@@ -1,0 +1,87 @@
+syntax = "proto2";
+
+package ks.v1;
+
+// 导入 supervisor 的 NonceCredential 定义
+import "supervisor.proto";
+
+// Key Server 服务定义
+// 负责生成和管理椭圆曲线密钥对
+service KeyServer {
+  // 生成新的密钥对，返回公钥和 key_id
+  rpc GenerateKey(GenerateKeyRequest) returns (GenerateKeyResponse);
+
+  // 获取指定 key_id 的私钥
+  rpc GetSecretKey(GetSecretKeyRequest) returns (GetSecretKeyResponse);
+
+  // 健康检查
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ============================================================================
+// 生成密钥相关消息
+// ============================================================================
+
+message GenerateKeyRequest {
+  // nonce-auth 认证凭证
+  required supervisor.v1.NonceCredential credential = 1;
+}
+
+message GenerateKeyResponse {
+  // 生成的密钥 ID
+  required uint32 key_id = 1;
+
+  // 公钥（Base64 编码的压缩格式）
+  required string public_key = 2;
+
+  // 密钥过期时间（Unix 时间戳，秒）
+  required uint64 expires_at = 3;
+}
+
+// ============================================================================
+// 获取私钥相关消息
+// ============================================================================
+
+message GetSecretKeyRequest {
+  // 要查询的密钥 ID
+  required uint32 key_id = 1;
+
+  // nonce-auth 认证凭证
+  required supervisor.v1.NonceCredential credential = 2;
+}
+
+message GetSecretKeyResponse {
+  // 密钥 ID
+  required uint32 key_id = 1;
+
+  // 私钥（Base64 编码）
+  required string secret_key = 2;
+
+  // 密钥过期时间（Unix 时间戳，秒）
+  required uint64 expires_at = 3;
+}
+
+// ============================================================================
+// 健康检查相关消息
+// ============================================================================
+
+message HealthCheckRequest {
+  // 健康检查不需要参数
+}
+
+message HealthCheckResponse {
+  // 服务状态
+  required string status = 1;
+
+  // 服务名称
+  required string service = 2;
+
+  // 存储后端名称
+  required string backend = 3;
+
+  // 当前密钥数量
+  required uint32 key_count = 4;
+
+  // 当前时间戳（Unix 时间戳，秒）
+  required uint64 timestamp = 5;
+}

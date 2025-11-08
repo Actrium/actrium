@@ -1,0 +1,149 @@
+//! Key Server (KS) 配置
+//!
+//! KS 服务用于生成和管理加密密钥，为其他服务提供密钥生成和公钥查询功能
+
+use crate::crypto::KekSource;
+use crate::storage::StorageConfig;
+use serde::{Deserialize, Serialize};
+
+/// KS 服务配置
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct KsServiceConfig {
+    /// 是否启用 KS 服务
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// 存储配置
+    #[serde(default)]
+    pub storage: StorageConfig,
+
+    /// Nonce 数据库路径（用于防重放攻击）
+    ///
+    /// 如果为空，则使用与 storage 相同的数据库
+    /// 注意：只有 SQLite 后端才需要此配置，Redis/PostgreSQL 可以使用同一连接
+    #[serde(default)]
+    pub nonce_db_path: Option<String>,
+
+    /// KEK (Key Encryption Key) - 直接配置
+    ///
+    /// 用于加密存储的私钥。支持两种格式：
+    /// - 64 字符的十六进制字符串（32 字节）
+    /// - 44 字符的 Base64 字符串（32 字节）
+    ///
+    /// 注意：直接在配置文件中存储 KEK 不够安全，生产环境建议使用 kek_env 或 kek_file
+    #[serde(default)]
+    pub kek: Option<String>,
+
+    /// KEK 环境变量名称
+    ///
+    /// 从指定的环境变量读取 KEK，比直接配置更安全
+    /// 例如：kek_env = "ACTRIX_KS_KEK"
+    #[serde(default)]
+    pub kek_env: Option<String>,
+
+    /// KEK 文件路径
+    ///
+    /// 从文件读取 KEK，文件应该包含 64 字符的十六进制字符串或 44 字符的 Base64 字符串
+    /// 文件权限应设置为 600 (仅所有者可读写)
+    #[serde(default)]
+    pub kek_file: Option<String>,
+}
+
+impl KsServiceConfig {
+    /// 获取 KEK 源
+    ///
+    /// 优先级: kek_file > kek_env > kek
+    /// 如果都未配置，返回 None（使用无加密模式）
+    pub fn get_kek_source(&self) -> Option<KekSource> {
+        if let Some(path) = &self.kek_file {
+            return Some(KekSource::File(path.clone()));
+        }
+
+        if let Some(env_var) = &self.kek_env {
+            return Some(KekSource::Environment(env_var.clone()));
+        }
+
+        if let Some(kek) = &self.kek {
+            return Some(KekSource::Direct(kek.clone()));
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{SqliteConfig, StorageBackend};
+
+    #[test]
+    fn test_default_ks_service_config() {
+        let config = KsServiceConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.storage.backend, StorageBackend::Sqlite);
+    }
+
+    #[test]
+    fn test_serialize_ks_service_config() {
+        let config = KsServiceConfig {
+            enabled: true,
+            storage: StorageConfig {
+                backend: StorageBackend::Sqlite,
+                key_ttl_seconds: 7200,
+                sqlite: Some(SqliteConfig {
+                    path: "custom.db".to_string(),
+                }),
+                redis: None,
+                postgres: None,
+            },
+            nonce_db_path: Some("nonce.db".to_string()),
+            kek: None,
+            kek_env: None,
+            kek_file: None,
+        };
+
+        let toml = toml::to_string(&config).unwrap();
+        assert!(toml.contains("enabled = true"));
+        assert!(toml.contains("key_ttl_seconds = 7200"));
+    }
+
+    #[test]
+    fn test_kek_source_priority() {
+        // 未配置 KEK
+        let config = KsServiceConfig::default();
+        assert!(config.get_kek_source().is_none());
+
+        // 仅配置 kek
+        let config = KsServiceConfig {
+            kek: Some("test_kek".to_string()),
+            ..Default::default()
+        };
+        match config.get_kek_source() {
+            Some(KekSource::Direct(k)) => assert_eq!(k, "test_kek"),
+            _ => panic!("Expected Direct KEK source"),
+        }
+
+        // 配置 kek 和 kek_env，优先使用 kek_env
+        let config = KsServiceConfig {
+            kek: Some("test_kek".to_string()),
+            kek_env: Some("TEST_ENV".to_string()),
+            ..Default::default()
+        };
+        match config.get_kek_source() {
+            Some(KekSource::Environment(e)) => assert_eq!(e, "TEST_ENV"),
+            _ => panic!("Expected Environment KEK source"),
+        }
+
+        // 配置所有三个，优先使用 kek_file
+        let config = KsServiceConfig {
+            kek: Some("test_kek".to_string()),
+            kek_env: Some("TEST_ENV".to_string()),
+            kek_file: Some("/path/to/kek".to_string()),
+            ..Default::default()
+        };
+        match config.get_kek_source() {
+            Some(KekSource::File(f)) => assert_eq!(f, "/path/to/kek"),
+            _ => panic!("Expected File KEK source"),
+        }
+    }
+}

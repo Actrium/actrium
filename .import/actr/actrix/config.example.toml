@@ -1,0 +1,211 @@
+# Actrix Configuration Example
+#
+# Service enable bitmask (binary representation):
+#   xxxxx
+#   ││││└─ Signaling (00001 = 1)  [Currently disabled in codebase]
+#   │││└── STUN      (00010 = 2)
+#   ││└─── TURN      (00100 = 4)
+#   │└──── AIS       (01000 = 8)  [Currently disabled in codebase]
+#   └───── KS        (10000 = 16)
+#
+# Examples:
+#   31 (0b11111) = All services (when all are enabled)
+#   22 (0b10110) = KS + TURN + STUN (recommended)
+#   6  (0b00110) = TURN + STUN only
+#   4  (0b00100) = TURN only
+#   2  (0b00010) = STUN only
+enable = 6
+
+# Instance identifier (used for monitoring and tracing)
+name = "actrix-01"
+
+# Environment: dev/prod/test
+# - dev: allows HTTP, relaxed security
+# - prod: enforces HTTPS, strict security
+# - test: for automated testing
+env = "dev"
+
+# Log level: trace/debug/info/warn/error
+log_level = "info"
+
+# Log output destination: console/file
+# - console: Output to stdout (default, recommended for development)
+# - file: Output to log files (recommended for production)
+log_output = "console"
+
+# Log rotation (only applies when log_output = "file")
+# - true: Create new log file daily (actrix-2024-01-15.log, actrix-2024-01-16.log, etc.)
+# - false: Append to single file (actrix.log)
+log_rotate = false
+
+# Log file directory (only applies when log_output = "file")
+# All log files will be stored in this directory
+log_path = "logs/"
+
+# SQLite database path for persistent storage
+sqlite = "database.db"
+
+# Geographic location tag (for multi-region deployment monitoring)
+# Format: cloud-provider,region,zone
+# Examples: "aws,us-west-2,zone-a", "aliyun,beijing,zone-b"
+location_tag = "local,dev,default"
+
+# Shared PSK for inter-service authentication
+# IMPORTANT: Change this in production!
+# Generate a strong key: openssl rand -hex 32
+actrix_shared_key = "example-key-please-replace-with-secure-random-value-32chars+"
+
+# Process management (optional)
+# pid_file = "/var/run/actrix.pid"
+# user = "actrix"    # Drop privileges to this user after binding ports
+# group = "actrix"   # Drop privileges to this group
+
+# ============================================================================
+# OpenTelemetry Distributed Tracing Configuration (requires opentelemetry feature)
+# ============================================================================
+[tracing]
+# Enable tracing export to OTLP backend
+# To use this, compile with: cargo build --features opentelemetry
+enable = false
+
+# Service name for tracing (appears in Jaeger UI)
+service_name = "actrix"
+
+# OTLP gRPC endpoint
+# Examples:
+#   - Jaeger (docker): http://127.0.0.1:4317
+#   - Grafana Tempo: http://tempo:4317
+#   - OpenTelemetry Collector: http://otel-collector:4317
+endpoint = "http://127.0.0.1:4317"
+
+# To enable tracing:
+# 1. Start Jaeger: docker-compose -f docker/jaeger-compose.yml up -d
+# 2. Set enable = true above
+# 3. Compile with feature: cargo build --features opentelemetry
+# 4. Access Jaeger UI: http://localhost:16686
+
+# ============================================================================
+# Network Binding Configuration
+# ============================================================================
+
+[bind]
+# HTTP (development only - NOT recommended for production)
+[bind.http]
+domain_name = "localhost"
+advertised_ip = "127.0.0.1"
+ip = "127.0.0.1"
+port = 8080
+
+# HTTPS (required for production)
+[bind.https]
+domain_name = "actrix.example.com"
+advertised_ip = "203.0.113.10"
+ip = "0.0.0.0"
+port = 8443
+cert = "certificates/server.crt"
+key = "certificates/server.key"
+
+# ICE services (STUN/TURN)
+[bind.ice]
+domain_name = "ice.example.com"
+advertised_ip = "203.0.113.10"
+ip = "0.0.0.0"
+port = 3478
+
+# ============================================================================
+# TURN Configuration
+# ============================================================================
+[turn]
+# Server advertised IP (must be routable)
+# Replace with your actual public IP
+advertised_ip = "203.0.113.10"
+
+# Advertised port for TURN
+advertised_port = 3478
+
+# Relay port range for TURN data channels
+# Format: start-end (e.g., "49152-65535")
+# Larger range = more concurrent relay sessions
+relay_port_range = "49152-65535"
+
+# TURN realm
+realm = "actrix.example.com"
+
+# ============================================================================
+# Key Server (KS) Configuration (optional)
+# ============================================================================
+# [ks]
+# # Server configuration
+# [ks.server]
+# # ... KS server settings ...
+#
+# # Client configuration (for connecting to other KS instances)
+# [ks.client]
+# base_url = "https://ks.example.com"
+# cache_db_path = "ks_cache.db"
+
+# ============================================================================
+# Supervisor Platform Integration (optional)
+# ============================================================================
+# [supervisor]
+# # Management platform registration endpoint
+# addr = "https://supervisor.example.com/api/resources/register"
+#
+# # Unique identifier for this service instance
+# associated_id = "actrix-prod-01"
+#
+# # Shared secret for management platform communication (hex-encoded)
+# secret = "deadbeef1234567890abcdef"
+
+# ============================================================================
+# Production Configuration Example
+# ============================================================================
+# This section demonstrates a production-ready configuration.
+# Copy and modify these settings for production deployment.
+#
+# Key differences from development:
+# - env = "prod"
+# - log_output = "file" with log_rotate = true
+# - HTTPS with valid certificates
+# - Real public IP for TURN
+# - OpenTelemetry enabled with production endpoint
+# - Strong actrix_shared_key
+#
+# Example production config:
+#
+# enable = 22
+# name = "actrix-prod-01"
+# env = "prod"
+# log_level = "info"
+# log_output = "file"
+# log_rotate = true
+# log_path = "/var/log/actrix/"
+# sqlite = "/var/lib/actrix/database.db"
+# location_tag = "aws,us-west-2,zone-a"
+# actrix_shared_key = "REPLACE_WITH_STRONG_RANDOM_KEY_MINIMUM_32_CHARS"
+# pid = "/var/run/actrix.pid"
+# user = "actrix"
+# group = "actrix"
+#
+# [tracing]
+# enable = true
+# service_name = "actrix-prod-01"
+# endpoint = "http://otel-collector.internal:4317"
+#
+# [bind.https]
+# domain_name = "actrix.example.com"
+# ip = "0.0.0.0"
+# port = 443
+# cert = "/etc/actrix/tls/fullchain.pem"
+# key = "/etc/actrix/tls/privkey.pem"
+#
+# [bind.ice]
+# domain_name = "ice.example.com"
+# ip = "0.0.0.0"
+# port = 3478
+#
+# [turn]
+# advertised_ip = "203.0.113.10"  # Your actual public IP
+# advertised_port = 3478
+# relay_port_range = "49152-65535"
+# realm = "actrix.example.com"

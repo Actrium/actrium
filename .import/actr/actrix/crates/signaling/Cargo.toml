@@ -1,0 +1,53 @@
+[package]
+name = "signaling"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+keywords.workspace = true
+description = "WebRTC信令服务实现，作为aux-servers的组件"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { workspace = true }
+futures-util = "0.3"
+tracing = { workspace = true }
+bytes = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4"] }
+
+# WebSocket implementation
+axum = { workspace = true, features = ["ws"] }
+
+# Actor-RTC Protocol
+actr-framework = { workspace = true }
+actr-protocol = { workspace = true }
+
+# Protobuf
+prost = "0.14.1"
+prost-types = "0.14.1"
+
+# 内部依赖
+actrix-common = { path = "../common" }
+
+# HTTP client for AIS
+reqwest = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Rate limiting
+governor = "0.10"
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
+tracing-subscriber = { workspace = true }
+tokio-tungstenite = "0.26"
+toml = { workspace = true }
+
+[features]
+default = []

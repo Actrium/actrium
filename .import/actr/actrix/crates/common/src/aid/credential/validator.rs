@@ -1,0 +1,188 @@
+//! AId Credential 验证器
+//!
+//! 负责验证和解密 AId Token，专注于验证职责
+
+use super::error::AidError;
+use crate::aid::identity_claims::IdentityClaims;
+use crate::aid::key_cache::KeyCache;
+use crate::config::ks::KsClientConfig;
+use actr_protocol::AIdCredential;
+use ecies::{SecretKey, decrypt};
+use ks::GrpcClient;
+use once_cell::sync::OnceCell;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, error};
+
+/// AId Token 验证器 - 提供静态方法验证和解密 Token
+pub struct AIdCredentialValidator {
+    key_cache: Arc<KeyCache>,
+    ks_client: Arc<RwLock<GrpcClient>>,
+}
+
+static VALIDATOR_INSTANCE: OnceCell<Arc<AIdCredentialValidator>> = OnceCell::new();
+
+impl AIdCredentialValidator {
+    /// 创建新的验证器实例
+    pub async fn new(
+        ks_client_config: &KsClientConfig,
+        actrix_shared_key: &str,
+    ) -> Result<Self, AidError> {
+        let cache_db_path = "ks_cache.db"; // 固定缓存路径
+
+        let key_cache = Arc::new(KeyCache::new(cache_db_path).await?);
+
+        // 创建 gRPC 客户端配置
+        let grpc_config = ks::GrpcClientConfig {
+            endpoint: ks_client_config.endpoint.clone(),
+            actrix_shared_key: actrix_shared_key.to_string(),
+            timeout_seconds: ks_client_config.timeout_seconds,
+            enable_tls: ks_client_config.enable_tls,
+            tls_domain: ks_client_config.tls_domain.clone(),
+            ca_cert: ks_client_config.ca_cert.clone(),
+            client_cert: ks_client_config.client_cert.clone(),
+            client_key: ks_client_config.client_key.clone(),
+        };
+
+        let grpc_client = GrpcClient::new(&grpc_config).await.map_err(|e| {
+            AidError::DecryptionFailed(format!("Failed to create KS gRPC client: {e}"))
+        })?;
+
+        let ks_client = Arc::new(RwLock::new(grpc_client));
+
+        Ok(Self {
+            key_cache,
+            ks_client,
+        })
+    }
+
+    /// 初始化全局验证器实例
+    pub async fn init(
+        ks_client_config: &KsClientConfig,
+        actrix_shared_key: &str,
+    ) -> Result<(), AidError> {
+        let validator = Self::new(ks_client_config, actrix_shared_key).await?;
+        VALIDATOR_INSTANCE
+            .set(Arc::new(validator))
+            .map_err(|_| AidError::DecryptionFailed("Validator already initialized".to_string()))?;
+        Ok(())
+    }
+
+    /// 获取全局验证器实例
+    async fn get_instance() -> Result<Arc<AIdCredentialValidator>, AidError> {
+        VALIDATOR_INSTANCE.get().cloned().ok_or_else(|| {
+            AidError::DecryptionFailed(
+                "Validator not initialized. Call AIdCredentialValidator::init() first".to_string(),
+            )
+        })
+    }
+
+    /// 检查 credential (解密 + 验证有效性)
+    ///
+    /// 使用 AIdCredential 进行验证
+    ///
+    /// # Arguments
+    /// * `credential` - 来自 actor-rtc-proto 的 AIdCredential
+    /// * `tenant_id` - 期望的租户 ID
+    ///
+    /// # Returns
+    /// * `Ok(Claims)` - 验证成功，返回解密后的身份声明
+    /// * `Err(AidError)` - 验证失败，包含具体错误信息
+    pub async fn check(
+        credential: &AIdCredential,
+        tenant_id: u32,
+    ) -> Result<IdentityClaims, AidError> {
+        let validator = Self::get_instance().await?;
+        let secret_key = validator
+            .get_secret_key_by_id(credential.token_key_id)
+            .await?;
+        Self::check_with_key(credential, tenant_id, &secret_key)
+    }
+
+    /// 使用提供的密钥检查 credential (解密 + 验证有效性)
+    ///
+    /// # Arguments  
+    /// * `credential` - 来自 actor-rtc-proto 的 AIdCredential
+    /// * `tenant_id` - 期望的租户 ID
+    /// * `secret_key` - 用于解密的密钥
+    ///
+    /// # Returns
+    /// * `Ok(Claims)` - 验证成功，返回解密后的身份声明
+    /// * `Err(AidError)` - 验证失败，包含具体错误信息
+    pub fn check_with_key(
+        credential: &AIdCredential,
+        tenant_id: u32,
+        secret_key: &SecretKey,
+    ) -> Result<IdentityClaims, AidError> {
+        // 将 SecretKey 转换为字节
+        let secret_key_bytes = secret_key.serialize();
+
+        // 解密
+        let decrypted_bytes = decrypt(&secret_key_bytes, &credential.encrypted_token)
+            .map_err(|e| AidError::DecryptionFailed(format!("Decryption error: {e}")))?;
+
+        // 反序列化
+        let claims: IdentityClaims = serde_json::from_slice(&decrypted_bytes)
+            .map_err(|e| AidError::DecryptionFailed(format!("Deserialization error: {e}")))?;
+
+        // 验证 credential 是否过期
+        if claims.is_expired() {
+            return Err(AidError::Expired);
+        }
+
+        // 验证 realm_id 是否匹配
+        if claims.realm_id != tenant_id {
+            return Err(AidError::DecryptionFailed("Realm ID mismatch".to_string()));
+        }
+
+        Ok(claims)
+    }
+
+    /// 根据 key_id 获取对应的密钥（生产逻辑）
+    ///
+    /// 实现完整的密钥管理逻辑：
+    /// 1. 首先尝试从本地缓存中读取私钥
+    /// 2. 如果缓存中没有或已过期，则从 KS 服务获取
+    /// 3. 更新本地缓存
+    /// 4. 返回密钥
+    async fn get_secret_key_by_id(&self, key_id: u32) -> Result<SecretKey, AidError> {
+        debug!("Fetching secret key for key_id: {}", key_id);
+
+        // 1. 首先尝试从缓存获取
+        match self.key_cache.get_cached_key(key_id).await? {
+            Some(secret_key) => {
+                debug!("Found cached secret key for key_id: {}", key_id);
+                return Ok(secret_key);
+            }
+            None => {
+                debug!(
+                    "No cached key found for key_id: {}, fetching from KS",
+                    key_id
+                );
+            }
+        }
+
+        // 2. 从 KS 服务获取密钥和过期时间
+        let (secret_key, expires_at) = {
+            let mut client = self.ks_client.write().await;
+            client.fetch_secret_key(key_id).await.map_err(|e| {
+                error!("Failed to fetch secret key {} from KS: {}", key_id, e);
+                AidError::DecryptionFailed(format!("KS error: {e}"))
+            })?
+        };
+
+        // 3. 更新缓存（使用 KS 返回的过期时间）
+        if let Err(cache_err) = self
+            .key_cache
+            .cache_key(key_id, &secret_key, expires_at)
+            .await
+        {
+            // 缓存失败不应该影响主要功能，只记录错误
+            error!("Failed to cache secret key {}: {}", key_id, cache_err);
+        } else {
+            debug!("Successfully cached secret key for key_id: {}", key_id);
+        }
+
+        Ok(secret_key)
+    }
+}
