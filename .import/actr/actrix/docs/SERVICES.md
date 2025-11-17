@@ -50,13 +50,13 @@ pub trait IceService: Send + Sync + Debug {
 
 **关键区别**:
 
-| 特性 | HttpRouterService | IceService |
-|------|-------------------|------------|
-| **协议** | HTTP/HTTPS (TCP) | UDP |
-| **服务器** | 共享单个 axum 实例 | 独立 UDP socket |
-| **端口** | 共享 (如 8443) | 独立 (如 3478) |
-| **路由** | URL 路径分发 | 协议内容分发 |
-| **示例** | KS, AIS, Signaling (WS) | STUN, TURN |
+| 特性       | HttpRouterService       | IceService      |
+| ---------- | ----------------------- | --------------- |
+| **协议**   | HTTP/HTTPS (TCP)        | UDP             |
+| **服务器** | 共享单个 axum 实例      | 独立 UDP socket |
+| **端口**   | 共享 (如 8443)          | 独立 (如 3478)  |
+| **路由**   | URL 路径分发            | 协议内容分发    |
+| **示例**   | KS, AIS, Signaling (WS) | STUN, TURN      |
 
 ### 1.2 服务类型枚举
 
@@ -78,14 +78,14 @@ pub enum ServiceType {
 
 根据代码实际状态:
 
-| 服务 | 类型 | 状态 | 位掩码 | 说明 |
-|------|------|------|--------|------|
-| **KS** | HTTP | ✅ 已启用 | 16 (0b10000) | 密钥服务器 |
-| **STUN** | ICE | ✅ 已启用 | 2 (0b00010) | NAT 穿越 |
-| **TURN** | ICE | ✅ 已启用 | 4 (0b00100) | 网络中继 |
-| **AIS** | HTTP | ✅ 已启用 | 8 (0b01000) | Actor 身份服务 |
-| **Signaling** | HTTP/WS | ⚠️ 待重构 | 1 (0b00001) | WebRTC 信令 |
-| **Supervisor** | HTTP | ⚠️ 可选 | - | 管理平台客户端 |
+| 服务           | 类型    | 状态     | 位掩码       | 说明           |
+| -------------- | ------- | -------- | ------------ | -------------- |
+| **KS**         | HTTP    | ✅ 已启用 | 16 (0b10000) | 密钥服务器     |
+| **STUN**       | ICE     | ✅ 已启用 | 2 (0b00010)  | NAT 穿越       |
+| **TURN**       | ICE     | ✅ 已启用 | 4 (0b00100)  | 网络中继       |
+| **AIS**        | HTTP    | ✅ 已启用 | 8 (0b01000)  | Actor 身份服务 |
+| **Signaling**  | HTTP/WS | ⚠️ 待重构 | 1 (0b00001)  | WebRTC 信令    |
+| **Supervisor** | HTTP    | ⚠️ 可选   | -            | 管理平台客户端 |
 
 ---
 
@@ -940,59 +940,62 @@ fn run_application(config_path: &PathBuf) -> Result<()> {
     // 3. 初始化可观测性
     let _guard = Self::init_observability(&config)?;
 
-    info!("Starting Actrix v{}", env!("CARGO_PKG_VERSION"));
-    info!("Instance: {}, Environment: {}", config.name, config.env);
-
     // 4. 创建 Tokio runtime 并运行
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
 
     runtime.block_on(async {
-        // 5. 创建 ServiceManager
-        let mut manager = ServiceManager::new(config.clone());
+        // 5. 创建全局 shutdown 广播通道 + ServiceManager
+        let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(10);
+        let mut manager = ServiceManager::new(config.clone(), shutdown_tx.clone());
 
-        // 6. 根据配置添加服务
+        // 6. 根据配置注册服务
+        if config.is_supervisor_enabled() {
+            manager.add_service(ServiceContainer::supervisor(SupervisorService::new(
+                config.clone(),
+            )));
+        }
+        if config.is_signaling_enabled() {
+            manager.add_service(ServiceContainer::signaling(SignalingService::new(
+                config.clone(),
+            )));
+        }
         if config.is_ks_enabled() {
-            let ks_service = KsHttpService::new(config.clone());
-            manager.add_service(ServiceContainer::HttpRouter(Box::new(ks_service)));
+            manager.add_service(ServiceContainer::ks(KsHttpService::new(config.clone())));
         }
-
-        if config.is_stun_enabled() {
-            let stun_service = StunService::new(config.clone());
-            manager.add_service(ServiceContainer::Ice(Box::new(stun_service)));
-        }
-
         if config.is_turn_enabled() {
-            let turn_service = TurnService::new(config.clone());
-            manager.add_service(ServiceContainer::Ice(Box::new(turn_service)));
+            manager.add_service(ServiceContainer::turn(TurnService::new(config.clone())));
+        } else if config.is_stun_enabled() {
+            manager.add_service(ServiceContainer::stun(StunService::new(config.clone())));
         }
 
-        // TODO: 其他服务 (AIS, Signaling) 待重构后启用
+        // 7. 启动所有服务并收集 JoinHandle
+        let mut handles = manager.start_all().await?;
 
-        // 7. 启动所有服务
-        manager.start_all().await?;
+        // 8. 附加 KS gRPC 任务（同样监听 shutdown 通道）
+        if config.is_ks_enabled() {
+            let mut ks_grpc = KsGrpcService::new(config.clone());
+            handles.push(
+                ks_grpc
+                    .start("127.0.0.1:50052".parse()?, shutdown_tx.clone())
+                    .await?,
+            );
+        }
 
         info!("All services started successfully");
 
-        // 8. 等待关闭信号
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                info!("Received Ctrl+C, shutting down...");
-            }
-            _ = async {
-                let mut sigterm = tokio::signal::unix::signal(
-                    tokio::signal::unix::SignalKind::terminate()
-                ).unwrap();
-                sigterm.recv().await;
-            } => {
-                info!("Received SIGTERM, shutting down...");
+        // 9. 顺序等待所有任务；任何任务失败都会触发 shutdown 广播
+        for handle in handles {
+            if let Err(err) = handle.await {
+                tracing::error!("background task crashed: {}", err);
+                let _ = shutdown_tx.send(());
             }
         }
 
-        // 9. 优雅关闭
+        // 10. 优雅关闭
         info!("Shutting down all services...");
-        manager.shutdown().await?;
+        manager.stop_all().await?;
         info!("All services stopped gracefully");
 
         Ok::<_, Error>(())

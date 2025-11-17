@@ -2,49 +2,33 @@
 //!
 //! 提供椭圆曲线密钥生成和管理的 gRPC API 服务
 
-use crate::service::ServiceType;
-use crate::service::info::ServiceInfo;
-use actrix_common::config::ActrixConfig;
-use actrix_common::storage::nonce::SqliteNonceStorage;
+use actrix_common::{config::ActrixConfig, storage::nonce::SqliteNonceStorage};
 use anyhow::Result;
 use ks::{KeyEncryptor, KeyStorage, create_grpc_service};
 use std::net::SocketAddr;
+use tokio::{sync::broadcast, task::JoinHandle};
 use tonic::transport::Server;
 use tracing::{error, info};
 
 /// KS gRPC 服务实现
 #[derive(Debug)]
 pub struct KsGrpcService {
-    info: ServiceInfo,
     config: ActrixConfig,
 }
 
 impl KsGrpcService {
     pub fn new(config: ActrixConfig) -> Self {
-        Self {
-            info: ServiceInfo::new(
-                "KS gRPC Service",
-                ServiceType::Ks,
-                Some("Key Server gRPC - 椭圆曲线密钥生成和管理服务".to_string()),
-                &config,
-            ),
-            config,
-        }
-    }
-
-    pub fn info_mut(&mut self) -> &mut ServiceInfo {
-        &mut self.info
+        Self { config }
     }
 
     /// 启动 gRPC 服务器
     pub async fn start(
         &mut self,
         addr: SocketAddr,
-        mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-    ) -> Result<()> {
+        shutdown_tx: broadcast::Sender<()>,
+    ) -> Result<JoinHandle<()>> {
         info!("Starting KS gRPC service on {}", addr);
 
-        // 获取 KS 服务配置
         let ks_service_config = self
             .config
             .services
@@ -84,29 +68,22 @@ impl KsGrpcService {
 
         info!("KS gRPC service created successfully");
 
-        // 启动 gRPC 服务器
-        let server = Server::builder()
-            .add_service(grpc_service)
-            .serve_with_shutdown(addr, async move {
-                let _ = shutdown_rx.recv().await;
-                info!("KS gRPC service received shutdown signal");
-            });
-
-        // 更新服务状态为运行中
-        self.info_mut().status =
-            actrix_common::status::services::ServiceStatus::Running(format!("gRPC {addr}"));
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        let handle = tokio::spawn(async move {
+            Server::builder()
+                .add_service(grpc_service)
+                .serve_with_shutdown(addr, async move {
+                    let _ = shutdown_rx.recv().await;
+                    info!("KS gRPC service received shutdown signal");
+                })
+                .await
+                .map_err(|err| error!("KS gRPC service error: {}", err))
+                .ok();
+            let _ = shutdown_tx.send(());
+        });
 
         info!("✅ KS gRPC service listening on {}", addr);
 
-        // 运行服务器（阻塞直到关闭）
-        if let Err(e) = server.await {
-            error!("KS gRPC server error: {}", e);
-            self.info_mut().status = actrix_common::status::services::ServiceStatus::Unknown;
-            return Err(anyhow::anyhow!("KS gRPC server failed: {e}"));
-        }
-
-        info!("KS gRPC service stopped");
-        self.info_mut().status = actrix_common::status::services::ServiceStatus::Unknown;
-        Ok(())
+        Ok(handle)
     }
 }

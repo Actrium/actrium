@@ -302,10 +302,8 @@ actrix/
 
 ```rust
 pub struct ServiceManager {
-    services: Vec<ServiceContainer>,                    // 服务列表
-    ice_handles: Vec<JoinHandle<Result<()>>>,           // ICE 任务句柄
-    http_handle: Option<JoinHandle<Result<()>>>,        // HTTP 任务句柄
-    shutdown_tx: broadcast::Sender<()>,                 // 关闭信号广播
+    services: Vec<ServiceContainer>,                    // 待启动服务列表
+    shutdown_tx: broadcast::Sender<()>,                 // 全局关闭信号
     collected_service_info: Arc<RwLock<HashMap<String, ServiceInfo>>>,
     config: ActrixConfig,
 }
@@ -320,11 +318,11 @@ pub struct ServiceManager {
 **关键方法**:
 
 ```rust
-// 文件: src/service/manager.rs:34-50
-pub fn new(config: ActrixConfig) -> Self
+// 文件: src/service/manager.rs
+pub fn new(config: ActrixConfig, shutdown_tx: broadcast::Sender<()>) -> Self
 pub fn add_service(&mut self, service: ServiceContainer)
-pub async fn start_all(&mut self) -> Result<()>
-pub async fn wait_for_shutdown(&mut self) -> Result<()>
+pub async fn start_all(&mut self) -> Result<Vec<JoinHandle<()>>>
+pub async fn stop_all(&mut self) -> Result<()>
 pub async fn register_services(&self, services: Vec<ServiceInfo>) -> Result<()>
 ```
 
@@ -805,42 +803,38 @@ endpoint = "http://localhost:4317"
    ↓
 6. ProcessManager::write_pid_file(pid_path)
    ↓
-7. ServiceManager::new(config)
-   ├─ 创建 shutdown broadcast channel
-   └─ 初始化服务列表
+7. 创建 shutdown broadcast channel
+   └─ tokio::sync::broadcast::channel::<()>(10)
    ↓
-8. 根据 config.enable 位掩码添加服务
-   ├─ if is_turn_enabled(): add TurnService
-   ├─ if is_stun_enabled(): add StunService
-   ├─ if is_ks_enabled(): add KsHttpService
-   └─ if is_supervisor_enabled(): add SupervisorService
+8. setup_ctrl_c_handler(shutdown_tx.clone())
    ↓
-9. setup_ctrl_c_handler(shutdown_tx.clone())
+9. （可选）额外任务
+   └─ 例如 KsGrpcService::start(..., shutdown_tx.clone())
    ↓
-10. service_manager.start_all()
-    ├─ 启动 ICE 服务 (UDP)
-    │   ├─ 绑定端口
-    │   └─ 生成异步任务
-    └─ 启动 HTTP 服务
-        ├─ 构建路由
-        ├─ 合并路由
-        ├─ 添加 middleware
-        └─ 启动 Axum 服务器
+10. ServiceManager::new(config, shutdown_tx.clone()) 并根据 config 启用项添加服务
+    ├─ if is_turn_enabled(): add TurnService
+    ├─ if is_stun_enabled(): add StunService
+    ├─ if is_ks_enabled(): add KsHttpService
+    └─ if is_supervisor_enabled(): add SupervisorService
     ↓
-11. ProcessManager::drop_privileges(user, group)
+11. service_manager.start_all() -> Vec<JoinHandle<()>>
+    ├─ 启动 ICE 服务（每个任务共享 shutdown_tx）
+    └─ 启动 HTTP/Axum 服务并返回句柄
+    ↓
+12. ProcessManager::drop_privileges(user, group)
     // Unix only: 切换到非 root 用户
     ↓
-12. 显示服务信息
+13. 显示服务信息
     ↓
-13. service_manager.wait_for_shutdown()
-    // 等待 Ctrl-C 信号
+14. 顺序等待 handle_futs
+    ├─ 任一任务退出/失败即记录错误
+    └─ 同时通过 shutdown_tx 广播关闭
     ↓
-14. 优雅关闭
-    ├─ broadcast shutdown signal
-    ├─ 等待所有任务完成
-    └─ 清理资源
+15. service_manager.stop_all()
+    ├─ 调用各服务 on_stop/stop
+    └─ 清理采集信息
     ↓
-15. 程序退出
+16. 程序退出
 ```
 
 **代码路径**: `src/main.rs:66-542`

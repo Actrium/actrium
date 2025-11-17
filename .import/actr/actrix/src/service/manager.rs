@@ -24,8 +24,6 @@ use url::Url;
 #[derive(Debug)]
 pub struct ServiceManager {
     services: Vec<ServiceContainer>,
-    ice_handles: Vec<JoinHandle<Result<()>>>,
-    http_handle: Option<JoinHandle<Result<()>>>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     collected_service_info: Arc<RwLock<HashMap<String, ServiceInfo>>>, // 收集的服务信息
     config: ActrixConfig,
@@ -33,12 +31,9 @@ pub struct ServiceManager {
 
 impl ServiceManager {
     /// 创建新的服务管理器
-    pub fn new(config: ActrixConfig) -> Self {
-        let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(10);
+    pub fn new(config: ActrixConfig, shutdown_tx: tokio::sync::broadcast::Sender<()>) -> Self {
         Self {
             services: Vec::new(),
-            ice_handles: Vec::new(),
-            http_handle: None,
             shutdown_tx,
             collected_service_info: Arc::new(RwLock::new(HashMap::new())),
             config,
@@ -79,7 +74,7 @@ impl ServiceManager {
     }
 
     /// 启动所有服务
-    pub async fn start_all(&mut self) -> Result<()> {
+    pub async fn start_all(&mut self) -> Result<Vec<JoinHandle<()>>> {
         info!(
             "Starting all {} types ({}) services.",
             self.services.len(),
@@ -104,18 +99,23 @@ impl ServiceManager {
         }
         let notify = Arc::new(Notify::new());
         let notify_clone = notify.clone();
+        let mut handle_futs = Vec::new();
         // 启动HTTP服务器（合并所有HTTP路由服务）
         if !http_services.is_empty() {
-            self.start_http_services(http_services, notify_clone)
+            let handle = self
+                .start_http_services(http_services, notify_clone)
                 .await?;
+            handle_futs.push(handle);
         }
         notify.notified().await;
         let notify_clone = notify.clone();
 
         // 启动ICE服务
         for service in ice_services {
-            self.start_ice_service(service, notify_clone.clone())
+            let handle = self
+                .start_ice_service(service, notify_clone.clone())
                 .await?;
+            handle_futs.push(handle);
             notify.notified().await;
         }
 
@@ -129,7 +129,7 @@ impl ServiceManager {
         // 注册HTTP、ICE服务到管理平台
         self.register_services(services).await?;
 
-        Ok(())
+        Ok(handle_futs)
     }
 
     /// 启动HTTP服务器，合并所有HTTP路由服务
@@ -137,7 +137,7 @@ impl ServiceManager {
         &mut self,
         mut services: Vec<ServiceContainer>,
         notify: Arc<Notify>,
-    ) -> Result<()> {
+    ) -> Result<JoinHandle<()>> {
         let is_dev = self.config.env.to_lowercase() == "dev";
         let protocol = if is_dev { "HTTP" } else { "HTTPS" };
 
@@ -147,8 +147,6 @@ impl ServiceManager {
             services.len(),
             self.config.env
         );
-
-        let shutdown_rx = self.shutdown_tx.subscribe();
 
         // 确定绑定配置
         let (bind_addr, public_url, tls_config) = if is_dev {
@@ -203,121 +201,126 @@ impl ServiceManager {
 
         let collected_service_info = self.collected_service_info.clone();
 
-        let handle = tokio::spawn(async move {
-            // 构建合并的路由器
-            let mut app = Router::new();
-            let mut http_services_info = Vec::new();
+        // 构建合并的路由器
+        let mut app = Router::new();
+        let mut http_services_info = Vec::new();
 
-            // 添加 HTTP 追踪层（支持 OpenTelemetry 上下文传播）
-            use crate::service::trace::http_trace_layer;
-            use tower_http::cors::CorsLayer;
+        // 添加 HTTP 追踪层（支持 OpenTelemetry 上下文传播）
+        use crate::service::trace::http_trace_layer;
+        use tower_http::cors::CorsLayer;
 
-            for service in &mut services {
-                let route_prefix = match service.route_prefix() {
-                    Some(prefix) => prefix.to_string(),
-                    None => continue,
-                };
+        for service in &mut services {
+            let route_prefix = match service.route_prefix() {
+                Some(prefix) => prefix.to_string(),
+                None => continue,
+            };
 
-                let service_name = service.info().name.clone();
+            let service_name = service.info().name.clone();
 
-                let router_result = match service.build_router().await {
-                    Some(result) => result,
-                    None => continue,
-                };
+            let router_result = match service.build_router().await {
+                Some(result) => result,
+                None => continue,
+            };
 
-                match router_result {
-                    Ok(router) => {
-                        info!(
-                            "Adding route '{}' for service '{}'",
-                            route_prefix, service_name
-                        );
-                        app = app.nest(&route_prefix, router);
+            match router_result {
+                Ok(router) => {
+                    info!(
+                        "Adding route '{}' for service '{}'",
+                        route_prefix, service_name
+                    );
+                    app = app.nest(&route_prefix, router);
 
-                        // 记录服务信息用于后续状态更新
-                        http_services_info.push((service_name.clone(), route_prefix.clone()));
+                    // 记录服务信息用于后续状态更新
+                    http_services_info.push((service_name.clone(), route_prefix.clone()));
 
-                        // 调用 on_start 回调
-                        let start_result = match service.on_start(public_url.clone()).await {
-                            Some(result) => {
-                                // 更新服务信息到收集器
-                                collected_service_info
-                                    .write()
-                                    .map_err(|e| {
-                                        anyhow::anyhow!("Failed to write service info: {e}")
-                                    })?
-                                    .insert(service_name.clone(), service.info().clone());
-                                result
-                            }
-                            None => Ok(()),
-                        };
-
-                        if let Err(e) = start_result {
-                            error!("Failed to start service '{}': {}", service_name, e);
+                    // 调用 on_start 回调
+                    let start_result = match service.on_start(public_url.clone()).await {
+                        Some(result) => {
+                            // 更新服务信息到收集器
+                            collected_service_info
+                                .write()
+                                .map_err(|e| anyhow::anyhow!("Failed to write service info: {e}"))?
+                                .insert(service_name.clone(), service.info().clone());
+                            result
                         }
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to build router for service '{}': {}",
-                            service_name, e
-                        );
+                        None => Ok(()),
+                    };
+
+                    if let Err(e) = start_result {
+                        error!("Failed to start service '{}': {}", service_name, e);
                     }
                 }
+                Err(e) => {
+                    error!(
+                        "Failed to build router for service '{}': {}",
+                        service_name, e
+                    );
+                }
             }
+        }
 
-            // 添加全局 Prometheus metrics 端点
-            info!("Adding /metrics endpoint for Prometheus");
-            app = app.route("/metrics", axum::routing::get(metrics_handler));
+        // 添加全局 Prometheus metrics 端点
+        info!("Adding /metrics endpoint for Prometheus");
+        app = app.route("/metrics", axum::routing::get(metrics_handler));
 
-            // 添加全局中间件层
-            app = app
-                .layer(http_trace_layer()) // HTTP 追踪（包含 OpenTelemetry 上下文传播）
-                .layer(CorsLayer::permissive()); // CORS 支持
+        // 添加全局中间件层
+        app = app
+            .layer(http_trace_layer()) // HTTP 追踪（包含 OpenTelemetry 上下文传播）
+            .layer(CorsLayer::permissive()); // CORS 支持
 
-            // 启动服务器
-            let addr: std::net::SocketAddr = bind_addr
-                .parse()
-                .map_err(|e| anyhow::anyhow!("Invalid bind address '{bind_addr}': {e}"))?;
+        // 启动服务器
+        let addr: std::net::SocketAddr = bind_addr
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid bind address '{bind_addr}': {e}"))?;
 
-            info!("{} server listening on {}", protocol, addr);
-            notify.notify_one();
+        info!("{} server listening on {}", protocol, addr);
+        notify.notify_one();
 
-            let mut shutdown_rx = shutdown_rx;
-            if let Some(tls_config) = tls_config {
-                // 启动HTTPS服务器
+        let shutdown_tx = self.shutdown_tx.clone();
+        let fut = if let Some(tls_config) = tls_config {
+            // 启动HTTPS服务器
+            let server = axum_server::bind_rustls(addr, tls_config)
+                .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>());
+            tokio::spawn(async move {
+                let mut shutdown_rx = shutdown_tx.subscribe();
                 tokio::select! {
-                    result = axum_server::bind_rustls(addr, tls_config)
-                        .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>()) => {
+                    result = server => {
                         if let Err(e) = result {
                             error!("HTTPS server error: {}", e);
+                            let _ = shutdown_tx.send(());
                         }
                     }
                     _ = shutdown_rx.recv() => {
                         info!("HTTPS server received shutdown signal");
                     }
                 }
-            } else {
-                // 启动HTTP服务器
-                let listener = tokio::net::TcpListener::bind(addr)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to bind to address '{addr}': {e}"))?;
+                info!("HTTPS server stopped");
+            })
+        } else {
+            // 启动HTTP服务器
+            let listener = tokio::net::TcpListener::bind(addr)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to bind to address '{addr}': {e}"))?;
 
-                tokio::select! {
-                    result = axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()) => {
-                        if let Err(e) = result {
-                            error!("HTTP server error: {}", e);
-                        }
-                    }
-                    _ = shutdown_rx.recv() => {
-                        info!("HTTP server received shutdown signal");
-                    }
+            tokio::spawn(async move {
+                let mut shutdown_rx = shutdown_tx.subscribe();
+                let server = axum::serve(
+                    listener,
+                    app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                )
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.recv().await;
+                    info!("HTTP server received shutdown signal");
+                });
+                if let Err(e) = server.await {
+                    error!("HTTP server error: {}", e);
+                    let _ = shutdown_tx.send(());
                 }
-            }
+                info!("HTTP server stopped");
+            })
+        };
 
-            Ok(())
-        });
-
-        self.http_handle = Some(handle);
-        Ok(())
+        Ok(fut)
     }
 
     /// 启动单个ICE服务
@@ -325,83 +328,83 @@ impl ServiceManager {
         &mut self,
         service: ServiceContainer,
         notify: Arc<Notify>,
-    ) -> Result<()> {
+    ) -> Result<JoinHandle<()>> {
         let shutdown_rx = self.shutdown_tx.subscribe();
+        let shutdown_tx = self.shutdown_tx.clone();
         let service_name = service.info().name.clone();
         let collected_service_info = self.collected_service_info.clone();
         let bind_addr = self.config.bind.ice.domain_name.clone();
         let config = self.config.clone();
-        let handle = tokio::spawn(async move {
-            let start_result = match service {
-                ServiceContainer::Stun(mut s) => {
-                    let (tx, rx) = tokio::sync::oneshot::channel::<ServiceInfo>();
-                    let res = tokio::spawn(async move { s.start(shutdown_rx, tx).await });
-                    let info = rx
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to receive STUN service info: {e}"))?;
-                    collected_service_info
-                        .write()
-                        .map_err(|e| anyhow::anyhow!("Failed to write STUN service info: {e}"))?
-                        .insert(info.name.clone(), info);
-                    notify.notify_one();
-                    res.await
-                        .map_err(|e| anyhow::anyhow!("STUN service task failed: {e}"))?
-                }
-                ServiceContainer::Turn(mut s) => {
-                    let (tx, rx) = tokio::sync::oneshot::channel::<ServiceInfo>();
-                    let res = tokio::spawn(async move { s.start(shutdown_rx, tx).await });
-                    let info = rx
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to receive TURN service info: {e}"))?;
 
-                    collected_service_info
-                        .write()
-                        .map_err(|e| anyhow::anyhow!("Failed to write TURN service info: {e}"))?
-                        .insert(info.name.clone(), info.clone());
-                    // turn 服务需要注册两个服务，一个是turn，一个是stun
-
-                    let mut stun_info =
-                        ServiceInfo::new("STUN Server", ServiceType::Stun, None, &config);
-
-                    stun_info.set_running(
-                        Url::parse(&format!("stun:{}:{}", bind_addr, info.port_info))
-                            .map_err(|e| anyhow::anyhow!("Failed to parse STUN URL: {e}"))?,
-                    );
-
-                    collected_service_info
-                        .write()
-                        .map_err(|e| {
-                            anyhow::anyhow!("Failed to write STUN info for TURN service: {e}")
-                        })?
-                        .insert(stun_info.name.clone(), stun_info);
-                    notify.notify_one();
-                    res.await
-                        .map_err(|e| anyhow::anyhow!("TURN service task failed: {e}"))?
-                }
-                _ => {
-                    error!("Invalid service type for ICE service: {}", service_name);
-                    return Ok(());
-                }
-            };
-
-            if let Err(e) = start_result {
-                error!("ICE service '{}' failed to start: {}", service_name, e);
-                return Err(e);
+        match service {
+            ServiceContainer::Stun(mut s) => {
+                let (tx, rx) = tokio::sync::oneshot::channel::<ServiceInfo>();
+                let handle = tokio::spawn(async move {
+                    if let Err(e) = s.start(shutdown_rx, tx).await {
+                        error!("Failed to start STUN service: {}", e);
+                        let _ = shutdown_tx.send(());
+                    }
+                });
+                let info = rx
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to receive STUN service info: {e}"))?;
+                collected_service_info
+                    .write()
+                    .map_err(|e| anyhow::anyhow!("Failed to write STUN service info: {e}"))?
+                    .insert(info.name.clone(), info);
+                notify.notify_one();
+                Ok(handle)
             }
-            Ok(())
-        });
+            ServiceContainer::Turn(mut s) => {
+                let (tx, rx) = tokio::sync::oneshot::channel::<ServiceInfo>();
+                let handle = tokio::spawn(async move {
+                    if let Err(e) = s.start(shutdown_rx, tx).await {
+                        error!("Failed to start TURN service: {}", e);
+                        let _ = shutdown_tx.send(());
+                    }
+                });
+                let info = rx
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to receive TURN service info: {e}"))?;
 
-        self.ice_handles.push(handle);
-        Ok(())
+                collected_service_info
+                    .write()
+                    .map_err(|e| anyhow::anyhow!("Failed to write TURN service info: {e}"))?
+                    .insert(info.name.clone(), info.clone());
+                // turn 服务需要注册两个服务，一个是turn，一个是stun
+
+                let mut stun_info =
+                    ServiceInfo::new("STUN Server", ServiceType::Stun, None, &config);
+
+                stun_info.set_running(
+                    Url::parse(&format!("stun:{}:{}", bind_addr, info.port_info))
+                        .map_err(|e| anyhow::anyhow!("Failed to parse STUN URL: {e}"))?,
+                );
+
+                collected_service_info
+                    .write()
+                    .map_err(|e| {
+                        anyhow::anyhow!("Failed to write STUN info for TURN service: {e}")
+                    })?
+                    .insert(stun_info.name.clone(), stun_info);
+                notify.notify_one();
+                Ok(handle)
+            }
+            _ => {
+                error!("Invalid service type for ICE service: {}", service_name);
+                Err(anyhow::anyhow!(
+                    "Invalid service type for ICE service: {}",
+                    service_name
+                ))
+            }
+        }
     }
 
     /// 停止所有服务
-    async fn stop_all(&mut self) -> Result<()> {
+    pub async fn stop_all(&mut self) -> Result<()> {
         info!("Stopping all services");
 
-        // 发送关闭信号
         let _ = self.shutdown_tx.send(());
-
         for service in &mut self.services {
             match service {
                 ServiceContainer::Supervit(s) => s.on_stop().await.unwrap(),
@@ -413,39 +416,7 @@ impl ServiceManager {
             }
         }
 
-        // 等待HTTP服务器完成
-        if let Some(handle) = self.http_handle.take() {
-            if let Err(e) = handle.await {
-                error!("HTTP server task failed: {:?}", e);
-            }
-        }
-
-        // 等待所有ICE服务任务完成
-        while let Some(handle) = self.ice_handles.pop() {
-            if let Err(e) = handle.await {
-                error!("ICE service task failed: {:?}", e);
-            }
-        }
-
         info!("All services stopped");
-        Ok(())
-    }
-
-    /// 获取关闭信号发送器
-    pub fn shutdown_sender(&self) -> tokio::sync::broadcast::Sender<()> {
-        self.shutdown_tx.clone()
-    }
-
-    /// 获取关闭信号接收器
-    pub fn shutdown_receiver(&self) -> tokio::sync::broadcast::Receiver<()> {
-        self.shutdown_tx.subscribe()
-    }
-
-    /// 等待关闭信号
-    pub async fn wait_for_shutdown(&mut self) -> Result<()> {
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let _ = shutdown_rx.recv().await;
-        self.stop_all().await?;
         Ok(())
     }
 }

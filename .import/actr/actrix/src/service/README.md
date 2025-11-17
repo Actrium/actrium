@@ -70,44 +70,58 @@ pub enum ServiceContainer {
 ## 使用示例
 
 ```rust
+use actrix_common::config::ActrixConfig;
+use tokio::sync::broadcast;
+
 use service::{
-    ServiceManager, ServiceContainer,
-    AdminService, StatusService, SignalingService, AuthorityService,
-    StunService, TurnService
+    AdminService, KsGrpcService, ServiceContainer, ServiceManager, SignalingService, StatusService,
+    StunService, TurnService,
 };
 
-async fn main() -> Result<()> {
-    let config = Config::from_file("config.toml")?;
-    let mut service_manager = ServiceManager::new(config);
-    
-    // 添加ICE服务 - 细粒度控制
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = ActrixConfig::from_file("config.toml")?;
+    let (shutdown_tx, _) = broadcast::channel::<()>(10);
+    let mut service_manager = ServiceManager::new(config.clone(), shutdown_tx.clone());
+
+    // 添加 ICE 服务
     if config.is_turn_enabled() {
-        let turn_service = TurnService::new(config.clone());
-        service_manager.add_service(ServiceContainer::turn(turn_service));
+        service_manager.add_service(ServiceContainer::turn(TurnService::new(config.clone())));
     } else if config.is_stun_enabled() {
-        let stun_service = StunService::new(config.clone());
-        service_manager.add_service(ServiceContainer::stun(stun_service));
+        service_manager.add_service(ServiceContainer::stun(StunService::new(config.clone())));
     }
-    
-    // 添加HTTP路由服务 - 每个服务独立控制
-    let admin_service = AdminService::new(config.clone());
-    service_manager.add_service(ServiceContainer::admin(admin_service));
-    
-    let status_service = StatusService::new(config.clone());
-    service_manager.add_service(ServiceContainer::status(status_service));
-    
-    // 可选添加其他服务
+
+    // 添加 HTTP 路由服务
+    service_manager.add_service(ServiceContainer::admin(AdminService::new(config.clone())));
+    service_manager.add_service(ServiceContainer::status(StatusService::new(config.clone())));
+
     if config.is_signaling_enabled() {
-        let signaling_service = SignalingService::new(config.clone());
-        service_manager.add_service(ServiceContainer::signaling(signaling_service));
+        service_manager.add_service(ServiceContainer::signaling(SignalingService::new(
+            config.clone(),
+        )));
     }
-    
-    // 启动所有服务
-    service_manager.start_all().await?;
-    
-    // 等待关闭信号
-    service_manager.wait_for_shutdown().await;
-    
+
+    // 启动所有服务并收集任务句柄
+    let mut handles = service_manager.start_all().await?;
+
+    // 如果启用 KS gRPC，追加其任务句柄
+    if config.is_ks_enabled() {
+        let mut ks_grpc = KsGrpcService::new(config.clone());
+        handles.push(
+            ks_grpc
+                .start("127.0.0.1:50052".parse()?, shutdown_tx.clone())
+                .await?,
+        );
+    }
+
+    // 顺序等待所有服务；一旦出错立即广播关闭
+    for handle in handles {
+        if let Err(e) = handle.await {
+            tracing::error!("Service task exited unexpectedly: {}", e);
+            let _ = shutdown_tx.send(());
+        }
+    }
+    service_manager.stop_all().await?;
     Ok(())
 }
 ```
@@ -130,8 +144,10 @@ async fn main() -> Result<()> {
   - https://0.0.0.0:8443/admin/health
   - https://0.0.0.0:8443/status/health
   - https://0.0.0.0:8443/authority/health
-  - https://0.0.0.0:8443/signaling/health
+  - https://0.0.0.0:8443/signaling/ws
 ```
+
+> ℹ️ 当前设计中，KS gRPC 服务结束后会通过 `shutdown_tx` 通知其余服务立即停机，因此 KS 的“单独状态”不再展示，统一依赖整体进程健康度来判断可用性。
 
 ## 架构优势
 

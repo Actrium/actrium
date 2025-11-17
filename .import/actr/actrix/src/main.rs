@@ -15,6 +15,7 @@ use service::{
     StunService, SupervisorService, TurnService,
 };
 use std::path::{Path, PathBuf};
+use tokio::task::JoinHandle;
 
 use tracing::{error, info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -447,34 +448,33 @@ impl ApplicationLauncher {
     ) -> Result<()> {
         info!("🚀 启动 WebRTC 辅助服务器集群");
 
-        // 先创建并启动所有需要特权端口的服务
-        let mut service_manager = Self::create_service_manager(config.clone()).await?;
+        // 初始化全局关闭通道（供所有服务共享）
+        let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(10);
 
-        // 启动所有服务（这会绑定端口）
-        info!("启动所有服务...");
-        if let Err(e) = service_manager.start_all().await {
-            error!("启动服务失败: {}", e);
-            return Err(Error::service_startup(format!("启动服务失败: {e}")));
-        }
+        // 安装 Ctrl-C 处理器，确保任何阶段都能广播关闭
+        setup_ctrl_c_handler(shutdown_tx.clone()).await;
 
-        // 启动 KS gRPC 服务（如果启用）
-        let grpc_handle = if config.is_ks_enabled() {
+        // 如果启用 KS，构建 gRPC 服务 future
+        let mut handle_futs: Vec<JoinHandle<()>> = Vec::new();
+        if config.is_ks_enabled() {
             info!("启动 KS gRPC 服务器...");
-            let mut grpc_service = KsGrpcService::new(config.clone());
             let grpc_addr = "127.0.0.1:50052".parse().map_err(|e| {
                 Error::service_startup(format!("Failed to parse gRPC address: {e}"))
             })?;
-            let shutdown_rx = service_manager.shutdown_receiver();
+            let mut grpc_service = KsGrpcService::new(config.clone());
+            let grpc_future = grpc_service
+                .start(grpc_addr, shutdown_tx.clone())
+                .await
+                .map_err(|e| Error::service_startup(format!("KS gRPC 初始化失败: {e}")))?;
 
-            let handle = tokio::spawn(async move {
-                if let Err(e) = grpc_service.start(grpc_addr, shutdown_rx).await {
-                    error!("KS gRPC service error: {}", e);
-                }
-            });
-            Some(handle)
-        } else {
-            None
-        };
+            handle_futs.push(grpc_future);
+        }
+
+        let mut service_manager =
+            Self::create_service_manager(config.clone(), shutdown_tx.clone()).await?;
+        let handle_futures = service_manager.start_all().await?;
+        handle_futs.extend(handle_futures);
+        info!("启动所有服务...");
 
         // 端口绑定完成后，切换用户和组
         info!("服务启动完成，准备切换用户权限...");
@@ -487,24 +487,23 @@ impl ApplicationLauncher {
         // 显示服务信息
         Self::display_service_info(&config);
 
-        // 等待关闭信号
-        if let Err(e) = service_manager.wait_for_shutdown().await {
-            error!("Error during shutdown: {}", e);
+        for handle in handle_futs {
+            if let Err(e) = handle.await {
+                error!("Service task terminated unexpectedly: {}", e);
+                let _ = shutdown_tx.send(());
+            }
         }
-        info!("收到关闭信号，等待所有服务停止...");
-
-        // 等待 gRPC 服务停止
-        if let Some(handle) = grpc_handle {
-            info!("等待 KS gRPC 服务停止...");
-            let _ = handle.await;
-        }
+        service_manager.stop_all().await?;
 
         info!("🛑 所有服务已安全关闭");
         Ok(())
     }
 
     /// 创建服务管理器
-    async fn create_service_manager(config: ActrixConfig) -> Result<ServiceManager> {
+    async fn create_service_manager(
+        config: ActrixConfig,
+        shutdown_tx: tokio::sync::broadcast::Sender<()>,
+    ) -> Result<ServiceManager> {
         info!("📊 计划启动的服务:");
         actrix_common::storage::db::set_db_path(Path::new(&config.sqlite)).await?;
 
@@ -529,7 +528,7 @@ impl ApplicationLauncher {
 
         info!("✅ Prometheus metrics registry 初始化成功");
 
-        let mut service_manager = ServiceManager::new(config.clone());
+        let mut service_manager = ServiceManager::new(config.clone(), shutdown_tx.clone());
         // 添加ICE服务 - 细粒度控制STUN和TURN
         if config.is_ice_enabled() {
             if config.is_turn_enabled() {
@@ -569,9 +568,6 @@ impl ApplicationLauncher {
             let ks_service = KsHttpService::new(config.clone());
             service_manager.add_service(ServiceContainer::ks(ks_service));
         }
-
-        // 设置Ctrl-C信号处理程序
-        setup_ctrl_c_handler(service_manager.shutdown_sender()).await;
 
         Ok(service_manager)
     }
