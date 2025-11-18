@@ -259,7 +259,7 @@ token_ttl_secs = 3600
 
 [services.ais.dependencies.ks]
 # 可选：如果不配置，自动使用本地 KS（如果启用）
-endpoint = "https://localhost:8443"
+endpoint = "http://localhost:50052"  # gRPC 端口
 ```
 
 ### 2.2 IceService 详解
@@ -1111,12 +1111,15 @@ advertised_ip = "203.0.113.10"  # 公网 IP
 realm = "actrix.example.com"
 
 # KS 服务配置
-[ks]
-ip = "127.0.0.1"
-port = 8081
-psk = "ks-internal-psk"
-database_path = "/var/lib/actrix/ks.db"
+[services.ks]
+enabled = true
+
+[services.ks.storage]
+backend = "sqlite"
 key_ttl_seconds = 3600
+
+[services.ks.storage.sqlite]
+path = "/var/lib/actrix/ks.db"
 
 # OpenTelemetry 追踪
 [tracing]

@@ -2042,18 +2042,14 @@ message AIdAllocationSuccess {
 enabled = true
 
 [services.ais.server]
-ip = "0.0.0.0"
-port = 8091
 database_path = "ais.db"
 signaling_heartbeat_interval_secs = 30
 token_ttl_secs = 3600
 
 [services.ais.dependencies.ks]
 # 可选：如果不配置，会自动使用本地 KS（如果启用）
-endpoint = "https://localhost:8443"
-psk = "your-shared-key"
+endpoint = "http://localhost:50052"  # gRPC 端口
 timeout_seconds = 30
-cache_db_path = "ais_ks_cache.db"
 ```
 
 ### 6.5 测试覆盖

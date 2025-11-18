@@ -9,17 +9,6 @@ use serde::{Deserialize, Serialize};
 /// 配置 KS 服务的服务器端参数
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KsServerConfig {
-    /// 绑定 IP 地址
-    ///
-    /// KS 服务实际绑定的网络接口 IP 地址。
-    /// 通常使用 "0.0.0.0" 监听所有接口，内网使用具体 IP。
-    pub ip: String,
-
-    /// 绑定端口
-    ///
-    /// KS 服务监听的端口号。
-    pub port: u16,
-
     /// 服务器 PSK (Pre-Shared Key) - 已弃用
     ///
     /// 注意：此字段已弃用，KS 服务现在使用 ActrixConfig 中的 actrix_shared_key
@@ -100,8 +89,6 @@ pub struct KsConfig {
 impl Default for KsServerConfig {
     fn default() -> Self {
         Self {
-            ip: "0.0.0.0".to_string(),
-            port: 8090,
             #[allow(deprecated)]
             psk: "default-ks-psk-change-in-production".to_string(),
             database_path: "ks_keys.db".to_string(),

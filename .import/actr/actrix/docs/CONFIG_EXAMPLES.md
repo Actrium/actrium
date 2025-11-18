@@ -26,31 +26,30 @@ enable = 6
 # KS 服务
 [services.ks]
 enabled = true
-ip = "0.0.0.0"
-port = 8090
-database_path = "ks.db"
+
+[services.ks.storage]
+backend = "sqlite"
 key_ttl_seconds = 3600
+
+[services.ks.storage.sqlite]
+path = "ks.db"
 
 # AIS 服务（自动使用本地 KS）
 [services.ais]
 enabled = true
 
-  [services.ais.server]
-  ip = "0.0.0.0"
-  port = 8091
-  database_path = "ais.db"
+[services.ais.server]
+database_path = "ais.db"
 
 # 📝 注意：AIS 没有配置 dependencies.ks
-# 它会自动发现本地 KS 并使用 http://127.0.0.1:8090
+# 它会自动发现本地 KS 并通过 gRPC 连接
 
 # Signaling 服务（可选，也会自动使用本地 KS）
 [services.signaling]
 enabled = true
 
-  [services.signaling.server]
-  ip = "0.0.0.0"
-  port = 8092
-  ws_path = "/signaling"
+[services.signaling.server]
+ws_path = "/signaling"
 
 [bind.https]
 ip = "0.0.0.0"
@@ -81,10 +80,13 @@ enable = 0
 
 [services.ks]
 enabled = true
-ip = "0.0.0.0"
-port = 8090
-database_path = "/var/lib/actrix/ks.db"
+
+[services.ks.storage]
+backend = "sqlite"
 key_ttl_seconds = 7200  # 2小时
+
+[services.ks.storage.sqlite]
+path = "/var/lib/actrix/ks.db"
 
 [bind.https]
 ip = "0.0.0.0"
@@ -112,29 +114,24 @@ enable = 6
 [services.ais]
 enabled = true
 
-  [services.ais.server]
-  ip = "0.0.0.0"
-  port = 8091
-  database_path = "/var/lib/actrix/ais.db"
+[services.ais.server]
+database_path = "/var/lib/actrix/ais.db"
 
-  # 显式配置远程 KS
-  [services.ais.dependencies.ks]
-  endpoint = "https://ks.internal.example.com:8443"
-  cache_db_path = "/var/lib/actrix/ais_ks_cache.db"
-  timeout_seconds = 10
+# 显式配置远程 KS（gRPC endpoint）
+[services.ais.dependencies.ks]
+endpoint = "https://ks.internal.example.com:50052"
+timeout_seconds = 10
 
 # Signaling 服务（连接相同的远程 KS）
 [services.signaling]
 enabled = true
 
-  [services.signaling.server]
-  ip = "0.0.0.0"
-  port = 8092
+[services.signaling.server]
+ws_path = "/signaling"
 
-  [services.signaling.dependencies.ks]
-  endpoint = "https://ks.internal.example.com:8443"
-  cache_db_path = "/var/lib/actrix/signaling_ks_cache.db"
-  timeout_seconds = 5
+[services.signaling.dependencies.ks]
+endpoint = "https://ks.internal.example.com:50052"
+timeout_seconds = 5
 
 [bind.https]
 ip = "0.0.0.0"
@@ -161,9 +158,9 @@ actrix_shared_key = "SHARED_KEY"
 [services.ais]
 enabled = true
 
-  [services.ais.dependencies.ks]
-  endpoint = "https://ks-us-west.internal:8443"
-  cache_db_path = "ais_ks_cache.db"
+[services.ais.dependencies.ks]
+endpoint = "https://ks-us-west.internal:50052"
+timeout_seconds = 10
 ```
 
 ### 区域 B: 欧洲（使用欧洲 KS）
@@ -176,9 +173,9 @@ actrix_shared_key = "SHARED_KEY"
 [services.ais]
 enabled = true
 
-  [services.ais.dependencies.ks]
-  endpoint = "https://ks-eu-central.internal:8443"
-  cache_db_path = "ais_ks_cache.db"
+[services.ais.dependencies.ks]
+endpoint = "https://ks-eu-central.internal:50052"
+timeout_seconds = 10
 ```
 
 ---
@@ -214,12 +211,11 @@ actrix_shared_key = "shared-key"
 
 [services.ks]
 enabled = true
-port = 8090
 
 [services.ais]
 enabled = true
 # 不需要配置 dependencies.ks
-# AIS 自动使用 http://127.0.0.1:8090
+# AIS 自动通过 gRPC 连接本地 KS (http://127.0.0.1:50052)
 ```
 
 **等价于**:
@@ -227,11 +223,10 @@ enabled = true
 ```toml
 [services.ais]
 enabled = true
-  [services.ais.dependencies.ks]
-  endpoint = "http://127.0.0.1:8090"
-  psk = "shared-key"  # 自动使用 actrix_shared_key
-  timeout_seconds = 30
-  cache_db_path = "ais_ks_cache.db"
+
+[services.ais.dependencies.ks]
+endpoint = "http://127.0.0.1:50052"  # gRPC 端口
+timeout_seconds = 30
 ```
 
 ### 示例 2: 显式配置覆盖自动发现
@@ -239,15 +234,14 @@ enabled = true
 ```toml
 [services.ks]
 enabled = true  # 本地 KS 在运行
-port = 8090
 
 [services.ais]
 enabled = true
 
-  # 显式配置优先级更高
-  [services.ais.dependencies.ks]
-  endpoint = "http://remote-ks:9090"  # 连接远程 KS，忽略本地
-  timeout_seconds = 15
+# 显式配置优先级更高
+[services.ais.dependencies.ks]
+endpoint = "http://remote-ks:50052"  # 连接远程 KS，忽略本地
+timeout_seconds = 15
 ```
 
 ### 示例 3: 不同服务使用不同 KS
@@ -255,19 +249,19 @@ enabled = true
 ```toml
 [services.ks]
 enabled = true
-port = 8090
 
 [services.ais]
 enabled = true
-  # AIS 使用本地 KS（自动发现）
-  # dependencies.ks 未配置
+# AIS 使用本地 KS（自动发现）
+# dependencies.ks 未配置
 
 [services.signaling]
 enabled = true
-  # Signaling 使用远程 KS（显式配置）
-  [services.signaling.dependencies.ks]
-  endpoint = "http://backup-ks:8090"
-  cache_db_path = "signaling_ks_cache.db"
+# Signaling 使用远程 KS（显式配置）
+
+[services.signaling.dependencies.ks]
+endpoint = "http://backup-ks:50052"
+timeout_seconds = 10
 ```
 
 ### 示例 4: 验证配置
@@ -308,8 +302,9 @@ enabled = true
 # ✅ 正确配置 - 方式 2：显式配置远程 KS
 [services.ais]
 enabled = true
-  [services.ais.dependencies.ks]
-  endpoint = "http://remote-ks:8090"
+
+[services.ais.dependencies.ks]
+endpoint = "http://remote-ks:50052"
 ```
 
 ### Signaling 服务（可选 KS）
@@ -323,8 +318,9 @@ enabled = true
 # ✅ 如果需要加密，可以配置 KS
 [services.signaling]
 enabled = true
-  [services.signaling.dependencies.ks]
-  endpoint = "http://ks:8090"
+
+[services.signaling.dependencies.ks]
+endpoint = "http://ks:50052"
 ```
 
 ---

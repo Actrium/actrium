@@ -22,12 +22,6 @@ pub struct SignalingConfig {
 /// Signaling 服务器配置
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SignalingServerConfig {
-    /// 绑定 IP 地址
-    pub ip: String,
-
-    /// 绑定端口
-    pub port: u16,
-
     /// WebSocket 路径
     pub ws_path: String,
 
@@ -146,8 +140,6 @@ fn default_timeout() -> u64 {
 impl Default for SignalingServerConfig {
     fn default() -> Self {
         Self {
-            ip: "0.0.0.0".to_string(),
-            port: 8092,
             ws_path: "/signaling".to_string(),
             rate_limit: RateLimitConfig::default(),
         }

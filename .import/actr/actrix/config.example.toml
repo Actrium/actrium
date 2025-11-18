@@ -132,17 +132,38 @@ relay_port_range = "49152-65535"
 realm = "actrix.example.com"
 
 # ============================================================================
-# Key Server (KS) Configuration (optional)
+# Service Configuration (optional)
 # ============================================================================
-# [ks]
-# # Server configuration
-# [ks.server]
-# # ... KS server settings ...
+# All HTTP services share the instance-level HTTP/HTTPS port (bind.http/bind.https)
 #
-# # Client configuration (for connecting to other KS instances)
-# [ks.client]
-# base_url = "https://ks.example.com"
-# cache_db_path = "ks_cache.db"
+# # Key Server (KS) Configuration
+# [services.ks]
+# enabled = true
+#
+# [services.ks.storage]
+# backend = "sqlite"
+# key_ttl_seconds = 3600
+#
+# [services.ks.storage.sqlite]
+# path = "ks.db"
+#
+# # AIS (Actor Identity Service) Configuration
+# [services.ais]
+# enabled = true
+#
+# [services.ais.server]
+# database_path = "ais.db"
+#
+# # AIS automatically uses local KS if enabled, or configure explicitly:
+# [services.ais.dependencies.ks]
+# endpoint = "http://remote-ks:50052"  # gRPC endpoint
+#
+# # Signaling Service Configuration
+# [services.signaling]
+# enabled = true
+#
+# [services.signaling.server]
+# ws_path = "/signaling"
 
 # ============================================================================
 # Supervisor Platform Integration (optional)

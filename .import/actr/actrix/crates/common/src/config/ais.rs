@@ -22,12 +22,6 @@ pub struct AisConfig {
 /// AIS 服务器配置
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AisServerConfig {
-    /// 绑定 IP 地址
-    pub ip: String,
-
-    /// 绑定端口
-    pub port: u16,
-
     /// 数据库路径
     pub database_path: String,
 
@@ -59,8 +53,6 @@ pub struct AisDependencies {
 impl Default for AisServerConfig {
     fn default() -> Self {
         Self {
-            ip: "0.0.0.0".to_string(),
-            port: 8081,
             database_path: "ais.db".to_string(),
             signaling_heartbeat_interval_secs: default_signaling_heartbeat_interval_secs(),
             token_ttl_secs: default_token_ttl_secs(),

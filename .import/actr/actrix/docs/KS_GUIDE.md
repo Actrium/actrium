@@ -1415,12 +1415,16 @@ class KSClient {
 enable = 16  # 或包含 16 的组合，如 22 (KS + STUN + TURN)
 
 # KS 服务配置
-[ks]
-ip = "127.0.0.1"              # 监听地址 (建议仅内网)
-port = 8081                   # 监听端口
-database_path = "/var/lib/actrix/ks.db"
+[services.ks]
+enabled = true
 nonce_db_path = "/var/lib/actrix/nonce.db"
-key_ttl_seconds = 3600        # 密钥 TTL (秒), 0=永不过期
+
+[services.ks.storage]
+backend = "sqlite"
+key_ttl_seconds = 3600      # 密钥 TTL (秒), 0=永不过期
+
+[services.ks.storage.sqlite]
+path = "/var/lib/actrix/ks.db"
 
 # 全局配置
 actrix_shared_key = "your-strong-key-change-me"  # ⚠️ 必须更改!
