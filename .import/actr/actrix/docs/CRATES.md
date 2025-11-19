@@ -574,7 +574,7 @@ pub struct KeyServerConfig {
     pub ip: String,              // 监听 IP
     pub port: u16,               // 监听端口
     pub psk: String,             // Pre-Shared Key (服务端使用)
-    pub database_path: String,   // SQLite 数据库路径
+    // Note: database_path has been removed. Storage is now configured via StorageConfig
     pub nonce_db_path: Option<String>, // Nonce 数据库路径(可选)
     pub key_ttl_seconds: u64,    // 密钥 TTL (秒)
 }
@@ -585,7 +585,7 @@ impl Default for KeyServerConfig {
             ip: "127.0.0.1".to_string(),
             port: 8081,
             psk: "default-psk-change-me".to_string(),
-            database_path: "ks.db".to_string(),
+            // database_path removed - use StorageConfig instead
             nonce_db_path: None,
             key_ttl_seconds: 3600, // 1 小时
         }
@@ -614,9 +614,9 @@ pub struct KeyStorage {
 
 ```rust
 impl KeyStorage {
-    pub fn new<P: AsRef<Path>>(database_path: P, key_ttl_seconds: u64)
+    pub fn new<P: AsRef<Path>>(storage_path: P, key_ttl_seconds: u64)
         -> KsResult<Self> {
-        let path = database_path.as_ref();
+        let path = storage_path.as_ref();
 
         // 确保数据库目录存在
         if let Some(parent) = path.parent() {
@@ -2046,7 +2046,7 @@ enable = 8  # ENABLE_AIS (位 3) 或与其他服务组合
 
 [services.ais]
 [services.ais.server]
-database_path = "ais.db"
+# Note: AIS key storage file is automatically set to {sqlite_path}/keys.db
 signaling_heartbeat_interval_secs = 30
 token_ttl_secs = 3600
 

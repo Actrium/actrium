@@ -43,11 +43,7 @@ async fn test_end_to_end_token_issuance_and_validation() {
         token_ttl_secs: 3600,
         signaling_heartbeat_interval_secs: 30,
         key_refresh_interval_secs: 3600,
-        key_storage_path: issuer_temp_dir
-            .path()
-            .join("issuer_keys.db")
-            .to_string_lossy()
-            .to_string(),
+        key_storage_file: issuer_temp_dir.path().join("issuer_keys.db"),
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
     };
@@ -60,7 +56,7 @@ async fn test_end_to_end_token_issuance_and_validation() {
         .expect("Failed to create issuer");
 
     // 2. 初始化 Validator
-    AIdCredentialValidator::init(&ks_config, &shared_key)
+    AIdCredentialValidator::init(&ks_config, &shared_key, _validator_temp_dir.path())
         .await
         .expect("Failed to initialize validator");
 
@@ -155,11 +151,7 @@ async fn test_token_validation_with_wrong_tenant_fails() {
         token_ttl_secs: 3600,
         signaling_heartbeat_interval_secs: 30,
         key_refresh_interval_secs: 3600,
-        key_storage_path: issuer_temp_dir
-            .path()
-            .join("issuer_keys.db")
-            .to_string_lossy()
-            .to_string(),
+        key_storage_file: issuer_temp_dir.path().join("issuer_keys.db"),
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
     };
@@ -172,7 +164,7 @@ async fn test_token_validation_with_wrong_tenant_fails() {
         .expect("Failed to create issuer");
 
     // 初始化 Validator
-    AIdCredentialValidator::init(&ks_config, &shared_key)
+    AIdCredentialValidator::init(&ks_config, &shared_key, _validator_temp_dir.path())
         .await
         .expect("Failed to initialize validator");
 
@@ -222,11 +214,7 @@ async fn test_multiple_key_rotations() {
         token_ttl_secs: 3600,
         signaling_heartbeat_interval_secs: 30,
         key_refresh_interval_secs: 3600,
-        key_storage_path: issuer_temp_dir
-            .path()
-            .join("issuer_keys.db")
-            .to_string_lossy()
-            .to_string(),
+        key_storage_file: issuer_temp_dir.path().join("issuer_keys.db"),
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
     };
@@ -239,7 +227,7 @@ async fn test_multiple_key_rotations() {
         .expect("Failed to create issuer");
 
     // 初始化 Validator
-    AIdCredentialValidator::init(&ks_config, &shared_key)
+    AIdCredentialValidator::init(&ks_config, &shared_key, _validator_temp_dir.path())
         .await
         .expect("Failed to initialize validator");
 
@@ -298,11 +286,7 @@ async fn test_issuer_health_checks() {
         token_ttl_secs: 3600,
         signaling_heartbeat_interval_secs: 30,
         key_refresh_interval_secs: 3600,
-        key_storage_path: issuer_temp_dir
-            .path()
-            .join("issuer_keys.db")
-            .to_string_lossy()
-            .to_string(),
+        key_storage_file: issuer_temp_dir.path().join("issuer_keys.db"),
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
     };

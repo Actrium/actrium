@@ -20,7 +20,8 @@ pub use crate::config::supervisor::SupervisorConfig;
 pub use crate::config::tracing::TracingConfig;
 pub use crate::config::turn::TurnConfig;
 use ::ks::storage::StorageBackend;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::path::PathBuf;
 
 /// Actor-RTC 辅助服务的主配置结构体
 ///
@@ -108,11 +109,16 @@ pub struct ActrixConfig {
     #[serde(default)]
     pub services: ServicesConfig,
 
-    /// SQLite 数据库文件路径
+    /// SQLite 数据库文件存储目录路径
     ///
-    /// 指定用于存储持久化数据的 SQLite 数据库文件路径。
+    /// 指定用于存储所有 SQLite 数据库文件的目录路径。
+    /// 主数据库文件将存储为 `{sqlite_path}/actrix.db`。
     /// 包括租户信息、访问控制列表、nonce 缓存等。
-    pub sqlite: String,
+    #[serde(
+        serialize_with = "serialize_pathbuf",
+        deserialize_with = "deserialize_pathbuf"
+    )]
+    pub sqlite_path: PathBuf,
 
     /// Actrix 内部服务通信共享密钥
     ///
@@ -178,6 +184,21 @@ fn default_log_path() -> String {
     "logs/".to_string()
 }
 
+fn serialize_pathbuf<S>(path: &PathBuf, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    path.display().to_string().serialize(serializer)
+}
+
+fn deserialize_pathbuf<'de, D>(deserializer: D) -> Result<PathBuf, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(PathBuf::from(s))
+}
+
 impl Default for ActrixConfig {
     fn default() -> Self {
         Self {
@@ -192,7 +213,7 @@ impl Default for ActrixConfig {
             location_tag: "default-location".to_string(),
             supervisor: None,
             services: ServicesConfig::default(),
-            sqlite: "database.db".to_string(),
+            sqlite_path: PathBuf::from("database"),
             actrix_shared_key: "XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg=".to_string(),
             log_level: "info".to_string(),
             log_output: default_log_output(),
@@ -385,7 +406,12 @@ impl ActrixConfig {
         }
 
         // 验证 SQLite 路径
-        if self.sqlite.trim().is_empty() {
+        if self
+            .sqlite_path
+            .to_str()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
             errors.push("SQLite database path cannot be empty".to_string());
         }
 
@@ -416,20 +442,7 @@ impl ActrixConfig {
             if let Some(ref ks) = self.services.ks {
                 // 验证存储配置
                 match ks.storage.backend {
-                    StorageBackend::Sqlite => {
-                        if let Some(ref sqlite_cfg) = ks.storage.sqlite {
-                            if sqlite_cfg.path.trim().is_empty() {
-                                errors.push(
-                                    "KS SQLite storage is configured but path is empty".to_string(),
-                                );
-                            }
-                        } else {
-                            errors.push(
-                                "KS is configured to use SQLite but sqlite config is missing"
-                                    .to_string(),
-                            );
-                        }
-                    }
+                    StorageBackend::Sqlite => {}
                     StorageBackend::Redis => {
                         if ks.storage.redis.is_none() {
                             errors.push(
@@ -470,6 +483,16 @@ impl ActrixConfig {
                 // AIS 位掩码已设置但 services.ais 配置缺失
                 errors.push(
                     "AIS service is enabled (ENABLE_AIS bit is set) but services.ais configuration is missing".to_string(),
+                );
+            }
+        }
+
+        // 验证 Signaling 配置（如果启用）
+        if self.is_signaling_enabled() {
+            if self.services.signaling.is_none() {
+                errors.push(
+                    "Signaling service is enabled (ENABLE_SIGNALING bit is set) but services.signaling configuration is missing"
+                        .to_string(),
                 );
             }
         }
@@ -765,7 +788,47 @@ mod tests {
             e.contains("KS service is enabled (ENABLE_KS bit is set) but services.ks configuration is missing")
         }));
 
-        // Case 3: Bitmask set and services.* config present - should pass (if other validations pass)
+        // Case 3: Signaling bitmask set but services.signaling config missing - should error
+        config.enable = ENABLE_SIGNALING;
+        config.services.signaling = None;
+        config.services.ks = None;
+
+        let result = config.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| {
+            e.contains("Signaling service is enabled (ENABLE_SIGNALING bit is set) but services.signaling configuration is missing")
+        }));
+
+        // Case 4: Signaling enabled with config present - should pass (if other validations pass)
+        // Note: Unlike AIS, Signaling validation does not check KS availability
+        config.enable = ENABLE_SIGNALING;
+        config.services.signaling = Some(SignalingConfig {
+            server: signaling::SignalingServerConfig::default(),
+            dependencies: signaling::SignalingDependencies {
+                ks: None,
+                ais: None,
+            },
+        });
+        config.services.ks = None; // No local KS
+
+        let result = config.validate();
+        // Signaling with config should not have bitmask consistency errors
+        // (may have other validation errors like sqlite_path, etc.)
+        if let Err(errors) = result {
+            assert!(
+                !errors
+                    .iter()
+                    .any(|e| e.contains("Signaling service is enabled (ENABLE_SIGNALING bit is set) but services.signaling configuration is missing"))
+            );
+            assert!(
+                !errors
+                    .iter()
+                    .any(|e| e.contains("bit is not set in enable bitmask"))
+            );
+        }
+
+        // Case 5: Bitmask set and services.* config present - should pass (if other validations pass)
         config.enable = ENABLE_AIS | ENABLE_KS;
         config.services.ais = Some(AisConfig {
             server: ais::AisServerConfig::default(),
@@ -785,13 +848,10 @@ mod tests {
             storage: ::ks::storage::StorageConfig {
                 backend: ::ks::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(::ks::storage::SqliteConfig {
-                    path: "test.db".to_string(),
-                }),
+                sqlite: Some(::ks::storage::SqliteConfig {}),
                 redis: None,
                 postgres: None,
             },
-            nonce_db_path: None,
             kek: None,
             kek_env: None,
             kek_file: None,

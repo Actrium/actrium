@@ -47,8 +47,9 @@ log_rotate = false
 # All log files will be stored in this directory
 log_path = "logs/"
 
-# SQLite database path for persistent storage
-sqlite = "database.db"
+# SQLite database storage directory path
+# Main database file will be stored as {sqlite_path}/actrix.db
+sqlite_path = "database"
 
 # Geographic location tag (for multi-region deployment monitoring)
 # Format: cloud-provider,region,zone
@@ -159,7 +160,6 @@ realm = "actrix.example.com"
 # [services.ais]
 #
 # [services.ais.server]
-# database_path = "ais.db"
 #
 # # AIS automatically uses local KS if enabled, or configure explicitly:
 # [services.ais.dependencies.ks]
@@ -209,7 +209,7 @@ realm = "actrix.example.com"
 # log_output = "file"
 # log_rotate = true
 # log_path = "/var/log/actrix/"
-# sqlite = "/var/lib/actrix/database.db"
+# sqlite_path = "/var/lib/actrix"
 # location_tag = "aws,us-west-2,zone-a"
 # actrix_shared_key = "REPLACE_WITH_STRONG_RANDOM_KEY_MINIMUM_32_CHARS"
 # pid = "/var/run/actrix.pid"

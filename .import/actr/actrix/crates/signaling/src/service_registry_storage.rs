@@ -36,15 +36,15 @@ pub struct ServiceRegistryStorage {
 
 impl ServiceRegistryStorage {
     /// 创建存储实例
-    pub async fn new(database_path: impl AsRef<Path>, ttl_secs: Option<u64>) -> Result<Self> {
+    pub async fn new(database_file: impl AsRef<Path>, ttl_secs: Option<u64>) -> Result<Self> {
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&format!("sqlite:{}", database_path.as_ref().display()))
+            .connect(&format!("sqlite:{}", database_file.as_ref().display()))
             .await
             .with_context(|| {
                 format!(
                     "Failed to connect to database: {}",
-                    database_path.as_ref().display()
+                    database_file.as_ref().display()
                 )
             })?;
 

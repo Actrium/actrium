@@ -220,7 +220,7 @@ Uses `config.toml` in root directory. Key sections:
 enable = 31              # Bitmask: all services (1+2+4+8+16)
 name = "actrix-01"        # Instance identifier
 env = "prod"             # Environment: dev/prod/test
-sqlite = "database.db"   # SQLite database path
+sqlite_path = "database"   # SQLite database storage directory path
 actrix_shared_key = "your-strong-key-here"  # MUST change from default
 
 [bind.https]

@@ -9,6 +9,7 @@ mod process;
 mod service;
 
 use actrix_common::config::ActrixConfig;
+use anyhow::Context;
 use clap::Parser;
 use service::{
     AisService, KsGrpcService, KsHttpService, ServiceContainer, ServiceManager, SignalingService,
@@ -420,6 +421,16 @@ impl ApplicationLauncher {
             }
         };
 
+        // ensure sqlite_path directory exists
+        if !config.sqlite_path.exists() {
+            std::fs::create_dir_all(&config.sqlite_path).with_context(|| {
+                format!(
+                    "Failed to create SQLite data directory: {}",
+                    config.sqlite_path.display()
+                )
+            })?;
+        }
+
         // 初始化可观测性系统（日志 + 追踪）
         let _observability_guard = Self::init_observability(&config)?;
 
@@ -507,7 +518,7 @@ impl ApplicationLauncher {
         shutdown_tx: tokio::sync::broadcast::Sender<()>,
     ) -> Result<ServiceManager> {
         info!("📊 计划启动的服务:");
-        actrix_common::storage::db::set_db_path(Path::new(&config.sqlite)).await?;
+        actrix_common::storage::db::set_db_path(&config.sqlite_path).await?;
 
         // 初始化 Prometheus metrics registry
         let registry = &actrix_common::metrics::REGISTRY;

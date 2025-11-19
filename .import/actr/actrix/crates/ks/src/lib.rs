@@ -42,19 +42,15 @@ mod tests {
     #[tokio::test]
     async fn test_ks_service_creation() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test_ks.db");
 
         let config = KsServiceConfig {
             storage: StorageConfig {
                 backend: StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(SqliteConfig {
-                    path: db_path.to_string_lossy().to_string(),
-                }),
+                sqlite: Some(SqliteConfig {}),
                 redis: None,
                 postgres: None,
             },
-            nonce_db_path: None,
             kek: None,
             kek_env: None,
             kek_file: None,
@@ -62,7 +58,13 @@ mod tests {
 
         // 使用内存存储进行测试（避免文件系统依赖）
         let nonce_storage = MemoryStorage::new();
-        let state = create_ks_state(&config, nonce_storage, "test-actrix-shared-key").await;
+        let state = create_ks_state(
+            &config,
+            nonce_storage,
+            "test-actrix-shared-key",
+            temp_dir.path(),
+        )
+        .await;
         assert!(state.is_ok());
     }
 }

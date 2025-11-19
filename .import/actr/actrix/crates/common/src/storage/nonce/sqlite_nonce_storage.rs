@@ -22,19 +22,12 @@ pub struct SqliteNonceStorage {
 
 impl SqliteNonceStorage {
     /// 创建新的 Nonce 存储实例（同步方法，适用于非 async 上下文）
-    pub fn new(db_path: Option<String>) -> Result<Self> {
-        let db_path = db_path.unwrap_or_else(|| {
-            std::env::var("NONCE_DB_PATH").unwrap_or_else(|_| "nonce.db".to_string())
-        });
-
-        // 确保数据库目录存在
-        if let Some(parent) = Path::new(&db_path).parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+    pub fn new<P: AsRef<Path>>(db_path: P) -> Result<Self> {
+        let db_file = db_path.as_ref().join("nonce.db");
 
         // 创建新的运行时来初始化（仅用于非 async 上下文）
         let rt = tokio::runtime::Runtime::new()?;
-        let pool = rt.block_on(Self::init_pool(&db_path))?;
+        let pool = rt.block_on(Self::init_pool(&db_file))?;
 
         Ok(Self {
             pool: Arc::new(pool),
@@ -43,17 +36,9 @@ impl SqliteNonceStorage {
     }
 
     /// 创建新的 Nonce 存储实例（异步方法，适用于 async 上下文）
-    pub async fn new_async(db_path: Option<String>) -> Result<Self> {
-        let db_path = db_path.unwrap_or_else(|| {
-            std::env::var("NONCE_DB_PATH").unwrap_or_else(|_| "nonce.db".to_string())
-        });
-
-        // 确保数据库目录存在
-        if let Some(parent) = Path::new(&db_path).parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let pool = Self::init_pool(&db_path).await?;
+    pub async fn new_async<P: AsRef<Path>>(db_path: P) -> Result<Self> {
+        let db_file = db_path.as_ref().join("nonce.db");
+        let pool = Self::init_pool(&db_file).await?;
 
         Ok(Self {
             pool: Arc::new(pool),
@@ -61,12 +46,13 @@ impl SqliteNonceStorage {
         })
     }
 
-    async fn init_pool(db_path: &str) -> Result<SqlitePool> {
-        let options = SqliteConnectOptions::from_str(&format!("sqlite:{db_path}"))?
-            .create_if_missing(true)
-            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
-            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
-            .busy_timeout(Duration::from_secs(5));
+    async fn init_pool<P: AsRef<Path>>(db_file: P) -> Result<SqlitePool> {
+        let options =
+            SqliteConnectOptions::from_str(&format!("sqlite:{}", db_file.as_ref().display()))?
+                .create_if_missing(true)
+                .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+                .busy_timeout(Duration::from_secs(5));
 
         let pool = SqlitePoolOptions::new()
             .max_connections(10)
@@ -239,8 +225,7 @@ mod tests {
     #[tokio::test]
     async fn test_basic_storage() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let storage = SqliteNonceStorage::new_async(Some(db_path.to_string_lossy().to_string()))
+        let storage = SqliteNonceStorage::new_async(temp_dir.path())
             .await
             .unwrap();
 
@@ -278,8 +263,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let storage = SqliteNonceStorage::new_async(Some(db_path.to_string_lossy().to_string()))
+        let storage = SqliteNonceStorage::new_async(temp_dir.path())
             .await
             .unwrap();
 
@@ -329,8 +313,7 @@ mod tests {
     #[tokio::test]
     async fn test_stats() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let storage = SqliteNonceStorage::new_async(Some(db_path.to_string_lossy().to_string()))
+        let storage = SqliteNonceStorage::new_async(temp_dir.path())
             .await
             .unwrap();
 

@@ -7,14 +7,9 @@ use serde::{Deserialize, Serialize};
 /// KS 服务器配置
 ///
 /// 配置 KS 服务的服务器端参数
+/// 注意：只存储 key_id 和 public_key，不存储 secret_key。
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct KsServerConfig {
-    /// SQLite 数据库路径
-    ///
-    /// 存储生成的密钥信息的 SQLite 数据库文件路径。
-    /// 注意：只存储 key_id 和 public_key，不存储 secret_key。
-    pub database_path: String,
-}
+pub struct KsServerConfig {}
 
 /// KS 客户端配置
 ///
@@ -70,9 +65,7 @@ pub struct KsConfig {
 
 impl Default for KsServerConfig {
     fn default() -> Self {
-        Self {
-            database_path: "ks_keys.db".to_string(),
-        }
+        Self {}
     }
 }
 

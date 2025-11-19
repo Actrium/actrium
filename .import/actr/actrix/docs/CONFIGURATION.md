@@ -58,18 +58,18 @@ env = "test"  # 测试环境
 - `dev`: 允许 HTTP, 宽松验证
 - `test`: 用于自动化测试
 
-### sqlite (必需)
+### sqlite_path (必需)
 
-**类型**: `String` (文件路径)  
-**默认值**: `"database.db"`  
-**用途**: SQLite 数据库文件路径
+**类型**: `String` (目录路径)  
+**默认值**: `"database"`  
+**用途**: SQLite 数据库文件存储目录路径。主数据库文件将存储为 `{sqlite_path}/actrix.db`
 
 ```toml
-sqlite = "/var/lib/actrix/database.db"
-sqlite = "database.db"  # 相对路径
+sqlite_path = "/var/lib/actrix"
+sqlite_path = "database"  # 相对路径
 ```
 
-**权限建议**: `chmod 600 database.db`
+**权限建议**: `chmod 755 {sqlite_path}` (目录权限)
 
 ### actrix_shared_key (必需)
 
@@ -402,7 +402,7 @@ cargo run -- test config.toml
 enable = 2
 name = "actrix-stun"
 env = "dev"
-sqlite = "database.db"
+sqlite_path = "database"
 actrix_shared_key = "my-secure-key-min-16-chars"
 location_tag = "dev,local"
 log_level = "info"
@@ -420,7 +420,7 @@ port = 3478
 enable = 22  # KS + TURN + STUN
 name = "actrix-prod-01"
 env = "prod"
-sqlite = "/var/lib/actrix/database.db"
+sqlite_path = "/var/lib/actrix"
 actrix_shared_key = "REPLACE_WITH_STRONG_32_CHAR_HEX_KEY"
 location_tag = "aws,us-west-2,zone-a"
 
@@ -470,7 +470,7 @@ secret = "REPLACE_WITH_HEX_SECRET"
 enable = 6  # TURN + STUN
 name = "actrix-dev"
 env = "dev"
-sqlite = "database.db"
+sqlite_path = "database"
 actrix_shared_key = "dev-key-16-chars-min"
 location_tag = "local,dev"
 

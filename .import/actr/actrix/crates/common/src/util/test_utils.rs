@@ -15,7 +15,7 @@ pub mod utils {
         INIT.get_or_init(|| async {
             let db_path = std::env::temp_dir().join("test_rusqlite_global.db");
             if db_path.exists() {
-                std::fs::remove_file(&db_path).expect("Failed to remove existing test DB");
+                let _ = std::fs::remove_file(&db_path);
             }
 
             let db_path_str = db_path

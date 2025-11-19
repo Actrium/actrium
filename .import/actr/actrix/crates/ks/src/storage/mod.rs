@@ -8,6 +8,8 @@
 //! - `KeyStorage` enum 封装不同的后端实现
 //! - 通过 `StorageConfig` 配置选择和初始化后端
 
+use std::path::Path;
+
 pub mod backend;
 pub mod config;
 
@@ -61,6 +63,7 @@ impl KeyStorage {
     /// # Arguments
     /// * `config` - 存储配置
     /// * `encryptor` - 密钥加密器
+    /// * `db_path` - 数据库文件存储目录路径（当 backend = "sqlite" 时必需，来自 ActrixConfig.sqlite_path）
     ///
     /// # Returns
     /// 初始化完成的存储实例
@@ -69,14 +72,20 @@ impl KeyStorage {
     /// - 缺少对应后端的配置
     /// - 后端初始化失败
     /// - 后端功能未启用（feature flag）
-    pub async fn from_config(config: &StorageConfig, encryptor: KeyEncryptor) -> KsResult<Self> {
+    pub async fn from_config<P: AsRef<Path>>(
+        config: &StorageConfig,
+        encryptor: KeyEncryptor,
+        db_path: P,
+    ) -> KsResult<Self> {
         match config.backend {
             StorageBackend::Sqlite => {
                 let cfg = config
                     .sqlite
                     .as_ref()
                     .ok_or_else(|| KsError::Config("Missing SQLite config".into()))?;
-                let backend = SqliteBackend::new(cfg, config.key_ttl_seconds, encryptor).await?;
+                let backend =
+                    SqliteBackend::new(cfg, config.key_ttl_seconds, encryptor, db_path.as_ref())
+                        .await?;
                 Ok(Self::Sqlite(backend))
             }
 
@@ -212,22 +221,21 @@ mod tests {
     #[tokio::test]
     async fn test_storage_from_config_sqlite() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
             key_ttl_seconds: 3600,
-            sqlite: Some(SqliteConfig {
-                path: db_path.to_string_lossy().to_string(),
-            }),
+            sqlite: Some(SqliteConfig {}),
             redis: None,
             postgres: None,
         };
 
-        let storage =
-            KeyStorage::from_config(&config, crate::crypto::KeyEncryptor::no_encryption())
-                .await
-                .unwrap();
+        let storage = KeyStorage::from_config(
+            &config,
+            crate::crypto::KeyEncryptor::no_encryption(),
+            temp_dir.path(),
+        )
+        .await
+        .unwrap();
         assert_eq!(storage.backend_name(), "SQLite");
 
         // 测试基本操作
@@ -248,8 +256,13 @@ mod tests {
             postgres: None,
         };
 
-        let result =
-            KeyStorage::from_config(&config, crate::crypto::KeyEncryptor::no_encryption()).await;
+        let temp_dir = tempdir().unwrap();
+        let result = KeyStorage::from_config(
+            &config,
+            crate::crypto::KeyEncryptor::no_encryption(),
+            temp_dir.path(),
+        )
+        .await;
         assert!(result.is_err());
         assert!(
             result

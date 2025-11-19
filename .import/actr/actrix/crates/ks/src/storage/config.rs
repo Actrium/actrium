@@ -54,19 +54,11 @@ pub enum StorageBackend {
 }
 
 /// SQLite 配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SqliteConfig {
-    /// 数据库文件路径
-    pub path: String,
-}
-
-impl Default for SqliteConfig {
-    fn default() -> Self {
-        Self {
-            path: "ks_keys.db".to_string(),
-        }
-    }
-}
+///
+/// 注意：数据库路径通过 KeyStorage::from_config 的 db_path 参数传入
+/// TODO: define grain config for sqlite
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SqliteConfig {}
 
 /// Redis 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,9 +162,7 @@ mod tests {
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
             key_ttl_seconds: 7200,
-            sqlite: Some(SqliteConfig {
-                path: "test.db".to_string(),
-            }),
+            sqlite: Some(SqliteConfig {}),
             redis: None,
             postgres: None,
         };

@@ -27,10 +27,11 @@ impl AIdCredentialValidator {
     pub async fn new(
         ks_client_config: &KsClientConfig,
         actrix_shared_key: &str,
+        sqlite_path: &std::path::Path,
     ) -> Result<Self, AidError> {
-        let cache_db_path = "ks_cache.db"; // 固定缓存路径
+        let cache_db_file = sqlite_path.join("ks_cache.db");
 
-        let key_cache = Arc::new(KeyCache::new(cache_db_path).await?);
+        let key_cache = Arc::new(KeyCache::new(cache_db_file).await?);
 
         // 创建 gRPC 客户端配置
         let grpc_config = ks::GrpcClientConfig {
@@ -60,8 +61,9 @@ impl AIdCredentialValidator {
     pub async fn init(
         ks_client_config: &KsClientConfig,
         actrix_shared_key: &str,
+        sqlite_path: &std::path::Path,
     ) -> Result<(), AidError> {
-        let validator = Self::new(ks_client_config, actrix_shared_key).await?;
+        let validator = Self::new(ks_client_config, actrix_shared_key, sqlite_path).await?;
         VALIDATOR_INSTANCE
             .set(Arc::new(validator))
             .map_err(|_| AidError::DecryptionFailed("Validator already initialized".to_string()))?;

@@ -94,8 +94,8 @@ pub struct IssuerConfig {
     pub signaling_heartbeat_interval_secs: u32,
     /// 密钥缓存刷新间隔（秒，默认 1 小时）
     pub key_refresh_interval_secs: u64,
-    /// 密钥存储数据库路径
-    pub key_storage_path: String,
+    /// 密钥存储数据库文件路径
+    pub key_storage_file: std::path::PathBuf,
     /// 是否启用定期密钥轮替
     pub enable_periodic_rotation: bool,
     /// 密钥轮替间隔（秒，默认 24 小时）
@@ -111,7 +111,7 @@ impl Default for IssuerConfig {
             token_ttl_secs: 3600,                  // 1 小时
             signaling_heartbeat_interval_secs: 30, // 30 秒
             key_refresh_interval_secs: 3600,       // 1 小时
-            key_storage_path: "ais_keys.db".to_string(),
+            key_storage_file: std::path::PathBuf::from("ais_keys.db"),
             enable_periodic_rotation: false,   // 默认禁用定期轮替
             key_rotation_interval_secs: 86400, // 24 小时
         }
@@ -137,7 +137,7 @@ pub struct AIdIssuer {
 impl AIdIssuer {
     /// 创建新的 AIdIssuer
     pub async fn new(ks_client: KsClientWrapper, config: IssuerConfig) -> Result<Self, AidError> {
-        let key_storage = KeyStorage::new(&config.key_storage_path)
+        let key_storage = KeyStorage::new(&config.key_storage_file)
             .await
             .map_err(|e| {
                 AidError::GenerationFailed(format!("Failed to create key storage: {e}"))

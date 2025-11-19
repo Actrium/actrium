@@ -254,7 +254,7 @@ enable = 8  # ENABLE_AIS (位 3) 或与其他服务组合，如 enable = 15 (1+2
 
 [services.ais]
 [services.ais.server]
-database_path = "ais.db"
+# Note: AIS key storage file is automatically set to {sqlite_path}/keys.db
 token_ttl_secs = 3600
 
 [services.ais.dependencies.ks]
@@ -1048,8 +1048,8 @@ enable = 22  # KS (16) + TURN (4) + STUN (2)
 name = "actrix-01"
 env = "prod"
 
-# SQLite 数据库
-sqlite = "/var/lib/actrix/actrix.db"
+# SQLite 数据库存储目录
+sqlite_path = "/var/lib/actrix"
 
 # 内部服务通信密钥
 actrix_shared_key = "your-strong-random-key-here"
@@ -1083,7 +1083,8 @@ realm = "actrix.example.com"
 
 # KS 服务配置
 [services.ks]
-enabled = true
+# Note: Service enablement is controlled by the bitmask (enable field)
+# Set ENABLE_KS bit (16) in the enable field to enable this service
 
 [services.ks.storage]
 backend = "sqlite"

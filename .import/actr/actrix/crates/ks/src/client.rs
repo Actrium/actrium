@@ -36,12 +36,6 @@ pub struct ClientConfig {
     ///
     /// 连接 KS 服务的超时时间
     pub timeout_seconds: u64,
-
-    /// 本地密钥缓存数据库路径
-    ///
-    /// 用于缓存从 KS 服务获取的私钥，避免频繁网络请求。
-    /// 如果不设置，默认使用 "ks_cache.db"
-    pub cache_db_path: Option<String>,
 }
 
 impl Client {
@@ -180,7 +174,6 @@ mod tests {
             endpoint: "http://127.0.0.1:8090".to_string(),
             psk: "test-shared-key".to_string(),
             timeout_seconds: 30,
-            cache_db_path: None,
         };
 
         let client = Client::new(&config);

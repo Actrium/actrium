@@ -21,9 +21,6 @@ pub struct AisConfig {
 /// AIS 服务器配置
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AisServerConfig {
-    /// 数据库路径
-    pub database_path: String,
-
     /// Signaling Server 心跳间隔（秒）
     ///
     /// 在 RegisterResponse 中返回，指导客户端连接 Signaling Server 后的心跳频率
@@ -52,7 +49,6 @@ pub struct AisDependencies {
 impl Default for AisServerConfig {
     fn default() -> Self {
         Self {
-            database_path: "ais.db".to_string(),
             signaling_heartbeat_interval_secs: default_signaling_heartbeat_interval_secs(),
             token_ttl_secs: default_token_ttl_secs(),
         }

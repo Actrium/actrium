@@ -16,13 +16,6 @@ pub struct KsServiceConfig {
     #[serde(default)]
     pub storage: StorageConfig,
 
-    /// Nonce 数据库路径（用于防重放攻击）
-    ///
-    /// 如果为空，则使用与 storage 相同的数据库
-    /// 注意：只有 SQLite 后端才需要此配置，Redis/PostgreSQL 可以使用同一连接
-    #[serde(default)]
-    pub nonce_db_path: Option<String>,
-
     /// KEK (Key Encryption Key) - 直接配置
     ///
     /// 用于加密存储的私钥。支持两种格式：
@@ -87,13 +80,10 @@ mod tests {
             storage: StorageConfig {
                 backend: StorageBackend::Sqlite,
                 key_ttl_seconds: 7200,
-                sqlite: Some(SqliteConfig {
-                    path: "custom.db".to_string(),
-                }),
+                sqlite: Some(SqliteConfig {}),
                 redis: None,
                 postgres: None,
             },
-            nonce_db_path: Some("nonce.db".to_string()),
             kek: None,
             kek_env: None,
             kek_file: None,

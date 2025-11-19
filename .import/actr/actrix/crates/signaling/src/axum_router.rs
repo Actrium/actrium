@@ -5,7 +5,7 @@
 use crate::server::{SignalingServer, SignalingServerHandle};
 use actrix_common::aid::credential::validator::AIdCredentialValidator;
 use actrix_common::config::ActrixConfig;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use axum::{
     Router,
     extract::{
@@ -16,7 +16,6 @@ use axum::{
     routing::get,
 };
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -55,12 +54,16 @@ pub async fn create_signaling_router_with_config(config: &ActrixConfig) -> Resul
     if let Some(signaling_config) = &config.services.signaling {
         if let Some(ks_client_config) = signaling_config.get_ks_client_config(config) {
             info!("Initializing AIdCredentialValidator with KS config");
-            AIdCredentialValidator::init(&ks_client_config, config.get_actrix_shared_key())
-                .await
-                .map_err(|e| {
-                    error!("Failed to initialize AIdCredentialValidator: {}", e);
-                    anyhow::anyhow!("AIdCredentialValidator initialization failed: {e}")
-                })?;
+            AIdCredentialValidator::init(
+                &ks_client_config,
+                config.get_actrix_shared_key(),
+                &config.sqlite_path,
+            )
+            .await
+            .map_err(|e| {
+                error!("Failed to initialize AIdCredentialValidator: {}", e);
+                anyhow::anyhow!("AIdCredentialValidator initialization failed: {e}")
+            })?;
             info!("✅ AIdCredentialValidator initialized successfully");
         } else {
             warn!("⚠️  No KS config found for Signaling service, credential validation will fail");
@@ -75,19 +78,10 @@ pub async fn create_signaling_router_with_config(config: &ActrixConfig) -> Resul
 
     // 初始化 ServiceRegistry 持久化缓存（用于重启恢复）
     let cache_ttl_secs = 3600; // 1 小时 TTL
-    let cache_db_path = PathBuf::from(&config.sqlite).join("signaling_cache.db");
-    if let Some(parent) = cache_db_path.parent() {
-        if !parent.exists() {
-            tokio::fs::create_dir_all(parent).await.with_context(|| {
-                format!(
-                    "Failed to create ServiceRegistry cache directory: {}",
-                    parent.display()
-                )
-            })?;
-        }
-    }
+    let cache_db_file = config.sqlite_path.join("signaling_cache.db");
+
     match crate::service_registry_storage::ServiceRegistryStorage::new(
-        &cache_db_path,
+        &cache_db_file,
         Some(cache_ttl_secs),
     )
     .await
@@ -96,7 +90,7 @@ pub async fn create_signaling_router_with_config(config: &ActrixConfig) -> Resul
             let storage_arc = Arc::new(storage);
             info!(
                 "✅ ServiceRegistry cache initialized at: {}",
-                cache_db_path.display()
+                cache_db_file.display()
             );
 
             // 设置存储到 ServiceRegistry

@@ -120,10 +120,7 @@ pub async fn create_ais_router(
         token_ttl_secs: config.server.token_ttl_secs,
         signaling_heartbeat_interval_secs: config.server.signaling_heartbeat_interval_secs,
         key_refresh_interval_secs: 3600, // 1 小时
-        key_storage_path: format!(
-            "{}_keys.db",
-            config.server.database_path.trim_end_matches(".db")
-        ),
+        key_storage_file: global_config.sqlite_path.join("ais_keys.db"),
         enable_periodic_rotation: false, // 默认禁用，可通过配置文件开启
         key_rotation_interval_secs: 86400, // 24 小时
     };

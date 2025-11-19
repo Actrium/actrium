@@ -169,6 +169,7 @@ pub async fn create_ks_state<N: NonceStorage + Send + Sync + 'static>(
     service_config: &crate::config::KsServiceConfig,
     nonce_storage: N,
     actrix_shared_key: &str,
+    sqlite_path: &std::path::Path,
 ) -> Result<KSState, KsError> {
     info!("Initializing KS state from KsServiceConfig");
 
@@ -185,7 +186,8 @@ pub async fn create_ks_state<N: NonceStorage + Send + Sync + 'static>(
     };
 
     // 从配置创建存储实例（异步）
-    let key_storage = KeyStorage::from_config(&service_config.storage, encryptor).await?;
+    let key_storage =
+        KeyStorage::from_config(&service_config.storage, encryptor, sqlite_path).await?;
 
     Ok(KSState::new(
         key_storage,
@@ -431,20 +433,14 @@ mod tests {
 
     async fn create_test_app() -> (Router, String, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test_ks.db");
-        let nonce_db_path = temp_dir.path().join("test_nonces.db");
-
         let config = crate::config::KsServiceConfig {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(crate::storage::SqliteConfig {
-                    path: db_path.to_string_lossy().to_string(),
-                }),
+                sqlite: Some(crate::storage::SqliteConfig {}),
                 redis: None,
                 postgres: None,
             },
-            nonce_db_path: Some(nonce_db_path.to_string_lossy().to_string()),
             kek: None,
             kek_env: None,
             kek_file: None,
@@ -452,7 +448,9 @@ mod tests {
 
         let psk = "test-psk".to_string();
         let nonce_storage = MemoryStorage::new();
-        let app_state = create_ks_state(&config, nonce_storage, &psk).await.unwrap();
+        let app_state = create_ks_state(&config, nonce_storage, &psk, temp_dir.path())
+            .await
+            .unwrap();
 
         let router = Router::new()
             .route("/generate", post(generate_key_handler))
@@ -471,26 +469,28 @@ mod tests {
     #[tokio::test]
     async fn test_service_creation_from_config() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test_ks.db");
 
         let config = crate::config::KsServiceConfig {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(crate::storage::SqliteConfig {
-                    path: db_path.to_string_lossy().to_string(),
-                }),
+                sqlite: Some(crate::storage::SqliteConfig {}),
                 redis: None,
                 postgres: None,
             },
-            nonce_db_path: None,
             kek: None,
             kek_env: None,
             kek_file: None,
         };
 
         let nonce_storage = MemoryStorage::new();
-        let state = create_ks_state(&config, nonce_storage, "test-shared-key-123").await;
+        let state = create_ks_state(
+            &config,
+            nonce_storage,
+            "test-shared-key-123",
+            temp_dir.path(),
+        )
+        .await;
         assert!(state.is_ok());
 
         let state = state.unwrap();
@@ -500,26 +500,22 @@ mod tests {
     #[tokio::test]
     async fn test_router_creation() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test_ks.db");
 
         let config = crate::config::KsServiceConfig {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(crate::storage::SqliteConfig {
-                    path: db_path.to_string_lossy().to_string(),
-                }),
+                sqlite: Some(crate::storage::SqliteConfig {}),
                 redis: None,
                 postgres: None,
             },
-            nonce_db_path: None,
             kek: None,
             kek_env: None,
             kek_file: None,
         };
 
         let nonce_storage = MemoryStorage::new();
-        let state = create_ks_state(&config, nonce_storage, "test-shared-key")
+        let state = create_ks_state(&config, nonce_storage, "test-shared-key", temp_dir.path())
             .await
             .unwrap();
 
@@ -530,26 +526,22 @@ mod tests {
     #[tokio::test]
     async fn test_service_stats() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test_ks.db");
 
         let config = crate::config::KsServiceConfig {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(crate::storage::SqliteConfig {
-                    path: db_path.to_string_lossy().to_string(),
-                }),
+                sqlite: Some(crate::storage::SqliteConfig {}),
                 redis: None,
                 postgres: None,
             },
-            nonce_db_path: None,
             kek: None,
             kek_env: None,
             kek_file: None,
         };
 
         let nonce_storage = MemoryStorage::new();
-        let state = create_ks_state(&config, nonce_storage, "test-shared-key")
+        let state = create_ks_state(&config, nonce_storage, "test-shared-key", temp_dir.path())
             .await
             .unwrap();
 

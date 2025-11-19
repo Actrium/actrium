@@ -238,15 +238,17 @@ mod tests {
     use crate::tenant::Tenant;
     use crate::util::test_utils::utils::setup_test_db;
     use serial_test::serial;
+    use uuid::Uuid;
 
     #[tokio::test]
     #[serial]
     async fn test_actor_acl_crud() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        // Create a tenant first
+        // Create a tenant first with unique name
+        let tenant_id = format!("test_tenant_for_acl_{}", Uuid::new_v4());
         let mut tenant = Tenant::new(
-            "test_tenant_for_acl".to_string(),
+            tenant_id,
             "auth_key_for_acl".to_string(),
             b"public_key".to_vec(),
             b"secret_key".to_vec(),

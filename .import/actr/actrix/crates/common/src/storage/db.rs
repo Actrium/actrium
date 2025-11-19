@@ -16,14 +16,15 @@ pub struct Database {
 
 impl Database {
     /// 创建新的数据库实例
-    pub async fn new(db_path: &str) -> Result<Self> {
-        // 确保数据库目录存在
-        if let Some(parent) = Path::new(db_path).parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+    ///
+    /// # Arguments
+    /// * `path` - 数据库文件存储目录路径，必须已存在
+    ///   主数据库文件将存储为 `{path}/actrix.db`
+    pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let db_file = path.as_ref().join("actrix.db");
 
         // 创建连接选项并启用 WAL 模式
-        let options = SqliteConnectOptions::from_str(&format!("sqlite:{db_path}"))?
+        let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_file.display()))?
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
@@ -132,8 +133,7 @@ static GLOBAL_DATABASE: OnceCell<Database> = OnceCell::const_new();
 
 /// 设置全局数据库路径
 pub async fn set_db_path(path: &Path) -> Result<()> {
-    let db_path = path.to_str().expect("Invalid database path");
-    let database = Database::new(db_path).await?;
+    let database = Database::new(path).await?;
     GLOBAL_DATABASE
         .set(database)
         .map_err(|_| anyhow::anyhow!("Database already initialized"))?;

@@ -98,21 +98,15 @@ impl KeyStorage {
     /// - 最大连接数：10
     /// - WAL 模式：提升并发读性能（4x）
     /// - 同步模式：NORMAL（平衡性能和安全）
-    pub async fn new<P: AsRef<Path>>(db_path: P) -> Result<Self> {
-        let path = db_path.as_ref().to_string_lossy().to_string();
-
-        // 确保数据库目录存在
-        if let Some(parent) = db_path.as_ref().parent() {
-            std::fs::create_dir_all(parent).context("Failed to create database directory")?;
-        }
-
+    pub async fn new<P: AsRef<Path>>(db_file: P) -> Result<Self> {
         // 创建连接选项并启用 WAL 模式
-        let options = SqliteConnectOptions::from_str(&format!("sqlite:{path}"))
-            .context("Failed to parse SQLite URL")?
-            .create_if_missing(true)
-            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
-            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
-            .busy_timeout(Duration::from_secs(5));
+        let options =
+            SqliteConnectOptions::from_str(&format!("sqlite:{}", db_file.as_ref().display()))
+                .context("Failed to parse SQLite URL")?
+                .create_if_missing(true)
+                .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+                .busy_timeout(Duration::from_secs(5));
 
         // 创建连接池
         let pool = SqlitePoolOptions::new()

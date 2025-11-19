@@ -22,18 +22,9 @@ pub struct KeyCache {
 
 impl KeyCache {
     /// 创建新的密钥缓存实例
-    pub async fn new<P: AsRef<Path>>(cache_db_path: P) -> Result<Self, AidError> {
-        let path = cache_db_path.as_ref();
-
-        // 确保缓存数据库目录存在
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                AidError::DecryptionFailed(format!("Cannot create cache directory: {e}"))
-            })?;
-        }
-
+    pub async fn new<P: AsRef<Path>>(cache_db_file: P) -> Result<Self, AidError> {
         // 创建 SQLite 连接池（使用 WAL 模式提升性能）
-        let database_url = format!("sqlite:{}", path.display());
+        let database_url = format!("sqlite:{}", cache_db_file.as_ref().display());
         let options = SqliteConnectOptions::from_str(&database_url)
             .map_err(|e| AidError::DecryptionFailed(format!("Invalid database URL: {e}")))?
             .create_if_missing(true)
@@ -57,7 +48,10 @@ impl KeyCache {
         // 初始化数据库表
         cache.init_tables().await?;
 
-        info!("Key cache initialized with database: {}", path.display());
+        info!(
+            "Key cache initialized with database: {}",
+            cache_db_file.as_ref().display()
+        );
         Ok(cache)
     }
 

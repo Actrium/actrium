@@ -36,25 +36,20 @@ impl SqliteBackend {
     /// 创建新的 SQLite 后端实例
     ///
     /// # Arguments
-    /// * `config` - SQLite 配置
+    /// * `_config` - SQLite 配置（暂时保留，未使用）
     /// * `key_ttl` - 密钥有效期（秒），0 表示永不过期
     /// * `encryptor` - 密钥加密器
+    /// * `db_path` - 数据库文件存储目录路径（来自 ActrixConfig.sqlite_path）
     pub async fn new(
-        config: &SqliteConfig,
+        _config: &SqliteConfig,
         key_ttl: u64,
         encryptor: KeyEncryptor,
+        db_path: &Path,
     ) -> KsResult<Self> {
-        let path = &config.path;
-
-        // 确保数据库目录存在
-        if let Some(parent) = Path::new(path).parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                KsError::Internal(format!("Failed to create database directory: {e}"))
-            })?;
-        }
+        let file = db_path.join("ks_keys.db");
 
         // 创建连接选项并启用 WAL 模式
-        let options = SqliteConnectOptions::from_str(&format!("sqlite:{path}"))
+        let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", file.display()))
             .map_err(|e| KsError::Internal(format!("Failed to parse SQLite URL: {e}")))?
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
@@ -79,7 +74,7 @@ impl SqliteBackend {
 
         info!(
             "SQLite storage initialized with sqlx: path={}, key_ttl={}s, encryption={}, WAL mode enabled",
-            path,
+            file.display(),
             key_ttl,
             backend.encryptor.is_enabled()
         );
@@ -271,14 +266,16 @@ mod tests {
 
     async fn create_test_backend() -> SqliteBackend {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let config = SqliteConfig {
-            path: db_path.to_string_lossy().to_string(),
-        };
 
-        SqliteBackend::new(&config, 3600, crate::crypto::KeyEncryptor::no_encryption())
-            .await
-            .unwrap()
+        let config = SqliteConfig {};
+        SqliteBackend::new(
+            &config,
+            3600,
+            crate::crypto::KeyEncryptor::no_encryption(),
+            temp_dir.path(),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -344,15 +341,17 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_expired_keys() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let config = SqliteConfig {
-            path: db_path.to_string_lossy().to_string(),
-        };
 
         // 创建 TTL 为 1 秒的后端
-        let backend = SqliteBackend::new(&config, 1, crate::crypto::KeyEncryptor::no_encryption())
-            .await
-            .unwrap();
+        let config = SqliteConfig {};
+        let backend = SqliteBackend::new(
+            &config,
+            1,
+            crate::crypto::KeyEncryptor::no_encryption(),
+            temp_dir.path(),
+        )
+        .await
+        .unwrap();
 
         // 生成密钥
         backend.generate_and_store_key().await.unwrap();
@@ -370,15 +369,17 @@ mod tests {
     #[tokio::test]
     async fn test_zero_ttl_never_expires() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let config = SqliteConfig {
-            path: db_path.to_string_lossy().to_string(),
-        };
 
         // TTL 为 0（永不过期）
-        let backend = SqliteBackend::new(&config, 0, crate::crypto::KeyEncryptor::no_encryption())
-            .await
-            .unwrap();
+        let config = SqliteConfig {};
+        let backend = SqliteBackend::new(
+            &config,
+            0,
+            crate::crypto::KeyEncryptor::no_encryption(),
+            temp_dir.path(),
+        )
+        .await
+        .unwrap();
 
         backend.generate_and_store_key().await.unwrap();
         assert_eq!(backend.get_key_count().await.unwrap(), 1);

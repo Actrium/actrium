@@ -37,7 +37,7 @@ path = "ks.db"
 # AIS 服务（自动使用本地 KS）
 [services.ais]
 [services.ais.server]
-database_path = "ais.db"
+# Note: AIS key storage file is automatically set to {sqlite_path}/keys.db
 
 # 📝 注意：AIS 没有配置 dependencies.ks
 # 它会自动发现本地 KS 并通过 gRPC 连接
@@ -75,7 +75,8 @@ actrix_shared_key = "PROD_SHARED_KEY_32_CHARS_MINIMUM"
 enable = 16  # ENABLE_KS (位 4)
 
 [services.ks]
-enabled = true  # KS 使用位掩码 + 次级开关
+# Note: Service enablement is controlled by the bitmask (enable field)
+# Set ENABLE_KS bit (16) in the enable field to enable this service
 
 [services.ks.storage]
 backend = "sqlite"
@@ -110,7 +111,7 @@ enable = 15  # 1+2+4+8
 # AIS 服务（连接远程 KS）
 [services.ais]
 [services.ais.server]
-database_path = "/var/lib/actrix/ais.db"
+# Note: AIS key storage file is automatically set to {sqlite_path}/keys.db
 
 # 显式配置远程 KS（gRPC endpoint）
 [services.ais.dependencies.ks]
@@ -209,7 +210,8 @@ actrix_shared_key = "shared-key"
 enable = 24  # ENABLE_KS (16) + ENABLE_AIS (8)
 
 [services.ks]
-enabled = true  # KS 使用位掩码 + 次级开关
+# Note: Service enablement is controlled by the bitmask (enable field)
+# Set ENABLE_KS bit (16) in the enable field to enable this service
 
 [services.ais]
 # 不需要配置 dependencies.ks
@@ -252,7 +254,8 @@ timeout_seconds = 15
 enable = 25  # ENABLE_KS (16) + ENABLE_AIS (8) + ENABLE_SIGNALING (1)
 
 [services.ks]
-enabled = true  # KS 使用位掩码 + 次级开关
+# Note: Service enablement is controlled by the bitmask (enable field)
+# Set ENABLE_KS bit (16) in the enable field to enable this service
 
 [services.ais]
 # AIS 使用本地 KS（自动发现）

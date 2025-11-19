@@ -1183,14 +1183,14 @@ CREATE TABLE nonce (
 
 ```
 默认位置:
-  /var/lib/actrix/ks.db
+  {sqlite_path}/ks_keys.db (通过 StorageConfig 配置)
 
 配置方式:
-  [ks]
-  database_path = "/var/lib/actrix/ks.db"
+  [services.ks.storage.sqlite]
+  path = "ks_keys.db"  # 相对于 sqlite_path 目录，或使用绝对路径
 
 查看数据库信息:
-  sqlite3 /var/lib/actrix/ks.db "
+  sqlite3 {sqlite_path}/ks_keys.db "
     SELECT
       COUNT(*) as total_keys,
       SUM(CASE WHEN expires_at = 0 THEN 1 ELSE 0 END) as permanent_keys,
@@ -1421,19 +1421,20 @@ enable = 16  # 或包含 16 的组合，如 22 (KS + STUN + TURN)
 
 # KS 服务配置
 [services.ks]
-enabled = true
-nonce_db_path = "/var/lib/actrix/nonce.db"
+# Note: Service enablement is controlled by the bitmask (enable field)
+# Set ENABLE_KS bit (16) in the enable field to enable this service
+nonce_db_file = "/var/lib/actrix/nonce.db"  # Optional: Nonce database file path
 
 [services.ks.storage]
 backend = "sqlite"
 key_ttl_seconds = 3600      # 密钥 TTL (秒), 0=永不过期
 
 [services.ks.storage.sqlite]
-path = "/var/lib/actrix/ks.db"
+path = "ks_keys.db"  # Relative to sqlite_path, or use absolute path
 
 # 全局配置
 actrix_shared_key = "your-strong-key-change-me"  # ⚠️ 必须更改!
-sqlite = "/var/lib/actrix/actrix.db"
+sqlite_path = "/var/lib/actrix"  # 数据库存储目录，主数据库文件为 {sqlite_path}/actrix.db
 
 # 日志配置
 log_level = "info"
@@ -1790,14 +1791,14 @@ sqlite3 /var/lib/actrix/ks.db \
 
 ### A. 配置参数完整列表
 
-| 参数                 | 类型   | 默认值      | 说明                  |
-| -------------------- | ------ | ----------- | --------------------- |
-| `ks.ip`              | String | "127.0.0.1" | 监听地址              |
-| `ks.port`            | u16    | 8081        | 监听端口              |
-| `ks.database_path`   | String | "ks.db"     | 密钥数据库路径        |
-| `ks.nonce_db_path`   | String | None        | Nonce 数据库路径      |
-| `ks.key_ttl_seconds` | u64    | 3600        | 密钥 TTL (0=永不过期) |
-| `actrix_shared_key`  | String | -           | PSK (必须配置)        |
+| 参数                              | 类型   | 默认值       | 说明                                     |
+| --------------------------------- | ------ | ------------ | ---------------------------------------- |
+| `ks.ip`                           | String | "127.0.0.1"  | 监听地址                                 |
+| `ks.port`                         | u16    | 8081         | 监听端口                                 |
+| `services.ks.storage.sqlite.path` | String | "ks_keys.db" | 密钥数据库文件路径（相对于 sqlite_path） |
+| `services.ks.nonce_db_file`       | String | None         | Nonce 数据库文件路径（可选）             |
+| `ks.key_ttl_seconds`              | u64    | 3600         | 密钥 TTL (0=永不过期)                    |
+| `actrix_shared_key`               | String | -            | PSK (必须配置)                           |
 
 ### B. 错误代码参考
 
