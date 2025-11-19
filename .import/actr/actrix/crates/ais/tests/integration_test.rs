@@ -19,11 +19,9 @@ fn setup_test_environment() -> (TempDir, TempDir, KsClientConfig, String) {
 
     // 在实际集成测试中，需要启动真实的 KS gRPC 服务
     // 这里使用环境变量或默认配置（gRPC 端点）
-    #[allow(deprecated)]
     let ks_config = KsClientConfig {
         endpoint: std::env::var("KS_ENDPOINT")
             .unwrap_or_else(|_| "http://localhost:50052".to_string()),
-        psk: shared_key.clone(), // 已废弃但保留以向后兼容
         timeout_seconds: 30,
         enable_tls: false,
         tls_domain: None,

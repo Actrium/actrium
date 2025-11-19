@@ -28,19 +28,23 @@ use serde::{Deserialize, Serialize};
 /// 配置文件使用 TOML 格式，支持完整的类型安全加载。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ActrixConfig {
-    /// 服务启用标志位 (位掩码) - 已弃用
+    /// Service enable flags (bitmask) - Primary switch for all services
     ///
-    /// 注意：此字段已弃用，现在使用 services.*.enabled 来控制各服务
-    /// 保留此字段仅为了兼容旧的启动逻辑，建议尽快迁移
+    /// This is the primary control mechanism for enabling services. Each service
+    /// must have its corresponding bit set in this mask to be enabled. All services
+    /// (Signaling, AIS, KS, STUN, TURN) are controlled exclusively by this bitmask.
     ///
-    /// 使用二进制位掩码控制各个服务的启用状态：
-    /// - 位 0 (1): Signaling 信令服务
-    /// - 位 1 (2): STUN 服务
-    /// - 位 2 (4): TURN 服务
-    /// - 位 3 (8): AIS 身份认证服务
-    /// - 位 4 (16): KS 密钥服务
+    /// Bit positions:
+    /// - Bit 0 (1): Signaling service
+    /// - Bit 1 (2): STUN service
+    /// - Bit 2 (4): TURN service
+    /// - Bit 3 (8): AIS (Actor Identity Service)
+    /// - Bit 4 (16): KS (Key Server)
     ///
-    /// 例如：enable = 31 表示启用所有服务 (1+2+4+8+16=31)
+    /// Examples:
+    /// - `enable = 31` enables all services (1+2+4+8+16=31)
+    /// - `enable = 6` enables STUN + TURN (2+4=6)
+    /// - `enable = 7` enables Signaling + STUN + TURN (1+2+4=7)
     #[serde(default = "default_enable")]
     pub enable: u8,
 
@@ -208,12 +212,10 @@ pub const ENABLE_KS: u8 = 0b10000;
 
 impl ActrixConfig {
     /// 检查是否启用了信令服务
+    ///
+    /// Service is enabled if the ENABLE_SIGNALING bit is set in the enable bitmask.
     pub fn is_signaling_enabled(&self) -> bool {
-        self.services
-            .signaling
-            .as_ref()
-            .map(|sig| sig.enabled)
-            .unwrap_or(false)
+        self.enable & ENABLE_SIGNALING != 0
     }
 
     /// 检查是否启用了 STUN 服务
@@ -227,21 +229,17 @@ impl ActrixConfig {
     }
 
     /// 检查是否启用了 AIS (AId Issue Service) 身份认证服务
+    ///
+    /// Service is enabled if the ENABLE_AIS bit is set in the enable bitmask.
     pub fn is_ais_enabled(&self) -> bool {
-        self.services
-            .ais
-            .as_ref()
-            .map(|ais| ais.enabled)
-            .unwrap_or(false)
+        self.enable & ENABLE_AIS != 0
     }
 
     /// 检查是否启用了 KS (Key Server) 密钥服务
+    ///
+    /// Service is enabled if the ENABLE_KS bit is set in the enable bitmask.
     pub fn is_ks_enabled(&self) -> bool {
-        self.services
-            .ks
-            .as_ref()
-            .map(|ks| ks.enabled)
-            .unwrap_or(false)
+        self.enable & ENABLE_KS != 0
     }
 
     /// 检查是否启用了 ICE 服务（STUN 或 TURN）
@@ -341,6 +339,14 @@ impl ActrixConfig {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
+        // 验证位掩码值范围 (0-31, 5 bits)
+        if self.enable > 31 {
+            errors.push(format!(
+                "Invalid enable bitmask value: {}. Must be between 0 and 31 (5 bits)",
+                self.enable
+            ));
+        }
+
         // 验证实例名称
         if self.name.trim().is_empty() {
             errors.push("Instance name cannot be empty".to_string());
@@ -406,8 +412,8 @@ impl ActrixConfig {
         }
 
         // 验证 KS 配置（如果启用）
-        if let Some(ref ks) = self.services.ks {
-            if ks.enabled {
+        if self.is_ks_enabled() {
+            if let Some(ref ks) = self.services.ks {
                 // 验证存储配置
                 match ks.storage.backend {
                     StorageBackend::Sqlite => {
@@ -441,13 +447,18 @@ impl ActrixConfig {
                         }
                     }
                 }
+            } else {
+                // KS 位掩码已设置但 services.ks 配置缺失
+                errors.push(
+                    "KS service is enabled (ENABLE_KS bit is set) but services.ks configuration is missing".to_string(),
+                );
             }
         }
 
         // 验证 AIS 配置（如果启用）
-        if let Some(ref ais) = self.services.ais {
-            if ais.enabled {
-                // 检查是否能获取 KS 配置（显式配置或自动默认）
+        if self.is_ais_enabled() {
+            // 检查是否能获取 KS 配置（显式配置或自动默认）
+            if let Some(ref ais) = self.services.ais {
                 if ais.get_ks_client_config(self).is_none() {
                     errors.push(
                         "AIS service is enabled but no KS available: \
@@ -455,6 +466,11 @@ impl ActrixConfig {
                             .to_string(),
                     );
                 }
+            } else {
+                // AIS 位掩码已设置但 services.ais 配置缺失
+                errors.push(
+                    "AIS service is enabled (ENABLE_AIS bit is set) but services.ais configuration is missing".to_string(),
+                );
             }
         }
 
@@ -543,51 +559,81 @@ mod tests {
     fn test_service_flags() {
         let mut config = ActrixConfig::default();
 
-        // 测试启用 Signaling 服务
+        // Test Signaling service: bitmask-only control
+        // Case 1: Bitmask not set, service not enabled
+        config.enable = 0;
         config.services.signaling = Some(SignalingConfig {
-            enabled: true,
+            server: signaling::SignalingServerConfig::default(),
+            dependencies: signaling::SignalingDependencies::default(),
+        });
+        assert!(!config.is_signaling_enabled());
+
+        // Case 2: Bitmask set -> enabled (regardless of services.* config)
+        config.enable = ENABLE_SIGNALING;
+        assert!(config.is_signaling_enabled());
+
+        // Case 3: Bitmask set, with services.* config -> still enabled
+        config.services.signaling = Some(SignalingConfig {
             server: signaling::SignalingServerConfig::default(),
             dependencies: signaling::SignalingDependencies::default(),
         });
         assert!(config.is_signaling_enabled());
 
-        // 测试禁用 Signaling 服务
+        // Case 4: Bitmask set, no services.* config -> enabled
         config.services.signaling = None;
-        assert!(!config.is_signaling_enabled());
+        assert!(config.is_signaling_enabled());
 
-        // 测试启用 AIS 服务
+        // Test AIS service: bitmask-only control
+        config.enable = 0;
         config.services.ais = Some(AisConfig {
-            enabled: true,
-            server: ais::AisServerConfig::default(),
-            dependencies: ais::AisDependencies::default(),
-        });
-        assert!(config.is_ais_enabled());
-
-        // 测试禁用 AIS 服务
-        config.services.ais = Some(AisConfig {
-            enabled: false,
             server: ais::AisServerConfig::default(),
             dependencies: ais::AisDependencies::default(),
         });
         assert!(!config.is_ais_enabled());
 
-        // 测试启用 KS 服务
-        config.services.ks = Some(KsServiceConfig {
-            enabled: true,
-            ..Default::default()
-        });
-        assert!(config.is_ks_enabled());
+        // Case 2: Bitmask set -> enabled (regardless of services.* config)
+        config.enable = ENABLE_AIS;
+        assert!(config.is_ais_enabled());
 
-        // 测试禁用 KS 服务
+        // Case 3: Bitmask set, with services.* config -> still enabled
+        config.services.ais = Some(AisConfig {
+            server: ais::AisServerConfig::default(),
+            dependencies: ais::AisDependencies::default(),
+        });
+        assert!(config.is_ais_enabled());
+
+        // Case 4: Bitmask set, no services.* config -> enabled
+        config.services.ais = None;
+        assert!(config.is_ais_enabled());
+
+        // Test KS service: bitmask-only control
+        config.enable = 0;
         config.services.ks = Some(KsServiceConfig {
-            enabled: false,
             ..Default::default()
         });
         assert!(!config.is_ks_enabled());
 
-        // 测试 ICE 服务（STUN/TURN 使用 bitmask）
+        // Case 2: Bitmask set -> enabled (regardless of services.* config)
+        config.enable = ENABLE_KS;
+        assert!(config.is_ks_enabled());
+
+        // Case 3: Bitmask set, with services.* config -> still enabled
+        config.services.ks = Some(KsServiceConfig {
+            ..Default::default()
+        });
+        assert!(config.is_ks_enabled());
+
+        // Case 4: Bitmask set, no services.* config -> enabled
+        config.services.ks = None;
+        assert!(config.is_ks_enabled());
+
+        // Test ICE services (STUN/TURN use bitmask only)
         config.enable = ENABLE_STUN;
         assert!(config.is_stun_enabled());
+        assert!(config.is_ice_enabled());
+
+        config.enable = ENABLE_TURN;
+        assert!(config.is_turn_enabled());
         assert!(config.is_ice_enabled());
     }
 
@@ -596,13 +642,12 @@ mod tests {
         let mut config = ActrixConfig::default();
 
         // 场景 1: 启用本地 KS，AIS 不配置 KS 客户端，应自动使用本地 KS
+        config.enable = ENABLE_KS | ENABLE_AIS; // Enable both KS and AIS via bitmask
         config.services.ks = Some(KsServiceConfig {
-            enabled: true,
             ..Default::default()
         });
 
         config.services.ais = Some(AisConfig {
-            enabled: true,
             server: ais::AisServerConfig::default(),
             dependencies: ais::AisDependencies { ks: None }, // 未配置 KS
         });
@@ -621,13 +666,10 @@ mod tests {
 
         // 场景 2: 显式配置 KS 客户端，应使用显式配置
         config.services.ais = Some(AisConfig {
-            enabled: true,
             server: ais::AisServerConfig::default(),
             dependencies: ais::AisDependencies {
                 ks: Some(crate::config::ks::KsClientConfig {
                     endpoint: "http://remote-ks:50052".to_string(),
-                    #[allow(deprecated)]
-                    psk: "custom".to_string(),
                     timeout_seconds: 10,
                     enable_tls: false,
                     tls_domain: None,
@@ -651,10 +693,10 @@ mod tests {
         // 场景 3: 没有本地 KS，也没有显式配置，应返回 None
         config.services.ks = None;
         config.services.ais = Some(AisConfig {
-            enabled: true,
             server: ais::AisServerConfig::default(),
             dependencies: ais::AisDependencies { ks: None },
         });
+        config.enable = ENABLE_AIS; // Enable AIS via bitmask
 
         let ks_config = config
             .services
@@ -669,14 +711,13 @@ mod tests {
     fn test_signaling_auto_ks_config() {
         let mut config = ActrixConfig::default();
 
-        // 启用本地 KS
+        // 启用本地 KS 和 Signaling
+        config.enable = ENABLE_KS | ENABLE_SIGNALING; // Enable both via bitmask
         config.services.ks = Some(KsServiceConfig {
-            enabled: true,
             ..Default::default()
         });
 
         config.services.signaling = Some(SignalingConfig {
-            enabled: true,
             server: signaling::SignalingServerConfig::default(),
             dependencies: signaling::SignalingDependencies {
                 ks: None,
@@ -695,5 +736,75 @@ mod tests {
         let ks_config = ks_config.unwrap();
         // gRPC 默认端口 50052
         assert_eq!(ks_config.endpoint, "http://127.0.0.1:50052");
+    }
+
+    #[test]
+    fn test_validate_bitmask_consistency() {
+        let mut config = ActrixConfig::default();
+
+        // Case 1: AIS bitmask set but services.ais config missing - should warn
+        config.enable = ENABLE_AIS;
+        config.services.ais = None;
+
+        let result = config.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.contains(
+            "AIS service is enabled (ENABLE_AIS bit is set) but services.ais configuration is missing"
+        )));
+
+        // Case 2: KS bitmask set but services.ks config missing - should warn
+        config.enable = ENABLE_KS;
+        config.services.ais = None;
+        config.services.ks = None;
+
+        let result = config.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| {
+            e.contains("KS service is enabled (ENABLE_KS bit is set) but services.ks configuration is missing")
+        }));
+
+        // Case 3: Bitmask set and services.* config present - should pass (if other validations pass)
+        config.enable = ENABLE_AIS | ENABLE_KS;
+        config.services.ais = Some(AisConfig {
+            server: ais::AisServerConfig::default(),
+            dependencies: ais::AisDependencies {
+                ks: Some(crate::config::ks::KsClientConfig {
+                    endpoint: "http://127.0.0.1:50052".to_string(),
+                    timeout_seconds: 10,
+                    enable_tls: false,
+                    tls_domain: None,
+                    ca_cert: None,
+                    client_cert: None,
+                    client_key: None,
+                }),
+            },
+        });
+        config.services.ks = Some(KsServiceConfig {
+            storage: ::ks::storage::StorageConfig {
+                backend: ::ks::storage::StorageBackend::Sqlite,
+                key_ttl_seconds: 3600,
+                sqlite: Some(::ks::storage::SqliteConfig {
+                    path: "test.db".to_string(),
+                }),
+                redis: None,
+                postgres: None,
+            },
+            nonce_db_path: None,
+            kek: None,
+            kek_env: None,
+            kek_file: None,
+        });
+
+        // Should not have bitmask consistency errors (may have other validation errors)
+        let result = config.validate();
+        if let Err(errors) = result {
+            assert!(
+                !errors
+                    .iter()
+                    .any(|e| e.contains("bit is not set in enable bitmask"))
+            );
+        }
     }
 }

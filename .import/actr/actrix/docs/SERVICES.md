@@ -250,9 +250,9 @@ impl HttpRouterService for AisHttpService {
 
 **配置依赖**:
 ```toml
-[services.ais]
-enabled = true
+enable = 8  # ENABLE_AIS (位 3) 或与其他服务组合，如 enable = 15 (1+2+4+8)
 
+[services.ais]
 [services.ais.server]
 database_path = "ais.db"
 token_ttl_secs = 3600
@@ -782,7 +782,9 @@ async fn start_ice_service(
 
 ### 3.7 注册到管理平台
 
-**文件**: `src/service/manager.rs:54-124`
+**文件**: `src/service/manager.rs:49-74`
+
+服务通过 SupervitClient 的 StreamStatus 自动上报到管理平台：
 
 ```rust
 pub async fn register_services(&self, services: Vec<ServiceInfo>) -> Result<()> {
@@ -790,76 +792,30 @@ pub async fn register_services(&self, services: Vec<ServiceInfo>) -> Result<()> 
     let managed_config = match &self.config.supervisor {
         Some(config) => config,
         None => {
-            warn!("No management platform configured, skipping service registration");
+            warn!(
+                "No management platform configured, skipping service registration for '{:?}'",
+                services
+            );
             return Ok(());
         }
     };
 
-    // 构建注册负载
-    let location = services
-        .iter()
-        .map(|s| s.report_url())
-        .collect::<Vec<_>>()
-        .join(",");
-
-    let service_tag = services
-        .iter()
-        .map(|s| s.service_type.to_string())
-        .collect::<Vec<_>>();
-
-    let secret = managed_config.secret.clone();
-    let secret_vec = hex::decode(secret)?;
-
-    let payload = ResourceRegistrationPayload {
-        resource_id: managed_config.associated_id.clone(),
-        secret: secret_vec,
-        public_key: None,
-        services,
-        location,
-        name: self.config.name.clone(),
-        location_tag: Some(self.config.location_tag.clone()),
-        service_tag: Some(service_tag),
-        power_reserve: pwrzv::get_power_reserve_level_direct().await.unwrap_or(0),
-    };
-
-    info!("Registering to management platform at {}", managed_config.addr);
-
-    // 发送 HTTP POST 请求
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&managed_config.addr)
-        .json(&payload)
-        .send()
-        .await?;
-
-    if response.status().is_success() {
-        info!("Successfully registered service to management platform");
-    } else {
-        let status = response.status();
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        error!("Failed to register: HTTP {} - {}", status, error_text);
-        return Err(anyhow!("Registration failed: {} - {}", status, error_text));
-    }
+    // 服务注册通过 SupervitClient 的 StreamStatus 自动完成
+    info!(
+        "Service registration via gRPC: {} services will be reported to {}",
+        services.len(),
+        managed_config.server_addr
+    );
 
     Ok(())
 }
 ```
 
-**注册负载结构**:
+**实现方式**:
 
-```rust
-pub struct ResourceRegistrationPayload {
-    pub resource_id: String,            // 资源 ID
-    pub secret: Vec<u8>,                // 认证密钥
-    pub public_key: Option<Vec<u8>>,    // 公钥 (可选)
-    pub services: Vec<ServiceInfo>,     // 服务列表
-    pub location: String,               // 服务位置 (URL 列表)
-    pub name: String,                   // 实例名称
-    pub location_tag: Option<String>,   // 位置标签
-    pub service_tag: Option<Vec<String>>, // 服务标签
-    pub power_reserve: u8,              // 电量预留等级
-}
-```
+- 服务状态通过 SupervitClient 的双向 gRPC 流自动上报
+- 不需要手动构建和发送注册负载
+- SupervitClient 在其他地方初始化并管理连接
 
 ---
 
@@ -1046,12 +1002,16 @@ enable = 7   # 1 + 2 + 4 = 0b00111
 
 **检查方法**:
 
+The bitmask (`enable`) is the **primary switch** for all services. The `services.*.enabled` fields serve as **optional secondary switches** for fine-grained control.
+
 ```rust
 impl ActrixConfig {
+    // Signaling uses bitmask only (no secondary switch)
     pub fn is_signaling_enabled(&self) -> bool {
         self.enable & ENABLE_SIGNALING != 0
     }
 
+    // STUN/TURN use bitmask only
     pub fn is_stun_enabled(&self) -> bool {
         self.enable & ENABLE_STUN != 0
     }
@@ -1060,12 +1020,23 @@ impl ActrixConfig {
         self.enable & ENABLE_TURN != 0
     }
 
+    // AIS uses bitmask only (no secondary switch)
+    pub fn is_ais_enabled(&self) -> bool {
+        self.enable & ENABLE_AIS != 0
+    }
+
+    // KS uses bitmask only (no secondary switch)
     pub fn is_ks_enabled(&self) -> bool {
-        // 需要位标志和配置项都存在
-        self.enable & ENABLE_KS != 0 && self.ks.is_some()
+        self.enable & ENABLE_KS != 0
     }
 }
 ```
+
+**启用逻辑**:
+
+**所有服务 (仅使用位掩码)**:
+- Bitmask not set → Service disabled
+- Bitmask set → Service enabled
 
 ### 5.2 配置文件示例
 

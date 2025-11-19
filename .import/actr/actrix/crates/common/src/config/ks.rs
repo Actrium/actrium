@@ -9,15 +9,6 @@ use serde::{Deserialize, Serialize};
 /// 配置 KS 服务的服务器端参数
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KsServerConfig {
-    /// 服务器 PSK (Pre-Shared Key) - 已弃用
-    ///
-    /// 注意：此字段已弃用，KS 服务现在使用 ActrixConfig 中的 actrix_shared_key
-    /// 进行内部服务间的认证。此字段保留仅为向后兼容。
-    ///
-    /// 在实际部署中，KS 服务会忽略此字段，转而使用全局的 actrix_shared_key。
-    #[deprecated(note = "Use actrix_shared_key from ActrixConfig instead")]
-    pub psk: String,
-
     /// SQLite 数据库路径
     ///
     /// 存储生成的密钥信息的 SQLite 数据库文件路径。
@@ -34,15 +25,6 @@ pub struct KsClientConfig {
     ///
     /// gRPC endpoint，例如: "http://127.0.0.1:50052" 或 "https://ks.example.com:50052"
     pub endpoint: String,
-
-    /// 客户端 PSK (Pre-Shared Key) - 已弃用
-    ///
-    /// 注意：此字段已弃用，KS 客户端现在应该使用 ActrixConfig 中的 actrix_shared_key
-    /// 进行内部服务间的认证。此字段保留仅为向后兼容。
-    ///
-    /// 在实际部署中，KS 客户端会忽略此字段，转而使用全局的 actrix_shared_key。
-    #[deprecated(note = "Use actrix_shared_key from ActrixConfig instead")]
-    pub psk: String,
 
     /// 请求超时时间（秒）
     ///
@@ -89,8 +71,6 @@ pub struct KsConfig {
 impl Default for KsServerConfig {
     fn default() -> Self {
         Self {
-            #[allow(deprecated)]
-            psk: "default-ks-psk-change-in-production".to_string(),
             database_path: "ks_keys.db".to_string(),
         }
     }
@@ -100,8 +80,6 @@ impl Default for KsClientConfig {
     fn default() -> Self {
         Self {
             endpoint: "http://127.0.0.1:50052".to_string(), // gRPC 默认端口
-            #[allow(deprecated)]
-            psk: "default-ks-psk-change-in-production".to_string(),
             timeout_seconds: 30,
             enable_tls: false,
             tls_domain: None,

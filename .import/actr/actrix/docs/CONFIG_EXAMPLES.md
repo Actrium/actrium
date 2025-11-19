@@ -20,12 +20,12 @@ name = "actrix-dev"
 env = "dev"
 actrix_shared_key = "dev-shared-key-change-in-production"
 
-# 启用 STUN + TURN（位掩码）
-enable = 6
+# 启用所有服务（位掩码）
+# 位 0 (1): Signaling, 位 1 (2): STUN, 位 2 (4): TURN, 位 3 (8): AIS, 位 4 (16): KS
+enable = 31  # 1+2+4+8+16 = 所有服务
 
 # KS 服务
 [services.ks]
-enabled = true
 
 [services.ks.storage]
 backend = "sqlite"
@@ -36,8 +36,6 @@ path = "ks.db"
 
 # AIS 服务（自动使用本地 KS）
 [services.ais]
-enabled = true
-
 [services.ais.server]
 database_path = "ais.db"
 
@@ -46,8 +44,6 @@ database_path = "ais.db"
 
 # Signaling 服务（可选，也会自动使用本地 KS）
 [services.signaling]
-enabled = true
-
 [services.signaling.server]
 ws_path = "/signaling"
 
@@ -76,10 +72,10 @@ env = "prod"
 actrix_shared_key = "PROD_SHARED_KEY_32_CHARS_MINIMUM"
 
 # 只启用 KS 服务
-enable = 0
+enable = 16  # ENABLE_KS (位 4)
 
 [services.ks]
-enabled = true
+enabled = true  # KS 使用位掩码 + 次级开关
 
 [services.ks.storage]
 backend = "sqlite"
@@ -104,16 +100,15 @@ name = "actrix-business-01"
 env = "prod"
 actrix_shared_key = "PROD_SHARED_KEY_32_CHARS_MINIMUM"  # 与 KS 相同
 
-# 启用 STUN + TURN
-enable = 6
+# 启用 STUN + TURN + AIS + Signaling
+# 位 0 (1): Signaling, 位 1 (2): STUN, 位 2 (4): TURN, 位 3 (8): AIS
+enable = 15  # 1+2+4+8
 
 # 本地不运行 KS
 # services.ks 未配置
 
 # AIS 服务（连接远程 KS）
 [services.ais]
-enabled = true
-
 [services.ais.server]
 database_path = "/var/lib/actrix/ais.db"
 
@@ -124,7 +119,6 @@ timeout_seconds = 10
 
 # Signaling 服务（连接相同的远程 KS）
 [services.signaling]
-enabled = true
 
 [services.signaling.server]
 ws_path = "/signaling"
@@ -155,9 +149,10 @@ name = "actrix-us-west-01"
 location_tag = "aws,us-west-2,zone-a"
 actrix_shared_key = "SHARED_KEY"
 
-[services.ais]
-enabled = true
+# 启用 AIS 服务（位掩码）
+enable = 8  # ENABLE_AIS (位 3)
 
+[services.ais]
 [services.ais.dependencies.ks]
 endpoint = "https://ks-us-west.internal:50052"
 timeout_seconds = 10
@@ -170,9 +165,10 @@ name = "actrix-eu-central-01"
 location_tag = "aws,eu-central-1,zone-a"
 actrix_shared_key = "SHARED_KEY"
 
-[services.ais]
-enabled = true
+# 启用 AIS 服务（位掩码）
+enable = 8  # ENABLE_AIS (位 3)
 
+[services.ais]
 [services.ais.dependencies.ks]
 endpoint = "https://ks-eu-central.internal:50052"
 timeout_seconds = 10
@@ -193,7 +189,7 @@ timeout_seconds = 10
 │     ↓ 如果存在，直接使用                                 │
 │                                                         │
 │  2️⃣  本地 KS 自动发现                                    │
-│     ↓ 如果 services.ks.enabled = true                  │
+│     ↓ 如果 KS 服务已启用（ENABLE_KS 位已设置）          │
 │     ↓ 自动生成: http://127.0.0.1:{ks_port}             │
 │                                                         │
 │  3️⃣  配置错误                                           │
@@ -209,11 +205,13 @@ timeout_seconds = 10
 # ✅ 最简洁的配置 - 自动发现本地 KS
 actrix_shared_key = "shared-key"
 
+# 启用 KS 和 AIS 服务（位掩码）
+enable = 24  # ENABLE_KS (16) + ENABLE_AIS (8)
+
 [services.ks]
-enabled = true
+enabled = true  # KS 使用位掩码 + 次级开关
 
 [services.ais]
-enabled = true
 # 不需要配置 dependencies.ks
 # AIS 自动通过 gRPC 连接本地 KS (http://127.0.0.1:50052)
 ```
@@ -221,9 +219,12 @@ enabled = true
 **等价于**:
 
 ```toml
-[services.ais]
+enable = 24  # ENABLE_KS (16) + ENABLE_AIS (8)
+
+[services.ks]
 enabled = true
 
+[services.ais]
 [services.ais.dependencies.ks]
 endpoint = "http://127.0.0.1:50052"  # gRPC 端口
 timeout_seconds = 30
@@ -232,12 +233,12 @@ timeout_seconds = 30
 ### 示例 2: 显式配置覆盖自动发现
 
 ```toml
+# 启用 KS 和 AIS 服务（位掩码）
+enable = 24  # ENABLE_KS (16) + ENABLE_AIS (8)
+
 [services.ks]
-enabled = true  # 本地 KS 在运行
 
 [services.ais]
-enabled = true
-
 # 显式配置优先级更高
 [services.ais.dependencies.ks]
 endpoint = "http://remote-ks:50052"  # 连接远程 KS，忽略本地
@@ -247,18 +248,18 @@ timeout_seconds = 15
 ### 示例 3: 不同服务使用不同 KS
 
 ```toml
+# 启用 KS、AIS 和 Signaling 服务（位掩码）
+enable = 25  # ENABLE_KS (16) + ENABLE_AIS (8) + ENABLE_SIGNALING (1)
+
 [services.ks]
-enabled = true
+enabled = true  # KS 使用位掩码 + 次级开关
 
 [services.ais]
-enabled = true
 # AIS 使用本地 KS（自动发现）
 # dependencies.ks 未配置
 
 [services.signaling]
-enabled = true
 # Signaling 使用远程 KS（显式配置）
-
 [services.signaling.dependencies.ks]
 endpoint = "http://backup-ks:50052"
 timeout_seconds = 10
@@ -288,21 +289,20 @@ cargo run --bin actrix -- test --config config.toml
 
 ```toml
 # ❌ 错误配置 - AIS 需要 KS
+enable = 8  # ENABLE_AIS (位 3)
 [services.ais]
-enabled = true
 # 既没有本地 KS，也没有显式配置
 
 # ✅ 正确配置 - 方式 1：本地 KS
+enable = 24  # ENABLE_KS (16) + ENABLE_AIS (8)
 [services.ks]
 enabled = true
 
 [services.ais]
-enabled = true
 
 # ✅ 正确配置 - 方式 2：显式配置远程 KS
+enable = 8  # ENABLE_AIS (位 3)
 [services.ais]
-enabled = true
-
 [services.ais.dependencies.ks]
 endpoint = "http://remote-ks:50052"
 ```
@@ -311,14 +311,13 @@ endpoint = "http://remote-ks:50052"
 
 ```toml
 # ✅ 可以不依赖 KS
+enable = 1  # ENABLE_SIGNALING (位 0)
 [services.signaling]
-enabled = true
 # 不配置 dependencies.ks 也可以运行
 
 # ✅ 如果需要加密，可以配置 KS
+enable = 1  # ENABLE_SIGNALING (位 0)
 [services.signaling]
-enabled = true
-
 [services.signaling.dependencies.ks]
 endpoint = "http://ks:50052"
 ```
@@ -361,7 +360,7 @@ AIS service is enabled but no KS available
 ```
 
 **解决方案**:
-1. 检查是否启用了本地 KS：`services.ks.enabled = true`
+1. 检查是否启用了本地 KS：`enable` 位掩码中设置了 ENABLE_KS 位 (16)
 2. 或者显式配置远程 KS：`services.ais.dependencies.ks`
 
 ### Q: AIS 连接了错误的 KS

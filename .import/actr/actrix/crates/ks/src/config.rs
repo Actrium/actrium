@@ -7,12 +7,11 @@ use crate::storage::StorageConfig;
 use serde::{Deserialize, Serialize};
 
 /// KS 服务配置
+///
+/// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
+/// The ENABLE_KS bit (bit 4) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct KsServiceConfig {
-    /// 是否启用 KS 服务
-    #[serde(default)]
-    pub enabled: bool,
-
     /// 存储配置
     #[serde(default)]
     pub storage: StorageConfig,
@@ -79,14 +78,12 @@ mod tests {
     #[test]
     fn test_default_ks_service_config() {
         let config = KsServiceConfig::default();
-        assert!(!config.enabled);
         assert_eq!(config.storage.backend, StorageBackend::Sqlite);
     }
 
     #[test]
     fn test_serialize_ks_service_config() {
         let config = KsServiceConfig {
-            enabled: true,
             storage: StorageConfig {
                 backend: StorageBackend::Sqlite,
                 key_ttl_seconds: 7200,
@@ -103,7 +100,7 @@ mod tests {
         };
 
         let toml = toml::to_string(&config).unwrap();
-        assert!(toml.contains("enabled = true"));
+        assert!(!toml.contains("enabled")); // enabled field should not be present
         assert!(toml.contains("key_ttl_seconds = 7200"));
     }
 

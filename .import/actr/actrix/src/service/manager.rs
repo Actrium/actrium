@@ -7,12 +7,10 @@ use super::{HttpRouterService, IceService};
 use crate::service::ServiceType;
 use crate::service::container::ServiceContainer;
 use crate::service::info::ServiceInfo;
-// use crate::service::ResourceRegistrationPayload; // WebSocket 模式下使用，gRPC 模式已不需要
 use actrix_common::{TlsConfigurer, config::ActrixConfig};
 use anyhow::Result;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
-// use serde_json::json; // WebSocket 模式下使用，gRPC 模式已不需要
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Notify;

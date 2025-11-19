@@ -2,18 +2,23 @@
 #
 # Service enable bitmask (binary representation):
 #   xxxxx
-#   ││││└─ Signaling (00001 = 1)  [Currently disabled in codebase]
+#   ││││└─ Signaling (00001 = 1)
 #   │││└── STUN      (00010 = 2)
 #   ││└─── TURN      (00100 = 4)
-#   │└──── AIS       (01000 = 8)  [Currently disabled in codebase]
+#   │└──── AIS       (01000 = 8)
 #   └───── KS        (10000 = 16)
 #
+# All services are controlled by this bitmask. No individual enabled fields are needed.
+#
 # Examples:
-#   31 (0b11111) = All services (when all are enabled)
-#   22 (0b10110) = KS + TURN + STUN (recommended)
-#   6  (0b00110) = TURN + STUN only
+#   31 (0b11111) = All services (1+2+4+8+16)
+#   22 (0b10110) = KS + TURN + STUN (16+4+2)
+#   6  (0b00110) = TURN + STUN (4+2)
 #   4  (0b00100) = TURN only
 #   2  (0b00010) = STUN only
+#   1  (0b00001) = Signaling only
+#   8  (0b01000) = AIS only
+#   16 (0b10000) = KS only
 enable = 6
 
 # Instance identifier (used for monitoring and tracing)
@@ -137,8 +142,9 @@ realm = "actrix.example.com"
 # All HTTP services share the instance-level HTTP/HTTPS port (bind.http/bind.https)
 #
 # # Key Server (KS) Configuration
+# # Service enablement is controlled by the bitmask (enable field)
+# # Set ENABLE_KS bit (16) in the enable field to enable this service
 # [services.ks]
-# enabled = true
 #
 # [services.ks.storage]
 # backend = "sqlite"
@@ -148,8 +154,9 @@ realm = "actrix.example.com"
 # path = "ks.db"
 #
 # # AIS (Actor Identity Service) Configuration
+# # Service enablement is controlled by the bitmask (enable field)
+# # Set ENABLE_AIS bit (8) in the enable field to enable this service
 # [services.ais]
-# enabled = true
 #
 # [services.ais.server]
 # database_path = "ais.db"
@@ -159,8 +166,9 @@ realm = "actrix.example.com"
 # endpoint = "http://remote-ks:50052"  # gRPC endpoint
 #
 # # Signaling Service Configuration
+# # Service enablement is controlled by the bitmask (enable field)
+# # Set ENABLE_SIGNALING bit (1) in the enable field to enable this service
 # [services.signaling]
-# enabled = true
 #
 # [services.signaling.server]
 # ws_path = "/signaling"

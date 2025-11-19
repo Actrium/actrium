@@ -6,6 +6,7 @@
 //! 3. PSK 签名验证和防重放攻击保护
 //! 4. 多存储后端支持：SQLite, Redis, PostgreSQL
 
+#[cfg(test)]
 pub mod client;
 pub mod config;
 pub mod crypto;
@@ -17,6 +18,7 @@ pub mod storage;
 pub mod types;
 
 // Re-export commonly used items
+#[cfg(test)]
 pub use client::{Client, ClientConfig};
 pub use config::KsServiceConfig;
 pub use crypto::{KekSource, KeyEncryptor};
@@ -43,7 +45,6 @@ mod tests {
         let db_path = temp_dir.path().join("test_ks.db");
 
         let config = KsServiceConfig {
-            enabled: true,
             storage: StorageConfig {
                 backend: StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,

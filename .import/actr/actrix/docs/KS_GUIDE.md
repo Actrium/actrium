@@ -62,14 +62,14 @@
 
 ### 关键特性
 
-| 特性 | 说明 | 文件位置 |
-|------|------|---------|
-| **ECIES 加密** | 基于椭圆曲线的集成加密方案 | `storage.rs:196` |
-| **自动递增 ID** | SQLite AUTOINCREMENT 避免冲突 | `storage.rs:61` |
-| **PSK 认证** | Pre-Shared Key 认证机制 | `handlers.rs:35-57` |
-| **Nonce 防重放** | 基于 nonce-auth v0.6.1 | `nonce_storage.rs` |
-| **密钥过期** | 可配置 TTL，自动清理 | `storage.rs:226-244` |
-| **RESTful API** | 标准 HTTP JSON 接口 | `handlers.rs:86-92` |
+| 特性             | 说明                          | 文件位置             |
+| ---------------- | ----------------------------- | -------------------- |
+| **ECIES 加密**   | 基于椭圆曲线的集成加密方案    | `storage.rs:196`     |
+| **自动递增 ID**  | SQLite AUTOINCREMENT 避免冲突 | `storage.rs:61`      |
+| **PSK 认证**     | Pre-Shared Key 认证机制       | `handlers.rs:35-57`  |
+| **Nonce 防重放** | 基于 nonce-auth v0.6.1        | `nonce_storage.rs`   |
+| **密钥过期**     | 可配置 TTL，自动清理          | `storage.rs:226-244` |
+| **RESTful API**  | 标准 HTTP JSON 接口           | `handlers.rs:86-92`  |
 
 ---
 
@@ -607,13 +607,13 @@ pub struct GenerateKeyResponse {
 
 **错误响应**:
 
-| 状态码 | 错误 | 原因 |
-|--------|------|------|
-| 400 | `Invalid request` | 请求格式错误 |
-| 401 | `Invalid signature` | PSK 错误或签名不匹配 |
-| 403 | `Nonce already used` | 重放攻击检测 |
-| 403 | `Timestamp out of range` | 时间戳超出窗口 |
-| 500 | `Database error` | 数据库操作失败 |
+| 状态码 | 错误                     | 原因                 |
+| ------ | ------------------------ | -------------------- |
+| 400    | `Invalid request`        | 请求格式错误         |
+| 401    | `Invalid signature`      | PSK 错误或签名不匹配 |
+| 403    | `Nonce already used`     | 重放攻击检测         |
+| 403    | `Timestamp out of range` | 时间戳超出窗口       |
+| 500    | `Database error`         | 数据库操作失败       |
 
 **curl 示例**:
 ```bash
@@ -688,13 +688,13 @@ pub struct GetSecretKeyResponse {
 
 **错误响应**:
 
-| 状态码 | 错误 | 原因 |
-|--------|------|------|
-| 400 | `key_id mismatch` | 路径和查询参数不匹配 |
-| 401 | `Invalid signature` | 认证失败 |
-| 403 | `Nonce already used` | 重放攻击 |
-| 404 | `Key not found` | 密钥不存在或已过期 |
-| 500 | `Database error` | 数据库错误 |
+| 状态码 | 错误                 | 原因                 |
+| ------ | -------------------- | -------------------- |
+| 400    | `key_id mismatch`    | 路径和查询参数不匹配 |
+| 401    | `Invalid signature`  | 认证失败             |
+| 403    | `Nonce already used` | 重放攻击             |
+| 404    | `Key not found`      | 密钥不存在或已过期   |
+| 500    | `Database error`     | 数据库错误           |
 
 **curl 示例**:
 ```bash
@@ -1065,13 +1065,13 @@ CREATE TABLE nonce (
 
 **keys 表**:
 
-| 字段 | 类型 | 说明 | 示例 |
-|------|------|------|------|
-| `key_id` | INTEGER | 自动递增主键 | 1, 2, 3... |
-| `public_key` | TEXT | Base64 编码的公钥 | "BHxN7Q8vK..." |
-| `secret_key` | TEXT | Base64 编码的私钥 | "VxPz9m2nL..." |
-| `created_at` | INTEGER | 创建时间 (Unix 时间戳) | 1730611200 |
-| `expires_at` | INTEGER | 过期时间 (0=永不过期) | 1730614800 |
+| 字段         | 类型    | 说明                   | 示例           |
+| ------------ | ------- | ---------------------- | -------------- |
+| `key_id`     | INTEGER | 自动递增主键           | 1, 2, 3...     |
+| `public_key` | TEXT    | Base64 编码的公钥      | "BHxN7Q8vK..." |
+| `secret_key` | TEXT    | Base64 编码的私钥      | "VxPz9m2nL..." |
+| `created_at` | INTEGER | 创建时间 (Unix 时间戳) | 1730611200     |
+| `expires_at` | INTEGER | 过期时间 (0=永不过期)  | 1730614800     |
 
 **存储格式**:
 ```
@@ -1208,13 +1208,17 @@ CREATE TABLE nonce (
 
 ### 1. Rust 客户端
 
-**创建客户端**:
+**注意**: `Client` 和 `ClientConfig` (HTTP 客户端) 仅在测试模式下可用 (`#[cfg(test)]`)。  
+生产代码应使用 `GrpcClient` 和 `GrpcClientConfig` (gRPC 客户端)。
+
+**测试代码示例**:
 ```rust
+#[cfg(test)]
 use ks::{Client, ClientConfig};
 
 let config = ClientConfig {
     endpoint: "https://ks.example.com".to_string(),
-    psk: actrix_shared_key,  // 从全局配置获取
+    psk: actrix_shared_key.clone(),  // 从全局配置获取
     timeout_seconds: 30,
     cache_db_path: None,
 };
@@ -1242,9 +1246,10 @@ use ecies::decrypt;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 1. 创建客户端
+    let actrix_shared_key = "your-actrix-shared-key";  // 从全局配置获取
     let client = Client::new(&ClientConfig {
         endpoint: "https://ks.example.com".to_string(),
-        psk: "your-actrix-shared-key".to_string(),
+        psk: actrix_shared_key.to_string(),
         timeout_seconds: 30,
         cache_db_path: None,
     });
@@ -1785,25 +1790,25 @@ sqlite3 /var/lib/actrix/ks.db \
 
 ### A. 配置参数完整列表
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `ks.ip` | String | "127.0.0.1" | 监听地址 |
-| `ks.port` | u16 | 8081 | 监听端口 |
-| `ks.database_path` | String | "ks.db" | 密钥数据库路径 |
-| `ks.nonce_db_path` | String | None | Nonce 数据库路径 |
-| `ks.key_ttl_seconds` | u64 | 3600 | 密钥 TTL (0=永不过期) |
-| `actrix_shared_key` | String | - | PSK (必须配置) |
+| 参数                 | 类型   | 默认值      | 说明                  |
+| -------------------- | ------ | ----------- | --------------------- |
+| `ks.ip`              | String | "127.0.0.1" | 监听地址              |
+| `ks.port`            | u16    | 8081        | 监听端口              |
+| `ks.database_path`   | String | "ks.db"     | 密钥数据库路径        |
+| `ks.nonce_db_path`   | String | None        | Nonce 数据库路径      |
+| `ks.key_ttl_seconds` | u64    | 3600        | 密钥 TTL (0=永不过期) |
+| `actrix_shared_key`  | String | -           | PSK (必须配置)        |
 
 ### B. 错误代码参考
 
-| 错误代码 | HTTP 状态 | 说明 |
-|----------|----------|------|
-| `InvalidRequest` | 400 | 请求格式错误 |
-| `Authentication` | 401 | 签名验证失败 |
-| `ReplayAttack` | 403 | Nonce 已使用 |
-| `KeyNotFound` | 404 | 密钥不存在 |
-| `Database` | 500 | 数据库错误 |
-| `Internal` | 500 | 内部错误 |
+| 错误代码         | HTTP 状态 | 说明         |
+| ---------------- | --------- | ------------ |
+| `InvalidRequest` | 400       | 请求格式错误 |
+| `Authentication` | 401       | 签名验证失败 |
+| `ReplayAttack`   | 403       | Nonce 已使用 |
+| `KeyNotFound`    | 404       | 密钥不存在   |
+| `Database`       | 500       | 数据库错误   |
+| `Internal`       | 500       | 内部错误     |
 
 ### C. 相关文档
 
@@ -1814,16 +1819,16 @@ sqlite3 /var/lib/actrix/ks.db \
 
 ### D. 文件位置索引
 
-| 模块 | 文件路径 | 说明 |
-|------|---------|------|
-| 库入口 | `crates/ks/src/lib.rs` | 公共接口 |
-| HTTP 处理器 | `crates/ks/src/handlers.rs` | API 实现 |
-| 存储层 | `crates/ks/src/storage.rs` | 数据库操作 |
-| 客户端 | `crates/ks/src/client.rs` | Rust 客户端 |
-| 数据类型 | `crates/ks/src/types.rs` | 请求/响应类型 |
-| 错误定义 | `crates/ks/src/error.rs` | 错误类型 |
-| 配置 | `crates/ks/src/config.rs` | 配置结构 |
-| Nonce 存储 | `crates/ks/src/nonce_storage.rs` | 防重放实现 |
+| 模块        | 文件路径                         | 说明          |
+| ----------- | -------------------------------- | ------------- |
+| 库入口      | `crates/ks/src/lib.rs`           | 公共接口      |
+| HTTP 处理器 | `crates/ks/src/handlers.rs`      | API 实现      |
+| 存储层      | `crates/ks/src/storage.rs`       | 数据库操作    |
+| 客户端      | `crates/ks/src/client.rs`        | Rust 客户端   |
+| 数据类型    | `crates/ks/src/types.rs`         | 请求/响应类型 |
+| 错误定义    | `crates/ks/src/error.rs`         | 错误类型      |
+| 配置        | `crates/ks/src/config.rs`        | 配置结构      |
+| Nonce 存储  | `crates/ks/src/nonce_storage.rs` | 防重放实现    |
 
 ---
 

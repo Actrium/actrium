@@ -4,12 +4,11 @@ use crate::config::ks::KsClientConfig;
 use serde::{Deserialize, Serialize};
 
 /// Signaling 服务配置
+///
+/// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
+/// The ENABLE_SIGNALING bit (bit 0) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SignalingConfig {
-    /// 是否启用 Signaling 服务
-    #[serde(default)]
-    pub enabled: bool,
-
     /// Signaling 服务器配置
     #[serde(default)]
     pub server: SignalingServerConfig,
@@ -109,7 +108,7 @@ pub struct SignalingDependencies {
     /// KS 客户端配置（可选，如果需要加密）
     ///
     /// 如果未配置但需要 KS，会自动查找本地 KS 服务：
-    /// - 如果 services.ks.enabled = true，使用 localhost:KS_PORT
+    /// - 如果 KS 服务已启用（ENABLE_KS 位已设置），使用 localhost:KS_PORT
     /// - 否则返回 None（Signaling 可以不依赖 KS）
     #[serde(default)]
     pub ks: Option<KsClientConfig>,
@@ -117,7 +116,7 @@ pub struct SignalingDependencies {
     /// AIS 客户端配置（可选，用于 Credential 刷新）
     ///
     /// 如果未配置但需要 AIS，会自动查找本地 AIS 服务：
-    /// - 如果 services.ais.enabled = true，使用 localhost:AIS_PORT
+    /// - 如果 AIS 服务已启用（ENABLE_AIS 位已设置），使用 localhost:AIS_PORT
     /// - 否则返回 None
     #[serde(default)]
     pub ais: Option<AisClientConfig>,
@@ -184,8 +183,8 @@ impl SignalingConfig {
         }
 
         // 回退：检查是否启用了本地 KS 服务
-        if let Some(ref ks_service) = global_config.services.ks {
-            if ks_service.enabled {
+        if global_config.is_ks_enabled() {
+            if let Some(_) = global_config.services.ks {
                 // 自动生成指向本地 KS 的客户端配置
                 // gRPC 使用独立端口 50052（HTTP router 使用 8443/8080）
                 let grpc_port = 50052;
@@ -193,8 +192,6 @@ impl SignalingConfig {
 
                 return Some(KsClientConfig {
                     endpoint: format!("{grpc_protocol}://127.0.0.1:{grpc_port}"),
-                    #[allow(deprecated)]
-                    psk: global_config.actrix_shared_key.clone(),
                     timeout_seconds: 30,
                     enable_tls: false,
                     tls_domain: None,
@@ -224,8 +221,8 @@ impl SignalingConfig {
         }
 
         // 回退：检查是否启用了本地 AIS 服务
-        if let Some(ref ais_service) = global_config.services.ais {
-            if ais_service.enabled {
+        if global_config.is_ais_enabled() {
+            if let Some(_) = global_config.services.ais {
                 // 自动生成指向本地 AIS 的客户端配置
                 // AIS 作为 HTTP router service 共享同一个 HTTP/HTTPS 端口
                 let port = global_config

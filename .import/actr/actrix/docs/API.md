@@ -164,19 +164,26 @@ curl "https://actrix.example.com/ks/secret/$KEY_ID?credential=$(urlencode $crede
 ```rust
 use ks::{Client, ClientConfig};
 
-let client = Client::new(ClientConfig {
-    host: "actrix.example.com".to_string(),
-    port: 443,
-    psk: "my-shared-key".to_string(),
-});
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let actrix_shared_key = "my-shared-key";  // 从全局配置获取
+    let client = Client::new(&ClientConfig {
+        endpoint: "https://actrix.example.com/ks".to_string(),
+        psk: actrix_shared_key.to_string(),
+        timeout_seconds: 30,
+        cache_db_path: None,
+    });
 
-// 生成密钥对
-let response = client.generate_key().await?;
-println!("Generated key_id: {}", response.key_id);
+    // 生成密钥对
+    let (key_id, public_key, expires_at) = client.generate_key().await?;
+    println!("Generated key_id: {}", key_id);
 
-// 获取私钥
-let secret = client.get_secret_key(response.key_id).await?;
-println!("Secret key: {}", secret.secret_key);
+    // 获取私钥
+    let (secret_key, expires_at) = client.fetch_secret_key(key_id).await?;
+    println!("Secret key fetched, expires at: {}", expires_at);
+
+    Ok(())
+}
 ```
 
 ---
@@ -223,14 +230,14 @@ curl https://actrix.example.com/ks/health
 
 ### HTTP 状态码
 
-| 状态码 | 说明 | 示例 |
-|--------|------|------|
-| **200 OK** | 请求成功 | - |
-| **400 Bad Request** | 请求参数错误 | `{"error": "Invalid key_id"}` |
-| **401 Unauthorized** | 认证失败 | `{"error": "Invalid signature"}` |
-| **403 Forbidden** | 重放攻击检测 | `{"error": "Nonce already used"}` |
-| **404 Not Found** | 资源不存在 | `{"error": "Key not found: 123"}` |
-| **500 Internal Server Error** | 服务器内部错误 | `{"error": "Database error"}` |
+| 状态码                        | 说明           | 示例                              |
+| ----------------------------- | -------------- | --------------------------------- |
+| **200 OK**                    | 请求成功       | -                                 |
+| **400 Bad Request**           | 请求参数错误   | `{"error": "Invalid key_id"}`     |
+| **401 Unauthorized**          | 认证失败       | `{"error": "Invalid signature"}`  |
+| **403 Forbidden**             | 重放攻击检测   | `{"error": "Nonce already used"}` |
+| **404 Not Found**             | 资源不存在     | `{"error": "Key not found: 123"}` |
+| **500 Internal Server Error** | 服务器内部错误 | `{"error": "Database error"}`     |
 
 ### 认证错误详情
 

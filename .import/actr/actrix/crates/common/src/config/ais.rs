@@ -4,12 +4,11 @@ use crate::config::ks::KsClientConfig;
 use serde::{Deserialize, Serialize};
 
 /// AIS 服务配置
+///
+/// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
+/// The ENABLE_AIS bit (bit 3) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AisConfig {
-    /// 是否启用 AIS 服务
-    #[serde(default)]
-    pub enabled: bool,
-
     /// AIS 服务器配置
     #[serde(default)]
     pub server: AisServerConfig,
@@ -44,7 +43,7 @@ pub struct AisDependencies {
     /// KS 客户端配置
     ///
     /// 如果未配置，AIS 会自动查找本地 KS 服务：
-    /// - 如果 services.ks.enabled = true，使用 localhost:KS_PORT
+    /// - 如果 KS 服务已启用（ENABLE_KS 位已设置），使用 localhost:KS_PORT
     /// - 否则返回配置错误
     #[serde(default)]
     pub ks: Option<KsClientConfig>,
@@ -87,8 +86,8 @@ impl AisConfig {
         }
 
         // 回退：检查是否启用了本地 KS 服务
-        if let Some(ref ks_service) = global_config.services.ks {
-            if ks_service.enabled {
+        if global_config.is_ks_enabled() {
+            if let Some(_) = global_config.services.ks {
                 // 自动生成指向本地 KS 的客户端配置
                 // gRPC 使用独立端口 50052（HTTP router 使用 8443/8080）
                 let grpc_port = 50052;
@@ -96,8 +95,6 @@ impl AisConfig {
 
                 return Some(KsClientConfig {
                     endpoint: format!("{grpc_protocol}://127.0.0.1:{grpc_port}"),
-                    #[allow(deprecated)]
-                    psk: global_config.actrix_shared_key.clone(),
                     timeout_seconds: 30,
                     enable_tls: false,
                     tls_domain: None,

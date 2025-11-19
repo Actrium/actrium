@@ -69,19 +69,6 @@ pub enum ServiceType {
 //     }
 // }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ResourceRegistrationPayload {
-    pub resource_id: String,
-    pub secret: Vec<u8>,
-    pub public_key: Option<Vec<u8>>,
-    pub services: Vec<ServiceInfo>,
-    pub location: String,
-    pub name: String,
-    pub location_tag: Option<String>,
-    pub service_tag: Option<Vec<String>>,
-    pub power_reserve: u8,
-}
-
 /// HTTP路由服务的核心 trait - 为 axum 提供路由器
 #[async_trait]
 pub trait HttpRouterService: Send + Sync + Debug {

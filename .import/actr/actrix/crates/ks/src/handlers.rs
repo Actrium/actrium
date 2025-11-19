@@ -435,7 +435,6 @@ mod tests {
         let nonce_db_path = temp_dir.path().join("test_nonces.db");
 
         let config = crate::config::KsServiceConfig {
-            enabled: true,
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
@@ -475,7 +474,6 @@ mod tests {
         let db_path = temp_dir.path().join("test_ks.db");
 
         let config = crate::config::KsServiceConfig {
-            enabled: true,
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
@@ -505,7 +503,6 @@ mod tests {
         let db_path = temp_dir.path().join("test_ks.db");
 
         let config = crate::config::KsServiceConfig {
-            enabled: true,
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
@@ -536,7 +533,6 @@ mod tests {
         let db_path = temp_dir.path().join("test_ks.db");
 
         let config = crate::config::KsServiceConfig {
-            enabled: true,
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,

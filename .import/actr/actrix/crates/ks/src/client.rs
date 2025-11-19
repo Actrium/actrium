@@ -27,12 +27,9 @@ pub struct ClientConfig {
     /// 例如: "http://127.0.0.1:8090" 或 "https://ks.example.com"
     pub endpoint: String,
 
-    /// 客户端 PSK (Pre-Shared Key) - 已弃用
+    /// PSK (Pre-Shared Key) - 用于认证
     ///
-    /// 注意：此字段已弃用，KS 客户端现在应该使用 ActrixConfig 中的 actrix_shared_key
-    /// 进行内部服务间的认证。此字段保留仅为向后兼容。
-    ///
-    /// 在实际部署中，这个字段的值会被赋予为 global.actrix_shared_key。
+    /// 用于内部服务间的认证密钥，通常从全局配置的 `actrix_shared_key` 获取
     pub psk: String,
 
     /// 请求超时时间（秒）
@@ -181,8 +178,7 @@ mod tests {
     fn test_client_creation() {
         let config = ClientConfig {
             endpoint: "http://127.0.0.1:8090".to_string(),
-            #[allow(deprecated)]
-            psk: "test".to_string(),
+            psk: "test-shared-key".to_string(),
             timeout_seconds: 30,
             cache_db_path: None,
         };

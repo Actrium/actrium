@@ -34,15 +34,15 @@ Actrix 是 **Actor-RTC 生态系统**的 WebRTC 辅助服务集合，提供关�
 
 ### 关键特性
 
-| 特性 | 实现 | 文件位置 |
-|------|------|---------|
-| **模块化服务** | Workspace crates | `Cargo.toml:2` |
-| **位掩码控制** | `enable` 字段 | `crates/base/src/config/mod.rs:34` |
-| **统一配置** | TOML 单文件 | `crates/base/src/config/mod.rs:18` |
-| **OpenTelemetry** | 可选 feature | `Cargo.toml:74-82` |
-| **SQLite 存储** | rusqlite v0.35.0 | `crates/base/src/storage/db.rs` |
-| **防重放攻击** | nonce-auth v0.6.1 | `crates/base/src/storage/nonce/` |
-| **TLS/HTTPS** | rustls v0.23.28 | `crates/base/src/config/bind/https.rs` |
+| 特性              | 实现              | 文件位置                               |
+| ----------------- | ----------------- | -------------------------------------- |
+| **模块化服务**    | Workspace crates  | `Cargo.toml:2`                         |
+| **位掩码控制**    | `enable` 字段     | `crates/base/src/config/mod.rs:34`     |
+| **统一配置**      | TOML 单文件       | `crates/base/src/config/mod.rs:18`     |
+| **OpenTelemetry** | 可选 feature      | `Cargo.toml:74-82`                     |
+| **SQLite 存储**   | rusqlite v0.35.0  | `crates/base/src/storage/db.rs`        |
+| **防重放攻击**    | nonce-auth v0.6.1 | `crates/base/src/storage/nonce/`       |
+| **TLS/HTTPS**     | rustls v0.23.28   | `crates/base/src/config/bind/https.rs` |
 
 ---
 
@@ -393,7 +393,9 @@ const ENABLE_KS: u8        = 0b10000;  // 16
 
 pub fn is_signaling_enabled(&self) -> bool { self.enable & ENABLE_SIGNALING != 0 }
 pub fn is_stun_enabled(&self) -> bool { self.enable & ENABLE_STUN != 0 }
-// ... 其他方法
+pub fn is_turn_enabled(&self) -> bool { self.enable & ENABLE_TURN != 0 }
+pub fn is_ais_enabled(&self) -> bool { self.enable & ENABLE_AIS != 0 }
+pub fn is_ks_enabled(&self) -> bool { self.enable & ENABLE_KS != 0 }
 ```
 
 **使用示例**:
@@ -845,31 +847,31 @@ endpoint = "http://localhost:4317"
 
 ### 关键代码位置索引
 
-| 功能模块 | 文件路径 | 行数参考 |
-|---------|---------|---------|
-| **应用入口** | `src/main.rs` | 66-80 |
-| **服务管理** | `src/service/manager.rs` | 23-542 |
-| **服务容器** | `src/service/container.rs` | 17-127 |
-| **配置系统** | `crates/base/src/config/mod.rs` | 18-350 |
-| **错误处理** | `crates/base/src/error/mod.rs` | 1-80 |
-| **数据库** | `crates/base/src/storage/db.rs` | 全文 |
-| **KS 服务** | `crates/ks/src/handlers.rs` | 84-232 |
-| **STUN 实现** | `crates/stun/src/lib.rs` | 29-176 |
-| **TURN 实现** | `crates/turn/src/lib.rs` | 全文 |
-| **Trace Layer** | `src/service/trace.rs` | 1-65 |
+| 功能模块        | 文件路径                        | 行数参考 |
+| --------------- | ------------------------------- | -------- |
+| **应用入口**    | `src/main.rs`                   | 66-80    |
+| **服务管理**    | `src/service/manager.rs`        | 23-542   |
+| **服务容器**    | `src/service/container.rs`      | 17-127   |
+| **配置系统**    | `crates/base/src/config/mod.rs` | 18-350   |
+| **错误处理**    | `crates/base/src/error/mod.rs`  | 1-80     |
+| **数据库**      | `crates/base/src/storage/db.rs` | 全文     |
+| **KS 服务**     | `crates/ks/src/handlers.rs`     | 84-232   |
+| **STUN 实现**   | `crates/stun/src/lib.rs`        | 29-176   |
+| **TURN 实现**   | `crates/turn/src/lib.rs`        | 全文     |
+| **Trace Layer** | `src/service/trace.rs`          | 1-65     |
 
 ### 依赖版本
 
-| 依赖 | 版本 | 用途 |
-|------|------|------|
-| tokio | 1.0 | 异步运行时 |
-| axum | 0.8.0 | Web 框架 |
-| rusqlite | 0.35.0 | SQLite 绑定 |
-| ecies | 0.2 | 椭圆曲线加密 |
-| nonce-auth | 0.6.1 | 防重放认证 |
-| rustls | 0.23.28 | TLS 实现 |
-| webrtc | 0.13.0 | WebRTC 协议 |
-| prost | 0.14.1 | Protobuf |
+| 依赖       | 版本    | 用途         |
+| ---------- | ------- | ------------ |
+| tokio      | 1.0     | 异步运行时   |
+| axum       | 0.8.0   | Web 框架     |
+| rusqlite   | 0.35.0  | SQLite 绑定  |
+| ecies      | 0.2     | 椭圆曲线加密 |
+| nonce-auth | 0.6.1   | 防重放认证   |
+| rustls     | 0.23.28 | TLS 实现     |
+| webrtc     | 0.13.0  | WebRTC 协议  |
+| prost      | 0.14.1  | Protobuf     |
 
 ---
 

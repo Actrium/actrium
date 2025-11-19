@@ -115,8 +115,7 @@ impl ActrixConfig {
     }
 
     pub fn is_ks_enabled(&self) -> bool {
-        // 需要位标志和配置项都存在
-        self.enable & ENABLE_KS != 0 && self.ks.is_some()
+        self.enable & ENABLE_KS != 0
     }
 
     pub fn is_ice_enabled(&self) -> bool {
@@ -910,17 +909,22 @@ async fn get_secret_key_handler(
 
 ```rust
 pub struct Client {
-    base_url: String,
-    psk: String,
-    http_client: reqwest::Client,
+    endpoint: String,
+    client: reqwest::Client,
+    actrix_shared_key: String,
 }
 
 impl Client {
-    pub fn new(config: ClientConfig) -> Self {
+    pub fn new(config: &ClientConfig, actrix_shared_key: &str) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(config.timeout_seconds))
+            .build()
+            .expect("Failed to create HTTP client");
+
         Self {
-            base_url: format!("http://{}:{}", config.host, config.port),
-            psk: config.psk,
-            http_client: reqwest::Client::new(),
+            endpoint: config.endpoint.clone(),
+            client,
+            actrix_shared_key: actrix_shared_key.to_string(),
         }
     }
 
@@ -969,7 +973,7 @@ impl Client {
     fn create_credential(&self, action: &str)
         -> Result<nonce_auth::NonceCredential, KsError> {
         nonce_auth::CredentialSigner::new()
-            .with_secret(self.psk.as_bytes())
+            .with_secret(self.actrix_shared_key.as_bytes())
             .sign(action.as_bytes())
             .map_err(|e| KsError::Internal(format!("Failed to create credential: {e}")))
     }
@@ -2038,9 +2042,9 @@ message AIdAllocationSuccess {
 ### 6.4 配置示例
 
 ```toml
-[services.ais]
-enabled = true
+enable = 8  # ENABLE_AIS (位 3) 或与其他服务组合
 
+[services.ais]
 [services.ais.server]
 database_path = "ais.db"
 signaling_heartbeat_interval_secs = 30
@@ -2067,12 +2071,12 @@ cargo test -p ais
 
 ### 6.6 性能指标
 
-| 指标 | 优化前 | 优化后 | 提升 |
-|-----|--------|--------|------|
-| Snowflake 锁机制 | Mutex | AtomicU64 + CAS | 6.25x |
-| 理论吞吐量 | ~80K IDs/s | ~500K IDs/s | 6.25x |
-| 并发争用 | 高（全局锁） | 低（CAS 重试） | 显著降低 |
-| 内存占用 | 32 bytes (Mutex) | 8 bytes (AtomicU64) | 4x 减少 |
+| 指标             | 优化前           | 优化后              | 提升     |
+| ---------------- | ---------------- | ------------------- | -------- |
+| Snowflake 锁机制 | Mutex            | AtomicU64 + CAS     | 6.25x    |
+| 理论吞吐量       | ~80K IDs/s       | ~500K IDs/s         | 6.25x    |
+| 并发争用         | 高（全局锁）     | 低（CAS 重试）      | 显著降低 |
+| 内存占用         | 32 bytes (Mutex) | 8 bytes (AtomicU64) | 4x 减少  |
 
 ---
 
@@ -2249,20 +2253,22 @@ use ks::{Client, ClientConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let client = Client::new(ClientConfig {
-        host: "127.0.0.1".to_string(),
-        port: 8081,
-        psk: "my-shared-key".to_string(),
+    let actrix_shared_key = "my-shared-key";  // 从全局配置获取
+    let client = Client::new(&ClientConfig {
+        endpoint: "http://127.0.0.1:8090".to_string(),
+        psk: actrix_shared_key.to_string(),
+        timeout_seconds: 30,
+        cache_db_path: None,
     });
 
     // 生成密钥对
-    let response = client.generate_key().await?;
-    println!("Generated key_id: {}", response.key_id);
-    println!("Public key: {}", response.public_key);
+    let (key_id, public_key, expires_at) = client.generate_key().await?;
+    println!("Generated key_id: {}", key_id);
+    println!("Public key: {:?}", public_key);
 
     // 获取私钥
-    let secret = client.get_secret_key(response.key_id).await?;
-    println!("Secret key: {}", secret.secret_key);
+    let (secret_key, expires_at) = client.fetch_secret_key(key_id).await?;
+    println!("Secret key fetched, expires at: {}", expires_at);
 
     Ok(())
 }

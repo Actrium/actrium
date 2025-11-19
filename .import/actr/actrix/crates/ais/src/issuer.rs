@@ -37,7 +37,6 @@
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let ks_config = KsClientConfig {
 //!     endpoint: "http://localhost:50052".to_string(),
-//!     psk: "test-key".to_string(),
 //!     timeout_seconds: 30,
 //!     enable_tls: false,
 //!     tls_domain: None,
