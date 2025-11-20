@@ -183,23 +183,21 @@ impl SignalingConfig {
         }
 
         // 回退：检查是否启用了本地 KS 服务
-        if global_config.is_ks_enabled() {
-            if let Some(_) = global_config.services.ks {
-                // 自动生成指向本地 KS 的客户端配置
-                // gRPC 使用独立端口 50052（HTTP router 使用 8443/8080）
-                let grpc_port = 50052;
-                let grpc_protocol = "http"; // 默认不启用 TLS，可通过配置开启
+        if global_config.is_ks_enabled() && global_config.services.ks.is_some() {
+            // 自动生成指向本地 KS 的客户端配置
+            // gRPC 使用独立端口 50052（HTTP router 使用 8443/8080）
+            let grpc_port = 50052;
+            let grpc_protocol = "http"; // 默认不启用 TLS，可通过配置开启
 
-                return Some(KsClientConfig {
-                    endpoint: format!("{grpc_protocol}://127.0.0.1:{grpc_port}"),
-                    timeout_seconds: 30,
-                    enable_tls: false,
-                    tls_domain: None,
-                    ca_cert: None,
-                    client_cert: None,
-                    client_key: None,
-                });
-            }
+            return Some(KsClientConfig {
+                endpoint: format!("{grpc_protocol}://127.0.0.1:{grpc_port}"),
+                timeout_seconds: 30,
+                enable_tls: false,
+                tls_domain: None,
+                ca_cert: None,
+                client_cert: None,
+                client_key: None,
+            });
         }
 
         None
@@ -221,29 +219,27 @@ impl SignalingConfig {
         }
 
         // 回退：检查是否启用了本地 AIS 服务
-        if global_config.is_ais_enabled() {
-            if let Some(_) = global_config.services.ais {
-                // 自动生成指向本地 AIS 的客户端配置
-                // AIS 作为 HTTP router service 共享同一个 HTTP/HTTPS 端口
-                let port = global_config
-                    .bind
-                    .https
-                    .as_ref()
-                    .map(|h| h.port)
-                    .or_else(|| global_config.bind.http.as_ref().map(|h| h.port))
-                    .unwrap_or(8080);
+        if global_config.is_ais_enabled() && global_config.services.ais.is_some() {
+            // 自动生成指向本地 AIS 的客户端配置
+            // AIS 作为 HTTP router service 共享同一个 HTTP/HTTPS 端口
+            let port = global_config
+                .bind
+                .https
+                .as_ref()
+                .map(|h| h.port)
+                .or_else(|| global_config.bind.http.as_ref().map(|h| h.port))
+                .unwrap_or(8080);
 
-                let protocol = if global_config.bind.https.is_some() {
-                    "https"
-                } else {
-                    "http"
-                };
+            let protocol = if global_config.bind.https.is_some() {
+                "https"
+            } else {
+                "http"
+            };
 
-                return Some(AisClientConfig {
-                    endpoint: format!("{protocol}://127.0.0.1:{port}"),
-                    timeout_seconds: 30,
-                });
-            }
+            return Some(AisClientConfig {
+                endpoint: format!("{protocol}://127.0.0.1:{port}"),
+                timeout_seconds: 30,
+            });
         }
 
         None

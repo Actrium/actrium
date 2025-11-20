@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 配置 KS 服务的服务器端参数
 /// 注意：只存储 key_id 和 public_key，不存储 secret_key。
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct KsServerConfig {}
 
 /// KS 客户端配置
@@ -61,12 +61,6 @@ pub struct KsConfig {
 
     /// KS 客户端配置（当需要连接其他 KS 服务时使用）
     pub client: Option<KsClientConfig>,
-}
-
-impl Default for KsServerConfig {
-    fn default() -> Self {
-        Self {}
-    }
 }
 
 impl Default for KsClientConfig {

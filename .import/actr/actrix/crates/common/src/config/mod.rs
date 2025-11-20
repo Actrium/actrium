@@ -21,7 +21,7 @@ pub use crate::config::tracing::TracingConfig;
 pub use crate::config::turn::TurnConfig;
 use ::ks::storage::StorageBackend;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Actor-RTC 辅助服务的主配置结构体
 ///
@@ -184,7 +184,7 @@ fn default_log_path() -> String {
     "logs/".to_string()
 }
 
-fn serialize_pathbuf<S>(path: &PathBuf, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_pathbuf<S>(path: &Path, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {

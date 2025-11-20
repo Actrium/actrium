@@ -238,19 +238,19 @@ async fn handle_client_envelope(
     server: &SignalingServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 检查消息速率限制
-    if let Some(ref limiter) = server.message_rate_limiter {
-        if let Err(e) = limiter.check_message(client_id).await {
-            warn!("🚫 连接 {} 消息速率限制触发: {}", client_id, e);
-            // 发送错误响应
-            let error_response = ErrorResponse {
-                code: 429,
-                message: e,
-            };
-            let error_envelope =
-                server.create_envelope(signaling_envelope::Flow::EnvelopeError(error_response));
-            send_envelope_to_client(client_id, error_envelope, server).await?;
-            return Ok(());
-        }
+    if let Some(ref limiter) = server.message_rate_limiter
+        && let Err(e) = limiter.check_message(client_id).await
+    {
+        warn!("🚫 连接 {} 消息速率限制触发: {}", client_id, e);
+        // 发送错误响应
+        let error_response = ErrorResponse {
+            code: 429,
+            message: e,
+        };
+        let error_envelope =
+            server.create_envelope(signaling_envelope::Flow::EnvelopeError(error_response));
+        send_envelope_to_client(client_id, error_envelope, server).await?;
+        return Ok(());
     }
 
     // 解码 protobuf 消息
@@ -332,21 +332,18 @@ async fn handle_register_request(
     }
 
     // 检查是否已经注册过
+    if let Some(client) = server.clients.read().await.get(client_id)
+        && client.actor_id.is_some()
     {
-        let clients_guard = server.clients.read().await;
-        if let Some(client) = clients_guard.get(client_id) {
-            if client.actor_id.is_some() {
-                send_register_error(
-                    client_id,
-                    409,
-                    "Already registered",
-                    server,
-                    request_envelope_id,
-                )
-                .await?;
-                return Ok(());
-            }
-        }
+        send_register_error(
+            client_id,
+            409,
+            "Already registered",
+            server,
+            request_envelope_id,
+        )
+        .await?;
+        return Ok(());
     }
 
     // 通过 AIS 分配 ActorId 和 Credential

@@ -413,24 +413,21 @@ impl ServiceRegistry {
                 // 检查版本要求
                 if let (Some(min_version), Some(capabilities)) =
                     (&requirements.min_version, &service.capabilities)
+                    && let Some(version_range) = &capabilities.version_range
                 {
-                    if let Some(version_range) = &capabilities.version_range {
-                        // 简单的版本比较，实际应该使用语义版本
-                        if version_range < min_version {
-                            continue;
-                        }
+                    // 简单的版本比较，实际应该使用语义版本
+                    if version_range < min_version {
+                        continue;
                     }
                 }
 
                 // 检查区域偏好
                 if let (Some(preferred_regions), Some(capabilities)) =
                     (&requirements.preferred_regions, &service.capabilities)
+                    && let Some(region) = &capabilities.region
+                    && !preferred_regions.contains(region)
                 {
-                    if let Some(region) = &capabilities.region {
-                        if !preferred_regions.contains(region) {
-                            continue;
-                        }
-                    }
+                    continue;
                 }
 
                 // 检查必需标签
@@ -632,10 +629,10 @@ impl ServiceRegistry {
                 }
 
                 // 按 manufacturer 过滤
-                if let Some(mfr) = manufacturer {
-                    if service.actor_id.r#type.manufacturer != mfr {
-                        continue;
-                    }
+                if let Some(mfr) = manufacturer
+                    && service.actor_id.r#type.manufacturer != mfr
+                {
+                    continue;
                 }
 
                 results.push(service);

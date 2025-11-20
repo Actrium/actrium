@@ -46,17 +46,17 @@ impl ConnectionRateLimiter {
 
         // 检查并发连接数
         let connections = self.connections.read().await;
-        if let Some(&count) = connections.get(&ip) {
-            if count >= self.config.max_concurrent_per_ip {
-                warn!(
-                    "IP {} exceeded max concurrent connections: {}/{}",
-                    ip, count, self.config.max_concurrent_per_ip
-                );
-                return Err(format!(
-                    "Too many concurrent connections from your IP: {}/{}",
-                    count, self.config.max_concurrent_per_ip
-                ));
-            }
+        if let Some(&count) = connections.get(&ip)
+            && count >= self.config.max_concurrent_per_ip
+        {
+            warn!(
+                "IP {} exceeded max concurrent connections: {}/{}",
+                ip, count, self.config.max_concurrent_per_ip
+            );
+            return Err(format!(
+                "Too many concurrent connections from your IP: {}/{}",
+                count, self.config.max_concurrent_per_ip
+            ));
         }
         drop(connections);
 

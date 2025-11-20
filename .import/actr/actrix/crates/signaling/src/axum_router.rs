@@ -218,11 +218,11 @@ async fn websocket_handler(
     let client_ip = addr.ip();
 
     // 检查连接速率限制
-    if let Some(ref limiter) = state.server.connection_rate_limiter {
-        if let Err(e) = limiter.check_connection(client_ip).await {
-            warn!("🚫 IP {} 连接速率限制触发: {}", client_ip, e);
-            return axum::http::StatusCode::TOO_MANY_REQUESTS.into_response();
-        }
+    if let Some(ref limiter) = state.server.connection_rate_limiter
+        && let Err(e) = limiter.check_connection(client_ip).await
+    {
+        warn!("🚫 IP {} 连接速率限制触发: {}", client_ip, e);
+        return axum::http::StatusCode::TOO_MANY_REQUESTS.into_response();
     }
 
     ws.on_upgrade(move |socket| handle_websocket(socket, state, client_ip))

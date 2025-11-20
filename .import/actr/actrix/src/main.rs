@@ -530,13 +530,13 @@ impl ApplicationLauncher {
         }
 
         // 注册各服务的 metrics
-        if config.is_ks_enabled() {
-            if let Err(e) = ks::register_ks_metrics(registry) {
-                warn!(
-                    "KS metrics registration warning (may already be registered): {}",
-                    e
-                );
-            }
+        if config.is_ks_enabled()
+            && let Err(e) = ks::register_ks_metrics(registry)
+        {
+            warn!(
+                "KS metrics registration warning (may already be registered): {}",
+                e
+            );
         }
 
         info!("✅ Prometheus metrics registry 初始化成功");
@@ -592,12 +592,10 @@ impl ApplicationLauncher {
         // Determine which URLs are available
         let mut urls = Vec::new();
 
-        if is_dev {
-            if let Some(ref http_config) = config.bind.http {
-                let http_url = format!("http://{}:{}", http_config.ip, http_config.port);
-                let ws_url = format!("ws://{}:{}", http_config.ip, http_config.port);
-                urls.push(("HTTP", http_url, ws_url));
-            }
+        if is_dev && let Some(ref http_config) = config.bind.http {
+            let http_url = format!("http://{}:{}", http_config.ip, http_config.port);
+            let ws_url = format!("ws://{}:{}", http_config.ip, http_config.port);
+            urls.push(("HTTP", http_url, ws_url));
         }
 
         if let Some(ref https_config) = config.bind.https {

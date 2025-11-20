@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::Config { output }) => {
             let mut wizard = UnifiedConfigWizard::new(cli.debug);
-            if let Some(config_path) = output {
+            if let Some(_config_path) = output {
                 // If output path is specified via CLI, use it directly (skip interactive selection)
                 // TODO: Add method to wizard to use specific path
                 println!("CLI-specified config path not yet implemented, using interactive mode");
