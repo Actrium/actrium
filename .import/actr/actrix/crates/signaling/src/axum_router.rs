@@ -5,7 +5,7 @@
 use crate::server::{SignalingServer, SignalingServerHandle};
 use actrix_common::aid::credential::validator::AIdCredentialValidator;
 use actrix_common::config::ActrixConfig;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use axum::{
     Router,
     extract::{
@@ -78,6 +78,15 @@ pub async fn create_signaling_router_with_config(config: &ActrixConfig) -> Resul
 
     // 初始化 ServiceRegistry 持久化缓存（用于重启恢复）
     let cache_ttl_secs = 3600; // 1 小时 TTL
+
+    if !config.sqlite_path.exists() {
+        std::fs::create_dir_all(&config.sqlite_path).with_context(|| {
+            format!(
+                "Failed to create SQLite data directory: {}",
+                config.sqlite_path.display()
+            )
+        })?;
+    }
     let cache_db_file = config.sqlite_path.join("signaling_cache.db");
 
     match crate::service_registry_storage::ServiceRegistryStorage::new(
