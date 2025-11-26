@@ -1,0 +1,92 @@
+{
+  "name": "rill",
+  "version": "0.1.0",
+  "description": "A lightweight, headless, sandboxed dynamic UI rendering engine for React Native",
+  "author": "kookyleo <kookyleo@gmail.com>",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kookyleo/rill.git"
+  },
+  "keywords": [
+    "react-native",
+    "dynamic-ui",
+    "sandbox",
+    "quickjs",
+    "mini-program"
+  ],
+  "main": "./dist/runtime/index.js",
+  "types": "./dist/runtime/index.d.ts",
+  "bin": {
+    "rill": "./dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.mjs",
+      "require": "./dist/runtime/index.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/sdk/index.mjs",
+      "require": "./dist/sdk/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "require": "./dist/cli/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "react-reconciler": "^0.29.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^14.0.0",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.0",
+    "@types/react-native": "^0.72.8",
+    "@types/react-reconciler": "^0.32.3",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "commander": "^11.0.0",
+    "esbuild": "^0.19.0",
+    "eslint": "^8.0.0",
+    "react": "^18.2.0",
+    "react-test-renderer": "^18.2.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0",
+    "react-native": ">=0.70.0",
+    "react-native-quickjs": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    },
+    "react-native-quickjs": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

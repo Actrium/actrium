@@ -1,0 +1,17 @@
+{
+  "name": "simple-rill-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "rill build src/index.tsx -o dist/bundle.js",
+    "build:dev": "rill build src/index.tsx -o dist/bundle.js --no-minify --sourcemap",
+    "watch": "rill build src/index.tsx -o dist/bundle.js --watch"
+  },
+  "dependencies": {
+    "rill": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "typescript": "^5.3.0"
+  }
+}
