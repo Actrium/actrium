@@ -39,7 +39,7 @@ const AskitModules: Record<string, ModuleHandler> = {
 };
 
 // Recreate bridge logic (same as bridge.ts)
-interface PluginMessage {
+interface GuestMessage {
   event: string;
   payload?: unknown;
 }
@@ -60,7 +60,7 @@ function parseAskitEvent(event: string): { module: string; method: string } | nu
   };
 }
 
-function handlePluginMessage(message: PluginMessage): unknown {
+function handleGuestMessage(message: GuestMessage): unknown {
   const { event, payload } = message;
 
   const parsed = parseAskitEvent(event);
@@ -95,7 +95,7 @@ function createEngineAdapter(engine: {
   });
 
   engine.on('message', (event: string, payload: unknown) => {
-    handlePluginMessage({ event, payload });
+    handleGuestMessage({ event, payload });
   });
 
   return {
@@ -126,7 +126,7 @@ describe('Core Bridge', () => {
     });
   });
 
-  describe('handlePluginMessage', () => {
+  describe('handleGuestMessage', () => {
     describe('askit module routing', () => {
       let toastCalls: Array<{ message: string; options: unknown }>;
       let hapticCalls: Array<{ type: unknown }>;
@@ -151,7 +151,7 @@ describe('Core Bridge', () => {
 
       it('should route askit:toast:show to Toast module', () => {
         // When payload is object, it becomes args[0]
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'askit:toast:show',
           payload: { message: 'Hello', options: { position: 'top' } },
         });
@@ -163,7 +163,7 @@ describe('Core Bridge', () => {
       });
 
       it('should handle array payload for toast', () => {
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'askit:toast:show',
           payload: ['Hello', { duration: 'long' }],
         });
@@ -173,7 +173,7 @@ describe('Core Bridge', () => {
 
       it('should route askit:haptic:trigger to Haptic module', () => {
         // When payload is object, it becomes args[0]
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'askit:haptic:trigger',
           payload: { type: 'success' },
         });
@@ -183,7 +183,7 @@ describe('Core Bridge', () => {
       });
 
       it('should handle array payload for haptic', () => {
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'askit:haptic:trigger',
           payload: ['light'],
         });
@@ -192,7 +192,7 @@ describe('Core Bridge', () => {
       });
 
       it('should handle missing payload (uses default)', () => {
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'askit:haptic:trigger',
         });
 
@@ -205,7 +205,7 @@ describe('Core Bridge', () => {
         const originalWarn = console.warn;
         console.warn = (...args) => warnings.push(args);
 
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'askit:unknown:method',
           payload: 'data',
         });
@@ -230,12 +230,12 @@ describe('Core Bridge', () => {
           received.push(payload);
         });
 
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'bus:testEvent',
-          payload: { data: 'fromPlugin' },
+          payload: { data: 'fromGuest' },
         });
 
-        expect(received).toEqual([{ data: 'fromPlugin' }]);
+        expect(received).toEqual([{ data: 'fromGuest' }]);
       });
 
       it('should handle bus events without payload', () => {
@@ -245,7 +245,7 @@ describe('Core Bridge', () => {
           received.push(payload);
         });
 
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'bus:noPayloadBus',
         });
 
@@ -259,7 +259,7 @@ describe('Core Bridge', () => {
         const originalWarn = console.warn;
         console.warn = (...args) => warnings.push(args);
 
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'unknown:event',
           payload: 'data',
         });
@@ -275,7 +275,7 @@ describe('Core Bridge', () => {
         const originalWarn = console.warn;
         console.warn = (...args) => warnings.push(args);
 
-        handlePluginMessage({
+        handleGuestMessage({
           event: 'randomstring',
           payload: 'data',
         });
@@ -311,15 +311,15 @@ describe('Core Bridge', () => {
 
       createEngineAdapter(engine);
 
-      (Bus as NativeBus).emit('hostEventForward', { data: 'toPlugin' });
+      (Bus as NativeBus).emit('hostEventForward', { data: 'toGuest' });
 
       expect(sentEvents).toContainEqual({
         event: 'hostEventForward',
-        payload: { data: 'toPlugin' },
+        payload: { data: 'toGuest' },
       });
     });
 
-    it('should route engine messages to handlePluginMessage', () => {
+    it('should route engine messages to handleGuestMessage', () => {
       const toastCalls: string[] = [];
       (ToastModule as NativeToast)._setCustomHandler((message) => {
         toastCalls.push(message);

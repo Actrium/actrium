@@ -27,7 +27,7 @@ export {
 } from './registry';
 
 // Bridge exports
-export { Bridge, handlePluginMessage, createEngineAdapter } from './bridge';
+export { Bridge, handleGuestMessage, createEngineAdapter } from './bridge';
 
 // Type exports
 export type { AskitRegistryConfig, ComponentMap, ModuleMap } from '../types';
