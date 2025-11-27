@@ -5,7 +5,7 @@
  * timestamps, delivery status, and long press actions.
  */
 
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import {
   View,
   Text,

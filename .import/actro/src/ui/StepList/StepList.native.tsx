@@ -32,6 +32,7 @@ interface StepNodeProps {
   colors: typeof DEFAULT_COLORS;
   lineWidth: number;
   onPress?: (item: StepItem, index: number) => void;
+  key?: React.Key;
 }
 
 /**

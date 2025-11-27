@@ -77,7 +77,7 @@ describe('Toast (Native)', () => {
 
         toast.show('Test', { duration: 'long', position: 'center' });
 
-        expect(calls[0].options).toEqual({ duration: 'long', position: 'center' });
+        expect(calls[0]?.options).toEqual({ duration: 'long', position: 'center' });
       });
 
       it('should handle show without options', () => {
@@ -107,7 +107,7 @@ describe('Toast (Native)', () => {
         expect(calls).toEqual(['First']);
         // Second should go to fallback (console.log)
         expect(logs.length).toBe(1);
-        expect(logs[0][0]).toContain('Second');
+        expect((logs[0] as unknown[])?.[0]).toContain('Second');
 
         console.log = originalLog;
       });
@@ -122,7 +122,7 @@ describe('Toast (Native)', () => {
         toast.show('Fallback message');
 
         expect(logs.length).toBe(1);
-        expect(logs[0][0]).toBe('[Toast] Fallback message');
+        expect((logs[0] as unknown[])?.[0]).toBe('[Toast] Fallback message');
 
         console.log = originalLog;
       });
@@ -137,9 +137,9 @@ describe('Toast (Native)', () => {
         toast.show('Third');
 
         expect(logs.length).toBe(3);
-        expect(logs[0][0]).toBe('[Toast] First');
-        expect(logs[1][0]).toBe('[Toast] Second');
-        expect(logs[2][0]).toBe('[Toast] Third');
+        expect((logs[0] as unknown[])?.[0]).toBe('[Toast] First');
+        expect((logs[1] as unknown[])?.[0]).toBe('[Toast] Second');
+        expect((logs[2] as unknown[])?.[0]).toBe('[Toast] Third');
 
         console.log = originalLog;
       });

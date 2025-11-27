@@ -5,7 +5,6 @@
  * Supports different variants for common UI patterns.
  */
 
-import React from 'react';
 import { View, StyleSheet, type ViewStyle } from 'react-native';
 import type { ThemeViewProps } from '../../types';
 
@@ -50,9 +49,9 @@ function getPadding(padding?: ThemeViewProps['padding']): number {
     return padding;
   }
   if (typeof padding === 'string') {
-    return PADDING_MAP[padding] ?? PADDING_MAP.medium;
+    return PADDING_MAP[padding] ?? PADDING_MAP['medium'] ?? 16;
   }
-  return PADDING_MAP.medium;
+  return PADDING_MAP['medium'] ?? 16;
 }
 
 /**
