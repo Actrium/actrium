@@ -1,0 +1,78 @@
+{
+  "name": "askit",
+  "version": "0.1.0",
+  "description": "AskAway Client Kit - Isomorphic UI components and APIs for Host and Plugin",
+  "license": "Apache-2.0",
+  "author": "kookyleo <kookyleo@gmail.com>",
+  "main": "./dist/remote/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "react-native": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/native/index.js"
+      },
+      "default": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/remote/index.js"
+      }
+    },
+    "./core": {
+      "types": "./dist/types/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "fmt": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "fmt:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.72.0",
+    "rill": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    },
+    "rill": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/react": "^18.2.0",
+    "@types/react-native": "^0.72.0",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
+    "@vitest/coverage-v8": "^4.0.14",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "react": "^18.2.0",
+    "react-native": "^0.72.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.48.0",
+    "vitest": "^4.0.14"
+  },
+  "keywords": [
+    "askaway",
+    "react-native",
+    "isomorphic",
+    "ui-kit",
+    "sandbox"
+  ]
+}
