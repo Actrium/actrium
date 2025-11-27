@@ -5,7 +5,7 @@
  * Supports different sizes and fallback to initials.
  */
 
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -45,21 +45,23 @@ function getInitials(name?: string): string {
   if (!name) return '?';
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) {
-    return parts[0].charAt(0).toUpperCase();
+    return parts[0]?.charAt(0).toUpperCase() ?? '?';
   }
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  const first = parts[0]?.charAt(0) ?? '';
+  const last = parts[parts.length - 1]?.charAt(0) ?? '';
+  return (first + last).toUpperCase();
 }
 
 /**
  * Get background color from name (consistent hash)
  */
 function getColorFromName(name?: string): string {
-  if (!name) return AVATAR_COLORS[0];
+  if (!name) return AVATAR_COLORS[0] ?? '#FF6B6B';
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? '#FF6B6B';
 }
 
 /**
@@ -69,7 +71,7 @@ function getSize(size?: UserAvatarProps['size']): number {
   if (typeof size === 'number') {
     return size;
   }
-  return SIZE_MAP[size || 'medium'] || SIZE_MAP.medium;
+  return SIZE_MAP[size || 'medium'] ?? SIZE_MAP['medium'] ?? 48;
 }
 
 /**

@@ -75,7 +75,7 @@ describe('Haptic (Native)', () => {
 
       expect(calls).toEqual(['light']);
       expect(logs.length).toBe(1);
-      expect(logs[0][0]).toBe('[Haptic] heavy');
+      expect((logs[0] as unknown[])?.[0]).toBe('[Haptic] heavy');
 
       console.log = originalLog;
     });
@@ -90,7 +90,7 @@ describe('Haptic (Native)', () => {
       haptic.trigger('success');
 
       expect(logs.length).toBe(1);
-      expect(logs[0][0]).toBe('[Haptic] success');
+      expect((logs[0] as unknown[])?.[0]).toBe('[Haptic] success');
 
       console.log = originalLog;
     });
@@ -102,7 +102,7 @@ describe('Haptic (Native)', () => {
 
       haptic.trigger();
 
-      expect(logs[0][0]).toBe('[Haptic] medium');
+      expect((logs[0] as unknown[])?.[0]).toBe('[Haptic] medium');
 
       console.log = originalLog;
     });
@@ -117,9 +117,9 @@ describe('Haptic (Native)', () => {
       haptic.trigger('error');
 
       expect(logs.length).toBe(3);
-      expect(logs[0][0]).toBe('[Haptic] light');
-      expect(logs[1][0]).toBe('[Haptic] heavy');
-      expect(logs[2][0]).toBe('[Haptic] error');
+      expect((logs[0] as unknown[])?.[0]).toBe('[Haptic] light');
+      expect((logs[1] as unknown[])?.[0]).toBe('[Haptic] heavy');
+      expect((logs[2] as unknown[])?.[0]).toBe('[Haptic] error');
 
       console.log = originalLog;
     });

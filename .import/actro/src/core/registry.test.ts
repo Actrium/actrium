@@ -65,7 +65,7 @@ describe('Core Registry (Module Handlers)', () => {
     it('should handle show with duration options', () => {
       ToastHandler.handle('show', ['Test', { duration: 'long' }]);
 
-      expect(toastCalls[0].options).toEqual({ duration: 'long' });
+      expect(toastCalls[0]?.options).toEqual({ duration: 'long' });
     });
 
     it('should ignore unknown methods', () => {
@@ -148,7 +148,7 @@ describe('Core Registry (Module Handlers)', () => {
 
       ToastModule.show('Msg', { duration: 'long' });
 
-      expect(calls[0].options).toEqual({ duration: 'long' });
+      expect(calls[0]?.options).toEqual({ duration: 'long' });
     });
   });
 

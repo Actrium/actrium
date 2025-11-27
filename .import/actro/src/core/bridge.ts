@@ -30,9 +30,15 @@ function parseAskitEvent(event: string): { module: string; method: string } | nu
     return null;
   }
 
+  const module = parts[0];
+  const method = parts[1];
+  if (!module || !method) {
+    return null;
+  }
+
   return {
-    module: parts[0],
-    method: parts[1],
+    module,
+    method,
   };
 }
 

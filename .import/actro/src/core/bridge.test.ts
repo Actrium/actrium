@@ -54,9 +54,15 @@ function parseAskitEvent(event: string): { module: string; method: string } | nu
     return null;
   }
 
+  const module = parts[0];
+  const method = parts[1];
+  if (!module || !method) {
+    return null;
+  }
+
   return {
-    module: parts[0],
-    method: parts[1],
+    module,
+    method,
   };
 }
 
@@ -94,7 +100,9 @@ function createEngineAdapter(engine: {
     engine.sendEvent(event, payload);
   });
 
-  engine.on('message', (event: string, payload: unknown) => {
+  engine.on('message', (...args: unknown[]) => {
+    const event = args[0] as string;
+    const payload = args[1] as unknown;
     handleGuestMessage({ event, payload });
   });
 
@@ -211,7 +219,7 @@ describe('Core Bridge', () => {
         });
 
         expect(warnings.length).toBe(1);
-        expect(warnings[0][0]).toContain('Unknown module: unknown');
+        expect((warnings[0] as unknown[])?.[0]).toContain('Unknown module: unknown');
 
         console.warn = originalWarn;
       });
@@ -265,7 +273,7 @@ describe('Core Bridge', () => {
         });
 
         expect(warnings.length).toBe(1);
-        expect(warnings[0][0]).toContain('Unknown event: unknown:event');
+        expect((warnings[0] as unknown[])?.[0]).toContain('Unknown event: unknown:event');
 
         console.warn = originalWarn;
       });
@@ -325,9 +333,9 @@ describe('Core Bridge', () => {
         toastCalls.push(message);
       });
 
-      let messageCallback: ((event: string, payload: unknown) => void) | null = null;
+      let messageCallback: ((...args: unknown[]) => void) | null = null;
       const engine = {
-        on: (event: string, callback: (event: string, payload: unknown) => void) => {
+        on: (event: string, callback: (...args: unknown[]) => void) => {
           if (event === 'message') {
             messageCallback = callback;
           }
@@ -338,7 +346,9 @@ describe('Core Bridge', () => {
       createEngineAdapter(engine);
 
       if (messageCallback) {
-        messageCallback('askit:toast:show', ['Engine Toast Message']);
+        (messageCallback as (...args: unknown[]) => void)('askit:toast:show', [
+          'Engine Toast Message',
+        ]);
       }
 
       expect(toastCalls).toEqual(['Engine Toast Message']);

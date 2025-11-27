@@ -12,16 +12,16 @@ describe('Haptic (Remote)', () => {
   let originalSendToHost: unknown;
 
   beforeEach(() => {
-    originalSendToHost = (globalThis as Record<string, unknown>).sendToHost;
+    originalSendToHost = (globalThis as Record<string, unknown>)['sendToHost'];
     sentMessages = [];
 
-    (globalThis as Record<string, unknown>).sendToHost = (event: string, payload?: unknown) => {
+    (globalThis as Record<string, unknown>)['sendToHost'] = (event: string, payload?: unknown) => {
       sentMessages.push({ event, payload });
     };
   });
 
   afterEach(() => {
-    (globalThis as Record<string, unknown>).sendToHost = originalSendToHost;
+    (globalThis as Record<string, unknown>)['sendToHost'] = originalSendToHost;
   });
 
   describe('trigger', () => {
@@ -39,7 +39,7 @@ describe('Haptic (Remote)', () => {
     it('should use default type "medium" when not specified', () => {
       Haptic.trigger();
 
-      expect(sentMessages[0].payload).toEqual({ type: 'medium' });
+      expect(sentMessages[0]?.payload).toEqual({ type: 'medium' });
     });
 
     it('should handle all haptic types', () => {
@@ -65,7 +65,7 @@ describe('Haptic (Remote)', () => {
 
   describe('without sendToHost', () => {
     it('should warn when sendToHost is not available', () => {
-      (globalThis as Record<string, unknown>).sendToHost = undefined;
+      (globalThis as Record<string, unknown>)['sendToHost'] = undefined;
 
       const warnings: unknown[] = [];
       const originalWarn = console.warn;
@@ -74,7 +74,7 @@ describe('Haptic (Remote)', () => {
       Haptic.trigger('light');
 
       expect(warnings.length).toBe(1);
-      expect(warnings[0][0]).toContain('sendToHost not available');
+      expect((warnings[0] as unknown[])?.[0]).toContain('sendToHost not available');
 
       console.warn = originalWarn;
     });
