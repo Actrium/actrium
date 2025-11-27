@@ -5,7 +5,7 @@ This guide will help you get started with askit in your project.
 ## Prerequisites
 
 - Node.js 18+
-- React Native 0.72+ (for Host App)
+- React 19+ / React Native 0.82+ (for Host App)
 - rill engine (for Guest sandbox)
 
 ## Installation
