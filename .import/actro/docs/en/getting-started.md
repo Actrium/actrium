@@ -6,7 +6,7 @@ This guide will help you get started with askit in your project.
 
 - Node.js 18+
 - React Native 0.72+ (for Host App)
-- rill engine (for Plugin sandbox)
+- rill engine (for Guest sandbox)
 
 ## Installation
 
@@ -16,19 +16,19 @@ npm install askit
 
 ## Basic Setup
 
-### For Plugin Development
+### For Guest Development
 
-In your plugin code, simply import and use the APIs:
+In your guest code, simply import and use the APIs:
 
 ```typescript
 import { Bus, Toast, Haptic } from 'askit';
 
-// Initialize your plugin
-Bus.emit('plugin:init', { name: 'MyPlugin', version: '1.0.0' });
+// Initialize your guest
+Bus.emit('guest:init', { name: 'MyGuest', version: '1.0.0' });
 
 // Listen for host events
 Bus.on('host:ready', () => {
-  Toast.show('Plugin connected!');
+  Toast.show('Guest connected!');
 });
 ```
 
@@ -51,8 +51,8 @@ Object.entries(AskitComponents).forEach(([name, Component]) => {
   engine.registerComponent(name, Component);
 });
 
-// Load and run plugin
-await engine.loadPlugin('https://example.com/plugin.js');
+// Load and run guest
+await engine.loadGuest('https://example.com/guest.js');
 ```
 
 ## Project Structure
@@ -67,8 +67,8 @@ my-askaway-app/
 │   │   └── engine/
 │   │       └── setup.ts  # Engine configuration
 │   └── package.json
-├── plugins/              # Plugin projects
-│   └── my-plugin/
+├── guests/              # Guest projects
+│   └── my-guest/
 │       ├── src/
 │       │   └── index.ts
 │       └── package.json

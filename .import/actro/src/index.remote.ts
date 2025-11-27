@@ -1,5 +1,5 @@
 /**
- * AskIt - Remote Entry (Plugin/Sandbox)
+ * askit - Remote Entry (Guest/Sandbox)
  *
  * This is the main entry point for QuickJS / Rill sandbox environment.
  * Exports DSL identifiers that map to native components on Host.

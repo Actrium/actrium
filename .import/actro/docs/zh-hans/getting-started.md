@@ -6,7 +6,7 @@
 
 - Node.js 18+
 - React Native 0.72+ (用于 Host App)
-- rill 引擎 (用于 Plugin 沙箱)
+- rill 引擎 (用于 Guest 沙箱)
 
 ## 安装
 
@@ -24,7 +24,7 @@ npm install askit
 import { Bus, Toast, Haptic } from 'askit';
 
 // 初始化插件
-Bus.emit('plugin:init', { name: 'MyPlugin', version: '1.0.0' });
+Bus.emit('guest:init', { name: 'MyGuest', version: '1.0.0' });
 
 // 监听 Host 事件
 Bus.on('host:ready', () => {
@@ -52,7 +52,7 @@ Object.entries(AskitComponents).forEach(([name, Component]) => {
 });
 
 // 加载并运行插件
-await engine.loadPlugin('https://example.com/plugin.js');
+await engine.loadGuest('https://example.com/guest.js');
 ```
 
 ## 项目结构
@@ -67,8 +67,8 @@ my-askaway-app/
 │   │   └── engine/
 │   │       └── setup.ts  # 引擎配置
 │   └── package.json
-├── plugins/              # 插件项目
-│   └── my-plugin/
+├── guests/              # 插件项目
+│   └── my-guest/
 │       ├── src/
 │       │   └── index.ts
 │       └── package.json
