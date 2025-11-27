@@ -5,7 +5,7 @@
 ## 前置要求
 
 - Node.js 18+
-- React Native 0.72+ (用于 Host App)
+- React 19+ / React Native 0.82+ (用于 Host App)
 - rill 引擎 (用于 Guest 沙箱)
 
 ## 安装
