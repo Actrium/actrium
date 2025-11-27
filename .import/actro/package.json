@@ -1,7 +1,7 @@
 {
   "name": "askit",
   "version": "0.1.0",
-  "description": "AskAway Client Kit - Isomorphic UI components and APIs for Host and Plugin",
+  "description": "AskAway Client Kit - Isomorphic UI components and APIs for Host and Guest",
   "license": "Apache-2.0",
   "author": "kookyleo <kookyleo@gmail.com>",
   "main": "./dist/remote/index.js",

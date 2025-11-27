@@ -11,7 +11,7 @@ import { Bus, NativeBus } from '../api/Bus.native';
 /**
  * Message types from guests
  */
-interface PluginMessage {
+interface GuestMessage {
   event: string;
   payload?: unknown;
 }
@@ -39,7 +39,7 @@ function parseAskitEvent(event: string): { module: string; method: string } | nu
 /**
  * Handle incoming message from guest
  */
-export function handlePluginMessage(message: PluginMessage): unknown {
+export function handleGuestMessage(message: GuestMessage): unknown {
   const { event, payload } = message;
 
   // Handle askit module calls
@@ -91,9 +91,9 @@ export function createEngineAdapter(engine: {
     engine.sendEvent(event, payload);
   });
 
-  // Listen for plugin messages
+  // Listen for guest messages
   engine.on('message', (event: string, payload: unknown) => {
-    handlePluginMessage({ event, payload });
+    handleGuestMessage({ event, payload });
   });
 
   return {
@@ -107,7 +107,7 @@ export function createEngineAdapter(engine: {
  * Bridge utilities
  */
 export const Bridge = {
-  handleMessage: handlePluginMessage,
+  handleMessage: handleGuestMessage,
   createAdapter: createEngineAdapter,
 };
 
