@@ -3,10 +3,10 @@ use tower_http::{
     classify::{ServerErrorsAsFailures, SharedClassifier},
     trace::{MakeSpan, TraceLayer},
 };
-use tracing::{Span, info_span};
+use tracing::{info_span, Span};
 
 #[cfg(feature = "opentelemetry")]
-use opentelemetry::{Context, propagation::Extractor, trace::TraceContextExt};
+use opentelemetry::{propagation::Extractor, trace::TraceContextExt, Context};
 #[cfg(feature = "opentelemetry")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -30,7 +30,7 @@ impl<B> MakeSpan<B> for HttpMakeSpan {
 
         #[cfg(feature = "opentelemetry")]
         if let Some(context) = extract_remote_context(request.headers()) {
-            span.set_parent(context);
+            let _ = span.set_parent(context);
         }
 
         span

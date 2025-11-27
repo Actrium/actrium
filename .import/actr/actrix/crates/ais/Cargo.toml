@@ -2,6 +2,8 @@
 name = "ais"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 description = "Actor Identity Service (AIS) - ActrId registration and credential issuing"
@@ -26,7 +28,7 @@ prost-types = { workspace = true }
 ecies = { workspace = true }
 
 ## Database
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
+sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
 
 ## Utilities
 base64 = { workspace = true }

@@ -77,6 +77,8 @@ fn create_envelope(flow: signaling_envelope::Flow) -> SignalingEnvelope {
             nanos: now.subsec_nanos() as i32,
         },
         reply_for: None,
+        traceparent: None,
+        tracestate: None,
         flow: Some(flow),
     }
 }

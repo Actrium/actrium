@@ -20,10 +20,10 @@ fn main() {
         .join("../../deploy/tpl/config.template.toml");
 
     // 确保输出目录存在
-    if let Some(parent) = template_output_path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).expect("Failed to create template directory");
-        }
+    if let Some(parent) = template_output_path.parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent).expect("Failed to create template directory");
     }
 
     match generate_config_template(&config_src_path, &template_output_path) {
@@ -174,14 +174,14 @@ fn generate_optional_struct_fields(
 
 fn add_doc_comments(template: &mut String, attrs: &[Attribute]) {
     for attr in attrs {
-        if attr.path().is_ident("doc") {
-            if let Ok(doc_string) = attr.value() {
-                let doc_content = doc_string.to_token_stream().to_string();
-                // 移除引号并清理内容
-                let cleaned = doc_content.trim_matches('"').trim();
-                if !cleaned.is_empty() {
-                    template.push_str(&format!("#{cleaned}\n"));
-                }
+        if attr.path().is_ident("doc")
+            && let Ok(doc_string) = attr.value()
+        {
+            let doc_content = doc_string.to_token_stream().to_string();
+            // 移除引号并清理内容
+            let cleaned = doc_content.trim_matches('"').trim();
+            if !cleaned.is_empty() {
+                template.push_str(&format!("#{cleaned}\n"));
             }
         }
     }
@@ -189,14 +189,14 @@ fn add_doc_comments(template: &mut String, attrs: &[Attribute]) {
 
 fn add_doc_comments_commented(template: &mut String, attrs: &[Attribute]) {
     for attr in attrs {
-        if attr.path().is_ident("doc") {
-            if let Ok(doc_string) = attr.value() {
-                let doc_content = doc_string.to_token_stream().to_string();
-                // 移除引号并清理内容
-                let cleaned = doc_content.trim_matches('"').trim();
-                if !cleaned.is_empty() {
-                    template.push_str(&format!("# #{cleaned}\n"));
-                }
+        if attr.path().is_ident("doc")
+            && let Ok(doc_string) = attr.value()
+        {
+            let doc_content = doc_string.to_token_stream().to_string();
+            // 移除引号并清理内容
+            let cleaned = doc_content.trim_matches('"').trim();
+            if !cleaned.is_empty() {
+                template.push_str(&format!("# #{cleaned}\n"));
             }
         }
     }
@@ -211,12 +211,11 @@ fn is_option_type(type_path: &syn::TypePath) -> bool {
 }
 
 fn extract_option_inner_type(type_path: &syn::TypePath) -> String {
-    if let Some(segment) = type_path.path.segments.first() {
-        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-            if let Some(syn::GenericArgument::Type(inner_type)) = args.args.first() {
-                return type_to_string(inner_type);
-            }
-        }
+    if let Some(segment) = type_path.path.segments.first()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner_type)) = args.args.first()
+    {
+        return type_to_string(inner_type);
     }
     "Unknown".to_string()
 }

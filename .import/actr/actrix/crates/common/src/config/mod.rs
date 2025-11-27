@@ -382,11 +382,15 @@ impl ActrixConfig {
         }
 
         // 验证日志级别
-        if !["trace", "debug", "info", "warn", "error"].contains(&self.log_level.as_str()) {
-            errors.push(format!(
-                "Invalid log level '{}', must be one of: trace, debug, info, warn, error",
-                self.log_level
-            ));
+        // Support compound log levels like "debug,h2=info" etc.
+        {
+            let main_level = self.log_level.split(',').next().unwrap_or("").trim();
+            if !["trace", "debug", "info", "warn", "error"].contains(&main_level) {
+                errors.push(format!(
+                    "Invalid log level '{}', must start with one of: trace, debug, info, warn, error",
+                    self.log_level
+                ));
+            }
         }
 
         // 验证日志输出

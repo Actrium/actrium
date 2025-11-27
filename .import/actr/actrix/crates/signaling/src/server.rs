@@ -43,7 +43,7 @@ use prost::Message as ProstMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{debug, debug_span, error, info, instrument, warn};
 use uuid::Uuid;
 
 // Axum WebSocket
@@ -52,6 +52,9 @@ use axum::extract::ws::{Message as WsMessage, WebSocket};
 use crate::load_balancer::LoadBalancer;
 use crate::presence::PresenceManager;
 use crate::service_registry::ServiceRegistry;
+#[cfg(feature = "opentelemetry")]
+use crate::trace::{extract_trace_context, inject_trace_context};
+use tracing::Instrument;
 
 /// 信令服务器状态
 #[derive(Debug)]
@@ -96,12 +99,14 @@ pub struct SignalingServerHandle {
 
 impl SignalingServerHandle {
     /// 创建 SignalingEnvelope
+    #[instrument(level = "debug", skip_all, fields(reply_for))]
     fn create_envelope(
         &self,
         flow: signaling_envelope::Flow,
         reply_for: Option<&str>,
     ) -> SignalingEnvelope {
-        SignalingEnvelope {
+        #[allow(unused_mut)]
+        let mut envelope = SignalingEnvelope {
             envelope_version: 1,
             envelope_id: Uuid::new_v4().to_string(),
             reply_for: reply_for.map(|id| id.to_string()),
@@ -109,10 +114,18 @@ impl SignalingServerHandle {
                 seconds: chrono::Utc::now().timestamp(),
                 nanos: 0,
             },
+            traceparent: None,
+            tracestate: None,
             flow: Some(flow),
-        }
+        };
+        debug!(
+            "Created envelope: envelope_id={}, reply_for={reply_for:?}",
+            envelope.envelope_id,
+        );
+        envelope
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn create_new_envelope(&self, flow: signaling_envelope::Flow) -> SignalingEnvelope {
         self.create_envelope(flow, None)
     }
@@ -264,34 +277,55 @@ async fn handle_client_envelope(
     // 解码 protobuf 消息
     let envelope = SignalingEnvelope::decode(data)?;
 
-    info!("📨 收到信令消息 envelope_id={}", envelope.envelope_id);
+    #[cfg(feature = "opentelemetry")]
+    let remote_context = extract_trace_context(&envelope);
 
-    // 根据流向处理消息
-    match envelope.flow {
-        Some(signaling_envelope::Flow::PeerToServer(peer_to_server)) => {
-            handle_peer_to_server(peer_to_server, client_id, server, &envelope.envelope_id).await?;
-        }
-        Some(signaling_envelope::Flow::ActrToServer(actr_to_server)) => {
-            handle_actr_to_server(actr_to_server, client_id, server, &envelope.envelope_id).await?;
-        }
-        Some(signaling_envelope::Flow::ActrRelay(relay)) => {
-            handle_actr_relay(relay, client_id, server, &envelope.envelope_id).await?;
-        }
-        Some(signaling_envelope::Flow::EnvelopeError(error)) => {
-            error!(
-                "收到 envelope 错误: code={}, message={}",
-                error.code, error.message
-            );
-        }
-        _ => {
-            warn!("未知的信令流向");
-        }
+    let span = debug_span!(
+        "signaling.envelope",
+        envelope_id = %envelope.envelope_id,
+        client_id = %client_id
+    );
+    #[cfg(feature = "opentelemetry")]
+    {
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let _ = span.set_parent(remote_context);
     }
 
-    Ok(())
+    async move {
+        info!("📨 收到信令消息 envelope_id={}", envelope.envelope_id);
+
+        // 根据流向处理消息
+        match envelope.flow {
+            Some(signaling_envelope::Flow::PeerToServer(peer_to_server)) => {
+                handle_peer_to_server(peer_to_server, client_id, server, &envelope.envelope_id)
+                    .await
+            }
+            Some(signaling_envelope::Flow::ActrToServer(actr_to_server)) => {
+                handle_actr_to_server(actr_to_server, client_id, server, &envelope.envelope_id)
+                    .await
+            }
+            Some(signaling_envelope::Flow::ActrRelay(relay)) => {
+                handle_actr_relay(relay, client_id, server, &envelope.envelope_id).await
+            }
+            Some(signaling_envelope::Flow::EnvelopeError(error)) => {
+                error!(
+                    "收到 envelope 错误: code={}, message={}",
+                    error.code, error.message
+                );
+                Ok(())
+            }
+            _ => {
+                warn!("未知的信令流向");
+                Ok(())
+            }
+        }
+    }
+    .instrument(span)
+    .await
 }
 
 /// 处理 PeerToSignaling 流程（注册前）
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_peer_to_server(
     peer_to_server: PeerToSignaling,
     client_id: &str,
@@ -311,6 +345,7 @@ async fn handle_peer_to_server(
 }
 
 /// 处理注册请求
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_register_request(
     request: RegisterRequest,
     client_id: &str,
@@ -503,16 +538,7 @@ async fn handle_register_request(
     });
 
     // 创建响应 envelope
-    let response_envelope = SignalingEnvelope {
-        envelope_version: 1,
-        envelope_id: Uuid::new_v4().to_string(),
-        reply_for: Some(request_envelope_id.to_string()),
-        timestamp: prost_types::Timestamp {
-            seconds: chrono::Utc::now().timestamp(),
-            nanos: 0,
-        },
-        flow: Some(flow),
-    };
+    let response_envelope = server.create_envelope(flow, Some(request_envelope_id));
 
     send_envelope_to_client(client_id, response_envelope, server).await?;
 
@@ -551,16 +577,7 @@ async fn handle_register_request(
                     )),
                 });
 
-                let event_envelope = SignalingEnvelope {
-                    envelope_version: 1,
-                    envelope_id: Uuid::new_v4().to_string(),
-                    reply_for: None, // 这是主动推送的事件，不是对请求的回复
-                    timestamp: prost_types::Timestamp {
-                        seconds: chrono::Utc::now().timestamp(),
-                        nanos: 0,
-                    },
-                    flow: Some(flow),
-                };
+                let event_envelope = server.create_new_envelope(flow);
 
                 if let Err(e) =
                     send_envelope_to_client(&subscriber_client_id, event_envelope, server).await
@@ -584,6 +601,7 @@ async fn handle_register_request(
 }
 
 /// 发送注册错误响应
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn send_register_error(
     client_id: &str,
     code: u32,
@@ -615,16 +633,7 @@ async fn send_register_error(
         payload: Some(signaling_to_actr::Payload::RegisterResponse(response)),
     });
 
-    let response_envelope = SignalingEnvelope {
-        envelope_version: 1,
-        envelope_id: Uuid::new_v4().to_string(),
-        reply_for: Some(request_envelope_id.to_string()),
-        timestamp: prost_types::Timestamp {
-            seconds: chrono::Utc::now().timestamp(),
-            nanos: 0,
-        },
-        flow: Some(flow),
-    };
+    let response_envelope = server.create_envelope(flow, Some(request_envelope_id));
 
     send_envelope_to_client(client_id, response_envelope, server).await?;
 
@@ -632,6 +641,7 @@ async fn send_register_error(
 }
 
 /// 处理 ActrToSignaling 流程（注册后）
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_actr_to_server(
     actr_to_server: ActrToSignaling,
     client_id: &str,
@@ -748,6 +758,7 @@ async fn handle_ping(
 }
 
 /// 处理注销
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_unregister(
     source: ActrId,
     req: actr_protocol::UnregisterRequest,
@@ -783,6 +794,7 @@ async fn handle_unregister(
 }
 
 /// 处理 ActrRelay（WebRTC 信令中继）
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_actr_relay(
     relay: ActrRelay,
     client_id: &str,
@@ -845,15 +857,18 @@ async fn handle_actr_relay(
 }
 
 /// 发送 SignalingEnvelope 到客户端
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = envelope.envelope_id))]
 async fn send_envelope_to_client(
     client_id: &str,
-    envelope: SignalingEnvelope,
+    #[allow(unused_mut)] mut envelope: SignalingEnvelope,
     server: &SignalingServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let clients_guard = server.clients.read().await;
 
     if let Some(client) = clients_guard.get(client_id) {
         // 编码 protobuf
+        #[cfg(feature = "opentelemetry")]
+        inject_trace_context(&tracing::Span::current(), &mut envelope);
         let mut buf = Vec::new();
         envelope.encode(&mut buf)?;
 
@@ -897,6 +912,7 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle) {
 }
 
 /// 处理 Credential 更新请求
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_credential_update(
     source: ActrId,
     _req: actr_protocol::CredentialUpdateRequest,
@@ -1035,6 +1051,7 @@ async fn handle_credential_update(
 }
 
 /// 处理服务发现请求
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_discovery_request(
     source: ActrId,
     req: actr_protocol::DiscoveryRequest,
@@ -1113,6 +1130,7 @@ async fn handle_discovery_request(
 }
 
 /// 处理路由候选请求（负载均衡）
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_route_candidates_request(
     source: ActrId,
     req: actr_protocol::RouteCandidatesRequest,
@@ -1203,6 +1221,7 @@ async fn handle_route_candidates_request(
 }
 
 /// 处理订阅 Actor 上线事件
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_subscribe_actr_up(
     source: ActrId,
     req: actr_protocol::SubscribeActrUpRequest,
@@ -1240,6 +1259,7 @@ async fn handle_subscribe_actr_up(
 }
 
 /// 处理取消订阅 Actor 上线事件
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_unsubscribe_actr_up(
     source: ActrId,
     req: actr_protocol::UnsubscribeActrUpRequest,
@@ -1286,6 +1306,7 @@ async fn handle_unsubscribe_actr_up(
 }
 
 /// 发送通用错误响应
+#[instrument(level = "debug", skip_all, fields(client_id, reply_for = ?reply_for, target = ?target))]
 async fn send_error_response(
     client_id: &str,
     target: &ActrId,

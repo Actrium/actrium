@@ -64,10 +64,10 @@ struct ObservabilityGuard {
 impl Drop for ObservabilityGuard {
     fn drop(&mut self) {
         #[cfg(feature = "opentelemetry")]
-        if let Some(provider) = self.tracer_provider.take() {
-            if let Err(e) = provider.shutdown() {
-                eprintln!("Failed to shutdown tracer provider: {e:?}");
-            }
+        if let Some(provider) = self.tracer_provider.take()
+            && let Err(e) = provider.shutdown()
+        {
+            eprintln!("Failed to shutdown tracer provider: {e:?}");
         }
     }
 }
@@ -86,7 +86,14 @@ fn main() -> Result<()> {
         }
         None => {
             let config_path = ApplicationLauncher::find_config_file(&cli.config)?;
-            ApplicationLauncher::run_application(&config_path)
+
+            // Create Tokio runtime（before running the application）
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+
+            // Run the asynchronous application
+            runtime.block_on(ApplicationLauncher::run_application(&config_path))
         }
     }
 }
@@ -152,7 +159,9 @@ impl ApplicationLauncher {
         if config.is_console_logging() {
             #[cfg(feature = "opentelemetry")]
             {
-                if let Some((otel_layer, provider)) = Self::build_tracing_layer(config)? {
+                if let Some((otel_layer, provider)) =
+                    Self::build_tracing_layer(config, log_filter.clone())?
+                {
                     guard.tracer_provider = Some(provider);
 
                     tracing_subscriber::registry()
@@ -210,7 +219,9 @@ impl ApplicationLauncher {
 
         #[cfg(feature = "opentelemetry")]
         {
-            if let Some((otel_layer, provider)) = Self::build_tracing_layer(config)? {
+            if let Some((otel_layer, provider)) =
+                Self::build_tracing_layer(config, log_filter.clone())?
+            {
                 guard.tracer_provider = Some(provider);
 
                 tracing_subscriber::registry()
@@ -257,9 +268,14 @@ impl ApplicationLauncher {
     #[cfg(feature = "opentelemetry")]
     fn build_tracing_layer(
         config: &ActrixConfig,
+        log_filter: EnvFilter,
     ) -> Result<
         Option<(
-            OpenTelemetryLayer<tracing_subscriber::Registry, trace::SdkTracer>,
+            tracing_subscriber::filter::Filtered<
+                OpenTelemetryLayer<tracing_subscriber::Registry, trace::SdkTracer>,
+                EnvFilter,
+                tracing_subscriber::Registry,
+            >,
             SdkTracerProvider,
         )>,
     > {
@@ -305,7 +321,10 @@ impl ApplicationLauncher {
         // 创建 tracer
         use opentelemetry::trace::TracerProvider as _;
         let tracer = tracer_provider.tracer("actrix");
-        let layer = tracing_opentelemetry::layer().with_tracer(tracer);
+        // 应用与日志相同的 filter 到 OpenTelemetry layer
+        let layer = tracing_opentelemetry::layer()
+            .with_tracer(tracer)
+            .with_filter(log_filter);
 
         Ok(Some((layer, tracer_provider)))
     }
@@ -388,7 +407,7 @@ impl ApplicationLauncher {
     }
 
     /// 运行应用程序的主入口
-    fn run_application(config_path: &PathBuf) -> Result<()> {
+    async fn run_application(config_path: &Path) -> Result<()> {
         bootstrap_info!("📄 加载配置文件: {:?}", config_path);
 
         // 加载配置文件
@@ -438,17 +457,12 @@ impl ApplicationLauncher {
         let pid_path = process::ProcessManager::write_pid_file(config.get_pid_path().as_deref())?;
         let _pid_guard = process::PidFileGuard::new(pid_path);
 
-        // 创建tokio runtime (自动使用默认工作线程数)
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?;
-
         // 需要在创建服务之前克隆配置，因为服务可能需要 root 权限来绑定端口
         let user = config.user.clone();
         let group = config.group.clone();
 
         // 运行服务
-        runtime.block_on(Self::run_services_with_privilege_drop(config, user, group))
+        Self::run_services_with_privilege_drop(config, user, group).await
     }
 
     /// 运行服务并在适当时机切换用户权限

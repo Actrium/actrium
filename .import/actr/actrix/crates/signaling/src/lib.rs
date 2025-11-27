@@ -23,6 +23,8 @@ pub mod ratelimit;
 pub mod server;
 pub mod service_registry;
 pub mod service_registry_storage;
+#[cfg(feature = "opentelemetry")]
+pub mod trace;
 
 // Axum router integration
 pub mod axum_router;
