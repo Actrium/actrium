@@ -30,7 +30,7 @@ export const AskitComponents: ComponentMap = {
 
 /**
  * Module handlers for plugin API calls
- * Processes messages like `askit:toast:show` from plugins
+ * Processes messages like `askit:toast:show` from guests
  */
 export interface ModuleHandler {
   handle: (method: string, args: unknown[]) => unknown;

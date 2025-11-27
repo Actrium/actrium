@@ -4,13 +4,13 @@
 
 [中文文档](./README.zh.md)
 
-**askit** is an isomorphic UI kit for the AskAway platform, providing unified APIs and components that work seamlessly across both the Host App (React Native) and Plugin environments (QuickJS Sandbox).
+**askit** is an isomorphic UI kit for the AskAway platform, providing unified APIs and components that work seamlessly across both the Host App (React Native) and Guest environments (QuickJS Sandbox).
 
 ## Architecture
 
 askit follows a **90% Universal + 10% Core** architecture:
 
-- **Universal (90%)**: Same API surface for both Host and Plugin
+- **Universal (90%)**: Same API surface for both Host and Guest
 - **Core (10%)**: Host-only modules for bridging and registration
 
 ```
@@ -40,7 +40,7 @@ askit follows a **90% Universal + 10% Core** architecture:
 │  │  - Bus, Toast, Haptic (Remote implementations)    │ │
 │  │  - StepList, ThemeView... (DSL generators)        │ │
 │  └───────────────────────────────────────────────────┘ │
-│                      Plugin                             │
+│                      Guest                             │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -52,20 +52,20 @@ npm install askit
 
 ## Usage
 
-### In Plugin (QuickJS Sandbox)
+### In Guest (QuickJS Sandbox)
 
 ```typescript
 import { Bus, Toast, Haptic } from 'askit';
 import { StepList, UserAvatar } from 'askit';
 
 // Event communication
-Bus.emit('plugin:ready', { version: '1.0.0' });
+Bus.emit('guest:ready', { version: '1.0.0' });
 Bus.on('host:config', (config) => {
   console.log('Received config:', config);
 });
 
 // Toast notifications
-Toast.show('Hello from plugin!', { duration: 'short', position: 'bottom' });
+Toast.show('Hello from guest!', { duration: 'short', position: 'bottom' });
 
 // Haptic feedback
 Haptic.trigger('light');
@@ -85,20 +85,20 @@ import { Engine } from 'rill';
 const engine = new Engine();
 const adapter = createEngineAdapter(engine);
 
-// Register components for rendering plugin UI
+// Register components for rendering guest UI
 Object.entries(AskitComponents).forEach(([name, Component]) => {
   engine.registerComponent(name, Component);
 });
 
-// Start plugin
-engine.loadPlugin('./plugin.js');
+// Start guest
+engine.loadGuest('./guest.js');
 ```
 
 ## API Reference
 
 ### Bus
 
-Event-based communication between Host and Plugin.
+Event-based communication between Host and Guest.
 
 ```typescript
 // Emit event
@@ -149,7 +149,7 @@ askit
 ├── index.ts          # Universal exports (Bus, Toast, Haptic, Components)
 └── core/
     ├── registry.ts   # Component and module registration
-    └── bridge.ts     # Host-Plugin message bridge
+    └── bridge.ts     # Host-Guest message bridge
 ```
 
 ### Conditional Exports

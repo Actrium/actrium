@@ -1,7 +1,7 @@
 /**
- * AskIt Bridge - Message Handler for Host-Plugin Communication
+ * AskIt Bridge - Message Handler for Host-Guest Communication
  *
- * This module handles messages from plugins and routes them to
+ * This module handles messages from guests and routes them to
  * the appropriate native modules.
  */
 
@@ -9,7 +9,7 @@ import { AskitModules } from './registry';
 import { Bus, NativeBus } from '../api/Bus.native';
 
 /**
- * Message types from plugins
+ * Message types from guests
  */
 interface PluginMessage {
   event: string;
@@ -37,7 +37,7 @@ function parseAskitEvent(event: string): { module: string; method: string } | nu
 }
 
 /**
- * Handle incoming message from plugin
+ * Handle incoming message from guest
  */
 export function handlePluginMessage(message: PluginMessage): unknown {
   const { event, payload } = message;

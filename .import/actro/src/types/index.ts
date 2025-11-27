@@ -1,5 +1,5 @@
 /**
- * AskIt Types - Shared type definitions for Host and Plugin
+ * AskIt Types - Shared type definitions for Host and Guest
  */
 
 import type { ReactNode } from 'react';

@@ -4,13 +4,13 @@
 
 [English](./README.md)
 
-**askit** 是 AskAway 平台的同构 UI 工具包，提供统一的 API 和组件，可在 Host App (React Native) 和 Plugin 环境 (QuickJS Sandbox) 中无缝运行。
+**askit** 是 AskAway 平台的同构 UI 工具包，提供统一的 API 和组件，可在 Host App (React Native) 和 Guest 环境 (QuickJS Sandbox) 中无缝运行。
 
 ## 架构
 
 askit 采用 **90% 通用 + 10% 核心** 架构：
 
-- **通用 (90%)**：Host 和 Plugin 共享相同的 API 接口
+- **通用 (90%)**：Host 和 Guest 共享相同的 API 接口
 - **核心 (10%)**：仅 Host 端使用的桥接和注册模块
 
 ```
@@ -40,7 +40,7 @@ askit 采用 **90% 通用 + 10% 核心** 架构：
 │  │  - Bus, Toast, Haptic (远程实现)                   │ │
 │  │  - StepList, ThemeView... (DSL 生成器)            │ │
 │  └───────────────────────────────────────────────────┘ │
-│                      Plugin                             │
+│                      Guest                             │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -52,14 +52,14 @@ npm install askit
 
 ## 使用
 
-### 在 Plugin 中 (QuickJS Sandbox)
+### 在 Guest 中 (QuickJS Sandbox)
 
 ```typescript
 import { Bus, Toast, Haptic } from 'askit';
 import { StepList, UserAvatar } from 'askit';
 
 // 事件通信
-Bus.emit('plugin:ready', { version: '1.0.0' });
+Bus.emit('guest:ready', { version: '1.0.0' });
 Bus.on('host:config', (config) => {
   console.log('收到配置:', config);
 });
@@ -91,14 +91,14 @@ Object.entries(AskitComponents).forEach(([name, Component]) => {
 });
 
 // 启动插件
-engine.loadPlugin('./plugin.js');
+engine.loadGuest('./guest.js');
 ```
 
 ## API 参考
 
 ### Bus
 
-Host 与 Plugin 之间基于事件的通信。
+Host 与 Guest 之间基于事件的通信。
 
 ```typescript
 // 发送事件
@@ -149,7 +149,7 @@ askit
 ├── index.ts          # 通用导出 (Bus, Toast, Haptic, Components)
 └── core/
     ├── registry.ts   # 组件和模块注册
-    └── bridge.ts     # Host-Plugin 消息桥接
+    └── bridge.ts     # Host-Guest 消息桥接
 ```
 
 ### 条件导出
