@@ -10,6 +10,7 @@ pub mod services;
 pub mod signaling;
 pub mod supervisor;
 pub mod tracing;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub mod turn;
 
 pub use crate::config::ais::AisConfig;
@@ -20,7 +21,6 @@ pub use crate::config::supervisor::SupervisorConfig;
 pub use crate::config::tracing::TracingConfig;
 pub use crate::config::turn::TurnConfig;
 use ::ks::storage::StorageBackend;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::path::{Path, PathBuf};
 
 /// Actor-RTC 辅助服务的主配置结构体
@@ -132,37 +132,24 @@ pub struct ActrixConfig {
     /// - 字段名保留 actrix_shared_key 以保持向后兼容
     pub actrix_shared_key: String,
 
-    /// 日志级别
+    /// 可观测性配置（日志 + 追踪）
     ///
-    /// 控制系统日志的详细程度，可选值：
-    /// - "trace": 最详细的调试信息
-    /// - "debug": 调试信息
-    /// - "info": 一般信息（推荐）
-    /// - "warn": 警告信息
-    /// - "error": 仅错误信息
-    pub log_level: String,
-
-    /// 日志输出目标
-    ///
-    /// 控制日志输出位置：
-    /// - "console": 仅输出到控制台（默认）
-    /// - "file": 输出到文件
-    #[serde(default = "default_log_output")]
-    pub log_output: String,
-
-    /// 日志轮转开关
-    ///
-    /// 当 log_output = "file" 时有效：
-    /// - true: 按天轮转日志文件
-    /// - false: 追加到单个文件
+    /// 将日志和 OpenTelemetry 追踪配置合并到统一的 observability 段，便于统一管理。
     #[serde(default)]
-    pub log_rotate: bool,
+    pub observability: ObservabilityConfig,
+}
 
-    /// 日志文件路径
+/// 可观测性配置
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ObservabilityConfig {
+    /// 过滤级别（用于日志与追踪）
     ///
-    /// 当 log_output = "file" 时有效
-    #[serde(default = "default_log_path")]
-    pub log_path: String,
+    /// 支持 EnvFilter 语法（如 "info,hyper=warn"）。默认值 "info"。
+    #[serde(default = "default_filter_level")]
+    pub filter_level: String,
+
+    #[serde(default)]
+    pub log: LogConfig,
 
     /// OpenTelemetry 追踪配置（可选）
     ///
@@ -170,6 +157,52 @@ pub struct ActrixConfig {
     /// 需要编译时启用 `opentelemetry` feature。
     #[serde(default)]
     pub tracing: TracingConfig,
+}
+
+/// 日志配置
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LogConfig {
+    /// 日志输出目标
+    ///
+    /// 控制日志输出位置：
+    /// - "console": 仅输出到控制台（默认）
+    /// - "file": 输出到文件
+    #[serde(default = "default_log_output")]
+    pub output: String,
+
+    /// 日志轮转开关
+    ///
+    /// 当 output = "file" 时有效：
+    /// - true: 按天轮转日志文件
+    /// - false: 追加到单个文件
+    #[serde(default)]
+    pub rotate: bool,
+
+    /// 日志文件路径
+    ///
+    /// 当 output = "file" 时有效
+    #[serde(default = "default_log_path")]
+    pub path: String,
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            log: LogConfig::default(),
+            filter_level: default_filter_level(),
+            tracing: TracingConfig::default(),
+        }
+    }
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            output: default_log_output(),
+            rotate: false,
+            path: default_log_path(),
+        }
+    }
 }
 
 fn default_enable() -> u8 {
@@ -182,6 +215,10 @@ fn default_log_output() -> String {
 
 fn default_log_path() -> String {
     "logs/".to_string()
+}
+
+fn default_filter_level() -> String {
+    "info".to_string()
 }
 
 fn serialize_pathbuf<S>(path: &Path, serializer: S) -> Result<S::Ok, S::Error>
@@ -215,11 +252,7 @@ impl Default for ActrixConfig {
             services: ServicesConfig::default(),
             sqlite_path: PathBuf::from("database"),
             actrix_shared_key: "XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg=".to_string(),
-            log_level: "info".to_string(),
-            log_output: default_log_output(),
-            log_rotate: false,
-            log_path: default_log_path(),
-            tracing: TracingConfig::default(),
+            observability: ObservabilityConfig::default(),
         }
     }
 }
@@ -297,22 +330,42 @@ impl ActrixConfig {
     ///
     /// 返回 OpenTelemetry 追踪配置的引用
     pub fn tracing_config(&self) -> &TracingConfig {
-        &self.tracing
+        &self.observability.tracing
+    }
+
+    /// 返回可观测性配置引用
+    pub fn observability_config(&self) -> &ObservabilityConfig {
+        &self.observability
+    }
+
+    /// 返回日志配置引用
+    pub fn log_config(&self) -> &LogConfig {
+        &self.observability.log
     }
 
     /// 检查是否使用控制台日志输出
     pub fn is_console_logging(&self) -> bool {
-        self.log_output == "console"
+        self.observability.log.output == "console"
     }
 
     /// 检查是否应该轮转日志
     pub fn should_rotate_logs(&self) -> bool {
-        self.log_output == "file" && self.log_rotate
+        self.observability.log.output == "file" && self.observability.log.rotate
     }
 
-    /// 获取日志级别
-    pub fn get_log_level(&self) -> &str {
-        &self.log_level
+    /// 获取日志/追踪过滤级别，优先使用 RUST_LOG
+    pub fn get_filter_level(&self) -> String {
+        std::env::var("RUST_LOG")
+            .ok()
+            .and_then(|v| {
+                let trimmed = v.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            })
+            .unwrap_or_else(|| self.observability.filter_level.clone())
     }
 
     /// 从文件加载配置
@@ -381,23 +434,28 @@ impl ActrixConfig {
             ));
         }
 
-        // 验证日志级别
-        // Support compound log levels like "debug,h2=info" etc.
+        // 验证过滤级别（EnvFilter 语法）
         {
-            let main_level = self.log_level.split(',').next().unwrap_or("").trim();
+            let main_level = self
+                .observability
+                .filter_level
+                .split(',')
+                .next()
+                .unwrap_or("")
+                .trim();
             if !["trace", "debug", "info", "warn", "error"].contains(&main_level) {
                 errors.push(format!(
-                    "Invalid log level '{}', must start with one of: trace, debug, info, warn, error",
-                    self.log_level
+                    "Invalid filter level '{}', must start with one of: trace, debug, info, warn, error",
+                    self.observability.filter_level
                 ));
             }
         }
 
         // 验证日志输出
-        if !["console", "file"].contains(&self.log_output.as_str()) {
+        if !["console", "file"].contains(&self.observability.log.output.as_str()) {
             errors.push(format!(
-                "Invalid log output '{}', must be 'console' or 'file'",
-                self.log_output
+                "Invalid log output '{}' (observability.log.output), must be 'console' or 'file'",
+                self.observability.log.output
             ));
         }
 
@@ -420,7 +478,7 @@ impl ActrixConfig {
         }
 
         // 验证追踪配置
-        if let Err(e) = self.tracing.validate() {
+        if let Err(e) = self.observability.tracing.validate() {
             errors.push(format!("Tracing configuration error: {e}"));
         }
 
@@ -533,13 +591,13 @@ impl ActrixConfig {
             }
 
             // 生产环境应使用文件日志
-            if self.log_output == "console" {
-                errors.push("Warning: Production environment should use file logging (log_output = \"file\")".to_string());
+            if self.observability.log.output == "console" {
+                errors.push("Warning: Production environment should use file logging (observability.log.output = \"file\")".to_string());
             }
 
             // 生产环境建议启用日志轮转
-            if self.log_output == "file" && !self.log_rotate {
-                errors.push("Warning: Production environment should enable log rotation (log_rotate = true)".to_string());
+            if self.observability.log.output == "file" && !self.observability.log.rotate {
+                errors.push("Warning: Production environment should enable log rotation (observability.log.rotate = true)".to_string());
             }
         }
 

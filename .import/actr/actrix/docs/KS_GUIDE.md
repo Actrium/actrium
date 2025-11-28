@@ -1437,9 +1437,12 @@ actrix_shared_key = "your-strong-key-change-me"  # ⚠️ 必须更改!
 sqlite_path = "/var/lib/actrix"  # 数据库存储目录，主数据库文件为 {sqlite_path}/actrix.db
 
 # 日志配置
-log_level = "info"
-log_output = "file"
-log_path = "/var/log/actrix"
+[observability]
+filter_level = "info"   # 可被 RUST_LOG 覆盖
+
+[observability.log]
+output = "file"
+path = "/var/log/actrix"
 ```
 
 ### 2. 启动和停止

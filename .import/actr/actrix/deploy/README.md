@@ -42,7 +42,7 @@ sudo nano /opt/actrix/config.toml
 - `bind.https`: HTTPS 证书和端口配置
 - `bind.ice`: STUN/TURN 端口配置
 - `turn.public_ip`: TURN 服务器的公网 IP
-- `log_output`: 设置为 "file" 并启用 log_rotate
+- `observability.log.output`: 设置为 "file" 并启用 rotate
 
 ### 4. 启动服务
 

@@ -44,7 +44,7 @@ pub mod util;             // 工具函数
 
 #### 1.2.1 ActrixConfig - 主配置结构
 
-**文件**: `crates/base/src/config/mod.rs:23-150`
+**文件**: `crates/common/src/config/mod.rs:23-170`
 
 核心配置结构:
 
@@ -61,14 +61,10 @@ pub struct ActrixConfig {
     pub turn: TurnConfig,                   // TURN 服务配置
     pub location_tag: String,               // 位置标签
     pub supervisor: Option<SupervisorConfig>, // Supervisor 配置
-    pub ks: Option<KeyServerConfig>,        // KS 服务配置
-    pub sqlite: String,                     // SQLite 数据库路径
+    pub services: ServicesConfig,            // 服务配置
+    pub sqlite_path: PathBuf,                // SQLite 数据库目录
     pub actrix_shared_key: String,           // 内部服务通信密钥
-    pub log_level: String,                  // 日志级别
-    pub log_output: String,                 // 日志输出: console/file
-    pub log_rotate: bool,                   // 日志轮转开关
-    pub log_path: String,                   // 日志文件路径
-    pub tracing: TracingConfig,             // OpenTelemetry 追踪配置
+    pub observability: ObservabilityConfig,  // 日志 + 追踪配置
 }
 ```
 
@@ -144,10 +140,16 @@ pub fn validate(&self) -> Result<(), Vec<String>> {
         errors.push(format!("Invalid environment '{}'", self.env));
     }
 
-    // 3. 验证日志级别
-    if !["trace", "debug", "info", "warn", "error"]
-        .contains(&self.log_level.as_str()) {
-        errors.push(format!("Invalid log level '{}'", self.log_level));
+    // 3. 验证过滤级别 (EnvFilter 主级别前缀)
+    let main_level = self
+        .observability
+        .filter_level
+        .split(',')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if !["trace", "debug", "info", "warn", "error"].contains(&main_level) {
+        errors.push(format!("Invalid filter level '{}'", self.observability.filter_level));
     }
 
     // 4. 安全检查 - actrix_shared_key
@@ -176,7 +178,7 @@ pub fn validate(&self) -> Result<(), Vec<String>> {
             || self.bind.https.as_ref().unwrap().port == 0 {
             errors.push("Production should enable HTTPS".to_string());
         }
-        if self.log_output == "console" {
+        if self.observability.log.output == "console" {
             errors.push("Production should use file logging".to_string());
         }
     }
