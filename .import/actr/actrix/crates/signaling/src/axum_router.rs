@@ -262,6 +262,7 @@ async fn handle_websocket(socket: WebSocket, state: SignalingState, client_ip: s
     // 创建 SignalingServerHandle
     let server_handle = SignalingServerHandle {
         clients: state.server.clients.clone(),
+        actor_id_index: state.server.actor_id_index.clone(),
         service_registry: state.server.service_registry.clone(),
         presence_manager: state.server.presence_manager.clone(),
         ais_client: state.server.ais_client.clone(),

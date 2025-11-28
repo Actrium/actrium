@@ -49,7 +49,7 @@ Key settings to change:
 - `actrix_shared_key` - Generate with: `openssl rand -hex 32`
 - `turn.advertised_ip` - Your server's public IP
 - `bind.https.cert/key` - TLS certificate paths
-- `log_output` - Set to `"file"` for production
+- `observability.log.output` - Set to `"file"` for production
 
 ### Running
 
@@ -93,9 +93,13 @@ enable = 22  # KS + TURN + STUN (recommended)
 enable = 6
 name = "actrix-01"
 env = "prod"
-log_level = "info"
-log_output = "file"
-log_rotate = true
+
+[observability]
+filter_level = "info"    # RUST_LOG overrides if set
+
+[observability.log]
+output = "file"
+rotate = true
 
 [bind.ice]
 advertised_ip = "203.0.113.10"
@@ -117,15 +121,22 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for complete reference.
 
 **Console Output** (development):
 ```toml
-log_output = "console"
-log_level = "debug"
+[observability]
+filter_level = "debug"  # overridden by RUST_LOG if set
+
+[observability.log]
+output = "console"
 ```
 
 **File Output with Rotation** (production):
 ```toml
-log_output = "file"
-log_rotate = true
-log_path = "/var/log/actrix/"
+[observability]
+filter_level = "info"  # overridden by RUST_LOG if set
+
+[observability.log]
+output = "file"
+rotate = true
+path = "/var/log/actrix/"
 ```
 
 ### OpenTelemetry Tracing
@@ -138,7 +149,7 @@ docker-compose -f docker/jaeger-compose.yml up -d
 cargo build --release --features opentelemetry
 
 # 3. Configure endpoint
-[tracing]
+[observability.tracing]
 enable = true
 service_name = "actrix"
 endpoint = "http://127.0.0.1:4317"

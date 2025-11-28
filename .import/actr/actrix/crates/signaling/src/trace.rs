@@ -2,8 +2,6 @@ use actr_protocol::SignalingEnvelope;
 use opentelemetry::{
     Context, propagation::Extractor, propagation::Injector, trace::TraceContextExt,
 };
-use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 struct EnvelopeExtractor<'a>(&'a SignalingEnvelope);
 
@@ -48,10 +46,9 @@ impl<'a> Injector for EnvelopeInjector<'a> {
     }
 }
 
-/// Inject the given span's context into SignalingEnvelope.
-pub fn inject_trace_context(span: &Span, envelope: &mut SignalingEnvelope) {
+/// Inject the given OpenTelemetry context into SignalingEnvelope.
+pub fn inject_trace_context(context: &Context, envelope: &mut SignalingEnvelope) {
     let mut injector = EnvelopeInjector(envelope);
-    let context = span.context();
     let span_ref = context.span();
     let span_context = span_ref.span_context();
     if !span_context.is_valid() {
@@ -59,6 +56,6 @@ pub fn inject_trace_context(span: &Span, envelope: &mut SignalingEnvelope) {
     }
 
     opentelemetry::global::get_text_map_propagator(|propagator| {
-        propagator.inject_context(&context, &mut injector)
+        propagator.inject_context(context, &mut injector)
     });
 }

@@ -5,12 +5,14 @@
 mod cli;
 // mod config; // 已迁移到独立的 config crate
 mod error;
+mod observability;
 mod process;
 mod service;
 
 use actrix_common::config::ActrixConfig;
 use anyhow::Context;
 use clap::Parser;
+use observability::init_observability;
 use service::{
     AisService, KsGrpcService, KsHttpService, ServiceContainer, ServiceManager, SignalingService,
     StunService, SupervisorService, TurnService,
@@ -19,8 +21,6 @@ use std::path::{Path, PathBuf};
 use tokio::task::JoinHandle;
 
 use tracing::{error, info, warn};
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
 
 macro_rules! bootstrap_info {
     ($($arg:tt)*) => {
@@ -34,43 +34,8 @@ macro_rules! bootstrap_error {
     };
 }
 
-#[cfg(feature = "opentelemetry")]
-use opentelemetry::KeyValue;
-#[cfg(feature = "opentelemetry")]
-use opentelemetry_otlp::WithExportConfig;
-#[cfg(feature = "opentelemetry")]
-use opentelemetry_sdk::propagation::TraceContextPropagator;
-#[cfg(feature = "opentelemetry")]
-use opentelemetry_sdk::{
-    Resource,
-    trace::{self, SdkTracerProvider},
-};
-#[cfg(feature = "opentelemetry")]
-use tracing_opentelemetry::OpenTelemetryLayer;
-
 use cli::{Cli, Commands};
 use error::{Error, Result};
-
-/// Observability guard that manages lifecycle of tracing and logging resources
-///
-/// Ensures proper shutdown of OpenTelemetry tracer provider and log file handles
-#[derive(Default)]
-struct ObservabilityGuard {
-    #[cfg(feature = "opentelemetry")]
-    tracer_provider: Option<SdkTracerProvider>,
-    log_guard: Option<WorkerGuard>,
-}
-
-impl Drop for ObservabilityGuard {
-    fn drop(&mut self) {
-        #[cfg(feature = "opentelemetry")]
-        if let Some(provider) = self.tracer_provider.take()
-            && let Err(e) = provider.shutdown()
-        {
-            eprintln!("Failed to shutdown tracer provider: {e:?}");
-        }
-    }
-}
 
 /// Application launcher utilities
 struct ApplicationLauncher;
@@ -144,221 +109,6 @@ impl ApplicationLauncher {
         Err(Error::custom(
             "No configuration file found. Please create one or specify path with --config",
         ))
-    }
-
-    /// 初始化可观测性系统（日志 + 追踪）
-    fn init_observability(config: &ActrixConfig) -> Result<ObservabilityGuard> {
-        let mut guard = ObservabilityGuard::default();
-
-        // 创建日志目录
-        std::fs::create_dir_all(&config.log_path)?;
-
-        let log_filter = EnvFilter::new(config.get_log_level());
-
-        // 控制台输出模式
-        if config.is_console_logging() {
-            #[cfg(feature = "opentelemetry")]
-            {
-                if let Some((otel_layer, provider)) =
-                    Self::build_tracing_layer(config, log_filter.clone())?
-                {
-                    guard.tracer_provider = Some(provider);
-
-                    tracing_subscriber::registry()
-                        .with(otel_layer)
-                        .with(
-                            fmt::layer()
-                                .with_target(true)
-                                .with_level(true)
-                                .with_line_number(true)
-                                .with_file(true)
-                                .with_ansi(true)
-                                .with_filter(log_filter),
-                        )
-                        .init();
-
-                    info!("✅ 可观测性系统初始化完成 (控制台 + OpenTelemetry)");
-                    Self::log_status(config);
-                    return Ok(guard);
-                }
-            }
-
-            // 没有 OpenTelemetry 或未启用
-            tracing_subscriber::registry()
-                .with(
-                    fmt::layer()
-                        .with_target(true)
-                        .with_level(true)
-                        .with_line_number(true)
-                        .with_file(true)
-                        .with_ansi(true)
-                        .with_filter(log_filter),
-                )
-                .init();
-
-            info!("✅ 日志系统初始化完成 (控制台)");
-            info!("📝 日志级别: {}", config.log_level);
-            return Ok(guard);
-        }
-
-        // 文件输出模式
-        let (non_blocking, worker_guard) = if config.should_rotate_logs() {
-            // 按天轮转日志文件
-            let file_appender = tracing_appender::rolling::daily(&config.log_path, "actrix.log");
-            tracing_appender::non_blocking(file_appender)
-        } else {
-            // 追加到单个文件，不轮转
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(format!("{}/actrix.log", config.log_path))?;
-            tracing_appender::non_blocking(file)
-        };
-
-        guard.log_guard = Some(worker_guard);
-
-        #[cfg(feature = "opentelemetry")]
-        {
-            if let Some((otel_layer, provider)) =
-                Self::build_tracing_layer(config, log_filter.clone())?
-            {
-                guard.tracer_provider = Some(provider);
-
-                tracing_subscriber::registry()
-                    .with(otel_layer)
-                    .with(
-                        fmt::layer()
-                            .with_target(true)
-                            .with_level(true)
-                            .with_line_number(true)
-                            .with_file(true)
-                            .with_ansi(false) // 文件输出禁用颜色
-                            .with_writer(non_blocking)
-                            .with_filter(log_filter),
-                    )
-                    .init();
-
-                info!("✅ 可观测性系统初始化完成 (文件 + OpenTelemetry)");
-                Self::log_status(config);
-                return Ok(guard);
-            }
-        }
-
-        // 没有 OpenTelemetry 或未启用
-        tracing_subscriber::registry()
-            .with(
-                fmt::layer()
-                    .with_target(true)
-                    .with_level(true)
-                    .with_line_number(true)
-                    .with_file(true)
-                    .with_ansi(false) // 文件输出禁用颜色
-                    .with_writer(non_blocking)
-                    .with_filter(log_filter),
-            )
-            .init();
-
-        info!("✅ 日志系统初始化完成 (文件)");
-        Self::log_status(config);
-
-        Ok(guard)
-    }
-
-    /// 构建 OpenTelemetry 追踪层
-    #[cfg(feature = "opentelemetry")]
-    fn build_tracing_layer(
-        config: &ActrixConfig,
-        log_filter: EnvFilter,
-    ) -> Result<
-        Option<(
-            tracing_subscriber::filter::Filtered<
-                OpenTelemetryLayer<tracing_subscriber::Registry, trace::SdkTracer>,
-                EnvFilter,
-                tracing_subscriber::Registry,
-            >,
-            SdkTracerProvider,
-        )>,
-    > {
-        let tracing_cfg = config.tracing_config();
-
-        if !tracing_cfg.is_enabled() {
-            return Ok(None);
-        }
-
-        // 验证配置
-        if let Err(e) = tracing_cfg.validate() {
-            error!("OpenTelemetry 配置验证失败: {}", e);
-            return Ok(None);
-        }
-
-        // 构建 OTLP exporter
-        let exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
-            .with_endpoint(tracing_cfg.endpoint())
-            .build()
-            .map_err(|e| Error::custom(format!("Failed to build OTLP exporter: {e}")))?;
-
-        // 构建资源标签
-        let resource = Resource::builder()
-            .with_service_name(tracing_cfg.service_name().to_string())
-            .with_attributes([
-                KeyValue::new("service.instance.id", config.name.clone()),
-                KeyValue::new("service.environment", config.env.clone()),
-                KeyValue::new("service.location", config.location_tag.clone()),
-            ])
-            .build();
-
-        // 构建 tracer provider
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_resource(resource)
-            .with_batch_exporter(exporter)
-            .build();
-
-        // 设置全局 tracer provider
-        opentelemetry::global::set_tracer_provider(tracer_provider.clone());
-        opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
-
-        // 创建 tracer
-        use opentelemetry::trace::TracerProvider as _;
-        let tracer = tracer_provider.tracer("actrix");
-        // 应用与日志相同的 filter 到 OpenTelemetry layer
-        let layer = tracing_opentelemetry::layer()
-            .with_tracer(tracer)
-            .with_filter(log_filter);
-
-        Ok(Some((layer, tracer_provider)))
-    }
-
-    /// 记录日志和追踪状态
-    fn log_status(config: &ActrixConfig) {
-        info!("📝 日志配置:");
-        info!("  - 级别: {}", config.log_level);
-        info!("  - 输出: {}", config.log_output);
-
-        if config.log_output == "file" {
-            info!("  - 路径: {}", config.log_path);
-            info!(
-                "  - 轮转: {}",
-                if config.log_rotate {
-                    "开启（按天）"
-                } else {
-                    "关闭"
-                }
-            );
-        }
-
-        #[cfg(feature = "opentelemetry")]
-        {
-            let tracing_cfg = config.tracing_config();
-            if tracing_cfg.is_enabled() {
-                info!("📊 OpenTelemetry 追踪:");
-                info!("  - 服务名: {}", tracing_cfg.service_name());
-                info!("  - OTLP 端点: {}", tracing_cfg.endpoint());
-                info!("  - 实例 ID: {}", config.name);
-                info!("  - 环境: {}", config.env);
-                info!("  - 位置: {}", config.location_tag);
-            }
-        }
     }
 
     /// 测试配置文件是否有效
@@ -451,7 +201,7 @@ impl ApplicationLauncher {
         }
 
         // 初始化可观测性系统（日志 + 追踪）
-        let _observability_guard = Self::init_observability(&config)?;
+        let _observability_guard = init_observability(&config)?;
 
         // 写入 PID 文件（在绑定端口之前，需要权限）
         let pid_path = process::ProcessManager::write_pid_file(config.get_pid_path().as_deref())?;

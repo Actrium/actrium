@@ -109,22 +109,22 @@ location_tag = "aliyun,beijing,zone-b"
 location_tag = "office,beijing,rack-01"
 ```
 
-## 日志配置
+## 可观测性配置
 
-### log_level (必需)
+### observability.filter_level (必需)
 
 **类型**: `String`  
-**允许值**: `"trace"`, `"debug"`, `"info"`, `"warn"`, `"error"`  
+**允许值**: `"trace"`, `"debug"`, `"info"`, `"warn"`, `"error"` (支持 EnvFilter 语法，如 `info,hyper=warn`)  
 **默认值**: `"info"`  
-**用途**: 日志级别
+**用途**: 统一的日志与追踪过滤规则。若设置了 `RUST_LOG` 环境变量，则优先生效。
 
 ```toml
-log_level = "info"   # 生产环境
-log_level = "debug"  # 开发调试
-log_level = "error"  # 仅错误
+[observability]
+filter_level = "info"          # 默认过滤级别
+# RUST_LOG=debug,hyper=info    # 环境变量覆盖配置
 ```
 
-### log_output (可选)
+### observability.log.output (可选)
 
 **类型**: `String`  
 **允许值**: `"console"`, `"file"`  
@@ -132,30 +132,45 @@ log_level = "error"  # 仅错误
 **用途**: 日志输出目标
 
 ```toml
-log_output = "console"  # 控制台 (开发)
-log_output = "file"     # 文件 (生产)
+[observability.log]
+output = "console"  # 控制台 (开发)
+output = "file"     # 文件 (生产)
 ```
 
-### log_rotate (可选)
+### observability.log.rotate (可选)
 
 **类型**: `bool`  
 **默认值**: `false`  
-**用途**: 启用按天日志轮转 (仅当 log_output = "file" 时)
+**用途**: 启用按天日志轮转 (仅当 output = "file" 时)
 
 ```toml
-log_rotate = true   # actrix-2025-01-15.log
-log_rotate = false  # actrix.log (追加)
+[observability.log]
+output = "file"
+rotate = true   # actrix-2025-01-15.log
+rotate = false  # actrix.log (追加)
 ```
 
-### log_path (可选)
+### observability.log.path (可选)
 
 **类型**: `String` (目录路径)  
 **默认值**: `"logs/"`  
-**用途**: 日志文件目录 (仅当 log_output = "file" 时)
+**用途**: 日志文件目录 (仅当 output = "file" 时)
 
 ```toml
-log_path = "/var/log/actrix/"
-log_path = "logs/"  # 相对路径
+[observability.log]
+output = "file"
+path = "/var/log/actrix/"
+```
+
+### observability.tracing (可选)
+
+**用途**: OpenTelemetry 分布式追踪配置（需要 `opentelemetry` feature）
+
+```toml
+[observability.tracing]
+enable = true
+service_name = "actrix"
+endpoint = "http://127.0.0.1:4317"
 ```
 
 ## 进程管理 (可选)
@@ -293,14 +308,14 @@ realm = "actrix.example.com"
 
 ## OpenTelemetry 追踪 (可选)
 
-### tracing.enable (可选)
+### observability.tracing.enable (可选)
 
 **类型**: `bool`  
 **默认值**: `false`  
 **用途**: 启用 OpenTelemetry 追踪
 
 ```toml
-[tracing]
+[observability.tracing]
 enable = true
 ```
 
@@ -309,23 +324,25 @@ enable = true
 cargo build --features opentelemetry
 ```
 
-### tracing.service_name (可选)
+### observability.tracing.service_name (可选)
 
 **类型**: `String`  
 **默认值**: `"actrix"`  
 **用途**: 服务名称 (在 Jaeger 等显示)
 
 ```toml
+[observability.tracing]
 service_name = "actrix-prod-01"
 ```
 
-### tracing.endpoint (可选)
+### observability.tracing.endpoint (可选)
 
 **类型**: `String` (URL)  
 **默认值**: `"http://127.0.0.1:4317"`  
 **用途**: OTLP gRPC 端点
 
 ```toml
+[observability.tracing]
 endpoint = "http://127.0.0.1:4317"  # Jaeger
 endpoint = "http://tempo:4317"      # Grafana Tempo
 endpoint = "http://otel-collector:4317"  # OTel Collector
@@ -384,7 +401,7 @@ cargo run -- test config.toml
 - ❌ 必需字段缺失
 - ❌ 无效的 IP 地址格式
 - ❌ 无效的环境值 (非 dev/prod/test)
-- ❌ 无效的日志级别
+- ❌ 无效的过滤级别
 - ❌ TURN 启用但缺少配置
 - ❌ KS 启用但缺少配置
 
@@ -405,7 +422,12 @@ env = "dev"
 sqlite_path = "database"
 actrix_shared_key = "my-secure-key-min-16-chars"
 location_tag = "dev,local"
-log_level = "info"
+
+[observability]
+filter_level = "info"
+
+[observability.log]
+output = "console"
 
 [bind.ice]
 domain_name = "localhost"
@@ -424,10 +446,13 @@ sqlite_path = "/var/lib/actrix"
 actrix_shared_key = "REPLACE_WITH_STRONG_32_CHAR_HEX_KEY"
 location_tag = "aws,us-west-2,zone-a"
 
-log_level = "info"
-log_output = "file"
-log_rotate = true
-log_path = "/var/log/actrix/"
+[observability]
+filter_level = "info"
+
+[observability.log]
+output = "file"
+rotate = true
+path = "/var/log/actrix/"
 
 pid = "/var/run/actrix.pid"
 user = "actrix"
@@ -453,7 +478,7 @@ advertised_port = 3478
 relay_port_range = "49152-65535"
 realm = "actrix.example.com"
 
-[tracing]
+[observability.tracing]
 enable = true
 service_name = "actrix-prod-01"
 endpoint = "http://otel-collector.internal:4317"
@@ -474,8 +499,11 @@ sqlite_path = "database"
 actrix_shared_key = "dev-key-16-chars-min"
 location_tag = "local,dev"
 
-log_level = "debug"
-log_output = "console"
+[observability]
+filter_level = "debug"
+
+[observability.log]
+output = "console"
 
 [bind.http]
 domain_name = "localhost"
@@ -495,7 +523,7 @@ advertised_port = 3478
 relay_port_range = "49152-65535"
 realm = "localhost"
 
-[tracing]
+[observability.tracing]
 enable = false  # 开发时可选
 ```
 
@@ -503,7 +531,7 @@ enable = false  # 开发时可选
 
 ### RUST_LOG
 
-覆盖 `log_level` 配置:
+覆盖 `observability.filter_level` 配置:
 
 ```bash
 RUST_LOG=debug ./actrix

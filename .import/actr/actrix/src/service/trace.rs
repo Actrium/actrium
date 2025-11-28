@@ -3,10 +3,10 @@ use tower_http::{
     classify::{ServerErrorsAsFailures, SharedClassifier},
     trace::{MakeSpan, TraceLayer},
 };
-use tracing::{info_span, Span};
+use tracing::{Span, info_span};
 
 #[cfg(feature = "opentelemetry")]
-use opentelemetry::{propagation::Extractor, trace::TraceContextExt, Context};
+use opentelemetry::{Context, propagation::Extractor, trace::TraceContextExt};
 #[cfg(feature = "opentelemetry")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 

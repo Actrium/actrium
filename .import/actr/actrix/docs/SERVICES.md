@@ -894,7 +894,7 @@ fn run_application(config_path: &PathBuf) -> Result<()> {
     }
 
     // 3. 初始化可观测性
-    let _guard = Self::init_observability(&config)?;
+    let _guard = Self::init_observability(config.observability_config())?;
 
     // 4. 创建 Tokio runtime 并运行
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -1054,11 +1054,14 @@ sqlite_path = "/var/lib/actrix"
 # 内部服务通信密钥
 actrix_shared_key = "your-strong-random-key-here"
 
-# 日志配置
-log_level = "info"
-log_output = "file"
-log_rotate = true
-log_path = "/var/log/actrix"
+# 日志/追踪配置
+[observability]
+filter_level = "info"      # RUST_LOG 覆盖时优先生效
+
+[observability.log]
+output = "file"
+rotate = true
+path = "/var/log/actrix"
 
 # 位置标签
 location_tag = "us-west-1"
@@ -1094,7 +1097,7 @@ key_ttl_seconds = 3600
 path = "/var/lib/actrix/ks.db"
 
 # OpenTelemetry 追踪
-[tracing]
+[observability.tracing]
 enable = true
 service_name = "actrix-prod"
 endpoint = "http://localhost:4317"
@@ -1243,7 +1246,7 @@ impl KeyStorage {
 **启用追踪** (需要 `opentelemetry` feature):
 
 ```toml
-[tracing]
+[observability.tracing]
 enable = true
 service_name = "actrix-prod-us-west-1"
 endpoint = "http://jaeger:4317"  # Jaeger OTLP gRPC endpoint

@@ -350,11 +350,14 @@ sqlite3 /var/lib/actrix/ks.db "
 启用详细日志记录:
 
 ```toml
-log_level = "info"
-log_output = "file"
-log_path = "/var/log/actrix"
+[observability]
+filter_level = "info"   # 可被 RUST_LOG 覆盖
 
-[tracing]
+[observability.log]
+output = "file"
+path = "/var/log/actrix"
+
+[observability.tracing]
 enable = true
 endpoint = "http://jaeger:4317"
 ```

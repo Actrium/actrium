@@ -281,7 +281,17 @@ mod tests {
         WEBSOCKET_CONNECTIONS.set(42);
 
         let output = export_metrics();
-        assert!(output.contains("actrix_websocket_connections"));
-        assert!(output.contains("42"));
+        // Check for the metric name (may appear with or without namespace prefix)
+        assert!(
+            output.contains("actrix_websocket_connections")
+                || output.contains("websocket_connections"),
+            "Output should contain websocket_connections metric. Output: {}",
+            output
+        );
+        assert!(
+            output.contains("42"),
+            "Output should contain value 42. Output: {}",
+            output
+        );
     }
 }

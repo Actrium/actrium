@@ -356,7 +356,7 @@ pub async fn on_start(&mut self, base_url: Url) -> Option<Result<()>>
 
 ### 3. ActrixConfig (统一配置)
 
-**文件**: `crates/base/src/config/mod.rs:18-150`
+**文件**: `crates/common/src/config/mod.rs:18-160`
 
 ```rust
 pub struct ActrixConfig {
@@ -370,14 +370,10 @@ pub struct ActrixConfig {
     pub turn: TurnConfig,                // TURN 配置
     pub location_tag: String,            // 地理位置标签
     pub supervisor: Option<SupervisorConfig>,
-    pub ks: Option<KeyServerConfig>,
-    pub sqlite: String,                  // SQLite 路径
-    pub actrix_shared_key: String,        // 内部通信密钥
-    pub log_level: String,               // 日志级别
-    pub log_output: String,              // console/file
-    pub log_rotate: bool,                // 日志轮转
-    pub log_path: String,                // 日志目录
-    pub tracing: TracingConfig,          // OpenTelemetry 配置
+    pub services: ServicesConfig,
+    pub sqlite_path: PathBuf,            // SQLite 目录
+    pub actrix_shared_key: String,       // 内部通信密钥
+    pub observability: ObservabilityConfig, // 日志+追踪配置
 }
 ```
 
@@ -697,35 +693,36 @@ CREATE TABLE keys (
 
 ### 1. 日志系统
 
-**配置**: `crates/base/src/config/mod.rs:120-142`
+**配置**: `crates/common/src/config/mod.rs`
 
 ```rust
-pub struct ActrixConfig {
-    pub log_level: String,    // trace/debug/info/warn/error
-    pub log_output: String,   // console/file
-    pub log_rotate: bool,     // 日志轮转开关
-    pub log_path: String,     // 日志目录
+pub struct ObservabilityConfig {
+    pub log: LogConfig,         // 日志配置
+    pub filter_level: String,   // EnvFilter 语法，RUST_LOG 优先
+    pub tracing: TracingConfig, // OpenTelemetry 配置
+}
+
+pub struct LogConfig {
+    pub output: String,     // console/file
+    pub rotate: bool,       // 日志轮转开关
+    pub path: String,       // 日志目录
 }
 ```
 
-**实现**: `src/main.rs:119-242`
+**实现**: `src/observability.rs`
 
 ```rust
-fn init_observability(config: &ActrixConfig) -> Result<ObservabilityGuard> {
-    let log_filter = EnvFilter::new(&config.log_level);
+fn init_observability(config: &ObservabilityConfig) -> Result<ObservabilityGuard> {
+    let env_filter = resolve_env_filter(config); // RUST_LOG 优先，解析失败回退 info
 
-    match config.log_output.as_str() {
-        "console" => {
-            tracing_subscriber::registry()
-                .with(fmt::layer().with_filter(log_filter))
-                .init();
-        }
+    match config.log.output.as_str() {
         "file" => {
-            let file_appender = if config.log_rotate {
-                rolling::daily(&config.log_path, "actrix.log")
-            } else {
-                // 单文件追加
-            };
+            fs::create_dir_all(&config.log.path)?;
+            let (writer, guard) = build_file_writer(&config.log, config.log.rotate)?;
+            // fmt layer 使用文件 writer；tracing.enable 且配置验证通过时附加 OTLP layer
+        }
+        _ => {
+            // 控制台 fmt layer，基于 env_filter；Otel 附加逻辑与文件模式一致
         }
     }
 }
@@ -764,7 +761,7 @@ cargo build --features opentelemetry
 
 ```toml
 # config.toml
-[tracing]
+[observability.tracing]
 enable = true
 service_name = "actrix-prod"
 endpoint = "http://localhost:4317"
@@ -799,7 +796,7 @@ endpoint = "http://localhost:4317"
    ├─ 解析 TOML
    └─ 验证配置
    ↓
-5. init_observability(config)
+5. init_observability(config.observability_config())
    ├─ 初始化日志
    └─ 初始化 OpenTelemetry (可选)
    ↓
