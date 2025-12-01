@@ -9,14 +9,16 @@ use anyhow::{Context as _, Result};
 use axum::{
     Router,
     extract::{
-        ConnectInfo, State,
+        ConnectInfo, Query, State,
         ws::{WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
     routing::get,
 };
+use base64::Engine as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::{collections::HashMap, str::FromStr};
 use tracing::{error, info, warn};
 
 /// Signaling Server 状态（用于 Axum State）
@@ -236,6 +238,7 @@ async fn websocket_handler(
     ws: WebSocketUpgrade,
     State(state): State<SignalingState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let client_ip = addr.ip();
 
@@ -247,12 +250,49 @@ async fn websocket_handler(
         return axum::http::StatusCode::TOO_MANY_REQUESTS.into_response();
     }
 
-    ws.on_upgrade(move |socket| handle_websocket(socket, state, client_ip))
+    ws.on_upgrade(move |socket| handle_websocket(socket, state, client_ip, params))
 }
 
 /// WebSocket 连接处理
-async fn handle_websocket(socket: WebSocket, state: SignalingState, client_ip: std::net::IpAddr) {
+async fn handle_websocket(
+    socket: WebSocket,
+    state: SignalingState,
+    client_ip: std::net::IpAddr,
+    params: HashMap<String, String>,
+) {
     info!("📡 新 WebSocket 连接: IP={}", client_ip);
+
+    // 从 URL 获取 actor_id/token（如果提供），用于无注册重连。
+    let mut url_identity: Option<(actr_protocol::ActrId, actr_protocol::AIdCredential)> = None;
+    if let Some(actor_str) = params.get("actor_id") {
+        match actr_protocol::ActrIdExt::from_string_repr(actor_str) {
+            Ok(actor_id) => {
+                if let Some(token_b64) = params.get("token") {
+                    if let Ok(token_bytes) =
+                        base64::engine::general_purpose::STANDARD.decode(token_b64)
+                    {
+                        // 默认 key_id = 0，如果未提供则取 0
+                        let key_id = params
+                            .get("token_key_id")
+                            .and_then(|s| u32::from_str(s).ok())
+                            .unwrap_or_default();
+                        let credential = actr_protocol::AIdCredential {
+                            encrypted_token: token_bytes.into(),
+                            token_key_id: key_id,
+                        };
+                        url_identity = Some((actor_id, credential));
+                    } else {
+                        warn!("⚠️ 无法解析 token (base64) 来自 URL 参数");
+                    }
+                } else {
+                    warn!("⚠️ 提供了 actor_id 但缺少 token 参数");
+                }
+            }
+            Err(e) => {
+                warn!("⚠️ 无法解析 actor_id 字符串 '{}': {}", actor_str, e);
+            }
+        }
+    }
 
     // 增加连接计数
     if let Some(ref limiter) = state.server.connection_rate_limiter {
@@ -272,7 +312,9 @@ async fn handle_websocket(socket: WebSocket, state: SignalingState, client_ip: s
     };
 
     // 调用 SignalingServer 的 WebSocket 处理函数
-    if let Err(e) = crate::handle_websocket_connection(socket, server_handle, Some(client_ip)).await
+    if let Err(e) =
+        crate::handle_websocket_connection(socket, server_handle, Some(client_ip), url_identity)
+            .await
     {
         error!("WebSocket connection error: {}", e);
     }

@@ -33,9 +33,9 @@
 
 use actr_protocol::{
     AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ActrUpEvent, ErrorResponse,
-    PeerToSignaling, Ping, Pong, Realm, RegisterRequest, RegisterResponse, SignalingEnvelope,
-    SignalingToActr, actr_to_signaling, peer_to_signaling, register_response, signaling_envelope,
-    signaling_to_actr,
+    PeerToSignaling, Ping, Pong, Realm, RegisterRequest, RegisterResponse, RoleAssignment,
+    RoleNegotiation, SignalingEnvelope, SignalingToActr, actr_relay, actr_to_signaling,
+    peer_to_signaling, register_response, signaling_envelope, signaling_to_actr,
 };
 use actrix_common::aid::credential::validator::AIdCredentialValidator;
 use futures_util::{SinkExt, StreamExt};
@@ -162,6 +162,7 @@ pub async fn handle_websocket_connection(
     websocket: WebSocket,
     server: SignalingServerHandle,
     client_ip: Option<std::net::IpAddr>,
+    url_identity: Option<(ActrId, AIdCredential)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4().to_string();
     info!(
@@ -178,12 +179,31 @@ pub async fn handle_websocket_connection(
     // 注册客户端（包含专用发送器）
     {
         let mut clients_guard = server.clients.write().await;
+
+        // 如果 URL 已带 actor_id，则移除已有相同 actor 的连接（避免 stale 映射）。
+        let (actor_for_entry, cred_for_entry) =
+            if let Some((actor_id, credential)) = url_identity.clone() {
+                let mut to_remove = Vec::new();
+                for (cid, conn) in clients_guard.iter() {
+                    if conn.actor_id.as_ref() == Some(&actor_id) {
+                        to_remove.push(cid.clone());
+                    }
+                }
+                for cid in to_remove {
+                    clients_guard.remove(&cid);
+                    info!("🧹 Removed stale client {} for actor {:?}", cid, actor_id);
+                }
+                (Some(actor_id), Some(credential))
+            } else {
+                (None, None)
+            };
+
         clients_guard.insert(
             client_id.clone(),
             ClientConnection {
                 id: client_id.clone(),
-                actor_id: None,
-                credential: None,
+                actor_id: actor_for_entry,
+                credential: cred_for_entry,
                 direct_sender: direct_tx,
                 client_ip,
             },
@@ -427,7 +447,7 @@ async fn handle_register_request(
         }
     };
 
-    let (actor_id, credential) = match ais_client
+    let register_ok = match ais_client
         .refresh_credential(request.realm.realm_id, request.actr_type.clone())
         .await
     {
@@ -439,7 +459,7 @@ async fn handle_register_request(
                         "✅ AIS 分配 ActorId: realm={}, serial={}",
                         register_ok.actr_id.realm.realm_id, register_ok.actr_id.serial_number
                     );
-                    (register_ok.actr_id, register_ok.credential)
+                    register_ok
                 }
                 Some(register_response::Result::Error(err)) => {
                     error!(
@@ -494,7 +514,10 @@ async fn handle_register_request(
             .as_ref()
             .and_then(|spec| spec.description.clone())
             .unwrap_or_else(|| {
-                format!("{}/{}", actor_id.r#type.manufacturer, actor_id.r#type.name)
+                format!(
+                    "{}/{}",
+                    register_ok.actr_id.r#type.manufacturer, register_ok.actr_id.r#type.name
+                )
             });
 
         // 从 ServiceSpec 中提取 message_types（proto packages）
@@ -510,7 +533,7 @@ async fn handle_register_request(
             .unwrap_or_default();
 
         if let Err(e) = registry.register_service_full(
-            actor_id.clone(),
+            register_ok.actr_id.clone(),
             service_name,
             message_types,
             None, // capabilities 当前不使用
@@ -521,7 +544,7 @@ async fn handle_register_request(
         } else {
             info!(
                 "✅ 服务已注册到 ServiceRegistry (serial={})",
-                actor_id.serial_number
+                register_ok.actr_id.serial_number
             );
         }
         drop(registry);
@@ -534,45 +557,19 @@ async fn handle_register_request(
     {
         let mut clients_guard = server.clients.write().await;
         if let Some(client) = clients_guard.get_mut(client_id) {
-            client.actor_id = Some(actor_id.clone());
-            client.credential = Some(credential.clone());
-
-            // Update ActorId index while still holding clients lock
-            let mut actor_index = server.actor_id_index.write().await;
-            if let Some(previous_client) =
-                actor_index.insert(actor_id.clone(), client_id.to_string())
-                && previous_client != client_id
-            {
-                warn!(
-                    "⚠️  Actor {} 映射已从 {} 更新为 {}",
-                    actor_id.serial_number, previous_client, client_id
-                );
-            }
-        } else {
-            warn!(
-                "⚠️  注册时未找到客户端 {}，可能已断开连接，跳过 ActorId 映射",
-                client_id
-            );
-            // Do NOT insert into actor_id_index - client doesn't exist
+            client.actor_id = Some(register_ok.actr_id.clone());
+            client.credential = Some(register_ok.credential.clone());
         }
     }
 
-    // 创建成功响应
-    let register_ok = register_response::RegisterOk {
-        actr_id: actor_id.clone(),
-        credential: credential.clone(),
-        psk: None,                             // PSK 当前不使用
-        credential_expires_at: None,           // 当前不设置过期时间
-        signaling_heartbeat_interval_secs: 30, // 30 秒心跳间隔
-    };
-
+    // 直接使用 AIS 返回的 register_ok（包含 psk 和 public_key）
     let response = RegisterResponse {
-        result: Some(register_response::Result::Success(register_ok)),
+        result: Some(register_response::Result::Success(register_ok.clone())),
     };
 
     // 构造 SignalingToActr 流程
     let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
-        target: actor_id.clone(),
+        target: register_ok.actr_id.clone(),
         payload: Some(signaling_to_actr::Payload::RegisterResponse(response)),
     });
 
@@ -583,19 +580,19 @@ async fn handle_register_request(
 
     // 通知所有订阅了该 ActrType 的订阅者
     let presence = server.presence_manager.read().await;
-    let subscribers = presence.get_subscribers(&actor_id.r#type);
+    let subscribers = presence.get_subscribers(&register_ok.actr_id.r#type);
 
     if !subscribers.is_empty() {
         info!(
             "📢 Actor {}/{} 上线，通知 {} 个订阅者",
-            actor_id.r#type.manufacturer,
-            actor_id.r#type.name,
+            register_ok.actr_id.r#type.manufacturer,
+            register_ok.actr_id.r#type.name,
             subscribers.len()
         );
 
         // 构造 ActrUpEvent
         let actr_up_event = ActrUpEvent {
-            actor_id: actor_id.clone(),
+            actor_id: register_ok.actr_id.clone(),
         };
 
         // 为每个订阅者构造并发送通知
@@ -887,6 +884,8 @@ async fn handle_actr_relay(
         source.serial_number, target.serial_number
     );
 
+    tracing::debug!(?relay, "handle_actr_relay");
+
     // 验证 credential
     if let Err(e) = AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await {
         warn!(
@@ -906,38 +905,105 @@ async fn handle_actr_relay(
         return Ok(());
     }
 
-    // 查找目标客户端并转发
-    let target_client_id = match resolve_client_id_by_actor_id(target, server).await {
-        Ok(id) => id,
-        Err(e) => {
-            warn!("⚠️ 未找到目标 Actor {}: {}", target.serial_number, e);
-            send_error_response(
-                client_id,
-                &source,
-                404,
-                "Target actor not connected",
-                server,
-                Some(request_envelope_id),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
+    // Role negotiation: server decides offerer/answerer and notifies both parties
+    if let Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation { from, to, .. })) =
+        relay.payload.clone()
+    {
+        let is_offerer = actor_order_key(&from) < actor_order_key(&to);
 
-    // 重新构造 envelope 并转发
-    let flow = signaling_envelope::Flow::ActrRelay(relay);
-    #[allow(unused_mut)]
-    let mut forward_envelope = server.create_new_envelope(flow);
+        let new_relay = ActrRelay {
+            // source: peer actor (对端)，target: 该 assignment 的接收方
+            source: from.clone(),
+            credential: relay.credential.clone(),
+            target: to.clone(),
+            payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
+                is_offerer,
+            })),
+        };
+        send_role_assignment(&from, server, new_relay.clone()).await?;
 
-    // 使用客户端原始的 trace context 注入到转发的 envelope 中，确保端到端追踪
-    #[cfg(feature = "opentelemetry")]
-    inject_trace_context(&remote_context, &mut forward_envelope);
+        let new_relay = ActrRelay {
+            // source: peer actor (对端)，target: 该 assignment 的接收方
+            source: from.clone(),
+            credential: relay.credential.clone(),
+            target: to.clone(),
+            payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
+                is_offerer: !is_offerer,
+            })),
+        };
 
-    send_envelope_to_client(&target_client_id, forward_envelope, server).await?;
+        send_role_assignment(&to, server, new_relay).await?;
 
-    info!("✅ 信令中继成功");
+        return Ok(());
+    }
+
+    // 查找目标客户端并转发其他中继消息
+    let clients_guard = server.clients.read().await;
+    let target_client = clients_guard.values().find(|client| {
+        client.actor_id.as_ref().is_some_and(|id| {
+            id.realm.realm_id == target.realm.realm_id && id.serial_number == target.serial_number
+        })
+    });
+
+    if let Some(target_client) = target_client {
+        // 重新构造 envelope 并转发
+        let flow = signaling_envelope::Flow::ActrRelay(relay);
+        let forward_envelope = server.create_new_envelope(flow);
+
+        let mut buf = Vec::new();
+        forward_envelope.encode(&mut buf)?;
+
+        target_client
+            .direct_sender
+            .send(WsMessage::Binary(buf.into()))?;
+
+        info!("✅ 信令中继成功");
+    } else {
+        warn!("⚠️ 未找到目标 Actor {}", target.serial_number);
+    }
 
     Ok(())
+}
+
+// 计算用于排序的 ActorId key，确保角色分配可重复
+fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
+    (
+        id.realm.realm_id,
+        id.serial_number,
+        id.r#type.manufacturer.clone(),
+        id.r#type.name.clone(),
+    )
+}
+
+async fn send_role_assignment(
+    target_actor: &ActrId,
+    server: &SignalingServerHandle,
+    relay: ActrRelay,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let flow = signaling_envelope::Flow::ActrRelay(relay);
+    let envelope = server.create_new_envelope(flow);
+
+    let mut buf = Vec::new();
+    envelope.encode(&mut buf)?;
+
+    let clients_guard = server.clients.read().await;
+    if let Some(client) = clients_guard.values().find(|client| {
+        client.actor_id.as_ref().is_some_and(|id| {
+            id.realm.realm_id == target_actor.realm.realm_id
+                && id.serial_number == target_actor.serial_number
+        })
+    }) {
+        client
+            .direct_sender
+            .send(WsMessage::Binary(buf.into()))
+            .map_err(|e| e.into())
+    } else {
+        warn!(
+            "⚠️ send_role_assignment: 未找到目标 Actor {}",
+            target_actor.serial_number
+        );
+        Ok(())
+    }
 }
 
 /// 发送 SignalingEnvelope 到客户端
