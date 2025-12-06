@@ -43,7 +43,7 @@ use prost::Message as ProstMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, info_span, instrument, warn};
+use tracing::{debug, error, info, info_span, warn};
 use uuid::Uuid;
 
 // Axum WebSocket
@@ -55,6 +55,8 @@ use crate::service_registry::ServiceRegistry;
 #[cfg(feature = "opentelemetry")]
 use crate::trace::{extract_trace_context, inject_trace_context};
 use tracing::Instrument;
+#[cfg(feature = "opentelemetry")]
+use tracing::instrument;
 
 /// 信令服务器状态
 #[derive(Debug)]
@@ -101,7 +103,10 @@ pub struct SignalingServerHandle {
 }
 impl SignalingServerHandle {
     /// 创建 SignalingEnvelope
-    #[instrument(level = "debug", skip_all, fields(reply_for))]
+    #[cfg_attr(
+        feature = "opentelemetry",
+        instrument(level = "debug", skip_all, fields(reply_for))
+    )]
     fn create_envelope(
         &self,
         flow: signaling_envelope::Flow,
@@ -127,7 +132,7 @@ impl SignalingServerHandle {
         envelope
     }
 
-    #[instrument(level = "debug", skip_all)]
+    #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all))]
     fn create_new_envelope(&self, flow: signaling_envelope::Flow) -> SignalingEnvelope {
         self.create_envelope(flow, None)
     }
@@ -362,7 +367,7 @@ async fn handle_client_envelope(
 }
 
 /// 处理 PeerToSignaling 流程（注册前）
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_peer_to_server(
     peer_to_server: PeerToSignaling,
     client_id: &str,
@@ -382,7 +387,7 @@ async fn handle_peer_to_server(
 }
 
 /// 处理注册请求
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_register_request(
     request: RegisterRequest,
     client_id: &str,
@@ -690,7 +695,7 @@ async fn handle_register_request(
 }
 
 /// 发送注册错误响应
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn send_register_error(
     client_id: &str,
     code: u32,
@@ -730,7 +735,7 @@ async fn send_register_error(
 }
 
 /// 处理 ActrToSignaling 流程（注册后）
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_actr_to_server(
     actr_to_server: ActrToSignaling,
     client_id: &str,
@@ -847,7 +852,7 @@ async fn handle_ping(
 }
 
 /// 处理注销
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_unregister(
     source: ActrId,
     req: actr_protocol::UnregisterRequest,
@@ -924,7 +929,7 @@ fn format_actor_id(actor_id: &ActrId) -> String {
 }
 
 /// 处理 ActrRelay（WebRTC 信令中继）
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_actr_relay(
     relay: ActrRelay,
     client_id: &str,
@@ -1025,7 +1030,14 @@ async fn handle_actr_relay(
                 is_offerer,
             })),
         };
-        send_role_assignment(&from, server, new_relay.clone()).await?;
+        send_role_assignment(
+            &from,
+            server,
+            new_relay.clone(),
+            #[cfg(feature = "opentelemetry")]
+            remote_context.clone(),
+        )
+        .await?;
 
         let new_relay = ActrRelay {
             // source: peer actor (对端)，target: 该 assignment 的接收方
@@ -1037,30 +1049,42 @@ async fn handle_actr_relay(
             })),
         };
 
-        send_role_assignment(&to, server, new_relay).await?;
+        send_role_assignment(
+            &to,
+            server,
+            new_relay,
+            #[cfg(feature = "opentelemetry")]
+            remote_context,
+        )
+        .await?;
 
         return Ok(());
     }
 
     // 查找目标客户端并转发其他中继消息
     let clients_guard = server.clients.read().await;
-    let target_client = clients_guard.values().find(|client| {
-        client.actor_id.as_ref().is_some_and(|id| {
-            id.realm.realm_id == target.realm.realm_id && id.serial_number == target.serial_number
+    let target_client_id = clients_guard.iter().find_map(|(id, client)| {
+        client.actor_id.as_ref().and_then(|actor_id| {
+            if actor_id.realm.realm_id == target.realm.realm_id
+                && actor_id.serial_number == target.serial_number
+            {
+                Some(id.clone())
+            } else {
+                None
+            }
         })
     });
 
-    if let Some(target_client) = target_client {
+    if let Some(target_client_id) = target_client_id {
         // 重新构造 envelope 并转发
         let flow = signaling_envelope::Flow::ActrRelay(relay);
-        let forward_envelope = server.create_new_envelope(flow);
+        #[allow(unused_mut)]
+        let mut forward_envelope = server.create_new_envelope(flow);
 
-        let mut buf = Vec::new();
-        forward_envelope.encode(&mut buf)?;
-
-        target_client
-            .direct_sender
-            .send(WsMessage::Binary(buf.into()))?;
+        // Inject the original trace context into the forwarded envelope to ensure end-to-end tracing
+        #[cfg(feature = "opentelemetry")]
+        inject_trace_context(&remote_context, &mut forward_envelope);
+        send_envelope_to_client(&target_client_id, forward_envelope, server).await?;
 
         info!("✅ 信令中继成功");
     } else {
@@ -1080,13 +1104,19 @@ fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
     )
 }
 
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all))]
 async fn send_role_assignment(
     target_actor: &ActrId,
     server: &SignalingServerHandle,
     relay: ActrRelay,
+    #[cfg(feature = "opentelemetry")] remote_context: opentelemetry::Context,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let flow = signaling_envelope::Flow::ActrRelay(relay);
-    let envelope = server.create_new_envelope(flow);
+    #[allow(unused_mut)]
+    let mut envelope = server.create_new_envelope(flow);
+
+    #[cfg(feature = "opentelemetry")]
+    inject_trace_context(&remote_context, &mut envelope);
 
     let mut buf = Vec::new();
     envelope.encode(&mut buf)?;
@@ -1112,7 +1142,7 @@ async fn send_role_assignment(
 }
 
 /// 发送 SignalingEnvelope 到客户端
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = envelope.envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = envelope.envelope_id)))]
 async fn send_envelope_to_client(
     client_id: &str,
     #[allow(unused_mut)] mut envelope: SignalingEnvelope,
@@ -1186,7 +1216,7 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle) {
 }
 
 /// 处理 Credential 更新请求
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_credential_update(
     source: ActrId,
     _req: actr_protocol::CredentialUpdateRequest,
@@ -1325,7 +1355,7 @@ async fn handle_credential_update(
 }
 
 /// 处理服务发现请求
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_discovery_request(
     source: ActrId,
     req: actr_protocol::DiscoveryRequest,
@@ -1453,7 +1483,7 @@ async fn handle_discovery_request(
 }
 
 /// 处理路由候选请求（负载均衡）
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_route_candidates_request(
     source: ActrId,
     req: actr_protocol::RouteCandidatesRequest,
@@ -1586,7 +1616,7 @@ async fn handle_route_candidates_request(
 }
 
 /// 处理订阅 Actor 上线事件
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_subscribe_actr_up(
     source: ActrId,
     req: actr_protocol::SubscribeActrUpRequest,
@@ -1624,7 +1654,7 @@ async fn handle_subscribe_actr_up(
 }
 
 /// 处理取消订阅 Actor 上线事件
-#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
+#[cfg_attr(feature = "opentelemetry", tracing::instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_unsubscribe_actr_up(
     source: ActrId,
     req: actr_protocol::UnsubscribeActrUpRequest,
@@ -1671,7 +1701,7 @@ async fn handle_unsubscribe_actr_up(
 }
 
 /// 发送通用错误响应
-#[instrument(level = "debug", skip_all, fields(client_id, reply_for = ?reply_for, target = ?target))]
+#[cfg_attr(feature = "opentelemetry", tracing::instrument(level = "debug", skip_all, fields(client_id, reply_for = ?reply_for, target = ?target)))]
 async fn send_error_response(
     client_id: &str,
     target: &ActrId,
