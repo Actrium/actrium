@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use base64::prelude::*;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
 /// PostgreSQL 存储后端
 #[derive(Clone)]

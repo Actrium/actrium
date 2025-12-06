@@ -46,7 +46,7 @@ use postgres::PostgresBackend;
 #[derive(Clone, Debug)]
 pub enum KeyStorage {
     /// SQLite 存储后端（始终可用）
-    Sqlite(SqliteBackend),
+    Sqlite(Box<SqliteBackend>),
 
     /// Redis 存储后端
     #[cfg(feature = "backend-redis")]
@@ -86,7 +86,7 @@ impl KeyStorage {
                 let backend =
                     SqliteBackend::new(cfg, config.key_ttl_seconds, encryptor, db_path.as_ref())
                         .await?;
-                Ok(Self::Sqlite(backend))
+                Ok(Self::Sqlite(Box::new(backend)))
             }
 
             #[cfg(feature = "backend-redis")]
@@ -95,7 +95,7 @@ impl KeyStorage {
                     .redis
                     .as_ref()
                     .ok_or_else(|| KsError::Config("Missing Redis config".into()))?;
-                let backend = RedisBackend::new(cfg, config.key_ttl_seconds, encryptor).await?;
+                let backend = RedisBackend::new(cfg, config.key_ttl_seconds).await?;
                 Ok(Self::Redis(backend))
             }
 
@@ -105,7 +105,7 @@ impl KeyStorage {
                     .postgres
                     .as_ref()
                     .ok_or_else(|| KsError::Config("Missing PostgreSQL config".into()))?;
-                let backend = PostgresBackend::new(cfg, config.key_ttl_seconds, encryptor).await?;
+                let backend = PostgresBackend::new(cfg, config.key_ttl_seconds).await?;
                 Ok(Self::Postgres(backend))
             }
 
