@@ -214,9 +214,11 @@ const data = devtools.exportAll();
 
 ## 文档 (Deprecated)
 
-- [API 文档](./docs/en/API.zh.md) - 完整 API 参考
-- [使用指南](./docs/en/GUIDE.zh.md) - 入门教程和最佳实践
-- [架构设计](./docs/en/ARCHITECTURE.zh.md) - 系统架构详解
+- [API 文档](./docs/API.zh.md) - 完整 API 参考
+- [使用指南](./docs/GUIDE.zh.md) - 入门教程和最佳实践
+- [架构设计](./docs/ARCHITECTURE.zh.md) - 系统架构详解
+- [生产环境指南](./docs/PRODUCTION_GUIDE.zh.md) - 生产部署检查清单
+- [插件示例](./examples/) - 完整源码示例
 
 ## 开发
 
