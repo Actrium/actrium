@@ -154,6 +154,7 @@ function serializePropsWithTracking(
 ): SerializeResult {
   const result: SerializedProps = {};
   const fnIds = new Set<string>();
+  const visited = new WeakSet<object>();
 
   for (const [key, value] of Object.entries(props)) {
     // Skip children and internal properties
@@ -164,13 +165,14 @@ function serializePropsWithTracking(
       fnIds.add(fnId);
       result[key] = { __type: 'function', __fnId: fnId } as SerializedFunction;
     } else if (Array.isArray(value)) {
-      const { value: serialized, fnIds: arrayFnIds } = serializeArrayWithTracking(value, callbackRegistry);
+      const { value: serialized, fnIds: arrayFnIds } = serializeArrayWithTracking(value, callbackRegistry, visited);
       result[key] = serialized;
       arrayFnIds.forEach(id => fnIds.add(id));
     } else if (typeof value === 'object' && value !== null) {
       const { value: serialized, fnIds: objFnIds } = serializeObjectWithTracking(
         value as Record<string, unknown>,
-        callbackRegistry
+        callbackRegistry,
+        visited
       );
       result[key] = serialized;
       objFnIds.forEach(id => fnIds.add(id));
@@ -187,8 +189,15 @@ function serializePropsWithTracking(
  */
 function serializeArrayWithTracking(
   arr: unknown[],
-  callbackRegistry: CallbackRegistry
+  callbackRegistry: CallbackRegistry,
+  visited: WeakSet<object>
 ): { value: SerializedValue[]; fnIds: Set<string> } {
+  // Check for circular reference
+  if (visited.has(arr)) {
+    return { value: [], fnIds: new Set() };
+  }
+  visited.add(arr);
+
   const fnIds = new Set<string>();
   const value = arr.map((item) => {
     if (typeof item === 'function') {
@@ -196,13 +205,14 @@ function serializeArrayWithTracking(
       fnIds.add(fnId);
       return { __type: 'function', __fnId: fnId } as SerializedFunction;
     } else if (Array.isArray(item)) {
-      const { value: serialized, fnIds: nestedFnIds } = serializeArrayWithTracking(item, callbackRegistry);
+      const { value: serialized, fnIds: nestedFnIds } = serializeArrayWithTracking(item, callbackRegistry, visited);
       nestedFnIds.forEach(id => fnIds.add(id));
       return serialized;
     } else if (typeof item === 'object' && item !== null) {
       const { value: serialized, fnIds: nestedFnIds } = serializeObjectWithTracking(
         item as Record<string, unknown>,
-        callbackRegistry
+        callbackRegistry,
+        visited
       );
       nestedFnIds.forEach(id => fnIds.add(id));
       return serialized;
@@ -217,8 +227,15 @@ function serializeArrayWithTracking(
  */
 function serializeObjectWithTracking(
   obj: Record<string, unknown>,
-  callbackRegistry: CallbackRegistry
+  callbackRegistry: CallbackRegistry,
+  visited: WeakSet<object>
 ): { value: Record<string, SerializedValue>; fnIds: Set<string> } {
+  // Check for circular reference
+  if (visited.has(obj)) {
+    return { value: {}, fnIds: new Set() };
+  }
+  visited.add(obj);
+
   const result: Record<string, SerializedValue> = {};
   const fnIds = new Set<string>();
 
@@ -228,13 +245,14 @@ function serializeObjectWithTracking(
       fnIds.add(fnId);
       result[key] = { __type: 'function', __fnId: fnId } as SerializedFunction;
     } else if (Array.isArray(value)) {
-      const { value: serialized, fnIds: nestedFnIds } = serializeArrayWithTracking(value, callbackRegistry);
+      const { value: serialized, fnIds: nestedFnIds } = serializeArrayWithTracking(value, callbackRegistry, visited);
       result[key] = serialized;
       nestedFnIds.forEach(id => fnIds.add(id));
     } else if (typeof value === 'object' && value !== null) {
       const { value: serialized, fnIds: nestedFnIds } = serializeObjectWithTracking(
         value as Record<string, unknown>,
-        callbackRegistry
+        callbackRegistry,
+        visited
       );
       result[key] = serialized;
       nestedFnIds.forEach(id => fnIds.add(id));
