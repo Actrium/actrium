@@ -11,9 +11,82 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 - **Lightweight and Efficient**: No WebView overhead, native rendering performance
 - **Flexible Extension**: Supports registering custom business components
 
+## Repository Structure
+
+This is a monorepo containing multiple packages:
+
+```
+rill/
+├── packages/
+│   ├── rill/          # Core runtime library
+│   │   ├── src/
+│   │   │   ├── runtime/    # Engine and renderer
+│   │   │   ├── sdk/        # Plugin development SDK
+│   │   │   └── reconciler/ # React reconciler
+│   │   └── package.json
+│   └── cli/           # CLI tools for plugin development
+│       ├── src/
+│       └── package.json
+├── docs/              # Documentation
+├── examples/          # Example projects
+└── package.json       # Workspace root
+```
+
+### Packages
+
+- **rill** - Core runtime library for host applications
+  - Published as `rill` on npm
+  - Exports: `rill` (runtime), `rill/sdk` (plugin SDK)
+
+- **rill-cli** - Command-line tools for plugin development
+  - Published as `rill-cli` on npm
+  - Commands: `rill build`, `rill init`
+
+### Development
+
+Build all packages:
+```bash
+npm run build
+```
+
+Build a specific package:
+```bash
+cd packages/rill && npm run build
+cd packages/cli && npm run build
+```
+
+Run tests:
+```bash
+npm run test --workspaces
+```
+
 ## Quick Start
 
 ### Installation
+
+Compatibility and peer dependencies
+
+- Keep React and react-reconciler in compatible pairs to avoid install/runtime issues.
+- Choose only one platform peer: react-dom (Web) or react-native (RN). react-native-quickjs is optional for RN.
+
+Recommended pairings
+
+- React 18.2.x ↔ react-reconciler 0.29–0.31
+- React 19.0.x ↔ react-reconciler 0.32.x
+- React 19.2.x+ ↔ react-reconciler 0.33.x
+
+Install examples
+
+- React Native (RN 0.82 + React 19.2)
+  - npm i rill react@^19.2.1 react-native@^0.82 react-reconciler@^0.33
+- Web (React 19.2)
+  - npm i rill react@^19.2.1 react-dom@^19.2.1 react-reconciler@^0.33
+
+Notes
+
+- If you see npm ERESOLVE complaining react-reconciler@0.33 requires react@^19.2: upgrade React to ^19.2.1 (or align reconciler to 0.32 if you must stay on React 19.0).
+- Avoid using --legacy-peer-deps in the long term; fix the pairing instead.
+
 
 ```bash
 npm install rill
