@@ -1,0 +1,104 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd packages/rill
+          npm ci
+
+      - name: Run benchmarks
+        run: |
+          cd packages/rill
+          npm run bench > benchmark-output.txt 2>&1 || true
+          cat benchmark-output.txt
+
+      - name: Load baseline
+        id: baseline
+        run: |
+          if [ -f packages/rill/.benchmarks/baseline.json ]; then
+            echo "baseline_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "baseline_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Compare with baseline
+        if: steps.baseline.outputs.baseline_exists == 'true'
+        run: |
+          cd packages/rill
+          npx ts-node scripts/compare-benchmarks.ts \
+            .benchmarks/baseline.json \
+            benchmark-output.txt \
+            markdown > comparison.md
+          cat comparison.md
+        continue-on-error: true
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.baseline_exists == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comparison = fs.readFileSync('packages/rill/comparison.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comparison
+            });
+
+      - name: Fail on regression
+        if: steps.baseline.outputs.baseline_exists == 'true'
+        run: |
+          cd packages/rill
+          npx ts-node scripts/compare-benchmarks.ts \
+            .benchmarks/baseline.json \
+            benchmark-output.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: packages/rill/benchmark-output.txt
+          retention-days: 30
+
+      - name: Update baseline (main branch only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          cd packages/rill
+          mkdir -p .benchmarks
+          npx ts-node scripts/extract-baseline.ts \
+            benchmark-output.txt \
+            .benchmarks/baseline.json
+
+      - name: Commit baseline update
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add packages/rill/.benchmarks/baseline.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update benchmark baseline"
+          git push
+        continue-on-error: true

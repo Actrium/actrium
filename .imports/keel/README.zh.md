@@ -1,10 +1,10 @@
 # Rill
 
-轻量级、无头（Headless）、沙箱化的 React Native 动态 UI 渲染引擎。
+Lightweight, headless, sandboxed React Native dynamic UI rendering engine. (Chinese README migrated to README.zh.md under docs as per new policy)
 
 > **rill** /rɪl/ n. 小溪、细流 - 寓意轻量、流畅的数据流动
 
-## 特性
+## 特性 (This file will be deprecated; please refer to docs/en/*.zh.md)
 
 - **类 React 开发体验**：使用 JSX 和 Hooks 编写插件
 - **完全沙箱隔离**：基于 QuickJS，插件崩溃不影响宿主
@@ -212,11 +212,11 @@ console.log(devtools.getComponentTreeText(nodeMap, rootChildren));
 const data = devtools.exportAll();
 ```
 
-## 文档
+## 文档 (Deprecated)
 
-- [API 文档](./docs/API.md) - 完整 API 参考
-- [使用指南](./docs/GUIDE.md) - 入门教程和最佳实践
-- [架构设计](./docs/ARCHITECTURE.md) - 系统架构详解
+- [API 文档](./docs/en/API.zh.md) - 完整 API 参考
+- [使用指南](./docs/en/GUIDE.zh.md) - 入门教程和最佳实践
+- [架构设计](./docs/en/ARCHITECTURE.zh.md) - 系统架构详解
 
 ## 开发
 
