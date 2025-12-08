@@ -135,6 +135,9 @@ export class TimeoutError extends Error { constructor(message: string) { super(m
  * await engine.loadBundle(bundleCode);
  * ```
  */
+// Global engine counter for debugging
+let engineIdCounter = 0;
+
 export class Engine {
   private runtime: QuickJSRuntime | null = null;
   private context: QuickJSContext | null = null;
@@ -146,6 +149,7 @@ export class Engine {
   private loaded = false;
   private errorCount = 0;
   private lastErrorAt: number | null = null;
+  private readonly engineId: number;
 
   // Event listeners
   private listeners: Map<keyof EngineEvents, Set<EventListener<unknown>>> = new Map();
@@ -167,9 +171,10 @@ export class Engine {
     };
 
     this.registry = new ComponentRegistry();
+    this.engineId = ++engineIdCounter;
 
     if (this.options.debug) {
-      this.options.logger.log('[rill] Engine created with QuickJS sandbox');
+      this.options.logger.log(`[rill] Engine #${this.engineId} created with QuickJS sandbox`);
     }
   }
 
@@ -205,8 +210,8 @@ export class Engine {
       const code = await this.resolveSource(source);
 
       if (this.options.debug) {
-        this.options.logger.log('[rill] Bundle loaded, length:', code.length);
-        this.options.logger.log('[rill] Bundle preview:', code.substring(0, 200));
+        this.options.logger.log(`[rill] Engine #${this.engineId} Bundle loaded, length:`, code.length);
+        this.options.logger.log(`[rill] Engine #${this.engineId} Bundle preview:`, code.substring(0, 200));
       }
 
       // Initialize sandbox and execute
@@ -235,7 +240,7 @@ export class Engine {
       this.emit('load');
 
       if (this.options.debug) {
-        this.options.logger.log('[rill] ✅ Bundle executed successfully');
+        this.options.logger.log(`[rill] Engine #${this.engineId} ✅ Bundle executed successfully`);
       }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -410,10 +415,17 @@ export class Engine {
     // __sendToHost: Send operations to host
     this.context.setGlobal('__sendToHost', (batch: OperationBatch) => {
       if (debug) {
-        logger.log('[rill] __sendToHost called, operations:', batch.operations.length);
+        logger.log(`[rill] Engine #${this.engineId} __sendToHost called, operations:`, batch.operations.length);
       }
       this.emit('operation', batch);
-      this.receiver?.applyBatch(batch);
+      if (this.receiver) {
+        if (debug) {
+          logger.log(`[rill] Engine #${this.engineId} applying batch to receiver`);
+        }
+        this.receiver.applyBatch(batch);
+      } else {
+        logger.warn(`[rill] Engine #${this.engineId} has no receiver to apply batch!`);
+      }
     });
 
     // __getConfig: Get initial configuration
@@ -581,12 +593,18 @@ export class Engine {
    * Create Receiver
    */
   createReceiver(onUpdate: () => void): Receiver {
+    if (this.options.debug) {
+      this.options.logger.log(`[rill] Engine #${this.engineId} creating Receiver`);
+    }
     this.receiver = new Receiver(
       this.registry,
       (message) => this.sendToSandbox(message),
       onUpdate,
       { onMetric: this.options.onMetric, maxBatchSize: this.options.receiverMaxBatchSize }
     );
+    if (this.options.debug) {
+      this.options.logger.log(`[rill] Engine #${this.engineId} Receiver created`);
+    }
     return this.receiver;
   }
 
