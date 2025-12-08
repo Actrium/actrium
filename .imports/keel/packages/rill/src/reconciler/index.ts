@@ -672,29 +672,40 @@ function cleanupNodeCallbacks(node: VNode, registry: CallbackRegistry): void {
 
 // ============ Render Entry ============
 
-let container: RootContainer | null = null;
-let root: ReturnType<RillReconciler['createContainer']> | null = null;
-let reconcilerInstance: {
+/**
+ * Reconciler instance data for each plugin
+ */
+interface ReconcilerInstance {
   reconciler: RillReconciler;
   callbackRegistry: CallbackRegistry;
   collector: OperationCollector;
-} | null = null;
+  container: RootContainer;
+  root: ReturnType<RillReconciler['createContainer']>;
+}
+
+/**
+ * Map of sendToHost functions to their reconciler instances
+ * This allows multiple plugins to each have their own isolated reconciler
+ */
+const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
 
 /**
  * Render React element
+ *
+ * Each unique sendToHost function gets its own isolated reconciler instance.
+ * This allows multiple plugins to run simultaneously without interfering with each other.
  */
 export function render(
   element: React.ReactElement,
   sendToHost: SendToHost
 ): void {
-  if (!reconcilerInstance) {
-    // Initialize reconciler on first render call
-    reconcilerInstance = createReconciler(sendToHost);
-  }
+  let instance = reconcilerMap.get(sendToHost);
 
-  if (!container) {
-    container = { children: [] };
-    root = reconcilerInstance.reconciler.createContainer(
+  if (!instance) {
+    // Create new reconciler instance for this plugin
+    const reconcilerInstance = createReconciler(sendToHost);
+    const container: RootContainer = { children: [] };
+    const root = reconcilerInstance.reconciler.createContainer(
       container,
       0, // ConcurrentRoot
       null,
@@ -707,31 +718,54 @@ export function render(
       () => {}, // onTransitionStart
       null
     );
+
+    instance = {
+      ...reconcilerInstance,
+      container,
+      root,
+    };
+
+    reconcilerMap.set(sendToHost, instance);
   }
 
-  reconcilerInstance.reconciler.updateContainer(element, root!, null, () => {});
+  instance.reconciler.updateContainer(element, instance.root, null, () => {});
 }
 
 /**
- * Unmount
+ * Unmount a specific plugin instance
  */
-export function unmount(): void {
-  if (root && reconcilerInstance) {
-    reconcilerInstance.reconciler.updateContainer(null, root, null, () => {});
+export function unmount(sendToHost: SendToHost): void {
+  const instance = reconcilerMap.get(sendToHost);
+  if (instance) {
+    instance.reconciler.updateContainer(null, instance.root, null, () => {});
+    instance.callbackRegistry.clear();
+    reconcilerMap.delete(sendToHost);
   }
-  container = null;
-  root = null;
-  if (reconcilerInstance) {
-    reconcilerInstance.callbackRegistry.clear();
-  }
-  reconcilerInstance = null;
 }
 
 /**
- * Get callback registry (for host to invoke callbacks)
+ * Unmount all plugin instances
  */
-export function getCallbackRegistry(): CallbackRegistry | null {
-  return reconcilerInstance?.callbackRegistry ?? null;
+export function unmountAll(): void {
+  reconcilerMap.forEach(instance => {
+    instance.reconciler.updateContainer(null, instance.root, null, () => {});
+    instance.callbackRegistry.clear();
+  });
+  reconcilerMap.clear();
+}
+
+/**
+ * Get callback registry for a specific plugin instance
+ * @deprecated This function assumes a single plugin instance. Use the plugin's own callback management instead.
+ */
+export function getCallbackRegistry(sendToHost?: SendToHost): CallbackRegistry | null {
+  if (sendToHost) {
+    const instance = reconcilerMap.get(sendToHost);
+    return instance?.callbackRegistry ?? null;
+  }
+  // Fallback: return the first available registry (for backward compatibility)
+  const firstInstance = reconcilerMap.values().next().value;
+  return firstInstance?.callbackRegistry ?? null;
 }
 
 export { type VNode, type Operation, type OperationBatch, type SendToHost };
