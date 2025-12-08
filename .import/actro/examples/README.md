@@ -1,65 +1,127 @@
-# Rill 插件示例
+# Rill Plugin Examples
 
-本目录包含 Rill 插件开发示例。
+This directory contains Rill plugin development and host integration examples, covering all features from basic to advanced.
 
-## 示例列表
+## Example List
 
-### simple-plugin
+### 1. simple-plugin - Basic Plugin Development
 
-一个完整的 Rill 插件示例，展示:
+**Target Audience**: Developers new to Rill
 
-- **基础组件**: View, Text, TouchableOpacity, ScrollView
-- **状态管理**: useState, useEffect
-- **宿主通信**:
-  - `useHostEvent` - 监听宿主事件
-  - `useSendToHost` - 向宿主发送消息
-  - `useConfig` - 获取插件配置
-- **主题支持**: 明暗主题切换
+**Features Demonstrated**:
+- Basic components: View, Text, TouchableOpacity, ScrollView
+- State management: useState, useEffect
+- Host communication:
+  - `useHostEvent` - Listen to host events
+  - `useSendToHost` - Send messages to host
+  - `useConfig` - Get plugin configuration
+- Theme support: Light and dark theme switching
 
-## 快速开始
+[View Example →](./simple-plugin)
+
+---
+
+### 2. host-integration - Complete Host Integration Example
+
+**Target Audience**: Developers who need to integrate Rill into React Native applications
+
+**Features Demonstrated**:
+- ✅ Engine instance creation and configuration
+- ✅ EngineView lifecycle management
+- ✅ Bidirectional host-plugin communication
+- ✅ Error handling and recovery
+- ✅ Custom component registration
+- ✅ QuickJS Provider configuration
+- ✅ Dynamic plugin loading
+- ✅ Resource cleanup and memory management
+
+[View Example →](./host-integration)
+
+---
+
+### 3. advanced-features - Advanced Features Example
+
+**Target Audience**: Developers who need to optimize performance and deploy to production
+
+**Features Demonstrated**:
+- ✅ Performance metrics tracking (onMetric)
+- ✅ Execution timeout protection (timeout)
+- ✅ Module whitelist (requireWhitelist)
+- ✅ Health checks (getHealth)
+- ✅ Batch processing optimization (receiverMaxBatchSize)
+- ✅ Custom logging system
+- ✅ Debug mode configuration
+- ✅ Performance monitoring and alerting
+
+[View Example →](./advanced-features)
+
+---
+
+## Quick Start
+
+### Building Plugins
+
+All example plugins follow the same build process:
 
 ```bash
-# 进入示例目录
-cd examples/simple-plugin
+# Navigate to any example directory
+cd examples/simple-plugin  # or host-integration, advanced-features
 
-# 安装依赖
+# Install dependencies
 npm install
 
-# 构建插件
+# Build the plugin
 npm run build
 
-# 开发模式 (不压缩 + sourcemap)
+# Development mode (no minification + sourcemap)
 npm run build:dev
 
-# 监听文件变化
+# Watch for file changes (if supported)
 npm run watch
 ```
 
-构建输出: `dist/bundle.js`
+Build output: `dist/bundle.js` or `dist/plugin.js`
 
-## 插件结构
+## Project Structure
+
+### Plugin Example Structure
 
 ```
 simple-plugin/
-├── package.json      # 项目配置
+├── package.json      # Project configuration
+├── README.md         # Detailed documentation
 ├── src/
-│   └── index.tsx     # 插件主入口
+│   └── index.tsx     # Plugin main entry
 └── dist/
-    └── bundle.js     # 构建输出
+    └── bundle.js     # Build output
 ```
 
-## 创建新插件
+### Host Integration Example Structure
 
-1. 复制 `simple-plugin` 目录
-2. 修改 `package.json` 中的名称
-3. 编辑 `src/index.tsx` 实现插件逻辑
-4. 运行 `npm run build` 构建
+```
+host-integration/
+├── package.json
+├── README.md         # Complete integration guide
+├── src/
+│   ├── plugin.tsx            # Plugin code
+│   ├── HostApp.tsx           # Host application example
+│   └── QuickJSProvider.tsx   # Provider configuration
+└── dist/
+    └── plugin.js
+```
 
-## SDK 导入
+## Creating a New Plugin
+
+1. Copy the `simple-plugin` directory
+2. Modify the name in `package.json`
+3. Edit `src/index.tsx` to implement plugin logic
+4. Run `npm run build` to build
+
+## SDK Import
 
 ```tsx
 import {
-  // 基础组件
+  // Basic components
   View,
   Text,
   TouchableOpacity,
@@ -69,35 +131,142 @@ import {
   Button,
 
   // Hooks
-  useHostEvent,      // 监听宿主事件
-  useSendToHost,     // 发送消息到宿主
-  useConfig,         // 获取插件配置
+  useHostEvent,      // Listen to host events
+  useSendToHost,     // Send messages to host
+  useConfig,         // Get plugin configuration
 
-  // 类型
+  // Types
   StyleProp,
   LayoutEvent,
   ScrollEvent,
 } from 'rill/sdk';
 ```
 
-## 宿主通信示例
+## Learning Path
+
+Recommended learning order:
+
+### 1️⃣ Getting Started
+
+Start with **simple-plugin** to learn:
+- How to write basic plugins
+- Usage of SDK components and hooks
+- Plugin build process
+
+### 2️⃣ Host Integration
+
+Read the **host-integration** example to understand:
+- How to integrate Rill into your application
+- Usage of Engine and EngineView
+- Lifecycle management and error handling
+- Host-plugin communication mechanisms
+
+### 3️⃣ Production Optimization
+
+Study the **advanced-features** example to master:
+- Performance monitoring and optimization
+- Security configuration (whitelist, timeout)
+- Health checks and error recovery
+- Production environment best practices
+
+---
+
+## Core Concepts
+
+### Plugin-side API
 
 ```tsx
-// 发送消息到宿主
+import {
+  // Basic components
+  View, Text, TouchableOpacity, ScrollView,
+  Image, ActivityIndicator, Button,
+
+  // Hooks
+  useHostEvent,      // Listen to host events
+  useSendToHost,     // Send messages to host
+  useConfig,         // Get plugin configuration
+} from 'rill/sdk';
+
+// Send message to host
 const sendToHost = useSendToHost();
 sendToHost('MY_EVENT', { data: 'value' });
 
-// 监听宿主事件
+// Listen to host events
 useHostEvent('REFRESH', () => {
   console.log('Host requested refresh');
 });
 
-// 带类型的事件处理
+// Typed event handling
 useHostEvent<{ theme: 'light' | 'dark' }>('THEME_CHANGE', (payload) => {
   console.log('Theme:', payload.theme);
 });
 
-// 获取配置
+// Get configuration
 const config = useConfig<{ title: string }>();
 console.log('Title:', config.title);
 ```
+
+### Host-side API
+
+```tsx
+import { Engine, EngineView } from 'rill';
+
+// Create Engine
+const engine = new Engine({
+  quickjs: provider,
+  timeout: 5000,
+  debug: true,
+  onMetric: (name, value) => console.log(`${name}: ${value}ms`),
+});
+
+// Register custom components
+engine.register({ MapView: NativeMapView });
+
+// Send events to plugin
+engine.sendEvent('THEME_CHANGE', { theme: 'dark' });
+
+// Listen to plugin messages
+engine.on('message', (msg) => console.log(msg));
+
+// Render plugin UI
+<EngineView
+  engine={engine}
+  bundleUrl="https://cdn.example.com/plugin.js"
+  initialProps={{ userId: '123' }}
+  onLoad={() => console.log('Loaded')}
+  onError={(err) => console.error(err)}
+/>
+```
+
+---
+
+## FAQ
+
+### Q: How to use third-party libraries in plugins?
+
+A: You need to configure allowed modules through `requireWhitelist` on the host side. Refer to the [advanced-features](./advanced-features) example.
+
+### Q: How to debug plugins?
+
+A:
+1. Use `npm run build:dev` to build with sourcemaps
+2. Enable `debug: true` in Engine configuration
+3. Use console.log for logging (visible on host side)
+
+### Q: How to optimize plugin performance?
+
+A: Refer to the performance monitoring and optimization guide in the [advanced-features](./advanced-features) example.
+
+### Q: How to handle plugin errors?
+
+A: Use the `onError` callback and `renderError` for custom error UI in EngineView. See the [host-integration](./host-integration) example for details.
+
+---
+
+## Related Resources
+
+- [Rill Documentation](../README.md)
+- [API Reference](../docs/API.md)
+- [User Guide](../docs/GUIDE.md)
+- [Architecture Design](../docs/ARCHITECTURE.md)
+- [Production Guide](../docs/PRODUCTION_GUIDE.md)
