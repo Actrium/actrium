@@ -291,6 +291,11 @@ export class Engine {
     const logger = this.options.logger;
     const debug = this.options.debug;
 
+    // Inject React and ReactJSXRuntime as global variables
+    // This is required for plugins compiled with rill CLI
+    this.context.setGlobal('React', React);
+    this.context.setGlobal('ReactJSXRuntime', ReactJSXRuntime);
+
     // console
     this.context.setGlobal('console', {
       log: (...args: unknown[]) => {

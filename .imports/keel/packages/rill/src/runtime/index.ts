@@ -8,7 +8,7 @@
 // Development-time version check to help align React and react-reconciler peer versions
 (function () {
   try {
-    const env = (typeof process !== 'undefined' && process && process.env && process.env.NODE_ENV) || 'production';
+    const env = (typeof process !== 'undefined' && process && process.env && process.env['NODE_ENV']) || 'production';
     if (env !== 'production') {
       // Dynamically resolve versions without creating hard dependencies
       let reactVersion: string | undefined;
