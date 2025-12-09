@@ -68,7 +68,7 @@ impl Database {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS realmconfig (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                realm_id INTEGER NOT NULL,
+                realm_rowid INTEGER NOT NULL,
                 key TEXT NOT NULL,
                 value TEXT NOT NULL
             )",
@@ -98,8 +98,8 @@ impl Database {
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_realmconfig_realm_id
-             ON realmconfig(realm_id)",
+            "CREATE INDEX IF NOT EXISTS idx_realmconfig_realm_rowid
+             ON realmconfig(realm_rowid)",
         )
         .execute(&self.pool)
         .await?;
