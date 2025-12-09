@@ -10,7 +10,7 @@ use sqlx::FromRow;
 ///
 #[derive(Debug, Clone, Serialize, Deserialize, Default, FromRow)]
 pub struct Realm {
-    pub rowid: Option<u32>,
+    pub rowid: Option<i64>,
 
     // 基础字段 - 所有服务都需要
     pub realm_id: u32,
