@@ -6,8 +6,8 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 
 ## Features
 
-- **React-like Development Experience**: Write plugins using JSX and Hooks
-- **Complete Sandbox Isolation**: Based on QuickJS, plugin crashes don't affect the host
+- **React-like Development Experience**: Write guests using JSX and Hooks
+- **Complete Sandbox Isolation**: Based on QuickJS, guest crashes don't affect the host
 - **Lightweight and Efficient**: No WebView overhead, native rendering performance
 - **Flexible Extension**: Supports registering custom business components
 
@@ -21,11 +21,11 @@ rill/
 │   ├── rill/          # Core runtime library
 │   │   ├── src/
 │   │   │   ├── runtime/    # Engine and renderer
-│   │   │   ├── sdk/        # Plugin development SDK
+│   │   │   ├── sdk/        # Guest development SDK
 │   │   │   └── reconciler/ # React reconciler
 │   │   ├── docs/      # Documentation and examples
 │   │   └── package.json
-│   └── cli/           # CLI tools for plugin development
+│   └── cli/           # CLI tools for guest development
 │       ├── src/
 │       └── package.json
 └── package.json       # Workspace root
@@ -35,9 +35,9 @@ rill/
 
 - **rill** - Core runtime library for host applications
   - Published as `rill` on npm
-  - Exports: `rill` (runtime), `rill/sdk` (plugin SDK)
+  - Exports: `rill` (runtime), `rill/sdk` (guest SDK)
 
-- **rill-cli** - Command-line tools for plugin development
+- **rill-cli** - Command-line tools for guest development
   - Published as `rill-cli` on npm
   - Commands: `rill build`, `rill init`
 
@@ -107,26 +107,26 @@ engine.register({
   StepList: NativeStepList,
 });
 
-// 3. Render plugin
+// 3. Render guest
 function App() {
   return (
     <EngineView
       engine={engine}
-      bundleUrl="https://cdn.example.com/plugin.js"
+      bundleUrl="https://cdn.example.com/guest.js"
       initialProps={{ theme: 'dark' }}
-      onLoad={() => console.log('Plugin loaded')}
-      onError={(err) => console.error('Plugin error:', err)}
+      onLoad={() => console.log('Guest loaded')}
+      onError={(err) => console.error('Guest error:', err)}
     />
   );
 }
 ```
 
-### Plugin Development
+### Guest Development
 
 ```tsx
 import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/sdk';
 
-export default function MyPlugin() {
+export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
 
   useHostEvent('REFRESH', () => {
@@ -135,7 +135,7 @@ export default function MyPlugin() {
 
   return (
     <View style={{ flex: 1, padding: 20 }}>
-      <Text style={{ fontSize: 24 }}>Hello from Plugin!</Text>
+      <Text style={{ fontSize: 24 }}>Hello from Guest!</Text>
       <Text>Theme: {config.theme}</Text>
       <TouchableOpacity onPress={() => console.log('Pressed!')}>
         <Text>Click Me</Text>
@@ -145,17 +145,17 @@ export default function MyPlugin() {
 }
 ```
 
-### Build Plugin
+### Build Guest
 
 ```bash
 # Install CLI
 npm install -g rill
 
 # Build
-rill build src/plugin.tsx -o dist/bundle.js
+rill build src/guest.tsx -o dist/bundle.js
 
 # Development mode
-rill build src/plugin.tsx --watch --no-minify --sourcemap
+rill build src/guest.tsx --watch --no-minify --sourcemap
 ```
 
 ## Architecture
@@ -168,7 +168,7 @@ rill build src/plugin.tsx --watch --no-minify --sourcemap
 │                            │                                     │
 │                            ▼                                     │
 │                    ┌───────────────────┐                        │
-│                    │  Plugin Bundle.js  │                        │
+│                    │  Guest Bundle.js  │                        │
 │                    │  (React + SDK)     │                        │
 │                    └───────────────────┘                        │
 │                            │                                     │
@@ -184,9 +184,9 @@ rill build src/plugin.tsx --watch --no-minify --sourcemap
 
 | Module | Path | Description |
 |--------|------|-------------|
-| SDK | `rill/sdk` | Plugin development kit, virtual components and Hooks |
+| SDK | `rill/sdk` | Guest development kit, virtual components and Hooks |
 | Runtime | `rill` | Host runtime, Engine and EngineView |
-| CLI | `rill` (bin) | Plugin bundler tool |
+| CLI | `rill` (bin) | Guest bundler tool |
 
 ## API
 
@@ -204,10 +204,10 @@ interface EngineOptions {
 // Register components
 engine.register({ ComponentName: ReactComponent });
 
-// Load plugin
+// Load guest
 await engine.loadBundle(bundleUrl, initialProps);
 
-// Send event to plugin
+// Send event to guest
 engine.sendEvent('EVENT_NAME', payload);
 
 // Update configuration
@@ -290,7 +290,7 @@ const data = devtools.exportAll();
 - [User Guide](./docs/GUIDE.md) - Getting started tutorial and best practices
 - [Architecture Design](./docs/ARCHITECTURE.md) - System architecture details
 - [Production Guide](./docs/PRODUCTION_GUIDE.md) - Production deployment checklist
-- [Plugin Examples](./examples/) - Working examples with complete source code
+- [Guest Examples](./examples/) - Working examples with complete source code
 
 ## Development
 
@@ -315,6 +315,95 @@ npm run test:coverage
 ```
 
 ## Testing
+
+
+## Host ↔ Guest Events
+
+- Guest subscribes using SDK hook `useHostEvent(event, callback)`.
+- Host sends events via `engine.sendEvent(eventName, payload)`.
+- Unsubscribe: `const off = useHostEvent('EVT', cb); off?.();` If you keep the return value from the hook call, call it to remove the listener.
+
+Example (guest):
+
+```tsx
+import * as React from 'react';
+import { View, Text } from 'rill/sdk';
+import { useHostEvent, useSendToHost } from 'rill/sdk';
+
+export default function Guest() {
+  const send = useSendToHost();
+  React.useEffect(() => {
+    const off = useHostEvent('PING', (payload: { ok: number }) => {
+      // handle host event
+      send('ACK', { got: payload.ok });
+    });
+    return () => { off && off(); };
+  }, []);
+  return <View><Text>Ready</Text></View>;
+}
+```
+
+Example (host):
+
+```ts
+import { Engine } from 'rill';
+const engine = new Engine({ provider: yourJSEngineProvider });
+engine.on('message', (m) => { /* m.event, m.payload */ });
+engine.sendEvent('PING', { ok: 1 });
+```
+
+Notes:
+- Engine injects `__useHostEvent`/`__handleHostEvent` at runtime as a safety polyfill, so the hook works even if your bundle doesn’t include the CLI banner.
+- For performance, prefer stable callbacks and unsubscribe on unmount.
+
+## SDK Compile-time Inlining and Strict Guard
+
+Goal: guest bundles must not require/import `rill/sdk` at runtime. The SDK is type-level + compile-time only.
+
+- Build with rill CLI (Vite lib build, IIFE output). The CLI sets a resolve alias so `rill/sdk` can be fully inlined/treeshaken.
+- Post-build, the CLI runs a strict guard that analyzes the bundle and fails if non-whitelisted runtime deps are present (e.g., `rill/sdk`).
+
+CLI:
+
+```bash
+# Build (strict guard on by default)
+rill build src/guest.tsx -o dist/bundle.js
+
+# Analyze an existing bundle
+rill analyze dist/bundle.js \
+  --fail-on-violation \
+  --treat-eval-as-violation \
+  --treat-dynamic-non-literal-as-violation
+```
+
+Whitelist (runtime): `react`, `react-native`, `react/jsx-runtime`, `rill/reconciler`.
+
+If the bundle still contains `require('rill/sdk')`, analyze fails fast with guidance.
+
+## Host Integration (correct API)
+
+```ts
+import { Engine } from 'rill';
+import { View, Text } from 'react-native'; // or your custom components
+
+const engine = new Engine({ provider: yourJSEngineProvider });
+engine.register({ View, Text }); // Register the components your guest needs
+const receiver = engine.createReceiver(() => {/* schedule host re-render */});
+await engine.loadBundle(codeOrUrl);
+```
+
+Notes:
+- Use `register(components)` (not `registerComponent`).
+- Use `loadBundle(source)` (not `loadGuest`).
+- Provide a JS engine provider via `new Engine({ provider })`.
+
+## Init Template Defaults
+
+`rill init` generates:
+- vite.config.ts: IIFE lib build, external: react/react-native/react/jsx-runtime/rill-reconciler, alias `rill/sdk` to ESM for inlining.
+- tsconfig.json: Bundler-resolve, isolatedModules, strict, verbatimModuleSyntax, and editor-only path typing for `rill/sdk`.
+- Example guest using `import { View, Text } from 'rill/sdk'`.
+
 
 The project includes a complete test suite:
 
