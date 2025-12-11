@@ -29,7 +29,10 @@ impl KsClientWrapper {
     }
 
     /// 获取私钥
-    pub async fn fetch_secret_key(&self, key_id: u32) -> Result<(SecretKey, u64), ks::KsError> {
+    pub async fn fetch_secret_key(
+        &self,
+        key_id: u32,
+    ) -> Result<(SecretKey, u64, bool), ks::KsError> {
         let mut client = self.inner.write().await;
         client.fetch_secret_key(key_id).await
     }

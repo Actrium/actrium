@@ -50,6 +50,8 @@ pub struct GetSecretKeyResponse {
     pub secret_key: String,
     /// 过期时间（Unix 时间戳）
     pub expires_at: u64,
+    /// 是否在容忍期内（true = 密钥已过期但在容忍期，false = 正常有效期）
+    pub in_tolerance_period: bool,
 }
 
 /// 存储在数据库中的密钥记录

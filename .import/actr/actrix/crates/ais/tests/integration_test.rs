@@ -105,7 +105,7 @@ async fn test_end_to_end_token_issuance_and_validation() {
     );
 
     // 8. 使用 Validator 验证 Token
-    let claims = AIdCredentialValidator::check(credential, 1001)
+    let (claims, _) = AIdCredentialValidator::check(credential, 1001)
         .await
         .expect("Token validation should succeed");
 
@@ -194,7 +194,9 @@ async fn test_token_validation_with_wrong_tenant_fails() {
     let credential = &register_ok.credential;
 
     // 尝试使用错误的 realm_id 验证（期望失败）
-    let result = AIdCredentialValidator::check(credential, 9999).await;
+    let result = AIdCredentialValidator::check(credential, 9999)
+        .await
+        .map(|(claims, _)| claims);
 
     assert!(
         result.is_err(),
@@ -262,7 +264,7 @@ async fn test_multiple_key_rotations() {
 
     // 验证所有 Token
     for (i, credential) in credentials.iter().enumerate() {
-        let claims = AIdCredentialValidator::check(credential, 1001)
+        let (claims, _) = AIdCredentialValidator::check(credential, 1001)
             .await
             .unwrap_or_else(|e| panic!("Token {} validation failed: {}", i, e));
 
