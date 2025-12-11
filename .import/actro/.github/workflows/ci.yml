@@ -44,7 +44,7 @@ jobs:
       - name: Test CLI executable
         run: |
           echo "Testing CLI version command..."
-          node dist/cli/index.js --version
+          node packages/cli/dist/index.js --version
 
       - name: Test CLI build + analyze (strict guard)
         run: |
@@ -63,15 +63,15 @@ jobs:
           EOF
 
           echo "Building test plugin..."
-          node dist/cli/index.js build test-plugin/plugin.tsx -o test-plugin/bundle.js
+          node packages/cli/dist/index.js build test-plugin/plugin.tsx -o test-plugin/bundle.js
 
           echo "Analyzing built bundle (should PASS)..."
-          node dist/cli/index.js analyze test-plugin/bundle.js --fail-on-violation --treat-eval-as-violation --treat-dynamic-non-literal-as-violation
+          node packages/cli/dist/index.js analyze test-plugin/bundle.js --fail-on-violation --treat-eval-as-violation --treat-dynamic-non-literal-as-violation
 
           echo "Creating bad bundle (should FAIL analyze)..."
           echo "require('rill/sdk');" > test-plugin/bad-bundle.js
           set +e
-          node dist/cli/index.js analyze test-plugin/bad-bundle.js --fail-on-violation
+          node packages/cli/dist/index.js analyze test-plugin/bad-bundle.js --fail-on-violation
           if [ $? -eq 0 ]; then
             echo "❌ Analyze should have failed but passed"
             exit 1
@@ -83,6 +83,6 @@ jobs:
       - name: Check bundle size
         run: |
           echo "Bundle sizes:"
-          du -h dist/runtime/index.js || true
-          du -h dist/sdk/index.js || true
-          du -h dist/cli/index.js || true
+          du -h packages/rill/dist/runtime/index.js || true
+          du -h packages/rill/dist/sdk/index.js || true
+          du -h packages/cli/dist/index.js || true
