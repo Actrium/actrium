@@ -21,7 +21,7 @@ describe('Analyze integration - build then analyze', () => {
     fs.writeFileSync(
       path.join('src', 'guest.tsx'),
       `import * as React from 'react';
-import { View, Text } from 'rill/sdk';
+import { View, Text } from '@rill/core/sdk';
 export default function Guest(){
   return <View><Text>OK</Text></View>;
 }

@@ -25,7 +25,7 @@ guest开发者使用的 SDK，在 QuickJS 沙箱中运行。
 虚组件是字符串标识符，在打包时被 JSX 转换为操作指令。
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, Button, Switch, ActivityIndicator } from 'rill/sdk';
+import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, Button, Switch, ActivityIndicator } from '@rill/core/sdk';
 ```
 
 #### View
@@ -225,7 +225,7 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 监听宿主事件。
 
 ```tsx
-import { useHostEvent } from 'rill/sdk';
+import { useHostEvent } from '@rill/core/sdk';
 
 function Guest() {
   useHostEvent<{ force: boolean }>('REFRESH', (payload) => {
@@ -246,7 +246,7 @@ function Guest() {
 获取初始配置。
 
 ```tsx
-import { useConfig } from 'rill/sdk';
+import { useConfig } from '@rill/core/sdk';
 
 interface Config {
   theme: 'light' | 'dark';
@@ -269,7 +269,7 @@ function Guest() {
 向宿主发送事件。
 
 ```tsx
-import { useSendToHost } from 'rill/sdk';
+import { useSendToHost } from '@rill/core/sdk';
 
 function Guest() {
   const sendToHost = useSendToHost();

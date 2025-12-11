@@ -26,7 +26,7 @@ describe('CLI Build', () => {
     fs.writeFileSync(
       path.join(srcDir, 'guest.tsx'),
       `
-      import { View, Text } from 'rill/sdk';
+      import { View, Text } from '@rill/core/sdk';
       export default function Guest() {
         return <View><Text>Hello</Text></View>;
       }

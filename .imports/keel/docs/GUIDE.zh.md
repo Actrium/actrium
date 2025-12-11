@@ -30,7 +30,7 @@ bun add -D rill
 
 ```tsx
 // src/guest.tsx
-import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/sdk';
+import { View, Text, TouchableOpacity, useConfig, useSendToHost } from '@rill/core/sdk';
 
 interface Config {
   title: string;
@@ -146,7 +146,7 @@ my-guest/
 虚组件是字符串标识符，在构建时被转换为操作指令：
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/sdk';
+import { View, Text, Image, ScrollView, TouchableOpacity } from '@rill/core/sdk';
 
 function MyComponent() {
   return (

@@ -13,7 +13,7 @@ import {
   useHostEvent,
   useConfig,
   useSendToHost,
-} from 'rill/sdk';
+} from '@rill/core/sdk';
 
 interface Config {
   title?: string;
