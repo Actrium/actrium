@@ -1,5 +1,25 @@
+# Dependencies
 node_modules/
+
+# Build artifacts (no longer used - we export TS directly)
 dist/
+*.tgz
+
+# Test coverage
 coverage/
+
+# Logs
 *.log
+npm-debug.log*
+
+# Lock files (we use bun)
+package-lock.json
+yarn.lock
+
+# OS files
 .DS_Store
+
+# IDE
+.vscode/
+.idea/
+ANALYSIS.md

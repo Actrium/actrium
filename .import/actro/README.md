@@ -14,53 +14,55 @@ askit follows a **90% Universal + 10% Core** architecture:
 - **Core (10%)**: Host-only modules for bridging and registration
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      Host App (RN)                      │
-│  ┌─────────────────┐  ┌─────────────────────────────┐  │
-│  │   askit/core    │  │         askit               │  │
-│  │  - registry     │  │  - Bus, Toast, Haptic       │  │
-│  │  - bridge       │  │  - StepList, ThemeView...   │  │
-│  └────────┬────────┘  └──────────────┬──────────────┘  │
-│           │                          │                  │
-│           └──────────┬───────────────┘                  │
-│                      ▼                                  │
-│              ┌───────────────┐                          │
-│              │  rill Engine  │                          │
-│              └───────┬───────┘                          │
-└──────────────────────┼──────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Host App (RN)                          │
+│  ┌─────────────────┐  ┌───────────────────────────────┐    │
+│  │   askit/core    │  │         askit                 │    │
+│  │  - registry     │  │  - EventEmitter, Toast, Haptic│    │
+│  │  - bridge       │  │  - StepList, ThemeView...     │    │
+│  └────────┬────────┘  └──────────────┬────────────────┘    │
+│           │                          │                      │
+│           └──────────┬───────────────┘                      │
+│                      ▼                                      │
+│              ┌───────────────┐                              │
+│              │  rill Engine  │                              │
+│              └───────┬───────┘                              │
+└──────────────────────┼──────────────────────────────────────┘
                        │ Message Protocol
-┌──────────────────────┼──────────────────────────────────┐
-│                      ▼                                  │
-│              ┌───────────────┐                          │
-│              │ QuickJS Sandbox│                         │
-│              └───────┬───────┘                          │
-│                      │                                  │
-│  ┌───────────────────▼───────────────────────────────┐ │
-│  │                    askit                          │ │
-│  │  - Bus, Toast, Haptic (Remote implementations)    │ │
-│  │  - StepList, ThemeView... (DSL generators)        │ │
-│  └───────────────────────────────────────────────────┘ │
-│                      Guest                             │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────┼──────────────────────────────────────┐
+│                      ▼                                      │
+│              ┌───────────────┐                              │
+│              │ QuickJS Sandbox│                             │
+│              └───────┬───────┘                              │
+│                      │                                      │
+│  ┌───────────────────▼─────────────────────────────────┐   │
+│  │                    askit                            │   │
+│  │  - EventEmitter, Toast, Haptic (Guest impl)         │   │
+│  │  - StepList, ThemeView... (DSL generators)          │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                      Guest                                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Installation
 
 ```bash
-npm install askit
+bun add github:GoAskAway/askit
 ```
+
+> **Note**: askit is published via GitHub and exports TypeScript source directly (no build step required). Your bundler (Metro, Vite, etc.) needs to support TypeScript compilation. Both React Native Metro and modern bundlers handle this automatically.
 
 ## Usage
 
 ### In Guest (QuickJS Sandbox)
 
 ```typescript
-import { Bus, Toast, Haptic } from 'askit';
+import { EventEmitter, Toast, Haptic } from 'askit';
 import { StepList, UserAvatar } from 'askit';
 
 // Event communication
-Bus.emit('guest:ready', { version: '1.0.0' });
-Bus.on('host:config', (config) => {
+EventEmitter.emit('guest:ready', { version: '1.0.0' });
+EventEmitter.on('host:config', (config) => {
   console.log('Received config:', config);
 });
 
@@ -78,7 +80,7 @@ const avatar = UserAvatar({ uri: 'https://example.com/avatar.png', size: 48 });
 
 ```typescript
 // Import core module for bridging
-import { createEngineAdapter, AskitComponents } from 'askit/core';
+import { createEngineAdapter, components } from 'askit/core';
 import { Engine } from 'rill';
 
 // Create engine and connect askit
@@ -86,9 +88,7 @@ const engine = new Engine();
 const adapter = createEngineAdapter(engine);
 
 // Register components for rendering guest UI
-Object.entries(AskitComponents).forEach(([name, Component]) => {
-  engine.registerComponent(name, Component);
-});
+engine.register(components);
 
 // Start guest
 engine.loadGuest('./guest.js');
@@ -96,22 +96,25 @@ engine.loadGuest('./guest.js');
 
 ## API Reference
 
-### Bus
+### EventEmitter
 
 Event-based communication between Host and Guest.
 
 ```typescript
 // Emit event
-Bus.emit(event: string, payload?: unknown): void
+EventEmitter.emit(event: string, payload?: unknown): void
 
-// Listen to event
-Bus.on(event: string, handler: (payload: unknown) => void): () => void
+// Listen to event (supports wildcards: 'user:*', 'analytics:**')
+EventEmitter.on(event: string, handler: (payload: unknown) => void, options?: {
+  rateLimit?: 'throttle' | 'debounce' | 'none';
+  delay?: number;
+}): () => void
 
 // Listen once
-Bus.once(event: string, handler: (payload: unknown) => void): () => void
+EventEmitter.once(event: string, handler: (payload: unknown) => void): () => void
 
 // Remove listener
-Bus.off(event: string, handler?: (payload: unknown) => void): void
+EventEmitter.off(event: string, handler: (payload: unknown) => void): void
 ```
 
 ### Toast
@@ -130,7 +133,7 @@ Toast.show(message: string, options?: {
 Trigger haptic feedback.
 
 ```typescript
-Haptic.trigger(type?: 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error'): void
+Haptic.trigger(type?: 'light' | 'medium' | 'heavy' | 'selection' | 'success' | 'warning' | 'error'): void
 ```
 
 ## Components
@@ -146,7 +149,7 @@ Haptic.trigger(type?: 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'er
 
 ```
 askit
-├── index.ts          # Universal exports (Bus, Toast, Haptic, Components)
+├── index.ts          # Universal exports (EventEmitter, Toast, Haptic, Components)
 └── core/
     ├── registry.ts   # Component and module registration
     └── bridge.ts     # Host-Guest message bridge
@@ -160,10 +163,10 @@ The package uses conditional exports to serve different implementations:
 {
   "exports": {
     ".": {
-      "react-native": "./dist/native/index.js",
-      "default": "./dist/remote/index.js"
+      "react-native": "./src/index.host.ts",
+      "default": "./src/index.guest.ts"
     },
-    "./core": "./dist/core/index.js"
+    "./core": "./src/core/index.ts"
   }
 }
 ```
@@ -175,22 +178,22 @@ The package uses conditional exports to serve different implementations:
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
 # Run tests
-npm test
+bun test
 
 # Run tests with coverage
-npm run test:coverage
+bun test --coverage
 
 # Lint
-npm run lint
+bun run lint
 
 # Format
-npm run fmt
+bun run fmt
 
 # Build
-npm run build
+bun run build
 ```
 
 ## License

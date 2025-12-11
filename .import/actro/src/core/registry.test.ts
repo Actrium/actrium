@@ -1,140 +1,120 @@
 /**
  * Core Registry Tests
  *
- * Tests module handlers and configuration functions
+ * Tests module registry and configuration functions
  * Note: Full registry tests require React Native environment
  *
- * We test the module handlers independently since registry.ts
+ * We test the modules independently since registry.ts
  * imports React Native components which can't be loaded in Node.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { Toast as ToastModule, NativeToast } from '../api/Toast.native';
-import { Haptic as HapticModule, NativeHaptic } from '../api/Haptic.native';
+import {
+  Toast,
+  HostToast,
+  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
+  TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
+} from '../api/Toast.host';
+import { Haptic, HostHaptic, HAPTIC_SET_HANDLER, HAPTIC_CLEAR_HANDLER } from '../api/Haptic.host';
 
-// Recreate module handlers for testing (same logic as registry.ts)
-interface ModuleHandler {
-  handle: (method: string, args: unknown[]) => unknown;
-}
+// Recreate module registry (same as registry.ts)
+const modules = {
+  toast: Toast,
+  haptic: Haptic,
+} as const;
 
-const ToastHandler: ModuleHandler = {
-  handle(method: string, args: unknown[]) {
-    if (method === 'show') {
-      const [message, options] = args as [string, unknown];
-      ToastModule.show(message, options as Parameters<typeof ToastModule.show>[1]);
-    }
-  },
-};
+describe('Core Registry', () => {
+  describe('Module Registry', () => {
+    it('should export toast module', () => {
+      expect(modules.toast).toBeDefined();
+      expect(typeof modules.toast.show).toBe('function');
+    });
 
-const HapticHandler: ModuleHandler = {
-  handle(method: string, args: unknown[]) {
-    if (method === 'trigger') {
-      const [type] = args as [Parameters<typeof HapticModule.trigger>[0]];
-      HapticModule.trigger(type);
-    }
-  },
-};
+    it('should export haptic module', () => {
+      expect(modules.haptic).toBeDefined();
+      expect(typeof modules.haptic.trigger).toBe('function');
+    });
+  });
 
-describe('Core Registry (Module Handlers)', () => {
-  describe('Toast Module Handler', () => {
+  describe('Toast Module', () => {
     let toastCalls: Array<{ message: string; options: unknown }>;
 
     beforeEach(() => {
       toastCalls = [];
-      (ToastModule as NativeToast)._setCustomHandler((message, options) => {
+      (Toast as HostToast)[SET_HANDLER_SYMBOL]((message, options) => {
         toastCalls.push({ message, options });
       });
     });
 
     afterEach(() => {
-      (ToastModule as NativeToast)._clearCustomHandler();
+      (Toast as HostToast)[CLEAR_HANDLER_SYMBOL]();
     });
 
-    it('should handle show method', () => {
-      ToastHandler.handle('show', ['Hello', { position: 'top' }]);
+    it('should call show method', () => {
+      Toast.show('Hello', { position: 'top' });
 
       expect(toastCalls).toEqual([{ message: 'Hello', options: { position: 'top' } }]);
     });
 
-    it('should handle show without options', () => {
-      ToastHandler.handle('show', ['Message']);
+    it('should call show without options', () => {
+      Toast.show('Message');
 
       expect(toastCalls).toEqual([{ message: 'Message', options: undefined }]);
     });
 
-    it('should handle show with duration options', () => {
-      ToastHandler.handle('show', ['Test', { duration: 'long' }]);
+    it('should call show with duration options', () => {
+      Toast.show('Test', { duration: 'long' });
 
       expect(toastCalls[0]?.options).toEqual({ duration: 'long' });
     });
-
-    it('should ignore unknown methods', () => {
-      ToastHandler.handle('unknownMethod', ['arg']);
-
-      expect(toastCalls).toEqual([]);
-    });
-
-    it('should handle empty args', () => {
-      ToastHandler.handle('show', []);
-
-      expect(toastCalls).toEqual([{ message: undefined, options: undefined }]);
-    });
   });
 
-  describe('Haptic Module Handler', () => {
+  describe('Haptic Module', () => {
     let hapticCalls: Array<{ type: unknown }>;
 
     beforeEach(() => {
       hapticCalls = [];
-      (HapticModule as NativeHaptic)._setCustomHandler((type) => {
+      (Haptic as HostHaptic)[HAPTIC_SET_HANDLER]((type) => {
         hapticCalls.push({ type });
       });
     });
 
     afterEach(() => {
-      (HapticModule as NativeHaptic)._clearCustomHandler();
+      (Haptic as HostHaptic)[HAPTIC_CLEAR_HANDLER]();
     });
 
-    it('should handle trigger method', () => {
-      HapticHandler.handle('trigger', ['light']);
+    it('should call trigger method', () => {
+      Haptic.trigger('light');
 
       expect(hapticCalls).toEqual([{ type: 'light' }]);
     });
 
-    it('should handle trigger with all types', () => {
+    it('should handle all haptic types', () => {
       const types = ['light', 'medium', 'heavy', 'selection', 'success', 'warning', 'error'];
-      types.forEach((type) => HapticHandler.handle('trigger', [type]));
+      types.forEach((type) => Haptic.trigger(type as Parameters<typeof Haptic.trigger>[0]));
 
       expect(hapticCalls.map((c) => c.type)).toEqual(types);
     });
 
-    it('should handle trigger without type (uses default)', () => {
-      HapticHandler.handle('trigger', []);
+    it('should use default type when not specified', () => {
+      Haptic.trigger();
 
-      // Haptic.trigger(undefined) uses default 'medium'
       expect(hapticCalls).toEqual([{ type: 'medium' }]);
-    });
-
-    it('should ignore unknown methods', () => {
-      HapticHandler.handle('unknownMethod', ['arg']);
-
-      expect(hapticCalls).toEqual([]);
     });
   });
 
   describe('configureToast function', () => {
     afterEach(() => {
-      (ToastModule as NativeToast)._clearCustomHandler();
+      (Toast as HostToast)[CLEAR_HANDLER_SYMBOL]();
     });
 
     it('should set custom toast handler', () => {
       const calls: string[] = [];
 
-      (ToastModule as NativeToast)._setCustomHandler((message) => {
+      (Toast as HostToast)[SET_HANDLER_SYMBOL]((message) => {
         calls.push(message);
       });
 
-      ToastModule.show('Test');
+      Toast.show('Test');
 
       expect(calls).toEqual(['Test']);
     });
@@ -142,11 +122,11 @@ describe('Core Registry (Module Handlers)', () => {
     it('should pass options to custom handler', () => {
       const calls: Array<{ message: string; options: unknown }> = [];
 
-      (ToastModule as NativeToast)._setCustomHandler((message, options) => {
+      (Toast as HostToast)[SET_HANDLER_SYMBOL]((message, options) => {
         calls.push({ message, options });
       });
 
-      ToastModule.show('Msg', { duration: 'long' });
+      Toast.show('Msg', { duration: 'long' });
 
       expect(calls[0]?.options).toEqual({ duration: 'long' });
     });
@@ -154,17 +134,17 @@ describe('Core Registry (Module Handlers)', () => {
 
   describe('configureHaptic function', () => {
     afterEach(() => {
-      (HapticModule as NativeHaptic)._clearCustomHandler();
+      (Haptic as HostHaptic)[HAPTIC_CLEAR_HANDLER]();
     });
 
     it('should set custom haptic handler', () => {
       const calls: unknown[] = [];
 
-      (HapticModule as NativeHaptic)._setCustomHandler((type) => {
+      (Haptic as HostHaptic)[HAPTIC_SET_HANDLER]((type) => {
         calls.push(type);
       });
 
-      HapticModule.trigger('success');
+      Haptic.trigger('success');
 
       expect(calls).toEqual(['success']);
     });

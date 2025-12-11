@@ -7,27 +7,26 @@
  * Usage:
  * ```typescript
  * import { Engine } from 'rill';
- * import { AskitRegistry, createEngineAdapter } from 'askit/core';
+ * import { components, createEngineAdapter } from 'askit/core';
  *
  * const engine = new Engine();
- * engine.register(AskitRegistry.components);
+ * engine.register(components);
  * const adapter = createEngineAdapter(engine);
  * ```
  */
 
 // Registry exports
-export {
-  AskitRegistry,
-  AskitComponents,
-  AskitModules,
-  configureToast,
-  configureHaptic,
-  components,
-  modules,
-} from './registry';
+export { components, modules, configureToast, configureHaptic } from './registry';
 
 // Bridge exports
 export { Bridge, handleGuestMessage, createEngineAdapter } from './bridge';
+export { createTypedSender, TypedBridge, validatePayload } from './typed-bridge';
+
+// Utilities
+export { throttle, debounce, rateLimit } from './throttle';
+export type { RateLimitConfig } from './throttle';
+export { createGuestComponent, validateProps, validators } from './component-helpers';
+export type { GuestComponent, ValidationRule } from './component-helpers';
 
 // Type exports
-export type { AskitRegistryConfig, ComponentMap, ModuleMap } from '../types';
+export type { AskitMessageMap, TypedSendToHost, EventEmitterMessageMap } from '../types';

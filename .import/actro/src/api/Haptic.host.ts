@@ -1,5 +1,5 @@
 /**
- * Haptic - Native Implementation (Host App)
+ * Haptic - Host Implementation
  *
  * Provides haptic feedback functionality.
  * Note: Requires react-native-haptic-feedback or similar library in host app.
@@ -7,7 +7,13 @@
 
 import type { HapticAPI, HapticType } from '../types';
 
-class NativeHaptic implements HapticAPI {
+/**
+ * Internal symbols for accessing private APIs
+ */
+const SET_HANDLER_SYMBOL = Symbol.for('askit.haptic.setHandler');
+const CLEAR_HANDLER_SYMBOL = Symbol.for('askit.haptic.clearHandler');
+
+class HostHaptic implements HapticAPI {
   private customTriggerHandler?: (type?: HapticType) => void;
 
   /**
@@ -25,22 +31,25 @@ class NativeHaptic implements HapticAPI {
 
   /**
    * Set custom trigger handler (for host app to inject haptic library)
-   * @internal
+   * @internal - Accessed via SET_HANDLER_SYMBOL
    */
-  _setCustomHandler(handler: (type?: HapticType) => void): void {
+  [SET_HANDLER_SYMBOL](handler: (type?: HapticType) => void): void {
     this.customTriggerHandler = handler;
   }
 
   /**
    * Clear custom handler
-   * @internal
+   * @internal - Accessed via CLEAR_HANDLER_SYMBOL
    */
-  _clearCustomHandler(): void {
+  [CLEAR_HANDLER_SYMBOL](): void {
     this.customTriggerHandler = undefined;
   }
 }
 
-export const Haptic: HapticAPI = new NativeHaptic();
+export const Haptic: HapticAPI = new HostHaptic();
 
 // Export class for core module
-export { NativeHaptic };
+export { HostHaptic };
+
+// Export symbols for core module access
+export { SET_HANDLER_SYMBOL as HAPTIC_SET_HANDLER, CLEAR_HANDLER_SYMBOL as HAPTIC_CLEAR_HANDLER };

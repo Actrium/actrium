@@ -1,5 +1,5 @@
 /**
- * ChatBubble - Native Implementation (Host App)
+ * ChatBubble - Host Implementation
  *
  * Chat message bubble with support for own/other messages,
  * timestamps, delivery status, and long press actions.

@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 // Environment Detection
 // ============================================================================
 
-export type Environment = 'native' | 'remote';
+export type Environment = 'host' | 'guest';
 
 // ============================================================================
 // Style Types (React Native Compatible)
@@ -195,16 +195,145 @@ export interface ChatBubbleProps extends BaseProps {
 }
 
 // ============================================================================
-// Bus (Communication) Types
+// Message Protocol Types - Type-safe payload mapping
 // ============================================================================
 
-export type BusEventCallback<T = unknown> = (payload: T) => void;
+/**
+ * Type-safe message map for askit protocol
+ * Maps event names to their expected payload types
+ */
+export interface AskitMessageMap {
+  // Toast module
+  'askit:toast:show': [message: string, options?: ToastOptions];
 
-export interface BusAPI {
-  emit: (event: string, payload?: unknown) => void;
-  on: <T = unknown>(event: string, callback: BusEventCallback<T>) => void;
-  off: <T = unknown>(event: string, callback: BusEventCallback<T>) => void;
-  once: <T = unknown>(event: string, callback: BusEventCallback<T>) => void;
+  // Haptic module
+  'askit:haptic:trigger': [type?: HapticType];
+
+  // EventEmitter events (using event: prefix)
+  // Note: Event emitter events are dynamic, so we use string index signature
+}
+
+/**
+ * EventEmitter message map - allows any event with any payload
+ */
+export interface EventEmitterMessageMap {
+  [event: string]: unknown;
+}
+
+/**
+ * Type-safe sendToHost function signature
+ */
+export interface TypedSendToHost {
+  <K extends keyof AskitMessageMap>(event: K, payload: AskitMessageMap[K]): void;
+  // Allow askit:event: prefixed messages with any payload
+  (event: `askit:event:${string}`, payload?: unknown): void;
+  // Fallback for any string event
+  (event: string, payload?: unknown): void;
+}
+
+// ============================================================================
+// EventEmitter (Communication) Types
+// ==================================
+
+export type EventCallback<T = unknown> = (payload: T) => void;
+
+/**
+ * Rate limiting options for event listeners
+ */
+export interface EventListenerOptions {
+  /**
+   * Rate limiting type
+   * - 'throttle': Execute at most once per delay period
+   * - 'debounce': Execute only after events stop for delay period
+   * - 'none': No rate limiting (default)
+   */
+  rateLimit?: 'throttle' | 'debounce' | 'none';
+
+  /**
+   * Delay in milliseconds for rate limiting (default: 100ms)
+   * Keep this value low (50-200ms) to maintain responsiveness
+   */
+  delay?: number;
+}
+
+/**
+ * Typed event map for askit EventEmitter
+ * Similar to Rill's EngineEvents, provides type safety for event payload
+ *
+ * Users can extend this interface to add custom typed events:
+ *
+ * @example
+ * ```typescript
+ * declare module 'askit' {
+ *   interface AskitEvents {
+ *     'user:login': { userId: string; timestamp: number };
+ *     'user:logout': { userId: string };
+ *     'analytics:click': { buttonId: string; metadata?: Record<string, unknown> };
+ *   }
+ * }
+ * ```
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface AskitEvents {
+  // Empty by default - users can extend via module augmentation
+}
+
+/**
+ * Type-safe EventEmitter API
+ *
+ * Supports both typed events (via AskitEvents interface) and dynamic events.
+ * When using typed events, payload types are enforced. For dynamic events,
+ * you can specify the payload type via generic parameter.
+ */
+export interface EventEmitterAPI {
+  /**
+   * Emit a typed event
+   */
+  emit<K extends keyof AskitEvents>(event: K, payload: AskitEvents[K]): void;
+  /**
+   * Emit a dynamic event with optional payload type
+   */
+  emit<T = unknown>(event: string, payload?: T): void;
+
+  /**
+   * Subscribe to a typed event
+   */
+  on<K extends keyof AskitEvents>(
+    event: K,
+    callback: EventCallback<AskitEvents[K]>,
+    options?: EventListenerOptions
+  ): () => void;
+  /**
+   * Subscribe to a dynamic event or pattern
+   */
+  on<T = unknown>(
+    event: string,
+    callback: EventCallback<T>,
+    options?: EventListenerOptions
+  ): () => void;
+
+  /**
+   * Unsubscribe from a typed event
+   */
+  off<K extends keyof AskitEvents>(event: K, callback: EventCallback<AskitEvents[K]>): void;
+  /**
+   * Unsubscribe from a dynamic event or pattern
+   */
+  off<T = unknown>(event: string, callback: EventCallback<T>): void;
+
+  /**
+   * Subscribe to a typed event once
+   */
+  once<K extends keyof AskitEvents>(event: K, callback: EventCallback<AskitEvents[K]>): () => void;
+  /**
+   * Subscribe to a dynamic event or pattern once
+   */
+  once<T = unknown>(event: string, callback: EventCallback<T>): () => void;
+
+  /**
+   * Remove all listeners for an event, or all listeners if no event specified
+   */
+  removeAllListeners(event?: string): void;
 }
 
 // ============================================================================

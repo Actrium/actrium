@@ -1,10 +1,16 @@
 /**
- * Toast - Native Implementation (Host App)
+ * Toast - Host Implementation
  *
  * Provides toast notification functionality using React Native APIs.
  */
 
 import type { ToastAPI, ToastOptions, ToastDuration, ToastPosition } from '../types';
+
+/**
+ * Internal symbols for accessing private APIs
+ */
+const SET_HANDLER_SYMBOL = Symbol.for('askit.toast.setHandler');
+const CLEAR_HANDLER_SYMBOL = Symbol.for('askit.toast.clearHandler');
 
 // Types for React Native modules
 type PlatformType = { OS: string };
@@ -87,11 +93,11 @@ export function getGravityValue(position?: ToastPosition): 'top' | 'center' | 'b
 }
 
 /**
- * Native Toast implementation
+ * Host Toast implementation
  * - Android: Uses ToastAndroid
  * - iOS: Falls back to console.log (requires custom implementation in host app)
  */
-class NativeToast implements ToastAPI {
+class HostToast implements ToastAPI {
   private customShowHandler?: (message: string, options?: ToastOptions) => void;
 
   /**
@@ -136,22 +142,25 @@ class NativeToast implements ToastAPI {
 
   /**
    * Set custom show handler (for iOS or custom toast library)
-   * @internal
+   * @internal - Accessed via SET_HANDLER_SYMBOL
    */
-  _setCustomHandler(handler: (message: string, options?: ToastOptions) => void): void {
+  [SET_HANDLER_SYMBOL](handler: (message: string, options?: ToastOptions) => void): void {
     this.customShowHandler = handler;
   }
 
   /**
    * Clear custom handler
-   * @internal
+   * @internal - Accessed via CLEAR_HANDLER_SYMBOL
    */
-  _clearCustomHandler(): void {
+  [CLEAR_HANDLER_SYMBOL](): void {
     this.customShowHandler = undefined;
   }
 }
 
-export const Toast: ToastAPI = new NativeToast();
+export const Toast: ToastAPI = new HostToast();
 
 // Export class for core module to extend
-export { NativeToast };
+export { HostToast };
+
+// Export symbols for core module access
+export { SET_HANDLER_SYMBOL as TOAST_SET_HANDLER, CLEAR_HANDLER_SYMBOL as TOAST_CLEAR_HANDLER };

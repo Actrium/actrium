@@ -5,8 +5,10 @@
 ## 目录
 
 - [快速开始](./getting-started.md)
+- [集成指南](./integration.md) - **askit 与 rill 协作**
 - [API 参考](./api-reference.md)
 - [组件](./components.md)
+- [最佳实践](./best-practices.md)
 - [架构](./architecture.md)
 
 ## 快速链接

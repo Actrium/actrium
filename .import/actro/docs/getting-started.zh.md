@@ -11,8 +11,10 @@
 ## 安装
 
 ```bash
-npm install askit
+bun add github:GoAskAway/askit
 ```
+
+> **注意**：askit 通过 GitHub 发布，直接导出 TypeScript 源码（无需构建步骤）。你的打包工具（Metro、Vite 等）需要支持 TypeScript 编译。React Native Metro 和现代打包工具都会自动处理。
 
 ## 基本设置
 
@@ -21,13 +23,13 @@ npm install askit
 在插件代码中，直接导入并使用 API：
 
 ```typescript
-import { Bus, Toast, Haptic } from 'askit';
+import { EventEmitter, Toast, Haptic } from 'askit';
 
 // 初始化插件
-Bus.emit('guest:init', { name: 'MyGuest', version: '1.0.0' });
+EventEmitter.emit('guest:init', { name: 'MyGuest', version: '1.0.0' });
 
 // 监听 Host 事件
-Bus.on('host:ready', () => {
+EventEmitter.on('host:ready', () => {
   Toast.show('插件已连接!');
 });
 ```
@@ -37,7 +39,7 @@ Bus.on('host:ready', () => {
 在 React Native Host App 中：
 
 ```typescript
-import { createEngineAdapter, AskitComponents, AskitModules } from 'askit/core';
+import { createEngineAdapter, components } from 'askit/core';
 import { Engine } from 'rill';
 
 // 创建并配置引擎
@@ -47,9 +49,7 @@ const engine = new Engine();
 const adapter = createEngineAdapter(engine);
 
 // 注册所有 askit 组件
-Object.entries(AskitComponents).forEach(([name, Component]) => {
-  engine.registerComponent(name, Component);
-});
+engine.register(components);
 
 // 加载并运行插件
 await engine.loadGuest('https://example.com/guest.js');
@@ -77,6 +77,6 @@ my-askaway-app/
 
 ## 下一步
 
-- [API 参考](./api-reference.md) - 了解 Bus、Toast 和 Haptic API
+- [API 参考](./api-reference.md) - 了解 EventEmitter、Toast 和 Haptic API
 - [组件](./components.md) - 探索 UI 组件
 - [架构](./architecture.md) - 理解同构设计
