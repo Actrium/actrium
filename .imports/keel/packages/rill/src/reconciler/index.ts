@@ -296,13 +296,56 @@ interface RootContainer {
  * Reconciler instance type
  */
 type RillReconciler = ReconcilerType<
+  RootContainer, // Container
+  VNode,         // Instance
+  VNode,         // TextInstance
+  unknown,       // SuspenseInstance
+  VNode          // PublicInstance
+>;
+
+/**
+ * Extended host config with React 19 internal methods
+ * These methods are used internally by React 19 but not yet in official types
+ */
+interface ExtendedHostConfig extends HostConfig<
+  string,
+  Record<string, unknown>,
   RootContainer,
   VNode,
   VNode,
   unknown,
+  unknown,
   VNode,
-  object
->;
+  object,
+  unknown,
+  unknown,
+  number,
+  -1
+> {
+  // Priority and scheduling methods
+  resolveUpdatePriority: () => number;
+  setCurrentUpdatePriority: () => void;
+  getCurrentUpdatePriority: () => number;
+
+  // Suspense-related methods
+  maySuspendCommit: () => boolean;
+  preloadInstance: () => boolean;
+  startSuspendingCommit: () => void;
+  suspendInstance: () => void;
+  waitForCommitToBeReady: () => null;
+
+  // Transition context
+  NotPendingTransition: null;
+  HostTransitionContext: null;
+
+  // Misc methods
+  requestPostPaintCallback: () => void;
+  shouldAttemptEagerTransition: () => boolean;
+  resolveEventType: () => null;
+  resolveEventTimeStamp: () => number;
+  resetFormInstance: () => void;
+  trackSchedulerEvent: () => void;
+}
 
 /**
  * Create custom renderer
@@ -318,22 +361,7 @@ export function createReconciler(sendToHost: SendToHost): {
   const collector = new OperationCollector();
   let nodeIdCounter = 0;
 
-  const hostConfig: HostConfig<
-    string, // Type
-    Record<string, unknown>, // Props
-    RootContainer, // Container
-    VNode, // Instance
-    VNode, // TextInstance
-    unknown, // SuspenseInstance
-    unknown, // HydratableInstance
-    VNode, // PublicInstance
-    object, // HostContext
-    unknown, // UpdatePayload
-    unknown, // ChildSet
-    unknown, // TimeoutHandle
-    unknown, // NoTimeout
-    unknown // TransitionStatus
-  > = {
+  const hostConfig: ExtendedHostConfig = {
     // ============ Core Methods ============
 
     createInstance(
@@ -495,8 +523,22 @@ export function createReconciler(sendToHost: SendToHost): {
       cleanupNodeCallbacks(child, callbackRegistry);
     },
 
+    prepareUpdate(
+      _instance: VNode,
+      _type: string,
+      oldProps: Record<string, unknown>,
+      newProps: Record<string, unknown>,
+      _rootContainer: RootContainer,
+      _hostContext: object
+    ): unknown | null {
+      // Return a truthy value to indicate an update is needed
+      // The actual diffing happens in commitUpdate
+      return oldProps !== newProps ? {} : null;
+    },
+
     commitUpdate(
       instance: VNode,
+      _updatePayload: unknown,
       _type: string,
       oldProps: Record<string, unknown>,
       newProps: Record<string, unknown>,
@@ -576,7 +618,7 @@ export function createReconciler(sendToHost: SendToHost): {
     cancelTimeout: clearTimeout,
     noTimeout: -1,
 
-    getCurrentUpdatePriority(): number {
+    getCurrentEventPriority(): number {
       return DefaultEventPriority;
     },
 
@@ -618,52 +660,26 @@ export function createReconciler(sendToHost: SendToHost): {
     scheduleMicrotask:
       typeof queueMicrotask === 'function' ? queueMicrotask : setTimeout,
 
-    // React 19 new features
-    NotPendingTransition: null as never,
-    HostTransitionContext: null as never,
-
-    setCurrentUpdatePriority(_priority: number): void {},
-
-    resolveUpdatePriority(): number {
-      return DefaultEventPriority;
-    },
-
-    shouldAttemptEagerTransition(): boolean {
-      return false;
-    },
-
-    requestPostPaintCallback(_callback: (time: number) => void): void {},
-
-    maySuspendCommit(): boolean {
-      return false;
-    },
-
-    preloadInstance(): boolean {
-      return true;
-    },
-
-    startSuspendingCommit(): void {},
-
-    suspendInstance(): void {},
-
-    waitForCommitToBeReady(): null {
-      return null;
-    },
-
-    resetFormInstance(): void {},
-
-    trackSchedulerEvent(): void {},
-
-    resolveEventType(): string {
-      return 'unknown';
-    },
-
-    resolveEventTimeStamp(): number {
-      return Date.now();
-    },
+    // React 19 internal methods (not in official HostConfig types yet)
+    resolveUpdatePriority: () => DefaultEventPriority,
+    setCurrentUpdatePriority: () => {},
+    getCurrentUpdatePriority: () => DefaultEventPriority,
+    maySuspendCommit: () => false,
+    preloadInstance: () => false,
+    startSuspendingCommit: () => {},
+    suspendInstance: () => {},
+    waitForCommitToBeReady: () => null,
+    NotPendingTransition: null,
+    HostTransitionContext: null,
+    requestPostPaintCallback: () => {},
+    shouldAttemptEagerTransition: () => false,
+    resolveEventType: () => null,
+    resolveEventTimeStamp: () => Date.now(),
+    resetFormInstance: () => {},
+    trackSchedulerEvent: () => {},
   };
 
-  const reconciler = Reconciler(hostConfig);
+  const reconciler = Reconciler(hostConfig) as RillReconciler;
 
   return {
     reconciler,
@@ -730,11 +746,8 @@ export function render(
       false,
       null,
       'rill',
-      (error: Error, _info: unknown) => console.error('[rill] Uncaught error:', error), // onUncaughtError
-      (error: Error, _info: unknown) => console.error('[rill] Caught error:', error), // onCaughtError
-      (error: Error, _info: unknown) => console.error('[rill] Recoverable error:', error), // onRecoverableError
-      () => {}, // onTransitionStart
-      null
+      (error: Error) => console.error('[rill] Error:', error), // onUncaughtError
+      null // formState
     );
 
     instance = {
