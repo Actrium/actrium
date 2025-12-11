@@ -5,8 +5,14 @@
  * the appropriate native modules.
  */
 
-import { AskitModules } from './registry';
-import { Bus, NativeBus } from '../api/Bus.native';
+import { modules } from './registry';
+import {
+  EventEmitter,
+  HostEventEmitter,
+  BROADCASTER_SYMBOL,
+  NOTIFY_SYMBOL,
+} from '../api/EventEmitter.host';
+import { logger } from './logger';
 
 /**
  * Message types from guests
@@ -17,59 +23,85 @@ interface GuestMessage {
 }
 
 /**
- * Parse askit event name
- * Format: askit:module:method
- */
-function parseAskitEvent(event: string): { module: string; method: string } | null {
-  if (!event.startsWith('askit:')) {
-    return null;
-  }
-
-  const parts = event.slice(6).split(':');
-  if (parts.length !== 2) {
-    return null;
-  }
-
-  const module = parts[0];
-  const method = parts[1];
-  if (!module || !method) {
-    return null;
-  }
-
-  return {
-    module,
-    method,
-  };
-}
-
-/**
  * Handle incoming message from guest
+ *
+ * Simplified implementation that inlines validation and parsing for better performance.
  */
 export function handleGuestMessage(message: GuestMessage): unknown {
-  const { event, payload } = message;
-
-  // Handle askit module calls
-  const parsed = parseAskitEvent(event);
-  if (parsed) {
-    const handler = AskitModules[parsed.module];
-    if (handler) {
-      const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
-      return handler.handle(parsed.method, args);
-    }
-    console.warn(`[askit/bridge] Unknown module: ${parsed.module}`);
+  // Inline validation
+  if (
+    !message ||
+    typeof message !== 'object' ||
+    !message.event ||
+    typeof message.event !== 'string'
+  ) {
+    logger.error('Bridge', 'Invalid message format', {
+      message: typeof message === 'object' ? JSON.stringify(message) : String(message),
+    });
     return undefined;
   }
 
-  // Handle Bus events (format: bus:eventName)
-  if (event.startsWith('bus:')) {
-    const busEvent = event.slice(4);
-    (Bus as NativeBus)._handleEngineMessage(busEvent, payload);
+  const { event, payload } = message;
+
+  // Handle askit protocol messages (format: askit:...)
+  if (event.startsWith('askit:')) {
+    const parts = event.slice(6).split(':');
+
+    if (parts.length < 2) {
+      logger.warn('Bridge', `Invalid askit protocol format: ${event}`, { event });
+      return undefined;
+    }
+
+    const [moduleName, methodName] = parts;
+
+    // EventEmitter events (format: askit:event:eventName)
+    // Must check this FIRST because eventName can contain colons (e.g., user:login)
+    if (moduleName === 'event') {
+      const eventName = parts.slice(1).join(':'); // Support nested events like 'user:login'
+      (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](eventName, payload);
+      return undefined;
+    }
+
+    // Module calls (format: askit:module:method) - exactly 2 parts after 'askit:'
+    if (parts.length === 2) {
+      // Validate module and method names (alphanumeric and underscore only)
+      const validName = /^[a-zA-Z0-9_]+$/;
+      if (validName.test(moduleName) && validName.test(methodName)) {
+        const module = modules[moduleName as keyof typeof modules];
+        if (module) {
+          const method = module[methodName as keyof typeof module];
+          if (typeof method === 'function') {
+            const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
+            return method.apply(module, args);
+          }
+        }
+
+        logger.warn('Bridge', `Unknown module or method: ${moduleName}.${methodName}`, {
+          module: moduleName,
+          method: methodName,
+          event,
+        });
+      }
+    } else {
+      logger.warn('Bridge', `Invalid askit protocol format: ${event}`, { event });
+    }
     return undefined;
   }
 
   // Unknown event
-  console.warn(`[askit/bridge] Unknown event: ${event}`);
+  logger.warn('Bridge', `Unknown event: ${event}`, { event });
   return undefined;
+}
+
+/**
+ * Engine interface for adapter
+ */
+interface EngineInterface {
+  on: (
+    event: 'message',
+    callback: (message: { event: string; payload: unknown }) => void
+  ) => () => void;
+  sendEvent: (event: string, payload?: unknown) => void;
 }
 
 /**
@@ -78,33 +110,32 @@ export function handleGuestMessage(message: GuestMessage): unknown {
  * Usage:
  * ```typescript
  * import { Engine } from 'rill';
- * import { createEngineAdapter, AskitRegistry } from 'askit/core';
+ * import { createEngineAdapter, components } from 'askit/core';
  *
  * const engine = new Engine();
  * const adapter = createEngineAdapter(engine);
- * engine.register(AskitRegistry.components);
+ * engine.register(components);
  * ```
  */
-export function createEngineAdapter(engine: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  on: (event: string, callback: (...args: any[]) => void) => void;
-  sendEvent: (event: string, payload?: unknown) => void;
-}): {
+export function createEngineAdapter(engine: EngineInterface): {
   dispose: () => void;
 } {
-  // Listen for host events and forward to engine
-  const unregisterBus = (Bus as NativeBus)._registerEngine((event: string, payload: unknown) => {
-    engine.sendEvent(event, payload);
+  // Forward EventEmitter events to engine with askit:event: prefix
+  (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL]((event: string, payload: unknown) => {
+    engine.sendEvent(`askit:event:${event}`, payload);
   });
 
-  // Listen for guest messages
-  engine.on('message', (event: string, payload: unknown) => {
-    handleGuestMessage({ event, payload });
+  // Listen for guest messages and route them
+  const unsubscribeMessage = engine.on('message', (message) => {
+    handleGuestMessage({ event: message.event, payload: message.payload });
   });
 
   return {
     dispose() {
-      unregisterBus();
+      // Disconnect broadcaster
+      (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL](null);
+      // Unsubscribe from engine messages
+      unsubscribeMessage();
     },
   };
 }

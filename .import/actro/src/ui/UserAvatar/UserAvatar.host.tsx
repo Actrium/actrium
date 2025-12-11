@@ -1,5 +1,5 @@
 /**
- * UserAvatar - Native Implementation (Host App)
+ * UserAvatar - Host Implementation
  *
  * Displays user avatar with optional online status indicator.
  * Supports different sizes and fallback to initials.

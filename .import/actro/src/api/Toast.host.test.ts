@@ -1,15 +1,20 @@
 /**
- * Toast Native Implementation Tests
+ * Toast Host Implementation Tests
  *
  * Tests custom handler logic and fallback behavior
  * Android platform tests are in Toast.android.test.ts
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { NativeToast, getDurationMs, getGravityValue } from './Toast.native';
+import {
+  HostToast,
+  getDurationMs,
+  getGravityValue,
+  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
+  TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
+} from './Toast.host';
 import type { ToastOptions } from '../types';
 
-describe('Toast (Native)', () => {
+describe('Toast (Host)', () => {
   describe('getDurationMs', () => {
     it('should return 2000 for "short"', () => {
       expect(getDurationMs('short')).toBe(2000);
@@ -48,18 +53,18 @@ describe('Toast (Native)', () => {
     });
   });
 
-  describe('NativeToast', () => {
-    let toast: NativeToast;
+  describe('HostToast', () => {
+    let toast: HostToast;
 
     beforeEach(() => {
-      toast = new NativeToast();
+      toast = new HostToast();
     });
 
     describe('with custom handler', () => {
       it('should use custom handler when set', () => {
         const calls: Array<{ message: string; options?: ToastOptions }> = [];
 
-        toast._setCustomHandler((message, options) => {
+        toast[SET_HANDLER_SYMBOL]((message, options) => {
           calls.push({ message, options });
         });
 
@@ -71,7 +76,7 @@ describe('Toast (Native)', () => {
       it('should pass options to custom handler', () => {
         const calls: Array<{ message: string; options?: ToastOptions }> = [];
 
-        toast._setCustomHandler((message, options) => {
+        toast[SET_HANDLER_SYMBOL]((message, options) => {
           calls.push({ message, options });
         });
 
@@ -83,7 +88,7 @@ describe('Toast (Native)', () => {
       it('should handle show without options', () => {
         const calls: Array<{ message: string; options?: ToastOptions }> = [];
 
-        toast._setCustomHandler((message, options) => {
+        toast[SET_HANDLER_SYMBOL]((message, options) => {
           calls.push({ message, options });
         });
 
@@ -98,10 +103,10 @@ describe('Toast (Native)', () => {
         const originalLog = console.log;
         console.log = (...args) => logs.push(args);
 
-        toast._setCustomHandler((msg) => calls.push(msg));
+        toast[SET_HANDLER_SYMBOL]((msg) => calls.push(msg));
         toast.show('First');
 
-        toast._clearCustomHandler();
+        toast[CLEAR_HANDLER_SYMBOL]();
         toast.show('Second');
 
         expect(calls).toEqual(['First']);
@@ -147,13 +152,13 @@ describe('Toast (Native)', () => {
 
     describe('multiple instances', () => {
       it('should maintain separate handlers per instance', () => {
-        const toast1 = new NativeToast();
-        const toast2 = new NativeToast();
+        const toast1 = new HostToast();
+        const toast2 = new HostToast();
         const calls1: string[] = [];
         const calls2: string[] = [];
 
-        toast1._setCustomHandler((msg) => calls1.push(msg));
-        toast2._setCustomHandler((msg) => calls2.push(msg));
+        toast1[SET_HANDLER_SYMBOL]((msg) => calls1.push(msg));
+        toast2[SET_HANDLER_SYMBOL]((msg) => calls2.push(msg));
 
         toast1.show('msg1');
         toast2.show('msg2');

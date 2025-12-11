@@ -1,17 +1,17 @@
 /**
- * askit - Remote Entry (Guest/Sandbox)
+ * askit - Guest Entry
  *
  * This is the main entry point for QuickJS / Rill sandbox environment.
- * Exports DSL identifiers that map to native components on Host.
+ * Exports DSL identifiers that map to host components.
  */
 
 // UI Components (DSL identifiers)
-export { StepList, ThemeView, UserAvatar, ChatBubble } from './ui/index.remote';
+export { StepList, ThemeView, UserAvatar, ChatBubble } from './ui/index.guest';
 
-// APIs (Remote implementations)
-export { Bus, Toast, Haptic } from './api/index.remote';
+// APIs (Guest implementations)
+export { EventEmitter, Toast, Haptic } from './api/index.guest';
 
-// Types (same as native for consistent API)
+// Types (same as host for consistent API)
 export type {
   // Common
   ViewStyle,
@@ -34,9 +34,9 @@ export type {
   // ChatBubble
   ChatBubbleProps,
 
-  // Bus
-  BusAPI,
-  BusEventCallback,
+  // EventEmitter
+  EventEmitterAPI,
+  EventCallback,
 
   // Toast
   ToastAPI,

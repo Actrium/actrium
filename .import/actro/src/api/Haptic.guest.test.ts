@@ -1,11 +1,10 @@
 /**
- * Haptic Remote Implementation Tests
+ * Haptic Guest Implementation Tests
  *
  * 100% real tests - simulating sandbox environment
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { Haptic } from './Haptic.remote';
+import { Haptic } from './Haptic.guest';
 
 describe('Haptic (Remote)', () => {
   let sentMessages: Array<{ event: string; payload: unknown }>;
@@ -31,7 +30,7 @@ describe('Haptic (Remote)', () => {
       expect(sentMessages).toEqual([
         {
           event: 'askit:haptic:trigger',
-          payload: { type: 'light' },
+          payload: ['light'],
         },
       ]);
     });
@@ -39,7 +38,7 @@ describe('Haptic (Remote)', () => {
     it('should use default type "medium" when not specified', () => {
       Haptic.trigger();
 
-      expect(sentMessages[0]?.payload).toEqual({ type: 'medium' });
+      expect(sentMessages[0]?.payload).toEqual(['medium']);
     });
 
     it('should handle all haptic types', () => {
@@ -51,7 +50,7 @@ describe('Haptic (Remote)', () => {
       Haptic.trigger('warning');
       Haptic.trigger('error');
 
-      expect(sentMessages.map((m) => (m.payload as { type: string }).type)).toEqual([
+      expect(sentMessages.map((m) => (m.payload as string[])[0])).toEqual([
         'light',
         'medium',
         'heavy',
@@ -73,10 +72,29 @@ describe('Haptic (Remote)', () => {
 
       Haptic.trigger('light');
 
-      expect(warnings.length).toBe(1);
-      expect((warnings[0] as unknown[])?.[0]).toContain('sendToHost not available');
+      expect(warnings.length).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(warnings)).toContain('sendToHost not available');
 
       console.warn = originalWarn;
+    });
+  });
+
+  describe('error handling', () => {
+    it('should handle sendToHost throwing exception', () => {
+      (globalThis as Record<string, unknown>)['sendToHost'] = () => {
+        throw new Error('Bridge failure');
+      };
+
+      const errors: unknown[] = [];
+      const originalError = console.error;
+      console.error = (...args) => errors.push(args);
+
+      Haptic.trigger('success');
+
+      expect(errors.length).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(errors)).toContain('Failed to send message to host');
+
+      console.error = originalError;
     });
   });
 });

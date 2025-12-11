@@ -1,15 +1,15 @@
 /**
- * AskIt - Native Entry (Host App)
+ * AskIt - Host Entry
  *
  * This is the main entry point for React Native / Metro bundler.
- * Exports all UI components and APIs with native implementations.
+ * Exports all UI components and APIs with host implementations.
  */
 
 // UI Components
-export { StepList, ThemeView, UserAvatar, ChatBubble } from './ui/index.native';
+export { StepList, ThemeView, UserAvatar, ChatBubble } from './ui/index.host';
 
 // APIs
-export { Bus, Toast, Haptic } from './api/index.native';
+export { EventEmitter, Toast, Haptic } from './api/index.host';
 
 // Types
 export type {
@@ -34,9 +34,9 @@ export type {
   // ChatBubble
   ChatBubbleProps,
 
-  // Bus
-  BusAPI,
-  BusEventCallback,
+  // EventEmitter
+  EventEmitterAPI,
+  EventCallback,
 
   // Toast
   ToastAPI,

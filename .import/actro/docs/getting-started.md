@@ -11,8 +11,10 @@ This guide will help you get started with askit in your project.
 ## Installation
 
 ```bash
-npm install askit
+bun add github:GoAskAway/askit
 ```
+
+> **Note**: askit is published via GitHub and exports TypeScript source directly (no build step required). Your bundler (Metro, Vite, etc.) needs to support TypeScript compilation. Both React Native Metro and modern bundlers handle this automatically.
 
 ## Basic Setup
 
@@ -21,13 +23,13 @@ npm install askit
 In your guest code, simply import and use the APIs:
 
 ```typescript
-import { Bus, Toast, Haptic } from 'askit';
+import { EventEmitter, Toast, Haptic } from 'askit';
 
 // Initialize your guest
-Bus.emit('guest:init', { name: 'MyGuest', version: '1.0.0' });
+EventEmitter.emit('guest:init', { name: 'MyGuest', version: '1.0.0' });
 
 // Listen for host events
-Bus.on('host:ready', () => {
+EventEmitter.on('host:ready', () => {
   Toast.show('Guest connected!');
 });
 ```
@@ -37,7 +39,7 @@ Bus.on('host:ready', () => {
 In your React Native host app:
 
 ```typescript
-import { createEngineAdapter, AskitComponents, AskitModules } from 'askit/core';
+import { createEngineAdapter, components } from 'askit/core';
 import { Engine } from 'rill';
 
 // Create and configure engine
@@ -47,9 +49,7 @@ const engine = new Engine();
 const adapter = createEngineAdapter(engine);
 
 // Register all askit components
-Object.entries(AskitComponents).forEach(([name, Component]) => {
-  engine.registerComponent(name, Component);
-});
+engine.register(components);
 
 // Load and run guest
 await engine.loadGuest('https://example.com/guest.js');
@@ -77,6 +77,6 @@ my-askaway-app/
 
 ## Next Steps
 
-- [API Reference](./api-reference.md) - Learn about Bus, Toast, and Haptic APIs
+- [API Reference](./api-reference.md) - Learn about EventEmitter, Toast, and Haptic APIs
 - [Components](./components.md) - Explore UI components
 - [Architecture](./architecture.md) - Understand the isomorphic design

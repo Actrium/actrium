@@ -1,5 +1,5 @@
 /**
- * ThemeView - Native Implementation (Host App)
+ * ThemeView - Host Implementation
  *
  * A themed container view with default background and padding.
  * Supports different variants for common UI patterns.

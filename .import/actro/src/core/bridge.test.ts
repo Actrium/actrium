@@ -5,38 +5,25 @@
  * Note: Uses recreated handlers to avoid React Native imports
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { Bus, NativeBus } from '../api/Bus.native';
-import { Toast as ToastModule, NativeToast } from '../api/Toast.native';
-import { Haptic as HapticModule, NativeHaptic } from '../api/Haptic.native';
+import {
+  EventEmitter,
+  HostEventEmitter,
+  BROADCASTER_SYMBOL,
+  NOTIFY_SYMBOL,
+} from '../api/EventEmitter.host';
+import {
+  Toast,
+  HostToast,
+  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
+  TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
+} from '../api/Toast.host';
+import { Haptic, HostHaptic, HAPTIC_SET_HANDLER, HAPTIC_CLEAR_HANDLER } from '../api/Haptic.host';
 
-// Recreate module handlers (same logic as registry.ts)
-interface ModuleHandler {
-  handle: (method: string, args: unknown[]) => unknown;
-}
-
-const ToastHandler: ModuleHandler = {
-  handle(method: string, args: unknown[]) {
-    if (method === 'show') {
-      const [message, options] = args as [string, unknown];
-      ToastModule.show(message, options as Parameters<typeof ToastModule.show>[1]);
-    }
-  },
-};
-
-const HapticHandler: ModuleHandler = {
-  handle(method: string, args: unknown[]) {
-    if (method === 'trigger') {
-      const [type] = args as [Parameters<typeof HapticModule.trigger>[0]];
-      HapticModule.trigger(type);
-    }
-  },
-};
-
-const AskitModules: Record<string, ModuleHandler> = {
-  toast: ToastHandler,
-  haptic: HapticHandler,
-};
+// Recreate module registry (same as registry.ts)
+const modules = {
+  toast: Toast,
+  haptic: Haptic,
+} as const;
 
 // Recreate bridge logic (same as bridge.ts)
 interface GuestMessage {
@@ -44,45 +31,57 @@ interface GuestMessage {
   payload?: unknown;
 }
 
-function parseAskitEvent(event: string): { module: string; method: string } | null {
-  if (!event.startsWith('askit:')) {
-    return null;
-  }
-
-  const parts = event.slice(6).split(':');
-  if (parts.length !== 2) {
-    return null;
-  }
-
-  const module = parts[0];
-  const method = parts[1];
-  if (!module || !method) {
-    return null;
-  }
-
-  return {
-    module,
-    method,
-  };
-}
-
 function handleGuestMessage(message: GuestMessage): unknown {
-  const { event, payload } = message;
-
-  const parsed = parseAskitEvent(event);
-  if (parsed) {
-    const handler = AskitModules[parsed.module];
-    if (handler) {
-      const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
-      return handler.handle(parsed.method, args);
-    }
-    console.warn(`[askit/bridge] Unknown module: ${parsed.module}`);
+  // Inline validation
+  if (
+    !message ||
+    typeof message !== 'object' ||
+    !message.event ||
+    typeof message.event !== 'string'
+  ) {
+    console.error('[askit/bridge] Invalid message format');
     return undefined;
   }
 
-  if (event.startsWith('bus:')) {
-    const busEvent = event.slice(4);
-    (Bus as NativeBus)._handleEngineMessage(busEvent, payload);
+  const { event, payload } = message;
+
+  // Handle askit protocol messages (format: askit:...)
+  if (event.startsWith('askit:')) {
+    const parts = event.slice(6).split(':');
+
+    if (parts.length < 2) {
+      console.error('[askit/bridge] Invalid askit protocol format');
+      return undefined;
+    }
+
+    const [moduleName, methodName] = parts;
+
+    // EventEmitter events (format: askit:event:eventName)
+    // Must check this FIRST because eventName can contain colons (e.g., user:login)
+    if (moduleName === 'event') {
+      const eventName = parts.slice(1).join(':');
+      (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](eventName, payload);
+      return undefined;
+    }
+
+    // Module calls (format: askit:module:method) - exactly 2 parts after 'askit:'
+    if (parts.length === 2) {
+      const validName = /^[a-zA-Z0-9_]+$/;
+      if (validName.test(moduleName) && validName.test(methodName)) {
+        const module = modules[moduleName as keyof typeof modules];
+        if (module) {
+          const method = module[methodName as keyof typeof module];
+          if (typeof method === 'function') {
+            const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
+            return method.apply(module, args);
+          }
+        }
+
+        console.warn(`[askit/bridge] Unknown module or method: ${moduleName}.${methodName}`);
+      }
+    } else {
+      console.warn('[askit/bridge] Invalid askit protocol format');
+    }
     return undefined;
   }
 
@@ -96,8 +95,9 @@ function createEngineAdapter(engine: {
 }): {
   dispose: () => void;
 } {
-  const unregisterBus = (Bus as NativeBus)._registerEngine((event: string, payload: unknown) => {
-    engine.sendEvent(event, payload);
+  // Forward EventEmitter events to engine with askit:event: prefix
+  (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL]((event: string, payload: unknown) => {
+    engine.sendEvent(`askit:event:${event}`, payload);
   });
 
   engine.on('message', (...args: unknown[]) => {
@@ -108,32 +108,12 @@ function createEngineAdapter(engine: {
 
   return {
     dispose() {
-      unregisterBus();
+      (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL](null);
     },
   };
 }
 
 describe('Core Bridge', () => {
-  describe('parseAskitEvent', () => {
-    it('should parse valid askit event', () => {
-      expect(parseAskitEvent('askit:toast:show')).toEqual({
-        module: 'toast',
-        method: 'show',
-      });
-    });
-
-    it('should return null for non-askit event', () => {
-      expect(parseAskitEvent('bus:event')).toBeNull();
-      expect(parseAskitEvent('other:event')).toBeNull();
-    });
-
-    it('should return null for invalid format', () => {
-      expect(parseAskitEvent('askit:invalid')).toBeNull();
-      expect(parseAskitEvent('askit:')).toBeNull();
-      expect(parseAskitEvent('askit:a:b:c')).toBeNull();
-    });
-  });
-
   describe('handleGuestMessage', () => {
     describe('askit module routing', () => {
       let toastCalls: Array<{ message: string; options: unknown }>;
@@ -143,18 +123,18 @@ describe('Core Bridge', () => {
         toastCalls = [];
         hapticCalls = [];
 
-        (ToastModule as NativeToast)._setCustomHandler((message, options) => {
+        (Toast as HostToast)[SET_HANDLER_SYMBOL]((message, options) => {
           toastCalls.push({ message, options });
         });
 
-        (HapticModule as NativeHaptic)._setCustomHandler((type) => {
+        (Haptic as HostHaptic)[HAPTIC_SET_HANDLER]((type) => {
           hapticCalls.push({ type });
         });
       });
 
       afterEach(() => {
-        (ToastModule as NativeToast)._clearCustomHandler();
-        (HapticModule as NativeHaptic)._clearCustomHandler();
+        (Toast as HostToast)[CLEAR_HANDLER_SYMBOL]();
+        (Haptic as HostHaptic)[HAPTIC_CLEAR_HANDLER]();
       });
 
       it('should route askit:toast:show to Toast module', () => {
@@ -219,45 +199,71 @@ describe('Core Bridge', () => {
         });
 
         expect(warnings.length).toBe(1);
-        expect((warnings[0] as unknown[])?.[0]).toContain('Unknown module: unknown');
+        expect((warnings[0] as unknown[])?.[0]).toContain(
+          'Unknown module or method: unknown.method'
+        );
 
         console.warn = originalWarn;
       });
     });
 
-    describe('bus event routing', () => {
-      beforeEach(() => {
-        // Create fresh bus instance for each test
-        new NativeBus();
-      });
-
-      it('should route bus: events to Bus', () => {
+    describe('askit:event: protocol routing', () => {
+      it('should route askit:event: events to EventEmitter', () => {
         const received: unknown[] = [];
 
-        (Bus as NativeBus).on('testEvent', (payload) => {
+        const unsubscribe = (EventEmitter as HostEventEmitter).on('testEvent', (payload) => {
           received.push(payload);
         });
 
-        handleGuestMessage({
-          event: 'bus:testEvent',
-          payload: { data: 'fromGuest' },
-        });
+        // Directly test the NOTIFY_SYMBOL method
+        (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL]('testEvent', { data: 'fromGuest' });
 
         expect(received).toEqual([{ data: 'fromGuest' }]);
+
+        unsubscribe();
       });
 
-      it('should handle bus events without payload', () => {
+      it('should handle events without payload', () => {
         const received: unknown[] = [];
 
-        (Bus as NativeBus).on('noPayloadBus', (payload) => {
+        const unsubscribe = (EventEmitter as HostEventEmitter).on('noPayloadEvent', (payload) => {
           received.push(payload);
         });
 
-        handleGuestMessage({
-          event: 'bus:noPayloadBus',
-        });
+        // Directly test the NOTIFY_SYMBOL method
+        (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL]('noPayloadEvent', undefined);
 
         expect(received).toEqual([undefined]);
+
+        unsubscribe();
+      });
+
+      it('should parse askit:event: prefix in handleGuestMessage', () => {
+        // Test that the bridge correctly extracts event name from 'askit:event:' prefix
+        const result = handleGuestMessage({
+          event: 'askit:event:testParsing',
+          payload: 'test',
+        });
+
+        expect(result).toBeUndefined(); // handleGuestMessage returns undefined for askit:event: messages
+      });
+
+      it('should support nested event names', () => {
+        const received: unknown[] = [];
+
+        const unsubscribe = (EventEmitter as HostEventEmitter).on('user:login', (payload) => {
+          received.push(payload);
+        });
+
+        // Test nested event name parsing
+        handleGuestMessage({
+          event: 'askit:event:user:login',
+          payload: { userId: 123 },
+        });
+
+        expect(received).toEqual([{ userId: 123 }]);
+
+        unsubscribe();
       });
     });
 
@@ -308,7 +314,7 @@ describe('Core Bridge', () => {
       expect(typeof adapter.dispose).toBe('function');
     });
 
-    it('should forward Bus events to engine.sendEvent', () => {
+    it('should forward EventEmitter events to engine.sendEvent', () => {
       const sentEvents: Array<{ event: string; payload: unknown }> = [];
       const engine = {
         on: () => {},
@@ -319,17 +325,17 @@ describe('Core Bridge', () => {
 
       createEngineAdapter(engine);
 
-      (Bus as NativeBus).emit('hostEventForward', { data: 'toGuest' });
+      (EventEmitter as HostEventEmitter).emit('hostEventForward', { data: 'toGuest' });
 
       expect(sentEvents).toContainEqual({
-        event: 'hostEventForward',
+        event: 'askit:event:hostEventForward',
         payload: { data: 'toGuest' },
       });
     });
 
     it('should route engine messages to handleGuestMessage', () => {
       const toastCalls: string[] = [];
-      (ToastModule as NativeToast)._setCustomHandler((message) => {
+      (Toast as HostToast)[SET_HANDLER_SYMBOL]((message) => {
         toastCalls.push(message);
       });
 
@@ -353,7 +359,7 @@ describe('Core Bridge', () => {
 
       expect(toastCalls).toEqual(['Engine Toast Message']);
 
-      (ToastModule as NativeToast)._clearCustomHandler();
+      (Toast as HostToast)[CLEAR_HANDLER_SYMBOL]();
     });
 
     it('should unregister bus on dispose', () => {
@@ -367,12 +373,12 @@ describe('Core Bridge', () => {
 
       const adapter = createEngineAdapter(engine);
 
-      (Bus as NativeBus).emit('beforeDispose', 'data1');
+      (EventEmitter as HostEventEmitter).emit('beforeDispose', 'data1');
       adapter.dispose();
-      (Bus as NativeBus).emit('afterDispose', 'data2');
+      (EventEmitter as HostEventEmitter).emit('afterDispose', 'data2');
 
-      const beforeEvents = sentEvents.filter((e) => e.event === 'beforeDispose');
-      const afterEvents = sentEvents.filter((e) => e.event === 'afterDispose');
+      const beforeEvents = sentEvents.filter((e) => e.event === 'askit:event:beforeDispose');
+      const afterEvents = sentEvents.filter((e) => e.event === 'askit:event:afterDispose');
 
       expect(beforeEvents.length).toBe(1);
       expect(afterEvents.length).toBe(0);

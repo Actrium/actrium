@@ -5,93 +5,72 @@
  * to the Rill engine. Host apps import this to inject native implementations.
  */
 
-import type { ComponentMap, ModuleMap, AskitRegistryConfig } from '../types';
+// Import host component implementations
+import { StepList } from '../ui/StepList/StepList.host';
+import { ThemeView } from '../ui/ThemeView/ThemeView.host';
+import { UserAvatar } from '../ui/UserAvatar/UserAvatar.host';
+import { ChatBubble } from '../ui/ChatBubble/ChatBubble.host';
 
-// Import native component implementations
-import { StepList } from '../ui/StepList/StepList.native';
-import { ThemeView } from '../ui/ThemeView/ThemeView.native';
-import { UserAvatar } from '../ui/UserAvatar/UserAvatar.native';
-import { ChatBubble } from '../ui/ChatBubble/ChatBubble.native';
-
-// Import native module implementations
-import { Toast as ToastModule, NativeToast } from '../api/Toast.native';
-import { Haptic as HapticModule, NativeHaptic } from '../api/Haptic.native';
+// Import host module implementations
+import { Toast, HostToast, TOAST_SET_HANDLER, TOAST_CLEAR_HANDLER } from '../api/Toast.host';
+import { Haptic, HostHaptic, HAPTIC_SET_HANDLER, HAPTIC_CLEAR_HANDLER } from '../api/Haptic.host';
 
 /**
- * Default component registry
- * Maps component names to their native React implementations
+ * Component registry for Rill engine
+ *
+ * Usage:
+ * ```typescript
+ * import { Engine } from 'rill';
+ * import { components } from 'askit/core';
+ *
+ * const engine = new Engine();
+ * engine.register(components);
+ * ```
  */
-export const AskitComponents: ComponentMap = {
+export const components = {
   StepList,
   ThemeView,
   UserAvatar,
   ChatBubble,
-};
+} as const;
 
 /**
- * Module handlers for guest API calls
- * Processes messages like `askit:toast:show` from guests
+ * Module registry for Bridge routing
+ * Maps module names to their host implementations
  */
-export interface ModuleHandler {
-  handle: (method: string, args: unknown[]) => unknown;
-}
-
-/**
- * Toast module handler
- */
-const ToastHandler: ModuleHandler = {
-  handle(method: string, args: unknown[]) {
-    if (method === 'show') {
-      const [message, options] = args as [string, unknown];
-      ToastModule.show(message, options as Parameters<typeof ToastModule.show>[1]);
-    }
-  },
-};
-
-/**
- * Haptic module handler
- */
-const HapticHandler: ModuleHandler = {
-  handle(method: string, args: unknown[]) {
-    if (method === 'trigger') {
-      const [type] = args as [Parameters<typeof HapticModule.trigger>[0]];
-      HapticModule.trigger(type);
-    }
-  },
-};
-
-/**
- * Default module registry
- */
-export const AskitModules: Record<string, ModuleHandler> = {
-  toast: ToastHandler,
-  haptic: HapticHandler,
-};
-
-/**
- * Full registry configuration for Rill engine
- */
-export const AskitRegistry: AskitRegistryConfig = {
-  components: AskitComponents,
-  modules: AskitModules as unknown as ModuleMap,
-};
+export const modules = {
+  toast: Toast,
+  haptic: Haptic,
+} as const;
 
 /**
  * Configure Toast with custom handler (e.g., for iOS)
  */
 export function configureToast(
-  handler: (message: string, options?: Parameters<typeof ToastModule.show>[1]) => void
+  handler: (message: string, options?: Parameters<typeof Toast.show>[1]) => void
 ): void {
-  (ToastModule as NativeToast)._setCustomHandler(handler);
+  (Toast as HostToast)[TOAST_SET_HANDLER](handler);
+}
+
+/**
+ * Clear Toast custom handler
+ */
+export function clearToastHandler(): void {
+  (Toast as HostToast)[TOAST_CLEAR_HANDLER]();
 }
 
 /**
  * Configure Haptic with custom handler
  */
 export function configureHaptic(
-  handler: (type?: Parameters<typeof HapticModule.trigger>[0]) => void
+  handler: (type?: Parameters<typeof Haptic.trigger>[0]) => void
 ): void {
-  (HapticModule as NativeHaptic)._setCustomHandler(handler);
+  (Haptic as HostHaptic)[HAPTIC_SET_HANDLER](handler);
 }
 
-export { AskitComponents as components, AskitModules as modules };
+/**
+ * Clear Haptic custom handler
+ */
+export function clearHapticHandler(): void {
+  (Haptic as HostHaptic)[HAPTIC_CLEAR_HANDLER]();
+}

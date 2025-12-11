@@ -1,5 +1,5 @@
 /**
- * StepList - Native Implementation (Host App)
+ * StepList - Host Implementation
  *
  * A step-by-step progress indicator component with connecting lines.
  * Supports loop display mode and various status states.

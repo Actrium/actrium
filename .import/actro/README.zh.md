@@ -14,53 +14,55 @@ askit 采用 **90% 通用 + 10% 核心** 架构：
 - **核心 (10%)**：仅 Host 端使用的桥接和注册模块
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      Host App (RN)                      │
-│  ┌─────────────────┐  ┌─────────────────────────────┐  │
-│  │   askit/core    │  │         askit               │  │
-│  │  - registry     │  │  - Bus, Toast, Haptic       │  │
-│  │  - bridge       │  │  - StepList, ThemeView...   │  │
-│  └────────┬────────┘  └──────────────┬──────────────┘  │
-│           │                          │                  │
-│           └──────────┬───────────────┘                  │
-│                      ▼                                  │
-│              ┌───────────────┐                          │
-│              │  rill Engine  │                          │
-│              └───────┬───────┘                          │
-└──────────────────────┼──────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Host App (RN)                          │
+│  ┌─────────────────┐  ┌───────────────────────────────┐    │
+│  │   askit/core    │  │         askit                 │    │
+│  │  - registry     │  │  - EventEmitter, Toast, Haptic│    │
+│  │  - bridge       │  │  - StepList, ThemeView...     │    │
+│  └────────┬────────┘  └──────────────┬────────────────┘    │
+│           │                          │                      │
+│           └──────────┬───────────────┘                      │
+│                      ▼                                      │
+│              ┌───────────────┐                              │
+│              │  rill Engine  │                              │
+│              └───────┬───────┘                              │
+└──────────────────────┼──────────────────────────────────────┘
                        │ 消息协议
-┌──────────────────────┼──────────────────────────────────┐
-│                      ▼                                  │
-│              ┌───────────────┐                          │
-│              │ QuickJS Sandbox│                         │
-│              └───────┬───────┘                          │
-│                      │                                  │
-│  ┌───────────────────▼───────────────────────────────┐ │
-│  │                    askit                          │ │
-│  │  - Bus, Toast, Haptic (远程实现)                   │ │
-│  │  - StepList, ThemeView... (DSL 生成器)            │ │
-│  └───────────────────────────────────────────────────┘ │
-│                      Guest                             │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────┼──────────────────────────────────────┐
+│                      ▼                                      │
+│              ┌───────────────┐                              │
+│              │ QuickJS Sandbox│                             │
+│              └───────┬───────┘                              │
+│                      │                                      │
+│  ┌───────────────────▼─────────────────────────────────┐   │
+│  │                    askit                            │   │
+│  │  - EventEmitter, Toast, Haptic (Guest 实现)         │   │
+│  │  - StepList, ThemeView... (DSL 生成器)              │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                      Guest                                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## 安装
 
 ```bash
-npm install askit
+bun add github:GoAskAway/askit
 ```
+
+> **注意**：askit 通过 GitHub 发布，直接导出 TypeScript 源码（无需构建步骤）。你的打包工具（Metro、Vite 等）需要支持 TypeScript 编译。React Native Metro 和现代打包工具都会自动处理。
 
 ## 使用
 
 ### 在 Guest 中 (QuickJS Sandbox)
 
 ```typescript
-import { Bus, Toast, Haptic } from 'askit';
+import { EventEmitter, Toast, Haptic } from 'askit';
 import { StepList, UserAvatar } from 'askit';
 
 // 事件通信
-Bus.emit('guest:ready', { version: '1.0.0' });
-Bus.on('host:config', (config) => {
+EventEmitter.emit('guest:ready', { version: '1.0.0' });
+EventEmitter.on('host:config', (config) => {
   console.log('收到配置:', config);
 });
 
@@ -78,7 +80,7 @@ const avatar = UserAvatar({ uri: 'https://example.com/avatar.png', size: 48 });
 
 ```typescript
 // 导入核心模块用于桥接
-import { createEngineAdapter, AskitComponents } from 'askit/core';
+import { createEngineAdapter, components } from 'askit/core';
 import { Engine } from 'rill';
 
 // 创建引擎并连接 askit
@@ -86,9 +88,7 @@ const engine = new Engine();
 const adapter = createEngineAdapter(engine);
 
 // 注册组件以渲染插件 UI
-Object.entries(AskitComponents).forEach(([name, Component]) => {
-  engine.registerComponent(name, Component);
-});
+engine.register(components);
 
 // 启动插件
 engine.loadGuest('./guest.js');
@@ -96,22 +96,25 @@ engine.loadGuest('./guest.js');
 
 ## API 参考
 
-### Bus
+### EventEmitter
 
 Host 与 Guest 之间基于事件的通信。
 
 ```typescript
 // 发送事件
-Bus.emit(event: string, payload?: unknown): void
+EventEmitter.emit(event: string, payload?: unknown): void
 
-// 监听事件
-Bus.on(event: string, handler: (payload: unknown) => void): () => void
+// 监听事件（支持通配符：'user:*', 'analytics:**'）
+EventEmitter.on(event: string, handler: (payload: unknown) => void, options?: {
+  rateLimit?: 'throttle' | 'debounce' | 'none';
+  delay?: number;
+}): () => void
 
 // 单次监听
-Bus.once(event: string, handler: (payload: unknown) => void): () => void
+EventEmitter.once(event: string, handler: (payload: unknown) => void): () => void
 
 // 移除监听
-Bus.off(event: string, handler?: (payload: unknown) => void): void
+EventEmitter.off(event: string, handler: (payload: unknown) => void): void
 ```
 
 ### Toast
@@ -130,7 +133,7 @@ Toast.show(message: string, options?: {
 触发触觉反馈。
 
 ```typescript
-Haptic.trigger(type?: 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error'): void
+Haptic.trigger(type?: 'light' | 'medium' | 'heavy' | 'selection' | 'success' | 'warning' | 'error'): void
 ```
 
 ## 组件
@@ -146,7 +149,7 @@ Haptic.trigger(type?: 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'er
 
 ```
 askit
-├── index.ts          # 通用导出 (Bus, Toast, Haptic, Components)
+├── index.ts          # 通用导出 (EventEmitter, Toast, Haptic, Components)
 └── core/
     ├── registry.ts   # 组件和模块注册
     └── bridge.ts     # Host-Guest 消息桥接
@@ -160,10 +163,10 @@ askit
 {
   "exports": {
     ".": {
-      "react-native": "./dist/native/index.js",
-      "default": "./dist/remote/index.js"
+      "react-native": "./src/index.host.ts",
+      "default": "./src/index.guest.ts"
     },
-    "./core": "./dist/core/index.js"
+    "./core": "./src/core/index.ts"
   }
 }
 ```
@@ -175,22 +178,22 @@ askit
 
 ```bash
 # 安装依赖
-npm install
+bun install
 
 # 运行测试
-npm test
+bun test
 
 # 运行测试并生成覆盖率报告
-npm run test:coverage
+bun test --coverage
 
 # 代码检查
-npm run lint
+bun run lint
 
 # 代码格式化
-npm run fmt
+bun run fmt
 
 # 构建
-npm run build
+bun run build
 ```
 
 ## 许可证
