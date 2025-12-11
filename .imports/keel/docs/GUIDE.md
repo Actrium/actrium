@@ -20,10 +20,10 @@ Rill is a lightweight React Native dynamic UI rendering engine, similar to Shopi
 
 ```bash
 # In host application
-npm install rill react-native-quickjs
+bun add rill react-native-quickjs
 
 # In guest project (dev dependency only)
-npm install -D rill
+bun add -D rill
 ```
 
 ### 2. Create Guest
@@ -59,7 +59,7 @@ export default function MyGuest() {
 ### 3. Build Guest
 
 ```bash
-npx rill build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 ```
 
 ### 4. Use in Host Application

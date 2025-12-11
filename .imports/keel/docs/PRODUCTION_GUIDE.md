@@ -106,8 +106,8 @@ await analyze('dist/bundle.js', { whitelist: ['react', 'react/jsx-runtime'], fai
 - Init scaffold
 ```bash
 rill init my-rill-guest
-cd my-rill-guest && npm install
-npm run build
+cd my-rill-guest && bun install
+bun run build
 ```
 
 ## 9. Troubleshooting

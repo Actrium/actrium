@@ -17,13 +17,13 @@ git clone https://github.com/kookyleo/rill.git
 cd rill
 
 # 2. 安装依赖
-npm install
+bun install
 
 # 3. 构建项目
-npm run build
+bun run build
 
 # 4. 运行类型检查
-npm run typecheck
+bun run typecheck
 
 # 5. 运行测试
 npm test
@@ -49,10 +49,10 @@ git checkout -b fix/your-bug-fix
 
 ```bash
 # 类型检查
-npm run typecheck
+bun run typecheck
 
 # 构建
-npm run build
+bun run build
 
 # 运行测试
 npm test

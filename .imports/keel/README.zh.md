@@ -16,7 +16,7 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine. (Chin
 ### 安装
 
 ```bash
-npm install rill
+bun add rill
 # 或
 yarn add rill
 ```
@@ -77,7 +77,7 @@ export default function MyGuest() {
 
 ```bash
 # 安装 CLI
-npm install -g rill
+bun add -g rill
 
 # 构建
 rill build src/guest.tsx -o dist/bundle.js
@@ -313,22 +313,22 @@ const data = devtools.exportAll();
 
 ```bash
 # 安装依赖
-npm install
+bun install
 
 # 构建
-npm run build
+bun run build
 
 # 开发模式
-npm run build:watch
+bun run build:watch
 
 # 类型检查
-npm run typecheck
+bun run typecheck
 
 # 测试
-npm run test
+bun test
 
 # 测试覆盖率
-npm run test:coverage
+bun run test:coverage
 ```
 
 ## 测试
@@ -340,9 +340,9 @@ npm run test:coverage
 - 覆盖率目标：80%+ 代码覆盖
 
 ```bash
-npm test           # 运行所有测试
-npm test -- --run  # 单次运行
-npm test:coverage  # 生成覆盖率报告
+bun test            # 运行所有测试
+bun test --run  # 单次运行
+bun test:coverage  # 生成覆盖率报告
 ```
 
 ## 许可证

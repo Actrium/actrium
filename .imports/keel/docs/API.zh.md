@@ -629,26 +629,26 @@ const exported = timeline.export();
 
 ```bash
 # 构建guest
-npx rill build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 
 # 监听模式
-npx rill build src/guest.tsx -o dist/bundle.js --watch
+bunx rill build src/guest.tsx -o dist/bundle.js --watch
 
 # 生成 sourcemap
-npx rill build src/guest.tsx -o dist/bundle.js --sourcemap
+bunx rill build src/guest.tsx -o dist/bundle.js --sourcemap
 
 # 不压缩
-npx rill build src/guest.tsx -o dist/bundle.js --no-minify
+bunx rill build src/guest.tsx -o dist/bundle.js --no-minify
 
 # 生成 metafile
-npx rill build src/guest.tsx -o dist/bundle.js --metafile dist/meta.json
+bunx rill build src/guest.tsx -o dist/bundle.js --metafile dist/meta.json
 ```
 
 ### 分析命令
 
 ```bash
 # 分析 bundle
-npx rill analyze dist/bundle.js
+bunx rill analyze dist/bundle.js
 ```
 
 ### 编程接口
