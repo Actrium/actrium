@@ -72,7 +72,10 @@ export function handleGuestMessage(message: GuestMessage): unknown {
           const method = module[methodNameStr as keyof typeof module];
           if (typeof method === 'function') {
             const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
-            return (method as (...args: unknown[]) => unknown).apply(module as Record<string, unknown>, args);
+            return (method as (...args: unknown[]) => unknown).apply(
+              module as unknown as Record<string, unknown>,
+              args
+            );
           }
         }
 
