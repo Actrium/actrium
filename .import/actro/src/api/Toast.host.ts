@@ -117,9 +117,6 @@ class HostToast implements ToastAPI {
 
       // Android Toast with gravity based on position
       const gravity = this.getGravity(options?.position);
-      // Debug: ensure ToastAndroid and Platform are as expected
-       
-      console.log('[DEBUG Toast.host] Platform:', Platform, 'ToastAndroid:', ToastAndroid);
       ToastAndroid.showWithGravity(message, duration, gravity);
     } else {
       // iOS or non-RN environment - log to console
