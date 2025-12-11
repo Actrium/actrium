@@ -45,18 +45,18 @@ rill/
 
 Build all packages:
 ```bash
-npm run build
+bun run build
 ```
 
 Build a specific package:
 ```bash
-cd packages/rill && npm run build
-cd packages/cli && npm run build
+cd packages/rill && bun run build
+cd packages/cli && bun run build
 ```
 
 Run tests:
 ```bash
-npm run test --workspaces
+bun test
 ```
 
 ## Quick Start
@@ -77,9 +77,9 @@ Recommended pairings
 Install examples
 
 - React Native (RN 0.82 + React 19.2)
-  - npm i rill react@^19.2.1 react-native@^0.82 react-reconciler@^0.33
+  - bun add rill react@^19.2.1 react-native@^0.82 react-reconciler@^0.33
 - Web (React 19.2)
-  - npm i rill react@^19.2.1 react-dom@^19.2.1 react-reconciler@^0.33
+  - bun add rill react@^19.2.1 react-dom@^19.2.1 react-reconciler@^0.33
 
 Notes
 
@@ -88,7 +88,7 @@ Notes
 
 
 ```bash
-npm install rill
+bun add rill
 # or
 yarn add rill
 ```
@@ -149,7 +149,7 @@ export default function MyGuest() {
 
 ```bash
 # Install CLI
-npm install -g rill
+bun add -g rill
 
 # Build
 rill build src/guest.tsx -o dist/bundle.js
@@ -296,22 +296,22 @@ const data = devtools.exportAll();
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
 # Build
-npm run build
+bun run build
 
 # Development mode
-npm run build:watch
+bun run build:watch
 
 # Type check
-npm run typecheck
+bun run typecheck
 
 # Test
-npm run test
+bun test
 
 # Test coverage
-npm run test:coverage
+bun run test:coverage
 ```
 
 ## Testing
@@ -412,9 +412,9 @@ The project includes a complete test suite:
 - Coverage target: 80%+ code coverage
 
 ```bash
-npm test           # Run all tests
-npm test -- --run  # Single run
-npm test:coverage  # Generate coverage report
+bun test            # Run all tests
+bun test --run  # Single run
+bun test:coverage  # Generate coverage report
 ```
 
 ## License
