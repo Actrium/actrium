@@ -68,16 +68,16 @@ All example guests follow the same build process:
 cd examples/simple-guest  # or host-integration, advanced-features
 
 # Install dependencies
-npm install
+bun install
 
 # Build the guest
-npm run build
+bun run build
 
 # Development mode (no minification + sourcemap)
-npm run build:dev
+bun run build:dev
 
 # Watch for file changes (if supported)
-npm run watch
+bun run watch
 ```
 
 Build output: `dist/bundle.js` or `dist/guest.js`
@@ -149,7 +149,7 @@ host-integration/
 1. Copy the `simple-guest` directory
 2. Modify the name in `package.json`
 3. Edit `src/index.tsx` to implement guest logic
-4. Run `npm run build` to build
+4. Run `bun run build` to build
 
 ## SDK Import
 
@@ -283,7 +283,7 @@ A: You need to configure allowed modules through `requireWhitelist` on the host 
 ### Q: How to debug guests?
 
 A:
-1. Use `npm run build:dev` to build with sourcemaps
+1. Use `bun run build:dev` to build with sourcemaps
 2. Enable `debug: true` in Engine configuration
 3. Use console.log for logging (visible on host side)
 
