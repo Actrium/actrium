@@ -8,7 +8,7 @@ This guide summarizes recommended settings and operational practices to run Rill
   - Pass `requireWhitelist` in EngineOptions when creating Engine. Only these modules can be `require()`ed by the guest bundle.
   - Default whitelist: `react`, `react-native`, `react/jsx-runtime`, `rill/reconciler`.
 - Execution timeout
-  - Use `timeout` option (default 5000ms). While QuickJS `eval` runs synchronously, the guard catches long-running tasks that yield to event loop. Consider using separate worker/isolate if strict CPU time slicing is required.
+  - Use `timeout` option (default 5000ms). QuickJS `eval` is synchronous and cannot be forcibly interrupted; this timeout is "best-effort". Consider worker/thread isolation if strict CPU time slicing is required.
 - Error classification
   - The engine throws specific error classes: `RequireError`, `ExecutionError`, `TimeoutError`.
   - Subscribe to `engine.on('error', handler)` to log and report.
@@ -18,8 +18,9 @@ This guide summarizes recommended settings and operational practices to run Rill
     - `engine.fetchBundle` (ms, { status, size })
     - `engine.initializeRuntime` (ms)
     - `engine.executeBundle` (ms, { size })
+    - `receiver.applyBatch` (ms, { applied, skipped, total })
 - Batch limits
-  - If the guest can emit very large batches, configure a maximum batch size in the host and split/skip overly large batches before calling `receiver.applyBatch`.
+  - `receiverMaxBatchSize` (default 5000) limits the number of operations applied in a single batch, preventing guests from overwhelming the host with massive operations. Excess operations are skipped and reported via metrics.
 
 ## 2. Observability
 
@@ -34,7 +35,8 @@ This guide summarizes recommended settings and operational practices to run Rill
 ## 3. Security & isolation
 
 - Sandbox
-  - Use the `QuickJSProvider` (WASM-based) in production to ensure isolation from the host.
+  - Use a `JSEngineProvider` implementation (like QuickJS WASM) in production to ensure isolation from the host.
+  - Supported sandbox modes: `'vm'` (Node.js VM), `'worker'` (Web Worker), `'none'` (no sandbox)
 - Module access
   - Keep whitelist minimal; do not expose Node built-ins or dynamic loaders to the guest.
 - Callbacks
@@ -60,13 +62,13 @@ This guide summarizes recommended settings and operational practices to run Rill
 
 ## 6. Host integration checklist
 
-- [ ] Provide `QuickJSProvider` implementation
-- [ ] Instantiate `Engine` with `requireWhitelist`, `timeout`, `logger`, and `onMetric`
-- [ ] Register host components via `engine.register()`
-- [ ] Create `receiver = engine.createReceiver(onUpdate)` and render tree updates
+- [ ] (Optional) Provide `JSEngineProvider` implementation, or use built-in sandbox mode
+- [ ] Create `Engine` and configure `sandbox`, `requireWhitelist`, `timeout`, `logger`, `onMetric`, `receiverMaxBatchSize`
+- [ ] Register host components: `engine.register()`
+- [ ] Create and use `receiver = engine.createReceiver(onUpdate)` to render tree updates
 - [ ] Wire event bridge: `engine.sendEvent` and `__handleHostMessage`
 - [ ] Add health monitoring and metrics forwarding
-- [ ] Handle `engine.on('error', ...)` and define fallback UI
+- [ ] Subscribe to `engine.on('error', ...)` and provide fallback UI
 
 ## 7. Observability Details
 
@@ -82,7 +84,11 @@ This guide summarizes recommended settings and operational practices to run Rill
 - Using onMetric
 ```ts
 const metrics: Array<{ name: string; value: number; extra?: Record<string, unknown> }> = [];
-const engine = new Engine({ quickjs: provider, onMetric: (n, v, e) => metrics.push({ name: n, value: v, extra: e }) });
+const engine = new Engine({
+  provider: myJSEngineProvider, // Optional
+  sandbox: 'vm', // Optional: 'vm' | 'worker' | 'none'
+  onMetric: (n, v, e) => metrics.push({ name: n, value: v, extra: e })
+});
 ```
 
 - Health check API
@@ -95,12 +101,17 @@ const health = engine.getHealth();
 
 - Analyze with whitelist scanning
 ```bash
-rill analyze dist/bundle.js # default warnings
+rill analyze dist/bundle.js # default warnings only
 ```
 Programmatic (options):
 ```ts
-import { analyze } from 'rill/cli/build';
-await analyze('dist/bundle.js', { whitelist: ['react', 'react/jsx-runtime'], failOnViolation: true });
+import { analyze } from '@rill/cli';
+await analyze('dist/bundle.js', {
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
+  failOnViolation: true,
+  treatEvalAsViolation: true,
+  treatDynamicNonLiteralAsViolation: true,
+});
 ```
 
 - Init scaffold
