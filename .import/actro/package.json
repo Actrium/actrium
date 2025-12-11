@@ -7,10 +7,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "bun run --filter '*' build",
     "test": "bun test",
-    "lint": "npm run lint --workspaces",
-    "typecheck": "npm run typecheck --workspaces"
+    "lint": "bun run --filter '*' lint",
+    "typecheck": "bun run --filter '*' typecheck"
   },
   "engines": {
     "node": ">=18.0.0",
