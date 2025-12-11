@@ -17,21 +17,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
         with:
-          node-version: '18'
-          cache: 'npm'
+          bun-version: latest
 
       - name: Install dependencies
-        run: |
-          cd packages/rill
-          npm ci
+        run: bun install --frozen-lockfile
 
       - name: Run benchmarks
         run: |
           cd packages/rill
-          npm run bench > benchmark-output.txt 2>&1 || true
+          bun run bench > benchmark-output.txt 2>&1 || true
           cat benchmark-output.txt
 
       - name: Load baseline
