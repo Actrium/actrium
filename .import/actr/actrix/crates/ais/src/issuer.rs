@@ -548,7 +548,7 @@ impl AIdIssuer {
             self.ks_client
                 .fetch_secret_key(key_id)
                 .await
-                .map(|_| ())
+                .map(|(_, _, _)| ())
                 .map_err(|e| AidError::GenerationFailed(format!("KS service unhealthy: {e}")))
         } else {
             // 没有缓存密钥，尝试生成新密钥

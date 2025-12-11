@@ -775,30 +775,44 @@ async fn handle_actr_to_server(
         return Ok(());
     }
 
-    // 验证 credential
-    if let Err(e) =
-        AIdCredentialValidator::check(&actr_to_server.credential, source.realm.realm_id).await
+    // 验证 credential 并获取容忍期状态
+    let in_tolerance_period = match AIdCredentialValidator::check(
+        &actr_to_server.credential,
+        source.realm.realm_id,
+    )
+    .await
     {
-        warn!(
-            "⚠️  Actor {} credential 验证失败: {}",
-            source.serial_number, e
-        );
-        // 发送错误响应
-        send_error_response(
-            client_id,
-            &source,
-            401,
-            &format!("Credential validation failed: {e}"),
-            server,
-            Some(request_envelope_id),
-        )
-        .await?;
-        return Ok(());
-    }
+        Ok((_claims, in_tolerance)) => in_tolerance,
+        Err(e) => {
+            warn!(
+                "⚠️  Actor {} credential 验证失败: {}",
+                source.serial_number, e
+            );
+            // 发送错误响应
+            send_error_response(
+                client_id,
+                &source,
+                401,
+                &format!("Credential validation failed: {e}"),
+                server,
+                Some(request_envelope_id),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
 
     match actr_to_server.payload {
         Some(actr_to_signaling::Payload::Ping(ping)) => {
-            handle_ping(source, ping, client_id, server, request_envelope_id).await?;
+            handle_ping(
+                source,
+                ping,
+                client_id,
+                server,
+                request_envelope_id,
+                in_tolerance_period,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::UnregisterRequest(req)) => {
             handle_unregister(source, req, client_id, server, request_envelope_id).await?;
@@ -840,14 +854,20 @@ async fn handle_ping(
     client_id: &str,
     server: &SignalingServerHandle,
     request_envelope_id: &str,
+    in_tolerance_period: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(
-        "💓 收到 Actor {} 心跳: availability={}, power_reserve={:.2}, mailbox_backlog={:.2}, sticky_clients={}",
+        "💓 收到 Actor {} 心跳: availability={}, power_reserve={:.2}, mailbox_backlog={:.2}, sticky_clients={}{}",
         source.serial_number,
         ping.availability,
         ping.power_reserve,
         ping.mailbox_backlog,
-        ping.sticky_client_ids.len()
+        ping.sticky_client_ids.len(),
+        if in_tolerance_period {
+            " [⚠️ Key in tolerance period]"
+        } else {
+            ""
+        }
     );
 
     // 存储负载指标到 ServiceRegistry
@@ -863,10 +883,25 @@ async fn handle_ping(
     drop(registry);
 
     // 创建 Pong 响应
-    let pong = Pong {
+    let mut pong = Pong {
         seq: chrono::Utc::now().timestamp() as u64,
         suggest_interval_secs: Some(30),
+        credential_warning: None,
     };
+
+    // 如果密钥在容忍期，添加警告
+    if in_tolerance_period {
+        warn!(
+            "⚠️  Actor {} credential key is in tolerance period",
+            source.serial_number
+        );
+        pong.credential_warning = Some(actr_protocol::CredentialWarning {
+            r#type: actr_protocol::credential_warning::WarningType::KeyInTolerancePeriod as i32,
+            message:
+                "Your credential key is in tolerance period. Please update your credential soon."
+                    .to_string(),
+        });
+    }
 
     let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
         target: source,
@@ -1041,7 +1076,10 @@ async fn handle_actr_relay(
     }
 
     // 验证 credential
-    if let Err(e) = AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await {
+    if let Err(e) = AIdCredentialValidator::check(&relay.credential, source.realm.realm_id)
+        .await
+        .map(|(claims, _)| claims)
+    {
         warn!(
             "⚠️  Actor {} credential 验证失败: {}",
             source.serial_number, e

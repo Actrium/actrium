@@ -133,17 +133,34 @@ impl KeyServer for KsGrpcService {
             .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
             .ok_or_else(|| Status::not_found(format!("Key not found: {key_id}")))?;
 
-        // 检查密钥是否过期
-        if key_record.expires_at > 0 {
+        // 检查密钥是否过期，并计算是否在容忍期
+        // TODO: 容忍期应该从配置中获取，这里暂时使用默认值 3600 秒
+        const DEFAULT_TOLERANCE_SECONDS: u64 = 3600;
+
+        let in_tolerance_period = if key_record.expires_at > 0 {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            if key_record.expires_at < now {
-                warn!("Key {} has expired", key_id);
+
+            // 检查是否在容忍期内：已过期但未超过容忍期
+            let is_in_tolerance = key_record.expires_at < now
+                && key_record.expires_at + DEFAULT_TOLERANCE_SECONDS >= now;
+
+            // 检查是否超过了过期时间 + 容忍期
+            if key_record.expires_at + DEFAULT_TOLERANCE_SECONDS < now {
+                warn!("Key {} has expired beyond tolerance period", key_id);
                 return Err(Status::not_found(format!("Key {key_id} has expired")));
             }
-        }
+
+            if is_in_tolerance {
+                warn!("Key {} is in tolerance period", key_id);
+            }
+
+            is_in_tolerance
+        } else {
+            false // 永不过期的密钥不在容忍期
+        };
 
         // 获取私钥
         let secret_key = self
@@ -153,12 +170,16 @@ impl KeyServer for KsGrpcService {
             .map_err(|e| Status::internal(format!("Failed to get secret key: {e}")))?
             .ok_or_else(|| Status::not_found(format!("Secret key not found: {key_id}")))?;
 
-        info!("Found secret key for key_id: {}", key_id);
+        info!(
+            "Found secret key for key_id: {}, in_tolerance: {}",
+            key_id, in_tolerance_period
+        );
 
         let response = GetSecretKeyResponse {
             key_id,
             secret_key,
             expires_at: key_record.expires_at,
+            in_tolerance_period,
         };
 
         Ok(Response::new(response))

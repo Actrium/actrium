@@ -59,6 +59,9 @@ message GetSecretKeyResponse {
 
   // 密钥过期时间（Unix 时间戳，秒）
   required uint64 expires_at = 3;
+
+  // 是否在容忍期内（true = 密钥已过期但在容忍期，false = 正常有效期）
+  required bool in_tolerance_period = 4;
 }
 
 // ============================================================================
