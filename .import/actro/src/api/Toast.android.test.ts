@@ -4,16 +4,23 @@
  * Tests Android-specific code using dependency injection
  */
 
-const makeMock = () => {
-  const fn: any = (...args: any[]) => {
-    fn.mock.calls.push(args);
-  };
-  fn.mock = { calls: [] as any[] };
+interface MockFn {
+  (...args: unknown[]): void;
+  mock: { calls: unknown[][] };
+  mockClear: () => void;
+}
+
+function makeMock(): MockFn {
+  const calls: unknown[][] = [];
+  const fn = ((...args: unknown[]) => {
+    calls.push(args);
+  }) as MockFn;
+  fn.mock = { calls };
   fn.mockClear = () => {
     fn.mock.calls = [];
   };
   return fn;
-};
+}
 import {
   HostToast,
   _injectMocks,
