@@ -52,11 +52,9 @@ export function handleGuestMessage(message: GuestMessage): unknown {
       return undefined;
     }
 
-    const [moduleName, methodName] = parts;
-
     // EventEmitter events (format: askit:event:eventName)
     // Must check this FIRST because eventName can contain colons (e.g., user:login)
-    if (moduleName === 'event') {
+    if (parts[0] === 'event') {
       const eventName = parts.slice(1).join(':'); // Support nested events like 'user:login'
       (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](eventName, payload);
       return undefined;
@@ -66,19 +64,21 @@ export function handleGuestMessage(message: GuestMessage): unknown {
     if (parts.length === 2) {
       // Validate module and method names (alphanumeric and underscore only)
       const validName = /^[a-zA-Z0-9_]+$/;
-      if (validName.test(moduleName) && validName.test(methodName)) {
-        const module = modules[moduleName as keyof typeof modules];
+      const moduleNameStr = parts[0]!;
+      const methodNameStr = parts[1]!;
+      if (validName.test(moduleNameStr) && validName.test(methodNameStr)) {
+        const module = modules[moduleNameStr as keyof typeof modules];
         if (module) {
-          const method = module[methodName as keyof typeof module];
+          const method = module[methodNameStr as keyof typeof module];
           if (typeof method === 'function') {
             const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
-            return method.apply(module, args);
+            return (method as (...args: unknown[]) => unknown).apply(module as any, args);
           }
         }
 
-        logger.warn('Bridge', `Unknown module or method: ${moduleName}.${methodName}`, {
-          module: moduleName,
-          method: methodName,
+        logger.warn('Bridge', `Unknown module or method: ${moduleNameStr}.${methodNameStr}`, {
+          module: moduleNameStr,
+          method: methodNameStr,
           event,
         });
       }
