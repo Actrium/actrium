@@ -17,7 +17,7 @@ function makeMock(): MockFn {
   }) as MockFn;
   fn.mock = { calls };
   fn.mockClear = () => {
-    fn.mock.calls = [];
+    calls.length = 0;
   };
   return fn;
 }

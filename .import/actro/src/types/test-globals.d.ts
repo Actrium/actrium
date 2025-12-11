@@ -17,14 +17,24 @@ declare function expect(actual: unknown): {
   toBeUndefined(): void;
   toBeDefined(): void;
   toBeGreaterThan(n: number): void;
+  toHaveBeenCalledWith(...args: unknown[]): void;
+  toHaveBeenCalledTimes(n: number): void;
+  toContainEqual(expected: unknown): void;
   not: {
     toHaveBeenCalled(): void;
     toBe(expected: unknown): void;
+    toThrow(): void;
   };
   [key: string]: (...args: unknown[]) => void;
 };
 
 declare const vi: {
-  fn: <T extends (...args: unknown[]) => unknown>() => T & { mock?: { calls: unknown[][] }; mockClear?: () => void };
+  fn: <T extends (...args: unknown[]) => unknown>() => T & {
+    mock?: { calls: unknown[][] };
+    mockClear?: () => void;
+  };
+  useFakeTimers: () => void;
+  advanceTimersByTime: (ms: number) => void;
+  restoreAllMocks: () => void;
   [key: string]: unknown;
 };
