@@ -17,13 +17,13 @@ git clone https://github.com/kookyleo/rill.git
 cd rill
 
 # 2. Install dependencies
-npm install
+bun install
 
 # 3. Build the project
-npm run build
+bun run build
 
 # 4. Run type checking
-npm run typecheck
+bun run typecheck
 
 # 5. Run tests
 npm test
@@ -49,10 +49,10 @@ git checkout -b fix/your-bug-fix
 
 ```bash
 # Type checking
-npm run typecheck
+bun run typecheck
 
 # Build
-npm run build
+bun run build
 
 # Run tests
 npm test
