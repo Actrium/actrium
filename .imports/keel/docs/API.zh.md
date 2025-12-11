@@ -7,16 +7,20 @@ Rill 是一个轻量级的 React Native 动态 UI 渲染引擎，允许在沙箱
 ## 模块结构
 
 ```
-rill/
-├── sdk          # guest端 SDK (在沙箱中运行)
-├── runtime      # 宿主端运行时
-├── reconciler   # React 协调器
-└── devtools     # 调试工具
+@rill/core/           # 核心包
+├── (root)            # 宿主端运行时 (Engine, EngineView, Receiver, etc.)
+├── sdk               # guest端 SDK (在沙箱中运行)
+├── types             # 类型定义
+├── reconciler        # React 协调器
+└── devtools          # 调试工具
+
+@rill/cli/            # CLI 包
+└── (bin)             # guest 打包工具 (rill build, rill analyze, rill init)
 ```
 
 ---
 
-## SDK (rill/sdk)
+## SDK (@rill/core/sdk)
 
 guest开发者使用的 SDK，在 QuickJS 沙箱中运行。
 
@@ -288,27 +292,37 @@ function Guest() {
 
 ---
 
-## Runtime (rill/runtime)
+## Runtime (@rill/core)
 
 宿主端运行时，负责执行沙箱和渲染 UI。
 
 ### Engine
 
-沙箱引擎，管理 QuickJS 执行环境。
+沙箱引擎，管理 JS 执行环境。支持多种沙箱模式。
 
 ```tsx
-import { Engine } from 'rill/runtime';
+import { Engine } from '@rill/core';
 
 const engine = new Engine({
   timeout: 5000,
   debug: true,
   logger: customLogger,
+  sandbox: 'vm', // 可选: 'vm' | 'worker' | 'none'
+  requireWhitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
+  onMetric: (name, value, extra) => console.log(`Metric: ${name}=${value}ms`, extra),
+  receiverMaxBatchSize: 5000,
 });
 
 // 注册自定义组件
 engine.register({
   StepList: NativeStepList,
   CustomButton: MyButton,
+});
+
+// 创建 Receiver (必须在 loadBundle 前调用)
+const receiver = engine.createReceiver(() => {
+  // 更新回调，在这里触发 UI 刷新
+  forceUpdate();
 });
 
 // 加载并执行guest
@@ -322,12 +336,18 @@ engine.on('load', () => console.log('Guest loaded'));
 engine.on('error', (error) => console.error('Guest error:', error));
 engine.on('operation', (batch) => console.log('Operations:', batch));
 engine.on('destroy', () => console.log('Guest destroyed'));
+engine.on('fatalError', (error) => console.error('Fatal error:', error));
+engine.on('message', (msg) => console.log('Guest message:', msg.event, msg.payload));
 
 // 发送事件到沙箱
 engine.sendEvent('REFRESH', { force: true });
 
 // 更新配置
 engine.updateConfig({ theme: 'light' });
+
+// 获取健康状态
+const health = engine.getHealth();
+// { loaded, destroyed, errorCount, lastErrorAt, receiverNodes, batching }
 
 // 销毁引擎
 engine.destroy();
@@ -337,18 +357,27 @@ engine.destroy();
 
 | 选项 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
+| provider | JSEngineProvider | auto | JS 引擎 Provider |
+| sandbox | 'vm' \| 'worker' \| 'none' | auto | 沙箱模式 |
 | timeout | number | 5000 | 执行超时 (ms) |
 | debug | boolean | false | 调试模式 |
 | logger | Logger | console | 日志处理器 |
+| requireWhitelist | string[] | ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'] | 允许 require 的模块 |
+| onMetric | (name, value, extra?) => void | - | 性能指标回调 |
+| receiverMaxBatchSize | number | 5000 | Receiver 单批次最大操作数 |
 
 #### 方法
 
 | 方法 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
 | register | components: ComponentMap | void | 注册组件 |
-| loadBundle | source: string, props?: object | Promise\<void\> | 加载guest |
-| sendEvent | eventName: string, payload?: unknown | void | 发送事件 |
+| createReceiver | onUpdate: () => void | Receiver | 创建 Receiver |
+| getReceiver | - | Receiver \| null | 获取 Receiver |
+| loadBundle | source: string, props?: object | Promise\<void\> | 加载 guest |
+| sendEvent | eventName: string, payload?: unknown | void | 发送事件到 guest |
 | updateConfig | config: object | void | 更新配置 |
+| getHealth | - | EngineHealth | 获取健康状态 |
+| getRegistry | - | ComponentRegistry | 获取组件注册表 |
 | destroy | - | void | 销毁引擎 |
 
 #### 属性
@@ -363,18 +392,28 @@ engine.destroy();
 渲染引擎输出的 React Native 组件。
 
 ```tsx
-import { EngineView } from 'rill/runtime';
+import { Engine, EngineView } from '@rill/core';
 
 function GuestContainer() {
+  // 1. 创建 Engine 实例
+  const engine = useMemo(() => new Engine({ debug: __DEV__ }), []);
+
+  // 2. 注册自定义组件
+  useEffect(() => {
+    engine.register({ CustomButton: MyButton });
+  }, [engine]);
+
   return (
     <EngineView
-      source="https://cdn.example.com/guest.js"
+      engine={engine}
+      bundleUrl="https://cdn.example.com/guest.js"
       initialProps={{ theme: 'dark' }}
-      components={{ CustomButton: MyButton }}
       onLoad={() => console.log('Loaded')}
       onError={(error) => console.error(error)}
+      onDestroy={() => console.log('Destroyed')}
       fallback={<Text>Loading...</Text>}
-      debug={true}
+      renderError={(error) => <Text>Error: {error.message}</Text>}
+      style={{ flex: 1 }}
     />
   );
 }
@@ -384,37 +423,48 @@ function GuestContainer() {
 
 | 属性 | 类型 | 必须 | 说明 |
 |------|------|------|------|
-| source | string | 是 | Bundle URL 或代码 |
+| engine | Engine | 是 | Engine 实例 |
+| bundleUrl | string | 是 | Bundle URL 或代码 |
 | initialProps | object | 否 | 初始属性 |
-| components | ComponentMap | 否 | 自定义组件 |
 | onLoad | () => void | 否 | 加载完成回调 |
 | onError | (error: Error) => void | 否 | 错误回调 |
-| fallback | ReactElement | 否 | 加载中占位 |
-| debug | boolean | 否 | 调试模式 |
+| onDestroy | () => void | 否 | 销毁回调 |
+| fallback | ReactNode | 否 | 加载中占位 |
+| renderError | (error: Error) => ReactNode | 否 | 错误渲染函数 |
+| style | object | 否 | 容器样式 |
 
 ### ComponentRegistry
 
 组件注册表，管理组件白名单。
 
 ```tsx
-import { ComponentRegistry, createRegistry } from 'rill/runtime';
+import { ComponentRegistry, createRegistry } from '@rill/core';
 
-// 使用工厂函数
-const registry = createRegistry({
-  View: RNView,
-  Text: RNText,
-  Image: RNImage,
-});
+// 使用工厂函数创建空注册表
+const registry = createRegistry();
 
 // 或使用类
 const registry = new ComponentRegistry();
+
+// 注册单个组件
 registry.register('CustomCard', MyCard);
-registry.registerAll({ Header, Footer });
+
+// 批量注册组件
+registry.registerAll({ Header, Footer, View: RNView });
 
 // 查询组件
 const Component = registry.get('View');
 const hasComponent = registry.has('CustomCard');
-const allNames = registry.getAll();
+const allNames = registry.getRegisteredNames(); // 返回 string[]
+
+// 注销组件
+registry.unregister('CustomCard');
+
+// 清空注册表
+registry.clear();
+
+// 获取已注册组件数量
+console.log(registry.size);
 ```
 
 ### Receiver
@@ -422,12 +472,17 @@ const allNames = registry.getAll();
 指令接收器，解析操作并构建组件树。
 
 ```tsx
-import { Receiver } from 'rill/runtime';
+import { Receiver } from '@rill/core';
 
 const receiver = new Receiver(
   registry,
   (message) => engine.sendToSandbox(message),
-  () => forceUpdate()
+  () => forceUpdate(),
+  {
+    onMetric: (name, value, extra) => console.log(name, value, extra),
+    maxBatchSize: 5000,
+    debug: false,
+  }
 );
 
 // 应用操作批次
@@ -436,13 +491,20 @@ receiver.applyBatch(batch);
 // 渲染组件树
 const tree = receiver.render();
 
+// 获取节点数量
+console.log(receiver.nodeCount);
+
+// 清空所有节点
+receiver.clear();
+
 // 获取调试信息
 const debugInfo = receiver.getDebugInfo();
+// { nodeCount, rootChildren, nodes: Array<{ id, type, childCount }> }
 ```
 
 ---
 
-## Performance (rill/runtime)
+## Performance (@rill/core)
 
 性能优化工具。
 
@@ -451,7 +513,7 @@ const debugInfo = receiver.getDebugInfo();
 节流调度器，控制更新频率。
 
 ```tsx
-import { ThrottledScheduler } from 'rill/runtime';
+import { ThrottledScheduler } from '@rill/core';
 
 const scheduler = new ThrottledScheduler(
   (batch) => receiver.applyBatch(batch),
@@ -478,7 +540,7 @@ scheduler.dispose();
 虚拟滚动计算器，优化长列表渲染。
 
 ```tsx
-import { VirtualScrollCalculator } from 'rill/runtime';
+import { VirtualScrollCalculator } from '@rill/core';
 
 const calculator = new VirtualScrollCalculator({
   estimatedItemHeight: 50,
@@ -498,7 +560,7 @@ const state = calculator.calculate(scrollTop, viewportHeight);
 性能监控器。
 
 ```tsx
-import { PerformanceMonitor } from 'rill/runtime';
+import { PerformanceMonitor } from '@rill/core';
 
 const monitor = new PerformanceMonitor();
 
@@ -515,7 +577,7 @@ monitor.reset();
 
 ---
 
-## DevTools (rill/devtools)
+## DevTools (@rill/core/devtools)
 
 调试工具集。
 
@@ -524,7 +586,7 @@ monitor.reset();
 整合所有调试功能。
 
 ```tsx
-import { createDevTools } from 'rill/devtools';
+import { createDevTools } from '@rill/core/devtools';
 
 const devtools = createDevTools({
   inspector: { maxDepth: 10, showFunctions: true },
@@ -557,7 +619,7 @@ devtools.reset();
 组件树检查器。
 
 ```tsx
-import { ComponentInspector } from 'rill/devtools';
+import { ComponentInspector } from '@rill/core/devtools';
 
 const inspector = new ComponentInspector({
   maxDepth: 10,
@@ -579,7 +641,7 @@ inspector.clearHighlights();
 操作日志记录器。
 
 ```tsx
-import { OperationLogger } from 'rill/devtools';
+import { OperationLogger } from '@rill/core/devtools';
 
 const logger = new OperationLogger(100);
 
@@ -600,7 +662,7 @@ const exported = logger.export();
 时间线记录器。
 
 ```tsx
-import { TimelineRecorder } from 'rill/devtools';
+import { TimelineRecorder } from '@rill/core/devtools';
 
 const timeline = new TimelineRecorder(500);
 
@@ -621,7 +683,7 @@ const exported = timeline.export();
 
 ---
 
-## CLI (rill/cli)
+## CLI (@rill/cli)
 
 命令行工具，用于构建guest。
 
@@ -654,7 +716,7 @@ bunx rill analyze dist/bundle.js
 ### 编程接口
 
 ```tsx
-import { build, analyze } from 'rill/cli';
+import { build, analyze } from '@rill/cli';
 
 await build({
   entry: 'src/guest.tsx',
@@ -663,9 +725,16 @@ await build({
   sourcemap: false,
   watch: false,
   metafile: 'dist/meta.json',
+  strict: true, // 启用严格依赖检查 (默认 true)
+  strictPeerVersions: false, // 严格检查 React/reconciler 版本匹配
 });
 
-await analyze('dist/bundle.js');
+await analyze('dist/bundle.js', {
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
+  failOnViolation: true,
+  treatEvalAsViolation: true,
+  treatDynamicNonLiteralAsViolation: true,
+});
 ```
 
 ---
@@ -857,6 +926,8 @@ const calculator = new VirtualScrollCalculator({
 ### 3. 调试
 
 ```tsx
+import { createDevTools } from '@rill/core/devtools';
+
 // 开发环境启用 DevTools
 if (__DEV__) {
   const devtools = createDevTools();
@@ -868,10 +939,12 @@ if (__DEV__) {
 
 ```tsx
 <EngineView
-  source={bundleUrl}
+  engine={engine}
+  bundleUrl={bundleUrl}
   onError={(error) => {
     reportError(error);
   }}
-  fallback={<ErrorFallback />}
+  fallback={<LoadingIndicator />}
+  renderError={(error) => <ErrorFallback error={error} />}
 />
 ```

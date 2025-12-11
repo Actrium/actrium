@@ -7,9 +7,9 @@
 | 维度 | Shopify Remote-UI | Rill |
 |------|-------------------|------|
 | 目标平台 | Web (DOM) | React Native |
-| 沙箱技术 | iframe / Web Worker | QuickJS |
+| 沙箱技术 | iframe / Web Worker | JSEngineProvider (可插拔: QuickJS, VM, Worker) |
 | 渲染目标 | 真实 DOM 元素 | RN 原生组件 |
-| 通信方式 | postMessage | QuickJS Bridge |
+| 通信方式 | postMessage | JSEngineProvider Bridge |
 | 变更检测 | MutationObserver | react-reconciler |
 | 组件模型 | Custom Elements | 虚组件 (字符串标识符) |
 
@@ -30,7 +30,7 @@
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────────────┐ │
-│  │  EngineView │───▶│   Engine    │───▶│          QuickJS Context        │ │
+│  │  EngineView │───▶│   Engine    │───▶│      JSEngineProvider Context   │ │
 │  │  (React)    │    │  (Manager)  │    │  ┌─────────────────────────────┐│ │
 │  └─────────────┘    └─────────────┘    │  │     Guest Bundle.js        ││ │
 │         │                 │            │  │  ┌─────────────────────────┐││ │
@@ -628,9 +628,10 @@ export function useSendToHost(): (eventName: string, payload?: any) => void {
 ### 5.3 Runtime 模块
 
 ```typescript
-// src/runtime/index.ts
+// packages/core/src/runtime/index.ts
 
-import { QuickJS } from 'react-native-quickjs';
+// JSEngineProvider 是可插拔的沙箱引擎接口
+import type { JSEngineProvider, JSEngineContext, JSEngineRuntime } from './engine';
 
 /**
  * 组件注册表
@@ -836,30 +837,41 @@ class Receiver {
 }
 
 /**
+ * Engine 选项
+ */
+interface EngineOptions {
+  provider?: JSEngineProvider;        // JS 引擎 Provider (可插拔)
+  sandbox?: 'vm' | 'worker' | 'none'; // 沙箱模式
+  timeout?: number;                   // 执行超时 (默认 5000ms)
+  debug?: boolean;                    // 调试模式
+  logger?: Logger;                    // 日志处理器
+  requireWhitelist?: string[];        // 允许 require 的模块
+  onMetric?: MetricCallback;          // 性能指标回调
+  receiverMaxBatchSize?: number;      // Receiver 单批次最大操作数
+}
+
+/**
  * 引擎主类
  */
 export class Engine {
-  private quickjs: QuickJS | null = null;
+  private provider: JSEngineProvider | null = null;
+  private context: JSEngineContext | null = null;
   private registry = new ComponentRegistry();
   private receiver: Receiver | null = null;
   private config: Record<string, any> = {};
+  private options: Required<EngineOptions>;
 
-  constructor() {
-    this.setupDefaultComponents();
-  }
-
-  /**
-   * 注册默认组件
-   */
-  private setupDefaultComponents(): void {
-    // 在 components/ 目录中实现
-    this.registry.registerAll({
-      View: require('../components/View').default,
-      Text: require('../components/Text').default,
-      Image: require('../components/Image').default,
-      ScrollView: require('../components/ScrollView').default,
-      TouchableOpacity: require('../components/TouchableOpacity').default,
-    });
+  constructor(options: EngineOptions = {}) {
+    this.options = {
+      provider: options.provider ?? null,
+      sandbox: options.sandbox ?? 'vm',
+      timeout: options.timeout ?? 5000,
+      debug: options.debug ?? false,
+      logger: options.logger ?? console,
+      requireWhitelist: options.requireWhitelist ?? ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
+      onMetric: options.onMetric ?? (() => {}),
+      receiverMaxBatchSize: options.receiverMaxBatchSize ?? 5000,
+    };
   }
 
   /**
@@ -870,68 +882,59 @@ export class Engine {
   }
 
   /**
-   * 加载并运行guest Bundle
+   * 创建 Receiver
+   */
+  createReceiver(onUpdate: () => void): Receiver {
+    this.receiver = new Receiver(
+      this.registry,
+      (message) => this.sendToSandbox(message),
+      onUpdate,
+      {
+        onMetric: this.options.onMetric,
+        maxBatchSize: this.options.receiverMaxBatchSize,
+        debug: this.options.debug,
+      }
+    );
+    return this.receiver;
+  }
+
+  /**
+   * 加载并运行 guest Bundle
    */
   async loadBundle(bundleUrl: string, initialProps?: Record<string, any>): Promise<void> {
     // 1. 获取 Bundle 内容
     const bundleCode = await this.fetchBundle(bundleUrl);
 
-    // 2. 创建 QuickJS Context
-    this.quickjs = new QuickJS();
+    // 2. 创建/获取 JSEngineProvider Context
+    await this.initializeProvider();
 
     // 3. 注入 Polyfill 和运行时
     this.injectPolyfills();
     this.injectRuntime(initialProps);
 
     // 4. 执行 Bundle
-    this.quickjs.eval(bundleCode);
+    await this.context?.eval(bundleCode);
+
+    this.emit('load');
   }
 
   /**
-   * 注入 Polyfill
+   * 初始化 Provider
    */
-  private injectPolyfills(): void {
-    // console
-    this.quickjs?.setGlobal('console', {
-      log: (...args: any[]) => console.log('[Guest]', ...args),
-      warn: (...args: any[]) => console.warn('[Guest]', ...args),
-      error: (...args: any[]) => console.error('[Guest]', ...args),
-    });
-
-    // setTimeout / setInterval
-    this.quickjs?.setGlobal('setTimeout', (fn: Function, delay: number) => {
-      return setTimeout(() => this.quickjs?.eval(`(${fn})()`), delay);
-    });
-
-    // ... 其他 Polyfill
+  private async initializeProvider(): Promise<void> {
+    if (this.options.provider) {
+      const runtime = await this.options.provider.createRuntime();
+      this.context = await runtime.createContext();
+    } else {
+      // 根据 sandbox 选项选择内置 provider
+      // 'vm' -> Node.js VM, 'worker' -> Web Worker, 'none' -> 直接执行
+    }
   }
 
   /**
-   * 注入运行时钩子
+   * 发送事件到 guest
    */
-  private injectRuntime(initialProps?: Record<string, any>): void {
-    this.config = initialProps || {};
-
-    // sendToHost: 沙箱向宿主发送操作
-    this.quickjs?.setGlobal('__sendToHost', (batch: OperationBatch) => {
-      this.receiver?.applyBatch(batch);
-    });
-
-    // __getConfig: 获取初始配置
-    this.quickjs?.setGlobal('__getConfig', () => this.config);
-  }
-
-  /**
-   * 向沙箱发送消息
-   */
-  sendToSandbox(message: HostMessage): void {
-    this.quickjs?.eval(`__handleHostMessage(${JSON.stringify(message)})`);
-  }
-
-  /**
-   * 发送宿主事件
-   */
-  emit(eventName: string, payload?: any): void {
+  sendEvent(eventName: string, payload?: any): void {
     this.sendToSandbox({
       type: 'HOST_EVENT',
       eventName,
@@ -940,41 +943,53 @@ export class Engine {
   }
 
   /**
+   * 获取健康状态
+   */
+  getHealth(): EngineHealth {
+    return {
+      loaded: this.isLoaded,
+      destroyed: this.isDestroyed,
+      errorCount: this.errorCount,
+      lastErrorAt: this.lastErrorAt,
+      receiverNodes: this.receiver?.nodeCount ?? 0,
+      batching: false,
+    };
+  }
+
+  /**
    * 销毁引擎
    */
   destroy(): void {
     this.sendToSandbox({ type: 'DESTROY' });
-    this.quickjs?.dispose();
-    this.quickjs = null;
+    this.context?.dispose();
+    this.context = null;
     this.receiver = null;
+    this.emit('destroy');
   }
 
-  /**
-   * 创建 Receiver 并返回
-   */
-  createReceiver(onUpdate: () => void): Receiver {
-    this.receiver = new Receiver(this.registry, onUpdate);
-    return this.receiver;
-  }
+  // ... 事件订阅、错误处理等方法
 }
 ```
 
 ### 5.4 EngineView 组件
 
 ```typescript
-// src/runtime/EngineView.tsx
+// packages/core/src/runtime/EngineView.tsx
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { Engine } from './Engine';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import type { Engine } from './engine';
 
 interface EngineViewProps {
-  engine: Engine;
-  bundleUrl: string;
-  initialProps?: Record<string, any>;
-  onError?: (error: Error) => void;
-  onLoad?: () => void;
-  fallback?: React.ReactNode;
+  engine: Engine;                      // 必须: Engine 实例
+  bundleUrl: string;                   // 必须: Bundle URL 或代码
+  initialProps?: Record<string, any>;  // 初始属性
+  onLoad?: () => void;                 // 加载完成回调
+  onError?: (error: Error) => void;    // 错误回调
+  onDestroy?: () => void;              // 销毁回调
+  fallback?: React.ReactNode;          // 加载中占位
+  renderError?: (error: Error) => React.ReactNode; // 错误渲染函数
+  style?: object;                      // 容器样式
 }
 
 export function EngineView({
@@ -1068,87 +1083,125 @@ const styles = StyleSheet.create({
 
 ### 6.1 打包配置
 
-```typescript
-// src/cli/build.ts
+CLI 使用 **Vite** 作为打包工具 (已从 esbuild 迁移)，支持更好的 tree-shaking 和模块解析。
 
-import { build } from 'esbuild';
-import path from 'path';
+```typescript
+// packages/cli/src/build.ts
+
+import { build as viteBuild } from 'vite';
+import type { InlineConfig } from 'vite';
 
 interface BuildOptions {
   entry: string;
   outfile: string;
   minify?: boolean;
   sourcemap?: boolean;
+  watch?: boolean;
+  metafile?: string;
+  strict?: boolean;           // 启用严格依赖检查 (默认 true)
+  strictPeerVersions?: boolean; // 严格检查 React/reconciler 版本匹配
 }
 
-export async function buildGuest(options: BuildOptions) {
-  const { entry, outfile, minify = true, sourcemap = false } = options;
-
-  await build({
-    entryPoints: [entry],
-    bundle: true,
-    outfile,
-    format: 'iife',
-    globalName: '__RillGuest',
-    minify,
-    sourcemap,
-    target: 'es2020',
-
-    // 外部依赖 - 不打包进 bundle
-    external: ['react-native'],
-
-    // 注入运行时
-    inject: [path.resolve(__dirname, '../reconciler/runtime-inject.js')],
-
-    // 别名配置
-    alias: {
-      'react-native-mini-engine/sdk': path.resolve(__dirname, '../sdk'),
+export async function build(options: BuildOptions): Promise<void> {
+  const viteConfig: InlineConfig = {
+    configFile: false,
+    mode: 'production',
+    build: {
+      lib: {
+        entry: options.entry,
+        name: '__RillGuest',
+        formats: ['iife'],
+      },
+      sourcemap: options.sourcemap,
+      minify: options.minify ? 'esbuild' : false,
+      target: 'es2020',
+      rollupOptions: {
+        // 外部依赖 - 不打包进 bundle
+        external: ['react', 'react/jsx-runtime', 'react-native', 'rill/reconciler'],
+        output: {
+          format: 'iife',
+          name: '__RillGuest',
+          // 注入运行时代码
+          banner: RUNTIME_INJECT,
+          footer: AUTO_RENDER_FOOTER,
+          globals: {
+            react: 'React',
+            'react/jsx-runtime': 'ReactJSXRuntime',
+            'react-native': 'ReactNative',
+            'rill/reconciler': 'RillReconciler',
+          },
+        },
+      },
     },
-
-    // 定义全局常量
+    resolve: {
+      alias: {
+        '@rill/core/sdk': require.resolve('@rill/core/sdk'),
+      },
+    },
     define: {
       'process.env.NODE_ENV': '"production"',
       __DEV__: 'false',
     },
+    esbuild: {
+      jsx: 'automatic',
+    },
+  };
 
-    // JSX 转换
-    jsx: 'automatic',
-    jsxImportSource: 'react',
-  });
+  await viteBuild(viteConfig);
 
-  console.log(`✓ Built: ${outfile}`);
+  // 构建后执行严格依赖检查
+  if (options.strict !== false) {
+    await analyze(options.outfile, {
+      whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
+      failOnViolation: true,
+    });
+  }
 }
 ```
 
 ### 6.2 CLI 入口
 
 ```typescript
-// src/cli/index.ts
+// packages/cli/src/index.ts
 
 #!/usr/bin/env node
 
 import { program } from 'commander';
-import { buildGuest } from './build';
+import { build, analyze } from './build';
 
 program
-  .name('@rill/core')
-  .description('Rill guest CLI')
+  .name('rill')
+  .description('Rill CLI - Guest bundle toolchain')
   .version('0.1.0');
 
 program
   .command('build')
-  .description('Build a guest bundle')
+  .description('Build a guest bundle using Vite')
   .argument('<entry>', 'Entry file path')
   .option('-o, --outfile <path>', 'Output file path', 'dist/bundle.js')
   .option('--no-minify', 'Disable minification')
   .option('--sourcemap', 'Generate sourcemap')
+  .option('--watch', 'Watch mode')
+  .option('--metafile <path>', 'Generate metafile')
+  .option('--no-strict', 'Disable strict dependency guard')
   .action(async (entry, options) => {
-    await buildGuest({
+    await build({
       entry,
       outfile: options.outfile,
       minify: options.minify,
       sourcemap: options.sourcemap,
+      watch: options.watch,
+      metafile: options.metafile,
+      strict: options.strict,
     });
+  });
+
+program
+  .command('analyze')
+  .description('Analyze a guest bundle for disallowed dependencies')
+  .argument('<bundle>', 'Bundle file path')
+  .action(async (bundle) => {
+    await analyze(bundle);
   });
 
 program.parse();
@@ -1160,25 +1213,33 @@ program.parse();
 
 ### 7.1 沙箱隔离
 
-1. **QuickJS 隔离**：独立的 JS 执行上下文，无法访问宿主的全局对象
+1. **JSEngineProvider 隔离**：独立的 JS 执行上下文，无法访问宿主的全局对象
+   - 支持多种沙箱模式: `'vm'` (Node.js VM), `'worker'` (Web Worker), `'none'` (无沙箱)
+   - React Native 环境可接入 `react-native-quickjs` 等原生沙箱
 2. **白名单组件**：只能渲染 Registry 中注册的组件
-3. **API 限制**：不注入危险 API (fetch, XMLHttpRequest 等)
+3. **require 白名单**：只允许 require 指定的模块 (默认: react, react-native, react/jsx-runtime, rill/reconciler)
+4. **API 限制**：不注入危险 API (fetch, XMLHttpRequest 等)
 
 ### 7.2 异常处理
 
 ```typescript
 // 沙箱内异常不影响宿主
-engine.quickjs?.setGlobal('__errorHandler', (error: Error) => {
+engine.on('error', (error: Error) => {
   console.error('[Guest Error]', error.message);
   // 可选：上报错误
+});
+
+engine.on('fatalError', (error: Error) => {
+  console.error('[Guest Fatal]', error.message);
+  // 沙箱已损坏，需要重新加载
 });
 ```
 
 ### 7.3 资源限制
 
-1. **执行超时**：单次渲染操作超时限制
-2. **内存限制**：QuickJS 堆内存上限
-3. **操作频率**：批次发送频率限制
+1. **执行超时**：`timeout` 选项控制单次渲染操作超时 (默认 5000ms)
+2. **内存限制**：JSEngineProvider 实现可设置堆内存上限
+3. **操作频率**：`receiverMaxBatchSize` 限制单批次最大操作数 (默认 5000)
 
 ---
 

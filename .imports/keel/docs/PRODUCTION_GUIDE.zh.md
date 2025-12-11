@@ -35,7 +35,8 @@
 ## 3. 安全与隔离
 
 - 沙箱
-  - 生产环境推荐使用 `QuickJSProvider`（WASM），保障与宿主隔离。
+  - 生产环境推荐使用 `JSEngineProvider` 实现（如 QuickJS WASM），保障与宿主隔离。
+  - 支持的沙箱模式：`'vm'` (Node.js VM)、`'worker'` (Web Worker)、`'none'` (无沙箱)
 - 模块访问
   - 尽量精简白名单，避免暴露 Node 内置或动态加载能力。
 - 回调
@@ -61,8 +62,8 @@
 
 ## 6. 宿主集成清单
 
-- [ ] 提供 `QuickJSProvider` 实现
-- [ ] 创建 `Engine` 并设置 `requireWhitelist`、`timeout`、`logger`、`onMetric`、`receiverMaxBatchSize`
+- [ ] (可选) 提供 `JSEngineProvider` 实现，或使用内置沙箱模式
+- [ ] 创建 `Engine` 并设置 `sandbox`、`requireWhitelist`、`timeout`、`logger`、`onMetric`、`receiverMaxBatchSize`
 - [ ] 注册宿主组件：`engine.register()`
 - [ ] 创建并使用 `receiver = engine.createReceiver(onUpdate)` 渲染树更新
 - [ ] 打通事件桥：`engine.sendEvent` 与 `__handleHostMessage`
@@ -83,7 +84,11 @@
 - onMetric 使用
 ```ts
 const metrics: Array<{ name: string; value: number; extra?: Record<string, unknown> }> = [];
-const engine = new Engine({ quickjs: provider, onMetric: (n, v, e) => metrics.push({ name: n, value: v, extra: e }) });
+const engine = new Engine({
+  provider: myJSEngineProvider, // 可选
+  sandbox: 'vm', // 可选: 'vm' | 'worker' | 'none'
+  onMetric: (n, v, e) => metrics.push({ name: n, value: v, extra: e })
+});
 ```
 
 - 健康检查 API
@@ -100,8 +105,13 @@ rill analyze dist/bundle.js # 默认只警告
 ```
 代码方式（带选项）:
 ```ts
-import { analyze } from 'rill/cli/build';
-await analyze('dist/bundle.js', { whitelist: ['react', 'react/jsx-runtime'], failOnViolation: true });
+import { analyze } from '@rill/cli';
+await analyze('dist/bundle.js', {
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
+  failOnViolation: true,
+  treatEvalAsViolation: true,
+  treatDynamicNonLiteralAsViolation: true,
+});
 ```
 
 - Init 脚手架
