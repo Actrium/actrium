@@ -34,12 +34,12 @@ jobs:
       - name: Check test coverage thresholds
         run: |
           cd packages/rill
-          npm run test:coverage:check
+          bun run test:coverage:check
 
       - name: E2E: Worker + quickjs-emscripten
         run: |
           echo "Running worker e2e (requires quickjs-emscripten)"
-          bun test rill/packages/rill/src/runtime/engine.worker.e2e.test.ts || (echo "Worker e2e failed" && exit 1)
+          bun test packages/rill/src/runtime/engine.worker.e2e.test.ts || (echo "Worker e2e failed" && exit 1)
 
       - name: Test CLI executable
         run: |
