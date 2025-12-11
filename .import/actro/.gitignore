@@ -37,3 +37,7 @@ coverage/
 
 # Generated
 *.generated.*
+
+# Benchmark outputs
+benchmark-*.txt
+packages/*/benchmark-*.txt
