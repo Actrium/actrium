@@ -4,10 +4,10 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine. (Chin
 
 > **rill** /rɪl/ n. 小溪、细流 - 寓意轻量、流畅的数据流动
 
-## 特性 (This file will be deprecated; please refer to docs/en/*.zh.md)
+## 特性
 
 - **类 React 开发体验**：使用 JSX 和 Hooks 编写guest
-- **完全沙箱隔离**：基于 QuickJS，guest崩溃不影响宿主
+- **完全沙箱隔离**：支持可插拔的 JSEngineProvider (QuickJS, VM, Worker)，guest崩溃不影响宿主
 - **轻量高效**：无 WebView 开销，原生渲染性能
 - **灵活扩展**：支持注册自定义业务组件
 
@@ -15,28 +15,48 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine. (Chin
 
 ### 安装
 
+本项目为 monorepo，使用 workspace 引用。在 `package.json` 中添加依赖：
+
+```json
+{
+  "dependencies": {
+    "@rill/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@rill/cli": "workspace:*"
+  }
+}
+```
+
+或者从 GitHub 安装：
+
 ```bash
-bun add rill
-# 或
-yarn add rill
+bun add github:kookyleo/rill#packages/core
 ```
 
 ### 宿主端集成
 
 ```tsx
+import React, { useMemo, useEffect } from 'react';
 import { Engine, EngineView } from '@rill/core';
 import { NativeStepList } from './components/NativeStepList';
 
-// 1. 创建引擎实例
-const engine = new Engine();
-
-// 2. 注册自定义组件
-engine.register({
-  StepList: NativeStepList,
-});
-
-// 3. 渲染guest
 function App() {
+  // 1. 创建引擎实例
+  const engine = useMemo(() => new Engine({
+    debug: __DEV__,
+    timeout: 5000,
+    sandbox: 'vm', // 可选: 'vm' | 'worker' | 'none'
+  }), []);
+
+  // 2. 注册自定义组件
+  useEffect(() => {
+    engine.register({
+      StepList: NativeStepList,
+    });
+  }, [engine]);
+
+  // 3. 渲染guest
   return (
     <EngineView
       engine={engine}
@@ -44,6 +64,8 @@ function App() {
       initialProps={{ theme: 'dark' }}
       onLoad={() => console.log('Guest loaded')}
       onError={(err) => console.error('Guest error:', err)}
+      onDestroy={() => console.log('Guest destroyed')}
+      renderError={(error) => <Text>Error: {error.message}</Text>}
     />
   );
 }
@@ -76,14 +98,17 @@ export default function MyGuest() {
 ### 构建guest
 
 ```bash
-# 安装 CLI
-bun add -g rill
+# 构建 (使用 workspace 中的 CLI)
+bun run --filter @rill/cli build src/guest.tsx -o dist/bundle.js
 
-# 构建
-rill build src/guest.tsx -o dist/bundle.js
+# 或者直接运行 CLI 脚本
+bun packages/cli/src/index.ts build src/guest.tsx -o dist/bundle.js
 
 # 开发模式
-rill build src/guest.tsx --watch --no-minify --sourcemap
+bun packages/cli/src/index.ts build src/guest.tsx --watch --no-minify --sourcemap
+
+# 分析 bundle
+bun packages/cli/src/index.ts analyze dist/bundle.js
 ```
 
 ## 架构
@@ -92,7 +117,7 @@ rill build src/guest.tsx --watch --no-minify --sourcemap
 ┌─────────────────────────────────────────────────────────────────┐
 │                       宿主 App (React Native)                    │
 ├─────────────────────────────────────────────────────────────────┤
-│  EngineView → Engine → QuickJS Context                          │
+│  EngineView → Engine → JSEngineProvider Context                 │
 │                            │                                     │
 │                            ▼                                     │
 │                    ┌───────────────────┐                        │
@@ -112,25 +137,35 @@ rill build src/guest.tsx --watch --no-minify --sourcemap
 
 | 模块 | 路径 | 说明 |
 |------|------|------|
-| SDK | `rill/sdk` | guest开发套件，虚组件和 Hooks |
-| Runtime | `rill` | 宿主运行时，Engine 和 EngineView |
-| CLI | `rill` (bin) | guest打包工具 |
+| SDK | `@rill/core/sdk` | guest 开发套件，虚组件和 Hooks |
+| Runtime | `@rill/core` | 宿主运行时，Engine 和 EngineView |
+| CLI | `@rill/cli` | guest 打包工具 (Vite-based) |
 
 ## API
 
 ### Engine
 
 ```typescript
+import { Engine } from '@rill/core';
+
 const engine = new Engine(options?: EngineOptions);
 
 interface EngineOptions {
-  timeout?: number;      // 执行超时 (默认 5000ms)
-  debug?: boolean;       // 调试模式
-  logger?: Logger;       // 自定义日志
+  provider?: JSEngineProvider;        // 可插拔 JS 引擎
+  sandbox?: 'vm' | 'worker' | 'none'; // 沙箱模式
+  timeout?: number;                   // 执行超时 (默认 5000ms)
+  debug?: boolean;                    // 调试模式
+  logger?: Logger;                    // 自定义日志
+  requireWhitelist?: string[];        // 允许 require 的模块
+  onMetric?: MetricCallback;          // 性能指标回调
+  receiverMaxBatchSize?: number;      // 单批次最大操作数
 }
 
 // 注册组件
 engine.register({ ComponentName: ReactComponent });
+
+// 创建 Receiver
+const receiver = engine.createReceiver(() => forceUpdate());
 
 // 加载guest
 await engine.loadBundle(bundleUrl, initialProps);
@@ -138,8 +173,14 @@ await engine.loadBundle(bundleUrl, initialProps);
 // 发送事件到guest
 engine.sendEvent('EVENT_NAME', payload);
 
+// 监听 guest 消息
+engine.on('message', (msg) => console.log(msg.event, msg.payload));
+
 // 更新配置
 engine.updateConfig({ key: value });
+
+// 获取健康状态
+const health = engine.getHealth();
 
 // 销毁
 engine.destroy();
@@ -202,7 +243,7 @@ export default function Guest() {
 
 ```ts
 import { Engine } from '@rill/core';
-const engine = new Engine({ quickjs });
+const engine = new Engine({ sandbox: 'vm' });
 engine.on('message', (m) => { /* m.event, m.payload */ });
 engine.sendEvent('PING', { ok: 1 });
 ```
@@ -239,25 +280,35 @@ rill analyze dist/bundle.js \
 
 ```ts
 import { Engine } from '@rill/core';
-import { DefaultComponents } from 'rill/components';
+import { View, Text, TouchableOpacity, Image } from 'react-native';
 
-const engine = new Engine({ quickjs });
-engine.register(DefaultComponents);
+const engine = new Engine({
+  sandbox: 'vm', // 可选: 'vm' | 'worker' | 'none'
+  debug: __DEV__,
+});
+
+// 注册组件
+engine.register({ View, Text, TouchableOpacity, Image });
+
+// 创建 Receiver
 const receiver = engine.createReceiver(() => {/* 触发宿主刷新 */});
-await engine.loadBundle(codeOrUrl);
+
+// 加载 guest
+await engine.loadBundle(codeOrUrl, initialProps);
 ```
 
 说明：
-- 使用 `register(components)`（不是 `registerComponent`）。
-- 使用 `loadBundle(source)`（不是 `loadGuest`）。
-- 通过 `new Engine({ quickjs })` 提供 QuickJS provider。
+- 使用 `register(components)` 批量注册组件。
+- 使用 `createReceiver(onUpdate)` 创建 Receiver。
+- 使用 `loadBundle(source, initialProps)` 加载 guest。
+- 通过 `sandbox` 选项选择沙箱模式，或通过 `provider` 注入自定义 JSEngineProvider。
 
 ## init 模板默认
 
 `rill init` 将生成：
-- vite.config.ts：IIFE lib build，external：react/react-native/react/jsx-runtime/rill-reconciler；alias `rill/sdk` 指向 ESM 方便内联。
-- tsconfig.json：Bundler 解析、isolatedModules、strict、verbatimModuleSyntax，并为编辑器提供 `rill/sdk` path 类型映射。
-- 示例guest使用 `import { View, Text } from '@rill/core/sdk'`。
+- vite.config.ts：IIFE lib build，external：react/react-native/react/jsx-runtime/rill-reconciler。
+- tsconfig.json：Bundler 解析、isolatedModules、strict、verbatimModuleSyntax。
+- 示例 guest 使用 `import { View, Text } from '@rill/core/sdk'`。
 
 
 Rill 内置多种性能优化机制：
@@ -267,7 +318,7 @@ import {
   ThrottledScheduler,
   VirtualScrollCalculator,
   PerformanceMonitor
-} from 'rill/runtime';
+} from '@rill/core';
 
 // 批量更新节流
 const scheduler = new ThrottledScheduler(onBatch, {
@@ -289,7 +340,7 @@ const monitor = new PerformanceMonitor();
 ## 调试工具
 
 ```tsx
-import { createDevTools } from 'rill/devtools';
+import { createDevTools } from '@rill/core/devtools';
 
 const devtools = createDevTools();
 devtools.enable();
