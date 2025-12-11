@@ -6,7 +6,7 @@ Rill is a lightweight React Native dynamic UI rendering engine, similar to Shopi
 
 ### Core Features
 
-- **Secure Sandbox** - Uses QuickJS to isolate plugin code
+- **Secure Sandbox** - Uses QuickJS to isolate guest code
 - **React Development Experience** - Supports JSX, Hooks, and other modern React features
 - **High Performance** - Batch updates, operation merging, virtual scrolling
 - **Type Safety** - Complete TypeScript support
@@ -22,14 +22,14 @@ Rill is a lightweight React Native dynamic UI rendering engine, similar to Shopi
 # In host application
 npm install rill react-native-quickjs
 
-# In plugin project (dev dependency only)
+# In guest project (dev dependency only)
 npm install -D rill
 ```
 
-### 2. Create Plugin
+### 2. Create Guest
 
 ```tsx
-// src/plugin.tsx
+// src/guest.tsx
 import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/sdk';
 
 interface Config {
@@ -37,7 +37,7 @@ interface Config {
   theme: 'light' | 'dark';
 }
 
-export default function MyPlugin() {
+export default function MyGuest() {
   const config = useConfig<Config>();
   const sendToHost = useSendToHost();
 
@@ -56,10 +56,10 @@ export default function MyPlugin() {
 }
 ```
 
-### 3. Build Plugin
+### 3. Build Guest
 
 ```bash
-npx rill build src/plugin.tsx -o dist/bundle.js
+npx rill build src/guest.tsx -o dist/bundle.js
 ```
 
 ### 4. Use in Host Application
@@ -74,14 +74,14 @@ export default function App() {
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <EngineView
-        source="https://cdn.example.com/plugin.js"
+        source="https://cdn.example.com/guest.js"
         initialProps={{
           title: 'Hello Rill',
           theme: 'light',
         }}
-        onLoad={() => console.log('Plugin loaded')}
-        onError={(error) => console.error('Plugin error:', error)}
-        fallback={<Text>Loading plugin...</Text>}
+        onLoad={() => console.log('Guest loaded')}
+        onError={(error) => console.error('Guest error:', error)}
+        fallback={<Text>Loading guest...</Text>}
       />
     </SafeAreaView>
   );
@@ -90,14 +90,14 @@ export default function App() {
 
 ---
 
-## Plugin Development
+## Guest Development
 
 ### Project Structure
 
 ```
-my-plugin/
+my-guest/
 ├── src/
-│   └── plugin.tsx    # Plugin entry
+│   └── guest.tsx    # Guest entry
 ├── dist/
 │   └── bundle.js     # Build output
 ├── package.json
@@ -108,11 +108,11 @@ my-plugin/
 
 ```json
 {
-  "name": "my-plugin",
+  "name": "my-guest",
   "version": "1.0.0",
   "scripts": {
-    "build": "rill build src/plugin.tsx -o dist/bundle.js",
-    "watch": "rill build src/plugin.tsx -o dist/bundle.js --watch"
+    "build": "rill build src/guest.tsx -o dist/bundle.js",
+    "watch": "rill build src/guest.tsx -o dist/bundle.js --watch"
   },
   "devDependencies": {
     "rill": "^1.0.0",
@@ -177,7 +177,7 @@ interface Config {
   features: string[];
 }
 
-function Plugin() {
+function Guest() {
   const config = useConfig<Config>();
 
   return (
@@ -192,7 +192,7 @@ function Plugin() {
 #### useHostEvent - Listen to Host Events
 
 ```tsx
-function Plugin() {
+function Guest() {
   const [refreshCount, setRefreshCount] = useState(0);
 
   useHostEvent<{ force: boolean }>('REFRESH', (payload) => {
@@ -209,7 +209,7 @@ function Plugin() {
 #### useSendToHost - Send Events to Host
 
 ```tsx
-function Plugin() {
+function Guest() {
   const sendToHost = useSendToHost();
 
   const handleComplete = (result: string) => {
@@ -266,7 +266,7 @@ interface Item {
   title: string;
 }
 
-function Plugin() {
+function Guest() {
   const [items] = useState<Item[]>([
     { id: '1', title: 'Item 1' },
     { id: '2', title: 'Item 2' },
@@ -300,11 +300,11 @@ import React from 'react';
 import { View } from 'react-native';
 import { EngineView } from 'rill/runtime';
 
-function PluginHost() {
+function GuestHost() {
   return (
     <View style={{ flex: 1 }}>
       <EngineView
-        source="https://cdn.example.com/plugin.js"
+        source="https://cdn.example.com/guest.js"
         initialProps={{ theme: 'dark' }}
       />
     </View>
@@ -314,13 +314,13 @@ function PluginHost() {
 
 ### Custom Components
 
-Register host-side native components for plugin use:
+Register host-side native components for guest use:
 
 ```tsx
 import { NativeStepList } from './components/NativeStepList';
 import { CustomButton } from './components/CustomButton';
 
-function PluginHost() {
+function GuestHost() {
   return (
     <EngineView
       source={bundleUrl}
@@ -333,14 +333,14 @@ function PluginHost() {
 }
 ```
 
-Using custom components in plugins:
+Using custom components in guests:
 
 ```tsx
-// Declare custom component types in plugin
+// Declare custom component types in guest
 declare const StepList: string;
 declare const CustomButton: string;
 
-function Plugin() {
+function Guest() {
   return (
     <View>
       <StepList steps={['Step 1', 'Step 2', 'Step 3']} />
@@ -352,13 +352,13 @@ function Plugin() {
 
 ### Event Communication
 
-#### Host -> Plugin
+#### Host -> Guest
 
 ```tsx
 import { useRef } from 'react';
 import { Engine } from 'rill/runtime';
 
-function PluginHost() {
+function GuestHost() {
   const engineRef = useRef<Engine>(null);
 
   const handleRefresh = () => {
@@ -377,15 +377,15 @@ function PluginHost() {
 }
 ```
 
-#### Plugin -> Host
+#### Guest -> Host
 
 Listen for operation events in EngineView:
 
 ```tsx
 import { Engine, EngineView } from 'rill/runtime';
 
-function PluginHost() {
-  const handlePluginEvent = (eventName: string, payload: unknown) => {
+function GuestHost() {
+  const handleGuestEvent = (eventName: string, payload: unknown) => {
     switch (eventName) {
       case 'TASK_COMPLETE':
         console.log('Task completed:', payload);
@@ -399,7 +399,7 @@ function PluginHost() {
   return (
     <EngineView
       source={bundleUrl}
-      onPluginEvent={handlePluginEvent}
+      onGuestEvent={handleGuestEvent}
     />
   );
 }
@@ -432,7 +432,7 @@ function useRillEngine(bundleUrl: string, initialProps: object) {
     engineRef.current = engine;
     receiverRef.current = receiver;
 
-    // Load plugin
+    // Load guest
     engine.loadBundle(bundleUrl, initialProps).catch(console.error);
 
     return () => {
@@ -559,14 +559,14 @@ const debugData = devtools.exportAll();
 
 ### Sandbox Isolation
 
-- Plugin code runs in QuickJS sandbox
+- Guest code runs in QuickJS sandbox
 - Cannot access host's native APIs
 - Cannot make network requests (unless host provides)
 - Cannot access file system
 
 ### Component Whitelist
 
-Only explicitly registered components can be used by plugins:
+Only explicitly registered components can be used by guests:
 
 ```tsx
 // Only register safe components
@@ -590,7 +590,7 @@ const engine = new Engine({
 
 ### Error Isolation
 
-Plugin errors won't crash the host application:
+Guest errors won't crash the host application:
 
 ```tsx
 <EngineView
@@ -608,7 +608,7 @@ Plugin errors won't crash the host application:
 
 ## FAQ
 
-### 1. Plugin Load Failed
+### 1. Guest Load Failed
 
 **Problem**: `Failed to fetch bundle: 404`
 
@@ -666,6 +666,6 @@ useEffect(() => {
 
 For complete examples, see the `examples/` directory:
 
-- `examples/basic-plugin/` - Basic plugin example
+- `examples/basic-guest/` - Basic guest example
 - `examples/host-app/` - Host application example
 - `examples/custom-components/` - Custom components example

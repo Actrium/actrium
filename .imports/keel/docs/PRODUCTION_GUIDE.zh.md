@@ -5,7 +5,7 @@
 ## 1. 运行时加固
 
 - 模块白名单（requireWhitelist）
-  - 在创建 Engine 时传入 `requireWhitelist`。仅允许插件 bundle `require()` 这些模块。
+  - 在创建 Engine 时传入 `requireWhitelist`。仅允许guest bundle `require()` 这些模块。
   - 默认白名单：`react`、`react-native`、`react/jsx-runtime`、`rill/reconciler`。
 - 执行超时
   - 使用 `timeout` 选项（默认 5000ms）。QuickJS `eval` 为同步执行，无法被强制中断，该超时保护为“尽力而为”。若需严格 CPU 时间切片，请考虑 worker/线程隔离。
@@ -20,13 +20,13 @@
     - `engine.executeBundle`（ms, { size }）
     - `receiver.applyBatch`（ms, { applied, skipped, total }）
 - 批量限制
-  - `receiverMaxBatchSize`（默认 5000）限制单批操作应用数量，避免插件一次性下发巨量操作拖垮宿主。超出部分跳过，并通过指标上报。
+  - `receiverMaxBatchSize`（默认 5000）限制单批操作应用数量，避免guest一次性下发巨量操作拖垮宿主。超出部分跳过，并通过指标上报。
 
 ## 2. 可观测性
 
 - 日志
   - 通过 `logger` 注入结构化日志，预发阶段可开启 `debug`。
-  - 插件侧 `console` 会被注入并带前缀输出。
+  - guest侧 `console` 会被注入并带前缀输出。
 - 指标
   - 将 `onMetric` 事件转发到你的指标系统（Datadog/Prometheus/Logcat 等）。
 - 健康检查
@@ -39,7 +39,7 @@
 - 模块访问
   - 尽量精简白名单，避免暴露 Node 内置或动态加载能力。
 - 回调
-  - 对来自插件的 payload 做校验，建议定义强类型 props。
+  - 对来自guest的 payload 做校验，建议定义强类型 props。
 
 ## 4. 性能建议
 
@@ -48,7 +48,7 @@
 - 虚拟列表
   - 长列表渲染组合 `VirtualScrollCalculator` 与 `ScrollThrottler` 并调优参数。
 - 内存管理
-  - 插件不再使用时及时调用 `engine.destroy()`。
+  - guest不再使用时及时调用 `engine.destroy()`。
 
 ## 5. CI/CD 与打包
 
@@ -106,8 +106,8 @@ await analyze('dist/bundle.js', { whitelist: ['react', 'react/jsx-runtime'], fai
 
 - Init 脚手架
 ```bash
-rill init my-rill-plugin
-cd my-rill-plugin && npm install
+rill init my-rill-guest
+cd my-rill-guest && npm install
 npm run build
 ```
 

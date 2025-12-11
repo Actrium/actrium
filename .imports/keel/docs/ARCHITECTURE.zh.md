@@ -32,7 +32,7 @@
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────────────┐ │
 │  │  EngineView │───▶│   Engine    │───▶│          QuickJS Context        │ │
 │  │  (React)    │    │  (Manager)  │    │  ┌─────────────────────────────┐│ │
-│  └─────────────┘    └─────────────┘    │  │     Plugin Bundle.js        ││ │
+│  └─────────────┘    └─────────────┘    │  │     Guest Bundle.js        ││ │
 │         │                 │            │  │  ┌─────────────────────────┐││ │
 │         │                 │            │  │  │  React + Reconciler     │││ │
 │         ▼                 │            │  │  │  (Custom Renderer)      │││ │
@@ -62,7 +62,7 @@
 ### 3.1 渲染流程 (Sandbox → Host)
 
 ```
-插件 JSX           Reconciler              Bridge              Receiver           原生组件
+guest JSX           Reconciler              Bridge              Receiver           原生组件
    │                   │                     │                    │                  │
    │  <View>           │                     │                    │                  │
    │──────────────────▶│                     │                    │                  │
@@ -870,7 +870,7 @@ export class Engine {
   }
 
   /**
-   * 加载并运行插件 Bundle
+   * 加载并运行guest Bundle
    */
   async loadBundle(bundleUrl: string, initialProps?: Record<string, any>): Promise<void> {
     // 1. 获取 Bundle 内容
@@ -893,9 +893,9 @@ export class Engine {
   private injectPolyfills(): void {
     // console
     this.quickjs?.setGlobal('console', {
-      log: (...args: any[]) => console.log('[Plugin]', ...args),
-      warn: (...args: any[]) => console.warn('[Plugin]', ...args),
-      error: (...args: any[]) => console.error('[Plugin]', ...args),
+      log: (...args: any[]) => console.log('[Guest]', ...args),
+      warn: (...args: any[]) => console.warn('[Guest]', ...args),
+      error: (...args: any[]) => console.error('[Guest]', ...args),
     });
 
     // setTimeout / setInterval
@@ -999,7 +999,7 @@ export function EngineView({
   useEffect(() => {
     let mounted = true;
 
-    async function loadPlugin() {
+    async function loadGuest() {
       try {
         // 创建 Receiver
         engine.createReceiver(handleUpdate);
@@ -1021,7 +1021,7 @@ export function EngineView({
       }
     }
 
-    loadPlugin();
+    loadGuest();
 
     return () => {
       mounted = false;
@@ -1081,7 +1081,7 @@ interface BuildOptions {
   sourcemap?: boolean;
 }
 
-export async function buildPlugin(options: BuildOptions) {
+export async function buildGuest(options: BuildOptions) {
   const { entry, outfile, minify = true, sourcemap = false } = options;
 
   await build({
@@ -1089,7 +1089,7 @@ export async function buildPlugin(options: BuildOptions) {
     bundle: true,
     outfile,
     format: 'iife',
-    globalName: '__RillPlugin',
+    globalName: '__RillGuest',
     minify,
     sourcemap,
     target: 'es2020',
@@ -1128,22 +1128,22 @@ export async function buildPlugin(options: BuildOptions) {
 #!/usr/bin/env node
 
 import { program } from 'commander';
-import { buildPlugin } from './build';
+import { buildGuest } from './build';
 
 program
   .name('rill')
-  .description('Rill plugin CLI')
+  .description('Rill guest CLI')
   .version('0.1.0');
 
 program
   .command('build')
-  .description('Build a plugin bundle')
+  .description('Build a guest bundle')
   .argument('<entry>', 'Entry file path')
   .option('-o, --outfile <path>', 'Output file path', 'dist/bundle.js')
   .option('--no-minify', 'Disable minification')
   .option('--sourcemap', 'Generate sourcemap')
   .action(async (entry, options) => {
-    await buildPlugin({
+    await buildGuest({
       entry,
       outfile: options.outfile,
       minify: options.minify,
@@ -1169,7 +1169,7 @@ program.parse();
 ```typescript
 // 沙箱内异常不影响宿主
 engine.quickjs?.setGlobal('__errorHandler', (error: Error) => {
-  console.error('[Plugin Error]', error.message);
+  console.error('[Guest Error]', error.message);
   // 可选：上报错误
 });
 ```

@@ -24,7 +24,7 @@ export default function HostApp() {
   // Initialize Engine
   useEffect(() => {
     const engineInstance = new Engine({
-      quickjs: createQuickJSProvider(),
+      provider: createQuickJSProvider(),
       timeout: 5000,
       debug: true,
       logger: {
@@ -37,15 +37,15 @@ export default function HostApp() {
       },
     });
 
-    // Listen for plugin messages
+    // Listen for guest messages
     engineInstance.on('message', (message) => {
-      console.log('[Host] Received plugin message:', message.event, message.payload);
-      Alert.alert('Plugin Message', `${message.event}: ${JSON.stringify(message.payload)}`);
+      console.log('[Host] Received guest message:', message.event, message.payload);
+      Alert.alert('Guest Message', `${message.event}: ${JSON.stringify(message.payload)}`);
     });
 
     // Listen for errors
     engineInstance.on('error', (error) => {
-      console.error('[Host] Plugin error:', error);
+      console.error('[Host] Guest error:', error);
       const health = engineInstance.getHealth();
       setErrorCount(health.errorCount);
     });
@@ -58,7 +58,7 @@ export default function HostApp() {
     };
   }, []);
 
-  // Send event to plugin
+  // Send event to guest
   const handleSendMessage = () => {
     if (engine) {
       engine.sendEvent('HOST_MESSAGE', {
@@ -103,7 +103,7 @@ export default function HostApp() {
         <Text style={styles.title}>Host Control Panel</Text>
 
         <View style={styles.statusRow}>
-          <Text style={styles.statusLabel}>Plugin Status:</Text>
+          <Text style={styles.statusLabel}>Guest Status:</Text>
           <Text style={isLoaded ? styles.statusLoaded : styles.statusLoading}>
             {isLoaded ? 'Loaded' : 'Loading...'}
           </Text>
@@ -121,7 +121,7 @@ export default function HostApp() {
             onPress={handleSendMessage}
             disabled={!isLoaded}
           >
-            <Text style={styles.buttonText}>Send Message to Plugin</Text>
+            <Text style={styles.buttonText}>Send Message to Guest</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -141,35 +141,35 @@ export default function HostApp() {
         </View>
       </View>
 
-      {/* Plugin Render Area */}
-      <View style={styles.pluginContainer}>
+      {/* Guest Render Area */}
+      <View style={styles.guestContainer}>
         <EngineView
           engine={engine}
-          bundleUrl="./dist/plugin.js"  // Locally bundled plugin
+          bundleUrl="./dist/guest.js"  // Locally bundled guest
           initialProps={{
             userId: 'user-123',
             theme,
           }}
           onLoad={() => {
-            console.log('[Host] Plugin loaded successfully');
+            console.log('[Host] Guest loaded successfully');
             setIsLoaded(true);
           }}
           onError={(error) => {
-            console.error('[Host] Plugin error:', error);
-            Alert.alert('Plugin Error', error.message);
+            console.error('[Host] Guest error:', error);
+            Alert.alert('Guest Error', error.message);
           }}
           onDestroy={() => {
-            console.log('[Host] Plugin destroyed');
+            console.log('[Host] Guest destroyed');
             setIsLoaded(false);
           }}
           fallback={
             <View style={styles.loadingContainer}>
-              <Text style={styles.loadingText}>Loading plugin...</Text>
+              <Text style={styles.loadingText}>Loading guest...</Text>
             </View>
           }
           renderError={(error) => (
             <View style={styles.errorContainer}>
-              <Text style={styles.errorTitle}>Plugin Load Failed</Text>
+              <Text style={styles.errorTitle}>Guest Load Failed</Text>
               <Text style={styles.errorMessage}>{error.message}</Text>
               <TouchableOpacity
                 style={styles.retryButton}
@@ -178,7 +178,7 @@ export default function HostApp() {
                   setEngine(null);
                   setTimeout(() => {
                     const newEngine = new Engine({
-                      quickjs: createQuickJSProvider(),
+                      provider: createQuickJSProvider(),
                       timeout: 5000,
                       debug: true,
                     });
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  pluginContainer: {
+  guestContainer: {
     flex: 1,
   },
   loadingContainer: {

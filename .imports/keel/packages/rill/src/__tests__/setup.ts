@@ -1,0 +1,205 @@
+/**
+ * Bun test setup file
+ * Provides compatibility layer and DOM environment
+ *
+ * IMPORTANT: Global polyfills MUST be defined before any imports
+ * because module resolution happens synchronously and some modules
+ * (like react-test-renderer) expect these globals during load time.
+ */
+
+// Store original console if it exists
+const originalConsole = globalThis.console;
+
+// CRITICAL: Ensure console is ALWAYS defined and has createTask
+// Some modules (react-jsx-dev-runtime) access console during module load
+if (globalThis.console) {
+  // Ensure createTask is available for react-test-renderer
+  if (!(globalThis.console as any).createTask) {
+    (globalThis.console as any).createTask = () => ({ run: (fn: () => void) => fn() });
+  }
+} else {
+  // Create minimal console if it doesn't exist
+  (globalThis as Record<string, unknown>).console = {
+    log: () => {},
+    warn: () => {},
+    error: () => {},
+    info: () => {},
+    debug: () => {},
+    trace: () => {},
+    createTask: () => ({ run: (fn: () => void) => fn() }),
+  };
+}
+
+// Ensure queueMicrotask is defined globally
+if (typeof globalThis.queueMicrotask === 'undefined') {
+  (globalThis as Record<string, unknown>).queueMicrotask = (callback: () => void) => {
+    Promise.resolve().then(callback);
+  };
+}
+
+// Ensure setTimeout/clearTimeout are defined (required by react-test-renderer)
+if (typeof globalThis.setTimeout === 'undefined') {
+  let timerId = 0;
+  const timers = new Map<number, any>();
+  const originalSetTimeout = globalThis.setTimeout;
+
+  if (originalSetTimeout) {
+    // If setTimeout already exists, use it
+    (globalThis as Record<string, unknown>).clearTimeout = (id: number) => {
+      if (typeof originalSetTimeout !== 'undefined') {
+        (globalThis as any).clearTimeout(id);
+      }
+      timers.delete(id);
+    };
+  } else {
+    // Create a polyfilled setTimeout using Bun.sleep
+    (globalThis as Record<string, unknown>).setTimeout = (fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      const id = ++timerId;
+      try {
+        const promise = (globalThis as any).Bun?.sleep?.(ms ?? 0)?.then?.(() => {
+          timers.delete(id);
+          fn(...args);
+        }) ?? Promise.resolve().then(() => {
+          timers.delete(id);
+          fn(...args);
+        });
+        timers.set(id, promise);
+      } catch {
+        // Fallback: execute immediately
+        fn(...args);
+      }
+      return id;
+    };
+    (globalThis as Record<string, unknown>).clearTimeout = (id: number) => {
+      timers.delete(id);
+    };
+  }
+}
+if (typeof globalThis.setInterval === 'undefined') {
+  (globalThis as Record<string, unknown>).setInterval = () => 0;
+  (globalThis as Record<string, unknown>).clearInterval = () => {};
+}
+
+// Now import bun:test after polyfills are in place
+import { mock, spyOn } from 'bun:test';
+
+// CRITICAL: Ensure console is available before react modules try to load
+// This is a defensive measure to prevent ReferenceError: console is not defined
+// when react-jsx-dev-runtime loads
+const preloadReactConsole = () => {
+  if (!globalThis.console) {
+    (globalThis as any).console = {
+      log: () => {},
+      warn: () => {},
+      error: () => {},
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+    };
+  }
+  if (!(globalThis.console as any).createTask) {
+    (globalThis.console as any).createTask = () => ({ run: (fn: () => void) => fn() });
+  }
+};
+preloadReactConsole();
+
+// Silence console output during tests (if console exists)
+// Preserve original console properties like createTask
+if (globalThis.console) {
+  try {
+    // Store original createTask before any modifications
+    const originalCreateTask = (console as any).createTask ||
+                              originalConsole?.createTask ||
+                              (() => ({ run: (fn: () => void) => fn() }));
+
+    spyOn(console, 'log').mockImplementation(() => {});
+    spyOn(console, 'warn').mockImplementation(() => {});
+    spyOn(console, 'error').mockImplementation(() => {});
+
+    // CRITICAL: Restore createTask after spyOn, as spyOn may have replaced console
+    (console as any).createTask = originalCreateTask;
+  } catch {
+    // Some test environments may not allow spying on console
+    // Ensure createTask exists anyway
+    if (!(console as any).createTask) {
+      (console as any).createTask = () => ({ run: (fn: () => void) => fn() });
+    }
+  }
+}
+
+// Mock react-native module FIRST before any other imports
+mock.module('react-native', () => ({
+  View: 'View',
+  Text: 'Text',
+  Image: 'Image',
+  ScrollView: 'ScrollView',
+  TouchableOpacity: 'TouchableOpacity',
+  ActivityIndicator: 'ActivityIndicator',
+  StyleSheet: {
+    create: <T extends Record<string, unknown>>(styles: T): T => styles,
+    flatten: (style: unknown) => style,
+  },
+  Platform: {
+    OS: 'ios',
+    select: <T>(obj: { ios?: T; android?: T; default?: T }): T | undefined =>
+      obj.ios ?? obj.default,
+  },
+  Dimensions: {
+    get: () => ({ width: 375, height: 812 }),
+  },
+  Alert: {
+    alert: () => {},
+  },
+}));
+
+// Now import happy-dom after mocking react-native
+import { GlobalRegistrator } from '@happy-dom/global-registrator';
+
+// Register happy-dom globally for React testing
+GlobalRegistrator.register();
+
+// Make mock available globally for compatibility
+(globalThis as Record<string, unknown>).mock = mock;
+
+// Provide vi compatibility shim for tests that still use vi
+const vi = {
+  fn: mock,
+  spyOn: (obj: unknown, method: string) => {
+    const original = (obj as Record<string, unknown>)[method];
+    const mockFn = mock(original as (...args: unknown[]) => unknown);
+    (obj as Record<string, unknown>)[method] = mockFn;
+    return mockFn;
+  },
+  useFakeTimers: () => {
+    // Bun doesn't have full fake timers support yet
+    if (globalThis.console?.warn) {
+      globalThis.console.warn('[test] vi.useFakeTimers() is not fully supported in Bun');
+    }
+  },
+  useRealTimers: () => {
+    // No-op
+  },
+  advanceTimersByTime: (_ms: number) => {
+    if (globalThis.console?.warn) {
+      globalThis.console.warn('[test] vi.advanceTimersByTime() is not supported in Bun');
+    }
+  },
+  runAllTimersAsync: async () => {
+    // Wait for any pending microtasks
+    if (typeof globalThis.setTimeout === 'function') {
+      await new Promise(resolve => globalThis.setTimeout(resolve, 0));
+    }
+  },
+  restoreAllMocks: () => {
+    // No-op - Bun handles this automatically
+  },
+  clearAllMocks: () => {
+    // No-op
+  },
+  resetAllMocks: () => {
+    // No-op
+  },
+  mocked: <T>(item: T): T => item,
+};
+
+(globalThis as Record<string, unknown>).vi = vi;

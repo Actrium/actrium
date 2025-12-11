@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, mock } from 'bun:test';
 import { Receiver } from './receiver';
 import { createRegistry } from './registry';
 
@@ -11,7 +11,7 @@ function makeBatch(n: number) {
 describe('Receiver limits & metrics', () => {
   it('applies at most maxBatchSize operations and reports metrics', () => {
     const registry = createRegistry();
-    const onMetric = vi.fn();
+    const onMetric = mock();
     const receiver = new Receiver(registry, () => {}, () => {}, { maxBatchSize: 10, onMetric });
     receiver.applyBatch(makeBatch(25));
     const names = onMetric.mock.calls.map(c => c[0]);

@@ -4,7 +4,7 @@
  * These tests verify correctness and completeness of public type definitions
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import type {
   OperationType,
   Operation,

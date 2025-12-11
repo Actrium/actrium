@@ -53,6 +53,7 @@ export interface InspectorConfig {
    * @default true
    */
   highlightChanges?: boolean;
+  highlightDuration?: number;
 }
 
 /**
@@ -63,7 +64,7 @@ export interface InspectorConfig {
 export class ComponentInspector {
   private config: Required<InspectorConfig>;
   private changedNodeIds = new Set<number>();
-  private changeHighlightDuration = 1000;
+  private changeHighlightDuration: number;
 
   constructor(config: InspectorConfig = {}) {
     this.config = {
@@ -71,7 +72,9 @@ export class ComponentInspector {
       filterProps: config.filterProps ?? [],
       showFunctions: config.showFunctions ?? false,
       highlightChanges: config.highlightChanges ?? true,
+      highlightDuration: config.highlightDuration ?? 1000,
     };
+    this.changeHighlightDuration = this.config.highlightDuration;
   }
 
   /**

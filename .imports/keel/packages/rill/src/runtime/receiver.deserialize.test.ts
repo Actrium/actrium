@@ -7,7 +7,7 @@
  * - Nested object/array deserialization
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import React from 'react';
 import { Receiver } from './receiver';
 import { ComponentRegistry } from './registry';
@@ -20,16 +20,16 @@ const MockText: React.FC<Record<string, unknown>> = (props) =>
 
 describe('Receiver Deserialization', () => {
   let registry: ComponentRegistry;
-  let sendToSandbox: ReturnType<typeof vi.fn>;
-  let onUpdate: ReturnType<typeof vi.fn>;
+  let sendToSandbox: ReturnType<typeof mock>;
+  let onUpdate: ReturnType<typeof mock>;
   let receiver: Receiver;
 
   beforeEach(() => {
     registry = new ComponentRegistry();
     registry.register('View', MockView);
     registry.register('Text', MockText);
-    sendToSandbox = vi.fn();
-    onUpdate = vi.fn();
+    sendToSandbox = mock();
+    onUpdate = mock();
     receiver = new Receiver(registry, sendToSandbox, onUpdate);
   });
 
@@ -214,8 +214,8 @@ describe('Receiver Deserialization', () => {
 
 describe('Receiver Rendering Edge Cases', () => {
   let registry: ComponentRegistry;
-  let sendToSandbox: ReturnType<typeof vi.fn>;
-  let onUpdate: ReturnType<typeof vi.fn>;
+  let sendToSandbox: ReturnType<typeof mock>;
+  let onUpdate: ReturnType<typeof mock>;
   let receiver: Receiver;
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
@@ -223,10 +223,10 @@ describe('Receiver Rendering Edge Cases', () => {
     registry = new ComponentRegistry();
     registry.register('View', MockView);
     registry.register('Text', MockText);
-    sendToSandbox = vi.fn();
-    onUpdate = vi.fn();
+    sendToSandbox = mock();
+    onUpdate = mock();
     receiver = new Receiver(registry, sendToSandbox, onUpdate);
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -333,8 +333,8 @@ describe('Receiver Metrics', () => {
 
     const receiver = new Receiver(
       registry,
-      vi.fn(),
-      vi.fn(),
+      mock(),
+      mock(),
       {
         onMetric: (name, value, extra) => {
           metrics.push({ name, value, extra });
@@ -367,8 +367,8 @@ describe('Receiver Metrics', () => {
 
     const receiver = new Receiver(
       registry,
-      vi.fn(),
-      vi.fn(),
+      mock(),
+      mock(),
       {
         maxBatchSize: 2,
         onMetric: (name, value, extra) => {

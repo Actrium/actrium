@@ -54,15 +54,22 @@ export { Engine } from './engine';
 export type {
   EngineOptions,
   EngineEvents,
-  PluginMessage,
-  QuickJSContext,
-  QuickJSRuntime,
-  QuickJSProvider,
+  GuestMessage,
+  JSEngineContext,
+  JSEngineRuntime,
+  JSEngineProvider,
 } from './engine';
 
-// QuickJSProvider 接口由 rill 提供，具体实现由宿主应用提供
-// React Native 宿主可使用 react-native-quickjs 原生模块
-// Node.js/Web 宿主可使用 quickjs-emscripten
+// Backward compatibility type aliases
+export type {
+  JSEngineContext as QuickJSContext,
+  JSEngineRuntime as QuickJSRuntime,
+  JSEngineProvider as QuickJSProvider,
+} from './engine';
+
+// JSEngineProvider interface is provided by rill, with specific implementations supplied by the host app
+// React Native hosts can use react-native-quickjs native module
+// Node.js/Web hosts can use quickjs-emscripten or vm-based providers
 
 export { EngineView } from './EngineView';
 export type { EngineViewProps } from './EngineView';

@@ -2,7 +2,7 @@
  * ComponentRegistry unit tests
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, mock, spyOn } from 'bun:test';
 import { ComponentRegistry, createRegistry } from './registry';
 import React from 'react';
 
@@ -36,7 +36,12 @@ describe('ComponentRegistry', () => {
     });
 
     it('should overwrite existing component with warning', () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      if (!globalThis.console?.warn) {
+        // Skip this test if console.warn is not available
+        return;
+      }
+
+      const consoleSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
       registry.register('View', MockView);
       registry.register('View', MockText);

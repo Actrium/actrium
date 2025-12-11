@@ -129,7 +129,7 @@ if (!fs.existsSync(filePath)) {
 ```
 rill/
 ├── src/
-│   ├── sdk/          # SDK - 供插件开发使用
+│   ├── sdk/          # SDK - 供guest开发使用
 │   ├── runtime/      # Runtime - 供宿主应用使用
 │   ├── cli/          # CLI - 构建工具
 │   ├── reconciler/   # Reconciler - React 渲染器

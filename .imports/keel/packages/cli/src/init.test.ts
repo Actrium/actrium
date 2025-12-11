@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 
@@ -16,11 +16,11 @@ describe('CLI init', () => {
     } catch {}
   });
 
-  it('should scaffold a minimal plugin project', async () => {
+  it('should scaffold a minimal guest project', async () => {
     const cwd = process.cwd();
     process.chdir(TMP_ROOT);
     const argv = process.argv;
-    process.argv = ['node', 'rill', 'init', 'my-rill-plugin'];
+    process.argv = ['node', 'rill', 'init', 'my-rill-guest'];
 
     // dynamic import to execute commander program
     await import('./index');
@@ -32,10 +32,10 @@ describe('CLI init', () => {
     process.argv = argv;
     process.chdir(cwd);
 
-    const base = path.join(TMP_ROOT, 'my-rill-plugin');
+    const base = path.join(TMP_ROOT, 'my-rill-guest');
     expect(fs.existsSync(path.join(base, 'package.json'))).toBe(true);
     expect(fs.existsSync(path.join(base, 'tsconfig.json'))).toBe(true);
-    expect(fs.existsSync(path.join(base, 'src', 'plugin.tsx'))).toBe(true);
+    expect(fs.existsSync(path.join(base, 'src', 'guest.tsx'))).toBe(true);
 
     const pkg = JSON.parse(fs.readFileSync(path.join(base, 'package.json'), 'utf-8'));
     expect(pkg.scripts.build).toBeDefined();

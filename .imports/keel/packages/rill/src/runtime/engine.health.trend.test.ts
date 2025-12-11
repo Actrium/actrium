@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import { Engine } from './engine';
 
 // Type definitions for mock QuickJS

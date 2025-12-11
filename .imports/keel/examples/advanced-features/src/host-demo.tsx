@@ -78,7 +78,7 @@ export default function HostDemo() {
   useEffect(() => {
     // Create Engine instance
     const engineInstance = new Engine({
-      quickjs: createQuickJSProvider(), // Need to provide actual provider
+      provider: createQuickJSProvider(), // Need to provide actual provider
       timeout: 5000, // 5 second timeout
       debug: true,
 
@@ -158,12 +158,12 @@ export default function HostDemo() {
         ))}
       </View>
 
-      {/* Plugin Render Area */}
+      {/* Guest Render Area */}
       <EngineView
         engine={engine}
-        bundleUrl="./dist/plugin.js"
-        onLoad={() => console.log('[Host] Plugin loaded')}
-        onError={(err) => console.error('[Host] Plugin error:', err)}
+        bundleUrl="./dist/guest.js"
+        onLoad={() => console.log('[Host] Guest loaded')}
+        onError={(err) => console.error('[Host] Guest error:', err)}
       />
     </View>
   );

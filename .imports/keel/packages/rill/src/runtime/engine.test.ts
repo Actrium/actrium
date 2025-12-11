@@ -2,7 +2,7 @@
  * Engine unit tests
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Engine } from './engine';
 import React from 'react';
 
@@ -31,7 +31,7 @@ const MockText: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
   React.createElement('Text', null, children);
 
 // Mock fetch
-const mockFetch = vi.fn();
+const mockFetch = mock();
 global.fetch = mockFetch;
 
 // Mock QuickJS Provider for tests
@@ -92,15 +92,15 @@ describe('Engine', () => {
 
     it('should create engine with custom options', () => {
       const customLogger = {
-        log: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
+        log: mock(),
+        warn: mock(),
+        error: mock(),
       };
 
       const e = new Engine({
         quickjs: createMockQuickJSProvider(),
         timeout: 10000,
-        debug: true,
+        debug: false,
         logger: customLogger,
       });
 
@@ -134,16 +134,16 @@ describe('Engine', () => {
   describe('loadBundle', () => {
     it('should fetch bundle from URL', async () => {
       const bundleCode = `
-        console.log('Plugin loaded');
+        console.log('Guest loaded');
       `;
       mockFetch.mockResolvedValueOnce({
         ok: true,
         text: () => Promise.resolve(bundleCode),
       });
 
-      await engine.loadBundle('https://example.com/plugin.js');
+      await engine.loadBundle('https://example.com/guest.js');
 
-      expect(mockFetch).toHaveBeenCalledWith('https://example.com/plugin.js');
+      expect(mockFetch).toHaveBeenCalledWith('https://example.com/guest.js');
       expect(engine.isLoaded).toBe(true);
     });
 
@@ -182,7 +182,7 @@ describe('Engine', () => {
       await engine.loadBundle('console.log("first")');
 
       await expect(engine.loadBundle('console.log("second")')).rejects.toThrow(
-        'Engine already loaded a bundle'
+        'Engine already loaded a Guest'
       );
     });
 
@@ -195,7 +195,7 @@ describe('Engine', () => {
     });
 
     it('should emit load event on success', async () => {
-      const loadHandler = vi.fn();
+      const loadHandler = mock();
       engine.on('load', loadHandler);
 
       await engine.loadBundle('console.log("test")');
@@ -206,11 +206,11 @@ describe('Engine', () => {
     it('should emit error event on failure', async () => {
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
-      const errorHandler = vi.fn();
+      const errorHandler = mock();
       engine.on('error', errorHandler);
 
       await expect(
-        engine.loadBundle('https://example.com/plugin.js')
+        engine.loadBundle('https://example.com/guest.js')
       ).rejects.toThrow();
 
       expect(errorHandler).toHaveBeenCalled();
@@ -257,7 +257,7 @@ describe('Engine', () => {
 
   describe('createReceiver', () => {
     it('should create and return receiver', () => {
-      const onUpdate = vi.fn();
+      const onUpdate = mock();
       const receiver = engine.createReceiver(onUpdate);
 
       expect(receiver).toBeDefined();
@@ -265,8 +265,8 @@ describe('Engine', () => {
     });
 
     it('should replace existing receiver', () => {
-      const onUpdate1 = vi.fn();
-      const onUpdate2 = vi.fn();
+      const onUpdate1 = mock();
+      const onUpdate2 = mock();
 
       const receiver1 = engine.createReceiver(onUpdate1);
       const receiver2 = engine.createReceiver(onUpdate2);
@@ -282,7 +282,7 @@ describe('Engine', () => {
     });
 
     it('should return receiver after createReceiver', () => {
-      engine.createReceiver(vi.fn());
+      engine.createReceiver(mock());
       expect(engine.getReceiver()).not.toBeNull();
     });
   });
@@ -299,7 +299,7 @@ describe('Engine', () => {
 
   describe('on', () => {
     it('should register event listener', async () => {
-      const loadHandler = vi.fn();
+      const loadHandler = mock();
       engine.on('load', loadHandler);
 
       await engine.loadBundle('console.log("test")');
@@ -308,7 +308,7 @@ describe('Engine', () => {
     });
 
     it('should return unsubscribe function', async () => {
-      const loadHandler = vi.fn();
+      const loadHandler = mock();
       const unsubscribe = engine.on('load', loadHandler);
 
       unsubscribe();
@@ -319,8 +319,8 @@ describe('Engine', () => {
     });
 
     it('should support multiple listeners', async () => {
-      const handler1 = vi.fn();
-      const handler2 = vi.fn();
+      const handler1 = mock();
+      const handler2 = mock();
 
       engine.on('load', handler1);
       engine.on('load', handler2);
@@ -341,7 +341,7 @@ describe('Engine', () => {
     });
 
     it('should emit destroy event', () => {
-      const destroyHandler = vi.fn();
+      const destroyHandler = mock();
       engine.on('destroy', destroyHandler);
 
       engine.destroy();
@@ -350,7 +350,7 @@ describe('Engine', () => {
     });
 
     it('should clear receiver', () => {
-      engine.createReceiver(vi.fn());
+      engine.createReceiver(mock());
       expect(engine.getReceiver()).not.toBeNull();
 
       engine.destroy();
@@ -366,7 +366,7 @@ describe('Engine', () => {
     });
 
     it('should clear event listeners', () => {
-      const handler = vi.fn();
+      const handler = mock();
       engine.on('load', handler);
 
       engine.destroy();
@@ -411,9 +411,10 @@ describe('Engine', () => {
 
 describe('Engine Polyfills', () => {
   let engine: Engine;
+  const mockLogger = { log: mock(), warn: mock(), error: mock() };
 
   beforeEach(() => {
-    engine = new Engine({ quickjs: createMockQuickJSProvider(), debug: true });
+    engine = new Engine({ quickjs: createMockQuickJSProvider(), debug: true, logger: mockLogger });
   });
 
   afterEach(() => {
@@ -496,7 +497,7 @@ describe('Engine Runtime API', () => {
   });
 
   it('should provide __sendToHost API', async () => {
-    const receiver = engine.createReceiver(vi.fn());
+    const receiver = engine.createReceiver(mock());
 
     await engine.loadBundle(`
       __sendToHost({
@@ -512,11 +513,11 @@ describe('Engine Runtime API', () => {
 
 describe('Engine Error Handling', () => {
   let engine: Engine;
-  let errorHandler: ReturnType<typeof vi.fn>;
+  let errorHandler: ReturnType<typeof mock>;
 
   beforeEach(() => {
     engine = new Engine({ quickjs: createMockQuickJSProvider() });
-    errorHandler = vi.fn();
+    errorHandler = mock();
     engine.on('error', errorHandler);
   });
 
@@ -528,7 +529,7 @@ describe('Engine Error Handling', () => {
     mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
     await expect(
-      engine.loadBundle('https://example.com/plugin.js')
+      engine.loadBundle('https://example.com/guest.js')
     ).rejects.toThrow('Network error');
 
     expect(errorHandler).toHaveBeenCalled();
@@ -541,7 +542,7 @@ describe('Engine Error Handling', () => {
     });
 
     await expect(
-      engine.loadBundle('https://example.com/plugin.js')
+      engine.loadBundle('https://example.com/guest.js')
     ).rejects.toThrow('Failed to fetch bundle: 500');
   });
 });
