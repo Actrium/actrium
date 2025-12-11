@@ -36,7 +36,7 @@ jobs:
           cd packages/rill
           bun run test:coverage:check
 
-      - name: E2E: Worker + quickjs-emscripten
+      - name: "E2E: Worker + quickjs-emscripten"
         run: |
           echo "Running worker e2e (requires quickjs-emscripten)"
           bun test packages/rill/src/runtime/engine.worker.e2e.test.ts || (echo "Worker e2e failed" && exit 1)
