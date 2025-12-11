@@ -19,7 +19,7 @@ function getReactNative(): typeof import('react-native') {
       throw new Error('[rill] react-native is not available in this environment');
     }
   }
-  return ReactNative;
+  return ReactNative!;
 }
 
 import * as RillReconciler from '../reconciler';
@@ -464,7 +464,7 @@ export class Engine implements IEngine {
     });
 
     // setTimeout / clearTimeout
-    const timeoutMap = new Map<number, ReturnType<typeof setTimeout>>();
+    const timeoutMap = new Map<number, NodeJS.Timeout>();
     let timeoutId = 0;
 
     this.context.setGlobal('setTimeout', (fn: () => void, delay: number) => {
@@ -477,20 +477,20 @@ export class Engine implements IEngine {
           logger.error('[Guest] setTimeout error:', error);
         }
       }, delay);
-      timeoutMap.set(id, handle);
+      timeoutMap.set(id, handle as NodeJS.Timeout);
       return id;
     });
 
     this.context.setGlobal('clearTimeout', (id: number) => {
       const handle = timeoutMap.get(id);
       if (handle) {
-        nativeClearTimeout(handle);
+        nativeClearTimeout(handle as any);
         timeoutMap.delete(id);
       }
     });
 
     // setInterval / clearInterval
-    const intervalMap = new Map<number, ReturnType<typeof setInterval>>();
+    const intervalMap = new Map<number, NodeJS.Timeout>();
     let intervalId = 0;
 
     this.context.setGlobal('setInterval', (fn: () => void, delay: number) => {
@@ -502,14 +502,14 @@ export class Engine implements IEngine {
           logger.error('[Guest] setInterval error:', error);
         }
       }, delay);
-      intervalMap.set(id, handle);
+      intervalMap.set(id, handle as NodeJS.Timeout);
       return id;
     });
 
     this.context.setGlobal('clearInterval', (id: number) => {
       const handle = intervalMap.get(id);
       if (handle) {
-        nativeClearInterval(handle);
+        nativeClearInterval(handle as any);
         intervalMap.delete(id);
       }
     });
@@ -716,12 +716,14 @@ export class Engine implements IEngine {
    */
   on<K extends keyof EngineEvents>(
     event: K,
-    listener: EventListener<EngineEvents[K] extends () => void ? void : Parameters<EngineEvents[K]>[0]>
+    listener: EngineEvents[K] extends () => void
+      ? () => void
+      : (data: Parameters<EngineEvents[K]>[0]) => void
   ): () => void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    this.listeners.get(event)!.add(listener);
+    this.listeners.get(event)!.add(listener as EventListener<unknown>);
 
     return () => {
       this.listeners.get(event)?.delete(listener as EventListener<unknown>);
