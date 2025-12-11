@@ -7,7 +7,7 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 ## Features
 
 - **React-like Development Experience**: Write guests using JSX and Hooks
-- **Complete Sandbox Isolation**: Based on QuickJS, guest crashes don't affect the host
+- **Complete Sandbox Isolation**: Pluggable JSEngineProvider (QuickJS, VM, Worker), guest crashes don't affect the host
 - **Lightweight and Efficient**: No WebView overhead, native rendering performance
 - **Flexible Extension**: Supports registering custom business components
 
@@ -77,38 +77,63 @@ Recommended pairings
 Install examples
 
 - React Native (RN 0.82 + React 19.2)
-  - bun add rill react@^19.2.1 react-native@^0.82 react-reconciler@^0.33
+  ```bash
+  npm i rill react@^19.2.1 react-native@^0.82 react-reconciler@^0.33
+  ```
 - Web (React 19.2)
-  - bun add rill react@^19.2.1 react-dom@^19.2.1 react-reconciler@^0.33
+  ```bash
+  npm i rill react@^19.2.1 react-dom@^19.2.1 react-reconciler@^0.33
+  ```
 
 Notes
 
 - If you see npm ERESOLVE complaining react-reconciler@0.33 requires react@^19.2: upgrade React to ^19.2.1 (or align reconciler to 0.32 if you must stay on React 19.0).
 - Avoid using --legacy-peer-deps in the long term; fix the pairing instead.
 
+For monorepo workspace development
+
+This is a monorepo project. Add dependencies in `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@rill/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@rill/cli": "workspace:*"
+  }
+}
+```
+
+Or install from GitHub:
 
 ```bash
-bun add rill
-# or
-yarn add rill
+bun add github:kookyleo/rill#packages/core
 ```
 
 ### Host Integration
 
 ```tsx
+import React, { useMemo, useEffect } from 'react';
 import { Engine, EngineView } from '@rill/core';
 import { NativeStepList } from './components/NativeStepList';
 
-// 1. Create engine instance
-const engine = new Engine();
-
-// 2. Register custom components
-engine.register({
-  StepList: NativeStepList,
-});
-
-// 3. Render guest
 function App() {
+  // 1. Create engine instance
+  const engine = useMemo(() => new Engine({
+    debug: __DEV__,
+    timeout: 5000,
+    sandbox: 'vm', // Options: 'vm' | 'worker' | 'none'
+  }), []);
+
+  // 2. Register custom components
+  useEffect(() => {
+    engine.register({
+      StepList: NativeStepList,
+    });
+  }, [engine]);
+
+  // 3. Render guest
   return (
     <EngineView
       engine={engine}
@@ -116,6 +141,8 @@ function App() {
       initialProps={{ theme: 'dark' }}
       onLoad={() => console.log('Guest loaded')}
       onError={(err) => console.error('Guest error:', err)}
+      onDestroy={() => console.log('Guest destroyed')}
+      renderError={(error) => <Text>Error: {error.message}</Text>}
     />
   );
 }
@@ -148,14 +175,17 @@ export default function MyGuest() {
 ### Build Guest
 
 ```bash
-# Install CLI
-bun add -g rill
+# Use workspace CLI
+bun run --filter @rill/cli build src/guest.tsx -o dist/bundle.js
 
-# Build
-rill build src/guest.tsx -o dist/bundle.js
+# Or run CLI script directly
+bun packages/cli/src/index.ts build src/guest.tsx -o dist/bundle.js
 
 # Development mode
-rill build src/guest.tsx --watch --no-minify --sourcemap
+bun packages/cli/src/index.ts build src/guest.tsx --watch --no-minify --sourcemap
+
+# Analyze bundle
+bun packages/cli/src/index.ts analyze dist/bundle.js
 ```
 
 ## Architecture
@@ -164,7 +194,7 @@ rill build src/guest.tsx --watch --no-minify --sourcemap
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Host App (React Native)                    │
 ├─────────────────────────────────────────────────────────────────┤
-│  EngineView → Engine → QuickJS Context                          │
+│  EngineView → Engine → JSEngineProvider Context                 │
 │                            │                                     │
 │                            ▼                                     │
 │                    ┌───────────────────┐                        │
@@ -184,25 +214,35 @@ rill build src/guest.tsx --watch --no-minify --sourcemap
 
 | Module | Path | Description |
 |--------|------|-------------|
-| SDK | `rill/sdk` | Guest development kit, virtual components and Hooks |
-| Runtime | `rill` | Host runtime, Engine and EngineView |
-| CLI | `rill` (bin) | Guest bundler tool |
+| SDK | `@rill/core/sdk` | Guest development kit, virtual components and Hooks |
+| Runtime | `@rill/core` | Host runtime, Engine and EngineView |
+| CLI | `@rill/cli` | Guest bundler tool (Vite-based) |
 
 ## API
 
 ### Engine
 
 ```typescript
+import { Engine } from '@rill/core';
+
 const engine = new Engine(options?: EngineOptions);
 
 interface EngineOptions {
-  timeout?: number;      // Execution timeout (default 5000ms)
-  debug?: boolean;       // Debug mode
-  logger?: Logger;       // Custom logger
+  provider?: JSEngineProvider;        // Pluggable JS engine
+  sandbox?: 'vm' | 'worker' | 'none'; // Sandbox mode
+  timeout?: number;                   // Execution timeout (default 5000ms)
+  debug?: boolean;                    // Debug mode
+  logger?: Logger;                    // Custom logger
+  requireWhitelist?: string[];        // Allowed require modules
+  onMetric?: MetricCallback;          // Performance metric callback
+  receiverMaxBatchSize?: number;      // Max operations per batch
 }
 
 // Register components
 engine.register({ ComponentName: ReactComponent });
+
+// Create receiver
+const receiver = engine.createReceiver(() => forceUpdate());
 
 // Load guest
 await engine.loadBundle(bundleUrl, initialProps);
@@ -210,8 +250,14 @@ await engine.loadBundle(bundleUrl, initialProps);
 // Send event to guest
 engine.sendEvent('EVENT_NAME', payload);
 
+// Listen to guest messages
+engine.on('message', (msg) => console.log(msg.event, msg.payload));
+
 // Update configuration
 engine.updateConfig({ key: value });
+
+// Get health status
+const health = engine.getHealth();
 
 // Destroy
 engine.destroy();
@@ -250,7 +296,7 @@ import {
   ThrottledScheduler,
   VirtualScrollCalculator,
   PerformanceMonitor
-} from 'rill/runtime';
+} from '@rill/core';
 
 // Batch update throttling
 const scheduler = new ThrottledScheduler(onBatch, {
@@ -272,7 +318,7 @@ const monitor = new PerformanceMonitor();
 ## Debugging Tools
 
 ```tsx
-import { createDevTools } from 'rill/devtools';
+import { createDevTools } from '@rill/core/devtools';
 
 const devtools = createDevTools();
 devtools.enable();
@@ -284,7 +330,7 @@ console.log(devtools.getComponentTreeText(nodeMap, rootChildren));
 const data = devtools.exportAll();
 ```
 
-## Documentation
+## Documentation (Deprecated)
 
 - [API Documentation](./docs/API.md) - Complete API reference
 - [User Guide](./docs/GUIDE.md) - Getting started tutorial and best practices
@@ -347,7 +393,7 @@ Example (host):
 
 ```ts
 import { Engine } from '@rill/core';
-const engine = new Engine({ provider: yourJSEngineProvider });
+const engine = new Engine({ sandbox: 'vm' });
 engine.on('message', (m) => { /* m.event, m.payload */ });
 engine.sendEvent('PING', { ok: 1 });
 ```
@@ -384,18 +430,28 @@ If the bundle still contains `require('@rill/core/sdk')`, analyze fails fast wit
 
 ```ts
 import { Engine } from '@rill/core';
-import { View, Text } from 'react-native'; // or your custom components
+import { View, Text, TouchableOpacity, Image } from 'react-native';
 
-const engine = new Engine({ provider: yourJSEngineProvider });
-engine.register({ View, Text }); // Register the components your guest needs
-const receiver = engine.createReceiver(() => {/* schedule host re-render */});
-await engine.loadBundle(codeOrUrl);
+const engine = new Engine({
+  sandbox: 'vm', // or 'worker' | 'none'
+  debug: __DEV__,
+});
+
+// Register components
+engine.register({ View, Text, TouchableOpacity, Image });
+
+// Create Receiver
+const receiver = engine.createReceiver(() => {/* trigger host update */});
+
+// Load guest
+await engine.loadBundle(codeOrUrl, initialProps);
 ```
 
 Notes:
-- Use `register(components)` (not `registerComponent`).
-- Use `loadBundle(source)` (not `loadGuest`).
-- Provide a JS engine provider via `new Engine({ provider })`.
+- Use `register(components)` to batch register components.
+- Use `createReceiver(onUpdate)` to create Receiver.
+- Use `loadBundle(source, initialProps)` to load guest.
+- Choose sandbox mode via `sandbox` option, or inject custom JSEngineProvider via `provider`.
 
 ## Init Template Defaults
 
