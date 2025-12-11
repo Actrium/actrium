@@ -273,9 +273,10 @@ export interface EventListenerOptions {
  * }
  * ```
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+// AskitEvents is intentionally empty to allow module augmentation by consumers.
+// Use an index signature to satisfy lint rules while still allowing augmentation.
 export interface AskitEvents {
-  // Empty by default - users can extend via module augmentation
+  [event: string]: unknown;
 }
 
 /**

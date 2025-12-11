@@ -17,7 +17,7 @@ export interface GuestComponent<T = unknown> {
 /**
  * Development mode detection
  */
-const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
+const isDev = typeof process !== 'undefined' && process.env?.['NODE_ENV'] === 'development';
 
 /**
  * Validation rules for component props
@@ -166,7 +166,7 @@ export function validateProps(
  * const component = StepList({ items: [...], currentStep: 1 });
  * ```
  */
-export function createGuestComponent<T extends Record<string, unknown>>(
+export function createGuestComponent<T extends object>(
   componentName: string,
   rules?: ValidationRule[]
 ): (props: T) => GuestComponent<T> {

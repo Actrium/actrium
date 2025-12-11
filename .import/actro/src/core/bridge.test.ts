@@ -54,11 +54,9 @@ function handleGuestMessage(message: GuestMessage): unknown {
       return undefined;
     }
 
-    const [moduleName, methodName] = parts;
-
     // EventEmitter events (format: askit:event:eventName)
     // Must check this FIRST because eventName can contain colons (e.g., user:login)
-    if (moduleName === 'event') {
+    if (parts[0] === 'event') {
       const eventName = parts.slice(1).join(':');
       (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](eventName, payload);
       return undefined;
@@ -67,13 +65,15 @@ function handleGuestMessage(message: GuestMessage): unknown {
     // Module calls (format: askit:module:method) - exactly 2 parts after 'askit:'
     if (parts.length === 2) {
       const validName = /^[a-zA-Z0-9_]+$/;
+      const moduleName = parts[0]!;
+      const methodName = parts[1]!;
       if (validName.test(moduleName) && validName.test(methodName)) {
         const module = modules[moduleName as keyof typeof modules];
         if (module) {
           const method = module[methodName as keyof typeof module];
           if (typeof method === 'function') {
             const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
-            return method.apply(module, args);
+            return (method as (...args: unknown[]) => unknown).apply(module as any, args);
           }
         }
 

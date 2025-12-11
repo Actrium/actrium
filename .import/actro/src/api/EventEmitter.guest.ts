@@ -361,7 +361,7 @@ class GuestEventEmitter implements EventEmitterAPI {
     // Apply rate limiting if specified
     let actualCallback: EventCallback<T> = callback;
     if (options?.rateLimit && options.rateLimit !== 'none') {
-      const limited = rateLimit(callback, {
+      const limited = rateLimit(callback as (...args: unknown[]) => unknown, {
         type: options.rateLimit,
         delay: options.delay ?? 100, // Default 100ms
       });
