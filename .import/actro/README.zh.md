@@ -24,7 +24,7 @@ yarn add rill
 ### 宿主端集成
 
 ```tsx
-import { Engine, EngineView } from 'rill';
+import { Engine, EngineView } from '@rill/core';
 import { NativeStepList } from './components/NativeStepList';
 
 // 1. 创建引擎实例
@@ -52,7 +52,7 @@ function App() {
 ### guest端开发
 
 ```tsx
-import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/sdk';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig } from '@rill/core/sdk';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -182,8 +182,8 @@ guest示例：
 
 ```tsx
 import * as React from 'react';
-import { View, Text } from 'rill/sdk';
-import { useHostEvent, useSendToHost } from 'rill/sdk';
+import { View, Text } from '@rill/core/sdk';
+import { useHostEvent, useSendToHost } from '@rill/core/sdk';
 
 export default function Guest() {
   const send = useSendToHost();
@@ -201,7 +201,7 @@ export default function Guest() {
 宿主示例：
 
 ```ts
-import { Engine } from 'rill';
+import { Engine } from '@rill/core';
 const engine = new Engine({ quickjs });
 engine.on('message', (m) => { /* m.event, m.payload */ });
 engine.sendEvent('PING', { ok: 1 });
@@ -233,12 +233,12 @@ rill analyze dist/bundle.js \
 
 运行时白名单：`react`、`react-native`、`react/jsx-runtime`、`rill/reconciler`。
 
-如 bundle 仍包含 `require('rill/sdk')`，analyze 将 fail-fast 并给出提示。
+如 bundle 仍包含 `require('@rill/core/sdk')`，analyze 将 fail-fast 并给出提示。
 
 ## 宿主集成（正确 API）
 
 ```ts
-import { Engine } from 'rill';
+import { Engine } from '@rill/core';
 import { DefaultComponents } from 'rill/components';
 
 const engine = new Engine({ quickjs });
@@ -257,7 +257,7 @@ await engine.loadBundle(codeOrUrl);
 `rill init` 将生成：
 - vite.config.ts：IIFE lib build，external：react/react-native/react/jsx-runtime/rill-reconciler；alias `rill/sdk` 指向 ESM 方便内联。
 - tsconfig.json：Bundler 解析、isolatedModules、strict、verbatimModuleSyntax，并为编辑器提供 `rill/sdk` path 类型映射。
-- 示例guest使用 `import { View, Text } from 'rill/sdk'`。
+- 示例guest使用 `import { View, Text } from '@rill/core/sdk'`。
 
 
 Rill 内置多种性能优化机制：

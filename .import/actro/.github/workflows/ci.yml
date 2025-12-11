@@ -33,13 +33,13 @@ jobs:
 
       - name: Check test coverage thresholds
         run: |
-          cd packages/rill
+          cd packages/core
           bun run test:coverage:check
 
       - name: "E2E: Worker + quickjs-emscripten"
         run: |
           echo "Running worker e2e (requires quickjs-emscripten)"
-          bun test packages/rill/src/runtime/engine.worker.e2e.test.ts || (echo "Worker e2e failed" && exit 1)
+          bun test packages/core/src/runtime/engine.worker.e2e.test.ts || (echo "Worker e2e failed" && exit 1)
 
       - name: Test CLI executable
         run: |
@@ -83,6 +83,6 @@ jobs:
       - name: Check bundle size
         run: |
           echo "Bundle sizes:"
-          du -h packages/rill/dist/runtime/index.js || true
-          du -h packages/rill/dist/sdk/index.js || true
+          du -h packages/core/dist/runtime/index.js || true
+          du -h packages/core/dist/sdk/index.js || true
           du -h packages/cli/dist/index.js || true
