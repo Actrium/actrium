@@ -2,7 +2,7 @@
  * Performance module unit tests
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
 import {
   OperationMerger,
   ThrottledScheduler,
@@ -11,6 +11,20 @@ import {
   PerformanceMonitor,
 } from './performance';
 import type { Operation, OperationBatch } from '../types';
+
+// Helper to wait for real time
+const sleep = (ms: number) => {
+  if (typeof globalThis.setTimeout === 'function') {
+    return new Promise(resolve => globalThis.setTimeout(resolve, ms));
+  }
+  // Fallback: use Bun.sleep if available
+  try {
+    // Bun provides Bun.sleep as a top-level function
+    return (globalThis as any).Bun?.sleep?.(ms) ?? Promise.resolve();
+  } catch {
+    return Promise.resolve();
+  }
+};
 
 // ============ OperationMerger 测试 ============
 
@@ -131,16 +145,16 @@ describe('OperationMerger', () => {
 
 describe('ThrottledScheduler', () => {
   let scheduler: ThrottledScheduler;
-  let flushCallback: ReturnType<typeof vi.fn>;
+  let flushCallback: ReturnType<typeof mock>;
 
   beforeEach(() => {
-    vi.useFakeTimers();
-    flushCallback = vi.fn();
+    
+    flushCallback = mock();
   });
 
   afterEach(() => {
     scheduler?.dispose();
-    vi.useRealTimers();
+    
   });
 
   describe('enqueue', () => {
@@ -152,7 +166,7 @@ describe('ThrottledScheduler', () => {
       expect(scheduler.pendingCount).toBe(1);
 
       // 执行 microtask
-      await vi.runAllTimersAsync();
+      await Promise.resolve();
 
       expect(flushCallback).toHaveBeenCalledTimes(1);
       expect(scheduler.pendingCount).toBe(0);
@@ -167,7 +181,7 @@ describe('ThrottledScheduler', () => {
 
       expect(scheduler.pendingCount).toBe(3);
 
-      await vi.runAllTimersAsync();
+      await Promise.resolve();
 
       expect(flushCallback).toHaveBeenCalledTimes(1);
       const batch: OperationBatch = flushCallback.mock.calls[0][0];
@@ -190,7 +204,7 @@ describe('ThrottledScheduler', () => {
       scheduler.enqueue({ op: 'UPDATE', id: 1, props: { a: 1 } });
       scheduler.enqueue({ op: 'UPDATE', id: 1, props: { b: 2 } });
 
-      await vi.runAllTimersAsync();
+      await Promise.resolve();
 
       const batch: OperationBatch = flushCallback.mock.calls[0][0];
       expect(batch.operations).toHaveLength(1);
@@ -206,7 +220,7 @@ describe('ThrottledScheduler', () => {
       scheduler.enqueue({ op: 'UPDATE', id: 1, props: { a: 1 } });
       scheduler.enqueue({ op: 'UPDATE', id: 1, props: { b: 2 } });
 
-      await vi.runAllTimersAsync();
+      await Promise.resolve();
 
       const batch: OperationBatch = flushCallback.mock.calls[0][0];
       expect(batch.operations).toHaveLength(2);
@@ -224,7 +238,7 @@ describe('ThrottledScheduler', () => {
 
       expect(scheduler.pendingCount).toBe(2);
 
-      await vi.runAllTimersAsync();
+      await Promise.resolve();
 
       expect(flushCallback).toHaveBeenCalledTimes(1);
     });
@@ -265,38 +279,44 @@ describe('ThrottledScheduler', () => {
 
   describe('throttling', () => {
     it('should throttle flushes', async () => {
-      scheduler = new ThrottledScheduler(flushCallback, { throttleMs: 100 });
+      // Use short throttle time for real-time testing
+      scheduler = new ThrottledScheduler(flushCallback, { throttleMs: 20 });
 
       scheduler.enqueue({ op: 'CREATE', id: 1, type: 'View', props: {} });
-      await vi.runAllTimersAsync();
+      await Promise.resolve();
 
-      // 第一次 flush 后立即再次 enqueue
-      scheduler.enqueue({ op: 'CREATE', id: 2, type: 'Text', props: {} });
-
-      // 由于节流，应该延迟 flush
+      // First flush happened
       expect(flushCallback).toHaveBeenCalledTimes(1);
 
-      // 推进时间
-      vi.advanceTimersByTime(100);
+      // Immediately enqueue again - should be throttled
+      scheduler.enqueue({ op: 'CREATE', id: 2, type: 'Text', props: {} });
 
+      // Should still be 1 (throttled)
+      expect(flushCallback).toHaveBeenCalledTimes(1);
+
+      // Wait for throttle period
+      await sleep(30);
+
+      // Now second flush should have happened
       expect(flushCallback).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('dispose', () => {
     it('should clear pending operations and timers', async () => {
-      scheduler = new ThrottledScheduler(flushCallback, { throttleMs: 100 });
+      scheduler = new ThrottledScheduler(flushCallback, { throttleMs: 20 });
 
       scheduler.enqueue({ op: 'CREATE', id: 1, type: 'View', props: {} });
-      await vi.runAllTimersAsync();
+      await Promise.resolve();
 
       scheduler.enqueue({ op: 'CREATE', id: 2, type: 'Text', props: {} });
       scheduler.dispose();
 
       expect(scheduler.pendingCount).toBe(0);
 
-      vi.advanceTimersByTime(100);
-      expect(flushCallback).toHaveBeenCalledTimes(1); // 只有第一次
+      // Wait past throttle period - should NOT trigger another flush
+      await sleep(30);
+      expect(flushCallback).toHaveBeenCalledTimes(1); // Only the first one
     });
   });
 });
@@ -445,17 +465,16 @@ describe('VirtualScrollCalculator', () => {
 
 describe('ScrollThrottler', () => {
   let throttler: ScrollThrottler;
-  let callback: ReturnType<typeof vi.fn>;
+  let callback: ReturnType<typeof mock>;
 
   beforeEach(() => {
-    vi.useFakeTimers();
-    callback = vi.fn();
-    throttler = new ScrollThrottler(100, 5);
+    callback = mock();
+    // Use short throttle time for real-time testing
+    throttler = new ScrollThrottler(20, 5);
   });
 
   afterEach(() => {
     throttler.dispose();
-    vi.useRealTimers();
   });
 
   describe('onScroll', () => {
@@ -472,40 +491,47 @@ describe('ScrollThrottler', () => {
       expect(callback).toHaveBeenCalledTimes(1);
     });
 
-    it('should throttle rapid scrolls', () => {
+    it('should throttle rapid scrolls', async () => {
       throttler.onScroll(100, callback);
       throttler.onScroll(200, callback);
       throttler.onScroll(300, callback);
 
-      // 只有第一次立即执行
+      // Only first one executes immediately
       expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(100);
 
-      // 推进时间
-      vi.advanceTimersByTime(100);
+      // Wait for throttle period
+      await sleep(30);
 
-      // 节流后执行最后一次
+      // After throttle, last value should be executed
       expect(callback).toHaveBeenCalledTimes(2);
       expect(callback).toHaveBeenLastCalledWith(300);
     });
 
-    it('should allow immediate execution after throttle period', () => {
+    it('should allow immediate execution after throttle period', async () => {
       throttler.onScroll(100, callback);
-      vi.advanceTimersByTime(100);
 
+      // Wait for throttle period to pass
+      await sleep(30);
+
+      // Now should execute immediately again
       throttler.onScroll(200, callback);
 
       expect(callback).toHaveBeenCalledTimes(2);
+      expect(callback).toHaveBeenLastCalledWith(200);
     });
   });
 
   describe('dispose', () => {
-    it('should cancel pending callbacks', () => {
+    it('should cancel pending callbacks', async () => {
       throttler.onScroll(100, callback);
       throttler.onScroll(200, callback);
       throttler.dispose();
 
-      vi.advanceTimersByTime(100);
+      // Wait past throttle period
+      await sleep(30);
 
+      // Should still only have the first call
       expect(callback).toHaveBeenCalledTimes(1);
     });
   });

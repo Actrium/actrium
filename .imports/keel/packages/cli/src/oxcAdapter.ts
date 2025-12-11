@@ -79,15 +79,15 @@ export async function analyzeModuleIDs(code: string): Promise<ScanResult> {
       const anyStr = deepFindString(obj);
       if (anyStr) return anyStr;
       const objRecord = obj as Record<string, unknown>;
-      const v1 = pick(objRecord.value);
+      const v1 = pick(objRecord['value']);
       if (v1) return v1;
-      const v2 = pick(objRecord.raw);
+      const v2 = pick(objRecord['raw']);
       if (v2) return v2;
-      const v3 = pick(objRecord.cooked);
+      const v3 = pick(objRecord['cooked']);
       if (v3) return v3;
       // oxc may nest value objects, dig one level deeper
-      if (objRecord.value && typeof objRecord.value === 'object') {
-        const v = tryExtract(objRecord.value);
+      if (objRecord['value'] && typeof objRecord['value'] === 'object') {
+        const v = tryExtract(objRecord['value']);
         if (v) return v;
       }
       return null;
@@ -114,10 +114,17 @@ export async function analyzeModuleIDs(code: string): Promise<ScanResult> {
       const v = getStringLiteral(nodeWithSource.source);
       if (v) {
         const nodeWithLoc = node as ASTNode & { loc?: SourceLocation; span?: SourceLocation };
+        const loc = nodeWithLoc.loc ?? nodeWithLoc.span;
         if (String(type || '').includes('Export')) {
-          foundStatic.add(v); details.push({ moduleId: v, kind: 'export', loc: nodeWithLoc.loc ?? nodeWithLoc.span });
+          foundStatic.add(v);
+          const detail: ScanDetail = { moduleId: v, kind: 'export' };
+          if (loc !== undefined) detail.loc = loc;
+          details.push(detail);
         } else {
-          foundStatic.add(v); details.push({ moduleId: v, kind: 'import', loc: nodeWithLoc.loc ?? nodeWithLoc.span });
+          foundStatic.add(v);
+          const detail: ScanDetail = { moduleId: v, kind: 'import' };
+          if (loc !== undefined) detail.loc = loc;
+          details.push(detail);
         }
       }
     }
@@ -126,14 +133,26 @@ export async function analyzeModuleIDs(code: string): Promise<ScanResult> {
     if (type === 'CallExpression' && nodeWithCallee.callee && nodeWithCallee.callee.type === 'Identifier' && (nodeWithCallee.callee as ASTNode & { name?: string }).name === 'require') {
       const arg = nodeWithCallee.arguments?.[0];
       const v = getStringLiteral(arg);
-      const nodeWithLoc = node as ASTNode & { loc?: SourceLocation; span?: SourceLocation };
-      if (v) { foundStatic.add(v); details.push({ moduleId: v, kind: 'require', loc: nodeWithLoc.loc ?? nodeWithLoc.span }); }
+      if (v) {
+        foundStatic.add(v);
+        const nodeWithLoc = node as ASTNode & { loc?: SourceLocation; span?: SourceLocation };
+        const loc = nodeWithLoc.loc ?? nodeWithLoc.span;
+        const detail: ScanDetail = { moduleId: v, kind: 'require' };
+        if (loc !== undefined) detail.loc = loc;
+        details.push(detail);
+      }
     }
     // import('x') - different parsers may represent as ImportExpression or CallExpression(callee: Import)
     if (type === 'ImportExpression' && nodeWithSource.source) {
       const v = getStringLiteral(nodeWithSource.source);
-      const nodeWithLoc = node as ASTNode & { loc?: SourceLocation; span?: SourceLocation };
-      if (v) { foundDyn.add(v); details.push({ moduleId: v, kind: 'dynamic', loc: nodeWithLoc.loc ?? nodeWithLoc.span }); }
+      if (v) {
+        foundDyn.add(v);
+        const nodeWithLoc = node as ASTNode & { loc?: SourceLocation; span?: SourceLocation };
+        const loc = nodeWithLoc.loc ?? nodeWithLoc.span;
+        const detail: ScanDetail = { moduleId: v, kind: 'dynamic' };
+        if (loc !== undefined) detail.loc = loc;
+        details.push(detail);
+      }
       else dynNonLiteral += 1;
     }
     if (type === 'CallExpression' && nodeWithCallee.callee) {
@@ -144,8 +163,14 @@ export async function analyzeModuleIDs(code: string): Promise<ScanResult> {
       if (isImportIdent || isImportNode) {
         const arg = nodeWithCallee.arguments?.[0];
         const v = getStringLiteral(arg);
-        const nodeWithLoc = node as ASTNode & { loc?: SourceLocation; span?: SourceLocation };
-        if (v) { foundDyn.add(v); details.push({ moduleId: v, kind: 'dynamic', loc: nodeWithLoc.loc ?? nodeWithLoc.span }); }
+        if (v) {
+          foundDyn.add(v);
+          const nodeWithLoc = node as ASTNode & { loc?: SourceLocation; span?: SourceLocation };
+          const loc = nodeWithLoc.loc ?? nodeWithLoc.span;
+          const detail: ScanDetail = { moduleId: v, kind: 'dynamic' };
+          if (loc !== undefined) detail.loc = loc;
+          details.push(detail);
+        }
         else dynNonLiteral += 1;
       }
     }

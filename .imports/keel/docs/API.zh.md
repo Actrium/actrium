@@ -8,7 +8,7 @@ Rill 是一个轻量级的 React Native 动态 UI 渲染引擎，允许在沙箱
 
 ```
 rill/
-├── sdk          # 插件端 SDK (在沙箱中运行)
+├── sdk          # guest端 SDK (在沙箱中运行)
 ├── runtime      # 宿主端运行时
 ├── reconciler   # React 协调器
 └── devtools     # 调试工具
@@ -18,7 +18,7 @@ rill/
 
 ## SDK (rill/sdk)
 
-插件开发者使用的 SDK，在 QuickJS 沙箱中运行。
+guest开发者使用的 SDK，在 QuickJS 沙箱中运行。
 
 ### 虚组件
 
@@ -227,7 +227,7 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 ```tsx
 import { useHostEvent } from 'rill/sdk';
 
-function Plugin() {
+function Guest() {
   useHostEvent<{ force: boolean }>('REFRESH', (payload) => {
     console.log('Refreshing...', payload.force);
   });
@@ -253,7 +253,7 @@ interface Config {
   userId: string;
 }
 
-function Plugin() {
+function Guest() {
   const config = useConfig<Config>();
 
   return <Text>Theme: {config.theme}</Text>;
@@ -271,7 +271,7 @@ function Plugin() {
 ```tsx
 import { useSendToHost } from 'rill/sdk';
 
-function Plugin() {
+function Guest() {
   const sendToHost = useSendToHost();
 
   const handleComplete = () => {
@@ -311,17 +311,17 @@ engine.register({
   CustomButton: MyButton,
 });
 
-// 加载并执行插件
-await engine.loadBundle('https://cdn.example.com/plugin.js', {
+// 加载并执行guest
+await engine.loadBundle('https://cdn.example.com/guest.js', {
   theme: 'dark',
   userId: '12345',
 });
 
 // 监听事件
-engine.on('load', () => console.log('Plugin loaded'));
-engine.on('error', (error) => console.error('Plugin error:', error));
+engine.on('load', () => console.log('Guest loaded'));
+engine.on('error', (error) => console.error('Guest error:', error));
 engine.on('operation', (batch) => console.log('Operations:', batch));
-engine.on('destroy', () => console.log('Plugin destroyed'));
+engine.on('destroy', () => console.log('Guest destroyed'));
 
 // 发送事件到沙箱
 engine.sendEvent('REFRESH', { force: true });
@@ -346,7 +346,7 @@ engine.destroy();
 | 方法 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
 | register | components: ComponentMap | void | 注册组件 |
-| loadBundle | source: string, props?: object | Promise\<void\> | 加载插件 |
+| loadBundle | source: string, props?: object | Promise\<void\> | 加载guest |
 | sendEvent | eventName: string, payload?: unknown | void | 发送事件 |
 | updateConfig | config: object | void | 更新配置 |
 | destroy | - | void | 销毁引擎 |
@@ -365,10 +365,10 @@ engine.destroy();
 ```tsx
 import { EngineView } from 'rill/runtime';
 
-function PluginContainer() {
+function GuestContainer() {
   return (
     <EngineView
-      source="https://cdn.example.com/plugin.js"
+      source="https://cdn.example.com/guest.js"
       initialProps={{ theme: 'dark' }}
       components={{ CustomButton: MyButton }}
       onLoad={() => console.log('Loaded')}
@@ -623,25 +623,25 @@ const exported = timeline.export();
 
 ## CLI (rill/cli)
 
-命令行工具，用于构建插件。
+命令行工具，用于构建guest。
 
 ### 构建命令
 
 ```bash
-# 构建插件
-npx rill build src/plugin.tsx -o dist/bundle.js
+# 构建guest
+npx rill build src/guest.tsx -o dist/bundle.js
 
 # 监听模式
-npx rill build src/plugin.tsx -o dist/bundle.js --watch
+npx rill build src/guest.tsx -o dist/bundle.js --watch
 
 # 生成 sourcemap
-npx rill build src/plugin.tsx -o dist/bundle.js --sourcemap
+npx rill build src/guest.tsx -o dist/bundle.js --sourcemap
 
 # 不压缩
-npx rill build src/plugin.tsx -o dist/bundle.js --no-minify
+npx rill build src/guest.tsx -o dist/bundle.js --no-minify
 
 # 生成 metafile
-npx rill build src/plugin.tsx -o dist/bundle.js --metafile dist/meta.json
+npx rill build src/guest.tsx -o dist/bundle.js --metafile dist/meta.json
 ```
 
 ### 分析命令
@@ -657,7 +657,7 @@ npx rill analyze dist/bundle.js
 import { build, analyze } from 'rill/cli';
 
 await build({
-  entry: 'src/plugin.tsx',
+  entry: 'src/guest.tsx',
   outfile: 'dist/bundle.js',
   minify: true,
   sourcemap: false,
@@ -798,17 +798,17 @@ type StyleProp = StyleObject | StyleObject[] | null | undefined;
 
 ### 沙箱错误隔离
 
-插件中的错误不会影响宿主应用：
+guest中的错误不会影响宿主应用：
 
 ```tsx
-// 插件代码中的错误会被捕获
-function BuggyPlugin() {
-  throw new Error('Plugin crashed!');
+// guest代码中的错误会被捕获
+function BuggyGuest() {
+  throw new Error('Guest crashed!');
 }
 
 // 宿主端处理
 engine.on('error', (error) => {
-  console.error('Plugin error:', error);
+  console.error('Guest error:', error);
   // 显示降级 UI
 });
 ```

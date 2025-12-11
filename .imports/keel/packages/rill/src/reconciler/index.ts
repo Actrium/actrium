@@ -691,7 +691,7 @@ function cleanupNodeCallbacks(node: VNode, registry: CallbackRegistry): void {
 // ============ Render Entry ============
 
 /**
- * Reconciler instance data for each plugin
+ * Reconciler instance data for each guest
  */
 interface ReconcilerInstance {
   reconciler: RillReconciler;
@@ -703,7 +703,7 @@ interface ReconcilerInstance {
 
 /**
  * Map of sendToHost functions to their reconciler instances
- * This allows multiple plugins to each have their own isolated reconciler
+ * This allows multiple guests to each have their own isolated reconciler
  */
 const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
 
@@ -711,7 +711,7 @@ const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
  * Render React element
  *
  * Each unique sendToHost function gets its own isolated reconciler instance.
- * This allows multiple plugins to run simultaneously without interfering with each other.
+ * This allows multiple guests to run simultaneously without interfering with each other.
  */
 export function render(
   element: React.ReactElement,
@@ -720,7 +720,7 @@ export function render(
   let instance = reconcilerMap.get(sendToHost);
 
   if (!instance) {
-    // Create new reconciler instance for this plugin
+    // Create new reconciler instance for this guest
     const reconcilerInstance = createReconciler(sendToHost);
     const container: RootContainer = { children: [] };
     const root = reconcilerInstance.reconciler.createContainer(
@@ -750,7 +750,7 @@ export function render(
 }
 
 /**
- * Unmount a specific plugin instance
+ * Unmount a specific guest instance
  */
 export function unmount(sendToHost: SendToHost): void {
   const instance = reconcilerMap.get(sendToHost);
@@ -762,7 +762,7 @@ export function unmount(sendToHost: SendToHost): void {
 }
 
 /**
- * Unmount all plugin instances
+ * Unmount all guest instances
  */
 export function unmountAll(): void {
   reconcilerMap.forEach(instance => {
@@ -773,8 +773,8 @@ export function unmountAll(): void {
 }
 
 /**
- * Get callback registry for a specific plugin instance
- * @deprecated This function assumes a single plugin instance. Use the plugin's own callback management instead.
+ * Get callback registry for a specific guest instance
+ * @deprecated This function assumes a single guest instance. Use the guest's own callback management instead.
  */
 export function getCallbackRegistry(sendToHost?: SendToHost): CallbackRegistry | null {
   if (sendToHost) {

@@ -2,20 +2,20 @@
  * Engine Performance Benchmarks
  *
  * Tests core Engine operations:
- * - Plugin loading time
+ * - Bundle loading time
  * - Message passing latency (host→sandbox, sandbox→host)
  * - Event handling
  * - Configuration updates
  */
 
-import { describe, it, beforeEach, afterEach } from 'vitest';
+import { describe, it, beforeEach, afterEach } from 'bun:test';
 import { Engine } from '../runtime/engine';
 import { benchmark } from './utils/benchmark';
 import { measureMemory, formatMemoryMeasurement } from './utils/memory';
 import type { BenchmarkResult } from './utils/benchmark';
 
-// Mock QuickJS Provider
-function createMockQuickJSProvider() {
+// Mock Provider
+function createMockProvider() {
   return {
     createRuntime() {
       const globals = new Map<string, unknown>();
@@ -45,8 +45,8 @@ function createMockQuickJSProvider() {
   };
 }
 
-// Simple plugin code for testing
-const SIMPLE_PLUGIN = `
+// Simple bundle code for testing
+const SIMPLE_BUNDLE = `
   __sendToHost({
     version: 1,
     batchId: 1,
@@ -57,8 +57,8 @@ const SIMPLE_PLUGIN = `
   });
 `;
 
-// Medium complexity plugin
-const MEDIUM_PLUGIN = `
+// Medium complexity bundle
+const MEDIUM_BUNDLE = `
   const operations = [];
   for (let i = 1; i <= 10; i++) {
     operations.push({ op: 'CREATE', id: i, type: 'View', props: {} });
@@ -70,8 +70,8 @@ const MEDIUM_PLUGIN = `
   __sendToHost({ version: 1, batchId: 1, operations });
 `;
 
-// Large plugin with many operations
-const LARGE_PLUGIN = `
+// Large bundle with many operations
+const LARGE_BUNDLE = `
   const operations = [];
   for (let i = 1; i <= 100; i++) {
     operations.push({ op: 'CREATE', id: i, type: 'View', props: { index: i } });
@@ -89,7 +89,7 @@ describe('Engine Benchmarks', () => {
 
   beforeEach(() => {
     engine = new Engine({
-      quickjs: createMockQuickJSProvider(),
+      provider: createMockProvider(),
       debug: false,
     });
   });
@@ -121,7 +121,7 @@ describe('Engine Benchmarks', () => {
       'Engine.new',
       () => {
         const e = new Engine({
-          quickjs: createMockQuickJSProvider(),
+          provider: createMockProvider(),
           debug: false,
         });
         e.destroy();
@@ -131,12 +131,12 @@ describe('Engine Benchmarks', () => {
     results.push(result);
   });
 
-  it('benchmark: Simple plugin loading', async () => {
+  it('benchmark: Simple bundle loading', async () => {
     const result = await benchmark(
       'Engine.loadBundle (simple)',
       async () => {
-        const e = new Engine({ quickjs: createMockQuickJSProvider(), debug: false });
-        await e.loadBundle(SIMPLE_PLUGIN);
+        const e = new Engine({ provider: createMockProvider(), debug: false });
+        await e.loadBundle(SIMPLE_BUNDLE);
         e.destroy();
       },
       { iterations: 50, warmup: 5 }
@@ -144,12 +144,12 @@ describe('Engine Benchmarks', () => {
     results.push(result);
   });
 
-  it('benchmark: Medium plugin loading', async () => {
+  it('benchmark: Medium bundle loading', async () => {
     const result = await benchmark(
       'Engine.loadBundle (medium)',
       async () => {
-        const e = new Engine({ quickjs: createMockQuickJSProvider(), debug: false });
-        await e.loadBundle(MEDIUM_PLUGIN);
+        const e = new Engine({ provider: createMockProvider(), debug: false });
+        await e.loadBundle(MEDIUM_BUNDLE);
         e.destroy();
       },
       { iterations: 50, warmup: 5 }
@@ -157,12 +157,12 @@ describe('Engine Benchmarks', () => {
     results.push(result);
   });
 
-  it('benchmark: Large plugin loading', async () => {
+  it('benchmark: Large bundle loading', async () => {
     const result = await benchmark(
       'Engine.loadBundle (large)',
       async () => {
-        const e = new Engine({ quickjs: createMockQuickJSProvider(), debug: false });
-        await e.loadBundle(LARGE_PLUGIN);
+        const e = new Engine({ provider: createMockProvider(), debug: false });
+        await e.loadBundle(LARGE_BUNDLE);
         e.destroy();
       },
       { iterations: 30, warmup: 3 }
@@ -171,7 +171,7 @@ describe('Engine Benchmarks', () => {
   });
 
   it('benchmark: Send event to sandbox', async () => {
-    await engine.loadBundle(SIMPLE_PLUGIN);
+    await engine.loadBundle(SIMPLE_BUNDLE);
 
     const result = await benchmark(
       'Engine.sendEvent',
@@ -184,7 +184,7 @@ describe('Engine Benchmarks', () => {
   });
 
   it('benchmark: Update config', async () => {
-    await engine.loadBundle(SIMPLE_PLUGIN);
+    await engine.loadBundle(SIMPLE_BUNDLE);
 
     const result = await benchmark(
       'Engine.updateConfig',
@@ -211,7 +211,7 @@ describe('Engine Benchmarks', () => {
   it('memory: Engine initialization', async () => {
     const measurement = await measureMemory(() => {
       const e = new Engine({
-        quickjs: createMockQuickJSProvider(),
+        provider: createMockProvider(),
         debug: false,
       });
       e.destroy();
@@ -220,9 +220,9 @@ describe('Engine Benchmarks', () => {
     console.log('\n' + formatMemoryMeasurement(measurement));
   });
 
-  it('memory: Plugin loading', async () => {
+  it('memory: Bundle loading', async () => {
     const measurement = await measureMemory(async () => {
-      await engine.loadBundle(LARGE_PLUGIN);
+      await engine.loadBundle(LARGE_BUNDLE);
     });
 
     console.log('\n' + formatMemoryMeasurement(measurement));

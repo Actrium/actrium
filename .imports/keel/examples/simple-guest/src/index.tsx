@@ -1,5 +1,5 @@
 /**
- * 示例插件
+ * Example Guest
  *
  * 展示 Rill SDK 的基本用法
  */
@@ -91,9 +91,9 @@ function ListItem({ title, index }: { title: string; index: number }) {
 }
 
 /**
- * 主插件组件
+ * Main guest component
  */
-export default function Plugin() {
+export default function Guest() {
   const config = useConfig<Config>();
   const [refreshCount, setRefreshCount] = useState(0);
 
@@ -133,7 +133,7 @@ export default function Plugin() {
             color: textColor,
           }}
         >
-          {config.title || 'Rill Plugin'}
+          {config.title || 'Rill Guest'}
         </Text>
         <Text
           style={{

@@ -1,7 +1,7 @@
 /**
  * Rill SDK
  *
- * Virtual components and Hooks for plugin development
+ * Virtual components and Hooks for Guest development
  * Zero runtime dependencies - all implementations injected by reconciler at runtime
  */
 
@@ -206,25 +206,28 @@ export interface ActivityIndicatorProps extends BaseProps {
  *
  * @param eventName Event name
  * @param callback Callback function
+ * @returns Unsubscribe function (if available)
  *
  * @example
  * ```tsx
- * useHostEvent('REFRESH', () => {
+ * const unsubscribe = useHostEvent('REFRESH', () => {
  *   console.log('Host requested refresh');
  *   fetchData();
  * });
+ * // Later: unsubscribe?.();
  * ```
  */
 export function useHostEvent<T = unknown>(
   eventName: string,
   callback: (payload: T) => void
-): void {
+): (() => void) | undefined {
   // Actual implementation injected by reconciler at runtime
   // SDK only provides type signature
   const g = globalThis as Record<string, unknown>;
   if (typeof globalThis !== 'undefined' && '__useHostEvent' in globalThis) {
-    (g['__useHostEvent'] as (name: string, cb: (payload: T) => void) => void)(eventName, callback);
+    return (g['__useHostEvent'] as (name: string, cb: (payload: T) => void) => () => void)(eventName, callback);
   }
+  return undefined;
 }
 
 /**

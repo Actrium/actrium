@@ -2,7 +2,7 @@
 /**
  * Rill CLI
  *
- * Plugin bundler tool
+ * Guest bundler tool
  */
 
 import { program } from 'commander';
@@ -12,28 +12,35 @@ import { version } from '../package.json';
 
 program
   .name('rill')
-  .description('Rill plugin CLI - Build dynamic UI plugins for React Native')
+  .description('Rill CLI - Build dynamic UI guests for React Native')
   .version(version);
 
 program
   .command('build')
-  .description('Build a plugin bundle')
-  .argument('<entry>', 'Entry file path (e.g., src/plugin.tsx)')
+  .description('Build a guest bundle (with strict SDK guard by default)')
+  .argument('<entry>', 'Entry file path (e.g., src/guest.tsx)')
   .option('-o, --outfile <path>', 'Output file path', 'dist/bundle.js')
   .option('--no-minify', 'Disable minification')
   .option('--sourcemap', 'Generate sourcemap')
   .option('--watch', 'Watch mode for development')
   .option('--metafile <path>', 'Output build metadata to file')
+  .option('--no-strict', 'Disable strict post-build dependency guard (not recommended)')
+  .option('--strict-peer-versions', 'Fail build if React/reconciler versions mismatch recommended matrix')
   .action(async (entry: string, options: Partial<BuildOptions>) => {
     try {
-      await build({
+      const buildOpts: BuildOptions = {
         entry,
         outfile: options.outfile ?? 'dist/bundle.js',
         minify: options.minify ?? true,
         sourcemap: options.sourcemap ?? false,
         watch: options.watch ?? false,
-        metafile: options.metafile,
-      });
+        strict: options.strict ?? true,
+        strictPeerVersions: options.strictPeerVersions ?? false,
+      };
+      if (options.metafile !== undefined) {
+        buildOpts.metafile = options.metafile;
+      }
+      await build(buildOpts);
     } catch (error) {
       console.error('Build failed:', error);
       process.exit(1);
@@ -41,9 +48,32 @@ program
   });
 
 program
+  .command('analyze')
+  .description('Analyze a built guest bundle for disallowed runtime deps')
+  .argument('<bundle>', 'Bundle file path (e.g., dist/bundle.js)')
+  .option('-w, --whitelist <mods...>', 'Whitelisted module IDs', ['react','react-native','react/jsx-runtime','rill/reconciler'])
+  .option('--fail-on-violation', 'Fail when non-whitelisted deps are found')
+  .option('--treat-eval-as-violation', 'Treat eval() usage as violation')
+  .option('--treat-dynamic-non-literal-as-violation', 'Treat dynamic import with non-literal specifier as violation')
+  .action(async (bundle: string, opts: { whitelist?: string[]; failOnViolation?: boolean; treatEvalAsViolation?: boolean; treatDynamicNonLiteralAsViolation?: boolean }) => {
+    try {
+      const { analyze } = await import('./build');
+      const analyzeOpts: { whitelist?: string[]; failOnViolation?: boolean; treatEvalAsViolation?: boolean; treatDynamicNonLiteralAsViolation?: boolean } = {};
+      if (opts.whitelist !== undefined) analyzeOpts.whitelist = opts.whitelist;
+      if (opts.failOnViolation !== undefined) analyzeOpts.failOnViolation = opts.failOnViolation;
+      if (opts.treatEvalAsViolation !== undefined) analyzeOpts.treatEvalAsViolation = opts.treatEvalAsViolation;
+      if (opts.treatDynamicNonLiteralAsViolation !== undefined) analyzeOpts.treatDynamicNonLiteralAsViolation = opts.treatDynamicNonLiteralAsViolation;
+      await analyze(bundle, analyzeOpts);
+    } catch (error) {
+      console.error('Analyze failed:', error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('init')
-  .description('Initialize a new plugin project')
-  .argument('[name]', 'Project name', 'my-rill-plugin')
+  .description('Initialize a new guest project')
+  .argument('[name]', 'Project name', 'my-rill-guest')
   .action(async (name: string) => {
     const fs = await import('fs');
     const path = await import('path');
@@ -64,7 +94,7 @@ program
         version: '0.1.0',
         private: true,
         scripts: {
-          build: 'rill build src/plugin.tsx -o dist/bundle.js',
+          build: 'rill build src/guest.tsx -o dist/bundle.js',
           analyze: 'rill analyze dist/bundle.js'
         },
         devDependencies: {
@@ -73,14 +103,14 @@ program
         dependencies: {
           react: '^18.0.0',
           'react/jsx-runtime': '^18.0.0',
-          'rill': 'latest',
+          rill: 'latest',
           'rill/sdk': 'latest'
         }
       };
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
     }
 
-    // tsconfig.json
+    // tsconfig.json (best practices)
     const tsconfigPath = path.join(targetDir, 'tsconfig.json');
     if (!fs.existsSync(tsconfigPath)) {
       fs.writeFileSync(tsconfigPath, JSON.stringify({
@@ -88,40 +118,61 @@ program
           target: 'ES2020',
           module: 'ESNext',
           jsx: 'react-jsx',
-          moduleResolution: 'Node',
+          moduleResolution: 'Bundler',
+          moduleDetection: 'force',
+          allowArbitraryExtensions: false,
+          allowJs: false,
+          resolveJsonModule: true,
+          isolatedModules: true,
+          useDefineForClassFields: true,
           strict: true,
           skipLibCheck: true,
-          esModuleInterop: true
+          esModuleInterop: true,
+          forceConsistentCasingInFileNames: true,
+          noFallthroughCasesInSwitch: true,
+          noUncheckedIndexedAccess: true,
+          noImplicitOverride: true,
+          noPropertyAccessFromIndexSignature: true,
+          verbatimModuleSyntax: true,
+          types: ["bun-types"],
+          paths: {
+            // Type-only mapping if needed in editor (build-time will inline via vite alias)
+            "rill/sdk": ["node_modules/rill/sdk/index.d.ts"]
+          }
         },
-        include: ['src']
+        include: ["src"]
       }, null, 2));
     }
 
-    // src/plugin.tsx
-    const pluginPath = path.join(srcDir, 'plugin.tsx');
-    if (!fs.existsSync(pluginPath)) {
-      const plugin = `import * as React from 'react';
-import { View, Text } from 'react-native';
-import { withRill } from 'rill/sdk';
+    // vite.config.ts
+    const viteConfigPath = path.join(targetDir, 'vite.config.ts');
+    if (!fs.existsSync(viteConfigPath)) {
+      const tpl = fs.readFileSync(path.join(__dirname, 'templates', 'vite.config.ts.tpl'), 'utf-8');
+      fs.writeFileSync(viteConfigPath, tpl);
+    }
 
-function Plugin() {
+    // src/guest.tsx
+    const guestPath = path.join(srcDir, 'guest.tsx');
+    if (!fs.existsSync(guestPath)) {
+      const guest = `import * as React from 'react';
+import { View, Text } from 'rill/sdk';
+
+export default function Guest() {
   return (
     <View>
-      <Text>Hello from Rill Plugin</Text>
+      <Text>Hello from Rill Guest</Text>
     </View>
   );
 }
-
-export default withRill(Plugin);
 `;
-      fs.writeFileSync(pluginPath, plugin);
+      fs.writeFileSync(guestPath, guest);
     }
 
-    console.log(`Initialized plugin project at ${targetDir}`);
+    console.log(`Initialized guest project at ${targetDir}`);
     console.log('Next steps:');
     console.log(`  cd ${name}`);
     console.log('  npm install');
-    console.log('  npx rill build src/plugin.tsx -o dist/bundle.js');
+    console.log('  npx rill build src/guest.tsx -o dist/bundle.js');
   });
 
 program.parse();

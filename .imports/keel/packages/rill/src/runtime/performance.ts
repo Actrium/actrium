@@ -42,6 +42,10 @@ export class OperationMerger {
     if (operations.length <= 1) return operations;
 
     const result: Operation[] = [];
+    const created = new Set<number>();
+    const deleted = new Set<number>();
+    const lastInsertForChild = new Map<number, Extract<Operation, { op: 'INSERT' }>>();
+    const lastReorderForParent = new Map<number, Extract<Operation, { op: 'REORDER' }>>();
     const updateMap = new Map<number, Extract<Operation, { op: 'UPDATE' }>>();
 
     for (const op of operations) {
@@ -68,6 +72,15 @@ export class OperationMerger {
         }
 
         case 'DELETE': {
+          // If node was created in this batch and then deleted before flush, drop both
+          if (created.has(op.id)) {
+            // remove the CREATE from result
+            const idx = result.findIndex((o) => o.op === 'CREATE' && o.id === op.id);
+            if (idx !== -1) result.splice(idx, 1);
+            created.delete(op.id);
+            // also drop this DELETE
+            break;
+          }
           // When deleting a node, remove all previous updates for that node
           updateMap.delete(op.id);
           // Also remove UPDATE operations for this node from result
@@ -81,9 +94,37 @@ export class OperationMerger {
           break;
         }
 
+        case 'CREATE': {
+          // If a node was previously deleted in this batch and recreated, just treat as CREATE
+          created.add(op.id);
+          result.push(op);
+          break;
+        }
+        case 'INSERT': {
+          // Keep only the last INSERT for the same childId within the batch (position churn)
+          const ins = op as Extract<Operation, { op: 'INSERT' }>;
+          lastInsertForChild.set(ins.childId, ins);
+          // do not push now; we'll finalize later
+          break;
+        }
+        case 'REORDER': {
+          // Keep only the last REORDER for each parentId
+          const rop = op as Extract<Operation, { op: 'REORDER' }>;
+          lastReorderForParent.set(rop.parentId, rop);
+          break;
+        }
         default:
           result.push(op);
       }
+    }
+
+    // Append deduplicated INSERTs
+    for (const ins of lastInsertForChild.values()) {
+      result.push(ins);
+    }
+    // Append deduplicated REORDERs (last one per parent)
+    for (const rop of lastReorderForParent.values()) {
+      result.push(rop);
     }
 
     return result;
@@ -170,11 +211,24 @@ export class ThrottledScheduler {
 
     if (timeSinceLastFlush >= this.config.throttleMs) {
       // Use microtask to ensure synchronous code completes
-      queueMicrotask(() => this.flush());
+      // Check for queueMicrotask first, then fallback to setTimeout/Promise
+      if (typeof globalThis.queueMicrotask === 'function') {
+        globalThis.queueMicrotask(() => this.flush());
+      } else if (typeof globalThis.setTimeout === 'function') {
+        globalThis.setTimeout(() => this.flush(), 0);
+      } else {
+        Promise.resolve().then(() => this.flush());
+      }
     } else {
       // Delay until next throttle cycle
       const delay = this.config.throttleMs - timeSinceLastFlush;
-      this.timeoutId = setTimeout(() => this.flush(), delay);
+      if (typeof globalThis.setTimeout === 'function') {
+        this.timeoutId = globalThis.setTimeout(() => this.flush(), delay);
+      } else if (typeof globalThis.queueMicrotask === 'function') {
+        globalThis.queueMicrotask(() => this.flush());
+      } else {
+        Promise.resolve().then(() => this.flush());
+      }
     }
   }
 
@@ -183,7 +237,9 @@ export class ThrottledScheduler {
    */
   flush(): void {
     if (this.timeoutId) {
-      clearTimeout(this.timeoutId);
+      if (typeof globalThis.clearTimeout === 'function') {
+        globalThis.clearTimeout(this.timeoutId);
+      }
       this.timeoutId = null;
     }
     if (this.rafId && typeof cancelAnimationFrame !== 'undefined') {
@@ -455,13 +511,20 @@ export class ScrollThrottler {
     this.scheduledCallback = () => callback(scrollTop);
 
     if (!this.timeoutId) {
-      this.timeoutId = setTimeout(() => {
+      const scheduleCallback = () => {
         if (this.scheduledCallback) {
           this.execute(scrollTop, this.scheduledCallback as (scrollTop: number) => void);
           this.scheduledCallback = null;
         }
         this.timeoutId = null;
-      }, this.config.throttleMs - timeDelta);
+      };
+
+      if (typeof globalThis.setTimeout === 'function') {
+        this.timeoutId = globalThis.setTimeout(scheduleCallback, this.config.throttleMs - timeDelta) as any;
+      } else {
+        // Fallback: schedule using microtask if setTimeout not available
+        Promise.resolve().then(scheduleCallback);
+      }
     }
   }
 
@@ -476,7 +539,9 @@ export class ScrollThrottler {
    */
   dispose(): void {
     if (this.timeoutId) {
-      clearTimeout(this.timeoutId);
+      if (typeof globalThis.clearTimeout === 'function') {
+        globalThis.clearTimeout(this.timeoutId);
+      }
       this.timeoutId = null;
     }
     this.scheduledCallback = null;

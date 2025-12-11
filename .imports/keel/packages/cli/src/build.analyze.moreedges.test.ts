@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, mock, beforeEach ,  spyOn } from 'bun:test';
 import path from 'path';
 import fs from 'fs';
 
@@ -14,7 +14,7 @@ describe('CLI Analyze - more string/comment edges', () => {
     const { analyze } = await import('./build');
     const code = `// import('left-pad') in comment\n/* require('lodash') */\nconsole.log('ok');`;
     fs.writeFileSync(bundle('comment.js'), code);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/comment.js', { whitelist: ['react'], failOnViolation: false });
     // should not include non-whitelisted warning from comments
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('non-whitelisted modules'));
@@ -25,7 +25,7 @@ describe('CLI Analyze - more string/comment edges', () => {
     const { analyze } = await import('./build');
     const code = `const a = "require('left-pad')"; const b = 'import(\'lodash\')';`;
     fs.writeFileSync(bundle('strings.js'), code);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/strings.js', { whitelist: ['react'], failOnViolation: false });
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('non-whitelisted modules'));
     warnSpy.mockRestore();
@@ -35,7 +35,7 @@ describe('CLI Analyze - more string/comment edges', () => {
     const { analyze } = await import('./build');
     const code = `import('left-pad');`;
     fs.writeFileSync(bundle('real-dyn.js'), code);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/real-dyn.js', { whitelist: ['react'], failOnViolation: false });
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('non-whitelisted modules'));
     warnSpy.mockRestore();

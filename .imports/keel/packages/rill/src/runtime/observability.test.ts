@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, mock } from 'bun:test';
 import { Engine } from './engine';
 
 // Type definitions for mock QuickJS
@@ -65,11 +65,12 @@ describe('Observability & Health', () => {
 
   it('emits metrics for sendToSandbox and receiver', async () => {
     const provider = createMockQuickJSProvider();
-    const onMetric = vi.fn();
+    const onMetric = mock();
     const engine = new Engine({ quickjs: provider, debug: false, onMetric });
     await engine.loadBundle('console.log("hi")');
     engine.createReceiver(() => {});
-    engine.sendEvent('PING', null);
+    // Use sendToSandbox directly to ensure we wait for the async operation
+    await engine.sendToSandbox({ type: 'HOST_EVENT', eventName: 'PING', payload: null });
     // render metrics
     engine.getReceiver()!.render();
     const names = onMetric.mock.calls.map((c) => c[0]);

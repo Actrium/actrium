@@ -2,7 +2,7 @@
  * Receiver unit tests
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, mock, afterEach, spyOn } from 'bun:test';
 import { Receiver, SendToSandbox } from './receiver';
 import { ComponentRegistry } from './registry';
 import type { OperationBatch, HostMessage } from '../types';
@@ -37,17 +37,17 @@ describe('Receiver', () => {
     });
 
     sentMessages = [];
-    sendToSandbox = vi.fn((message: HostMessage) => {
+    sendToSandbox = mock((message: HostMessage) => {
       sentMessages.push(message);
     });
 
-    onUpdate = vi.fn();
+    onUpdate = mock();
     receiver = new Receiver(registry, sendToSandbox, onUpdate);
   });
 
   afterEach(() => {
     receiver.clear();
-    vi.clearAllMocks();
+    // mocks cleared;
   });
 
   describe('applyBatch', () => {
@@ -198,7 +198,7 @@ describe('Receiver', () => {
     });
 
     it('should warn when updating non-existent node', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
       receiver.applyBatch({
         version: 1,
@@ -627,7 +627,7 @@ describe('Receiver', () => {
     });
 
     it('should warn for unregistered component types', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
       receiver.applyBatch({
         version: 1,

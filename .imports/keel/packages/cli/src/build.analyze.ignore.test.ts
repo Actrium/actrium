@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, mock, beforeEach ,  spyOn } from 'bun:test';
 import path from 'path';
 import fs from 'fs';
 
@@ -14,7 +14,7 @@ describe('CLI Analyze - ignore patterns', () => {
     const { analyze } = await import('./build');
     const code = `import('data:text/javascript,export default 1'); import('https://cdn.example.com/x.js');`;
     fs.writeFileSync(bundle('urls.js'), code);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/urls.js', { whitelist: ['react'], failOnViolation: false });
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('non-whitelisted modules'));
     warnSpy.mockRestore();
@@ -24,7 +24,7 @@ describe('CLI Analyze - ignore patterns', () => {
     const { analyze } = await import('./build');
     const code = `console.log(import.meta.url);`;
     fs.writeFileSync(bundle('importmeta.js'), code);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/importmeta.js', { whitelist: ['react'], failOnViolation: false });
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
@@ -34,7 +34,7 @@ describe('CLI Analyze - ignore patterns', () => {
     const { analyze } = await import('./build');
     const code = `__webpack_require__('left-pad'); __vite_ssr_import__('lodash');`;
     fs.writeFileSync(bundle('bundler.js'), code);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/bundler.js', { whitelist: ['react'], failOnViolation: false });
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();

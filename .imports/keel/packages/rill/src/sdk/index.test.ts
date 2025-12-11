@@ -2,7 +2,7 @@
  * SDK unit tests
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import {
   View,
   Text,
@@ -112,17 +112,17 @@ describe('Hooks', () => {
     });
 
     it('should call global __useHostEvent when available', () => {
-      const mockUseHostEvent = vi.fn();
+      const mockUseHostEvent = mock();
       (globalThis as Record<string, unknown>).__useHostEvent = mockUseHostEvent;
 
-      const callback = vi.fn();
+      const callback = mock();
       useHostEvent('REFRESH', callback);
 
       expect(mockUseHostEvent).toHaveBeenCalledWith('REFRESH', callback);
     });
 
     it('should not throw when __useHostEvent is not available', () => {
-      const callback = vi.fn();
+      const callback = mock();
 
       expect(() => {
         useHostEvent('REFRESH', callback);
@@ -130,14 +130,14 @@ describe('Hooks', () => {
     });
 
     it('should accept typed payload callback', () => {
-      const mockUseHostEvent = vi.fn();
+      const mockUseHostEvent = mock();
       (globalThis as Record<string, unknown>).__useHostEvent = mockUseHostEvent;
 
       interface RefreshPayload {
         timestamp: number;
       }
 
-      const callback = vi.fn((payload: RefreshPayload) => {
+      const callback = mock((payload: RefreshPayload) => {
         console.log(payload.timestamp);
       });
 
@@ -197,7 +197,7 @@ describe('Hooks', () => {
     });
 
     it('should return global __sendEventToHost when available', () => {
-      const mockSend = vi.fn();
+      const mockSend = mock();
       (globalThis as Record<string, unknown>).__sendEventToHost = mockSend;
 
       const send = useSendToHost();
@@ -207,7 +207,7 @@ describe('Hooks', () => {
     });
 
     it('should return noop function with warning when not available', () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
       const send = useSendToHost();
       send('TEST_EVENT');
@@ -220,7 +220,7 @@ describe('Hooks', () => {
     });
 
     it('should accept optional payload', () => {
-      const mockSend = vi.fn();
+      const mockSend = mock();
       (globalThis as Record<string, unknown>).__sendEventToHost = mockSend;
 
       const send = useSendToHost();

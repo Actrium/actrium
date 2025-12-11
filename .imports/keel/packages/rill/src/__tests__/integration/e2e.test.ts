@@ -1,15 +1,15 @@
 /**
  * End-to-end integration tests
  *
- * Simulates a complete plugin lifecycle:
- * 1. Compile plugin code
+ * Simulates a complete guest lifecycle:
+ * 1. Compile guest code
  * 2. Execute in sandbox
  * 3. Generate operations
  * 4. Host rendering
  * 5. Two-way communication
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import React from 'react';
 import { Engine } from '../../runtime/engine';
 import { ComponentRegistry } from '../../runtime/registry';
@@ -107,7 +107,7 @@ const MockTouchable: React.FC<{
 // ============ Integration tests ============
 
 describe('E2E Integration Tests', () => {
-  describe('Complete Plugin Lifecycle', () => {
+  describe('Complete Guest Lifecycle', () => {
     let engine: Engine;
     let receivedBatches: OperationBatch[];
     let sentMessages: HostMessage[];
@@ -128,10 +128,10 @@ describe('E2E Integration Tests', () => {
       engine.destroy();
     });
 
-    it('should execute simple plugin and generate operations', async () => {
-      // Simple plugin code
-      const pluginCode = `
-        // 模拟插件执行
+    it('should execute simple guest and generate operations', async () => {
+      // Simple guest code
+      const guestCode = `
+        // Simulate guest execution
         __sendToHost({
           version: 1,
           batchId: 1,
@@ -150,8 +150,8 @@ describe('E2E Integration Tests', () => {
         updateCount++;
       });
 
-      // Load and execute plugin
-      await engine.loadBundle(pluginCode, { theme: 'dark' });
+      // Load and execute guest
+      await engine.loadBundle(guestCode, { theme: 'dark' });
 
       // Wait for updates
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -162,7 +162,7 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should handle config access', async () => {
-      const pluginCode = `
+      const guestCode = `
         const config = __getConfig();
         console.log('Config:', config);
 
@@ -179,7 +179,7 @@ describe('E2E Integration Tests', () => {
       `;
 
       const receiver = engine.createReceiver(() => {});
-      await engine.loadBundle(pluginCode, { theme: 'dark' });
+      await engine.loadBundle(guestCode, { theme: 'dark' });
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -187,7 +187,7 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should handle multiple batches', async () => {
-      const pluginCode = `
+      const guestCode = `
         // 第一批操作
         __sendToHost({
           version: 1,
@@ -210,7 +210,7 @@ describe('E2E Integration Tests', () => {
       `;
 
       const receiver = engine.createReceiver(() => {});
-      await engine.loadBundle(pluginCode);
+      await engine.loadBundle(guestCode);
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -218,7 +218,7 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should handle node updates', async () => {
-      const pluginCode = `
+      const guestCode = `
         __sendToHost({
           version: 1,
           batchId: 1,
@@ -243,7 +243,7 @@ describe('E2E Integration Tests', () => {
         updateCount++;
       });
 
-      await engine.loadBundle(pluginCode);
+      await engine.loadBundle(guestCode);
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // 由于 microtask 批处理，两个批次可能合并为一次更新
@@ -252,7 +252,7 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should handle node removal', async () => {
-      const pluginCode = `
+      const guestCode = `
         __sendToHost({
           version: 1,
           batchId: 1,
@@ -276,7 +276,7 @@ describe('E2E Integration Tests', () => {
       `;
 
       const receiver = engine.createReceiver(() => {});
-      await engine.loadBundle(pluginCode);
+      await engine.loadBundle(guestCode);
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -360,7 +360,7 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should handle function props through callback registry', async () => {
-      const onPress = vi.fn();
+      const onPress = mock();
       const fnId = callbackRegistry.register(onPress);
 
       collector.add({
@@ -451,7 +451,7 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should send events from host to sandbox', async () => {
-      const pluginCode = `
+      const guestCode = `
         // 设置事件处理器
         globalThis.__handleHostEvent = function(eventName, payload) {
           console.log('Received event:', eventName, payload);
@@ -480,7 +480,7 @@ describe('E2E Integration Tests', () => {
       `;
 
       const receiver = engine.createReceiver(() => {});
-      await engine.loadBundle(pluginCode);
+      await engine.loadBundle(guestCode);
 
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(receiver.nodeCount).toBe(1);
@@ -495,7 +495,7 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should handle config updates', async () => {
-      const pluginCode = `
+      const guestCode = `
         let currentTheme = __getConfig().theme || 'light';
 
         globalThis.__handleHostMessage = function(message) {
@@ -516,7 +516,7 @@ describe('E2E Integration Tests', () => {
       `;
 
       engine.createReceiver(() => {});
-      await engine.loadBundle(pluginCode, { theme: 'light' });
+      await engine.loadBundle(guestCode, { theme: 'light' });
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -540,8 +540,8 @@ describe('E2E Integration Tests', () => {
       engine.destroy();
     });
 
-    it('should not crash host when plugin throws error', async () => {
-      const pluginCode = `
+    it('should not crash host when guest throws error', async () => {
+      const guestCode = `
         // 正常初始化
         __sendToHost({
           version: 1,
@@ -554,14 +554,14 @@ describe('E2E Integration Tests', () => {
 
         // 之后抛出错误
         setTimeout(() => {
-          throw new Error('Plugin error!');
+          throw new Error('Guest error!');
         }, 10);
       `;
 
       const receiver = engine.createReceiver(() => {});
 
       // 加载不应该失败
-      await engine.loadBundle(pluginCode);
+      await engine.loadBundle(guestCode);
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -571,14 +571,14 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should handle missing component gracefully', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
       engine.register({
         View: MockView,
         // Text 组件未注册
       });
 
-      const pluginCode = `
+      const guestCode = `
         __sendToHost({
           version: 1,
           batchId: 1,
@@ -592,7 +592,7 @@ describe('E2E Integration Tests', () => {
       `;
 
       const receiver = engine.createReceiver(() => {});
-      await engine.loadBundle(pluginCode);
+      await engine.loadBundle(guestCode);
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -700,8 +700,8 @@ describe('Full Stack Simulation', () => {
       renderCount++;
     });
 
-    // 3. 模拟插件代码
-    const pluginCode = `
+    // 3. Simulate guest code
+    const guestCode = `
       // 模拟 React 组件渲染后的操作
       const operations = [];
       let nodeId = 0;
@@ -778,7 +778,7 @@ describe('Full Stack Simulation', () => {
     `;
 
     // 4. 加载并执行
-    await engine.loadBundle(pluginCode);
+    await engine.loadBundle(guestCode);
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     // 5. 验证结果

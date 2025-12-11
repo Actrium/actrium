@@ -5,6 +5,11 @@
  */
 
 import React from 'react';
+
+// Polyfill queueMicrotask if not available
+const safeQueueMicrotask = typeof queueMicrotask !== 'undefined'
+  ? queueMicrotask
+  : (callback: () => void) => Promise.resolve().then(callback);
 import type {
   Operation,
   OperationBatch,
@@ -18,7 +23,7 @@ import type { ComponentRegistry } from './registry';
 /**
  * Message send function type
  */
-export type SendToSandbox = (message: HostMessage) => void;
+export type SendToSandbox = (message: HostMessage) => void | Promise<void>;
 
 /**
  * Check if value is serialized function
@@ -35,7 +40,11 @@ function isSerializedFunction(value: unknown): value is SerializedFunction {
 /**
  * Instruction Receiver
  */
-export interface ReceiverOptions { onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void; maxBatchSize?: number }
+export interface ReceiverOptions {
+  onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
+  maxBatchSize?: number;
+  debug?: boolean;
+}
 
 export class Receiver {
   private nodeMap = new Map<number, NodeInstance>();
@@ -44,7 +53,11 @@ export class Receiver {
   private sendToSandbox: SendToSandbox;
   private onUpdate: () => void;
   private updateScheduled = false;
-  private opts: { onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void; maxBatchSize: number };
+  private opts: {
+    onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
+    maxBatchSize: number;
+    debug: boolean;
+  };
 
   constructor(
     registry: ComponentRegistry,
@@ -55,7 +68,17 @@ export class Receiver {
     this.registry = registry;
     this.sendToSandbox = sendToSandbox;
     this.onUpdate = onUpdate;
-    this.opts = { onMetric: options?.onMetric, maxBatchSize: options?.maxBatchSize ?? 5000 };
+    this.opts = {
+      onMetric: options?.onMetric,
+      maxBatchSize: options?.maxBatchSize ?? 5000,
+      debug: options?.debug ?? false,
+    };
+  }
+
+  private log(...args: unknown[]): void {
+    if (this.opts.debug) {
+      console.log('[rill:Receiver]', ...args);
+    }
   }
 
   /**
@@ -80,6 +103,14 @@ export class Receiver {
       }
     }
     this.opts.onMetric?.('receiver.applyBatch', Date.now() - start, { applied, skipped, failed, total: batch.operations.length });
+
+    if (skipped > 0) {
+      // Inform guest about backpressure/skip to allow adaptive throttling upstream
+      try {
+        this.sendToSandbox({ type: 'HOST_EVENT', eventName: 'RECEIVER_BACKPRESSURE', payload: { batchId: batch.batchId, skipped, applied, total: batch.operations.length } });
+      } catch {}
+    }
+
     this.scheduleUpdate();
   }
 
@@ -91,9 +122,11 @@ export class Receiver {
     this.updateScheduled = true;
 
     // Use microtask to ensure batch operations complete before updating
-    queueMicrotask(() => {
+    safeQueueMicrotask(() => {
       this.updateScheduled = false;
+      this.log('calling onUpdate, rootChildren:', this.rootChildren.length);
       this.onUpdate();
+      this.log('onUpdate completed');
     });
   }
 
@@ -101,6 +134,19 @@ export class Receiver {
    * Apply single operation
    */
   private applyOperation(op: Operation): void {
+    if (this.opts.onMetric) {
+      this.opts.onMetric('receiver.operation', 0, { op: op.op, id: op.id });
+    }
+    // Add detailed logging for operations
+    if (op.op === 'APPEND') {
+      this.log(`Applying APPEND: childId=${op.childId}, parentId=${op.parentId}`);
+    } else if (op.op === 'INSERT') {
+      this.log(`Applying INSERT: childId=${op.childId}, parentId=${op.parentId}, index=${op.index}`);
+    } else if (op.op === 'CREATE') {
+      this.log(`Applying CREATE: id=${op.id}, type=${op.type}`);
+    }
+
+
     switch (op.op) {
       case 'CREATE':
         this.handleCreate(op);
@@ -288,7 +334,14 @@ export class Receiver {
   /**
    * Deserialize value
    */
-  private deserializeValue(value: unknown): unknown {
+  private deserializeValue(value: unknown, depth = 0): unknown {
+    const MAX_DEPTH = 50;
+
+    if (depth > MAX_DEPTH) {
+      console.warn('[rill:Receiver] Maximum deserialization depth exceeded');
+      return undefined;
+    }
+
     if (isSerializedFunction(value)) {
       // Create proxy function
       return (...args: unknown[]) => {
@@ -301,13 +354,13 @@ export class Receiver {
     }
 
     if (Array.isArray(value)) {
-      return value.map((item) => this.deserializeValue(item));
+      return value.map((item) => this.deserializeValue(item, depth + 1));
     }
 
     if (typeof value === 'object' && value !== null) {
       const result: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(value)) {
-        result[k] = this.deserializeValue(v);
+        result[k] = this.deserializeValue(v, depth + 1);
       }
       return result;
     }
@@ -320,7 +373,9 @@ export class Receiver {
    */
   render(): React.ReactElement | string | null {
     const t0 = Date.now();
+    this.log('render() called, rootChildren:', this.rootChildren.length, 'nodeMap:', this.nodeMap.size);
     if (this.rootChildren.length === 0) {
+      this.log('render() returning null (no root children)');
       this.opts.onMetric?.('receiver.render', Date.now() - t0, { nodeCount: this.nodeMap.size });
       return null;
     }
@@ -329,6 +384,7 @@ export class Receiver {
     const firstChild = this.rootChildren[0];
     if (this.rootChildren.length === 1 && firstChild) {
       const el = this.renderNode(firstChild);
+      this.log('render() returning single element, type:', (el as any)?.type?.name || typeof el);
       this.opts.onMetric?.('receiver.render', Date.now() - t0, { nodeCount: this.nodeMap.size });
       return el;
     }
@@ -339,6 +395,7 @@ export class Receiver {
       null,
       ...this.rootChildren.map((id) => this.renderNode(id))
     );
+    this.log('render() returning Fragment with', this.rootChildren.length, 'children');
     this.opts.onMetric?.('receiver.render', Date.now() - t0, { nodeCount: this.nodeMap.size });
     return el;
   }

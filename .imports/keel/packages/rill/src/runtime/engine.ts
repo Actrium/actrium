@@ -6,8 +6,21 @@
  */
 
 import * as React from 'react';
-import * as ReactNative from 'react-native';
 import * as ReactJSXRuntime from 'react/jsx-runtime';
+
+// Lazy-load react-native to avoid bundler issues in non-RN environments (e.g., Bun tests)
+let ReactNative: typeof import('react-native') | undefined;
+function getReactNative(): typeof import('react-native') {
+  if (!ReactNative) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      ReactNative = require('react-native');
+    } catch {
+      throw new Error('[rill] react-native is not available in this environment');
+    }
+  }
+  return ReactNative;
+}
 
 import * as RillReconciler from '../reconciler';
 
@@ -22,15 +35,26 @@ import { ComponentRegistry } from './registry';
 import type { ComponentMap } from './registry';
 import { Receiver } from './receiver';
 
+import type { IEngine, EngineEvents, GuestMessage, EngineHealth } from './IEngine';
+
 /**
  * Engine configuration options
  */
 export interface EngineOptions {
   /**
-   * QuickJS provider for creating sandbox runtime
-   * Required - must be provided by the host application
+   * JS Engine provider for creating sandbox runtime.
+   * Optional - if not provided, a default will be selected based on the environment.
    */
-  quickjs: QuickJSProvider;
+  provider?: JSEngineProvider;
+
+  /**
+   * Explicitly select a sandbox mode.
+   * - `vm`: (Default on Node/Bun) Uses Node's `vm` module for a secure, native sandbox.
+   * - `worker`: Uses `@sebastianwessel/quickjs` in a Web Worker.
+   * - `none`: Runs code directly in the host context via `eval`. Insecure, but fast and easy to debug.
+   * If not set, the best available provider for the environment is chosen automatically.
+   */
+  sandbox?: 'vm' | 'worker' | 'none';
 
   /**
    * Execution timeout (milliseconds)
@@ -73,24 +97,8 @@ export interface EngineOptions {
   receiverMaxBatchSize?: number;
 }
 
-/**
- * Engine event types
- */
-/**
- * Message from plugin to host
- */
-export interface PluginMessage {
-  event: string;
-  payload: unknown;
-}
-
-export interface EngineEvents {
-  load: () => void;
-  error: (error: Error) => void;
-  destroy: () => void;
-  operation: (batch: OperationBatch) => void;
-  message: (message: PluginMessage) => void;
-}
+// Re-export from IEngine for backward compatibility
+export type { IEngine, EngineEvents, GuestMessage, EngineHealth } from './IEngine';
 
 /**
  * Event listener
@@ -100,15 +108,29 @@ type EventListener<T> = (data: T) => void;
 /**
  * QuickJS interface (provided by react-native-quickjs)
  */
-export interface QuickJSContext {
+export interface JSEngineContext {
   eval(code: string): unknown;
+  evalAsync?(code: string): Promise<unknown>;
   setGlobal(name: string, value: unknown): void;
   getGlobal(name: string): unknown;
   dispose(): void;
+
+  /**
+   * Set an interrupt handler for execution budget control.
+   * The handler is called periodically during execution.
+   * Return `true` to interrupt execution, `false` to continue.
+   * Not all providers support this - check capabilities before use.
+   */
+  setInterruptHandler?(handler: () => boolean): void;
+
+  /**
+   * Clear the interrupt handler.
+   */
+  clearInterruptHandler?(): void;
 }
 
-export interface QuickJSRuntime {
-  createContext(): QuickJSContext;
+export interface JSEngineRuntime {
+  createContext(): JSEngineContext;
   dispose(): void;
 }
 
@@ -116,8 +138,8 @@ export interface QuickJSRuntime {
  * QuickJS provider interface
  * Allows injection of QuickJS runtime implementation
  */
-export interface QuickJSProvider {
-  createRuntime(): Promise<QuickJSRuntime> | QuickJSRuntime;
+export interface JSEngineProvider {
+  createRuntime(): Promise<JSEngineRuntime> | JSEngineRuntime;
 }
 
 /** Error types for better classification */
@@ -126,7 +148,9 @@ export class ExecutionError extends Error { constructor(message: string) { super
 export class TimeoutError extends Error { constructor(message: string) { super(message); this.name = 'TimeoutError'; } }
 
 /**
- * Rill Engine
+ * Rill Engine - Standalone JS sandbox engine
+ *
+ * For multi-tenant scenarios with shared worker pools, use PooledEngine instead.
  *
  * @example
  * ```typescript
@@ -138,39 +162,86 @@ export class TimeoutError extends Error { constructor(message: string) { super(m
 // Global engine counter for debugging
 let engineIdCounter = 0;
 
-export class Engine {
-  private runtime: QuickJSRuntime | null = null;
-  private context: QuickJSContext | null = null;
+export class Engine implements IEngine {
+  private runtime: JSEngineRuntime | null = null;
+  private context: JSEngineContext | null = null;
   private registry: ComponentRegistry;
   private receiver: Receiver | null = null;
   private config: Record<string, unknown> = {};
-  private options: Required<Omit<EngineOptions, 'logger' | 'requireWhitelist' | 'onMetric' | 'receiverMaxBatchSize'>> & { logger: NonNullable<EngineOptions['logger']>, requireWhitelist: ReadonlySet<string>, onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void, receiverMaxBatchSize: number };
+  private options: {
+    provider?: JSEngineProvider;
+    timeout: number;
+    debug: boolean;
+    logger: NonNullable<EngineOptions['logger']>;
+    requireWhitelist: ReadonlySet<string>;
+    onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
+    receiverMaxBatchSize: number;
+  };
   private destroyed = false;
   private loaded = false;
   private errorCount = 0;
   private lastErrorAt: number | null = null;
   private readonly engineId: number;
+  private _timeoutTimer?: ReturnType<typeof setTimeout>;
 
   // Event listeners
   private listeners: Map<keyof EngineEvents, Set<EventListener<unknown>>> = new Map();
 
-  constructor(options: EngineOptions) {
-    if (!options.quickjs) {
-      throw new Error('[rill] QuickJS provider is required');
-    }
-
+  constructor(options: EngineOptions = {}) {
     const defaultWhitelist = new Set(['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler']);
+    // Provide a safe fallback logger if console is not available
+    const defaultLogger = typeof console !== 'undefined' ? console : {
+      log: () => {},
+      warn: () => {},
+      error: () => {},
+      info: () => {},
+      debug: () => {},
+    };
     this.options = {
-      quickjs: options.quickjs,
+      provider: options.provider,
       timeout: options.timeout ?? 5000,
       debug: options.debug ?? false,
-      logger: options.logger ?? console,
+      logger: options.logger ?? defaultLogger,
       requireWhitelist: new Set(options.requireWhitelist ?? Array.from(defaultWhitelist)),
       onMetric: options.onMetric,
       receiverMaxBatchSize: options.receiverMaxBatchSize ?? 5000,
     };
 
     this.registry = new ComponentRegistry();
+
+    // Initialize JS engine provider
+    // Priority: explicit provider > DefaultJSEngineProvider auto-detect
+    if (!this.options.provider) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { DefaultJSEngineProvider } = require('./DefaultJSEngineProvider');
+        this.options.provider = DefaultJSEngineProvider.create({
+          timeout: this.options.timeout,
+          sandbox: options.sandbox,
+        });
+        if (this.options.debug) this.options.logger.log('[rill] Initialized DefaultJSEngineProvider');
+      } catch (e) {
+        this.options.logger.error('[rill] Failed to initialize DefaultJSEngineProvider:', e);
+        // Provide a minimal fallback for tests - use isolated scope instead of globalThis
+        const isolatedScope: Record<string, unknown> = {};
+        this.options.provider = {
+          createRuntime: () => ({
+            createContext: () => ({
+              eval: (code: string) => {
+                // Create a function with the isolated scope
+                const fn = new Function(...Object.keys(isolatedScope), code);
+                return fn(...Object.values(isolatedScope));
+              },
+              setGlobal: (name: string, value: unknown) => { isolatedScope[name] = value; },
+              getGlobal: (name: string) => isolatedScope[name],
+              dispose: () => {},
+            }),
+            dispose: () => {},
+          }),
+        };
+      }
+    }
+    
     this.engineId = ++engineIdCounter;
 
     if (this.options.debug) {
@@ -189,7 +260,7 @@ export class Engine {
   }
 
   /**
-   * Load and execute plugin bundle
+   * Load and execute Guest code
    */
   async loadBundle(
     source: string,
@@ -200,7 +271,7 @@ export class Engine {
     }
 
     if (this.loaded) {
-      throw new Error('[rill] Engine already loaded a bundle');
+      throw new Error('[rill] Engine already loaded a Guest');
     }
 
     this.config = initialProps ?? {};
@@ -217,23 +288,55 @@ export class Engine {
       // Initialize sandbox and execute
       await this.initializeRuntime();
 
-      // Best-effort timeout guard: only effective if eval yields to event loop
-      if (this.options.timeout > 0) {
-        let timedOut = false;
-        const timer = setTimeout(() => {
-          timedOut = true;
-          this.options.logger.error('[rill] Bundle execution timeout');
-        }, this.options.timeout);
+      // Execute with timeout protection
+      // Note: Hard timeout enforcement depends on the provider:
+      // - VMProvider: Uses vm.Script timeout (hard interrupt)
+      // - WorkerJSEngineProvider: Uses QuickJS executionTimeout (hard interrupt)
+      // - RNQuickJSProvider: Depends on native package implementation
+      // - NoSandboxProvider: No timeout support (dev-only)
+      //
+      // The timer below serves as a fallback safety net for async providers
+      // and will forcibly destroy the engine if execution hangs.
+
+      const timeout = this.options.timeout;
+      const hasTimeout = timeout > 0 && typeof globalThis.setTimeout === 'function';
+
+      if (hasTimeout) {
+        // Use Promise.race for hard timeout enforcement on async providers
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          const timer = globalThis.setTimeout(() => {
+            // Fatal: execution exceeded timeout, force destroy to prevent snowball
+            this.options.logger.error(`[rill] Fatal: Bundle execution exceeded timeout ${timeout}ms, destroying engine`);
+            const error = new TimeoutError(`[rill] Execution exceeded timeout ${timeout}ms (hard limit)`);
+
+            // Emit fatal error before destroying
+            this.emit('fatalError', error);
+
+            // Force destroy the engine to prevent resource leak
+            this.forceDestroy();
+
+            reject(error);
+          }, timeout);
+
+          // Store timer reference for cleanup
+          this._timeoutTimer = timer;
+        });
+
         try {
-          this.executeBundle(code);
-          if (timedOut) {
-            throw new TimeoutError(`[rill] Execution exceeded timeout ${this.options.timeout}ms`);
-          }
+          await Promise.race([
+            this.executeBundle(code),
+            timeoutPromise,
+          ]);
         } finally {
-          clearTimeout(timer);
+          // Clean up timer if execution completed normally
+          if (this._timeoutTimer) {
+            globalThis.clearTimeout(this._timeoutTimer);
+            this._timeoutTimer = undefined;
+          }
         }
       } else {
-        this.executeBundle(code);
+        // No timeout protection available
+        await this.executeBundle(code);
       }
 
       this.loaded = true;
@@ -277,11 +380,14 @@ export class Engine {
    */
   private async initializeRuntime(): Promise<void> {
     const start = Date.now();
-    this.runtime = await this.options.quickjs.createRuntime();
+    if (!this.options.provider) {
+      throw new Error('[rill] QuickJS provider not initialized');
+    }
+    this.runtime = await this.options.provider.createRuntime();
     this.context = this.runtime.createContext();
 
     this.injectPolyfills();
-    this.injectRuntimeAPI();
+    await this.injectRuntimeAPI();
 
     const dur = Date.now() - start;
     this.options.onMetric?.('engine.initializeRuntime', dur);
@@ -296,27 +402,44 @@ export class Engine {
     const logger = this.options.logger;
     const debug = this.options.debug;
 
+    // Save native timer functions to avoid recursion issues (with fallbacks for test environments)
+    const nativeSetTimeout = typeof globalThis.setTimeout === 'function'
+      ? globalThis.setTimeout.bind(globalThis)
+      : (fn: () => void, _ms?: number) => { Promise.resolve().then(fn); return 0; };
+    const nativeClearTimeout = typeof globalThis.clearTimeout === 'function'
+      ? globalThis.clearTimeout.bind(globalThis)
+      : () => {};
+    const nativeSetInterval = typeof globalThis.setInterval === 'function'
+      ? globalThis.setInterval.bind(globalThis)
+      : () => 0;
+    const nativeClearInterval = typeof globalThis.clearInterval === 'function'
+      ? globalThis.clearInterval.bind(globalThis)
+      : () => {};
+    const nativeQueueMicrotask = typeof globalThis.queueMicrotask === 'function'
+      ? globalThis.queueMicrotask.bind(globalThis)
+      : (fn: () => void) => Promise.resolve().then(fn);
+
     // Inject React and ReactJSXRuntime as global variables
-    // This is required for plugins compiled with rill CLI
+    // This is required for bundles compiled with rill CLI
     this.context.setGlobal('React', React);
     this.context.setGlobal('ReactJSXRuntime', ReactJSXRuntime);
 
     // console
     this.context.setGlobal('console', {
       log: (...args: unknown[]) => {
-        if (debug) logger.log('[Plugin]', ...args);
+        if (debug) logger.log('[Guest]', ...args);
       },
-      warn: (...args: unknown[]) => logger.warn('[Plugin]', ...args),
-      error: (...args: unknown[]) => logger.error('[Plugin]', ...args),
+      warn: (...args: unknown[]) => logger.warn('[Guest]', ...args),
+      error: (...args: unknown[]) => logger.error('[Guest]', ...args),
       debug: (...args: unknown[]) => {
-        if (debug) logger.log('[Plugin:debug]', ...args);
+        if (debug) logger.log('[Guest:debug]', ...args);
       },
       info: (...args: unknown[]) => {
-        if (debug) logger.log('[Plugin:info]', ...args);
+        if (debug) logger.log('[Guest:info]', ...args);
       },
     });
 
-    // require: module loader for plugin bundle
+    // require: module loader for Guest code
     this.context.setGlobal('require', (moduleName: string) => {
       if (debug) {
         logger.log('[rill:require]', moduleName);
@@ -346,12 +469,12 @@ export class Engine {
 
     this.context.setGlobal('setTimeout', (fn: () => void, delay: number) => {
       const id = ++timeoutId;
-      const handle = setTimeout(() => {
+      const handle = nativeSetTimeout(() => {
         timeoutMap.delete(id);
         try {
           fn();
         } catch (error) {
-          logger.error('[Plugin] setTimeout error:', error);
+          logger.error('[Guest] setTimeout error:', error);
         }
       }, delay);
       timeoutMap.set(id, handle);
@@ -361,7 +484,7 @@ export class Engine {
     this.context.setGlobal('clearTimeout', (id: number) => {
       const handle = timeoutMap.get(id);
       if (handle) {
-        clearTimeout(handle);
+        nativeClearTimeout(handle);
         timeoutMap.delete(id);
       }
     });
@@ -372,11 +495,11 @@ export class Engine {
 
     this.context.setGlobal('setInterval', (fn: () => void, delay: number) => {
       const id = ++intervalId;
-      const handle = setInterval(() => {
+      const handle = nativeSetInterval(() => {
         try {
           fn();
         } catch (error) {
-          logger.error('[Plugin] setInterval error:', error);
+          logger.error('[Guest] setInterval error:', error);
         }
       }, delay);
       intervalMap.set(id, handle);
@@ -386,18 +509,18 @@ export class Engine {
     this.context.setGlobal('clearInterval', (id: number) => {
       const handle = intervalMap.get(id);
       if (handle) {
-        clearInterval(handle);
+        nativeClearInterval(handle);
         intervalMap.delete(id);
       }
     });
 
     // queueMicrotask
     this.context.setGlobal('queueMicrotask', (fn: () => void) => {
-      queueMicrotask(() => {
+      nativeQueueMicrotask(() => {
         try {
           fn();
         } catch (error) {
-          logger.error('[Plugin] queueMicrotask error:', error);
+          logger.error('[Guest] queueMicrotask error:', error);
         }
       });
     });
@@ -406,11 +529,36 @@ export class Engine {
   /**
    * Inject runtime API into sandbox
    */
-  private injectRuntimeAPI(): void {
+  private async injectRuntimeAPI(): Promise<void> {
     if (!this.context) return;
 
     const debug = this.options.debug;
     const logger = this.options.logger;
+
+    // Inject runtime helpers for host-guest event communication
+    const RUNTIME_HELPERS = `
+(function(){
+  if (typeof globalThis.__hostEventListeners === 'undefined') {
+    var __hostEventListeners = new Map();
+    globalThis.__useHostEvent = function(eventName, callback){
+      if (!__hostEventListeners.has(eventName)) __hostEventListeners.set(eventName, new Set());
+      var set = __hostEventListeners.get(eventName);
+      set.add(callback);
+      return function(){ try { set.delete(callback); } catch(_){} };
+    };
+    globalThis.__handleHostEvent = function(eventName, payload){
+      var set = __hostEventListeners.get(eventName);
+      if (set) {
+        set.forEach(function(cb){ try { cb(payload); } catch(e) { console.error('[rill] Host event listener error:', e); } });
+      }
+    };
+  }
+})();`;
+    try {
+      await this.evalCode(RUNTIME_HELPERS);
+    } catch (e) {
+      logger.warn('[rill] Failed to inject runtime helpers:', e);
+    }
 
     // __sendToHost: Send operations to host
     this.context.setGlobal('__sendToHost', (batch: OperationBatch) => {
@@ -436,7 +584,7 @@ export class Engine {
       '__sendEventToHost',
       (eventName: string, payload?: unknown) => {
         if (debug) {
-          logger.log('[rill] Plugin event:', eventName, payload);
+          logger.log('[rill] Guest event:', eventName, payload);
         }
         this.emit('message', { event: eventName, payload });
       }
@@ -452,16 +600,29 @@ export class Engine {
   }
 
   /**
+   * Helper to evaluate code - uses evalAsync if available (for Worker providers),
+   * otherwise falls back to sync eval
+   */
+  private async evalCode(code: string): Promise<void> {
+    if (!this.context) return;
+    if (this.context.evalAsync) { // Check evalAsync directly on context
+      await this.context.evalAsync(code);
+    } else {
+      this.context.eval(code);
+    }
+  }
+
+  /**
    * Execute bundle code in sandbox
    */
-  private executeBundle(code: string): void {
+  private async executeBundle(code: string): Promise<void> {
     const start = Date.now();
     if (!this.context) {
       throw new Error('[rill] Context not initialized');
     }
 
     try {
-      this.context.eval(code);
+      await this.evalCode(code);
       const dur = Date.now() - start;
       this.options.onMetric?.('engine.executeBundle', dur, { size: code.length });
     } catch (error) {
@@ -474,13 +635,13 @@ export class Engine {
   /**
    * Handle messages from host
    */
-  private handleHostMessage(message: HostMessage): void {
+  private async handleHostMessage(message: HostMessage): Promise<void> {
     switch (message.type) {
       case 'CALL_FUNCTION':
-        this.handleCallFunction(message);
+        await this.handleCallFunction(message);
         break;
       case 'HOST_EVENT':
-        this.handleHostEvent(message);
+        await this.handleHostEvent(message);
         break;
       case 'CONFIG_UPDATE':
         this.config = { ...this.config, ...message.config };
@@ -494,11 +655,11 @@ export class Engine {
   /**
    * Handle callback function invocation
    */
-  private handleCallFunction(message: CallFunctionMessage): void {
+  private async handleCallFunction(message: CallFunctionMessage): Promise<void> {
     if (!this.context) return;
 
     try {
-      this.context.eval(
+      await this.evalCode(
         `__invokeCallback("${message.fnId}", ${JSON.stringify(message.args)})`
       );
     } catch (error) {
@@ -509,11 +670,11 @@ export class Engine {
   /**
    * Handle host event
    */
-  private handleHostEvent(message: HostEventMessage): void {
+  private async handleHostEvent(message: HostEventMessage): Promise<void> {
     if (!this.context) return;
 
     try {
-      this.context.eval(
+      await this.evalCode(
         `__handleHostEvent("${message.eventName}", ${JSON.stringify(message.payload)})`
       );
     } catch (error) {
@@ -524,10 +685,10 @@ export class Engine {
   /**
    * Send message to sandbox
    */
-  sendToSandbox(message: HostMessage): void {
+  async sendToSandbox(message: HostMessage): Promise<void> {
     if (this.destroyed || !this.context) return;
     const start = Date.now();
-    this.context.eval(`__handleHostMessage(${JSON.stringify(message)})`);
+    await this.evalCode(`__handleHostMessage(${JSON.stringify(message)})`);
     this.options.onMetric?.('engine.sendToSandbox', Date.now() - start, { size: JSON.stringify(message).length });
   }
 
@@ -560,7 +721,7 @@ export class Engine {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    this.listeners.get(event)!.add(listener as EventListener<unknown>);
+    this.listeners.get(event)!.add(listener);
 
     return () => {
       this.listeners.get(event)?.delete(listener as EventListener<unknown>);
@@ -568,10 +729,11 @@ export class Engine {
   }
 
   /**
-   * Send event to sandbox plugin
+   * Send event to sandbox guest
    */
   sendEvent(eventName: string, payload?: SerializedValue): void {
-    this.sendToSandbox({
+    // Fire-and-forget for backward compatibility, but still awaits internally for Worker providers
+    void this.sendToSandbox({
       type: 'HOST_EVENT',
       eventName,
       payload: payload ?? null,
@@ -583,7 +745,8 @@ export class Engine {
    */
   updateConfig(config: Record<string, SerializedValue>): void {
     this.config = { ...this.config, ...config };
-    this.sendToSandbox({
+    // Fire-and-forget for backward compatibility, but still awaits internally for Worker providers
+    void this.sendToSandbox({
       type: 'CONFIG_UPDATE',
       config,
     });
@@ -639,13 +802,14 @@ export class Engine {
   /**
    * Health snapshot for observability
    */
-  getHealth(): { loaded: boolean; destroyed: boolean; errorCount: number; lastErrorAt: number | null; receiverNodes: number } {
+  getHealth(): EngineHealth {
     return {
       loaded: this.loaded,
       destroyed: this.destroyed,
       errorCount: this.errorCount,
       lastErrorAt: this.lastErrorAt,
       receiverNodes: this.receiver?.nodeCount ?? 0,
+      batching: false,
     };
   }
 
@@ -669,5 +833,43 @@ export class Engine {
     this.runtime = null;
 
     this.listeners.clear();
+  }
+
+  /**
+   * Force destroy engine without emitting events.
+   * Used for fatal error recovery (e.g., timeout) to prevent snowball effects.
+   * This is more aggressive than destroy() - it doesn't emit 'destroy' event
+   * to avoid potential callback execution during error recovery.
+   */
+  private forceDestroy(): void {
+    if (this.destroyed) return;
+
+    this.destroyed = true;
+    this.loaded = false;
+
+    // Don't emit 'destroy' event during force destroy to avoid callbacks
+
+    this.receiver?.clear();
+    this.receiver = null;
+
+    try {
+      this.context?.dispose();
+    } catch {
+      // Ignore errors during force dispose
+    }
+    this.context = null;
+
+    try {
+      this.runtime?.dispose();
+    } catch {
+      // Ignore errors during force dispose
+    }
+    this.runtime = null;
+
+    // Keep listeners for fatalError handling, clear after
+    // Give handlers a chance to process, then clear
+    queueMicrotask(() => {
+      this.listeners.clear();
+    });
   }
 }

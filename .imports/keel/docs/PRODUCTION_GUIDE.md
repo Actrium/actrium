@@ -5,7 +5,7 @@ This guide summarizes recommended settings and operational practices to run Rill
 ## 1. Runtime hardening
 
 - Require whitelist
-  - Pass `requireWhitelist` in EngineOptions when creating Engine. Only these modules can be `require()`ed by the plugin bundle.
+  - Pass `requireWhitelist` in EngineOptions when creating Engine. Only these modules can be `require()`ed by the guest bundle.
   - Default whitelist: `react`, `react-native`, `react/jsx-runtime`, `rill/reconciler`.
 - Execution timeout
   - Use `timeout` option (default 5000ms). While QuickJS `eval` runs synchronously, the guard catches long-running tasks that yield to event loop. Consider using separate worker/isolate if strict CPU time slicing is required.
@@ -19,13 +19,13 @@ This guide summarizes recommended settings and operational practices to run Rill
     - `engine.initializeRuntime` (ms)
     - `engine.executeBundle` (ms, { size })
 - Batch limits
-  - If the plugin can emit very large batches, configure a maximum batch size in the host and split/skip overly large batches before calling `receiver.applyBatch`.
+  - If the guest can emit very large batches, configure a maximum batch size in the host and split/skip overly large batches before calling `receiver.applyBatch`.
 
 ## 2. Observability
 
 - Logging
   - Provide a structured logger via `logger` option. Enable `debug` in pre-production.
-  - Surface plugin-side logs via the injected `console`.
+  - Surface guest-side logs via the injected `console`.
 - Metrics
   - Forward `onMetric` events to your metrics system (Datadog/Prometheus/Logcat, etc.).
 - Health checks
@@ -36,9 +36,9 @@ This guide summarizes recommended settings and operational practices to run Rill
 - Sandbox
   - Use the `QuickJSProvider` (WASM-based) in production to ensure isolation from the host.
 - Module access
-  - Keep whitelist minimal; do not expose Node built-ins or dynamic loaders to the plugin.
+  - Keep whitelist minimal; do not expose Node built-ins or dynamic loaders to the guest.
 - Callbacks
-  - Always validate payloads from the plugin before applying to UI. Prefer strongly typed props.
+  - Always validate payloads from the guest before applying to UI. Prefer strongly typed props.
 
 ## 4. Performance recommendations
 
@@ -47,7 +47,7 @@ This guide summarizes recommended settings and operational practices to run Rill
 - Virtual lists
   - For long lists, wire `VirtualScrollCalculator` and `ScrollThrottler` with tuned parameters.
 - Memory hygiene
-  - Call `engine.destroy()` when the plugin is no longer needed.
+  - Call `engine.destroy()` when the guest is no longer needed.
 
 ## 5. CI/CD & packaging
 
@@ -56,7 +56,7 @@ This guide summarizes recommended settings and operational practices to run Rill
 - Linting
   - `@typescript-eslint/consistent-type-imports` is enabled to avoid bundler parse edge cases.
 - Bundles
-  - Use CLI `build` with `--format=iife` by default for plugins. Run `build analyze` to examine output.
+  - Use CLI `build` with `--format=iife` by default for guests. Run `build analyze` to examine output.
 
 ## 6. Host integration checklist
 
@@ -105,8 +105,8 @@ await analyze('dist/bundle.js', { whitelist: ['react', 'react/jsx-runtime'], fai
 
 - Init scaffold
 ```bash
-rill init my-rill-plugin
-cd my-rill-plugin && npm install
+rill init my-rill-guest
+cd my-rill-guest && npm install
 npm run build
 ```
 

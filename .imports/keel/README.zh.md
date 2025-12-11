@@ -6,8 +6,8 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine. (Chin
 
 ## 特性 (This file will be deprecated; please refer to docs/en/*.zh.md)
 
-- **类 React 开发体验**：使用 JSX 和 Hooks 编写插件
-- **完全沙箱隔离**：基于 QuickJS，插件崩溃不影响宿主
+- **类 React 开发体验**：使用 JSX 和 Hooks 编写guest
+- **完全沙箱隔离**：基于 QuickJS，guest崩溃不影响宿主
 - **轻量高效**：无 WebView 开销，原生渲染性能
 - **灵活扩展**：支持注册自定义业务组件
 
@@ -35,26 +35,26 @@ engine.register({
   StepList: NativeStepList,
 });
 
-// 3. 渲染插件
+// 3. 渲染guest
 function App() {
   return (
     <EngineView
       engine={engine}
-      bundleUrl="https://cdn.example.com/plugin.js"
+      bundleUrl="https://cdn.example.com/guest.js"
       initialProps={{ theme: 'dark' }}
-      onLoad={() => console.log('Plugin loaded')}
-      onError={(err) => console.error('Plugin error:', err)}
+      onLoad={() => console.log('Guest loaded')}
+      onError={(err) => console.error('Guest error:', err)}
     />
   );
 }
 ```
 
-### 插件端开发
+### guest端开发
 
 ```tsx
 import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/sdk';
 
-export default function MyPlugin() {
+export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
 
   useHostEvent('REFRESH', () => {
@@ -63,7 +63,7 @@ export default function MyPlugin() {
 
   return (
     <View style={{ flex: 1, padding: 20 }}>
-      <Text style={{ fontSize: 24 }}>Hello from Plugin!</Text>
+      <Text style={{ fontSize: 24 }}>Hello from Guest!</Text>
       <Text>Theme: {config.theme}</Text>
       <TouchableOpacity onPress={() => console.log('Pressed!')}>
         <Text>Click Me</Text>
@@ -73,17 +73,17 @@ export default function MyPlugin() {
 }
 ```
 
-### 构建插件
+### 构建guest
 
 ```bash
 # 安装 CLI
 npm install -g rill
 
 # 构建
-rill build src/plugin.tsx -o dist/bundle.js
+rill build src/guest.tsx -o dist/bundle.js
 
 # 开发模式
-rill build src/plugin.tsx --watch --no-minify --sourcemap
+rill build src/guest.tsx --watch --no-minify --sourcemap
 ```
 
 ## 架构
@@ -96,7 +96,7 @@ rill build src/plugin.tsx --watch --no-minify --sourcemap
 │                            │                                     │
 │                            ▼                                     │
 │                    ┌───────────────────┐                        │
-│                    │  Plugin Bundle.js  │                        │
+│                    │  Guest Bundle.js  │                        │
 │                    │  (React + SDK)     │                        │
 │                    └───────────────────┘                        │
 │                            │                                     │
@@ -112,9 +112,9 @@ rill build src/plugin.tsx --watch --no-minify --sourcemap
 
 | 模块 | 路径 | 说明 |
 |------|------|------|
-| SDK | `rill/sdk` | 插件开发套件，虚组件和 Hooks |
+| SDK | `rill/sdk` | guest开发套件，虚组件和 Hooks |
 | Runtime | `rill` | 宿主运行时，Engine 和 EngineView |
-| CLI | `rill` (bin) | 插件打包工具 |
+| CLI | `rill` (bin) | guest打包工具 |
 
 ## API
 
@@ -132,10 +132,10 @@ interface EngineOptions {
 // 注册组件
 engine.register({ ComponentName: ReactComponent });
 
-// 加载插件
+// 加载guest
 await engine.loadBundle(bundleUrl, initialProps);
 
-// 发送事件到插件
+// 发送事件到guest
 engine.sendEvent('EVENT_NAME', payload);
 
 // 更新配置
@@ -170,6 +170,95 @@ send('EVENT_NAME', payload);
 - `TouchableOpacity` - 可触摸组件
 
 ## 性能优化
+
+
+## Host ↔ Guest 事件
+
+- guest（guest）通过 SDK 的 `useHostEvent(event, callback)` 订阅宿主事件。
+- 宿主通过 `engine.sendEvent(eventName, payload)` 发送事件。
+- 取消订阅：`const off = useHostEvent('EVT', cb); off?.();` 保存返回值，在卸载时调用以移除监听。
+
+guest示例：
+
+```tsx
+import * as React from 'react';
+import { View, Text } from 'rill/sdk';
+import { useHostEvent, useSendToHost } from 'rill/sdk';
+
+export default function Guest() {
+  const send = useSendToHost();
+  React.useEffect(() => {
+    const off = useHostEvent('PING', (payload: { ok: number }) => {
+      // 处理宿主事件
+      send('ACK', { got: payload.ok });
+    });
+    return () => { off && off(); };
+  }, []);
+  return <View><Text>Ready</Text></View>;
+}
+```
+
+宿主示例：
+
+```ts
+import { Engine } from 'rill';
+const engine = new Engine({ quickjs });
+engine.on('message', (m) => { /* m.event, m.payload */ });
+engine.sendEvent('PING', { ok: 1 });
+```
+
+说明：
+- Engine 在运行时注入 `__useHostEvent`/`__handleHostEvent` 的兜底实现，即使打包产物没有 CLI banner 也能工作。
+- 为了性能，请使用稳定回调，并在组件卸载时取消订阅。
+
+## SDK 编译期内联与严格守卫
+
+目标：guest产物在运行时不能 require/import `rill/sdk`，SDK 仅用于类型与编译期。
+
+- 使用 rill CLI（Vite lib build, IIFE）构建，CLI 会设置 alias 使 `rill/sdk` 能被完全内联/摇树。
+- 构建后 CLI 会运行严格守卫（analyze），若发现非白名单依赖（如 `rill/sdk`）将直接失败。
+
+命令：
+
+```bash
+# 构建（默认开启严格守卫）
+rill build src/guest.tsx -o dist/bundle.js
+
+# 分析已构建 bundle
+rill analyze dist/bundle.js \
+  --fail-on-violation \
+  --treat-eval-as-violation \
+  --treat-dynamic-non-literal-as-violation
+```
+
+运行时白名单：`react`、`react-native`、`react/jsx-runtime`、`rill/reconciler`。
+
+如 bundle 仍包含 `require('rill/sdk')`，analyze 将 fail-fast 并给出提示。
+
+## 宿主集成（正确 API）
+
+```ts
+import { Engine } from 'rill';
+import { DefaultComponents } from 'rill/components';
+
+const engine = new Engine({ quickjs });
+engine.register(DefaultComponents);
+const receiver = engine.createReceiver(() => {/* 触发宿主刷新 */});
+await engine.loadBundle(codeOrUrl);
+```
+
+说明：
+- 使用 `register(components)`（不是 `registerComponent`）。
+- 使用 `loadBundle(source)`（不是 `loadGuest`）。
+- 通过 `new Engine({ quickjs })` 提供 QuickJS provider。
+
+## init 模板默认
+
+`rill init` 将生成：
+- vite.config.ts：IIFE lib build，external：react/react-native/react/jsx-runtime/rill-reconciler；alias `rill/sdk` 指向 ESM 方便内联。
+- tsconfig.json：Bundler 解析、isolatedModules、strict、verbatimModuleSyntax，并为编辑器提供 `rill/sdk` path 类型映射。
+- 示例guest使用 `import { View, Text } from 'rill/sdk'`。
+
 
 Rill 内置多种性能优化机制：
 
@@ -218,7 +307,7 @@ const data = devtools.exportAll();
 - [使用指南](./docs/GUIDE.zh.md) - 入门教程和最佳实践
 - [架构设计](./docs/ARCHITECTURE.zh.md) - 系统架构详解
 - [生产环境指南](./docs/PRODUCTION_GUIDE.zh.md) - 生产部署检查清单
-- [插件示例](./examples/) - 完整源码示例
+- [guest示例](./examples/) - 完整源码示例
 
 ## 开发
 

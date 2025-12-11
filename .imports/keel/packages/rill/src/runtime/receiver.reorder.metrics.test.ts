@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, mock } from 'bun:test';
 import { Receiver } from './receiver';
 import { createRegistry } from './registry';
 import React from 'react';
@@ -6,7 +6,7 @@ import React from 'react';
 describe('Receiver metrics with INSERT/REORDER', () => {
   it('reports render metrics after complex reorder', () => {
     const registry = createRegistry();
-    const onMetric = vi.fn();
+    const onMetric = mock();
     const Dummy = (props: any) => React.createElement('div', props, props.children);
     registry.register('View', Dummy as any);
 

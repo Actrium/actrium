@@ -2,7 +2,7 @@
  * DevTools unit tests
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
 import {
   ComponentInspector,
   OperationLogger,
@@ -11,6 +11,9 @@ import {
   createDevTools,
 } from './index';
 import type { NodeInstance, OperationBatch } from '../types';
+
+// Helper to wait for real time
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ============ ComponentInspector 测试 ============
 
@@ -145,14 +148,6 @@ describe('ComponentInspector', () => {
   });
 
   describe('recordChange', () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
     it('should highlight changed nodes', () => {
       inspector.recordChange(1);
 
@@ -164,16 +159,21 @@ describe('ComponentInspector', () => {
       expect(tree[0].highlighted).toBe(true);
     });
 
-    it('should clear highlight after timeout', () => {
-      inspector.recordChange(1);
+    it('should clear highlight after timeout', async () => {
+      // Create inspector with short highlight duration for testing
+      const testInspector = new ComponentInspector({ highlightDuration: 20 });
+      testInspector.recordChange(1);
 
-      vi.advanceTimersByTime(1100);
-
+      // Verify it's highlighted initially
       const nodeMap = new Map<number, NodeInstance>([
         [1, { id: 1, type: 'View', props: {}, children: [] }],
       ]);
-      const tree = inspector.buildTree(nodeMap, [1]);
+      expect(testInspector.buildTree(nodeMap, [1])[0].highlighted).toBe(true);
 
+      // Wait for highlight to clear
+      await sleep(30);
+
+      const tree = testInspector.buildTree(nodeMap, [1]);
       expect(tree[0].highlighted).toBe(false);
     });
 

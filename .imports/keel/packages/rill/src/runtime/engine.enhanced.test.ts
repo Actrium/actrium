@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, mock, beforeAll } from 'bun:test';
 import { Engine } from './engine';
 
 // Type definitions for mock QuickJS
@@ -54,10 +54,11 @@ function createMockQuickJSProvider(): MockQuickJSProvider {
 }
 
 function buildBundle(code: string) {
+  // Use var instead of const to avoid redeclaration error since React is already injected as global
   return `
-    const React = require('react');
-    const jsx = require('react/jsx-runtime');
-    const reconciler = require('rill/reconciler');
+    var _React = require('react');
+    var _jsx = require('react/jsx-runtime');
+    var _reconciler = require('rill/reconciler');
     ${code}
   `;
 }
@@ -74,7 +75,7 @@ describe('Engine enhanced behaviors', () => {
   });
 
   it('reports metrics via onMetric', async () => {
-    const onMetric = vi.fn();
+    const onMetric = mock();
     const engine = new Engine({ quickjs: provider, debug: false, onMetric });
     const src = buildBundle(`console.log('hello')`);
     await engine.loadBundle(src);

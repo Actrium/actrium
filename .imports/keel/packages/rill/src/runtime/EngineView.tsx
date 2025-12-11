@@ -1,7 +1,7 @@
 /**
  * EngineView
  *
- * React Native component for rendering sandbox plugin UI
+ * React Native component for rendering Guest UI in sandbox
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -23,7 +23,7 @@ export interface EngineViewProps {
   bundleUrl: string;
 
   /**
-   * Initial props to pass to the plugin
+   * Initial props to pass to the Guest
    */
   initialProps?: Record<string, unknown>;
 
@@ -73,10 +73,10 @@ type LoadingState = 'idle' | 'loading' | 'loaded' | 'error';
  *
  * <EngineView
  *   engine={engine}
- *   bundleUrl="https://cdn.example.com/plugin.js"
+ *   bundleUrl="https://cdn.example.com/bundle.js"
  *   initialProps={{ theme: 'dark' }}
- *   onLoad={() => console.log('Plugin loaded')}
- *   onError={(err) => console.error('Plugin error:', err)}
+ *   onLoad={() => console.log('Bundle loaded')}
+ *   onError={(err) => console.error('Bundle error:', err)}
  * />
  * ```
  */
@@ -106,11 +106,11 @@ export function EngineView({
     }
   }, [engine]);
 
-  // Load plugin
+  // Load Guest
   useEffect(() => {
     mountedRef.current = true;
 
-    async function loadPlugin() {
+    async function loadGuest() {
       if (engine.isLoaded || engine.isDestroyed) {
         return;
       }
@@ -122,7 +122,7 @@ export function EngineView({
         // Create Receiver
         engine.createReceiver(handleUpdate);
 
-        // Load and execute bundle
+        // Load and execute Guest
         await engine.loadBundle(bundleUrl, initialProps);
 
         if (mountedRef.current) {
@@ -130,7 +130,7 @@ export function EngineView({
           onLoad?.();
         }
       } catch (err) {
-        console.error('[EngineView] loadPlugin error:', err);
+        console.error('[EngineView] loadGuest error:', err);
         if (mountedRef.current) {
           const loadError = err instanceof Error ? err : new Error(String(err));
           setError(loadError);
@@ -140,7 +140,7 @@ export function EngineView({
       }
     }
 
-    loadPlugin();
+    loadGuest();
 
     return () => {
       mountedRef.current = false;
@@ -184,7 +184,7 @@ export function EngineView({
         {fallback ?? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>Loading plugin...</Text>
+            <Text style={styles.loadingText}>Loading bundle...</Text>
           </View>
         )}
       </View>
@@ -197,7 +197,7 @@ export function EngineView({
       <View style={[styles.container, style]}>
         {renderError?.(error) ?? (
           <View style={styles.errorContainer}>
-            <Text style={styles.errorTitle}>Plugin Error</Text>
+            <Text style={styles.errorTitle}>Bundle Error</Text>
             <Text style={styles.errorMessage}>{error.message}</Text>
           </View>
         )}
@@ -205,7 +205,7 @@ export function EngineView({
     );
   }
 
-  // Render plugin content
+  // Render Guest content
   return <View style={[styles.container, style]}>{content}</View>;
 }
 

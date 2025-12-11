@@ -6,7 +6,7 @@ Rill 是一个轻量级的 React Native 动态 UI 渲染引擎，类似于 Shopi
 
 ### 核心特性
 
-- **安全沙箱** - 使用 QuickJS 隔离插件代码
+- **安全沙箱** - 使用 QuickJS 隔离guest代码
 - **React 开发体验** - 支持 JSX、Hooks 等现代 React 特性
 - **高性能** - 批量更新、操作合并、虚拟滚动
 - **类型安全** - 完整的 TypeScript 支持
@@ -22,14 +22,14 @@ Rill 是一个轻量级的 React Native 动态 UI 渲染引擎，类似于 Shopi
 # 在宿主应用中
 npm install rill react-native-quickjs
 
-# 在插件项目中 (仅开发依赖)
+# 在guest项目中 (仅开发依赖)
 npm install -D rill
 ```
 
-### 2. 创建插件
+### 2. 创建guest
 
 ```tsx
-// src/plugin.tsx
+// src/guest.tsx
 import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/sdk';
 
 interface Config {
@@ -37,7 +37,7 @@ interface Config {
   theme: 'light' | 'dark';
 }
 
-export default function MyPlugin() {
+export default function MyGuest() {
   const config = useConfig<Config>();
   const sendToHost = useSendToHost();
 
@@ -56,10 +56,10 @@ export default function MyPlugin() {
 }
 ```
 
-### 3. 构建插件
+### 3. 构建guest
 
 ```bash
-npx rill build src/plugin.tsx -o dist/bundle.js
+npx rill build src/guest.tsx -o dist/bundle.js
 ```
 
 ### 4. 在宿主应用中使用
@@ -74,14 +74,14 @@ export default function App() {
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <EngineView
-        source="https://cdn.example.com/plugin.js"
+        source="https://cdn.example.com/guest.js"
         initialProps={{
           title: 'Hello Rill',
           theme: 'light',
         }}
-        onLoad={() => console.log('Plugin loaded')}
-        onError={(error) => console.error('Plugin error:', error)}
-        fallback={<Text>Loading plugin...</Text>}
+        onLoad={() => console.log('Guest loaded')}
+        onError={(error) => console.error('Guest error:', error)}
+        fallback={<Text>Loading guest...</Text>}
       />
     </SafeAreaView>
   );
@@ -90,14 +90,14 @@ export default function App() {
 
 ---
 
-## 插件开发
+## guest开发
 
 ### 项目结构
 
 ```
-my-plugin/
+my-guest/
 ├── src/
-│   └── plugin.tsx    # 插件入口
+│   └── guest.tsx    # guest入口
 ├── dist/
 │   └── bundle.js     # 构建输出
 ├── package.json
@@ -108,11 +108,11 @@ my-plugin/
 
 ```json
 {
-  "name": "my-plugin",
+  "name": "my-guest",
   "version": "1.0.0",
   "scripts": {
-    "build": "rill build src/plugin.tsx -o dist/bundle.js",
-    "watch": "rill build src/plugin.tsx -o dist/bundle.js --watch"
+    "build": "rill build src/guest.tsx -o dist/bundle.js",
+    "watch": "rill build src/guest.tsx -o dist/bundle.js --watch"
   },
   "devDependencies": {
     "rill": "^1.0.0",
@@ -177,7 +177,7 @@ interface Config {
   features: string[];
 }
 
-function Plugin() {
+function Guest() {
   const config = useConfig<Config>();
 
   return (
@@ -192,7 +192,7 @@ function Plugin() {
 #### useHostEvent - 监听宿主事件
 
 ```tsx
-function Plugin() {
+function Guest() {
   const [refreshCount, setRefreshCount] = useState(0);
 
   useHostEvent<{ force: boolean }>('REFRESH', (payload) => {
@@ -209,7 +209,7 @@ function Plugin() {
 #### useSendToHost - 发送事件到宿主
 
 ```tsx
-function Plugin() {
+function Guest() {
   const sendToHost = useSendToHost();
 
   const handleComplete = (result: string) => {
@@ -266,7 +266,7 @@ interface Item {
   title: string;
 }
 
-function Plugin() {
+function Guest() {
   const [items] = useState<Item[]>([
     { id: '1', title: 'Item 1' },
     { id: '2', title: 'Item 2' },
@@ -300,11 +300,11 @@ import React from 'react';
 import { View } from 'react-native';
 import { EngineView } from 'rill/runtime';
 
-function PluginHost() {
+function GuestHost() {
   return (
     <View style={{ flex: 1 }}>
       <EngineView
-        source="https://cdn.example.com/plugin.js"
+        source="https://cdn.example.com/guest.js"
         initialProps={{ theme: 'dark' }}
       />
     </View>
@@ -314,13 +314,13 @@ function PluginHost() {
 
 ### 自定义组件
 
-注册宿主端的原生组件供插件使用：
+注册宿主端的原生组件供guest使用：
 
 ```tsx
 import { NativeStepList } from './components/NativeStepList';
 import { CustomButton } from './components/CustomButton';
 
-function PluginHost() {
+function GuestHost() {
   return (
     <EngineView
       source={bundleUrl}
@@ -333,14 +333,14 @@ function PluginHost() {
 }
 ```
 
-插件中使用自定义组件：
+guest中使用自定义组件：
 
 ```tsx
-// 在插件中声明自定义组件类型
+// 在guest中声明自定义组件类型
 declare const StepList: string;
 declare const CustomButton: string;
 
-function Plugin() {
+function Guest() {
   return (
     <View>
       <StepList steps={['Step 1', 'Step 2', 'Step 3']} />
@@ -352,13 +352,13 @@ function Plugin() {
 
 ### 事件通信
 
-#### 宿主 -> 插件
+#### 宿主 -> guest
 
 ```tsx
 import { useRef } from 'react';
 import { Engine } from 'rill/runtime';
 
-function PluginHost() {
+function GuestHost() {
   const engineRef = useRef<Engine>(null);
 
   const handleRefresh = () => {
@@ -377,15 +377,15 @@ function PluginHost() {
 }
 ```
 
-#### 插件 -> 宿主
+#### guest -> 宿主
 
 在 EngineView 中监听操作事件：
 
 ```tsx
 import { Engine, EngineView } from 'rill/runtime';
 
-function PluginHost() {
-  const handlePluginEvent = (eventName: string, payload: unknown) => {
+function GuestHost() {
+  const handleGuestEvent = (eventName: string, payload: unknown) => {
     switch (eventName) {
       case 'TASK_COMPLETE':
         console.log('Task completed:', payload);
@@ -399,7 +399,7 @@ function PluginHost() {
   return (
     <EngineView
       source={bundleUrl}
-      onPluginEvent={handlePluginEvent}
+      onGuestEvent={handleGuestEvent}
     />
   );
 }
@@ -432,7 +432,7 @@ function useRillEngine(bundleUrl: string, initialProps: object) {
     engineRef.current = engine;
     receiverRef.current = receiver;
 
-    // 加载插件
+    // 加载guest
     engine.loadBundle(bundleUrl, initialProps).catch(console.error);
 
     return () => {
@@ -559,14 +559,14 @@ const debugData = devtools.exportAll();
 
 ### 沙箱隔离
 
-- 插件代码在 QuickJS 沙箱中运行
+- guest代码在 QuickJS 沙箱中运行
 - 无法访问宿主的原生 API
 - 无法执行网络请求 (除非宿主提供)
 - 无法访问文件系统
 
 ### 组件白名单
 
-只有显式注册的组件才能被插件使用：
+只有显式注册的组件才能被guest使用：
 
 ```tsx
 // 只注册安全的组件
@@ -590,7 +590,7 @@ const engine = new Engine({
 
 ### 错误隔离
 
-插件错误不会崩溃宿主应用：
+guest错误不会崩溃宿主应用：
 
 ```tsx
 <EngineView
@@ -608,7 +608,7 @@ const engine = new Engine({
 
 ## 常见问题
 
-### 1. 插件加载失败
+### 1. guest加载失败
 
 **问题**: `Failed to fetch bundle: 404`
 
@@ -666,6 +666,6 @@ useEffect(() => {
 
 完整示例请参考 `examples/` 目录：
 
-- `examples/basic-plugin/` - 基础插件示例
+- `examples/basic-guest/` - 基础guest示例
 - `examples/host-app/` - 宿主应用示例
 - `examples/custom-components/` - 自定义组件示例

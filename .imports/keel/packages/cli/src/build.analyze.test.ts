@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, mock, beforeEach, spyOn } from 'bun:test';
 import path from 'path';
 import fs from 'fs';
 
@@ -13,7 +13,7 @@ describe('CLI Analyze - whitelist scan', () => {
   it('should warn for non-whitelisted modules', async () => {
     const { analyze } = await import('./build');
     fs.writeFileSync(bundle, `require('left-pad');`);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/scan-bundle.js', { whitelist: ['react'], failOnViolation: false });
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('non-whitelisted modules'));
     warnSpy.mockRestore();
@@ -29,7 +29,7 @@ describe('CLI Analyze - whitelist scan', () => {
   it('should ignore relative imports', async () => {
     const { analyze } = await import('./build');
     fs.writeFileSync(bundle, `import x from './local';`);
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/scan-bundle.js', { whitelist: ['react'], failOnViolation: false });
     // no warnings for relative path
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('non-whitelisted modules'));
