@@ -27,14 +27,14 @@ jobs:
 
       - name: Run benchmarks
         run: |
-          cd packages/rill
+          cd packages/core
           bun run bench > benchmark-output.txt 2>&1 || true
           cat benchmark-output.txt
 
       - name: Load baseline
         id: baseline
         run: |
-          if [ -f packages/rill/.benchmarks/baseline.json ]; then
+          if [ -f packages/core/.benchmarks/baseline.json ]; then
             echo "baseline_exists=true" >> $GITHUB_OUTPUT
           else
             echo "baseline_exists=false" >> $GITHUB_OUTPUT
@@ -43,7 +43,7 @@ jobs:
       - name: Compare with baseline
         if: steps.baseline.outputs.baseline_exists == 'true'
         run: |
-          cd packages/rill
+          cd packages/core
           bun run scripts/compare-benchmarks.ts \
             .benchmarks/baseline.json \
             benchmark-output.txt \
@@ -57,7 +57,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const comparison = fs.readFileSync('packages/rill/comparison.md', 'utf8');
+            const comparison = fs.readFileSync('packages/core/comparison.md', 'utf8');
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -69,7 +69,7 @@ jobs:
       - name: Fail on regression
         if: steps.baseline.outputs.baseline_exists == 'true'
         run: |
-          cd packages/rill
+          cd packages/core
           bun run scripts/compare-benchmarks.ts \
             .benchmarks/baseline.json \
             benchmark-output.txt
@@ -78,13 +78,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: packages/rill/benchmark-output.txt
+          path: packages/core/benchmark-output.txt
           retention-days: 30
 
       - name: Update baseline (main branch only)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          cd packages/rill
+          cd packages/core
           mkdir -p .benchmarks
           bun run scripts/extract-baseline.ts \
             benchmark-output.txt \
@@ -95,7 +95,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add packages/rill/.benchmarks/baseline.json
+          git add packages/core/.benchmarks/baseline.json
           git diff --quiet && git diff --staged --quiet || git commit -m "Update benchmark baseline"
           git push
         continue-on-error: true

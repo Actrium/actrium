@@ -155,7 +155,7 @@ program
     const guestPath = path.join(srcDir, 'guest.tsx');
     if (!fs.existsSync(guestPath)) {
       const guest = `import * as React from 'react';
-import { View, Text } from 'rill/sdk';
+import { View, Text } from '@rill/core/sdk';
 
 export default function Guest() {
   return (

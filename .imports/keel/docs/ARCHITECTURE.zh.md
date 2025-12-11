@@ -1131,7 +1131,7 @@ import { program } from 'commander';
 import { buildGuest } from './build';
 
 program
-  .name('rill')
+  .name('@rill/core')
   .description('Rill guest CLI')
   .version('0.1.0');
 

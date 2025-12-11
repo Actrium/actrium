@@ -30,7 +30,7 @@ bun add -D rill
 
 ```tsx
 // src/guest.tsx
-import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/sdk';
+import { View, Text, TouchableOpacity, useConfig, useSendToHost } from '@rill/core/sdk';
 
 interface Config {
   title: string;
@@ -146,7 +146,7 @@ my-guest/
 Virtual components are string identifiers that are transformed into operation instructions during build:
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/sdk';
+import { View, Text, Image, ScrollView, TouchableOpacity } from '@rill/core/sdk';
 
 function MyComponent() {
   return (

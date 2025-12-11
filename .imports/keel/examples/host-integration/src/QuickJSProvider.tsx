@@ -7,7 +7,7 @@
  * - Custom implementation
  */
 
-import type { QuickJSProvider } from 'rill';
+import type { QuickJSProvider } from '@rill/core';
 
 /**
  * Create QuickJS Provider

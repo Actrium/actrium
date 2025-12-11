@@ -4,7 +4,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Engine, EngineView } from 'rill';
+import { Engine, EngineView } from '@rill/core';
 
 // Performance metrics collector
 class MetricsCollector {

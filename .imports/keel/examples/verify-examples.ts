@@ -6,7 +6,7 @@
  *
  * Run with: bun run verify-examples.ts
  */
-import { Engine } from '../packages/rill/src/runtime/engine';
+import { Engine } from '../packages/core/src/runtime/engine';
 import React from 'react';
 
 // ============================================================================

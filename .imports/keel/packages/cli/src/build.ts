@@ -15,7 +15,7 @@ import fs from 'fs';
 export interface BuildOptions {
   /**
    * Enforce post-build dependency guard to prevent runtime requires in guest bundle.
-   * If true (default), the analyzer will fail the build when detecting disallowed modules like 'rill/sdk',
+   * If true (default), the analyzer will fail the build when detecting disallowed modules like '@rill/core/sdk',
    * dynamic non-literal imports, or eval usage (configurable).
    */
   strict?: boolean;
@@ -275,8 +275,8 @@ export async function build(options: BuildOptions): Promise<void> {
     },
     resolve: {
       alias: {
-        // Resolve to the rill package's SDK ESM export
-        'rill/sdk': require.resolve('rill/sdk').replace('.js', '.mjs'),
+        // Resolve to the @rill/core package's SDK ESM export
+        '@rill/core/sdk': require.resolve('@rill/core/sdk').replace('.js', '.mjs'),
       },
     },
     define: {

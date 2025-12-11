@@ -173,7 +173,7 @@ import {
   StyleProp,
   LayoutEvent,
   ScrollEvent,
-} from 'rill/sdk';
+} from '@rill/core/sdk';
 ```
 
 ## Learning Path
@@ -219,7 +219,7 @@ import {
   useHostEvent,      // Listen to host events
   useSendToHost,     // Send messages to host
   useConfig,         // Get guest configuration
-} from 'rill/sdk';
+} from '@rill/core/sdk';
 
 // Send message to host
 const sendToHost = useSendToHost();
@@ -243,7 +243,7 @@ console.log('Title:', config.title);
 ### Host-side API
 
 ```tsx
-import { Engine, EngineView } from 'rill';
+import { Engine, EngineView } from '@rill/core';
 
 // Create Engine
 const engine = new Engine({

@@ -12,7 +12,7 @@ import {
   SafeAreaView,
   Alert,
 } from 'react-native';
-import { Engine, EngineView } from 'rill';
+import { Engine, EngineView } from '@rill/core';
 import { createQuickJSProvider } from './QuickJSProvider';
 
 export default function HostApp() {

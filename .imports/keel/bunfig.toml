@@ -1,7 +1,7 @@
 [test]
 # CRITICAL: Global polyfills must be loaded FIRST
 # These are needed for modules like react-test-renderer that access globals during module load
-preload = ["./packages/rill/src/__tests__/setup.ts"]
+preload = ["./packages/core/src/__tests__/setup.ts"]
 
 # Coverage settings
 coverage = false
