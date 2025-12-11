@@ -44,7 +44,7 @@ jobs:
         if: steps.baseline.outputs.baseline_exists == 'true'
         run: |
           cd packages/rill
-          npx ts-node scripts/compare-benchmarks.ts \
+          bun run scripts/compare-benchmarks.ts \
             .benchmarks/baseline.json \
             benchmark-output.txt \
             markdown > comparison.md
@@ -70,7 +70,7 @@ jobs:
         if: steps.baseline.outputs.baseline_exists == 'true'
         run: |
           cd packages/rill
-          npx ts-node scripts/compare-benchmarks.ts \
+          bun run scripts/compare-benchmarks.ts \
             .benchmarks/baseline.json \
             benchmark-output.txt
 
@@ -86,7 +86,7 @@ jobs:
         run: |
           cd packages/rill
           mkdir -p .benchmarks
-          npx ts-node scripts/extract-baseline.ts \
+          bun run scripts/extract-baseline.ts \
             benchmark-output.txt \
             .benchmarks/baseline.json
 
