@@ -33,12 +33,12 @@ rill/
 
 ### Packages
 
-- **rill** - Core runtime library for host applications
-  - Published as `rill` on npm
-  - Exports: `rill` (runtime), `rill/sdk` (guest SDK)
+- **@rill/core** - Core runtime library for host applications
+  - Published as `@rill/core` on npm
+  - Exports: `@rill/core` (runtime), `@rill/core/sdk` (guest SDK)
 
-- **rill-cli** - Command-line tools for guest development
-  - Published as `rill-cli` on npm
+- **@rill/cli** - Command-line tools for guest development
+  - Published as `@rill/cli` on npm
   - Commands: `rill build`, `rill init`
 
 ### Development
@@ -50,7 +50,7 @@ bun run build
 
 Build a specific package:
 ```bash
-cd packages/rill && bun run build
+cd packages/core && bun run build
 cd packages/cli && bun run build
 ```
 
@@ -96,7 +96,7 @@ yarn add rill
 ### Host Integration
 
 ```tsx
-import { Engine, EngineView } from 'rill';
+import { Engine, EngineView } from '@rill/core';
 import { NativeStepList } from './components/NativeStepList';
 
 // 1. Create engine instance
@@ -124,7 +124,7 @@ function App() {
 ### Guest Development
 
 ```tsx
-import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/sdk';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig } from '@rill/core/sdk';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -327,8 +327,8 @@ Example (guest):
 
 ```tsx
 import * as React from 'react';
-import { View, Text } from 'rill/sdk';
-import { useHostEvent, useSendToHost } from 'rill/sdk';
+import { View, Text } from '@rill/core/sdk';
+import { useHostEvent, useSendToHost } from '@rill/core/sdk';
 
 export default function Guest() {
   const send = useSendToHost();
@@ -346,7 +346,7 @@ export default function Guest() {
 Example (host):
 
 ```ts
-import { Engine } from 'rill';
+import { Engine } from '@rill/core';
 const engine = new Engine({ provider: yourJSEngineProvider });
 engine.on('message', (m) => { /* m.event, m.payload */ });
 engine.sendEvent('PING', { ok: 1 });
@@ -378,12 +378,12 @@ rill analyze dist/bundle.js \
 
 Whitelist (runtime): `react`, `react-native`, `react/jsx-runtime`, `rill/reconciler`.
 
-If the bundle still contains `require('rill/sdk')`, analyze fails fast with guidance.
+If the bundle still contains `require('@rill/core/sdk')`, analyze fails fast with guidance.
 
 ## Host Integration (correct API)
 
 ```ts
-import { Engine } from 'rill';
+import { Engine } from '@rill/core';
 import { View, Text } from 'react-native'; // or your custom components
 
 const engine = new Engine({ provider: yourJSEngineProvider });
@@ -402,7 +402,7 @@ Notes:
 `rill init` generates:
 - vite.config.ts: IIFE lib build, external: react/react-native/react/jsx-runtime/rill-reconciler, alias `rill/sdk` to ESM for inlining.
 - tsconfig.json: Bundler-resolve, isolatedModules, strict, verbatimModuleSyntax, and editor-only path typing for `rill/sdk`.
-- Example guest using `import { View, Text } from 'rill/sdk'`.
+- Example guest using `import { View, Text } from '@rill/core/sdk'`.
 
 
 The project includes a complete test suite:
