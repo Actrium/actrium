@@ -187,6 +187,10 @@ export class Engine implements IEngine {
   // Event listeners
   private listeners: Map<keyof EngineEvents, Set<EventListener<unknown>>> = new Map();
 
+  // Memory leak detection for Engine events
+  private maxListeners = 10;
+  private warnedEvents = new Set<keyof EngineEvents>();
+
   constructor(options: EngineOptions = {}) {
     const defaultWhitelist = new Set(['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler']);
     // Provide a safe fallback logger if console is not available
@@ -725,8 +729,28 @@ export class Engine implements IEngine {
     }
     this.listeners.get(event)!.add(listener as EventListener<unknown>);
 
+    // Memory leak detection - warn if listener count exceeds threshold
+    if (this.options.debug) {
+      const count = this.listeners.get(event)!.size;
+      if (count > this.maxListeners && !this.warnedEvents.has(event)) {
+        this.options.logger.warn(
+          `[rill] Possible EventEmitter memory leak detected. ` +
+          `${count} listeners added for event "${String(event)}". ` +
+          `Use setMaxListeners() to increase limit.`
+        );
+        this.warnedEvents.add(event);
+      }
+    }
+
     return () => {
       this.listeners.get(event)?.delete(listener as EventListener<unknown>);
+      // Clear warning if count drops below threshold
+      if (this.warnedEvents.has(event)) {
+        const count = this.listeners.get(event)?.size ?? 0;
+        if (count <= this.maxListeners) {
+          this.warnedEvents.delete(event);
+        }
+      }
     };
   }
 
@@ -799,6 +823,20 @@ export class Engine implements IEngine {
    */
   get isDestroyed(): boolean {
     return this.destroyed;
+  }
+
+  /**
+   * Set maximum number of listeners per event before warning
+   */
+  setMaxListeners(n: number): void {
+    this.maxListeners = n;
+  }
+
+  /**
+   * Get current maximum listener threshold
+   */
+  getMaxListeners(): number {
+    return this.maxListeners;
   }
 
   /**

@@ -113,6 +113,17 @@ export interface IEngine {
   getHealth(): EngineHealth;
 
   /**
+   * Set maximum number of listeners per event before warning
+   * @param n - Maximum listener count (default: 10)
+   */
+  setMaxListeners(n: number): void;
+
+  /**
+   * Get current maximum listener threshold
+   */
+  getMaxListeners(): number;
+
+  /**
    * Destroy engine and release resources
    */
   destroy(): void;
