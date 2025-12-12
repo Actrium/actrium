@@ -4,7 +4,7 @@
 preload = ["./packages/core/src/__tests__/setup.ts"]
 
 # Coverage settings
-coverage = false
+coverage = true
 coverageReporter = ["text", "lcov"]
 
 # Increased timeout to handle Worker-based hard timeout tests that need time to interrupt
