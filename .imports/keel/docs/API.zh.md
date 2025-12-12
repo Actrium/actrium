@@ -349,7 +349,15 @@ engine.updateConfig({ theme: 'light' });
 const health = engine.getHealth();
 // { loaded, destroyed, errorCount, lastErrorAt, receiverNodes, batching }
 
-// 销毁引擎
+// 获取资源使用统计
+const stats = engine.getResourceStats();
+console.log(`定时器: ${stats.timers}, 节点: ${stats.nodes}, 回调: ${stats.callbacks}`);
+
+// 监听器内存泄漏检测
+engine.setMaxListeners(20);  // 提高阈值
+const limit = engine.getMaxListeners();
+
+// 销毁引擎(释放所有资源: 定时器、节点、回调、运行时)
 engine.destroy();
 ```
 
@@ -361,31 +369,36 @@ engine.destroy();
 | sandbox | 'vm' \| 'worker' \| 'none' | auto | 沙箱模式 |
 | timeout | number | 5000 | 执行超时 (ms) |
 | debug | boolean | false | 调试模式 |
-| logger | Logger | console | 日志处理器 |
-| requireWhitelist | string[] | ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'] | 允许 require 的模块 |
+| logger | { log, warn, error } | console | 自定义日志处理器 |
+| requireWhitelist | string[] | ['react', ...] | 允许 require 的模块白名单 |
 | onMetric | (name, value, extra?) => void | - | 性能指标回调 |
-| receiverMaxBatchSize | number | 5000 | Receiver 单批次最大操作数 |
+| receiverMaxBatchSize | number | 5000 | 每批次最大操作数 (保护宿主 UI 响应性) |
 
 #### 方法
 
 | 方法 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
-| register | components: ComponentMap | void | 注册组件 |
-| createReceiver | onUpdate: () => void | Receiver | 创建 Receiver |
-| getReceiver | - | Receiver \| null | 获取 Receiver |
-| loadBundle | source: string, props?: object | Promise\<void\> | 加载 guest |
+| register | components: ComponentMap | void | 注册自定义组件 |
+| loadBundle | source: string, props?: object | Promise\<void\> | 加载并执行 guest bundle |
 | sendEvent | eventName: string, payload?: unknown | void | 发送事件到 guest |
-| updateConfig | config: object | void | 更新配置 |
-| getHealth | - | EngineHealth | 获取健康状态 |
+| updateConfig | config: object | void | 更新 guest 配置 |
+| on | event: keyof EngineEvents, handler: Function | () => void | 订阅引擎事件，返回取消订阅函数 |
+| getResourceStats | - | ResourceStats | 获取资源使用统计 |
+| getHealth | - | EngineHealth | 获取引擎健康状态 |
+| setMaxListeners | n: number | void | 设置最大事件监听器数量阈值 |
+| getMaxListeners | - | number | 获取最大事件监听器数量阈值 |
+| createReceiver | onUpdate: () => void | Receiver | 创建操作接收器 |
+| getReceiver | - | Receiver \| null | 获取当前接收器 |
 | getRegistry | - | ComponentRegistry | 获取组件注册表 |
-| destroy | - | void | 销毁引擎 |
+| destroy | - | void | 销毁引擎并释放所有资源 |
 
 #### 属性
 
 | 属性 | 类型 | 说明 |
 |------|------|------|
-| isLoaded | boolean | 是否已加载 |
-| isDestroyed | boolean | 是否已销毁 |
+| id | string (只读) | 引擎唯一标识符 |
+| loaded | boolean | Bundle 是否已加载 |
+| destroyed | boolean | 引擎是否已销毁 |
 
 ### EngineView
 
@@ -683,9 +696,133 @@ const exported = timeline.export();
 
 ---
 
+## DevTools (@rill/core/devtools)
+
+Rill 应用的开发和调试工具集。
+
+### createDevTools
+
+创建 DevTools 实例，提供组件检查、操作日志和时间线记录功能。
+
+```tsx
+import { createDevTools } from '@rill/core/devtools';
+
+const devtools = createDevTools({
+  inspector: {
+    maxDepth: 10,           // 组件树最大深度
+    filterProps: ['style'], // 隐藏敏感属性
+    showFunctions: false,   // 显示函数属性
+    highlightChanges: true, // 高亮变更节点
+  },
+  maxLogs: 100,            // 最大操作日志数
+  maxTimelineEvents: 500,  // 最大时间线事件数
+});
+
+// 启用/禁用
+devtools.enable();
+devtools.disable();
+
+// 处理引擎事件
+engine.on('operation', (batch) => {
+  devtools.onBatch(batch);
+});
+
+// 获取组件树
+const tree = devtools.getComponentTree(nodeMap, rootChildren);
+const treeText = devtools.getComponentTreeText(nodeMap, rootChildren);
+
+// 导出调试数据
+const data = devtools.exportAll();
+
+// 重置所有数据
+devtools.reset();
+```
+
+### ComponentInspector
+
+检查和可视化组件树结构。
+
+```tsx
+import { ComponentInspector } from '@rill/core/devtools';
+
+const inspector = new ComponentInspector({
+  maxDepth: 10,
+  filterProps: ['style'],
+  showFunctions: false,
+  highlightChanges: true,
+});
+
+// 从节点映射构建树
+const tree = inspector.buildTree(nodeMap, rootChildren);
+
+// 获取文本表示
+const text = inspector.toText(tree);
+console.log(text);
+// └─ <View flex={1}>
+//    ├─ <Text>你好</Text>
+//    └─ <Button title="点击">
+
+// 记录变更
+inspector.recordChange(nodeId);
+inspector.clearHighlights();
+```
+
+### OperationLogger
+
+记录和分析操作。
+
+```tsx
+import { OperationLogger } from '@rill/core/devtools';
+
+const logger = new OperationLogger(100); // 保留最近 100 条日志
+
+// 记录批次
+logger.log(batch, duration);
+
+// 查询日志
+const logs = logger.getLogs();
+const recent = logger.getRecentLogs(10);
+const creates = logger.filterByType('CREATE');
+const nodeOps = logger.filterByNodeId(1);
+const stats = logger.getStats();
+
+// 导出/清除
+const exported = logger.export();
+logger.clear();
+```
+
+### TimelineRecorder
+
+记录时间线事件，用于性能分析。
+
+```tsx
+import { TimelineRecorder } from '@rill/core/devtools';
+
+const timeline = new TimelineRecorder(500); // 保留最近 500 个事件
+
+// 记录事件
+timeline.recordMount(nodeId, type);
+timeline.recordUpdate(nodeId, changedProps);
+timeline.recordUnmount(nodeId);
+timeline.recordBatch(batchId, count, duration);
+timeline.recordCallback(fnId, args);
+timeline.recordHostEvent(eventName, payload);
+
+// 查询事件
+const events = timeline.getEvents();
+const rangeEvents = timeline.getEventsInRange(startTime, endTime);
+const mounts = timeline.getEventsByType('mount');
+
+// 导出/重置
+const exported = timeline.export();
+timeline.reset();
+```
+
+---
+
 ## CLI (@rill/cli)
 
-命令行工具，用于构建guest。
+命令行工具，用于构建 guest bundle。
 
 ### 构建命令
 
@@ -926,12 +1063,20 @@ const calculator = new VirtualScrollCalculator({
 ### 3. 调试
 
 ```tsx
-import { createDevTools } from '@rill/core/devtools';
+// 监控引擎事件
+engine.on('error', (error) => {
+  console.error('[Guest 错误]', error);
+  reportError(error);
+});
 
-// 开发环境启用 DevTools
-if (__DEV__) {
-  const devtools = createDevTools();
-  devtools.enable();
+engine.on('operation', (batch) => {
+  console.log(`操作数量: ${batch.operations.length}`);
+});
+
+// 检查资源使用情况
+const stats = engine.getResourceStats();
+if (stats.callbacks > 1000) {
+  console.warn('检测到高回调数量:', stats);
 }
 ```
 
@@ -947,4 +1092,141 @@ if (__DEV__) {
   fallback={<LoadingIndicator />}
   renderError={(error) => <ErrorFallback error={error} />}
 />
+```
+
+---
+
+## 类型定义
+
+### EngineOptions
+
+```typescript
+interface EngineOptions {
+  sandbox?: 'vm' | 'worker' | 'none';  // 沙箱模式(未设置则自动检测)
+  provider?: JSEngineProvider;          // 自定义 Provider
+  timeout?: number;                     // 执行超时(默认 5000ms)
+  debug?: boolean;                      // 调试模式
+  logger?: {                            // 自定义日志器
+    log: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+  };
+  onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
+  requireWhitelist?: string[];          // 允许的 require() 模块
+  receiverMaxBatchSize?: number;        // 每批次最大操作数(默认 5000)
+}
+```
+
+### EngineEvents
+
+```typescript
+interface EngineEvents {
+  load: () => void;                      // Bundle 成功加载
+  error: (error: Error) => void;         // Guest 运行时错误
+  fatalError: (error: Error) => void;    // 致命错误 - 引擎自动销毁
+  destroy: () => void;                   // 引擎已销毁
+  operation: (batch: OperationBatch) => void;  // 收到操作批次
+  message: (message: GuestMessage) => void;    // 收到 Guest 消息
+}
+```
+
+### ResourceStats
+
+```typescript
+interface ResourceStats {
+  timers: number;     // 活动的 setTimeout/setInterval 数量
+  nodes: number;      // 组件树中的 VNode 数量
+  callbacks: number;  // 注册的回调函数数量
+}
+```
+
+### EngineHealth
+
+```typescript
+interface EngineHealth {
+  loaded: boolean;         // Bundle 是否已加载
+  destroyed: boolean;      // 引擎是否已销毁
+  errorCount: number;      // 总错误数
+  lastErrorAt: number | null;  // 上次错误时间戳
+  receiverNodes: number;   // Receiver 中的节点数
+  batching: boolean;       // 批处理是否激活
+}
+```
+
+### GuestMessage
+
+```typescript
+interface GuestMessage {
+  event: string;    // 事件名称
+  payload: unknown; // 事件载荷
+}
+```
+
+### OperationBatch
+
+```typescript
+interface OperationBatch {
+  version: number;          // 协议版本
+  batchId: number;          // 批次标识符
+  operations: Operation[];  // 操作数组
+}
+```
+
+### Operation 类型
+
+```typescript
+type OperationType =
+  | 'CREATE'   // 创建新节点
+  | 'UPDATE'   // 更新节点属性
+  | 'DELETE'   // 删除节点
+  | 'APPEND'   // 添加子节点
+  | 'INSERT'   // 在索引处插入子节点
+  | 'REMOVE'   // 移除子节点
+  | 'REORDER'  // 重排子节点
+  | 'TEXT';    // 更新文本内容
+
+interface CreateOperation {
+  op: 'CREATE';
+  id: number;
+  type: string;
+  props: SerializedProps;
+}
+
+interface UpdateOperation {
+  op: 'UPDATE';
+  id: number;
+  props: SerializedProps;
+  removedProps?: string[];
+}
+
+interface AppendOperation {
+  op: 'APPEND';
+  id: number;
+  parentId: number;
+  childId: number;
+}
+
+// ... 其他操作类型
+```
+
+### ComponentMap
+
+```typescript
+type ComponentMap = Record<string, React.ComponentType<any>>;
+```
+
+### JSEngineProvider
+
+```typescript
+interface JSEngineProvider {
+  createEngine(): JSEngine;
+  supportsWorker?: boolean;
+}
+
+interface JSEngine {
+  evaluate(code: string): unknown;
+  set(name: string, value: unknown): void;
+  get(name: string): unknown;
+  dispose(): void;
+}
 ```

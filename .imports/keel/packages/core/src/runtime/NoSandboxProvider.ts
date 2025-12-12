@@ -1,4 +1,16 @@
-import type { JSEngineProvider, JSEngineRuntime, JSEngineContext } from './engine';
+import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from './engine';
+
+// Augment globalThis for budget tracking
+declare global {
+  // eslint-disable-next-line no-var
+  var __rill_budget_start: number | undefined;
+  // eslint-disable-next-line no-var
+  var __rill_budget_timeout: number | undefined;
+  // eslint-disable-next-line no-var
+  var __rill_budget_ops: number | undefined;
+  // eslint-disable-next-line no-var
+  var __checkBudget: (() => void) | undefined;
+}
 
 /**
  * An implementation of JSEngineProvider that runs code directly in the host context
@@ -31,24 +43,25 @@ export class NoSandboxProvider implements JSEngineProvider {
 
           // Inject a cooperative budget checker
           // Guest code can call __checkBudget() to cooperatively check timeout
-          (globalThis as any).__rill_budget_start = Date.now();
-          (globalThis as any).__rill_budget_timeout = timeout;
-          (globalThis as any).__rill_budget_ops = 0;
-          (globalThis as any).__checkBudget = function() {
-            const g = globalThis as any;
-            g.__rill_budget_ops++;
+          globalThis.__rill_budget_start = Date.now();
+          globalThis.__rill_budget_timeout = timeout;
+          globalThis.__rill_budget_ops = 0;
+          globalThis.__checkBudget = () => {
+            globalThis.__rill_budget_ops++;
             // Check every 1000 ops to avoid performance overhead
-            if (g.__rill_budget_ops % 1000 === 0) {
-              const elapsed = Date.now() - g.__rill_budget_start;
-              if (elapsed > g.__rill_budget_timeout) {
-                throw new Error(`[NoSandboxProvider] Cooperative timeout exceeded: ${elapsed}ms > ${g.__rill_budget_timeout}ms`);
+            if (globalThis.__rill_budget_ops % 1000 === 0) {
+              const elapsed = Date.now() - globalThis.__rill_budget_start;
+              if (elapsed > globalThis.__rill_budget_timeout) {
+                throw new Error(
+                  `[NoSandboxProvider] Cooperative timeout exceeded: ${elapsed}ms > ${globalThis.__rill_budget_timeout}ms`
+                );
               }
             }
           };
         }
 
         // Check interrupt handler before eval (won't help during eval, but catches between calls)
-        if (interruptHandler && interruptHandler()) {
+        if (interruptHandler?.()) {
           throw new Error('[NoSandboxProvider] Execution interrupted by handler');
         }
 
@@ -66,10 +79,10 @@ export class NoSandboxProvider implements JSEngineProvider {
 
       dispose: () => {
         // Clean up injected globals
-        delete (globalThis as any).__rill_budget_start;
-        delete (globalThis as any).__rill_budget_timeout;
-        delete (globalThis as any).__rill_budget_ops;
-        delete (globalThis as any).__checkBudget;
+        delete globalThis.__rill_budget_start;
+        delete globalThis.__rill_budget_timeout;
+        delete globalThis.__rill_budget_ops;
+        delete globalThis.__checkBudget;
         interruptHandler = null;
       },
 

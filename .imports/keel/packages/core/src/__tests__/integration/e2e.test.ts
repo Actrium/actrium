@@ -9,16 +9,12 @@
  * 5. Two-way communication
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import React from 'react';
+import { CallbackRegistry, OperationCollector } from '../../reconciler';
 import { Engine } from '../../runtime/engine';
-import { ComponentRegistry } from '../../runtime/registry';
 import { Receiver } from '../../runtime/receiver';
-import {
-  createReconciler,
-  CallbackRegistry,
-  OperationCollector,
-} from '../../reconciler';
+import { ComponentRegistry } from '../../runtime/registry';
 
 // TS type imports
 interface OperationBatch {
@@ -93,9 +89,8 @@ const MockView: React.FC<{
 }> = ({ children, testID }) =>
   React.createElement('mock-view', { 'data-testid': testID }, children);
 
-const MockText: React.FC<{ children?: React.ReactNode; style?: object }> = ({
-  children,
-}) => React.createElement('mock-text', null, children);
+const MockText: React.FC<{ children?: React.ReactNode; style?: object }> = ({ children }) =>
+  React.createElement('mock-text', null, children);
 
 const MockTouchable: React.FC<{
   onPress?: () => void;
@@ -109,8 +104,8 @@ const MockTouchable: React.FC<{
 describe('E2E Integration Tests', () => {
   describe('Complete Guest Lifecycle', () => {
     let engine: Engine;
-    let receivedBatches: OperationBatch[];
-    let sentMessages: HostMessage[];
+    let _receivedBatches: OperationBatch[];
+    let _sentMessages: HostMessage[];
 
     beforeEach(() => {
       engine = new Engine({ quickjs: createMockQuickJSProvider(), debug: false });
@@ -120,8 +115,8 @@ describe('E2E Integration Tests', () => {
         TouchableOpacity: MockTouchable,
       });
 
-      receivedBatches = [];
-      sentMessages = [];
+      _receivedBatches = [];
+      _sentMessages = [];
     });
 
     afterEach(() => {
@@ -302,7 +297,7 @@ describe('E2E Integration Tests', () => {
       });
 
       receivedBatches = [];
-      const sendToHost = (batch: OperationBatch) => {
+      const _sendToHost = (batch: OperationBatch) => {
         receivedBatches.push(batch);
         receiver.applyBatch(batch);
       };
@@ -601,9 +596,9 @@ describe('E2E Integration Tests', () => {
       expect(rendered).not.toBeNull();
 
       // 应该有警告
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('UnregisteredComponent')
-      );
+      expect(consoleSpy).toHaveBeenCalled();
+      const warnCalls = consoleSpy.mock.calls.flat().join(' ');
+      expect(warnCalls).toContain('UnregisteredComponent');
 
       consoleSpy.mockRestore();
     });
@@ -675,7 +670,7 @@ describe('E2E Integration Tests', () => {
     });
 
     it('should not flush when no pending operations', () => {
-      collector.flush((batch) => {
+      collector.flush((_batch) => {
         batchCount++;
       });
 

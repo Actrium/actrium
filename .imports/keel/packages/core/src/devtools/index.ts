@@ -80,10 +80,7 @@ export class ComponentInspector {
   /**
    * Build component tree from node map
    */
-  buildTree(
-    nodeMap: Map<number, NodeInstance>,
-    rootChildren: number[]
-  ): TreeNode[] {
+  buildTree(nodeMap: Map<number, NodeInstance>, rootChildren: number[]): TreeNode[] {
     return rootChildren
       .map((id) => this.buildNode(nodeMap, id, 0))
       .filter((node): node is TreeNode => node !== null);
@@ -121,9 +118,7 @@ export class ComponentInspector {
   /**
    * Filter props
    */
-  private filterProps(
-    props: Record<string, unknown>
-  ): Record<string, unknown> {
+  private filterProps(props: Record<string, unknown>): Record<string, unknown> {
     const result: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(props)) {
@@ -202,11 +197,7 @@ export class ComponentInspector {
   /**
    * Format node as text
    */
-  private formatNode(
-    nodes: TreeNode[],
-    lines: string[],
-    prefix: string
-  ): void {
+  private formatNode(nodes: TreeNode[], lines: string[], prefix: string): void {
     nodes.forEach((node, index) => {
       const isLast = index === nodes.length - 1;
       const connector = isLast ? '└─' : '├─';
@@ -243,7 +234,7 @@ export class ComponentInspector {
       parts.push('...');
     }
 
-    return ' ' + parts.join(' ');
+    return ` ${parts.join(' ')}`;
   }
 
   /**
@@ -323,9 +314,7 @@ export class OperationLogger {
   /**
    * Filter logs by operation type
    */
-  filterByType(
-    type: Operation['op']
-  ): Array<{ log: OperationLog; operation: Operation }> {
+  filterByType(type: Operation['op']): Array<{ log: OperationLog; operation: Operation }> {
     const results: Array<{ log: OperationLog; operation: Operation }> = [];
 
     for (const log of this.logs) {
@@ -342,9 +331,7 @@ export class OperationLogger {
   /**
    * Filter logs by node ID
    */
-  filterByNodeId(
-    nodeId: number
-  ): Array<{ log: OperationLog; operation: Operation }> {
+  filterByNodeId(nodeId: number): Array<{ log: OperationLog; operation: Operation }> {
     const results: Array<{ log: OperationLog; operation: Operation }> = [];
 
     for (const log of this.logs) {
@@ -381,8 +368,7 @@ export class OperationLogger {
       totalLogs: this.logs.length,
       totalOperations,
       operationCounts,
-      avgOperationsPerBatch:
-        this.logs.length > 0 ? totalOperations / this.logs.length : 0,
+      avgOperationsPerBatch: this.logs.length > 0 ? totalOperations / this.logs.length : 0,
     };
   }
 
@@ -412,13 +398,7 @@ export class OperationLogger {
 /**
  * Timeline event types
  */
-export type TimelineEventType =
-  | 'mount'
-  | 'update'
-  | 'unmount'
-  | 'batch'
-  | 'callback'
-  | 'event';
+export type TimelineEventType = 'mount' | 'update' | 'unmount' | 'batch' | 'callback' | 'event';
 
 /**
  * Timeline event
@@ -460,11 +440,7 @@ export class TimelineRecorder {
   /**
    * Record event
    */
-  record(
-    type: TimelineEventType,
-    data: Record<string, unknown>,
-    duration?: number
-  ): void {
+  record(type: TimelineEventType, data: Record<string, unknown>, duration?: number): void {
     if (!this.enabled) return;
 
     this.events.push({
@@ -535,9 +511,7 @@ export class TimelineRecorder {
    * Get events in time range
    */
   getEventsInRange(startMs: number, endMs: number): TimelineEvent[] {
-    return this.events.filter(
-      (e) => e.timestamp >= startMs && e.timestamp <= endMs
-    );
+    return this.events.filter((e) => e.timestamp >= startMs && e.timestamp <= endMs);
   }
 
   /**
@@ -644,10 +618,7 @@ export class DevTools {
           this.timeline.recordMount(op.id, op.type);
           break;
         case 'UPDATE':
-          this.timeline.recordUpdate(
-            op.id,
-            Object.keys(op.props)
-          );
+          this.timeline.recordUpdate(op.id, Object.keys(op.props));
           break;
         case 'DELETE':
           this.timeline.recordUnmount(op.id);
@@ -675,20 +646,14 @@ export class DevTools {
   /**
    * Get component tree
    */
-  getComponentTree(
-    nodeMap: Map<number, NodeInstance>,
-    rootChildren: number[]
-  ): TreeNode[] {
+  getComponentTree(nodeMap: Map<number, NodeInstance>, rootChildren: number[]): TreeNode[] {
     return this.inspector.buildTree(nodeMap, rootChildren);
   }
 
   /**
    * Get component tree text representation
    */
-  getComponentTreeText(
-    nodeMap: Map<number, NodeInstance>,
-    rootChildren: number[]
-  ): string {
+  getComponentTreeText(nodeMap: Map<number, NodeInstance>, rootChildren: number[]): string {
     const tree = this.getComponentTree(nodeMap, rootChildren);
     return this.inspector.toText(tree);
   }

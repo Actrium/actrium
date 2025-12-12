@@ -5,23 +5,59 @@
  * Transforms React render actions into JSON instructions
  */
 
+import type { ReactElement } from 'react';
+import type { HostConfig, Reconciler as ReconcilerType } from 'react-reconciler';
 // Static import for react-reconciler
 import Reconciler from 'react-reconciler';
-import type { HostConfig, Reconciler as ReconcilerType } from 'react-reconciler';
 import { DefaultEventPriority } from 'react-reconciler/constants';
+
+// Augment globalThis for debug tracking properties
+declare global {
+  // eslint-disable-next-line no-var
+  var __OP_COUNTS: Record<string, number> | undefined;
+  // eslint-disable-next-line no-var
+  var __TOTAL_OPS: number | undefined;
+  // eslint-disable-next-line no-var
+  var __RECONCILER_MOUNTED: number | undefined;
+  // eslint-disable-next-line no-var
+  var __RECONCILER_UPDATED: number | undefined;
+  // eslint-disable-next-line no-var
+  var __RECONCILER_REMOVED: number | undefined;
+  // eslint-disable-next-line no-var
+  var __TOUCHABLE_CREATE_COUNT: number | undefined;
+  // eslint-disable-next-line no-var
+  var __LAST_TOUCHABLE_FNID: string | undefined;
+  // eslint-disable-next-line no-var
+  var __APPEND_CREATE_COUNT: number | undefined;
+  // eslint-disable-next-line no-var
+  var __INSERT_CREATE_COUNT: number | undefined;
+  // eslint-disable-next-line no-var
+  var __REMOVE_CREATE_COUNT: number | undefined;
+  // eslint-disable-next-line no-var
+  var __RILL_RENDER_CALLED: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __RILL_RENDER_COUNT: number | undefined;
+  // eslint-disable-next-line no-var
+  var __APPEND_INITIAL_CALLED: number | undefined;
+  // eslint-disable-next-line no-var
+  var __APPEND_CHILD_CALLED: number | undefined;
+  // eslint-disable-next-line no-var
+  var __APPEND_TO_CONTAINER_CALLED: number | undefined;
+}
+
 import type {
-  VNode,
-  Operation,
-  CreateOperation,
-  UpdateOperation,
   AppendOperation,
-  RemoveOperation,
+  CreateOperation,
   InsertOperation,
+  Operation,
+  OperationBatch,
+  RemoveOperation,
+  SendToHost,
+  SerializedFunction,
   SerializedProps,
   SerializedValue,
-  SerializedFunction,
-  OperationBatch,
-  SendToHost,
+  UpdateOperation,
+  VNode,
 } from '../types';
 
 // ============ Callback Registry ============
@@ -117,6 +153,16 @@ export class OperationCollector {
   flush(sendToHost: SendToHost): void {
     if (this.operations.length === 0) return;
 
+    // 🔴 TRACK: Count operation types using global variable
+    if (typeof globalThis !== 'undefined') {
+      const opCounts: Record<string, number> = {};
+      this.operations.forEach((op) => {
+        opCounts[op.op] = (opCounts[op.op] || 0) + 1;
+      });
+      globalThis.__OP_COUNTS = opCounts;
+      globalThis.__TOTAL_OPS = this.operations.length;
+    }
+
     const batch: OperationBatch = {
       version: this.version,
       batchId: ++this.batchId,
@@ -165,9 +211,13 @@ function serializePropsWithTracking(
       fnIds.add(fnId);
       result[key] = { __type: 'function', __fnId: fnId } as SerializedFunction;
     } else if (Array.isArray(value)) {
-      const { value: serialized, fnIds: arrayFnIds } = serializeArrayWithTracking(value, callbackRegistry, visited);
+      const { value: serialized, fnIds: arrayFnIds } = serializeArrayWithTracking(
+        value,
+        callbackRegistry,
+        visited
+      );
       result[key] = serialized;
-      arrayFnIds.forEach(id => fnIds.add(id));
+      arrayFnIds.forEach((id) => fnIds.add(id));
     } else if (typeof value === 'object' && value !== null) {
       const { value: serialized, fnIds: objFnIds } = serializeObjectWithTracking(
         value as Record<string, unknown>,
@@ -175,7 +225,7 @@ function serializePropsWithTracking(
         visited
       );
       result[key] = serialized;
-      objFnIds.forEach(id => fnIds.add(id));
+      objFnIds.forEach((id) => fnIds.add(id));
     } else {
       result[key] = value as SerializedValue;
     }
@@ -205,8 +255,12 @@ function serializeArrayWithTracking(
       fnIds.add(fnId);
       return { __type: 'function', __fnId: fnId } as SerializedFunction;
     } else if (Array.isArray(item)) {
-      const { value: serialized, fnIds: nestedFnIds } = serializeArrayWithTracking(item, callbackRegistry, visited);
-      nestedFnIds.forEach(id => fnIds.add(id));
+      const { value: serialized, fnIds: nestedFnIds } = serializeArrayWithTracking(
+        item,
+        callbackRegistry,
+        visited
+      );
+      nestedFnIds.forEach((id) => fnIds.add(id));
       return serialized;
     } else if (typeof item === 'object' && item !== null) {
       const { value: serialized, fnIds: nestedFnIds } = serializeObjectWithTracking(
@@ -214,7 +268,7 @@ function serializeArrayWithTracking(
         callbackRegistry,
         visited
       );
-      nestedFnIds.forEach(id => fnIds.add(id));
+      nestedFnIds.forEach((id) => fnIds.add(id));
       return serialized;
     }
     return item as SerializedValue;
@@ -245,9 +299,13 @@ function serializeObjectWithTracking(
       fnIds.add(fnId);
       result[key] = { __type: 'function', __fnId: fnId } as SerializedFunction;
     } else if (Array.isArray(value)) {
-      const { value: serialized, fnIds: nestedFnIds } = serializeArrayWithTracking(value, callbackRegistry, visited);
+      const { value: serialized, fnIds: nestedFnIds } = serializeArrayWithTracking(
+        value,
+        callbackRegistry,
+        visited
+      );
       result[key] = serialized;
-      nestedFnIds.forEach(id => fnIds.add(id));
+      nestedFnIds.forEach((id) => fnIds.add(id));
     } else if (typeof value === 'object' && value !== null) {
       const { value: serialized, fnIds: nestedFnIds } = serializeObjectWithTracking(
         value as Record<string, unknown>,
@@ -255,7 +313,7 @@ function serializeObjectWithTracking(
         visited
       );
       result[key] = serialized;
-      nestedFnIds.forEach(id => fnIds.add(id));
+      nestedFnIds.forEach((id) => fnIds.add(id));
     } else {
       result[key] = value as SerializedValue;
     }
@@ -297,31 +355,32 @@ interface RootContainer {
  */
 type RillReconciler = ReconcilerType<
   RootContainer, // Container
-  VNode,         // Instance
-  VNode,         // TextInstance
-  unknown,       // SuspenseInstance
-  VNode          // PublicInstance
+  VNode, // Instance
+  VNode, // TextInstance
+  unknown, // SuspenseInstance
+  VNode // PublicInstance
 >;
 
 /**
  * Extended host config with React 19 internal methods
  * These methods are used internally by React 19 but not yet in official types
  */
-interface ExtendedHostConfig extends HostConfig<
-  string,
-  Record<string, unknown>,
-  RootContainer,
-  VNode,
-  VNode,
-  unknown,
-  unknown,
-  VNode,
-  object,
-  unknown,
-  unknown,
-  number,
-  -1
-> {
+interface ExtendedHostConfig
+  extends HostConfig<
+    string,
+    Record<string, unknown>,
+    RootContainer,
+    VNode,
+    VNode,
+    unknown,
+    unknown,
+    VNode,
+    object,
+    unknown,
+    unknown,
+    number,
+    -1
+  > {
   // Priority and scheduling methods
   resolveUpdatePriority: () => number;
   setCurrentUpdatePriority: () => void;
@@ -364,12 +423,17 @@ export function createReconciler(sendToHost: SendToHost): {
   const hostConfig: ExtendedHostConfig = {
     // ============ Core Methods ============
 
-    createInstance(
-      type: string,
-      props: Record<string, unknown>
-    ): VNode {
+    createInstance(type: string, props: Record<string, unknown>): VNode {
       const id = ++nodeIdCounter;
       const { props: serializedProps, fnIds } = serializePropsWithTracking(props, callbackRegistry);
+
+      // 🔴 TRACK: Log if this is TouchableOpacity with onPress
+      if (type === 'TouchableOpacity' && props.onPress) {
+        if (typeof globalThis !== 'undefined') {
+          globalThis.__TOUCHABLE_CREATE_COUNT = (globalThis.__TOUCHABLE_CREATE_COUNT || 0) + 1;
+          globalThis.__LAST_TOUCHABLE_FNID = Array.from(fnIds)[0];
+        }
+      }
 
       const node: VNode = {
         id,
@@ -413,11 +477,43 @@ export function createReconciler(sendToHost: SendToHost): {
     },
 
     appendInitialChild(parent: VNode, child: VNode): void {
+      // 🔴 TRACK: Use global variable since console.log is filtered
+      if (typeof globalThis !== 'undefined') {
+        globalThis.__APPEND_INITIAL_CALLED = (globalThis.__APPEND_INITIAL_CALLED || 0) + 1;
+      }
+
       parent.children.push(child);
       child.parent = parent;
+
+      // 🔴 FIX: Send APPEND operation during initial render to establish parent-child relationships
+      console.log(
+        '[rill:reconciler] 🟢 appendInitialChild called, parent:',
+        parent.id,
+        'child:',
+        child.id
+      );
+      const op: AppendOperation = {
+        op: 'APPEND',
+        id: child.id,
+        parentId: parent.id,
+        childId: child.id,
+      };
+      collector.add(op);
+      console.log('[rill:reconciler] 🟢 APPEND operation added to collector');
     },
 
     appendChild(parent: VNode, child: VNode): void {
+      // 🔴 TRACK: Use global variable since console.log is filtered
+      if (typeof globalThis !== 'undefined') {
+        globalThis.__APPEND_CHILD_CALLED = (globalThis.__APPEND_CHILD_CALLED || 0) + 1;
+      }
+
+      console.log(
+        '[rill:reconciler] 🟡 appendChild called, parent:',
+        parent.id,
+        'child:',
+        child.id
+      );
       parent.children.push(child);
       child.parent = parent;
 
@@ -428,9 +524,22 @@ export function createReconciler(sendToHost: SendToHost): {
         childId: child.id,
       };
       collector.add(op);
+      console.log('[rill:reconciler] 🟡 APPEND operation added');
     },
 
     appendChildToContainer(container: RootContainer, child: VNode): void {
+      // 🔴 TRACK: Use global variable since console.log is filtered
+      if (typeof globalThis !== 'undefined') {
+        globalThis.__APPEND_TO_CONTAINER_CALLED =
+          (globalThis.__APPEND_TO_CONTAINER_CALLED || 0) + 1;
+      }
+
+      console.log(
+        '[rill:reconciler] 🔵 appendChildToContainer called, child:',
+        child.id,
+        'type:',
+        child.type
+      );
       container.children.push(child);
 
       const op: AppendOperation = {
@@ -440,13 +549,10 @@ export function createReconciler(sendToHost: SendToHost): {
         childId: child.id,
       };
       collector.add(op);
+      console.log('[rill:reconciler] 🔵 APPEND to root operation added');
     },
 
-    insertBefore(
-      parent: VNode,
-      child: VNode,
-      beforeChild: VNode
-    ): void {
+    insertBefore(parent: VNode, child: VNode, beforeChild: VNode): void {
       const index = parent.children.indexOf(beforeChild);
       if (index !== -1) {
         parent.children.splice(index, 0, child);
@@ -465,11 +571,7 @@ export function createReconciler(sendToHost: SendToHost): {
       collector.add(op);
     },
 
-    insertInContainerBefore(
-      container: RootContainer,
-      child: VNode,
-      beforeChild: VNode
-    ): void {
+    insertInContainerBefore(container: RootContainer, child: VNode, beforeChild: VNode): void {
       const index = container.children.indexOf(beforeChild);
       if (index !== -1) {
         container.children.splice(index, 0, child);
@@ -549,11 +651,14 @@ export function createReconciler(sendToHost: SendToHost): {
 
       // Clean up old registered callbacks
       if (instance.registeredFnIds) {
-        instance.registeredFnIds.forEach(fnId => callbackRegistry.remove(fnId));
+        instance.registeredFnIds.forEach((fnId) => callbackRegistry.remove(fnId));
       }
 
       // Serialize new props and track new callbacks
-      const { props: serializedProps, fnIds: newFnIds } = serializePropsWithTracking(newProps, callbackRegistry);
+      const { props: serializedProps, fnIds: newFnIds } = serializePropsWithTracking(
+        newProps,
+        callbackRegistry
+      );
 
       instance.props = newProps;
       instance.registeredFnIds = newFnIds.size > 0 ? newFnIds : undefined;
@@ -568,7 +673,7 @@ export function createReconciler(sendToHost: SendToHost): {
     },
 
     commitTextUpdate(textInstance: VNode, _oldText: string, newText: string): void {
-      textInstance.props['text'] = newText;
+      textInstance.props.text = newText;
 
       const op: UpdateOperation = {
         op: 'UPDATE',
@@ -657,8 +762,7 @@ export function createReconciler(sendToHost: SendToHost): {
 
     // React 18 concurrent features
     supportsMicrotasks: true,
-    scheduleMicrotask:
-      typeof queueMicrotask === 'function' ? queueMicrotask : setTimeout,
+    scheduleMicrotask: typeof queueMicrotask === 'function' ? queueMicrotask : setTimeout,
 
     // React 19 internal methods (not in official HostConfig types yet)
     resolveUpdatePriority: () => DefaultEventPriority,
@@ -694,7 +798,7 @@ export function createReconciler(sendToHost: SendToHost): {
 function cleanupNodeCallbacks(node: VNode, registry: CallbackRegistry): void {
   // Clean up current node's registered callbacks
   if (node.registeredFnIds) {
-    node.registeredFnIds.forEach(fnId => registry.remove(fnId));
+    node.registeredFnIds.forEach((fnId) => registry.remove(fnId));
     node.registeredFnIds = undefined;
   }
 
@@ -729,10 +833,19 @@ const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
  * Each unique sendToHost function gets its own isolated reconciler instance.
  * This allows multiple guests to run simultaneously without interfering with each other.
  */
-export function render(
-  element: React.ReactElement,
-  sendToHost: SendToHost
-): void {
+export function render(element: ReactElement, sendToHost: SendToHost): void {
+  // 🔴 TEST: Set global variable to prove this code executes
+  if (typeof globalThis !== 'undefined') {
+    globalThis.__RILL_RENDER_CALLED = true;
+    globalThis.__RILL_RENDER_COUNT = (globalThis.__RILL_RENDER_COUNT || 0) + 1;
+  }
+
+  // 🔴 CRITICAL DEBUG: This should ALWAYS execute when Guest renders
+  // Use globalThis.console to bypass Guest console wrapper
+  if (typeof globalThis !== 'undefined' && globalThis.console) {
+    globalThis.console.log('[rill:reconciler] 🔴🔴🔴 RENDER CALLED (globalThis) 🔴🔴🔴');
+  }
+  console.log('[rill:reconciler] 🔴🔴🔴 RENDER CALLED (console) 🔴🔴🔴');
   let instance = reconcilerMap.get(sendToHost);
 
   if (!instance) {
@@ -778,7 +891,7 @@ export function unmount(sendToHost: SendToHost): void {
  * Unmount all guest instances
  */
 export function unmountAll(): void {
-  reconcilerMap.forEach(instance => {
+  reconcilerMap.forEach((instance) => {
     instance.reconciler.updateContainer(null, instance.root, null, () => {});
     instance.callbackRegistry.clear();
   });
@@ -787,16 +900,14 @@ export function unmountAll(): void {
 
 /**
  * Get callback registry for a specific guest instance
- * @deprecated This function assumes a single guest instance. Use the guest's own callback management instead.
+ * Used for resource monitoring and debugging
  */
 export function getCallbackRegistry(sendToHost?: SendToHost): CallbackRegistry | null {
-  if (sendToHost) {
-    const instance = reconcilerMap.get(sendToHost);
-    return instance?.callbackRegistry ?? null;
+  if (!sendToHost) {
+    return null;
   }
-  // Fallback: return the first available registry (for backward compatibility)
-  const firstInstance = reconcilerMap.values().next().value;
-  return firstInstance?.callbackRegistry ?? null;
+  const instance = reconcilerMap.get(sendToHost);
+  return instance ? instance.callbackRegistry : null;
 }
 
-export { type VNode, type Operation, type OperationBatch, type SendToHost };
+export type { VNode, Operation, OperationBatch, SendToHost };

@@ -1,5 +1,5 @@
 import vm from 'node:vm';
-import type { JSEngineProvider, JSEngineRuntime, JSEngineContext } from './engine';
+import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from './engine';
 
 /**
  * An implementation of JSEngineProvider that uses the Node.js `vm` module.
@@ -24,7 +24,7 @@ export class VMProvider implements JSEngineProvider {
     const context: JSEngineContext = {
       eval: (code: string) => {
         // Check interrupt handler before eval
-        if (interruptHandler && interruptHandler()) {
+        if (interruptHandler?.()) {
           throw new Error('[VMProvider] Execution interrupted by handler');
         }
 

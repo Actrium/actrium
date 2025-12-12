@@ -4,8 +4,9 @@
  * React Native component for rendering Guest UI in sandbox
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import type React from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import type { Engine } from './engine';
 
 /**
@@ -175,7 +176,7 @@ export function EngineView({
     return () => {
       mountedRef.current = false;
     };
-  }, [engine]);
+  }, []);
 
   // Render loading state
   if (loadingState === 'loading' || loadingState === 'idle') {

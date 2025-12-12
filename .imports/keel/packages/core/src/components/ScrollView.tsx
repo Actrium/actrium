@@ -4,12 +4,12 @@
  * Default scroll view component implementation, wrapping React Native ScrollView
  */
 
-import React from 'react';
+import type React from 'react';
 import {
-  ScrollView as RNScrollView,
-  type ViewStyle,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  ScrollView as RNScrollView,
+  type ViewStyle,
 } from 'react-native';
 
 export interface ScrollEvent {

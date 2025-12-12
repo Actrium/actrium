@@ -14,22 +14,25 @@ export default defineConfig({
     minify: 'esbuild',
     target: 'es2020',
     rollupOptions: {
-      external: ['react','react/jsx-runtime','react-native','rill/reconciler'],
+      external: ['react','react/jsx-runtime','react/jsx-dev-runtime','react-native','@rill/core','@rill/core/sdk'],
       output: {
         format: 'iife',
         name: '__RillGuest',
         globals: {
           react: 'React',
           'react/jsx-runtime': 'ReactJSXRuntime',
+          'react/jsx-dev-runtime': 'ReactJSXDevRuntime',
           'react-native': 'ReactNative',
-          'rill/reconciler': 'RillReconciler',
+          '@rill/core': 'RillCore',
+          '@rill/core/sdk': 'RillCore',
         },
       },
     },
   },
   resolve: {
     alias: {
-      'rill/sdk': require.resolve('rill/sdk').replace('.js', '.mjs'),
+      '@rill/core/sdk': require.resolve('@rill/core/sdk'),
+      '@rill/core': require.resolve('@rill/core'),
     },
   },
   define: {
@@ -38,5 +41,6 @@ export default defineConfig({
   },
   esbuild: {
     jsx: 'automatic',
+    jsxDev: false,
   },
 });

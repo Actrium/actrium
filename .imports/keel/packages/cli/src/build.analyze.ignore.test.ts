@@ -1,6 +1,6 @@
-import { describe, it, expect, mock, beforeEach ,  spyOn } from 'bun:test';
-import path from 'path';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
+import path from 'path';
 
 describe('CLI Analyze - ignore patterns', () => {
   const distDir = path.join(process.cwd(), 'dist');

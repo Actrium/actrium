@@ -1,7 +1,13 @@
 /**
  * Performance Optimization Module
  *
- * Provides batch update throttling, operation merging, and other optimization mechanisms
+ * Provides batch update throttling, operation merging, and other optimization mechanisms.
+ *
+ * Note: In the dedicated engine architecture (one Engine per Tab/View), these optimizations
+ * have shifted from "system-level stability guarantees" to "per-instance UI smoothness enhancements".
+ * - ThrottledScheduler: Still useful to prevent a single Guest from overwhelming its own UI thread
+ * - OperationMerger: Micro-optimization to reduce Host communication overhead
+ * - Both are optional but recommended for better user experience
  */
 
 import type { Operation, OperationBatch } from '../types';
@@ -32,7 +38,12 @@ export interface BatchConfig {
 /**
  * Operation Merger
  *
- * Merges consecutive operations on the same node to reduce unnecessary updates
+ * Merges consecutive operations on the same node to reduce unnecessary updates.
+ *
+ * In dedicated engine architecture:
+ * - Role: Micro-optimization to reduce Guest→Host communication
+ * - Impact: Beneficial but not critical (single engine doesn't compete for resources)
+ * - Status: Enabled by default, can be disabled via BatchConfig.enableMerge
  */
 export class OperationMerger {
   /**
@@ -43,7 +54,6 @@ export class OperationMerger {
 
     const result: Operation[] = [];
     const created = new Set<number>();
-    const deleted = new Set<number>();
     const lastInsertForChild = new Map<number, Extract<Operation, { op: 'INSERT' }>>();
     const lastReorderForParent = new Map<number, Extract<Operation, { op: 'REORDER' }>>();
     const updateMap = new Map<number, Extract<Operation, { op: 'UPDATE' }>>();
@@ -58,10 +68,9 @@ export class OperationMerger {
             existing.props = { ...existing.props, ...op.props };
             // Merge removedProps
             if (op.removedProps) {
-              existing.removedProps = [
-                ...(existing.removedProps || []),
-                ...op.removedProps,
-              ].filter((key, index, arr) => arr.indexOf(key) === index);
+              existing.removedProps = [...(existing.removedProps || []), ...op.removedProps].filter(
+                (key, index, arr) => arr.indexOf(key) === index
+              );
             }
           } else {
             const newOp = { ...op };
@@ -84,9 +93,7 @@ export class OperationMerger {
           // When deleting a node, remove all previous updates for that node
           updateMap.delete(op.id);
           // Also remove UPDATE operations for this node from result
-          const deleteIndex = result.findIndex(
-            (o) => o.op === 'UPDATE' && o.id === op.id
-          );
+          const deleteIndex = result.findIndex((o) => o.op === 'UPDATE' && o.id === op.id);
           if (deleteIndex !== -1) {
             result.splice(deleteIndex, 1);
           }
@@ -134,7 +141,13 @@ export class OperationMerger {
 /**
  * Throttled Update Scheduler
  *
- * Controls update frequency to avoid excessive re-renders
+ * Controls update frequency to avoid excessive re-renders.
+ *
+ * In dedicated engine architecture:
+ * - Previous role (pooled): System-wide stabilizer preventing cross-engine interference
+ * - Current role (dedicated): Per-instance UI smoothness optimizer
+ * - Use case: Prevents a single Guest from blocking its own UI with high-frequency setState
+ * - Default: 16ms throttle (~60fps), can be relaxed for simpler scenarios
  */
 export class ThrottledScheduler {
   private pendingOperations: Operation[] = [];
@@ -149,10 +162,7 @@ export class ThrottledScheduler {
   private batchId = 0;
   private version = 1;
 
-  constructor(
-    onFlush: (batch: OperationBatch) => void,
-    config: BatchConfig = {}
-  ) {
+  constructor(onFlush: (batch: OperationBatch) => void, config: BatchConfig = {}) {
     this.config = {
       maxBatchSize: config.maxBatchSize ?? 100,
       throttleMs: config.throttleMs ?? 16,
@@ -395,10 +405,7 @@ export class VirtualScrollCalculator {
   /**
    * Calculate visible range
    */
-  calculate(
-    scrollTop: number,
-    viewportHeight: number
-  ): VirtualScrollState {
+  calculate(scrollTop: number, viewportHeight: number): VirtualScrollState {
     if (this.totalItems === 0) {
       return {
         startIndex: 0,
@@ -520,7 +527,10 @@ export class ScrollThrottler {
       };
 
       if (typeof globalThis.setTimeout === 'function') {
-        this.timeoutId = globalThis.setTimeout(scheduleCallback, this.config.throttleMs - timeDelta) as any;
+        this.timeoutId = globalThis.setTimeout(
+          scheduleCallback,
+          this.config.throttleMs - timeDelta
+        ) as ReturnType<typeof setTimeout>;
       } else {
         // Fallback: schedule using microtask if setTimeout not available
         Promise.resolve().then(scheduleCallback);
@@ -590,8 +600,7 @@ export class PerformanceMonitor {
   recordBatch(batch: OperationBatch, originalCount?: number): void {
     this.metrics.totalBatches++;
     this.metrics.totalOperations += batch.operations.length;
-    this.metrics.avgBatchSize =
-      this.metrics.totalOperations / this.metrics.totalBatches;
+    this.metrics.avgBatchSize = this.metrics.totalOperations / this.metrics.totalBatches;
     this.metrics.lastUpdateTime = Date.now();
 
     if (originalCount !== undefined) {

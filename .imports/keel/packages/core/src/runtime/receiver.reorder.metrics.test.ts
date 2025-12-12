@@ -1,7 +1,7 @@
-import { describe, it, expect, mock } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
+import React from 'react';
 import { Receiver } from './receiver';
 import { createRegistry } from './registry';
-import React from 'react';
 
 describe('Receiver metrics with INSERT/REORDER', () => {
   it('reports render metrics after complex reorder', () => {
@@ -10,7 +10,12 @@ describe('Receiver metrics with INSERT/REORDER', () => {
     const Dummy = (props: any) => React.createElement('div', props, props.children);
     registry.register('View', Dummy as any);
 
-    const receiver = new Receiver(registry, () => {}, () => {}, { onMetric });
+    const receiver = new Receiver(
+      registry,
+      () => {},
+      () => {},
+      { onMetric }
+    );
 
     const ops: any[] = [];
     // parent and children
@@ -30,7 +35,7 @@ describe('Receiver metrics with INSERT/REORDER', () => {
     receiver.applyBatch({ operations: ops } as any);
     receiver.render();
 
-    const names = onMetric.mock.calls.map(c => c[0]);
+    const names = onMetric.mock.calls.map((c) => c[0]);
     expect(names).toContain('receiver.render');
   });
 });

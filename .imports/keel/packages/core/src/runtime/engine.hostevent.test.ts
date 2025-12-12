@@ -1,32 +1,53 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 // A minimal QuickJSProvider mock that runs code in the same JS context for test purposes
 // List of globals that should NOT be deleted on dispose (core JS/Node/Bun globals)
-const PROTECTED_GLOBALS = new Set(['console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'process', 'globalThis', 'global']);
+const PROTECTED_GLOBALS = new Set([
+  'console',
+  'setTimeout',
+  'clearTimeout',
+  'setInterval',
+  'clearInterval',
+  'queueMicrotask',
+  'process',
+  'globalThis',
+  'global',
+]);
 
 class MockContext {
   private globals = new Map<string, unknown>();
   eval(code: string): unknown {
     // Use indirect eval to execute in global scope
-    return (0,eval)(code);
+    return (0, eval)(code);
   }
   setGlobal(name: string, value: unknown): void {
-    (globalThis as any)[name] = value;
+    globalThis[name] = value;
     this.globals.set(name, value);
   }
-  getGlobal(name: string): unknown { return (globalThis as any)[name]; }
+  getGlobal(name: string): unknown {
+    return globalThis[name];
+  }
   dispose(): void {
     this.globals.forEach((_, k) => {
       // Don't delete protected globals like console
       if (!PROTECTED_GLOBALS.has(k)) {
-        delete (globalThis as any)[k];
+        delete globalThis[k];
       }
     });
     this.globals.clear();
   }
 }
-class MockRuntime { createContext() { return new MockContext(); } dispose() {} }
-const MockQuickJSProvider = { createRuntime() { return new MockRuntime(); } };
+class MockRuntime {
+  createContext() {
+    return new MockContext();
+  }
+  dispose() {}
+}
+const MockQuickJSProvider = {
+  createRuntime() {
+    return new MockRuntime();
+  },
+};
 
 import { Engine } from './engine';
 
@@ -48,10 +69,10 @@ describe('Engine host→guest events', () => {
     engine.sendEvent('PING', { ok: 1 } as any);
 
     // Wait for event to be processed (sendEvent is fire-and-forget)
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // verify callback executed in sandbox
-    expect((globalThis as any).__PING_PAYLOAD).toEqual({ ok: 1 });
+    expect(globalThis.__PING_PAYLOAD).toEqual({ ok: 1 });
 
     engine.destroy();
   });

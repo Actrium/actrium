@@ -5,7 +5,7 @@
  * NOTE: This test only runs in React Native environment (not in bun/node)
  */
 
-import { describe, it, expect, mock, beforeEach, beforeAll } from 'bun:test';
+import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 // Detect if we're in a React Native compatible environment
 // Bun cannot parse react-native's Flow syntax
@@ -52,7 +52,9 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
       if (updateCallback) {
         queueMicrotask(() => updateCallback());
       }
-      return { render: () => React.createElement('View', { testID: 'guest-content' }, 'Guest Content') };
+      return {
+        render: () => React.createElement('View', { testID: 'guest-content' }, 'Guest Content'),
+      };
     });
     getReceiverMock = mock(() => ({
       render: () => React.createElement('View', { testID: 'guest-content' }, 'Guest Content'),
@@ -72,23 +74,38 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
           storedListeners.set(event, new Set());
         }
         storedListeners.get(event)!.add(listener);
-        return mock(() => { storedListeners.get(event)?.delete(listener); });
+        return mock(() => {
+          storedListeners.get(event)?.delete(listener);
+        });
       }),
       emit: mock((event: string, arg?: any) => {
-        storedListeners.get(event)?.forEach(listener => listener(arg));
+        storedListeners.get(event)?.forEach((listener) => listener(arg));
       }),
       destroy: mock(() => {}),
-      options: { debug: false, timeout: 5000, logger: console, requireWhitelist: new Set(), receiverMaxBatchSize: 5000 },
+      options: {
+        debug: false,
+        timeout: 5000,
+        logger: console,
+        requireWhitelist: new Set(),
+        receiverMaxBatchSize: 5000,
+      },
       register: mock(() => {}),
       sendEvent: mock(() => {}),
       updateConfig: mock(() => {}),
       getRegistry: mock(() => ({})),
-      getHealth: mock(() => ({ loaded: false, destroyed: false, errorCount: 0, lastErrorAt: null, receiverNodes: 0, batching: false })),
+      getHealth: mock(() => ({
+        loaded: false,
+        destroyed: false,
+        errorCount: 0,
+        lastErrorAt: null,
+        receiverNodes: 0,
+        batching: false,
+      })),
     } as unknown as InstanceType<typeof Engine>;
   });
 
   // Helper to wait for promises to resolve
-  const flushPromises = () => new Promise(resolve => setTimeout(resolve, 0));
+  const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   describe('Initialization and Loading', () => {
     it('should show default loading indicator initially', async () => {
@@ -96,7 +113,10 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
       await act(async () => {
         renderer = TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: 'https://example.com/bundle.js' })
+          React.createElement(EngineView, {
+            engine: mockEngine,
+            bundleUrl: 'https://example.com/bundle.js',
+          })
         );
       });
 
@@ -108,7 +128,10 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
     it('should call engine.loadBundle with bundleUrl', async () => {
       await act(async () => {
         TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: 'https://example.com/bundle.js' })
+          React.createElement(EngineView, {
+            engine: mockEngine,
+            bundleUrl: 'https://example.com/bundle.js',
+          })
         );
         await flushPromises();
       });
@@ -153,7 +176,10 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
     it('should call createReceiver', async () => {
       await act(async () => {
         TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: 'https://example.com/bundle.js' })
+          React.createElement(EngineView, {
+            engine: mockEngine,
+            bundleUrl: 'https://example.com/bundle.js',
+          })
         );
         await flushPromises();
       });
@@ -264,7 +290,10 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
       await act(async () => {
         TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: 'https://example.com/bundle.js' })
+          React.createElement(EngineView, {
+            engine: mockEngine,
+            bundleUrl: 'https://example.com/bundle.js',
+          })
         );
         await flushPromises();
       });
@@ -280,7 +309,10 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
       await act(async () => {
         TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: 'https://example.com/bundle.js' })
+          React.createElement(EngineView, {
+            engine: mockEngine,
+            bundleUrl: 'https://example.com/bundle.js',
+          })
         );
         await flushPromises();
       });
@@ -293,7 +325,10 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
       await act(async () => {
         renderer = TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: 'https://example.com/bundle.js' })
+          React.createElement(EngineView, {
+            engine: mockEngine,
+            bundleUrl: 'https://example.com/bundle.js',
+          })
         );
       });
 
@@ -310,9 +345,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
   describe('Edge Cases', () => {
     it('should handle empty bundleUrl', async () => {
       await act(async () => {
-        TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: '' })
-        );
+        TestRenderer.create(React.createElement(EngineView, { engine: mockEngine, bundleUrl: '' }));
         await flushPromises();
       });
 
@@ -329,7 +362,10 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
       await act(async () => {
         renderer = TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: 'https://example.com/bundle.js' })
+          React.createElement(EngineView, {
+            engine: mockEngine,
+            bundleUrl: 'https://example.com/bundle.js',
+          })
         );
         await flushPromises();
       });
@@ -346,7 +382,10 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
       await act(async () => {
         renderer = TestRenderer.create(
-          React.createElement(EngineView, { engine: mockEngine, bundleUrl: 'https://example.com/bundle.js' })
+          React.createElement(EngineView, {
+            engine: mockEngine,
+            bundleUrl: 'https://example.com/bundle.js',
+          })
         );
         await flushPromises();
       });

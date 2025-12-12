@@ -6,9 +6,11 @@
 
 // Core exports
 // Development-time version check to help align React and react-reconciler peer versions
-(function () {
+(() => {
   try {
-    const env = (typeof process !== 'undefined' && process && process.env && process.env['NODE_ENV']) || 'production';
+    const env =
+      (typeof process !== 'undefined' && process && process.env && process.env.NODE_ENV) ||
+      'production';
     if (env !== 'production') {
       // Dynamically resolve versions without creating hard dependencies
       let reactVersion: string | undefined;
@@ -33,7 +35,7 @@
           { r: /^19\.0\./, allowed: /^0\.32\./, recommend: 'react-reconciler ^0.32' },
           { r: /^19\.(2|3|4|5)\./, allowed: /^0\.33\./, recommend: 'react-reconciler ^0.33' },
         ];
-        const match = guidance.find(g => g.r.test(reactVersion!));
+        const match = guidance.find((g) => g.r.test(reactVersion!));
         if (match && !match.allowed.test(reconcilerVersion)) {
           // eslint-disable-next-line no-console
           console.warn(
@@ -49,78 +51,72 @@
   }
 })();
 
-// Core exports
-export { Engine } from './engine';
-export type {
-  EngineOptions,
-  EngineEvents,
-  GuestMessage,
-  JSEngineContext,
-  JSEngineRuntime,
-  JSEngineProvider,
-} from './engine';
-
 // Backward compatibility type aliases
 export type {
+  EngineEvents,
+  EngineOptions,
+  GuestMessage,
+  JSEngineContext,
   JSEngineContext as QuickJSContext,
-  JSEngineRuntime as QuickJSRuntime,
+  JSEngineProvider,
   JSEngineProvider as QuickJSProvider,
+  JSEngineRuntime,
+  JSEngineRuntime as QuickJSRuntime,
 } from './engine';
+// Core exports
+export { Engine } from './engine';
 
 // JSEngineProvider interface is provided by rill, with specific implementations supplied by the host app
 // React Native hosts can use react-native-quickjs native module
 // Node.js/Web hosts can use quickjs-emscripten or vm-based providers
 
-export { EngineView } from './EngineView';
+export type { DefaultComponentName } from '../components';
+// Default components
+export { DefaultComponents } from '../components';
+// Type exports
+export type {
+  AppendOperation,
+  CallFunctionMessage,
+  ConfigUpdateMessage,
+  CreateOperation,
+  DeleteOperation,
+  DestroyMessage,
+  HostEventMessage,
+  HostMessage,
+  HostMessageType,
+  InsertOperation,
+  NodeInstance,
+  Operation,
+  OperationBatch,
+  OperationType,
+  RemoveOperation,
+  ReorderOperation,
+  SerializedFunction,
+  SerializedProps,
+  SerializedValue,
+  StyleObject,
+  StyleProp,
+  TextOperation,
+  UpdateOperation,
+} from '../types';
 export type { EngineViewProps } from './EngineView';
-
-export { Receiver } from './receiver';
-export type { SendToSandbox } from './receiver';
-
-export { ComponentRegistry, createRegistry } from './registry';
-export type { ComponentType, ComponentMap } from './registry';
+export { EngineView } from './EngineView';
+export type {
+  BatchConfig,
+  PerformanceMetrics,
+  VirtualScrollConfig,
+  VirtualScrollState,
+} from './performance';
 
 // Performance optimization
 export {
   OperationMerger,
+  PerformanceMonitor,
+  ScrollThrottler,
   ThrottledScheduler,
   VirtualScrollCalculator,
-  ScrollThrottler,
-  PerformanceMonitor,
 } from './performance';
-export type {
-  BatchConfig,
-  VirtualScrollConfig,
-  VirtualScrollState,
-  PerformanceMetrics,
-} from './performance';
-
-// Type exports
-export type {
-  Operation,
-  OperationBatch,
-  OperationType,
-  CreateOperation,
-  UpdateOperation,
-  DeleteOperation,
-  AppendOperation,
-  InsertOperation,
-  RemoveOperation,
-  ReorderOperation,
-  TextOperation,
-  HostMessage,
-  HostMessageType,
-  CallFunctionMessage,
-  HostEventMessage,
-  ConfigUpdateMessage,
-  DestroyMessage,
-  SerializedProps,
-  SerializedValue,
-  SerializedFunction,
-  NodeInstance,
-  StyleObject,
-  StyleProp,
-} from '../types';
-
-// Default components (need to be implemented in components/ directory)
-// export { DefaultComponents } from '../components';
+export type { SendToSandbox } from './receiver';
+export { Receiver } from './receiver';
+export type { ComponentMap, ComponentType } from './registry';
+export { ComponentRegistry, createRegistry } from './registry';

@@ -1,6 +1,6 @@
-import { describe, it, expect, mock, beforeEach, spyOn } from 'bun:test';
-import path from 'path';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
+import path from 'path';
 
 describe('CLI Analyze - whitelist scan', () => {
   const tmpDir = path.join(process.cwd(), 'dist');
@@ -22,8 +22,9 @@ describe('CLI Analyze - whitelist scan', () => {
   it('should fail when failOnViolation is true', async () => {
     const { analyze } = await import('./build');
     fs.writeFileSync(bundle, `import x from 'lodash';`);
-    await expect(analyze('dist/scan-bundle.js', { whitelist: ['react'], failOnViolation: true }))
-      .rejects.toThrow('Analyze failed');
+    await expect(
+      analyze('dist/scan-bundle.js', { whitelist: ['react'], failOnViolation: true })
+    ).rejects.toThrow('Analyze failed');
   });
 
   it('should ignore relative imports', async () => {

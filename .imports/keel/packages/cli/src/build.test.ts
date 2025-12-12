@@ -4,11 +4,11 @@
  * Tests for the build CLI commands. Uses actual vite for integration testing.
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
-import type { BuildOptions } from './build';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
-import path from 'path';
 import os from 'os';
+import path from 'path';
+import type { BuildOptions } from './build';
 
 describe('CLI Build', () => {
   let tempDir: string;
@@ -116,9 +116,7 @@ describe('CLI Build', () => {
 
       await analyze('dist/analyze-bundle.js');
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Bundle Analysis')
-      );
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Bundle Analysis'));
 
       consoleSpy.mockRestore();
     });
@@ -126,9 +124,7 @@ describe('CLI Build', () => {
     it('should throw error for non-existent bundle', async () => {
       const { analyze } = await import('./build');
 
-      await expect(analyze('non-existent.js')).rejects.toThrow(
-        'Bundle not found'
-      );
+      await expect(analyze('non-existent.js')).rejects.toThrow('Bundle not found');
     });
 
     it('should warn about react-native references', async () => {
@@ -145,9 +141,7 @@ describe('CLI Build', () => {
 
       await analyze('dist/bad-bundle.js');
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('react-native')
-      );
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('react-native'));
 
       consoleSpy.mockRestore();
     });
@@ -169,9 +163,7 @@ describe('CLI Build', () => {
 
       await analyze('dist/analyze-bundle.js');
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Lines:')
-      );
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Lines:'));
 
       consoleSpy.mockRestore();
     });
@@ -212,10 +204,7 @@ describe('Build Options Validation', () => {
 describe('Runtime Inject Content', () => {
   it('should include callback registration functions', () => {
     // 读取源码验证运行时注入内容
-    const buildSource = fs.readFileSync(
-      path.join(__dirname, 'build.ts'),
-      'utf-8'
-    );
+    const buildSource = fs.readFileSync(path.join(__dirname, 'build.ts'), 'utf-8');
 
     expect(buildSource).toContain('__registerCallback');
     expect(buildSource).toContain('__invokeCallback');
@@ -223,10 +212,7 @@ describe('Runtime Inject Content', () => {
   });
 
   it('should include host event handling', () => {
-    const buildSource = fs.readFileSync(
-      path.join(__dirname, 'build.ts'),
-      'utf-8'
-    );
+    const buildSource = fs.readFileSync(path.join(__dirname, 'build.ts'), 'utf-8');
 
     expect(buildSource).toContain('__useHostEvent');
     expect(buildSource).toContain('__handleHostEvent');

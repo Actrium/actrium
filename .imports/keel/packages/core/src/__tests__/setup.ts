@@ -47,22 +47,28 @@ if (typeof globalThis.setTimeout === 'undefined') {
     // If setTimeout already exists, use it
     (globalThis as Record<string, unknown>).clearTimeout = (id: number) => {
       if (typeof originalSetTimeout !== 'undefined') {
-        (globalThis as any).clearTimeout(id);
+        globalThis.clearTimeout(id);
       }
       timers.delete(id);
     };
   } else {
     // Create a polyfilled setTimeout using Bun.sleep
-    (globalThis as Record<string, unknown>).setTimeout = (fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    (globalThis as Record<string, unknown>).setTimeout = (
+      fn: (...args: unknown[]) => void,
+      ms?: number,
+      ...args: unknown[]
+    ) => {
       const id = ++timerId;
       try {
-        const promise = (globalThis as any).Bun?.sleep?.(ms ?? 0)?.then?.(() => {
-          timers.delete(id);
-          fn(...args);
-        }) ?? Promise.resolve().then(() => {
-          timers.delete(id);
-          fn(...args);
-        });
+        const promise =
+          globalThis.Bun?.sleep?.(ms ?? 0)?.then?.(() => {
+            timers.delete(id);
+            fn(...args);
+          }) ??
+          Promise.resolve().then(() => {
+            timers.delete(id);
+            fn(...args);
+          });
         timers.set(id, promise);
       } catch {
         // Fallback: execute immediately
@@ -88,7 +94,7 @@ import { mock, spyOn } from 'bun:test';
 // when react-jsx-dev-runtime loads
 const preloadReactConsole = () => {
   if (!globalThis.console) {
-    (globalThis as any).console = {
+    globalThis.console = {
       log: () => {},
       warn: () => {},
       error: () => {},
@@ -108,9 +114,10 @@ preloadReactConsole();
 if (globalThis.console) {
   try {
     // Store original createTask before any modifications
-    const originalCreateTask = (console as any).createTask ||
-                              originalConsole?.createTask ||
-                              (() => ({ run: (fn: () => void) => fn() }));
+    const originalCreateTask =
+      (console as any).createTask ||
+      originalConsole?.createTask ||
+      (() => ({ run: (fn: () => void) => fn() }));
 
     spyOn(console, 'log').mockImplementation(() => {});
     spyOn(console, 'warn').mockImplementation(() => {});
@@ -187,7 +194,7 @@ const vi = {
   runAllTimersAsync: async () => {
     // Wait for any pending microtasks
     if (typeof globalThis.setTimeout === 'function') {
-      await new Promise(resolve => globalThis.setTimeout(resolve, 0));
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
     }
   },
   restoreAllMocks: () => {

@@ -1,4 +1,4 @@
-import type { JSEngineProvider, JSEngineContext } from './engine';
+import type { JSEngineContext, JSEngineProvider } from './engine';
 
 export interface WorkerMessage {
   type: 'init' | 'eval' | 'setGlobal' | 'getGlobal' | 'dispose';
@@ -19,24 +19,31 @@ export interface WorkerMessage {
  *   This interface method allows for pre-eval checks on the main thread.
  */
 export class WorkerJSEngineProvider implements JSEngineProvider {
-  constructor(private createWorker: () => Worker, private options?: { timeout?: number }) {}
+  constructor(
+    private createWorker: () => Worker,
+    private options?: { timeout?: number }
+  ) {}
 
   async createRuntime() {
     const worker = this.createWorker();
     let interruptHandler: (() => boolean) | null = null;
 
-    const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
+    const pending = new Map<
+      string,
+      { resolve: (v: unknown) => void; reject: (e: unknown) => void }
+    >();
     let msgId = 0;
 
     const post = (msg: WorkerMessage) => worker.postMessage(msg);
 
     worker.onmessage = (ev: MessageEvent) => {
-      const { id, result, error } = ev.data;
+      const { id, result, error } = ev.data as { id?: string; result?: unknown; error?: string };
       if (id && pending.has(id)) {
+        const promise = pending.get(id)!;
         if (error) {
-          pending.get(id)!.reject(new Error(error));
+          promise.reject(new Error(error));
         } else {
-          pending.get(id)!.resolve(result);
+          promise.resolve(result);
         }
         pending.delete(id);
       }
@@ -54,14 +61,14 @@ export class WorkerJSEngineProvider implements JSEngineProvider {
     await call({ type: 'init', options: { timeout: this.options?.timeout } });
 
     const context: JSEngineContext = {
-      eval: (code: string) => {
+      eval: (_code: string) => {
         // This provider is async-only.
         throw new Error('Use evalAsync with WorkerJSEngineProvider');
       },
 
       evalAsync: async (code: string) => {
         // Check interrupt handler before sending to worker
-        if (interruptHandler && interruptHandler()) {
+        if (interruptHandler?.()) {
           throw new Error('[WorkerJSEngineProvider] Execution interrupted by handler');
         }
         return await call({ type: 'eval', code });
@@ -73,7 +80,7 @@ export class WorkerJSEngineProvider implements JSEngineProvider {
         if (typeof value === 'function') return;
         if (value && typeof value === 'object') {
           // Check if object contains functions (like console, React)
-          const hasFunction = Object.values(value).some(v => typeof v === 'function');
+          const hasFunction = Object.values(value).some((v) => typeof v === 'function');
           if (hasFunction) return;
         }
         // Fire-and-forget for serializable setGlobal

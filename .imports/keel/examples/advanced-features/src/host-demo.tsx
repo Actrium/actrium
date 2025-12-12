@@ -2,9 +2,9 @@
  * Host-side Advanced Features Demo
  */
 
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
 import { Engine, EngineView } from '@rill/core';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
 // Performance metrics collector
 class MetricsCollector {
@@ -41,9 +41,7 @@ class MetricsCollector {
   }
 
   getStats(metricName: string) {
-    const values = this.metrics
-      .filter((m) => m.name === metricName)
-      .map((m) => m.value);
+    const values = this.metrics.filter((m) => m.name === metricName).map((m) => m.value);
 
     if (values.length === 0) return null;
 
@@ -52,7 +50,7 @@ class MetricsCollector {
 
     return {
       count: values.length,
-      avg: Math.round(sum / values.length * 100) / 100,
+      avg: Math.round((sum / values.length) * 100) / 100,
       min: Math.min(...values),
       max: Math.max(...values),
       p50: sorted[Math.floor(sorted.length * 0.5)],
@@ -96,10 +94,7 @@ export default function HostDemo() {
       },
 
       // Module whitelist
-      requireWhitelist: [
-        'lodash',
-        'date-fns',
-      ],
+      requireWhitelist: ['lodash', 'date-fns'],
 
       // Batch size limit
       receiverMaxBatchSize: 5000,
@@ -150,8 +145,7 @@ export default function HostDemo() {
             <Text style={styles.statName}>{item.name}</Text>
             {item.stats && (
               <Text style={styles.statValue}>
-                avg: {item.stats.avg}ms | p95: {item.stats.p95}ms | count:{' '}
-                {item.stats.count}
+                avg: {item.stats.avg}ms | p95: {item.stats.p95}ms | count: {item.stats.count}
               </Text>
             )}
           </View>

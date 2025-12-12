@@ -1,6 +1,6 @@
-import { describe, it, expect, mock, beforeEach ,  spyOn } from 'bun:test';
-import path from 'path';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
+import path from 'path';
 
 describe('CLI Analyze - more string/comment edges', () => {
   const distDir = path.join(process.cwd(), 'dist');
@@ -23,7 +23,7 @@ describe('CLI Analyze - more string/comment edges', () => {
 
   it('should not warn for require/import inside plain strings', async () => {
     const { analyze } = await import('./build');
-    const code = `const a = "require('left-pad')"; const b = 'import(\'lodash\')';`;
+    const code = `const a = "require('left-pad')"; const b = 'import('lodash')';`;
     fs.writeFileSync(bundle('strings.js'), code);
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     await analyze('dist/strings.js', { whitelist: ['react'], failOnViolation: false });

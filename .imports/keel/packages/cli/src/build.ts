@@ -4,10 +4,10 @@
  * Vite-based guest bundler (replaced esbuild)
  */
 
-import { build as viteBuild } from 'vite';
-import type { InlineConfig } from 'vite';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
+import type { InlineConfig } from 'vite';
+import { build as viteBuild } from 'vite';
 
 /**
  * Build options
@@ -65,13 +65,17 @@ const RUNTIME_INJECT = `
 (function() {
   'use strict';
 
-  // Callback registry
-  var __callbacks = new Map();
-  var __callbackId = 0;
+  // Callback registry - persist across re-executions
+  if (!globalThis.__callbacks) {
+    globalThis.__callbacks = new Map();
+    globalThis.__callbackId = 0;
+  }
+  var __callbacks = globalThis.__callbacks;
+  var __callbackIdCounter = globalThis.__callbackId;
 
   // Register callback
   globalThis.__registerCallback = function(fn) {
-    var id = 'fn_' + (++__callbackId) + '_' + Date.now().toString(36);
+    var id = 'fn_' + (++globalThis.__callbackId);
     __callbacks.set(id, fn);
     return id;
   };
@@ -87,6 +91,7 @@ const RUNTIME_INJECT = `
       }
     } else {
       console.warn('[rill] Callback not found:', fnId);
+      console.warn('[rill] Available callbacks:', Array.from(__callbacks.keys()).join(', '));
     }
   };
 
@@ -164,7 +169,7 @@ const AUTO_RENDER_FOOTER = `
 
       // Import render function from reconciler
       // In Engine's mock runtime, this will be available via require polyfill
-      var reconciler = typeof require === 'function' ? require('rill/reconciler') : null;
+      var reconciler = typeof require === 'function' ? require('@rill/core') : null;
 
       if (!reconciler || !reconciler.render) {
         console.error('[rill] Reconciler not found, cannot auto-render');
@@ -188,6 +193,15 @@ const AUTO_RENDER_FOOTER = `
       console.log('[rill] Auto-rendering guest component');
       reconciler.render(element, __sendToHost);
 
+      // 🔴 TRACK: Read after commit phase completes
+      setTimeout(function() {
+        console.log('[Guest] === After Commit ===');
+        console.log('[Guest] Total ops:', typeof globalThis !== 'undefined' ? globalThis.__TOTAL_OPS : 0);
+        console.log('[Guest] Op types:', typeof globalThis !== 'undefined' ? JSON.stringify(globalThis.__OP_COUNTS) : '{}');
+        console.log('[Guest] TouchableOpacity created:', typeof globalThis !== 'undefined' ? globalThis.__TOUCHABLE_CREATE_COUNT : 0);
+        console.log('[Guest] Last TouchableOpacity fnId:', typeof globalThis !== 'undefined' ? globalThis.__LAST_TOUCHABLE_FNID : 'none');
+      }, 100);
+
     } catch (error) {
       console.error('[rill] Auto-render failed:', error);
     }
@@ -202,14 +216,7 @@ const AUTO_RENDER_FOOTER = `
 export async function build(options: BuildOptions): Promise<void> {
   const startTime = Date.now();
 
-  const {
-    entry,
-    outfile,
-    minify,
-    sourcemap,
-    watch,
-    metafile,
-  } = options;
+  const { entry, outfile, minify, sourcemap, watch, metafile } = options;
 
   const strict = options.strict ?? true;
   const strictPeerVersions = options.strictPeerVersions ?? false;
@@ -257,7 +264,14 @@ export async function build(options: BuildOptions): Promise<void> {
       minify: minify ? 'esbuild' : false,
       target: 'es2020',
       rollupOptions: {
-        external: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-native', 'rill/reconciler'],
+        external: [
+          'react',
+          'react/jsx-runtime',
+          'react/jsx-dev-runtime',
+          'react-native',
+          '@rill/core',
+          '@rill/core/sdk',
+        ],
         output: {
           format: 'iife',
           name: '__RillGuest',
@@ -266,17 +280,112 @@ export async function build(options: BuildOptions): Promise<void> {
           globals: {
             react: 'React',
             'react/jsx-runtime': 'ReactJSXRuntime',
+            'react/jsx-dev-runtime': 'ReactJSXDevRuntime',
             'react-native': 'ReactNative',
-            'rill/reconciler': 'RillReconciler',
+            '@rill/core': 'RillCore',
+            '@rill/core/sdk': 'RillCore', // Map to same global as @rill/core
           },
           entryFileNames: outFileName,
         },
+        plugins: [
+          // NOTE: Disabled transformation - use global variable injection at runtime instead
+          // See FunctionQuickJSProvider for global variable setup
+          /*
+          {
+            name: 'rill-transform-globals-to-require',
+            generateBundle(_options, bundle) {
+              for (const fileName in bundle) {
+                const item = bundle[fileName];
+                if (item && item.type === 'chunk') {
+                  const chunk = item; // Type narrowing
+                  // Transform IIFE that expects globals to use require() instead
+                  const moduleMap: Record<string, string> = {
+                    'ReactJSXRuntime': 'react/jsx-runtime',
+                    'React': 'react',
+                    'ReactNative': 'react-native',
+                    'RillReconciler': 'rill/reconciler',
+                    'RillSDK': 'rill/sdk',
+                  };
+
+                  // Save original bundle before transformation for debugging
+                  const originalPath = fileName.replace(/\.js$/, '.original.js');
+                  fs.writeFileSync(originalPath, chunk.code, 'utf-8');
+                  console.log(`📝 Original bundle saved to: ${originalPath}`);
+
+                  // Match the IIFE signature with parameters: (function(t,i,o){
+                  const signatureMatch = chunk.code.match(/var __RillGuest=\(function\(([^)]*)\)\{/);
+                  // Match the IIFE invocation with arguments: })(ReactJSXRuntime,React,RillSDK);
+                  const invokeMatch = chunk.code.match(/\)\(([\w,\s]+)\);(?=\(function\(\)\{|\s*\/\*\s*Auto-render)/);
+
+                  if (signatureMatch && invokeMatch && signatureMatch[1] && invokeMatch[1]) {
+                    // Get the minified parameter names (t, i, o, ...)
+                    const minifiedParams = signatureMatch[1].split(',').map((p: string) => p.trim()).filter(Boolean);
+                    // Get the global module names (ReactJSXRuntime, React, RillSDK, ...)
+                    const globalParams = invokeMatch[1].split(',').map((p: string) => p.trim()).filter(Boolean);
+
+                    // Generate require statements using minified parameter names
+                    // This preserves the variable names that the minified code expects
+                    const requireStatements = minifiedParams
+                      .map((minifiedName: string, index: number) => {
+                        const globalName = globalParams[index];
+                        const moduleName = globalName ? moduleMap[globalName] : null;
+                        return moduleName ? `var ${minifiedName}=require('${moduleName}');` : null;
+                      })
+                      .filter(Boolean)
+                      .join('\n');
+
+                    // IMPORTANT: Must remove "use strict" BEFORE adding require statements
+                    // Otherwise "use strict" won't be the first statement
+
+                    // First, replace IIFE signature and remove the "use strict" that immediately follows
+                    // Match: (function(t,i,o){"use strict"; → (function(){
+                    // Note: "use strict" might not have any whitespace after the semicolon
+                    chunk.code = chunk.code.replace(
+                      /var __RillGuest=\(function\([^)]*\)\{("use strict";|'use strict';)/,
+                      `var __RillGuest=(function(){\n${requireStatements}\n`
+                    );
+
+                    // Note: FunctionContext will add "use strict" at the outermost level
+
+                    // Remove the IIFE invocation arguments: })(React,RillSDK,...); → })();
+                    chunk.code = chunk.code.replace(
+                      /\)\(([\w,\s]+)\);(?=\(function\(\)\{|\s*\/\*\s*Auto-render)/,
+                      '();'
+                    );
+
+                    // Validate syntax using Function constructor (more strict than oxc-parser)
+                    // This simulates exactly how FunctionQuickJSProvider will execute the code
+                    try {
+                      // Test without "use strict" first
+                      new Function('require', chunk.code);
+                      // Test with "use strict" as FunctionContext will add it
+                      new Function('require', `"use strict"; ${chunk.code}`);
+                      console.log(`✅ Bundle ${fileName} passed Function constructor validation`);
+                    } catch (parseError) {
+                      const err = parseError as Error;
+                      // Save the problematic bundle for debugging
+                      const debugPath = fileName.replace(/\.js$/, '.debug.js');
+                      fs.writeFileSync(debugPath, chunk.code, 'utf-8');
+                      console.error(`❌ Syntax error in transformed bundle ${fileName}:`);
+                      console.error('Error:', err.message);
+                      console.error(`Debug bundle saved to: ${debugPath}`);
+                      console.error('First 500 chars:', chunk.code.substring(0, 500));
+                      console.error('Last 200 chars:', chunk.code.substring(chunk.code.length - 200));
+                      throw new Error(`Bundle transformation produced invalid syntax: ${err.message}`);
+                    }
+                  }
+                }
+              }
+            },
+          },*/
+        ],
       },
     },
     resolve: {
       alias: {
-        // Resolve to the @rill/core package's SDK ESM export
-        '@rill/core/sdk': require.resolve('@rill/core/sdk').replace('.js', '.mjs'),
+        // @rill/core publishes TypeScript source, Vite can handle .ts files directly
+        '@rill/core/sdk': require.resolve('@rill/core/sdk'),
+        '@rill/core': require.resolve('@rill/core'),
       },
     },
     define: {
@@ -285,6 +394,7 @@ export async function build(options: BuildOptions): Promise<void> {
     },
     esbuild: {
       jsx: 'automatic',
+      jsxDev: false, // Force production JSX runtime
     },
   };
 
@@ -322,9 +432,19 @@ export async function build(options: BuildOptions): Promise<void> {
 
       // Peer version matrix check
       try {
-        const reactPkg = require(require.resolve('react/package.json', { paths: [process.cwd()] })) as { version?: string };
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const reactPkg = require(
+          require.resolve('react/package.json', { paths: [process.cwd()] })
+        ) as { version?: string };
         let reconcilerPkg: { version?: string } | undefined;
-        try { reconcilerPkg = require(require.resolve('react-reconciler/package.json', { paths: [process.cwd()] })) as { version?: string }; } catch {}
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          reconcilerPkg = require(
+            require.resolve('react-reconciler/package.json', { paths: [process.cwd()] })
+          ) as { version?: string };
+        } catch {
+          // Reconciler package not found, skip version check
+        }
         if (reactPkg && reconcilerPkg) {
           const rv = String(reactPkg.version || '');
           const tv = String(reconcilerPkg.version || '');
@@ -333,7 +453,7 @@ export async function build(options: BuildOptions): Promise<void> {
             { r: /^19\.0\./, allowed: /^0\.32\./, recommend: 'react-reconciler ^0.32' },
             { r: /^19\.(2|3|4|5)\./, allowed: /^0\.33\./, recommend: 'react-reconciler ^0.33' },
           ];
-          const m = mapping.find(x => x.r.test(rv));
+          const m = mapping.find((x) => x.r.test(rv));
           if (m && !m.allowed.test(tv)) {
             const msg = `[rill] React ${rv} with react-reconciler ${tv}. Recommended: ${m.recommend}`;
             if (strictPeerVersions) throw new Error(msg);
@@ -349,7 +469,13 @@ export async function build(options: BuildOptions): Promise<void> {
       if (strict) {
         try {
           await analyze(path.join(outDir, outFileName), {
-            whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
+            whitelist: [
+              'react',
+              'react-native',
+              'react/jsx-runtime',
+              '@rill/core',
+              '@rill/core/sdk',
+            ],
             failOnViolation: true,
             treatEvalAsViolation: true,
             treatDynamicNonLiteralAsViolation: true,
@@ -357,11 +483,40 @@ export async function build(options: BuildOptions): Promise<void> {
           console.log('   Strict guard: PASS (no disallowed runtime deps)');
         } catch (guardErr) {
           console.error('\n❌ Strict guard failed:');
-          if (guardErr instanceof Error) console.error('   ' + guardErr.message);
+          if (guardErr instanceof Error) console.error(`   ${guardErr.message}`);
           console.error('   Hint: Remove runtime imports like "rill/sdk" from the bundle.');
           console.error('   The SDK must be compiled-time inlined.');
           throw guardErr;
         }
+      }
+
+      // Validate bundle can be loaded with Function constructor
+      try {
+        const bundleCode = fs.readFileSync(targetPath, 'utf-8');
+
+        // Mock the global variables that will be injected at runtime
+        const mockGlobals = {
+          ReactJSXRuntime: {},
+          ReactJSXDevRuntime: {},
+          React: {},
+          RillCore: {}, // New unified @rill/core global
+          ReactNative: {},
+        };
+
+        const globalNames = Object.keys(mockGlobals);
+        const globalValues = Object.values(mockGlobals);
+
+        // Test with Function constructor (simulates FunctionQuickJSProvider)
+        new Function(...globalNames, bundleCode)(...globalValues);
+
+        console.log('   Syntax validation: PASS');
+      } catch (validationErr) {
+        console.error('\n❌ Bundle validation failed:');
+        if (validationErr instanceof Error) {
+          console.error('   Error:', validationErr.message);
+          console.error('   The bundle cannot be loaded by Function constructor');
+        }
+        throw validationErr;
       }
 
       // Output build info
@@ -417,7 +572,15 @@ export async function build(options: BuildOptions): Promise<void> {
 /**
  * Analyze bundle
  */
-export async function analyze(bundlePath: string, options?: { whitelist?: string[]; failOnViolation?: boolean; treatEvalAsViolation?: boolean; treatDynamicNonLiteralAsViolation?: boolean }): Promise<void> {
+export async function analyze(
+  bundlePath: string,
+  options?: {
+    whitelist?: string[];
+    failOnViolation?: boolean;
+    treatEvalAsViolation?: boolean;
+    treatDynamicNonLiteralAsViolation?: boolean;
+  }
+): Promise<void> {
   const fullPath = path.resolve(process.cwd(), bundlePath);
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Bundle not found: ${fullPath}`);
@@ -454,13 +617,16 @@ export async function analyze(bundlePath: string, options?: { whitelist?: string
   // If no deps were found by AST, do a safe dynamic import literal scan excluding comments/strings
   if (found.size === 0) {
     const ranges: Array<[number, number]> = [];
-    const collect = (re: RegExp) => { let m: RegExpExecArray | null; while ((m = re.exec(content))) ranges.push([m.index, m.index + m[0].length]); };
+    const collect = (re: RegExp) => {
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(content))) ranges.push([m.index, m.index + m[0].length]);
+    };
     collect(/\/\*[\s\S]*?\*\//g); // block comments
     collect(/\/\/[^\n]*/g); // line comments
     collect(/'(?:\\.|[^'\\])*'/g); // single-quoted strings
     collect(/"(?:\\.|[^"\\])*"/g); // double-quoted strings
     collect(/`(?:\\.|[^`\\])*`/g); // template literals
-    const inRange = (idx: number) => ranges.some(([s,e]) => idx >= s && idx < e);
+    const inRange = (idx: number) => ranges.some(([s, e]) => idx >= s && idx < e);
 
     const addMatches = (re: RegExp) => {
       let m: RegExpExecArray | null;
@@ -479,21 +645,31 @@ export async function analyze(bundlePath: string, options?: { whitelist?: string
   // Try to find sourcemap (external or inline reference)
   let sourceMapPath: string | null = null;
   const sourceMapRefMatch = content.match(/\/\/# sourceMappingURL=(.*)$/m);
-  if (sourceMapRefMatch && sourceMapRefMatch[1]) {
+  if (sourceMapRefMatch?.[1]) {
     const ref = sourceMapRefMatch[1].trim();
     if (!ref.startsWith('data:')) {
       const candidate = path.resolve(path.dirname(fullPath), ref);
       if (fs.existsSync(candidate)) sourceMapPath = candidate;
     }
-  } else if (fs.existsSync(fullPath + '.map')) {
-    sourceMapPath = fullPath + '.map';
+  } else if (fs.existsSync(`${fullPath}.map`)) {
+    sourceMapPath = `${fullPath}.map`;
   }
-  type SourceMapSummary = { version?: unknown; sources?: unknown; file?: unknown } | { error: string } | null;
+  type SourceMapSummary =
+    | { version?: unknown; sources?: unknown; file?: unknown }
+    | { error: string }
+    | null;
   let sourceMapSummary: SourceMapSummary = null;
   if (sourceMapPath) {
     try {
-      const mapJson = JSON.parse(fs.readFileSync(sourceMapPath, 'utf-8')) as Record<string, unknown>;
-      sourceMapSummary = { version: mapJson['version'], sources: mapJson['sources'], file: mapJson['file'] };
+      const mapJson = JSON.parse(fs.readFileSync(sourceMapPath, 'utf-8')) as Record<
+        string,
+        unknown
+      >;
+      sourceMapSummary = {
+        version: mapJson.version,
+        sources: mapJson.sources,
+        file: mapJson.file,
+      };
     } catch {
       sourceMapSummary = { error: 'failed_to_parse' };
     }
@@ -514,7 +690,15 @@ export async function analyze(bundlePath: string, options?: { whitelist?: string
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
   console.log('  Report:', path.relative(process.cwd(), reportPath));
 
-  const whitelist = new Set(options?.whitelist ?? ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler']);
+  const whitelist = new Set(
+    options?.whitelist ?? [
+      'react',
+      'react-native',
+      'react/jsx-runtime',
+      '@rill/core',
+      '@rill/core/sdk',
+    ]
+  );
   const violations: string[] = Array.from(found).filter((m) => {
     if (whitelist.has(m)) return false;
     if (m.startsWith('./') || m.startsWith('../')) return false;

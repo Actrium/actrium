@@ -138,11 +138,7 @@ export interface SerializedFunction {
 /**
  * Host message type enum
  */
-export type HostMessageType =
-  | 'CALL_FUNCTION'
-  | 'HOST_EVENT'
-  | 'CONFIG_UPDATE'
-  | 'DESTROY';
+export type HostMessageType = 'CALL_FUNCTION' | 'HOST_EVENT' | 'CONFIG_UPDATE' | 'DESTROY';
 
 /**
  * Base message interface
@@ -242,12 +238,7 @@ export type FlexDirection = 'row' | 'column' | 'row-reverse' | 'column-reverse';
 /**
  * Flexbox alignment
  */
-export type FlexAlign =
-  | 'flex-start'
-  | 'flex-end'
-  | 'center'
-  | 'stretch'
-  | 'baseline';
+export type FlexAlign = 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline';
 
 /**
  * Flexbox justify

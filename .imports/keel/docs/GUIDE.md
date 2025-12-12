@@ -20,10 +20,10 @@ Rill is a lightweight React Native dynamic UI rendering engine, similar to Shopi
 
 ```bash
 # In host application
-bun add rill react-native-quickjs
+bun add @rill/core react-native-quickjs
 
 # In guest project (dev dependency only)
-bun add -D rill
+bun add -D @rill/cli
 ```
 
 ### 2. Create Guest
@@ -59,7 +59,7 @@ export default function MyGuest() {
 ### 3. Build Guest
 
 ```bash
-bunx rill build src/guest.tsx -o dist/bundle.js
+bunx @rill/cli build src/guest.tsx -o dist/bundle.js
 ```
 
 ### 4. Use in Host Application
@@ -67,21 +67,24 @@ bunx rill build src/guest.tsx -o dist/bundle.js
 ```tsx
 // App.tsx
 import React from 'react';
-import { SafeAreaView, Text } from 'react-native';
-import { EngineView } from 'rill/runtime';
+import { SafeAreaView, Text, ActivityIndicator } from 'react-native';
+import { Engine, EngineView } from '@rill/core';
+
+const engine = new Engine();
 
 export default function App() {
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <EngineView
-        source="https://cdn.example.com/guest.js"
+        engine={engine}
+        bundleUrl="https://cdn.example.com/guest.js"
         initialProps={{
           title: 'Hello Rill',
           theme: 'light',
         }}
         onLoad={() => console.log('Guest loaded')}
         onError={(error) => console.error('Guest error:', error)}
-        fallback={<Text>Loading guest...</Text>}
+        fallback={<ActivityIndicator />}
       />
     </SafeAreaView>
   );
@@ -298,13 +301,16 @@ function Guest() {
 ```tsx
 import React from 'react';
 import { View } from 'react-native';
-import { EngineView } from 'rill/runtime';
+import { Engine, EngineView } from '@rill/core';
+
+const engine = new Engine();
 
 function GuestHost() {
   return (
     <View style={{ flex: 1 }}>
       <EngineView
-        source="https://cdn.example.com/guest.js"
+        engine={engine}
+        bundleUrl="https://cdn.example.com/guest.js"
         initialProps={{ theme: 'dark' }}
       />
     </View>
@@ -317,17 +323,21 @@ function GuestHost() {
 Register host-side native components for guest use:
 
 ```tsx
+import { Engine, EngineView } from '@rill/core';
 import { NativeStepList } from './components/NativeStepList';
 import { CustomButton } from './components/CustomButton';
+
+const engine = new Engine();
+engine.register({
+  StepList: NativeStepList,
+  CustomButton: CustomButton,
+});
 
 function GuestHost() {
   return (
     <EngineView
-      source={bundleUrl}
-      components={{
-        StepList: NativeStepList,
-        CustomButton: CustomButton,
-      }}
+      engine={engine}
+      bundleUrl={bundleUrl}
     />
   );
 }
@@ -355,22 +365,23 @@ function Guest() {
 #### Host -> Guest
 
 ```tsx
-import { useRef } from 'react';
-import { Engine } from 'rill/runtime';
+import { useState } from 'react';
+import { Button, View } from 'react-native';
+import { Engine, EngineView } from '@rill/core';
 
 function GuestHost() {
-  const engineRef = useRef<Engine>(null);
+  const [engine] = useState(() => new Engine());
 
   const handleRefresh = () => {
-    engineRef.current?.sendEvent('REFRESH', { force: true });
+    engine.sendEvent('REFRESH', { force: true });
   };
 
   return (
     <View>
       <Button title="Refresh" onPress={handleRefresh} />
       <EngineView
-        ref={engineRef}
-        source={bundleUrl}
+        engine={engine}
+        bundleUrl={bundleUrl}
       />
     </View>
   );
@@ -379,27 +390,34 @@ function GuestHost() {
 
 #### Guest -> Host
 
-Listen for operation events in EngineView:
+Listen for messages from guest using engine events:
 
 ```tsx
-import { Engine, EngineView } from 'rill/runtime';
+import { useState, useEffect } from 'react';
+import { Engine, EngineView } from '@rill/core';
 
 function GuestHost() {
-  const handleGuestEvent = (eventName: string, payload: unknown) => {
-    switch (eventName) {
-      case 'TASK_COMPLETE':
-        console.log('Task completed:', payload);
-        break;
-      case 'NAVIGATION':
-        navigation.navigate(payload.route);
-        break;
-    }
-  };
+  const [engine] = useState(() => new Engine());
+
+  useEffect(() => {
+    const unsubscribe = engine.on('message', (message) => {
+      switch (message.event) {
+        case 'TASK_COMPLETE':
+          console.log('Task completed:', message.payload);
+          break;
+        case 'NAVIGATION':
+          navigation.navigate(message.payload.route);
+          break;
+      }
+    });
+
+    return unsubscribe;
+  }, [engine]);
 
   return (
     <EngineView
-      source={bundleUrl}
-      onGuestEvent={handleGuestEvent}
+      engine={engine}
+      bundleUrl={bundleUrl}
     />
   );
 }
@@ -410,7 +428,7 @@ function GuestHost() {
 Use the Engine class directly for more control:
 
 ```tsx
-import { Engine, Receiver, ComponentRegistry } from 'rill/runtime';
+import { Engine, Receiver, ComponentRegistry } from '@rill/core';
 
 function useRillEngine(bundleUrl: string, initialProps: object) {
   const [tree, setTree] = useState<React.ReactElement | null>(null);
@@ -453,7 +471,7 @@ function useRillEngine(bundleUrl: string, initialProps: object) {
 Rill automatically batches updates to optimize performance:
 
 ```tsx
-import { ThrottledScheduler } from 'rill/runtime';
+import { ThrottledScheduler } from '@rill/core';
 
 // Custom throttle configuration
 const scheduler = new ThrottledScheduler(
@@ -471,7 +489,7 @@ const scheduler = new ThrottledScheduler(
 Use virtual scrolling for long lists:
 
 ```tsx
-import { VirtualScrollCalculator } from 'rill/runtime';
+import { VirtualScrollCalculator } from '@rill/core';
 
 const calculator = new VirtualScrollCalculator({
   estimatedItemHeight: 60,  // Estimated item height
@@ -487,7 +505,7 @@ const state = calculator.calculate(scrollTop, viewportHeight);
 ### Performance Monitoring
 
 ```tsx
-import { PerformanceMonitor } from 'rill/runtime';
+import { PerformanceMonitor } from '@rill/core';
 
 const monitor = new PerformanceMonitor();
 
@@ -507,38 +525,46 @@ console.log(`Merged operations: ${metrics.mergedOperations}`);
 
 ## Debugging
 
-### Enable DevTools
+Rill provides built-in debugging capabilities through engine events and the optional DevTools package.
+
+### Basic Debugging
+
+Use engine events to monitor runtime behavior:
 
 ```tsx
-import { createDevTools } from 'rill/devtools';
+import { Engine } from '@rill/core';
 
-const devtools = createDevTools({
-  inspector: { maxDepth: 10 },
-  maxLogs: 100,
-  maxTimelineEvents: 500,
+const engine = new Engine({ debug: true });
+
+// Monitor errors
+engine.on('error', (error) => {
+  console.error('[Guest Error]', error);
 });
 
-// Enable in development
-if (__DEV__) {
-  devtools.enable();
-}
-
-// Record events
+// Monitor operations
 engine.on('operation', (batch) => {
-  devtools.onBatch(batch);
+  console.log(`Operations: ${batch.operations.length}`);
 });
+
+// Monitor resource usage
+const stats = engine.getResourceStats();
+console.log('Resources:', stats);
+// { timers: 2, nodes: 15, callbacks: 8 }
 ```
 
-### View Component Tree
+### DevTools (Optional)
+
+For advanced debugging, use the DevTools package with component inspection, operation logging, and timeline recording.
 
 ```tsx
-const receiver = engine.getReceiver();
-const treeText = devtools.getComponentTreeText(
-  receiver.nodeMap,
-  receiver.rootChildren
-);
+import { createDevTools } from '@rill/core/devtools';
 
-console.log(treeText);
+const devtools = createDevTools();
+
+if (__DEV__) {
+  devtools.enable();
+  engine.on('operation', (batch) => devtools.onBatch(batch));
+}
 // Output:
 // └─ <View testID="root">
 //    ├─ <Text numberOfLines={2}>
