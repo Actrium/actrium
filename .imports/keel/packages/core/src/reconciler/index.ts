@@ -71,6 +71,13 @@ export class CallbackRegistry {
   private counter = 0;
 
   /**
+   * Get internal callbacks Map (for syncing with globalThis.__callbacks)
+   */
+  getMap(): Map<string, (...args: unknown[]) => unknown> {
+    return this.callbacks;
+  }
+
+  /**
    * Register callback function
    */
   register(fn: (...args: unknown[]) => unknown): string {
@@ -422,10 +429,11 @@ export function createReconciler(sendToHost: SendToHost): {
 
   // 🔧 FIX: Sync callbackRegistry with globalThis.__callbacks
   // This allows Engine.handleCallFunction() to find callbacks via __invokeCallback()
-  if (typeof globalThis !== 'undefined' && callbackRegistry) {
+  if (typeof globalThis !== 'undefined') {
     // @ts-ignore - __callbacks is injected by Guest runtime
-    globalThis.__callbacks = (callbackRegistry as any).callbacks;
-    console.log('[rill:reconciler] 🔧 Synced callbackRegistry.callbacks to globalThis.__callbacks');
+    globalThis.__callbacks = callbackRegistry.getMap();
+    console.log('[rill:reconciler] 🔧 Synced callbackRegistry to globalThis.__callbacks');
+    console.log('[rill:reconciler] 🔧 Callbacks Map:', globalThis.__callbacks);
   }
 
   const hostConfig: ExtendedHostConfig = {
