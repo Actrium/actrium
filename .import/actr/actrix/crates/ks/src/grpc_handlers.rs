@@ -137,18 +137,14 @@ impl KeyServer for KsGrpcService {
             .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
             .ok_or_else(|| Status::not_found(format!("Key not found: {key_id}")))?;
 
-        // 检查密钥是否过期，并计算是否在容忍期
+        // 检查密钥是否超过容忍期
         let tolerance_seconds = self.tolerance_seconds;
 
-        let in_tolerance_period = if key_record.expires_at > 0 {
+        if key_record.expires_at > 0 {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-
-            // 检查是否在容忍期内：已过期但未超过容忍期
-            let is_in_tolerance =
-                key_record.expires_at < now && key_record.expires_at + tolerance_seconds >= now;
 
             // 检查是否超过了过期时间 + 容忍期
             if key_record.expires_at + tolerance_seconds < now {
@@ -156,14 +152,11 @@ impl KeyServer for KsGrpcService {
                 return Err(Status::not_found(format!("Key {key_id} has expired")));
             }
 
-            if is_in_tolerance {
+            // 记录是否在容忍期内
+            if key_record.expires_at < now {
                 warn!("Key {} is in tolerance period", key_id);
             }
-
-            is_in_tolerance
-        } else {
-            false // 永不过期的密钥不在容忍期
-        };
+        }
 
         // 获取私钥
         let secret_key = self
@@ -174,15 +167,15 @@ impl KeyServer for KsGrpcService {
             .ok_or_else(|| Status::not_found(format!("Secret key not found: {key_id}")))?;
 
         info!(
-            "Found secret key for key_id: {}, in_tolerance: {}",
-            key_id, in_tolerance_period
+            "Found secret key for key_id: {}, expires_at: {}",
+            key_id, key_record.expires_at
         );
 
         let response = GetSecretKeyResponse {
             key_id,
             secret_key,
             expires_at: key_record.expires_at,
-            in_tolerance_period,
+            tolerance_seconds,
         };
 
         Ok(Response::new(response))
