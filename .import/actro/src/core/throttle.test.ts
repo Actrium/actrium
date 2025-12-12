@@ -2,7 +2,7 @@
  * Throttle and Debounce Tests
  */
 
-import { throttle, debounce, rateLimit } from './throttle';
+import { debounce, rateLimit, throttle } from './throttle';
 
 describe('Throttle', () => {
   beforeEach(() => {

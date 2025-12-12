@@ -5,9 +5,9 @@
  */
 
 import {
+  BROADCASTER_SYMBOL,
   EventEmitter,
   HostEventEmitter,
-  BROADCASTER_SYMBOL,
   NOTIFY_SYMBOL,
 } from './EventEmitter.host';
 

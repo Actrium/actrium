@@ -4,8 +4,8 @@
  * Container component that applies theme-aware styling
  */
 
-import type { ThemeViewProps } from '../../types';
 import { createGuestComponent } from '../../core/component-helpers';
+import type { ThemeViewProps } from '../../types';
 
 /**
  * ThemeView component factory

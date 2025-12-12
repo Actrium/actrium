@@ -5,8 +5,8 @@
  * The actual rendering happens on the Host side.
  */
 
-import type { StepListProps } from '../../types';
 import { createGuestComponent, validators } from '../../core/component-helpers';
+import type { StepListProps } from '../../types';
 
 /**
  * StepList component factory

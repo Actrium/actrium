@@ -4,11 +4,9 @@
  * In guest environment, Toast sends commands to Host through the bridge.
  */
 
-import type { ToastAPI, ToastOptions } from '../types';
 import { logger } from '../core/logger';
-
 // Declare globals injected by Rill runtime
-import type { TypedSendToHost } from '../types';
+import type { ToastAPI, ToastOptions, TypedSendToHost } from '../types';
 
 declare const global: {
   sendToHost?: TypedSendToHost;

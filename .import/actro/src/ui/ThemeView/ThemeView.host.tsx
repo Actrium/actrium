@@ -5,7 +5,7 @@
  * Supports different variants for common UI patterns.
  */
 
-import { View, StyleSheet, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type ViewStyle } from 'react-native';
 import type { ThemeViewProps } from '../../types';
 
 // Theme colors (can be extended to support dark mode)
@@ -35,7 +35,6 @@ function getBackgroundColor(variant?: ThemeViewProps['variant']): string {
       return THEME_COLORS.secondary;
     case 'surface':
       return THEME_COLORS.surface;
-    case 'background':
     default:
       return THEME_COLORS.background;
   }
@@ -49,9 +48,9 @@ function getPadding(padding?: ThemeViewProps['padding']): number {
     return padding;
   }
   if (typeof padding === 'string') {
-    return PADDING_MAP[padding] ?? PADDING_MAP['medium'] ?? 16;
+    return PADDING_MAP[padding] ?? PADDING_MAP.medium ?? 16;
   }
-  return PADDING_MAP['medium'] ?? 16;
+  return PADDING_MAP.medium ?? 16;
 }
 
 /**

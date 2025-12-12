@@ -4,8 +4,8 @@
  * Displays a chat message bubble with optional metadata
  */
 
-import type { ChatBubbleProps } from '../../types';
 import { createGuestComponent } from '../../core/component-helpers';
+import type { ChatBubbleProps } from '../../types';
 
 /**
  * ChatBubble component factory

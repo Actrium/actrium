@@ -5,16 +5,17 @@
  * Supports loop display mode and various status states.
  */
 
-import React, { useMemo } from 'react';
+import type React from 'react';
+import { useMemo } from 'react';
 import {
-  View,
-  Text,
   StyleSheet,
-  TouchableOpacity,
-  type ViewStyle,
+  Text,
   type TextStyle,
+  TouchableOpacity,
+  View,
+  type ViewStyle,
 } from 'react-native';
-import type { StepListProps, StepItem, StepStatus } from '../../types';
+import type { StepItem, StepListProps, StepStatus } from '../../types';
 
 // Default colors
 const DEFAULT_COLORS = {
@@ -104,7 +105,6 @@ function getStatusColor(status: StepStatus, colors: typeof DEFAULT_COLORS): stri
       return colors.completed;
     case 'error':
       return colors.error;
-    case 'pending':
     default:
       return colors.pending;
   }

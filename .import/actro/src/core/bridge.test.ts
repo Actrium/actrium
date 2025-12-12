@@ -6,18 +6,23 @@
  */
 
 import {
-  EventEmitter,
-  HostEventEmitter,
   BROADCASTER_SYMBOL,
+  EventEmitter,
+  type HostEventEmitter,
   NOTIFY_SYMBOL,
 } from '../api/EventEmitter.host';
 import {
-  Toast,
-  HostToast,
-  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
+  HAPTIC_CLEAR_HANDLER,
+  HAPTIC_SET_HANDLER,
+  Haptic,
+  type HostHaptic,
+} from '../api/Haptic.host';
+import {
   TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
+  type HostToast,
+  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
+  Toast,
 } from '../api/Toast.host';
-import { Haptic, HostHaptic, HAPTIC_SET_HANDLER, HAPTIC_CLEAR_HANDLER } from '../api/Haptic.host';
 
 // Recreate module registry (same as registry.ts)
 const modules = {

@@ -10,9 +10,9 @@
  * - Error handling and isolation
  */
 
-import type { EventEmitterAPI, EventCallback, EventListenerOptions } from '../types';
 import { logger } from '../core/logger';
 import { rateLimit } from '../core/throttle';
+import type { EventCallback, EventEmitterAPI, EventListenerOptions } from '../types';
 
 type ListenerMap = Map<string, Set<EventCallback<unknown>>>;
 type PatternListenerMap = Map<EventCallback<unknown>, { pattern: string; regex: RegExp }>;

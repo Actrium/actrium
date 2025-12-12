@@ -9,12 +9,17 @@
  */
 
 import {
-  Toast,
-  HostToast,
-  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
+  HAPTIC_CLEAR_HANDLER,
+  HAPTIC_SET_HANDLER,
+  Haptic,
+  type HostHaptic,
+} from '../api/Haptic.host';
+import {
   TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
+  type HostToast,
+  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
+  Toast,
 } from '../api/Toast.host';
-import { Haptic, HostHaptic, HAPTIC_SET_HANDLER, HAPTIC_CLEAR_HANDLER } from '../api/Haptic.host';
 
 // Recreate module registry (same as registry.ts)
 const modules = {
@@ -90,7 +95,9 @@ describe('Core Registry', () => {
 
     it('should handle all haptic types', () => {
       const types = ['light', 'medium', 'heavy', 'selection', 'success', 'warning', 'error'];
-      types.forEach((type) => Haptic.trigger(type as Parameters<typeof Haptic.trigger>[0]));
+      for (const type of types) {
+        Haptic.trigger(type as Parameters<typeof Haptic.trigger>[0]);
+      }
 
       expect(hapticCalls.map((c) => c.type)).toEqual(types);
     });

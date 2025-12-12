@@ -5,15 +5,19 @@
  * to the Rill engine. Host apps import this to inject native implementations.
  */
 
+import {
+  HAPTIC_CLEAR_HANDLER,
+  HAPTIC_SET_HANDLER,
+  Haptic,
+  type HostHaptic,
+} from '../api/Haptic.host';
+// Import host module implementations
+import { type HostToast, TOAST_CLEAR_HANDLER, TOAST_SET_HANDLER, Toast } from '../api/Toast.host';
+import { ChatBubble } from '../ui/ChatBubble/ChatBubble.host';
 // Import host component implementations
 import { StepList } from '../ui/StepList/StepList.host';
 import { ThemeView } from '../ui/ThemeView/ThemeView.host';
 import { UserAvatar } from '../ui/UserAvatar/UserAvatar.host';
-import { ChatBubble } from '../ui/ChatBubble/ChatBubble.host';
-
-// Import host module implementations
-import { Toast, HostToast, TOAST_SET_HANDLER, TOAST_CLEAR_HANDLER } from '../api/Toast.host';
-import { Haptic, HostHaptic, HAPTIC_SET_HANDLER, HAPTIC_CLEAR_HANDLER } from '../api/Haptic.host';
 
 /**
  * Component registry for Rill engine

@@ -7,12 +7,12 @@
 
 import { useMemo } from 'react';
 import {
-  View,
-  Text,
   StyleSheet,
-  TouchableOpacity,
-  type ViewStyle,
+  Text,
   type TextStyle,
+  TouchableOpacity,
+  View,
+  type ViewStyle,
 } from 'react-native';
 import type { ChatBubbleProps } from '../../types';
 
@@ -38,7 +38,7 @@ function formatTimestamp(timestamp?: string | number | Date): string {
 
   const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
 
-  if (isNaN(date.getTime())) return '';
+  if (Number.isNaN(date.getTime())) return '';
 
   const hours = date.getHours().toString().padStart(2, '0');
   const minutes = date.getMinutes().toString().padStart(2, '0');

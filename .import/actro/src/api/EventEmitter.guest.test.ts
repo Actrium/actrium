@@ -16,20 +16,20 @@ describe('EventEmitter (Guest)', () => {
 
   beforeEach(() => {
     // Save original globals
-    originalSendToHost = (globalThis as Record<string, unknown>)['sendToHost'];
-    originalOnHostEvent = (globalThis as Record<string, unknown>)['onHostEvent'];
+    originalSendToHost = (globalThis as Record<string, unknown>).sendToHost;
+    originalOnHostEvent = (globalThis as Record<string, unknown>).onHostEvent;
 
     // Reset test state
     sentMessages = [];
     hostEventCallback = null;
 
     // Setup simulated sandbox globals
-    (globalThis as Record<string, unknown>)['sendToHost'] = (event: string, payload?: unknown) => {
+    (globalThis as Record<string, unknown>).sendToHost = (event: string, payload?: unknown) => {
       sentMessages.push({ event, payload });
     };
 
     // Setup onHostEvent to capture the callback
-    (globalThis as Record<string, unknown>)['onHostEvent'] = (
+    (globalThis as Record<string, unknown>).onHostEvent = (
       callback: (event: string, payload: unknown) => void
     ) => {
       hostEventCallback = callback;
@@ -41,8 +41,8 @@ describe('EventEmitter (Guest)', () => {
 
   afterEach(() => {
     // Restore original globals
-    (globalThis as Record<string, unknown>)['sendToHost'] = originalSendToHost;
-    (globalThis as Record<string, unknown>)['onHostEvent'] = originalOnHostEvent;
+    (globalThis as Record<string, unknown>).sendToHost = originalSendToHost;
+    (globalThis as Record<string, unknown>).onHostEvent = originalOnHostEvent;
   });
 
   describe('emit', () => {
@@ -113,7 +113,7 @@ describe('EventEmitter (Guest)', () => {
       console.error = (...args) => errors.push(args);
 
       // Mock sendToHost to throw
-      (globalThis as Record<string, unknown>)['sendToHost'] = () => {
+      (globalThis as Record<string, unknown>).sendToHost = () => {
         throw new Error('Network failure');
       };
 
@@ -314,7 +314,7 @@ describe('EventEmitter (Guest)', () => {
   describe('without sendToHost', () => {
     it('should warn when sendToHost is not available', () => {
       // Remove sendToHost
-      (globalThis as Record<string, unknown>)['sendToHost'] = undefined;
+      (globalThis as Record<string, unknown>).sendToHost = undefined;
 
       const busWithoutHost = new GuestEventEmitter();
 
@@ -427,7 +427,7 @@ describe('EventEmitter (Guest)', () => {
     it('should catch and queue messages when sendToHost throws error', () => {
       const errors: string[] = [];
 
-      (globalThis as Record<string, unknown>)['sendToHost'] = () => {
+      (globalThis as Record<string, unknown>).sendToHost = () => {
         throw new Error('Network failure');
       };
 

@@ -5,46 +5,37 @@
  * Exports all UI components and APIs with host implementations.
  */
 
-// UI Components
-export { StepList, ThemeView, UserAvatar, ChatBubble } from './ui/index.host';
-
 // APIs
-export { EventEmitter, Toast, Haptic } from './api/index.host';
-
+export { EventEmitter, Haptic, Toast } from './api/index.host';
 // Types
 export type {
-  // Common
-  ViewStyle,
-  TextStyle,
-  ImageStyle,
   BaseProps,
-  Environment,
-
-  // StepList
-  StepListProps,
-  StepItem,
-  StepStatus,
-
-  // ThemeView
-  ThemeViewProps,
-
-  // UserAvatar
-  UserAvatarProps,
-
   // ChatBubble
   ChatBubbleProps,
-
+  Environment,
+  EventCallback,
   // EventEmitter
   EventEmitterAPI,
-  EventCallback,
-
-  // Toast
-  ToastAPI,
-  ToastOptions,
-  ToastPosition,
-  ToastDuration,
-
   // Haptic
   HapticAPI,
   HapticType,
+  ImageStyle,
+  StepItem,
+  // StepList
+  StepListProps,
+  StepStatus,
+  TextStyle,
+  // ThemeView
+  ThemeViewProps,
+  // Toast
+  ToastAPI,
+  ToastDuration,
+  ToastOptions,
+  ToastPosition,
+  // UserAvatar
+  UserAvatarProps,
+  // Common
+  ViewStyle,
 } from './types';
+// UI Components
+export { ChatBubble, StepList, ThemeView, UserAvatar } from './ui/index.host';

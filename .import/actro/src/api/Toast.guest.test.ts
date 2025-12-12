@@ -11,16 +11,16 @@ describe('Toast (Remote)', () => {
   let originalSendToHost: unknown;
 
   beforeEach(() => {
-    originalSendToHost = (globalThis as Record<string, unknown>)['sendToHost'];
+    originalSendToHost = (globalThis as Record<string, unknown>).sendToHost;
     sentMessages = [];
 
-    (globalThis as Record<string, unknown>)['sendToHost'] = (event: string, payload?: unknown) => {
+    (globalThis as Record<string, unknown>).sendToHost = (event: string, payload?: unknown) => {
       sentMessages.push({ event, payload });
     };
   });
 
   afterEach(() => {
-    (globalThis as Record<string, unknown>)['sendToHost'] = originalSendToHost;
+    (globalThis as Record<string, unknown>).sendToHost = originalSendToHost;
   });
 
   describe('show', () => {
@@ -74,7 +74,7 @@ describe('Toast (Remote)', () => {
 
   describe('without sendToHost', () => {
     it('should warn and log when sendToHost is not available', () => {
-      (globalThis as Record<string, unknown>)['sendToHost'] = undefined;
+      (globalThis as Record<string, unknown>).sendToHost = undefined;
 
       const warnings: unknown[] = [];
       const logs: unknown[] = [];
@@ -96,7 +96,7 @@ describe('Toast (Remote)', () => {
 
   describe('error handling', () => {
     it('should handle sendToHost throwing exception', () => {
-      (globalThis as Record<string, unknown>)['sendToHost'] = () => {
+      (globalThis as Record<string, unknown>).sendToHost = () => {
         throw new Error('Bridge failure');
       };
 
