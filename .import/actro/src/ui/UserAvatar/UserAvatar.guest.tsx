@@ -4,8 +4,8 @@
  * Displays user avatar with optional online status indicator
  */
 
-import type { UserAvatarProps } from '../../types';
 import { createGuestComponent } from '../../core/component-helpers';
+import type { UserAvatarProps } from '../../types';
 
 /**
  * UserAvatar component factory

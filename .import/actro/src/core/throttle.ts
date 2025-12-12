@@ -140,7 +140,6 @@ export function rateLimit<T extends (...args: unknown[]) => unknown>(
       return throttle(fn, delay);
     case 'debounce':
       return debounce(fn, delay);
-    case 'none':
     default:
       return fn as (...args: Parameters<T>) => void;
   }

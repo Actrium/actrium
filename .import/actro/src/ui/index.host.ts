@@ -2,17 +2,16 @@
  * UI Components - Host exports
  */
 
-export { StepList } from './StepList/StepList.host';
-export { ThemeView } from './ThemeView/ThemeView.host';
-export { UserAvatar } from './UserAvatar/UserAvatar.host';
-export { ChatBubble } from './ChatBubble/ChatBubble.host';
-
 // Re-export types
 export type {
-  StepListProps,
+  ChatBubbleProps,
   StepItem,
+  StepListProps,
   StepStatus,
   ThemeViewProps,
   UserAvatarProps,
-  ChatBubbleProps,
 } from '../types';
+export { ChatBubble } from './ChatBubble/ChatBubble.host';
+export { StepList } from './StepList/StepList.host';
+export { ThemeView } from './ThemeView/ThemeView.host';
+export { UserAvatar } from './UserAvatar/UserAvatar.host';

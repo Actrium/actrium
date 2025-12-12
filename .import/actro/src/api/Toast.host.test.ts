@@ -5,14 +5,14 @@
  * Android platform tests are in Toast.android.test.ts
  */
 
+import type { ToastOptions } from '../types';
 import {
-  HostToast,
+  TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
   getDurationMs,
   getGravityValue,
+  HostToast,
   TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
-  TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
 } from './Toast.host';
-import type { ToastOptions } from '../types';
 
 describe('Toast (Host)', () => {
   describe('getDurationMs', () => {

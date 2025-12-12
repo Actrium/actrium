@@ -7,13 +7,13 @@
 
 import { useMemo, useState } from 'react';
 import {
-  View,
-  Text,
   Image,
   StyleSheet,
-  TouchableOpacity,
-  type ViewStyle,
+  Text,
   type TextStyle,
+  TouchableOpacity,
+  View,
+  type ViewStyle,
 } from 'react-native';
 import type { UserAvatarProps } from '../../types';
 
@@ -71,7 +71,7 @@ function getSize(size?: UserAvatarProps['size']): number {
   if (typeof size === 'number') {
     return size;
   }
-  return SIZE_MAP[size || 'medium'] ?? SIZE_MAP['medium'] ?? 48;
+  return SIZE_MAP[size || 'medium'] ?? SIZE_MAP.medium ?? 48;
 }
 
 /**

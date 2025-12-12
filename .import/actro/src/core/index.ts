@@ -15,18 +15,16 @@
  * ```
  */
 
-// Registry exports
-export { components, modules, configureToast, configureHaptic } from './registry';
+// Type exports
+export type { AskitMessageMap, EventEmitterMessageMap, TypedSendToHost } from '../types';
 
 // Bridge exports
-export { Bridge, handleGuestMessage, createEngineAdapter } from './bridge';
-export { createTypedSender, TypedBridge, validatePayload } from './typed-bridge';
-
-// Utilities
-export { throttle, debounce, rateLimit } from './throttle';
-export type { RateLimitConfig } from './throttle';
-export { createGuestComponent, validateProps, validators } from './component-helpers';
+export { Bridge, createEngineAdapter, handleGuestMessage } from './bridge';
 export type { GuestComponent, ValidationRule } from './component-helpers';
-
-// Type exports
-export type { AskitMessageMap, TypedSendToHost, EventEmitterMessageMap } from '../types';
+export { createGuestComponent, validateProps, validators } from './component-helpers';
+// Registry exports
+export { components, configureHaptic, configureToast, modules } from './registry';
+export type { RateLimitConfig } from './throttle';
+// Utilities
+export { debounce, rateLimit, throttle } from './throttle';
+export { createTypedSender, TypedBridge, validatePayload } from './typed-bridge';

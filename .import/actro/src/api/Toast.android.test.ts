@@ -21,10 +21,11 @@ function makeMock(): MockFn {
   };
   return fn;
 }
+
 import {
-  HostToast,
   _injectMocks,
   _resetReactNative,
+  HostToast,
   TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
 } from './Toast.host';
 

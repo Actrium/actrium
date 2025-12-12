@@ -7,4 +7,4 @@
  */
 
 // Re-export types for convenience
-export type { StepListProps, StepItem, StepStatus } from '../../types';
+export type { StepItem, StepListProps, StepStatus } from '../../types';

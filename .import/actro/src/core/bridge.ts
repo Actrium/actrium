@@ -5,14 +5,14 @@
  * the appropriate native modules.
  */
 
-import { modules } from './registry';
 import {
-  EventEmitter,
-  HostEventEmitter,
   BROADCASTER_SYMBOL,
+  EventEmitter,
+  type HostEventEmitter,
   NOTIFY_SYMBOL,
 } from '../api/EventEmitter.host';
 import { logger } from './logger';
+import { modules } from './registry';
 
 /**
  * Message types from guests

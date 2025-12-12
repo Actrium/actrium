@@ -17,7 +17,7 @@ export interface GuestComponent<T = unknown> {
 /**
  * Development mode detection
  */
-const isDev = typeof process !== 'undefined' && process.env?.['NODE_ENV'] === 'development';
+const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
 
 /**
  * Validation rules for component props

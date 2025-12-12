@@ -4,7 +4,7 @@
  * Provides toast notification functionality using React Native APIs.
  */
 
-import type { ToastAPI, ToastOptions, ToastDuration, ToastPosition } from '../types';
+import type { ToastAPI, ToastDuration, ToastOptions, ToastPosition } from '../types';
 
 /**
  * Internal symbols for accessing private APIs
@@ -71,7 +71,6 @@ export function getDurationMs(duration?: ToastDuration): number {
   switch (duration) {
     case 'long':
       return 3500;
-    case 'short':
     default:
       return 2000;
   }
@@ -86,7 +85,6 @@ export function getGravityValue(position?: ToastPosition): 'top' | 'center' | 'b
       return 'top';
     case 'center':
       return 'center';
-    case 'bottom':
     default:
       return 'bottom';
   }
@@ -134,7 +132,6 @@ class HostToast implements ToastAPI {
         return ToastAndroid.TOP;
       case 'center':
         return ToastAndroid.CENTER;
-      case 'bottom':
       default:
         return ToastAndroid.BOTTOM;
     }

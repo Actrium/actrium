@@ -4,12 +4,12 @@
  * 100% real tests - no mocks
  */
 
+import type { HapticType } from '../types';
 import {
+  HAPTIC_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
   HostHaptic,
   HAPTIC_SET_HANDLER as SET_HANDLER_SYMBOL,
-  HAPTIC_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
 } from './Haptic.host';
-import type { HapticType } from '../types';
 
 describe('Haptic (Host)', () => {
   let haptic: HostHaptic;
@@ -47,7 +47,9 @@ describe('Haptic (Host)', () => {
         'warning',
         'error',
       ];
-      types.forEach((type) => haptic.trigger(type));
+      for (const type of types) {
+        haptic.trigger(type);
+      }
 
       expect(calls).toEqual(types);
     });
