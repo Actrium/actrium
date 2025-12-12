@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import vm from 'node:vm';
 import { Engine } from './engine';
 import { VMProvider } from './VMProvider';
@@ -8,7 +8,7 @@ describe.skipIf(!vm)('VMProvider', () => {
   it('should interrupt a dead-loop with a timeout', async () => {
     const provider = new VMProvider({ timeout: 100 });
     const engine = new Engine({
-      quickjs: provider,
+      provider: provider, // Fixed: use 'provider' not 'quickjs'
       debug: false,
       timeout: 100,
     });

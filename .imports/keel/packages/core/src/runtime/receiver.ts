@@ -6,17 +6,39 @@
 
 import React from 'react';
 
+// Augment globalThis for debug tracking properties
+declare global {
+  // eslint-disable-next-line no-var
+  var __RECEIVER_APPEND_CALLS: number | undefined;
+  // eslint-disable-next-line no-var
+  var __APPEND_PARENT_IDS: number[] | undefined;
+  // eslint-disable-next-line no-var
+  var __APPEND_DETAILS:
+    | Array<{ parentId: number; childId: number; parentExists: boolean }>
+    | undefined;
+  // eslint-disable-next-line no-var
+  var __TOUCHABLE_RENDER_COUNT: number | undefined;
+  // eslint-disable-next-line no-var
+  var __LAST_TOUCHABLE_HAS_ONPRESS: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __RECEIVER_FUNCTION_COUNT: number | undefined;
+  // eslint-disable-next-line no-var
+  var __LAST_FUNCTION_FNID: string | undefined;
+}
+
 // Polyfill queueMicrotask if not available
-const safeQueueMicrotask = typeof queueMicrotask !== 'undefined'
-  ? queueMicrotask
-  : (callback: () => void) => Promise.resolve().then(callback);
+const safeQueueMicrotask =
+  typeof queueMicrotask !== 'undefined'
+    ? queueMicrotask
+    : (callback: () => void) => Promise.resolve().then(callback);
+
 import type {
+  HostMessage,
+  NodeInstance,
   Operation,
   OperationBatch,
-  NodeInstance,
-  SerializedProps,
   SerializedFunction,
-  HostMessage,
+  SerializedProps,
 } from '../types';
 import type { ComponentRegistry } from './registry';
 
@@ -63,7 +85,7 @@ export class Receiver {
     registry: ComponentRegistry,
     sendToSandbox: SendToSandbox,
     onUpdate: () => void,
-    options?: ReceiverOptions,
+    options?: ReceiverOptions
   ) {
     this.registry = registry;
     this.sendToSandbox = sendToSandbox;
@@ -91,24 +113,38 @@ export class Receiver {
     let skipped = 0;
     let failed = 0;
     for (let i = 0; i < batch.operations.length; i++) {
-      if (applied >= limit) { skipped += (batch.operations.length - i); break; }
+      if (applied >= limit) {
+        skipped += batch.operations.length - i;
+        break;
+      }
       const op = batch.operations[i];
       if (!op) continue;
       try {
         this.applyOperation(op);
         applied++;
-      } catch (e) {
+      } catch (_e) {
         failed++;
         // continue applying remaining operations
       }
     }
-    this.opts.onMetric?.('receiver.applyBatch', Date.now() - start, { applied, skipped, failed, total: batch.operations.length });
+    this.opts.onMetric?.('receiver.applyBatch', Date.now() - start, {
+      applied,
+      skipped,
+      failed,
+      total: batch.operations.length,
+    });
 
     if (skipped > 0) {
       // Inform guest about backpressure/skip to allow adaptive throttling upstream
       try {
-        this.sendToSandbox({ type: 'HOST_EVENT', eventName: 'RECEIVER_BACKPRESSURE', payload: { batchId: batch.batchId, skipped, applied, total: batch.operations.length } });
-      } catch {}
+        this.sendToSandbox({
+          type: 'HOST_EVENT',
+          eventName: 'RECEIVER_BACKPRESSURE',
+          payload: { batchId: batch.batchId, skipped, applied, total: batch.operations.length },
+        });
+      } catch {
+        // Silently ignore errors when sending backpressure notifications
+      }
     }
 
     this.scheduleUpdate();
@@ -141,11 +177,12 @@ export class Receiver {
     if (op.op === 'APPEND') {
       this.log(`Applying APPEND: childId=${op.childId}, parentId=${op.parentId}`);
     } else if (op.op === 'INSERT') {
-      this.log(`Applying INSERT: childId=${op.childId}, parentId=${op.parentId}, index=${op.index}`);
+      this.log(
+        `Applying INSERT: childId=${op.childId}, parentId=${op.parentId}, index=${op.index}`
+      );
     } else if (op.op === 'CREATE') {
       this.log(`Applying CREATE: id=${op.id}, type=${op.type}`);
     }
-
 
     switch (op.op) {
       case 'CREATE':
@@ -216,6 +253,24 @@ export class Receiver {
    * Handle append operation
    */
   private handleAppend(op: Extract<Operation, { op: 'APPEND' }>): void {
+    // 🔴 TRACK: Log APPEND operation details
+    if (typeof globalThis !== 'undefined') {
+      globalThis.__RECEIVER_APPEND_CALLS = (globalThis.__RECEIVER_APPEND_CALLS || 0) + 1;
+      if (!globalThis.__APPEND_PARENT_IDS) {
+        globalThis.__APPEND_PARENT_IDS = [];
+      }
+      globalThis.__APPEND_PARENT_IDS.push(op.parentId);
+
+      if (!globalThis.__APPEND_DETAILS) {
+        globalThis.__APPEND_DETAILS = [];
+      }
+      globalThis.__APPEND_DETAILS.push({
+        parentId: op.parentId,
+        childId: op.childId,
+        parentExists: this.nodeMap.has(op.parentId),
+      });
+    }
+
     if (op.parentId === 0) {
       // Append to root container
       if (!this.rootChildren.includes(op.childId)) {
@@ -314,7 +369,7 @@ export class Receiver {
   private handleText(op: Extract<Operation, { op: 'TEXT' }>): void {
     const node = this.nodeMap.get(op.id);
     if (node) {
-      node.props['text'] = op.text;
+      node.props.text = op.text;
     }
   }
 
@@ -343,13 +398,21 @@ export class Receiver {
     }
 
     if (isSerializedFunction(value)) {
+      // 🔴 TRACK: Log function creation
+      if (typeof globalThis !== 'undefined') {
+        globalThis.__RECEIVER_FUNCTION_COUNT = (globalThis.__RECEIVER_FUNCTION_COUNT || 0) + 1;
+        globalThis.__LAST_FUNCTION_FNID = value.__fnId;
+      }
+
       // Create proxy function
       return (...args: unknown[]) => {
+        console.log('[rill:Receiver] 🔴 Event handler called, fnId:', value.__fnId, 'args:', args);
         this.sendToSandbox({
           type: 'CALL_FUNCTION',
           fnId: value.__fnId,
           args: args as [],
         });
+        console.log('[rill:Receiver] 🔴 Sent CALL_FUNCTION to sandbox');
       };
     }
 
@@ -373,7 +436,12 @@ export class Receiver {
    */
   render(): React.ReactElement | string | null {
     const t0 = Date.now();
-    this.log('render() called, rootChildren:', this.rootChildren.length, 'nodeMap:', this.nodeMap.size);
+    this.log(
+      'render() called, rootChildren:',
+      this.rootChildren.length,
+      'nodeMap:',
+      this.nodeMap.size
+    );
     if (this.rootChildren.length === 0) {
       this.log('render() returning null (no root children)');
       this.opts.onMetric?.('receiver.render', Date.now() - t0, { nodeCount: this.nodeMap.size });
@@ -384,7 +452,17 @@ export class Receiver {
     const firstChild = this.rootChildren[0];
     if (this.rootChildren.length === 1 && firstChild) {
       const el = this.renderNode(firstChild);
-      this.log('render() returning single element, type:', (el as any)?.type?.name || typeof el);
+      let elType: string = typeof el;
+      if (el && typeof el === 'object' && 'type' in el) {
+        const elTypeProp = el.type as unknown;
+        if (elTypeProp && typeof elTypeProp === 'object' && 'name' in elTypeProp) {
+          const nameVal = (elTypeProp as { name: unknown }).name;
+          if (typeof nameVal === 'string') {
+            elType = nameVal;
+          }
+        }
+      }
+      this.log('render() returning single element, type:', elType);
       this.opts.onMetric?.('receiver.render', Date.now() - t0, { nodeCount: this.nodeMap.size });
       return el;
     }
@@ -412,7 +490,7 @@ export class Receiver {
 
     // Handle text node
     if (node.type === '__TEXT__') {
-      return node.props['text'] as string;
+      return node.props.text as string;
     }
 
     // Get component implementation
@@ -428,10 +506,18 @@ export class Receiver {
       .filter((child): child is React.ReactElement | string => child !== null);
 
     // Build props
-    const props = {
+    const props: Record<string, unknown> = {
       ...node.props,
       key: `rill-${id}`,
     };
+
+    // 🔴 TRACK: Log TouchableOpacity props
+    if (node.type === 'TouchableOpacity') {
+      if (typeof globalThis !== 'undefined') {
+        globalThis.__TOUCHABLE_RENDER_COUNT = (globalThis.__TOUCHABLE_RENDER_COUNT || 0) + 1;
+        globalThis.__LAST_TOUCHABLE_HAS_ONPRESS = typeof props.onPress === 'function';
+      }
+    }
 
     return React.createElement(Component, props, ...children);
   }
@@ -458,6 +544,13 @@ export class Receiver {
     nodeCount: number;
     rootChildren: number[];
     nodes: Array<{ id: number; type: string; childCount: number }>;
+    appendCalls?: number;
+    appendParentIds?: number[];
+    appendSample?: Array<{ parentId: number; childId: number; parentExists: boolean }>;
+    touchableRenderCount?: number;
+    touchableHasOnPress?: boolean;
+    functionCount?: number;
+    lastFunctionFnId?: string;
   } {
     return {
       nodeCount: this.nodeMap.size,
@@ -467,6 +560,23 @@ export class Receiver {
         type: node.type,
         childCount: node.children.length,
       })),
+      // 🔴 TRACK: Include APPEND tracking data
+      appendCalls:
+        typeof globalThis !== 'undefined' ? globalThis.__RECEIVER_APPEND_CALLS : undefined,
+      appendParentIds:
+        typeof globalThis !== 'undefined' ? globalThis.__APPEND_PARENT_IDS : undefined,
+      appendSample:
+        typeof globalThis !== 'undefined' ? globalThis.__APPEND_DETAILS?.slice(0, 10) : undefined,
+      // 🔴 TRACK: Include TouchableOpacity tracking
+      touchableRenderCount:
+        typeof globalThis !== 'undefined' ? globalThis.__TOUCHABLE_RENDER_COUNT : undefined,
+      touchableHasOnPress:
+        typeof globalThis !== 'undefined' ? globalThis.__LAST_TOUCHABLE_HAS_ONPRESS : undefined,
+      // 🔴 TRACK: Include function deserialization tracking
+      functionCount:
+        typeof globalThis !== 'undefined' ? globalThis.__RECEIVER_FUNCTION_COUNT : undefined,
+      lastFunctionFnId:
+        typeof globalThis !== 'undefined' ? globalThis.__LAST_FUNCTION_FNID : undefined,
     };
   }
 }

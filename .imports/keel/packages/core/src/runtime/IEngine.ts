@@ -1,15 +1,13 @@
 /**
- * IEngine - Common interface for all Engine implementations
+ * IEngine - Common interface for Engine implementations
  *
- * Implementations:
- * - Engine: Standalone engine with dedicated JS runtime
- * - PooledEngine: Engine backed by shared WorkerPool
+ * Each Engine instance owns a dedicated JS runtime/thread.
+ * Create a new Engine for each isolated execution context needed.
  */
 
-import type { ComponentMap } from './registry';
-import type { ComponentRegistry } from './registry';
-import type { Receiver } from './receiver';
 import type { OperationBatch, SerializedValue } from '../types';
+import type { Receiver } from './receiver';
+import type { ComponentMap, ComponentRegistry } from './registry';
 
 /**
  * Message from guest to host
@@ -48,9 +46,23 @@ export interface EngineHealth {
 }
 
 /**
+ * Resource statistics for monitoring
+ */
+export interface ResourceStats {
+  timers: number;
+  nodes: number;
+  callbacks: number;
+}
+
+/**
  * Common engine interface
  */
 export interface IEngine {
+  /**
+   * Unique engine identifier
+   */
+  readonly id: string;
+
   /**
    * Register custom components
    */
@@ -75,7 +87,7 @@ export interface IEngine {
   /**
    * Send event to sandbox guest
    */
-  sendEvent(eventName: string, payload?: SerializedValue): void;
+  sendEvent(eventName: string, payload?: unknown): void;
 
   /**
    * Update configuration
@@ -111,6 +123,11 @@ export interface IEngine {
    * Get health snapshot for observability
    */
   getHealth(): EngineHealth;
+
+  /**
+   * Get resource statistics for monitoring
+   */
+  getResourceStats(): ResourceStats;
 
   /**
    * Set maximum number of listeners per event before warning

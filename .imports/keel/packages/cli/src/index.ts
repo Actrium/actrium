@@ -6,9 +6,9 @@
  */
 
 import { program } from 'commander';
+import { version } from '../package.json';
 import type { BuildOptions } from './build';
 import { build } from './build';
-import { version } from '../package.json';
 
 program
   .name('rill')
@@ -25,7 +25,10 @@ program
   .option('--watch', 'Watch mode for development')
   .option('--metafile <path>', 'Output build metadata to file')
   .option('--no-strict', 'Disable strict post-build dependency guard (not recommended)')
-  .option('--strict-peer-versions', 'Fail build if React/reconciler versions mismatch recommended matrix')
+  .option(
+    '--strict-peer-versions',
+    'Fail build if React/reconciler versions mismatch recommended matrix'
+  )
   .action(async (entry: string, options: Partial<BuildOptions>) => {
     try {
       const buildOpts: BuildOptions = {
@@ -51,24 +54,49 @@ program
   .command('analyze')
   .description('Analyze a built guest bundle for disallowed runtime deps')
   .argument('<bundle>', 'Bundle file path (e.g., dist/bundle.js)')
-  .option('-w, --whitelist <mods...>', 'Whitelisted module IDs', ['react','react-native','react/jsx-runtime','rill/reconciler'])
+  .option('-w, --whitelist <mods...>', 'Whitelisted module IDs', [
+    'react',
+    'react-native',
+    'react/jsx-runtime',
+    'rill/reconciler',
+  ])
   .option('--fail-on-violation', 'Fail when non-whitelisted deps are found')
   .option('--treat-eval-as-violation', 'Treat eval() usage as violation')
-  .option('--treat-dynamic-non-literal-as-violation', 'Treat dynamic import with non-literal specifier as violation')
-  .action(async (bundle: string, opts: { whitelist?: string[]; failOnViolation?: boolean; treatEvalAsViolation?: boolean; treatDynamicNonLiteralAsViolation?: boolean }) => {
-    try {
-      const { analyze } = await import('./build');
-      const analyzeOpts: { whitelist?: string[]; failOnViolation?: boolean; treatEvalAsViolation?: boolean; treatDynamicNonLiteralAsViolation?: boolean } = {};
-      if (opts.whitelist !== undefined) analyzeOpts.whitelist = opts.whitelist;
-      if (opts.failOnViolation !== undefined) analyzeOpts.failOnViolation = opts.failOnViolation;
-      if (opts.treatEvalAsViolation !== undefined) analyzeOpts.treatEvalAsViolation = opts.treatEvalAsViolation;
-      if (opts.treatDynamicNonLiteralAsViolation !== undefined) analyzeOpts.treatDynamicNonLiteralAsViolation = opts.treatDynamicNonLiteralAsViolation;
-      await analyze(bundle, analyzeOpts);
-    } catch (error) {
-      console.error('Analyze failed:', error instanceof Error ? error.message : String(error));
-      process.exit(1);
+  .option(
+    '--treat-dynamic-non-literal-as-violation',
+    'Treat dynamic import with non-literal specifier as violation'
+  )
+  .action(
+    async (
+      bundle: string,
+      opts: {
+        whitelist?: string[];
+        failOnViolation?: boolean;
+        treatEvalAsViolation?: boolean;
+        treatDynamicNonLiteralAsViolation?: boolean;
+      }
+    ) => {
+      try {
+        const { analyze } = await import('./build');
+        const analyzeOpts: {
+          whitelist?: string[];
+          failOnViolation?: boolean;
+          treatEvalAsViolation?: boolean;
+          treatDynamicNonLiteralAsViolation?: boolean;
+        } = {};
+        if (opts.whitelist !== undefined) analyzeOpts.whitelist = opts.whitelist;
+        if (opts.failOnViolation !== undefined) analyzeOpts.failOnViolation = opts.failOnViolation;
+        if (opts.treatEvalAsViolation !== undefined)
+          analyzeOpts.treatEvalAsViolation = opts.treatEvalAsViolation;
+        if (opts.treatDynamicNonLiteralAsViolation !== undefined)
+          analyzeOpts.treatDynamicNonLiteralAsViolation = opts.treatDynamicNonLiteralAsViolation;
+        await analyze(bundle, analyzeOpts);
+      } catch (error) {
+        console.error('Analyze failed:', error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
     }
-  });
+  );
 
 program
   .command('init')
@@ -95,17 +123,17 @@ program
         private: true,
         scripts: {
           build: 'rill build src/guest.tsx -o dist/bundle.js',
-          analyze: 'rill analyze dist/bundle.js'
+          analyze: 'rill analyze dist/bundle.js',
         },
         devDependencies: {
-          typescript: '^5.0.0'
+          typescript: '^5.0.0',
         },
         dependencies: {
           react: '^18.0.0',
           'react/jsx-runtime': '^18.0.0',
           rill: 'latest',
-          'rill/sdk': 'latest'
-        }
+          'rill/sdk': 'latest',
+        },
       };
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
     }
@@ -113,35 +141,42 @@ program
     // tsconfig.json (best practices)
     const tsconfigPath = path.join(targetDir, 'tsconfig.json');
     if (!fs.existsSync(tsconfigPath)) {
-      fs.writeFileSync(tsconfigPath, JSON.stringify({
-        compilerOptions: {
-          target: 'ES2020',
-          module: 'ESNext',
-          jsx: 'react-jsx',
-          moduleResolution: 'Bundler',
-          moduleDetection: 'force',
-          allowArbitraryExtensions: false,
-          allowJs: false,
-          resolveJsonModule: true,
-          isolatedModules: true,
-          useDefineForClassFields: true,
-          strict: true,
-          skipLibCheck: true,
-          esModuleInterop: true,
-          forceConsistentCasingInFileNames: true,
-          noFallthroughCasesInSwitch: true,
-          noUncheckedIndexedAccess: true,
-          noImplicitOverride: true,
-          noPropertyAccessFromIndexSignature: true,
-          verbatimModuleSyntax: true,
-          types: ["bun-types"],
-          paths: {
-            // Type-only mapping if needed in editor (build-time will inline via vite alias)
-            "rill/sdk": ["node_modules/rill/sdk/index.d.ts"]
-          }
-        },
-        include: ["src"]
-      }, null, 2));
+      fs.writeFileSync(
+        tsconfigPath,
+        JSON.stringify(
+          {
+            compilerOptions: {
+              target: 'ES2020',
+              module: 'ESNext',
+              jsx: 'react-jsx',
+              moduleResolution: 'Bundler',
+              moduleDetection: 'force',
+              allowArbitraryExtensions: false,
+              allowJs: false,
+              resolveJsonModule: true,
+              isolatedModules: true,
+              useDefineForClassFields: true,
+              strict: true,
+              skipLibCheck: true,
+              esModuleInterop: true,
+              forceConsistentCasingInFileNames: true,
+              noFallthroughCasesInSwitch: true,
+              noUncheckedIndexedAccess: true,
+              noImplicitOverride: true,
+              noPropertyAccessFromIndexSignature: true,
+              verbatimModuleSyntax: true,
+              types: ['bun-types'],
+              paths: {
+                // Type-only mapping if needed in editor (build-time will inline via vite alias)
+                'rill/sdk': ['node_modules/rill/sdk/index.d.ts'],
+              },
+            },
+            include: ['src'],
+          },
+          null,
+          2
+        )
+      );
     }
 
     // vite.config.ts

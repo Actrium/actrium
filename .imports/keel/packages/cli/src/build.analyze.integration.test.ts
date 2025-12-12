@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import fs from 'fs';
-import path from 'path';
 import os from 'os';
+import path from 'path';
 
 // Integration test: run full build via build() then run analyze() on the output
 // Ensures that a typical guest using rill/sdk gets inlined and passes strict guard.
@@ -14,6 +14,11 @@ describe('Analyze integration - build then analyze', () => {
     originalCwd = process.cwd();
     process.chdir(tempDir);
     fs.mkdirSync('src', { recursive: true });
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('should build a guest with rill/sdk and pass strict guard', async () => {
@@ -45,7 +50,7 @@ export default function Guest(){
 
     // Now run analyze manually (should pass and not throw)
     await analyze(bundlePath, {
-      whitelist: ['react','react-native','react/jsx-runtime','rill/reconciler'],
+      whitelist: ['react', 'react-native', 'react/jsx-runtime', '@rill/core', '@rill/core/sdk'],
       failOnViolation: true,
       treatEvalAsViolation: true,
       treatDynamicNonLiteralAsViolation: true,

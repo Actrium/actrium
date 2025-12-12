@@ -1,16 +1,16 @@
 // engine.worker.ts - Worker script for running QuickJS via @sebastianwessel/quickjs v3.0.0
 
-import { loadQuickJs } from "@sebastianwessel/quickjs";
-import variant from "@jitl/quickjs-wasmfile-release-sync";
+import variant from '@jitl/quickjs-wasmfile-release-sync';
+import { loadQuickJs } from '@sebastianwessel/quickjs';
 
 interface WorkerOptions {
   timeout?: number;
 }
 
 let sandboxReady: Promise<{
-  runSandboxed: Awaited<ReturnType<typeof loadQuickJs>>["runSandboxed"];
+  runSandboxed: Awaited<ReturnType<typeof loadQuickJs>>['runSandboxed'];
 }> | null = null;
-let workerOptions: WorkerOptions = {};
+const workerOptions: WorkerOptions = {};
 
 async function getSandbox() {
   if (!sandboxReady) {
@@ -77,22 +77,43 @@ globalThis.require = function(moduleName) {
 };
 `;
 
-self.onmessage = async (ev: MessageEvent) => {
+interface WorkerRequest {
+  type: 'init' | 'eval' | 'dispose' | 'setGlobal' | 'getGlobal';
+  id?: string;
+  code?: string;
+  name?: string;
+  value?: unknown;
+  options?: { timeout?: number };
+}
+
+interface WorkerResponse {
+  type: 'result' | 'error';
+  id?: string;
+  result?: unknown;
+  error?: string;
+}
+
+self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const { type, id, code, name, value, options } = ev.data;
+
+  const postResponse = (response: WorkerResponse) => {
+    self.postMessage(response);
+  };
 
   try {
     switch (type) {
-      case "init":
+      case 'init': {
         // Store options for later use
         if (options?.timeout) {
           workerOptions.timeout = options.timeout;
         }
         // Pre-load the sandbox
         await getSandbox();
-        (self as any).postMessage({ type: "result", id, result: "ready" });
+        postResponse({ type: 'result', id, result: 'ready' });
         break;
+      }
 
-      case "eval":
+      case 'eval': {
         if (code) {
           const { runSandboxed } = await getSandbox();
 
@@ -113,41 +134,47 @@ self.onmessage = async (ev: MessageEvent) => {
           );
 
           if (result.ok) {
-            (self as any).postMessage({ type: "result", id, result: result.data });
+            postResponse({ type: 'result', id, result: result.data });
           } else {
-            (self as any).postMessage({
-              type: "error",
+            postResponse({
+              type: 'error',
               id,
-              error: result.error?.message || "Evaluation failed",
+              error: result.error?.message || 'Evaluation failed',
             });
           }
         }
         break;
+      }
 
-      case "dispose":
+      case 'dispose': {
         // In v3 API, sandbox is disposed after each runSandboxed call
         // Just reset state
         sandboxReady = null;
         pendingGlobals.clear();
-        (self as any).postMessage({ type: "result", id, result: "disposed" });
+        postResponse({ type: 'result', id, result: 'disposed' });
         break;
+      }
 
-      case "setGlobal":
+      case 'setGlobal': {
         // Store for injection during eval
-        pendingGlobals.set(name, value);
+        if (name !== undefined) {
+          pendingGlobals.set(name, value);
+        }
         // No response needed for fire-and-forget
         break;
+      }
 
-      case "getGlobal":
+      case 'getGlobal': {
         // In v3 API we can't easily get globals between sandbox runs
         // since each runSandboxed creates a fresh context.
         // Return undefined or stored value
-        const storedValue = pendingGlobals.get(name);
-        (self as any).postMessage({ type: "result", id, result: storedValue });
+        const storedValue = name !== undefined ? pendingGlobals.get(name) : undefined;
+        postResponse({ type: 'result', id, result: storedValue });
         break;
+      }
     }
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
-    (self as any).postMessage({ type: "error", id, error: err });
+    postResponse({ type: 'error', id, error: err });
   }
 };

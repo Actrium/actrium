@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 import { Engine } from './engine';
 import { WorkerJSEngineProvider } from './WorkerJSEngineProvider';
@@ -8,26 +8,26 @@ import { WorkerJSEngineProvider } from './WorkerJSEngineProvider';
 
 class FakeWorker {
   onmessage: ((ev: MessageEvent<any>) => void) | null = null;
-  private handler: ((ev: MessageEvent<any>) => void) | null = null;
-  postMessage(msg: any){
+  postMessage(msg: any) {
     // Handle init message
     if (msg.type === 'init') {
       queueMicrotask(() => {
-        this.onmessage && this.onmessage({ data: { type: 'result', id: msg.id, result: null } } as any);
+        this.onmessage?.({ data: { type: 'result', id: msg.id, result: null } } as any);
       });
     }
     // Simulate immediate success for eval
     if (msg.type === 'eval') {
       queueMicrotask(() => {
-        this.onmessage && this.onmessage({ data: { type: 'result', id: msg.id, result: null } } as any);
+        this.onmessage?.({ data: { type: 'result', id: msg.id, result: null } } as any);
       });
     }
   }
-  terminate(){}
+  terminate() {}
 }
 
-function createFakeWorker(){ return new FakeWorker() as unknown as Worker; }
-
+function createFakeWorker() {
+  return new FakeWorker() as unknown as Worker;
+}
 
 describe('Engine with WorkerJSEngineProvider (skeleton)', () => {
   it('should call evalAsync via worker provider without throwing', async () => {
@@ -44,11 +44,11 @@ describe('Engine with WorkerJSEngineProvider (skeleton)', () => {
       postMessage(msg: any) {
         if (msg.type === 'init') {
           queueMicrotask(() => {
-            this.onmessage && this.onmessage({ data: { type: 'result', id: msg.id, result: null } } as any);
+            this.onmessage?.({ data: { type: 'result', id: msg.id, result: null } } as any);
           });
         } else if (msg.type === 'eval') {
           queueMicrotask(() => {
-            this.onmessage && this.onmessage({ data: { type: 'error', id: msg.id, error: 'Eval error' } } as any);
+            this.onmessage?.({ data: { type: 'error', id: msg.id, error: 'Eval error' } } as any);
           });
         }
       }
@@ -67,13 +67,13 @@ describe('Engine with WorkerJSEngineProvider (skeleton)', () => {
       postMessage(msg: any) {
         if (msg.type === 'init') {
           queueMicrotask(() => {
-            this.onmessage && this.onmessage({ data: { type: 'result', id: msg.id, result: null } } as any);
+            this.onmessage?.({ data: { type: 'result', id: msg.id, result: null } } as any);
           });
         } else if (msg.type === 'setGlobal') {
           this.setGlobalCalls.push({ name: msg.name, value: msg.value });
         } else if (msg.type === 'eval') {
           queueMicrotask(() => {
-            this.onmessage && this.onmessage({ data: { type: 'result', id: msg.id, result: null } } as any);
+            this.onmessage?.({ data: { type: 'result', id: msg.id, result: null } } as any);
           });
         }
       }

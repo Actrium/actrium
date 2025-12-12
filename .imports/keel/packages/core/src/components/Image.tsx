@@ -4,8 +4,8 @@
  * Default Image component implementation, wrapping React Native Image
  */
 
-import React from 'react';
-import { Image as RNImage, type ImageStyle, type ImageSourcePropType } from 'react-native';
+import type React from 'react';
+import { type ImageSourcePropType, type ImageStyle, Image as RNImage } from 'react-native';
 
 export interface ImageSource {
   uri: string;

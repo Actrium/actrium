@@ -8,7 +8,7 @@
  * - sendToSandbox with metrics (line 504)
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Engine } from './engine';
 
 // Mock QuickJS Provider with callback tracking
@@ -87,8 +87,8 @@ describe('Engine Callback Handling', () => {
     });
 
     // Verify eval was called with the callback invocation
-    const callFunctionEval = mockProvider.evalCalls.find(
-      (call) => call.includes('__invokeCallback')
+    const callFunctionEval = mockProvider.evalCalls.find((call) =>
+      call.includes('__invokeCallback')
     );
     expect(callFunctionEval).toBeDefined();
   });
@@ -107,9 +107,7 @@ describe('Engine Callback Handling', () => {
       payload: { timestamp: 123456 },
     });
 
-    const hostEventEval = mockProvider.evalCalls.find(
-      (call) => call.includes('__handleHostEvent')
-    );
+    const hostEventEval = mockProvider.evalCalls.find((call) => call.includes('__handleHostEvent'));
     expect(hostEventEval).toBeDefined();
   });
 
@@ -154,7 +152,11 @@ describe('Engine Callback Handling', () => {
 
 describe('Engine Event Listener Error Handling', () => {
   let engine: Engine;
-  let customLogger: { log: ReturnType<typeof mock>; warn: ReturnType<typeof mock>; error: ReturnType<typeof mock> };
+  let customLogger: {
+    log: ReturnType<typeof mock>;
+    warn: ReturnType<typeof mock>;
+    error: ReturnType<typeof mock>;
+  };
 
   beforeEach(() => {
     customLogger = {
@@ -298,9 +300,7 @@ describe('Engine RequireWhitelist', () => {
     });
 
     // Attempting to require non-whitelisted module should throw
-    await expect(
-      engine.loadBundle(`const x = require('lodash');`)
-    ).rejects.toThrow();
+    await expect(engine.loadBundle(`const x = require('lodash');`)).rejects.toThrow();
 
     engine.destroy();
   });

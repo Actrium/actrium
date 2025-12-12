@@ -1,8 +1,30 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
-class MockContext { eval(code: string){ return (0,eval)(code); } setGlobal(n:string,v:unknown){ (globalThis as any)[n]=v; } getGlobal(n:string){ return (globalThis as any)[n]; } dispose(){ /* noop */ } }
-class MockRuntime { createContext(){ return new MockContext(); } dispose(){} }
-const MockQuickJSProvider = { createRuntime(){ return new MockRuntime(); } };
+class MockContext {
+  eval(code: string) {
+    return (0, eval)(code);
+  }
+  setGlobal(n: string, v: unknown) {
+    globalThis[n] = v;
+  }
+  getGlobal(n: string) {
+    return globalThis[n];
+  }
+  dispose() {
+    /* noop */
+  }
+}
+class MockRuntime {
+  createContext() {
+    return new MockContext();
+  }
+  dispose() {}
+}
+const MockQuickJSProvider = {
+  createRuntime() {
+    return new MockRuntime();
+  },
+};
 
 import { Engine } from './engine';
 

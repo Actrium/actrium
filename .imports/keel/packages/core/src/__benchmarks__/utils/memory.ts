@@ -30,11 +30,7 @@ export function getMemorySnapshot(): MemorySnapshot {
   }
 
   // Fallback for browser environment (if performance.memory is available)
-  if (
-    typeof performance !== 'undefined' &&
-    'memory' in performance &&
-    performance.memory
-  ) {
+  if (typeof performance !== 'undefined' && 'memory' in performance && performance.memory) {
     const mem = performance.memory as {
       usedJSHeapSize: number;
       totalJSHeapSize: number;
@@ -60,9 +56,7 @@ export function getMemorySnapshot(): MemorySnapshot {
 /**
  * Measure memory allocation during function execution
  */
-export async function measureMemory(
-  fn: () => void | Promise<void>
-): Promise<MemoryMeasurement> {
+export async function measureMemory(fn: () => void | Promise<void>): Promise<MemoryMeasurement> {
   // Force GC if available (requires --expose-gc flag in Node.js)
   if (typeof global !== 'undefined' && 'gc' in global) {
     (global as { gc: () => void }).gc();
@@ -89,7 +83,7 @@ export function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+  return `${(bytes / k ** i).toFixed(2)} ${sizes[i]}`;
 }
 
 /**

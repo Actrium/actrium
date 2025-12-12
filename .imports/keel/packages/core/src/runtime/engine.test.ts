@@ -2,9 +2,9 @@
  * Engine unit tests
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { Engine } from './engine';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import React from 'react';
+import { Engine } from './engine';
 
 // Type definitions for mock QuickJS
 interface MockQuickJSContext {
@@ -173,9 +173,9 @@ describe('Engine', () => {
         status: 404,
       });
 
-      await expect(
-        engine.loadBundle('https://example.com/not-found.js')
-      ).rejects.toThrow('Failed to fetch bundle: 404');
+      await expect(engine.loadBundle('https://example.com/not-found.js')).rejects.toThrow(
+        'Failed to fetch bundle: 404'
+      );
     });
 
     it('should throw error when loading twice', async () => {
@@ -209,9 +209,7 @@ describe('Engine', () => {
       const errorHandler = mock();
       engine.on('error', errorHandler);
 
-      await expect(
-        engine.loadBundle('https://example.com/guest.js')
-      ).rejects.toThrow();
+      await expect(engine.loadBundle('https://example.com/guest.js')).rejects.toThrow();
 
       expect(errorHandler).toHaveBeenCalled();
     });
@@ -497,7 +495,7 @@ describe('Engine Runtime API', () => {
   });
 
   it('should provide __sendToHost API', async () => {
-    const receiver = engine.createReceiver(mock());
+    const _receiver = engine.createReceiver(mock());
 
     await engine.loadBundle(`
       __sendToHost({
@@ -528,9 +526,9 @@ describe('Engine Error Handling', () => {
   it('should handle fetch network error', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
-    await expect(
-      engine.loadBundle('https://example.com/guest.js')
-    ).rejects.toThrow('Network error');
+    await expect(engine.loadBundle('https://example.com/guest.js')).rejects.toThrow(
+      'Network error'
+    );
 
     expect(errorHandler).toHaveBeenCalled();
   });
@@ -541,8 +539,8 @@ describe('Engine Error Handling', () => {
       status: 500,
     });
 
-    await expect(
-      engine.loadBundle('https://example.com/guest.js')
-    ).rejects.toThrow('Failed to fetch bundle: 500');
+    await expect(engine.loadBundle('https://example.com/guest.js')).rejects.toThrow(
+      'Failed to fetch bundle: 500'
+    );
   });
 });

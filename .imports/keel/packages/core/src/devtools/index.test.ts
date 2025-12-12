@@ -2,18 +2,18 @@
  * DevTools unit tests
  */
 
-import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
+import type { NodeInstance, OperationBatch } from '../types';
 import {
   ComponentInspector,
+  createDevTools,
+  DevTools,
   OperationLogger,
   TimelineRecorder,
-  DevTools,
-  createDevTools,
 } from './index';
-import type { NodeInstance, OperationBatch } from '../types';
 
 // Helper to wait for real time
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ============ ComponentInspector 测试 ============
 

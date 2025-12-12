@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { Engine } from './engine';
 import { NoSandboxProvider } from './NoSandboxProvider';
 
@@ -49,18 +49,18 @@ describe('NoSandboxProvider', () => {
     context.eval('1 + 1');
 
     // Verify globals are injected
-    expect((globalThis as any).__rill_budget_start).toBeDefined();
-    expect((globalThis as any).__rill_budget_timeout).toBe(100);
-    expect((globalThis as any).__rill_budget_ops).toBe(0);
-    expect(typeof (globalThis as any).__checkBudget).toBe('function');
+    expect(globalThis.__rill_budget_start).toBeDefined();
+    expect(globalThis.__rill_budget_timeout).toBe(100);
+    expect(globalThis.__rill_budget_ops).toBe(0);
+    expect(typeof globalThis.__checkBudget).toBe('function');
 
     // Call checkBudget multiple times (1000+ times to trigger timeout check)
     for (let i = 0; i < 1005; i++) {
-      (globalThis as any).__checkBudget();
+      globalThis.__checkBudget();
     }
 
     // Should not throw if within timeout
-    expect((globalThis as any).__rill_budget_ops).toBeGreaterThan(1000);
+    expect(globalThis.__rill_budget_ops).toBeGreaterThan(1000);
 
     context.dispose();
   });
@@ -80,12 +80,12 @@ describe('NoSandboxProvider', () => {
     }
 
     // Reset budget start to simulate timeout
-    (globalThis as any).__rill_budget_start = Date.now() - 100;
+    globalThis.__rill_budget_start = Date.now() - 100;
 
     // Call checkBudget 1000+ times to trigger check
     expect(() => {
       for (let i = 0; i < 1005; i++) {
-        (globalThis as any).__checkBudget();
+        globalThis.__checkBudget();
       }
     }).toThrow('Cooperative timeout exceeded');
 
@@ -102,7 +102,7 @@ describe('NoSandboxProvider', () => {
 
     expect(value).toBe('testValue');
 
-    delete (globalThis as any).testVar;
+    delete globalThis.testVar;
     context.dispose();
   });
 
@@ -146,15 +146,15 @@ describe('NoSandboxProvider', () => {
     context.eval('1');
 
     // Verify globals exist
-    expect((globalThis as any).__rill_budget_start).toBeDefined();
+    expect(globalThis.__rill_budget_start).toBeDefined();
 
     context.dispose();
 
     // Verify cleanup
-    expect((globalThis as any).__rill_budget_start).toBeUndefined();
-    expect((globalThis as any).__rill_budget_timeout).toBeUndefined();
-    expect((globalThis as any).__rill_budget_ops).toBeUndefined();
-    expect((globalThis as any).__checkBudget).toBeUndefined();
+    expect(globalThis.__rill_budget_start).toBeUndefined();
+    expect(globalThis.__rill_budget_timeout).toBeUndefined();
+    expect(globalThis.__rill_budget_ops).toBeUndefined();
+    expect(globalThis.__checkBudget).toBeUndefined();
   });
 
   it('should support runtime dispose', () => {
@@ -167,6 +167,6 @@ describe('NoSandboxProvider', () => {
     runtime.dispose?.();
 
     // Should clean up
-    expect((globalThis as any).__rill_budget_start).toBeUndefined();
+    expect(globalThis.__rill_budget_start).toBeUndefined();
   });
 });

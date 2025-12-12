@@ -4,11 +4,8 @@
  * Default touchable component implementation, wrapping React Native TouchableOpacity
  */
 
-import React from 'react';
-import {
-  TouchableOpacity as RNTouchableOpacity,
-  type ViewStyle,
-} from 'react-native';
+import type React from 'react';
+import { TouchableOpacity as RNTouchableOpacity, type ViewStyle } from 'react-native';
 
 export interface TouchableOpacityProps {
   style?: ViewStyle;

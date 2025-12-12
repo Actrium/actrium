@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'bun:test';
-import { Engine, TimeoutError } from './engine';
+import { describe, expect, it } from 'bun:test';
+import { Engine } from './engine';
 
 describe('DefaultJSEngineProvider (auto) - Node/Web', () => {
   it('simple eval without passing quickjs', async () => {

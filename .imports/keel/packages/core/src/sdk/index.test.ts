@@ -2,21 +2,22 @@
  * SDK unit tests
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import * as React from 'react';
 import {
-  View,
-  Text,
+  ActivityIndicator,
+  Button,
+  FlatList,
   Image,
   ScrollView,
-  TouchableOpacity,
-  FlatList,
-  TextInput,
-  Button,
   Switch,
-  ActivityIndicator,
-  useHostEvent,
+  Text,
+  TextInput,
+  TouchableOpacity,
   useConfig,
+  useHostEvent,
   useSendToHost,
+  View,
 } from './index';
 
 // ============ Virtual components tests ============
@@ -111,39 +112,143 @@ describe('Hooks', () => {
       delete (globalThis as Record<string, unknown>).__useHostEvent;
     });
 
-    it('should call global __useHostEvent when available', () => {
-      const mockUseHostEvent = mock();
+    it('should subscribe and unsubscribe when component mounts/unmounts', async () => {
+      const mockUnsubscribe = mock();
+      const mockUseHostEvent = mock(() => mockUnsubscribe);
       (globalThis as Record<string, unknown>).__useHostEvent = mockUseHostEvent;
 
       const callback = mock();
-      useHostEvent('REFRESH', callback);
 
-      expect(mockUseHostEvent).toHaveBeenCalledWith('REFRESH', callback);
-    });
-
-    it('should not throw when __useHostEvent is not available', () => {
-      const callback = mock();
-
-      expect(() => {
+      // Create a test component
+      const TestComponent = () => {
         useHostEvent('REFRESH', callback);
-      }).not.toThrow();
-    });
+        return React.createElement('div', null, 'test');
+      };
 
-    it('should accept typed payload callback', () => {
-      const mockUseHostEvent = mock();
-      (globalThis as Record<string, unknown>).__useHostEvent = mockUseHostEvent;
+      // Use react-test-renderer instead of @testing-library/react
+      const ReactTestRenderer = await import('react-test-renderer');
+      const { act } = ReactTestRenderer;
 
-      interface RefreshPayload {
-        timestamp: number;
-      }
-
-      const callback = mock((payload: RefreshPayload) => {
-        console.log(payload.timestamp);
+      let renderer: ReactTestRenderer.ReactTestRenderer;
+      await act(() => {
+        renderer = ReactTestRenderer.create(React.createElement(TestComponent));
       });
 
-      useHostEvent<RefreshPayload>('REFRESH', callback);
-
+      // Should subscribe on mount
       expect(mockUseHostEvent).toHaveBeenCalled();
+
+      // Should unsubscribe on unmount
+      await act(() => {
+        renderer!.unmount();
+      });
+      expect(mockUnsubscribe).toHaveBeenCalled();
+    });
+
+    it('should not throw when __useHostEvent is not available', async () => {
+      const callback = mock();
+
+      const TestComponent = () => {
+        useHostEvent('REFRESH', callback);
+        return React.createElement('div', null, 'test');
+      };
+
+      const ReactTestRenderer = await import('react-test-renderer');
+      const { act } = ReactTestRenderer;
+
+      // Should not throw when __useHostEvent is not available
+      let didThrow = false;
+      try {
+        await act(() => {
+          ReactTestRenderer.create(React.createElement(TestComponent));
+        });
+      } catch (_e) {
+        didThrow = true;
+      }
+      expect(didThrow).toBe(false);
+    });
+
+    it('should resubscribe when eventName changes', async () => {
+      const mockUnsubscribe1 = mock();
+      const mockUnsubscribe2 = mock();
+      let callCount = 0;
+      const mockUseHostEvent = mock(() => {
+        callCount++;
+        return callCount === 1 ? mockUnsubscribe1 : mockUnsubscribe2;
+      });
+      (globalThis as Record<string, unknown>).__useHostEvent = mockUseHostEvent;
+
+      const callback = mock();
+
+      const TestComponent = ({ eventName }: { eventName: string }) => {
+        useHostEvent(eventName, callback);
+        return React.createElement('div', null, 'test');
+      };
+
+      const ReactTestRenderer = await import('react-test-renderer');
+      const { act } = ReactTestRenderer;
+
+      let renderer: ReactTestRenderer.ReactTestRenderer;
+      await act(() => {
+        renderer = ReactTestRenderer.create(
+          React.createElement(TestComponent, { eventName: 'REFRESH' })
+        );
+      });
+
+      expect(mockUseHostEvent).toHaveBeenCalledTimes(1);
+
+      // Change eventName - should unsubscribe old and subscribe new
+      await act(() => {
+        renderer!.update(React.createElement(TestComponent, { eventName: 'UPDATE' }));
+      });
+
+      expect(mockUnsubscribe1).toHaveBeenCalled();
+      expect(mockUseHostEvent).toHaveBeenCalledTimes(2);
+    });
+
+    it('should use latest callback without resubscribing', async () => {
+      const listeners = new Map<string, Set<(payload: unknown) => void>>();
+      const mockUseHostEvent = (eventName: string, cb: (payload: unknown) => void) => {
+        if (!listeners.has(eventName)) listeners.set(eventName, new Set());
+        const set = listeners.get(eventName)!;
+        set.add(cb);
+        return () => set.delete(cb);
+      };
+      (globalThis as Record<string, unknown>).__useHostEvent = mockUseHostEvent;
+
+      let renderCount = 0;
+      const callback1 = () => {
+        renderCount = 1;
+      };
+      const callback2 = () => {
+        renderCount = 2;
+      };
+
+      const TestComponent = ({ cb }: { cb: () => void }) => {
+        useHostEvent('REFRESH', cb);
+        return React.createElement('div', null, 'test');
+      };
+
+      const ReactTestRenderer = await import('react-test-renderer');
+      const { act } = ReactTestRenderer;
+
+      let renderer: ReactTestRenderer.ReactTestRenderer;
+      await act(() => {
+        renderer = ReactTestRenderer.create(React.createElement(TestComponent, { cb: callback1 }));
+      });
+
+      // Trigger the event with first callback
+      const set = listeners.get('REFRESH')!;
+      set.forEach((cb) => cb({}));
+      expect(renderCount).toBe(1);
+
+      // Change callback - should NOT resubscribe, but should use new callback
+      await act(() => {
+        renderer!.update(React.createElement(TestComponent, { cb: callback2 }));
+      });
+
+      // Trigger event again - should call new callback
+      set.forEach((cb) => cb({}));
+      expect(renderCount).toBe(2);
     });
   });
 

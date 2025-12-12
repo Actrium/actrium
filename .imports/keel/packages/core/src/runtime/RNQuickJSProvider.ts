@@ -1,7 +1,7 @@
 // React Native QuickJS Provider adapter
 // Attempts to adapt either 'react-native-quickjs' or 'react-native-quick-js' packages to Engine's provider interface.
 
-import type { JSEngineProvider, JSEngineRuntime, JSEngineContext } from './engine';
+import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from './engine';
 
 export interface RNQuickJSContext {
   eval(code: string): unknown;
@@ -86,11 +86,15 @@ export function resolveRNQuickJS(): RNQuickJSLike | null {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const m = require('react-native-quickjs');
     if (m?.createRuntime) return m as RNQuickJSLike;
-  } catch {}
+  } catch {
+    // Package not available, try next option
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const m = require('react-native-quick-js');
     if (m?.createRuntime) return m as RNQuickJSLike;
-  } catch {}
+  } catch {
+    // Package not available
+  }
   return null;
 }

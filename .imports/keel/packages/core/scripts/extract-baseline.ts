@@ -38,31 +38,31 @@ function parseBenchmarkOutput(output: string): BenchmarkResult[] {
     // Parse metrics
     if (line.includes('Mean:')) {
       const match = line.match(/Mean:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.mean = parseFloat(match[1]);
+      if (match?.[1]) currentResult.mean = parseFloat(match[1]);
     }
     if (line.includes('Median:')) {
       const match = line.match(/Median:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.median = parseFloat(match[1]);
+      if (match?.[1]) currentResult.median = parseFloat(match[1]);
     }
     if (line.includes('Min:')) {
       const match = line.match(/Min:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.min = parseFloat(match[1]);
+      if (match?.[1]) currentResult.min = parseFloat(match[1]);
     }
     if (line.includes('Max:')) {
       const match = line.match(/Max:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.max = parseFloat(match[1]);
+      if (match?.[1]) currentResult.max = parseFloat(match[1]);
     }
     if (line.includes('Std Dev:')) {
       const match = line.match(/Std Dev:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.stdDev = parseFloat(match[1]);
+      if (match?.[1]) currentResult.stdDev = parseFloat(match[1]);
     }
     if (line.includes('Ops/sec:')) {
       const match = line.match(/Ops\/sec:\s+([\d.]+)/);
-      if (match && match[1]) currentResult.ops = parseFloat(match[1]);
+      if (match?.[1]) currentResult.ops = parseFloat(match[1]);
     }
     if (line.includes('Samples:')) {
       const match = line.match(/Samples:\s+(\d+)/);
-      if (match && match[1]) currentResult.samples = parseInt(match[1]);
+      if (match?.[1]) currentResult.samples = parseInt(match[1], 10);
     }
   }
 

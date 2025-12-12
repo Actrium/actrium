@@ -2,16 +2,15 @@
  * Receiver unit tests
  */
 
-import { describe, it, expect, beforeEach, mock, afterEach, spyOn } from 'bun:test';
-import { Receiver, SendToSandbox } from './receiver';
-import { ComponentRegistry } from './registry';
-import type { OperationBatch, HostMessage } from '../types';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import React from 'react';
+import type { HostMessage, OperationBatch } from '../types';
+import { Receiver, type SendToSandbox } from './receiver';
+import { ComponentRegistry } from './registry';
 
 // Mock 组件
-const MockView: React.FC<{ style?: object; children?: React.ReactNode }> = ({
-  children,
-}) => React.createElement('View', null, children);
+const MockView: React.FC<{ style?: object; children?: React.ReactNode }> = ({ children }) =>
+  React.createElement('View', null, children);
 
 const MockText: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
   React.createElement('Text', null, children);
@@ -76,17 +75,13 @@ describe('Receiver', () => {
       const batch1: OperationBatch = {
         version: 1,
         batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-        ],
+        operations: [{ op: 'CREATE', id: 1, type: 'View', props: {} }],
       };
 
       const batch2: OperationBatch = {
         version: 1,
         batchId: 2,
-        operations: [
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-        ],
+        operations: [{ op: 'CREATE', id: 2, type: 'Text', props: {} }],
       };
 
       receiver.applyBatch(batch1);
@@ -106,9 +101,7 @@ describe('Receiver', () => {
       receiver.applyBatch({
         version: 1,
         batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: { style: { flex: 1 } } },
-        ],
+        operations: [{ op: 'CREATE', id: 1, type: 'View', props: { style: { flex: 1 } } }],
       });
 
       await new Promise((resolve) => queueMicrotask(resolve));
@@ -120,9 +113,7 @@ describe('Receiver', () => {
       receiver.applyBatch({
         version: 1,
         batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: '__TEXT__', props: { text: 'Hello' } },
-        ],
+        operations: [{ op: 'CREATE', id: 1, type: '__TEXT__', props: { text: 'Hello' } }],
       });
 
       await new Promise((resolve) => queueMicrotask(resolve));
@@ -208,9 +199,7 @@ describe('Receiver', () => {
 
       await new Promise((resolve) => queueMicrotask(resolve));
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Node 999 not found')
-      );
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Node 999 not found'));
 
       consoleSpy.mockRestore();
     });

@@ -8,34 +8,23 @@
 import * as React from 'react';
 import * as ReactJSXRuntime from 'react/jsx-runtime';
 
-// Lazy-load react-native to avoid bundler issues in non-RN environments (e.g., Bun tests)
-let ReactNative: typeof import('react-native') | undefined;
-function getReactNative(): typeof import('react-native') {
-  if (!ReactNative) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      ReactNative = require('react-native');
-    } catch {
-      throw new Error('[rill] react-native is not available in this environment');
-    }
-  }
-  return ReactNative!;
-}
-
 import * as RillReconciler from '../reconciler';
 
+// 🔵 DEBUG: Verify reconciler has debug logs
+console.log('[rill:engine] 🔵 RillReconciler imported, checking source...');
+console.log('[rill:engine] 🔵 reconciler.render type:', typeof RillReconciler.render);
+
 import type {
-  OperationBatch,
-  HostMessage,
   CallFunctionMessage,
   HostEventMessage,
+  HostMessage,
+  OperationBatch,
   SerializedValue,
 } from '../types';
-import { ComponentRegistry } from './registry';
-import type { ComponentMap } from './registry';
+import type { EngineEvents, EngineHealth, IEngine } from './IEngine';
 import { Receiver } from './receiver';
-
-import type { IEngine, EngineEvents, GuestMessage, EngineHealth } from './IEngine';
+import type { ComponentMap } from './registry';
+import { ComponentRegistry } from './registry';
 
 /**
  * Engine configuration options
@@ -97,8 +86,8 @@ export interface EngineOptions {
   receiverMaxBatchSize?: number;
 }
 
-// Re-export from IEngine for backward compatibility
-export type { IEngine, EngineEvents, GuestMessage, EngineHealth } from './IEngine';
+// Re-export types for convenience
+export type { EngineEvents, EngineHealth, GuestMessage, IEngine } from './IEngine';
 
 /**
  * Event listener
@@ -143,20 +132,38 @@ export interface JSEngineProvider {
 }
 
 /** Error types for better classification */
-export class RequireError extends Error { constructor(message: string) { super(message); this.name = 'RequireError'; } }
-export class ExecutionError extends Error { constructor(message: string) { super(message); this.name = 'ExecutionError'; } }
-export class TimeoutError extends Error { constructor(message: string) { super(message); this.name = 'TimeoutError'; } }
+export class RequireError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequireError';
+  }
+}
+export class ExecutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExecutionError';
+  }
+}
+export class TimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
 
 /**
- * Rill Engine - Standalone JS sandbox engine
+ * Rill Engine - JS sandbox engine with dedicated runtime
  *
- * For multi-tenant scenarios with shared worker pools, use PooledEngine instead.
+ * Each Engine instance owns an isolated JS runtime.
+ * Create a new Engine for each isolated context (e.g., each tab/view).
  *
  * @example
  * ```typescript
  * const engine = new Engine({ debug: true });
  * engine.register({ StepList: NativeStepList });
  * await engine.loadBundle(bundleCode);
+ * // When done:
+ * engine.destroy();
  * ```
  */
 // Global engine counter for debugging
@@ -181,8 +188,20 @@ export class Engine implements IEngine {
   private loaded = false;
   private errorCount = 0;
   private lastErrorAt: number | null = null;
-  private readonly engineId: number;
   private _timeoutTimer?: ReturnType<typeof setTimeout>;
+
+  // Unique engine ID (UUID-like format)
+  public readonly id: string;
+
+  // Timer tracking for resource cleanup
+  private timeoutMap = new Map<number, ReturnType<typeof setTimeout>>();
+  private intervalMap = new Map<number, ReturnType<typeof setInterval>>();
+  private timeoutIdCounter = 0;
+  private intervalIdCounter = 0;
+
+  // Native timer references (captured during polyfill injection)
+  private nativeClearTimeout?: (handle: ReturnType<typeof setTimeout>) => void;
+  private nativeClearInterval?: (handle: ReturnType<typeof setInterval>) => void;
 
   // Event listeners
   private listeners: Map<keyof EngineEvents, Set<EventListener<unknown>>> = new Map();
@@ -191,16 +210,28 @@ export class Engine implements IEngine {
   private maxListeners = 10;
   private warnedEvents = new Set<keyof EngineEvents>();
 
+  // sendToHost reference for callback registry access
+  private sendToHostFn: ((batch: OperationBatch) => void) | null = null;
+
   constructor(options: EngineOptions = {}) {
-    const defaultWhitelist = new Set(['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler']);
+    const defaultWhitelist = new Set([
+      'react',
+      'react-native',
+      'react/jsx-runtime',
+      'rill/reconciler',
+      'rill/sdk',
+    ]);
     // Provide a safe fallback logger if console is not available
-    const defaultLogger = typeof console !== 'undefined' ? console : {
-      log: () => {},
-      warn: () => {},
-      error: () => {},
-      info: () => {},
-      debug: () => {},
-    };
+    const defaultLogger =
+      typeof console !== 'undefined'
+        ? console
+        : {
+            log: () => {},
+            warn: () => {},
+            error: () => {},
+            info: () => {},
+            debug: () => {},
+          };
     this.options = {
       provider: options.provider,
       timeout: options.timeout ?? 5000,
@@ -223,7 +254,8 @@ export class Engine implements IEngine {
           timeout: this.options.timeout,
           sandbox: options.sandbox,
         });
-        if (this.options.debug) this.options.logger.log('[rill] Initialized DefaultJSEngineProvider');
+        if (this.options.debug)
+          this.options.logger.log('[rill] Initialized DefaultJSEngineProvider');
       } catch (e) {
         this.options.logger.error('[rill] Failed to initialize DefaultJSEngineProvider:', e);
         // Provide a minimal fallback for tests - use isolated scope instead of globalThis
@@ -236,7 +268,9 @@ export class Engine implements IEngine {
                 const fn = new Function(...Object.keys(isolatedScope), code);
                 return fn(...Object.values(isolatedScope));
               },
-              setGlobal: (name: string, value: unknown) => { isolatedScope[name] = value; },
+              setGlobal: (name: string, value: unknown) => {
+                isolatedScope[name] = value;
+              },
               getGlobal: (name: string) => isolatedScope[name],
               dispose: () => {},
             }),
@@ -245,12 +279,19 @@ export class Engine implements IEngine {
         };
       }
     }
-    
-    this.engineId = ++engineIdCounter;
+
+    // Generate unique engine ID
+    const counter = ++engineIdCounter;
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 6);
+    this.id = `engine-${counter}-${timestamp}-${random}`;
 
     if (this.options.debug) {
-      this.options.logger.log(`[rill] Engine #${this.engineId} created with QuickJS sandbox`);
+      this.options.logger.log(`[rill:${this.id}] Engine created`);
     }
+
+    // Emit metric for engine creation
+    this.options.onMetric?.('engine.created', 1, { engineId: this.id });
   }
 
   /**
@@ -266,10 +307,7 @@ export class Engine implements IEngine {
   /**
    * Load and execute Guest code
    */
-  async loadBundle(
-    source: string,
-    initialProps?: Record<string, unknown>
-  ): Promise<void> {
+  async loadBundle(source: string, initialProps?: Record<string, unknown>): Promise<void> {
     if (this.destroyed) {
       throw new Error('[rill] Engine has been destroyed');
     }
@@ -285,8 +323,8 @@ export class Engine implements IEngine {
       const code = await this.resolveSource(source);
 
       if (this.options.debug) {
-        this.options.logger.log(`[rill] Engine #${this.engineId} Bundle loaded, length:`, code.length);
-        this.options.logger.log(`[rill] Engine #${this.engineId} Bundle preview:`, code.substring(0, 200));
+        this.options.logger.log(`[rill:${this.id}] Bundle loaded, length:`, code.length);
+        this.options.logger.log(`[rill:${this.id}] Bundle preview:`, code.substring(0, 200));
       }
 
       // Initialize sandbox and execute
@@ -310,8 +348,12 @@ export class Engine implements IEngine {
         const timeoutPromise = new Promise<never>((_, reject) => {
           const timer = globalThis.setTimeout(() => {
             // Fatal: execution exceeded timeout, force destroy to prevent snowball
-            this.options.logger.error(`[rill] Fatal: Bundle execution exceeded timeout ${timeout}ms, destroying engine`);
-            const error = new TimeoutError(`[rill] Execution exceeded timeout ${timeout}ms (hard limit)`);
+            this.options.logger.error(
+              `[rill] Fatal: Bundle execution exceeded timeout ${timeout}ms, destroying engine`
+            );
+            const error = new TimeoutError(
+              `[rill] Execution exceeded timeout ${timeout}ms (hard limit)`
+            );
 
             // Emit fatal error before destroying
             this.emit('fatalError', error);
@@ -327,10 +369,7 @@ export class Engine implements IEngine {
         });
 
         try {
-          await Promise.race([
-            this.executeBundle(code),
-            timeoutPromise,
-          ]);
+          await Promise.race([this.executeBundle(code), timeoutPromise]);
         } finally {
           // Clean up timer if execution completed normally
           if (this._timeoutTimer) {
@@ -347,7 +386,7 @@ export class Engine implements IEngine {
       this.emit('load');
 
       if (this.options.debug) {
-        this.options.logger.log(`[rill] Engine #${this.engineId} ✅ Bundle executed successfully`);
+        this.options.logger.log(`[rill:${this.id}] Bundle executed successfully`);
       }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -371,7 +410,10 @@ export class Engine implements IEngine {
         throw new Error(`Failed to fetch bundle: ${response.status}`);
       }
       const text = await response.text();
-      this.options.onMetric?.('engine.fetchBundle', Date.now() - s1, { status: 200, size: text.length });
+      this.options.onMetric?.('engine.fetchBundle', Date.now() - s1, {
+        status: 200,
+        size: text.length,
+      });
       this.options.onMetric?.('engine.resolveSource', Date.now() - start);
       return text;
     }
@@ -407,39 +449,110 @@ export class Engine implements IEngine {
     const debug = this.options.debug;
 
     // Save native timer functions to avoid recursion issues (with fallbacks for test environments)
-    const nativeSetTimeout = typeof globalThis.setTimeout === 'function'
-      ? globalThis.setTimeout.bind(globalThis)
-      : (fn: () => void, _ms?: number) => { Promise.resolve().then(fn); return 0; };
-    const nativeClearTimeout = typeof globalThis.clearTimeout === 'function'
-      ? globalThis.clearTimeout.bind(globalThis)
-      : () => {};
-    const nativeSetInterval = typeof globalThis.setInterval === 'function'
-      ? globalThis.setInterval.bind(globalThis)
-      : () => 0;
-    const nativeClearInterval = typeof globalThis.clearInterval === 'function'
-      ? globalThis.clearInterval.bind(globalThis)
-      : () => {};
-    const nativeQueueMicrotask = typeof globalThis.queueMicrotask === 'function'
-      ? globalThis.queueMicrotask.bind(globalThis)
-      : (fn: () => void) => Promise.resolve().then(fn);
+    const nativeSetTimeout =
+      typeof globalThis.setTimeout === 'function'
+        ? globalThis.setTimeout.bind(globalThis)
+        : (fn: () => void, _ms?: number) => {
+            Promise.resolve().then(fn);
+            return 0;
+          };
+    const nativeClearTimeout =
+      typeof globalThis.clearTimeout === 'function'
+        ? globalThis.clearTimeout.bind(globalThis)
+        : () => {};
+    const nativeSetInterval =
+      typeof globalThis.setInterval === 'function'
+        ? globalThis.setInterval.bind(globalThis)
+        : () => 0;
+    const nativeClearInterval =
+      typeof globalThis.clearInterval === 'function'
+        ? globalThis.clearInterval.bind(globalThis)
+        : () => {};
+    const nativeQueueMicrotask =
+      typeof globalThis.queueMicrotask === 'function'
+        ? globalThis.queueMicrotask.bind(globalThis)
+        : (fn: () => void) => Promise.resolve().then(fn);
 
     // Inject React and ReactJSXRuntime as global variables
     // This is required for bundles compiled with rill CLI
     this.context.setGlobal('React', React);
     this.context.setGlobal('ReactJSXRuntime', ReactJSXRuntime);
 
-    // console
+    // Inject RillSDK as global variable for IIFE bundles
+    // Bundle format: (function(ReactJSXRuntime, React, RillSDK) { ... })(ReactJSXRuntime, React, RillSDK)
+    const RillSDKModule = {
+      // React Native components (as string names)
+      View: 'View',
+      Text: 'Text',
+      Image: 'Image',
+      ScrollView: 'ScrollView',
+      TouchableOpacity: 'TouchableOpacity',
+      Button: 'Button',
+      ActivityIndicator: 'ActivityIndicator',
+      FlatList: 'FlatList',
+      TextInput: 'TextInput',
+      Switch: 'Switch',
+      // Host communication hooks will be added later in injectRuntimeAPI
+      useHostEvent: null,
+      useConfig: null,
+      useSendToHost: null,
+    };
+    this.context.setGlobal('RillSDK', RillSDKModule);
+
+    // Helper to format objects for logging (handles circular references)
+    const formatArg = (arg: unknown, seen = new WeakSet()): unknown => {
+      if (arg === null || arg === undefined) return arg;
+      if (typeof arg !== 'object') return arg;
+
+      // Handle circular references
+      if (seen.has(arg as object)) return '[Circular]';
+      seen.add(arg as object);
+
+      // Handle arrays
+      if (Array.isArray(arg)) {
+        return arg.map((item) => formatArg(item, seen));
+      }
+
+      // Handle plain objects
+      try {
+        const formatted: Record<string, unknown> = {};
+        for (const key of Object.keys(arg as object)) {
+          formatted[key] = formatArg((arg as Record<string, unknown>)[key], seen);
+        }
+        return formatted;
+      } catch {
+        return String(arg);
+      }
+    };
+
+    const formatArgs = (args: unknown[]): unknown[] => {
+      return args.map((arg) => {
+        if (typeof arg === 'object' && arg !== null) {
+          try {
+            // Format objects nicely with JSON.stringify for readability
+            return JSON.stringify(formatArg(arg), null, 2);
+          } catch {
+            return formatArg(arg);
+          }
+        }
+        return arg;
+      });
+    };
+
+    const engineId = this.id;
+
+    // console - with enhanced object formatting
     this.context.setGlobal('console', {
       log: (...args: unknown[]) => {
-        if (debug) logger.log('[Guest]', ...args);
+        if (debug) logger.log(`[rill:${engineId}][Guest]`, ...formatArgs(args));
       },
-      warn: (...args: unknown[]) => logger.warn('[Guest]', ...args),
-      error: (...args: unknown[]) => logger.error('[Guest]', ...args),
+      warn: (...args: unknown[]) => logger.warn(`[rill:${engineId}][Guest]`, ...formatArgs(args)),
+      error: (...args: unknown[]) => logger.error(`[rill:${engineId}][Guest]`, ...formatArgs(args)),
       debug: (...args: unknown[]) => {
-        if (debug) logger.log('[Guest:debug]', ...args);
+        if (debug) logger.log(`[rill:${engineId}][Guest:debug]`, ...formatArgs(args));
       },
       info: (...args: unknown[]) => {
-        if (debug) logger.log('[Guest:info]', ...args);
+        if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatArgs(args));
       },
     });
 
@@ -457,64 +570,101 @@ export class Engine implements IEngine {
         case 'react':
           return React;
         case 'react-native':
-          return ReactNative;
+          // Return RillSDK which is set as ReactNative global
+          return this.context?.getGlobal('ReactNative');
         case 'react/jsx-runtime':
           return ReactJSXRuntime;
         case 'rill/reconciler':
           return RillReconciler;
+        case 'rill/sdk':
+          // Virtual module that provides component names (strings) and host hooks
+          // Component names are used by rill reconciler to look up registered components
+          return {
+            // React Native components (as string names)
+            View: 'View',
+            Text: 'Text',
+            Image: 'Image',
+            ScrollView: 'ScrollView',
+            TouchableOpacity: 'TouchableOpacity',
+            Button: 'Button',
+            ActivityIndicator: 'ActivityIndicator',
+            FlatList: 'FlatList',
+            TextInput: 'TextInput',
+            Switch: 'Switch',
+            // Host communication hooks (need access to sandbox globals)
+            useHostEvent: this.context!.getGlobal('__useHostEvent'),
+            useConfig: this.context!.getGlobal('__getConfig'),
+            useSendToHost: () => this.context!.getGlobal('__sendEventToHost'),
+          };
         default:
           throw new Error(`[rill] Unsupported require("${moduleName}")`);
       }
     });
 
-    // setTimeout / clearTimeout
-    const timeoutMap = new Map<number, NodeJS.Timeout>();
-    let timeoutId = 0;
+    // Store native clear functions for cleanup
+    this.nativeClearTimeout = nativeClearTimeout;
+    this.nativeClearInterval = nativeClearInterval;
 
+    // setTimeout / clearTimeout - use instance maps for cleanup
     this.context.setGlobal('setTimeout', (fn: () => void, delay: number) => {
-      const id = ++timeoutId;
+      const id = ++this.timeoutIdCounter;
       const handle = nativeSetTimeout(() => {
-        timeoutMap.delete(id);
+        this.timeoutMap.delete(id);
         try {
           fn();
         } catch (error) {
-          logger.error('[Guest] setTimeout error:', error);
+          // Enhanced error handling for timer callbacks
+          const err = error instanceof Error ? error : new Error(String(error));
+          logger.error(`[rill:${this.id}][Guest] setTimeout error:`, err);
+
+          // Track error for monitoring
+          this.errorCount++;
+          this.lastErrorAt = Date.now();
+
+          // Emit error event so Host can handle it
+          this.emit('error', err);
         }
       }, delay);
-      timeoutMap.set(id, handle as NodeJS.Timeout);
+      this.timeoutMap.set(id, handle as ReturnType<typeof setTimeout>);
       return id;
     });
 
     this.context.setGlobal('clearTimeout', (id: number) => {
-      const handle = timeoutMap.get(id);
-      if (handle) {
-        nativeClearTimeout(handle as any);
-        timeoutMap.delete(id);
+      const handle = this.timeoutMap.get(id);
+      if (handle !== undefined) {
+        nativeClearTimeout(handle);
+        this.timeoutMap.delete(id);
       }
     });
 
-    // setInterval / clearInterval
-    const intervalMap = new Map<number, NodeJS.Timeout>();
-    let intervalId = 0;
-
+    // setInterval / clearInterval - use instance maps for cleanup
     this.context.setGlobal('setInterval', (fn: () => void, delay: number) => {
-      const id = ++intervalId;
+      const id = ++this.intervalIdCounter;
       const handle = nativeSetInterval(() => {
         try {
           fn();
         } catch (error) {
-          logger.error('[Guest] setInterval error:', error);
+          // Enhanced error handling for interval callbacks
+          const err = error instanceof Error ? error : new Error(String(error));
+          logger.error(`[rill:${this.id}][Guest] setInterval error:`, err);
+
+          // Track error for monitoring
+          this.errorCount++;
+          this.lastErrorAt = Date.now();
+
+          // Emit error event so Host can handle it
+          this.emit('error', err);
         }
       }, delay);
-      intervalMap.set(id, handle as NodeJS.Timeout);
+      this.intervalMap.set(id, handle as ReturnType<typeof setInterval>);
       return id;
     });
 
     this.context.setGlobal('clearInterval', (id: number) => {
-      const handle = intervalMap.get(id);
-      if (handle) {
-        nativeClearInterval(handle as any);
-        intervalMap.delete(id);
+      const handle = this.intervalMap.get(id);
+      if (handle !== undefined) {
+        nativeClearInterval(handle);
+        this.intervalMap.delete(id);
       }
     });
 
@@ -528,6 +678,52 @@ export class Engine implements IEngine {
         }
       });
     });
+
+    // Unhandled Promise Rejection monitoring
+    // This catches Promise rejections that are not handled with .catch()
+    // Note: Support varies by sandbox environment (vm/worker/none)
+    try {
+      const unhandledRejectionHandler = (event: {
+        reason?: unknown;
+        promise?: Promise<unknown>;
+        preventDefault?: () => void;
+      }) => {
+        const error =
+          event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+        logger.error(`[rill:${this.id}][Guest] Unhandled Promise Rejection:`, error);
+
+        // Track error for monitoring
+        this.errorCount++;
+        this.lastErrorAt = Date.now();
+
+        // Emit error event so Host can handle it
+        this.emit('error', error);
+
+        // Prevent error from bubbling to Host console
+        if (event.preventDefault) {
+          event.preventDefault();
+        }
+      };
+
+      // Try to set unhandledrejection handler
+      // Different sandbox environments have different support
+      if (typeof globalThis !== 'undefined') {
+        // Modern browsers and Node.js support
+        if ('addEventListener' in globalThis) {
+          globalThis.addEventListener('unhandledrejection', unhandledRejectionHandler);
+        } else if ('onunhandledrejection' in globalThis) {
+          globalThis.onunhandledrejection = unhandledRejectionHandler;
+        }
+      }
+
+      // Inject into sandbox context
+      this.context.setGlobal('onunhandledrejection', unhandledRejectionHandler);
+    } catch (_err) {
+      // Silently fail if unhandledrejection is not supported
+      if (debug) {
+        logger.warn(`[rill:${this.id}] Unhandledrejection handler not supported in this sandbox`);
+      }
+    }
   }
 
   /**
@@ -565,42 +761,62 @@ export class Engine implements IEngine {
     }
 
     // __sendToHost: Send operations to host
-    this.context.setGlobal('__sendToHost', (batch: OperationBatch) => {
+    const sendToHost = (batch: OperationBatch) => {
       if (debug) {
-        logger.log(`[rill] Engine #${this.engineId} __sendToHost called, operations:`, batch.operations.length);
+        logger.log(`[rill:${this.id}] __sendToHost called, operations:`, batch.operations.length);
       }
       this.emit('operation', batch);
       if (this.receiver) {
         if (debug) {
-          logger.log(`[rill] Engine #${this.engineId} applying batch to receiver`);
+          logger.log(`[rill:${this.id}] Applying batch to receiver`);
         }
         this.receiver.applyBatch(batch);
       } else {
-        logger.warn(`[rill] Engine #${this.engineId} has no receiver to apply batch!`);
+        logger.warn(`[rill:${this.id}] No receiver to apply batch!`);
       }
-    });
+    };
+
+    // Save reference for callback registry access
+    this.sendToHostFn = sendToHost;
+    this.context.setGlobal('__sendToHost', sendToHost);
 
     // __getConfig: Get initial configuration
     this.context.setGlobal('__getConfig', () => this.config);
 
     // __sendEventToHost: Send event to host
-    this.context.setGlobal(
-      '__sendEventToHost',
-      (eventName: string, payload?: unknown) => {
-        if (debug) {
-          logger.log('[rill] Guest event:', eventName, payload);
-        }
-        this.emit('message', { event: eventName, payload });
+    this.context.setGlobal('__sendEventToHost', (eventName: string, payload?: unknown) => {
+      if (debug) {
+        logger.log('[rill] Guest event:', eventName, payload);
       }
-    );
+      this.emit('message', { event: eventName, payload });
+    });
 
     // __handleHostMessage: Handle messages from host
-    this.context.setGlobal(
-      '__handleHostMessage',
-      (message: HostMessage) => {
-        this.handleHostMessage(message);
-      }
-    );
+    this.context.setGlobal('__handleHostMessage', (message: HostMessage) => {
+      this.handleHostMessage(message);
+    });
+
+    // Update RillSDK with actual host hooks (after runtime API is injected)
+    const RillSDKWithHooks = {
+      // React Native components (as string names)
+      View: 'View',
+      Text: 'Text',
+      Image: 'Image',
+      ScrollView: 'ScrollView',
+      TouchableOpacity: 'TouchableOpacity',
+      Button: 'Button',
+      ActivityIndicator: 'ActivityIndicator',
+      FlatList: 'FlatList',
+      TextInput: 'TextInput',
+      Switch: 'Switch',
+      // Host communication hooks (now available)
+      useHostEvent: this.context.getGlobal('__useHostEvent'),
+      useConfig: this.context.getGlobal('__getConfig'),
+      useSendToHost: () => this.context!.getGlobal('__sendEventToHost'),
+    };
+    this.context.setGlobal('RillSDK', RillSDKWithHooks);
+    // Alias for compatibility with bundles built with react-native imports
+    this.context.setGlobal('ReactNative', RillSDKWithHooks);
   }
 
   /**
@@ -609,7 +825,8 @@ export class Engine implements IEngine {
    */
   private async evalCode(code: string): Promise<void> {
     if (!this.context) return;
-    if (this.context.evalAsync) { // Check evalAsync directly on context
+    if (this.context.evalAsync) {
+      // Check evalAsync directly on context
       await this.context.evalAsync(code);
     } else {
       this.context.eval(code);
@@ -662,12 +879,18 @@ export class Engine implements IEngine {
   private async handleCallFunction(message: CallFunctionMessage): Promise<void> {
     if (!this.context) return;
 
+    console.log(
+      '[rill:Engine] 🔴 handleCallFunction called, fnId:',
+      message.fnId,
+      'args:',
+      message.args
+    );
     try {
-      await this.evalCode(
-        `__invokeCallback("${message.fnId}", ${JSON.stringify(message.args)})`
-      );
+      await this.evalCode(`__invokeCallback("${message.fnId}", ${JSON.stringify(message.args)})`);
+      console.log('[rill:Engine] 🔴 Successfully invoked callback');
     } catch (error) {
       this.options.logger.error(`[rill] Failed to invoke callback ${message.fnId}:`, error);
+      console.log('[rill:Engine] 🔴 Failed to invoke callback:', error);
     }
   }
 
@@ -693,7 +916,9 @@ export class Engine implements IEngine {
     if (this.destroyed || !this.context) return;
     const start = Date.now();
     await this.evalCode(`__handleHostMessage(${JSON.stringify(message)})`);
-    this.options.onMetric?.('engine.sendToSandbox', Date.now() - start, { size: JSON.stringify(message).length });
+    this.options.onMetric?.('engine.sendToSandbox', Date.now() - start, {
+      size: JSON.stringify(message).length,
+    });
   }
 
   /**
@@ -735,8 +960,8 @@ export class Engine implements IEngine {
       if (count > this.maxListeners && !this.warnedEvents.has(event)) {
         this.options.logger.warn(
           `[rill] Possible EventEmitter memory leak detected. ` +
-          `${count} listeners added for event "${String(event)}". ` +
-          `Use setMaxListeners() to increase limit.`
+            `${count} listeners added for event "${String(event)}". ` +
+            `Use setMaxListeners() to increase limit.`
         );
         this.warnedEvents.add(event);
       }
@@ -757,12 +982,11 @@ export class Engine implements IEngine {
   /**
    * Send event to sandbox guest
    */
-  sendEvent(eventName: string, payload?: SerializedValue): void {
-    // Fire-and-forget for backward compatibility, but still awaits internally for Worker providers
+  sendEvent(eventName: string, payload?: unknown): void {
     void this.sendToSandbox({
       type: 'HOST_EVENT',
       eventName,
-      payload: payload ?? null,
+      payload: (payload ?? null) as SerializedValue,
     });
   }
 
@@ -771,7 +995,6 @@ export class Engine implements IEngine {
    */
   updateConfig(config: Record<string, SerializedValue>): void {
     this.config = { ...this.config, ...config };
-    // Fire-and-forget for backward compatibility, but still awaits internally for Worker providers
     void this.sendToSandbox({
       type: 'CONFIG_UPDATE',
       config,
@@ -783,7 +1006,7 @@ export class Engine implements IEngine {
    */
   createReceiver(onUpdate: () => void): Receiver {
     if (this.options.debug) {
-      this.options.logger.log(`[rill] Engine #${this.engineId} creating Receiver`);
+      this.options.logger.log(`[rill:${this.id}] Creating Receiver`);
     }
     this.receiver = new Receiver(
       this.registry,
@@ -792,7 +1015,7 @@ export class Engine implements IEngine {
       { onMetric: this.options.onMetric, maxBatchSize: this.options.receiverMaxBatchSize }
     );
     if (this.options.debug) {
-      this.options.logger.log(`[rill] Engine #${this.engineId} Receiver created`);
+      this.options.logger.log(`[rill:${this.id}] Receiver created`);
     }
     return this.receiver;
   }
@@ -854,7 +1077,7 @@ export class Engine implements IEngine {
   }
 
   /**
-   * Destroy engine
+   * Destroy engine and release all resources
    */
   destroy(): void {
     if (this.destroyed) return;
@@ -862,7 +1085,14 @@ export class Engine implements IEngine {
     this.destroyed = true;
     this.loaded = false;
 
+    if (this.options.debug) {
+      this.options.logger.log(`[rill:${this.id}] Destroying engine`);
+    }
+
     this.emit('destroy');
+
+    // Clear all pending timers
+    this.clearAllTimers();
 
     this.receiver?.clear();
     this.receiver = null;
@@ -873,6 +1103,30 @@ export class Engine implements IEngine {
     this.runtime = null;
 
     this.listeners.clear();
+
+    // Emit metric for engine destruction
+    this.options.onMetric?.('engine.destroyed', 1, { engineId: this.id });
+  }
+
+  /**
+   * Clear all pending timers (timeouts and intervals)
+   */
+  private clearAllTimers(): void {
+    // Clear all timeouts
+    for (const handle of this.timeoutMap.values()) {
+      this.nativeClearTimeout?.(handle);
+    }
+    this.timeoutMap.clear();
+
+    // Clear all intervals
+    for (const handle of this.intervalMap.values()) {
+      this.nativeClearInterval?.(handle);
+    }
+    this.intervalMap.clear();
+
+    if (this.options.debug) {
+      this.options.logger.log(`[rill:${this.id}] Cleared all timers`);
+    }
   }
 
   /**
@@ -888,6 +1142,9 @@ export class Engine implements IEngine {
     this.loaded = false;
 
     // Don't emit 'destroy' event during force destroy to avoid callbacks
+
+    // Clear all pending timers first
+    this.clearAllTimers();
 
     this.receiver?.clear();
     this.receiver = null;
@@ -911,5 +1168,24 @@ export class Engine implements IEngine {
     queueMicrotask(() => {
       this.listeners.clear();
     });
+
+    // Emit metric for engine destruction
+    this.options.onMetric?.('engine.destroyed', 1, { engineId: this.id, forced: true });
+  }
+
+  /**
+   * Get resource statistics for monitoring
+   */
+  getResourceStats(): { timers: number; nodes: number; callbacks: number } {
+    // Get callback count from reconciler
+    const callbackRegistry = this.sendToHostFn
+      ? RillReconciler.getCallbackRegistry(this.sendToHostFn)
+      : null;
+
+    return {
+      timers: this.timeoutMap.size + this.intervalMap.size,
+      nodes: this.receiver?.nodeCount ?? 0,
+      callbacks: callbackRegistry?.size ?? 0,
+    };
   }
 }

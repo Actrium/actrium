@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 
@@ -16,7 +16,7 @@ describe('Strict Guard - violation cases', () => {
 
     await expect(
       analyze('dist/guard-sdk.js', {
-        whitelist: ['react','react-native','react/jsx-runtime','rill/reconciler'],
+        whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
         failOnViolation: true,
         treatEvalAsViolation: true,
         treatDynamicNonLiteralAsViolation: true,
@@ -30,7 +30,7 @@ describe('Strict Guard - violation cases', () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
     await analyze('dist/guard-ok.js', {
-      whitelist: ['react','react-native','react/jsx-runtime','rill/reconciler'],
+      whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
       failOnViolation: true,
     });
 

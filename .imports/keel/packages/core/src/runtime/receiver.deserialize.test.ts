@@ -7,16 +7,14 @@
  * - Nested object/array deserialization
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import React from 'react';
 import { Receiver } from './receiver';
 import { ComponentRegistry } from './registry';
 
 // Mock components
-const MockView: React.FC<Record<string, unknown>> = (props) =>
-  React.createElement('View', props);
-const MockText: React.FC<Record<string, unknown>> = (props) =>
-  React.createElement('Text', props);
+const MockView: React.FC<Record<string, unknown>> = (props) => React.createElement('View', props);
+const MockText: React.FC<Record<string, unknown>> = (props) => React.createElement('Text', props);
 
 describe('Receiver Deserialization', () => {
   let registry: ComponentRegistry;
@@ -275,11 +273,9 @@ describe('Receiver Rendering Edge Cases', () => {
 
     await new Promise((resolve) => queueMicrotask(resolve));
 
-    const element = receiver.render();
+    const _element = receiver.render();
     // Should have warned about unregistered component
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('UnknownComponent')
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('UnknownComponent'));
   });
 
   it('should render __TEXT__ nodes as strings', async () => {
@@ -331,16 +327,11 @@ describe('Receiver Metrics', () => {
     const registry = new ComponentRegistry();
     registry.register('View', MockView);
 
-    const receiver = new Receiver(
-      registry,
-      mock(),
-      mock(),
-      {
-        onMetric: (name, value, extra) => {
-          metrics.push({ name, value, extra });
-        },
-      }
-    );
+    const receiver = new Receiver(registry, mock(), mock(), {
+      onMetric: (name, value, extra) => {
+        metrics.push({ name, value, extra });
+      },
+    });
 
     receiver.applyBatch({
       version: 1,
@@ -365,17 +356,12 @@ describe('Receiver Metrics', () => {
     const registry = new ComponentRegistry();
     registry.register('View', MockView);
 
-    const receiver = new Receiver(
-      registry,
-      mock(),
-      mock(),
-      {
-        maxBatchSize: 2,
-        onMetric: (name, value, extra) => {
-          metrics.push({ name, value, extra });
-        },
-      }
-    );
+    const receiver = new Receiver(registry, mock(), mock(), {
+      maxBatchSize: 2,
+      onMetric: (name, value, extra) => {
+        metrics.push({ name, value, extra });
+      },
+    });
 
     // Send more operations than maxBatchSize
     receiver.applyBatch({

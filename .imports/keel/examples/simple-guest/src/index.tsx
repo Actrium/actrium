@@ -4,16 +4,16 @@
  * 展示 Rill SDK 的基本用法
  */
 
-import React, { useState, useEffect } from 'react';
 import {
-  View,
+  ScrollView,
   Text,
   TouchableOpacity,
-  ScrollView,
-  useHostEvent,
   useConfig,
+  useHostEvent,
   useSendToHost,
+  View,
 } from '@rill/core/sdk';
+import { useState } from 'react';
 
 interface Config {
   title?: string;
@@ -113,10 +113,7 @@ export default function Guest() {
   const textColor = isDark ? '#FFFFFF' : '#000000';
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor }}
-      contentContainerStyle={{ paddingBottom: 40 }}
-    >
+    <ScrollView style={{ flex: 1, backgroundColor }} contentContainerStyle={{ paddingBottom: 40 }}>
       {/* Header */}
       <View
         style={{
@@ -176,11 +173,9 @@ export default function Guest() {
           ITEMS
         </Text>
         <View style={{ backgroundColor: isDark ? '#2C2C2E' : '#FFFFFF' }}>
-          {['First Item', 'Second Item', 'Third Item', 'Fourth Item'].map(
-            (item, index) => (
-              <ListItem key={index} title={item} index={index} />
-            )
-          )}
+          {['First Item', 'Second Item', 'Third Item', 'Fourth Item'].map((item, index) => (
+            <ListItem key={index} title={item} index={index} />
+          ))}
         </View>
       </View>
     </ScrollView>

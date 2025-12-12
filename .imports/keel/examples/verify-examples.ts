@@ -6,8 +6,9 @@
  *
  * Run with: bun run verify-examples.ts
  */
-import { Engine } from '../packages/core/src/runtime/engine';
+
 import React from 'react';
+import { Engine } from '../packages/core/src/runtime/engine';
 
 // ============================================================================
 // Mock Components
@@ -37,12 +38,12 @@ const MOCK_COMPONENTS: Record<string, any> = {
 // ============================================================================
 
 interface OperationRecord {
-  op: string;        // Operation type: CREATE, APPEND, UPDATE, REMOVE, etc.
-  id?: number;       // Node ID
-  type?: string;     // Component type: Text, View, etc.
+  op: string; // Operation type: CREATE, APPEND, UPDATE, REMOVE, etc.
+  id?: number; // Node ID
+  type?: string; // Component type: Text, View, etc.
   props?: Record<string, any>;
   parentId?: number; // For APPEND operations
-  childId?: number;  // For APPEND operations
+  childId?: number; // For APPEND operations
 }
 
 interface StateChange {
@@ -203,7 +204,10 @@ const EXPECTED_BEHAVIORS: ExpectedBehavior[] = [
 // Tree Analysis Utilities
 // ============================================================================
 
-function analyzeTree(element: any, depth = 0): { depth: number; nodeCount: number; componentTypes: Set<string> } {
+function analyzeTree(
+  element: any,
+  depth = 0
+): { depth: number; nodeCount: number; componentTypes: Set<string> } {
   if (!element) {
     return { depth: 0, nodeCount: 0, componentTypes: new Set() };
   }
@@ -261,7 +265,13 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
     return match;
   }
 
-  function checkRange(category: string, label: string, min: number, max: number, actual: number): boolean {
+  function checkRange(
+    category: string,
+    label: string,
+    min: number,
+    max: number,
+    actual: number
+  ): boolean {
     const match = actual >= min && actual <= max;
     checks.push({
       category,
@@ -274,7 +284,12 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
     return match;
   }
 
-  function checkContains(category: string, label: string, required: string[], actual: string[]): boolean {
+  function checkContains(
+    category: string,
+    label: string,
+    required: string[],
+    actual: string[]
+  ): boolean {
     const missing = required.filter((r) => !actual.includes(r));
     const match = missing.length === 0;
     checks.push({
@@ -297,7 +312,7 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
     code = await Bun.file(expected.path).text();
     sizeKB = parseFloat((code.length / 1024).toFixed(2));
     checkRange('Bundle', 'Size (KB)', expected.bundle.minSize, expected.bundle.maxSize, sizeKB);
-  } catch (err) {
+  } catch (_err) {
     check('Bundle', 'File exists', 'true', 'false');
     return { name: expected.name, passed: false, checks, stateHistory, operations, messages };
   }
@@ -361,7 +376,7 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
   try {
     await engine.loadBundle(code, { title: 'Test', theme: 'light' });
     loadSucceeded = true;
-  } catch (err: any) {
+  } catch (_err: any) {
     loadSucceeded = false;
   }
 
@@ -384,7 +399,9 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
 
   // Analyze tree from CREATE operations
   const createOps = operations.filter((o) => o.op === 'CREATE' && o.type);
-  const componentTypesFromOps = new Set(createOps.map((o) => o.type!).filter((t) => !t.startsWith('__')));
+  const componentTypesFromOps = new Set(
+    createOps.map((o) => o.type!).filter((t) => !t.startsWith('__'))
+  );
   const nodeCount = createOps.filter((o) => !o.type!.startsWith('__')).length;
 
   // Find root component - it's the one appended to parentId=0
@@ -401,7 +418,7 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
   // Estimate depth - since tree builds bottom-up, we count unique component depths
   // Simplified: count distinct non-text component types as proxy for depth
   const distinctComponents = [...componentTypesFromOps].filter((t) => !t.startsWith('__'));
-  const estimatedDepth = Math.min(distinctComponents.length, nodeCount);
+  const _estimatedDepth = Math.min(distinctComponents.length, nodeCount);
 
   check('Tree', 'Root component', expected.tree.rootComponent, rootType);
   checkRange('Tree', 'Node count', expected.tree.minNodes, expected.tree.maxNodes, nodeCount);
@@ -417,19 +434,27 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
   // 5. Operations analysis
   // ─────────────────────────────────────────────────────────────────────────
   const initialOpsCount = operations.length;
-  checkRange('Ops', 'Initial count', expected.operations.minInitialOps, expected.operations.maxInitialOps, initialOpsCount);
+  checkRange(
+    'Ops',
+    'Initial count',
+    expected.operations.minInitialOps,
+    expected.operations.maxInitialOps,
+    initialOpsCount
+  );
 
   const opTypes = [...new Set(operations.map((o) => o.op).filter(Boolean))];
   checkContains('Ops', 'Op types', expected.operations.expectedTypes, opTypes);
 
   // Check component types created
-  const componentTypes = [...new Set(operations.filter((o) => o.op === 'CREATE' && o.type).map((o) => o.type!))];
+  const componentTypes = [
+    ...new Set(operations.filter((o) => o.op === 'CREATE' && o.type).map((o) => o.type!)),
+  ];
   checkContains('Ops', 'Component types', expected.tree.requiredComponents, componentTypes);
 
   // ─────────────────────────────────────────────────────────────────────────
   // 6. Event handling and state changes
   // ─────────────────────────────────────────────────────────────────────────
-  const renderCountBeforeEvents = renderCount;
+  const _renderCountBeforeEvents = renderCount;
 
   for (const eventName of expected.events.hostEvents) {
     const renderBefore = renderCount;
@@ -455,7 +480,12 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
   if (expected.events.expectedMessages) {
     for (const em of expected.events.expectedMessages) {
       const found = messages.some((m) => m.type === em.messageType);
-      check('Events', `Message after ${em.event}`, em.messageType, found ? em.messageType : 'not received');
+      check(
+        'Events',
+        `Message after ${em.event}`,
+        em.messageType,
+        found ? em.messageType : 'not received'
+      );
     }
   }
 
@@ -479,7 +509,7 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
 // ============================================================================
 
 function printResults(results: VerificationResult[]): boolean {
-  console.log('\n' + '═'.repeat(90));
+  console.log(`\n${'═'.repeat(90)}`);
   console.log('EXAMPLE VERIFICATION RESULTS');
   console.log('═'.repeat(90));
 
@@ -493,14 +523,15 @@ function printResults(results: VerificationResult[]): boolean {
 
     for (const cat of categories) {
       console.log(`\n  [${cat}]`);
-      console.log('  ' + 'Check'.padEnd(30) + 'Expected'.padEnd(25) + 'Actual'.padEnd(25) + 'Result');
-      console.log('  ' + '─'.repeat(85));
+      console.log(`  ${'Check'.padEnd(30)}${'Expected'.padEnd(25)}${'Actual'.padEnd(25)}Result`);
+      console.log(`  ${'─'.repeat(85)}`);
 
       const catChecks = result.checks.filter((c) => c.category === cat);
       for (const c of catChecks) {
         const matchStr = c.match ? '✓' : '✗';
-        const actualDisplay = c.actual.length > 22 ? c.actual.substring(0, 22) + '...' : c.actual;
-        const expectedDisplay = c.expected.length > 22 ? c.expected.substring(0, 22) + '...' : c.expected;
+        const actualDisplay = c.actual.length > 22 ? `${c.actual.substring(0, 22)}...` : c.actual;
+        const expectedDisplay =
+          c.expected.length > 22 ? `${c.expected.substring(0, 22)}...` : c.expected;
         console.log(
           '  ' +
             c.label.padEnd(30) +
@@ -514,8 +545,15 @@ function printResults(results: VerificationResult[]): boolean {
     // State history summary
     if (result.stateHistory.length > 0) {
       console.log(`\n  [State History] (${result.stateHistory.length} snapshots)`);
-      console.log('  ' + 'Snapshot'.padEnd(12) + 'Renders'.padEnd(10) + 'Ops'.padEnd(10) + 'Depth'.padEnd(10) + 'Nodes');
-      console.log('  ' + '─'.repeat(50));
+      console.log(
+        '  ' +
+          'Snapshot'.padEnd(12) +
+          'Renders'.padEnd(10) +
+          'Ops'.padEnd(10) +
+          'Depth'.padEnd(10) +
+          'Nodes'
+      );
+      console.log(`  ${'─'.repeat(50)}`);
       result.stateHistory.slice(0, 5).forEach((s, i) => {
         console.log(
           '  ' +
@@ -564,8 +602,10 @@ function printResults(results: VerificationResult[]): boolean {
   const totalChecks = results.reduce((sum, r) => sum + r.checks.length, 0);
   const passedChecks = results.reduce((sum, r) => sum + r.checks.filter((c) => c.match).length, 0);
 
-  console.log('\n' + '═'.repeat(90));
-  console.log(`SUMMARY: ${passed}/${total} examples passed (${passedChecks}/${totalChecks} checks)`);
+  console.log(`\n${'═'.repeat(90)}`);
+  console.log(
+    `SUMMARY: ${passed}/${total} examples passed (${passedChecks}/${totalChecks} checks)`
+  );
   console.log('═'.repeat(90));
 
   if (passed === total) {

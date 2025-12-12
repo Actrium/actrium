@@ -3,16 +3,9 @@
  * Demonstrates how to integrate Rill into a React Native application
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  Alert,
-} from 'react-native';
 import { Engine, EngineView } from '@rill/core';
+import { useEffect, useState } from 'react';
+import { Alert, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { createQuickJSProvider } from './QuickJSProvider';
 
 export default function HostApp() {
@@ -81,10 +74,7 @@ export default function HostApp() {
   const handleCheckHealth = () => {
     if (engine) {
       const health = engine.getHealth();
-      Alert.alert(
-        'Engine Health Status',
-        JSON.stringify(health, null, 2)
-      );
+      Alert.alert('Engine Health Status', JSON.stringify(health, null, 2));
     }
   };
 
@@ -116,19 +106,11 @@ export default function HostApp() {
         )}
 
         <View style={styles.buttonGroup}>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={handleSendMessage}
-            disabled={!isLoaded}
-          >
+          <TouchableOpacity style={styles.button} onPress={handleSendMessage} disabled={!isLoaded}>
             <Text style={styles.buttonText}>Send Message to Guest</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.button}
-            onPress={handleToggleTheme}
-            disabled={!isLoaded}
-          >
+          <TouchableOpacity style={styles.button} onPress={handleToggleTheme} disabled={!isLoaded}>
             <Text style={styles.buttonText}>Toggle Theme ({theme})</Text>
           </TouchableOpacity>
 
@@ -145,7 +127,7 @@ export default function HostApp() {
       <View style={styles.guestContainer}>
         <EngineView
           engine={engine}
-          bundleUrl="./dist/guest.js"  // Locally bundled guest
+          bundleUrl="./dist/guest.js" // Locally bundled guest
           initialProps={{
             userId: 'user-123',
             theme,

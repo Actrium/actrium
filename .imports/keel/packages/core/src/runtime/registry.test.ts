@@ -2,9 +2,9 @@
  * ComponentRegistry unit tests
  */
 
-import { describe, it, expect, beforeEach, mock, spyOn } from 'bun:test';
-import { ComponentRegistry, createRegistry } from './registry';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import React from 'react';
+import { ComponentRegistry, createRegistry } from './registry';
 
 // Mock 组件
 const MockView: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
@@ -13,10 +13,9 @@ const MockView: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
 const MockText: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
   React.createElement('Text', null, children);
 
-const MockImage: React.FC<{ source?: string }> = () =>
-  React.createElement('Image');
+const MockImage: React.FC<{ source?: string }> = () => React.createElement('Image');
 
-const MockCustomComponent: React.FC<{ data?: unknown[] }> = () =>
+const _MockCustomComponent: React.FC<{ data?: unknown[] }> = () =>
   React.createElement('CustomComponent');
 
 describe('ComponentRegistry', () => {
@@ -252,9 +251,8 @@ describe('Component Type Safety', () => {
   });
 
   it('should accept components with children', () => {
-    const ContainerComponent: React.FC<{ children?: React.ReactNode }> = ({
-      children,
-    }) => React.createElement('div', null, children);
+    const ContainerComponent: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
+      React.createElement('div', null, children);
 
     registry.register('Container', ContainerComponent);
 
@@ -287,14 +285,7 @@ describe('White-list Security Model', () => {
 
   it('should prevent injection of unauthorized components', () => {
     // Try retrieving unregistered potentially dangerous components
-    const dangerousNames = [
-      'script',
-      'iframe',
-      'object',
-      'embed',
-      '__proto__',
-      'constructor',
-    ];
+    const dangerousNames = ['script', 'iframe', 'object', 'embed', '__proto__', 'constructor'];
 
     for (const name of dangerousNames) {
       expect(registry.has(name)).toBe(false);

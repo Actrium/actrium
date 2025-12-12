@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { Engine } from './engine';
 
 // Type definitions for mock QuickJS
@@ -58,10 +58,13 @@ describe('Host-side sliding window metrics (example)', () => {
     const provider = createMockQuickJSProvider();
     const window: Array<{ name: string; value: number }> = [];
     const N = 5;
-    const engine = new Engine({ quickjs: provider, onMetric: (n, v) => {
-      window.push({ name: n, value: v });
-      if (window.length > N) window.shift();
-    }});
+    const engine = new Engine({
+      quickjs: provider,
+      onMetric: (n, v) => {
+        window.push({ name: n, value: v });
+        if (window.length > N) window.shift();
+      },
+    });
 
     await engine.loadBundle('console.log("ok")');
     engine.createReceiver(() => {});

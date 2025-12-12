@@ -1,6 +1,5 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { Engine } from './engine';
-import { Receiver } from './receiver';
 
 // Type definitions for mock QuickJS
 interface MockQuickJSContext {
@@ -56,7 +55,12 @@ function createMockQuickJSProvider(): MockQuickJSProvider {
 
 function makeBatch(n: number) {
   return {
-    operations: Array.from({ length: n }, (_, i) => ({ op: 'CREATE', id: i + 1, type: 'View', props: {} as any }))
+    operations: Array.from({ length: n }, (_, i) => ({
+      op: 'CREATE',
+      id: i + 1,
+      type: 'View',
+      props: {} as any,
+    })),
   } as any;
 }
 

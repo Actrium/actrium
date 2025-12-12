@@ -36,7 +36,7 @@ function loadBaseline(baselinePath: string): Record<string, BenchmarkResult> {
   try {
     const content = fs.readFileSync(baselinePath, 'utf-8');
     return JSON.parse(content);
-  } catch (error) {
+  } catch (_error) {
     console.warn(`Warning: Could not load baseline from ${baselinePath}`);
     return {};
   }
@@ -63,31 +63,31 @@ function parseBenchmarkOutput(output: string): BenchmarkResult[] {
     // Parse metrics
     if (line.includes('Mean:')) {
       const match = line.match(/Mean:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.mean = parseFloat(match[1]);
+      if (match?.[1]) currentResult.mean = parseFloat(match[1]);
     }
     if (line.includes('Median:')) {
       const match = line.match(/Median:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.median = parseFloat(match[1]);
+      if (match?.[1]) currentResult.median = parseFloat(match[1]);
     }
     if (line.includes('Min:')) {
       const match = line.match(/Min:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.min = parseFloat(match[1]);
+      if (match?.[1]) currentResult.min = parseFloat(match[1]);
     }
     if (line.includes('Max:')) {
       const match = line.match(/Max:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.max = parseFloat(match[1]);
+      if (match?.[1]) currentResult.max = parseFloat(match[1]);
     }
     if (line.includes('Std Dev:')) {
       const match = line.match(/Std Dev:\s+([\d.]+)ms/);
-      if (match && match[1]) currentResult.stdDev = parseFloat(match[1]);
+      if (match?.[1]) currentResult.stdDev = parseFloat(match[1]);
     }
     if (line.includes('Ops/sec:')) {
       const match = line.match(/Ops\/sec:\s+([\d.]+)/);
-      if (match && match[1]) currentResult.ops = parseFloat(match[1]);
+      if (match?.[1]) currentResult.ops = parseFloat(match[1]);
     }
     if (line.includes('Samples:')) {
       const match = line.match(/Samples:\s+(\d+)/);
-      if (match && match[1]) currentResult.samples = parseInt(match[1]);
+      if (match?.[1]) currentResult.samples = parseInt(match[1], 10);
     }
   }
 
@@ -134,13 +134,7 @@ function compareResults(
  * Format comparison report
  */
 function formatReport(comparisons: ComparisonResult[]): string {
-  const lines: string[] = [
-    '',
-    '='.repeat(100),
-    'BENCHMARK COMPARISON REPORT',
-    '='.repeat(100),
-    '',
-  ];
+  const lines: string[] = ['', '='.repeat(100), 'BENCHMARK COMPARISON REPORT', '='.repeat(100), ''];
 
   let regressionCount = 0;
   let improvementCount = 0;
@@ -234,7 +228,9 @@ async function main() {
   const format = args[2] || 'text'; // text or markdown
 
   if (!currentOutputPath) {
-    console.error('Usage: node compare-benchmarks.js <baseline-path> <current-output-path> [format]');
+    console.error(
+      'Usage: node compare-benchmarks.js <baseline-path> <current-output-path> [format]'
+    );
     process.exit(1);
   }
 
@@ -259,14 +255,13 @@ async function main() {
   }
 
   // Format and output report
-  const report = format === 'markdown'
-    ? formatMarkdownReport(comparisons)
-    : formatReport(comparisons);
+  const report =
+    format === 'markdown' ? formatMarkdownReport(comparisons) : formatReport(comparisons);
 
   console.log(report);
 
   // Exit with error if regressions detected
-  const hasRegressions = comparisons.some(c => c.regression);
+  const hasRegressions = comparisons.some((c) => c.regression);
   process.exit(hasRegressions ? 1 : 0);
 }
 

@@ -2,25 +2,25 @@
  * Performance module unit tests
  */
 
-import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import type { Operation, OperationBatch } from '../types';
 import {
   OperationMerger,
+  PerformanceMonitor,
+  ScrollThrottler,
   ThrottledScheduler,
   VirtualScrollCalculator,
-  ScrollThrottler,
-  PerformanceMonitor,
 } from './performance';
-import type { Operation, OperationBatch } from '../types';
 
 // Helper to wait for real time
 const sleep = (ms: number) => {
   if (typeof globalThis.setTimeout === 'function') {
-    return new Promise(resolve => globalThis.setTimeout(resolve, ms));
+    return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
   }
   // Fallback: use Bun.sleep if available
   try {
     // Bun provides Bun.sleep as a top-level function
-    return (globalThis as any).Bun?.sleep?.(ms) ?? Promise.resolve();
+    return globalThis.Bun?.sleep?.(ms) ?? Promise.resolve();
   } catch {
     return Promise.resolve();
   }
@@ -41,9 +41,7 @@ describe('OperationMerger', () => {
     });
 
     it('should return single operation unchanged', () => {
-      const ops: Operation[] = [
-        { op: 'CREATE', id: 1, type: 'View', props: {} },
-      ];
+      const ops: Operation[] = [{ op: 'CREATE', id: 1, type: 'View', props: {} }];
       expect(merger.merge(ops)).toEqual(ops);
     });
 
@@ -148,13 +146,11 @@ describe('ThrottledScheduler', () => {
   let flushCallback: ReturnType<typeof mock>;
 
   beforeEach(() => {
-    
     flushCallback = mock();
   });
 
   afterEach(() => {
     scheduler?.dispose();
-    
   });
 
   describe('enqueue', () => {

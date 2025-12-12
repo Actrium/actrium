@@ -4,32 +4,30 @@
  * These tests verify correctness and completeness of public type definitions
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import type {
-  OperationType,
-  Operation,
-  CreateOperation,
-  UpdateOperation,
-  DeleteOperation,
   AppendOperation,
+  CallFunctionMessage,
+  ConfigUpdateMessage,
+  CreateOperation,
+  DeleteOperation,
+  DestroyMessage,
+  HostEventMessage,
+  HostMessageType,
   InsertOperation,
+  NodeInstance,
+  OperationBatch,
+  OperationType,
   RemoveOperation,
   ReorderOperation,
-  TextOperation,
+  SerializedFunction,
   SerializedProps,
   SerializedValue,
-  SerializedFunction,
-  HostMessage,
-  HostMessageType,
-  CallFunctionMessage,
-  HostEventMessage,
-  ConfigUpdateMessage,
-  DestroyMessage,
-  OperationBatch,
-  VNode,
-  NodeInstance,
   StyleObject,
   StyleProp,
+  TextOperation,
+  UpdateOperation,
+  VNode,
 } from './types';
 
 describe('Operation Types', () => {
@@ -256,12 +254,7 @@ describe('Serialized Types', () => {
 describe('Host Message Types', () => {
   describe('HostMessageType', () => {
     it('should include all message types', () => {
-      const types: HostMessageType[] = [
-        'CALL_FUNCTION',
-        'HOST_EVENT',
-        'CONFIG_UPDATE',
-        'DESTROY',
-      ];
+      const types: HostMessageType[] = ['CALL_FUNCTION', 'HOST_EVENT', 'CONFIG_UPDATE', 'DESTROY'];
 
       expect(types).toHaveLength(4);
     });
@@ -450,12 +443,7 @@ describe('StyleObject', () => {
 
   it('should support transform', () => {
     const style: StyleObject = {
-      transform: [
-        { translateX: 10 },
-        { translateY: 20 },
-        { scale: 1.5 },
-        { rotate: '45deg' },
-      ],
+      transform: [{ translateX: 10 }, { translateY: 20 }, { scale: 1.5 }, { rotate: '45deg' }],
     };
 
     expect(style.transform).toHaveLength(4);

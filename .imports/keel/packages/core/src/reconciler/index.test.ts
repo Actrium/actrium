@@ -2,16 +2,16 @@
  * Reconciler unit tests
  */
 
-import { describe, it, expect, mock, beforeEach, afterEach, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import type { OperationBatch, SendToHost } from '../types';
 import {
   CallbackRegistry,
-  OperationCollector,
   createReconciler,
+  getCallbackRegistry,
+  OperationCollector,
   render,
   unmount,
-  getCallbackRegistry,
 } from './index';
-import type { OperationBatch, SendToHost } from '../types';
 
 // ============ CallbackRegistry tests ============
 
@@ -101,11 +101,7 @@ describe('CallbackRegistry', () => {
 
   describe('removeAll', () => {
     it('should remove multiple callbacks', () => {
-      const ids = [
-        registry.register(mock()),
-        registry.register(mock()),
-        registry.register(mock()),
-      ];
+      const ids = [registry.register(mock()), registry.register(mock()), registry.register(mock())];
 
       expect(registry.size).toBe(3);
 
@@ -258,7 +254,7 @@ describe('Props Serialization', () => {
 
     // Simulate instance creation
     const container = { children: [] };
-    const root = reconciler.createContainer(
+    const _root = reconciler.createContainer(
       container,
       0,
       null,
@@ -548,10 +544,10 @@ describe('Operation Types', () => {
 // ============ Render entry tests ============
 
 describe('render and unmount', () => {
-  let sendToHost: SendToHost;
+  let _sendToHost: SendToHost;
 
   beforeEach(() => {
-    sendToHost = mock();
+    _sendToHost = mock();
     // Ensure cleanup before each test
     unmount();
   });
@@ -650,31 +646,33 @@ describe('React Integration - Fiber Lifecycle', () => {
   });
 
   it('should create operations for simple React element', async () => {
-    const element = React.createElement('View', { testID: 'test' },
+    const element = React.createElement(
+      'View',
+      { testID: 'test' },
       React.createElement('Text', {}, 'Hello')
     );
 
     render(element, sendToHost);
 
     // Wait for React to flush
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(receivedBatches.length).toBeGreaterThan(0);
     const ops = receivedBatches[0].operations;
 
     // Should have CREATE operations for View and Text
-    const createOps = ops.filter(op => op.op === 'CREATE');
+    const createOps = ops.filter((op) => op.op === 'CREATE');
     expect(createOps.length).toBeGreaterThanOrEqual(2);
 
     // Check View creation
-    const viewOp = createOps.find(op => op.op === 'CREATE' && op.type === 'View');
+    const viewOp = createOps.find((op) => op.op === 'CREATE' && op.type === 'View');
     expect(viewOp).toBeDefined();
     if (viewOp && viewOp.op === 'CREATE') {
       expect(viewOp.props.testID).toBe('test');
     }
 
     // Check Text creation
-    const textOp = createOps.find(op => op.op === 'CREATE' && op.type === '__TEXT__');
+    const textOp = createOps.find((op) => op.op === 'CREATE' && op.type === '__TEXT__');
     expect(textOp).toBeDefined();
     if (textOp && textOp.op === 'CREATE') {
       expect(textOp.props.text).toBe('Hello');
@@ -682,21 +680,21 @@ describe('React Integration - Fiber Lifecycle', () => {
   });
 
   it('should handle nested components', async () => {
-    const element = React.createElement('View', {},
-      React.createElement('View', { style: { flex: 1 } },
-        React.createElement('Text', {}, 'Nested')
-      )
+    const element = React.createElement(
+      'View',
+      {},
+      React.createElement('View', { style: { flex: 1 } }, React.createElement('Text', {}, 'Nested'))
     );
 
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(receivedBatches.length).toBeGreaterThan(0);
 
     // Collect all CREATE operations across all batches
     // (React may send operations in multiple batches)
-    const allOps = receivedBatches.flatMap(batch => batch.operations);
-    const createOps = allOps.filter(op => op.op === 'CREATE');
+    const allOps = receivedBatches.flatMap((batch) => batch.operations);
+    const createOps = allOps.filter((op) => op.op === 'CREATE');
 
     // Should create: outer View, inner View, Text
     expect(createOps.length).toBeGreaterThanOrEqual(3);
@@ -707,7 +705,7 @@ describe('React Integration - Fiber Lifecycle', () => {
     const element = React.createElement('View', { onPress });
 
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Test passes if we got any batches (React reconciler executed)
     // Even if empty, the test coverage goal is achieved
@@ -717,27 +715,28 @@ describe('React Integration - Fiber Lifecycle', () => {
   it('should handle component updates', async () => {
     const element1 = React.createElement('View', { testID: 'v1' });
     render(element1, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     receivedBatches = []; // Clear batches
 
     const element2 = React.createElement('View', { testID: 'v2' });
     render(element2, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Should receive UPDATE operation
-    const updateOps = receivedBatches.flatMap(b => b.operations)
-      .filter(op => op.op === 'UPDATE');
+    const updateOps = receivedBatches
+      .flatMap((b) => b.operations)
+      .filter((op) => op.op === 'UPDATE');
     expect(updateOps.length).toBeGreaterThan(0);
   });
 
   it('should handle array serialization in props', async () => {
     const element = React.createElement('View', {
-      transform: [{ translateX: 10 }, { scale: 2 }]
+      transform: [{ translateX: 10 }, { scale: 2 }],
     });
 
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Test coverage achieved by invoking render
     expect(receivedBatches.length).toBeGreaterThanOrEqual(0);
@@ -747,18 +746,18 @@ describe('React Integration - Fiber Lifecycle', () => {
     const element = React.createElement('View', {
       style: {
         shadowOffset: { width: 0, height: 2 },
-        nested: { deep: { value: 42 } }
-      }
+        nested: { deep: { value: 42 } },
+      },
     });
 
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Test coverage achieved
     expect(receivedBatches.length).toBeGreaterThanOrEqual(0);
 
     const ops = receivedBatches[0]?.operations || [];
-    const viewOp = ops.find(op => op.op === 'CREATE' && op.type === 'View');
+    const viewOp = ops.find((op) => op.op === 'CREATE' && op.type === 'View');
 
     // Optional validation if ops were generated
     if (viewOp && viewOp.op === 'CREATE') {
@@ -771,7 +770,7 @@ describe('React Integration - Fiber Lifecycle', () => {
     const element = React.createElement('TouchableOpacity', { onPress });
 
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const registry = getCallbackRegistry(sendToHost);
     const initialSize = registry?.size || 0;
@@ -784,14 +783,16 @@ describe('React Integration - Fiber Lifecycle', () => {
   });
 
   it('should handle multiple children correctly', async () => {
-    const element = React.createElement('View', {},
+    const element = React.createElement(
+      'View',
+      {},
       React.createElement('Text', { key: '1' }, 'First'),
       React.createElement('Text', { key: '2' }, 'Second'),
       React.createElement('Text', { key: '3' }, 'Third')
     );
 
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Test coverage achieved by invoking render with multiple children
     expect(receivedBatches.length).toBeGreaterThanOrEqual(0);
@@ -799,15 +800,17 @@ describe('React Integration - Fiber Lifecycle', () => {
 
   it('should handle element removal', async () => {
     function Counter() {
-      const [count, setCount] = React.useState(0);
-      return React.createElement('View', {},
+      const [count, _setCount] = React.useState(0);
+      return React.createElement(
+        'View',
+        {},
         count > 0 ? React.createElement('Text', {}, `Count: ${count}`) : null
       );
     }
 
     const element = React.createElement(Counter);
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Check if we have operations (component may not trigger removal in this simple case)
     expect(receivedBatches.length).toBeGreaterThan(0);
@@ -819,14 +822,16 @@ describe('React Integration - Fiber Lifecycle', () => {
       React.useEffect(() => {
         setItems(['a', 'x', 'b']); // Insert in middle
       }, []);
-      return React.createElement('View', {},
-        ...items.map(item => React.createElement('Text', { key: item }, item))
+      return React.createElement(
+        'View',
+        {},
+        ...items.map((item) => React.createElement('Text', { key: item }, item))
       );
     }
 
     const element = React.createElement(List);
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     // Should have some operations
     expect(receivedBatches.length).toBeGreaterThan(0);
@@ -878,7 +883,7 @@ describe('HostConfig Methods - Direct Testing', () => {
     const { collector, callbackRegistry } = reconcilerInstance;
 
     // Register a callback to test cleanup
-    const fnId = callbackRegistry.register(mock());
+    const _fnId = callbackRegistry.register(mock());
 
     collector.add({
       op: 'REMOVE',
@@ -950,7 +955,7 @@ describe('HostConfig Methods - Direct Testing', () => {
 
     const ops = receivedBatches[0].operations;
     expect(ops.length).toBe(7);
-    expect(ops.map(o => o.op)).toEqual([
+    expect(ops.map((o) => o.op)).toEqual([
       'CREATE',
       'CREATE',
       'APPEND',
@@ -985,14 +990,16 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
         setTimeout(() => setChildren(['child1', 'child2']), 5);
       }, []);
 
-      return React.createElement('View', {},
-        ...children.map(c => React.createElement('Text', { key: c }, c))
+      return React.createElement(
+        'View',
+        {},
+        ...children.map((c) => React.createElement('Text', { key: c }, c))
       );
     }
 
     const element = React.createElement(Parent);
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     // Should have triggered some operations
     expect(receivedBatches.length).toBeGreaterThan(0);
@@ -1007,22 +1014,24 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
         setTimeout(() => setItems(['c', 'a', 'b']), 5);
       }, []);
 
-      return React.createElement('View', {},
-        ...items.map(item => React.createElement('Text', { key: item }, item))
+      return React.createElement(
+        'View',
+        {},
+        ...items.map((item) => React.createElement('Text', { key: item }, item))
       );
     }
 
     const element = React.createElement(ReorderList);
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     // Should have operations
     expect(receivedBatches.length).toBeGreaterThan(0);
 
     // Check for INSERT operations (from reordering)
-    const allOps = receivedBatches.flatMap(b => b.operations);
-    const hasInsertOrUpdate = allOps.some(op =>
-      op.op === 'INSERT' || op.op === 'UPDATE' || op.op === 'APPEND'
+    const allOps = receivedBatches.flatMap((b) => b.operations);
+    const hasInsertOrUpdate = allOps.some(
+      (op) => op.op === 'INSERT' || op.op === 'UPDATE' || op.op === 'APPEND'
     );
     expect(hasInsertOrUpdate).toBe(true);
   });
@@ -1036,14 +1045,16 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
         setTimeout(() => setShow(false), 5);
       }, []);
 
-      return React.createElement('View', {},
+      return React.createElement(
+        'View',
+        {},
         show ? React.createElement('Text', {}, 'visible') : null
       );
     }
 
     const element = React.createElement(ConditionalRender);
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     // Should have operations
     expect(receivedBatches.length).toBeGreaterThan(0);
@@ -1059,14 +1070,16 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
         setTimeout(() => setItems(['x', 'y', 'z']), 5);
       }, []);
 
-      return React.createElement('View', {},
-        ...items.map((item, i) => React.createElement('Text', { key: item }, item))
+      return React.createElement(
+        'View',
+        {},
+        ...items.map((item, _i) => React.createElement('Text', { key: item }, item))
       );
     }
 
     const element = React.createElement(EdgeCaseInsert);
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(receivedBatches.length).toBeGreaterThan(0);
   });
@@ -1081,7 +1094,9 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
         setTimeout(() => setCount(2), 10);
       }, []);
 
-      return React.createElement('View', {},
+      return React.createElement(
+        'View',
+        {},
         count > 0 ? React.createElement('Text', { key: 'a' }, 'A') : null,
         count > 1 ? React.createElement('Text', { key: 'b' }, 'B') : null
       );
@@ -1089,7 +1104,7 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
 
     const element = React.createElement(RemoveEdgeCase);
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 25));
 
     expect(receivedBatches.length).toBeGreaterThan(0);
   });
@@ -1100,11 +1115,11 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
     const element2 = React.createElement('View', { testID: '2' });
 
     render(element1, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Render different element (triggers container operations)
     render(element2, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(receivedBatches.length).toBeGreaterThan(0);
   });
@@ -1118,14 +1133,16 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
         setTimeout(() => setRoots([2, 1]), 5);
       }, []);
 
-      return React.createElement('View', {},
-        ...roots.map(r => React.createElement('View', { key: r }, `Root ${r}`))
+      return React.createElement(
+        'View',
+        {},
+        ...roots.map((r) => React.createElement('View', { key: r }, `Root ${r}`))
       );
     }
 
     const element = React.createElement(MultiRoot);
     render(element, sendToHost);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(receivedBatches.length).toBeGreaterThan(0);
   });
