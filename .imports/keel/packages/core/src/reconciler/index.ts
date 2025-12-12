@@ -420,6 +420,14 @@ export function createReconciler(sendToHost: SendToHost): {
   const collector = new OperationCollector();
   let nodeIdCounter = 0;
 
+  // 🔧 FIX: Sync callbackRegistry with globalThis.__callbacks
+  // This allows Engine.handleCallFunction() to find callbacks via __invokeCallback()
+  if (typeof globalThis !== 'undefined' && callbackRegistry) {
+    // @ts-ignore - __callbacks is injected by Guest runtime
+    globalThis.__callbacks = (callbackRegistry as any).callbacks;
+    console.log('[rill:reconciler] 🔧 Synced callbackRegistry.callbacks to globalThis.__callbacks');
+  }
+
   const hostConfig: ExtendedHostConfig = {
     // ============ Core Methods ============
 
