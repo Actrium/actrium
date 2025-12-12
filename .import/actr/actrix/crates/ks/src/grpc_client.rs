@@ -11,7 +11,7 @@ use nonce_auth::CredentialBuilder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// KS gRPC 客户端配置
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -190,13 +190,13 @@ impl GrpcClient {
         }
     }
 
-    /// 从 KS 服务获取私钥、过期时间和容忍期状态
+    /// 从 KS 服务获取私钥、过期时间和容忍期秒数
     ///
-    /// 返回 (SecretKey, expires_at, in_tolerance_period)
+    /// 返回 (SecretKey, expires_at, tolerance_seconds)
     pub async fn fetch_secret_key(
         &mut self,
         key_id: u32,
-    ) -> Result<(SecretKey, u64, bool), KsError> {
+    ) -> Result<(SecretKey, u64, u64), KsError> {
         let request_data = format!("get_secret_key:{key_id}");
 
         // 创建 nonce credential
@@ -234,18 +234,11 @@ impl GrpcClient {
         let secret_key = SecretKey::parse(&secret_key_array)
             .map_err(|e| KsError::Crypto(format!("Failed to parse secret key: {e}")))?;
 
-        if resp.in_tolerance_period {
-            warn!(
-                "Key {} is in tolerance period (expired but still valid)",
-                key_id
-            );
-        }
-
         info!(
-            "Successfully fetched secret key {} from KS via gRPC, expires_at: {}, in_tolerance: {}",
-            key_id, resp.expires_at, resp.in_tolerance_period
+            "Successfully fetched secret key {} from KS via gRPC, expires_at: {}, tolerance: {}s",
+            key_id, resp.expires_at, resp.tolerance_seconds
         );
-        Ok((secret_key, resp.expires_at, resp.in_tolerance_period))
+        Ok((secret_key, resp.expires_at, resp.tolerance_seconds))
     }
 
     /// 健康检查

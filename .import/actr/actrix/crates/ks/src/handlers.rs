@@ -346,21 +346,17 @@ async fn get_secret_key_handler(
     // 获取完整的密钥记录
     match app_state.storage.get_key_record(key_id).await? {
         Some(key_record) => {
-            // 检查密钥是否过期，并计算是否在容忍期
-            let in_tolerance_period = if key_record.expires_at > 0 {
+            // 检查密钥是否超过容忍期
+            if key_record.expires_at > 0 {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
 
-                // 检查是否在容忍期内：已过期但未超过容忍期
-                let is_in_tolerance = key_record.expires_at < now
-                    && key_record.expires_at + app_state.tolerance_seconds >= now;
-
                 // 检查是否超过了过期时间 + 容忍期
                 if key_record.expires_at + app_state.tolerance_seconds < now {
                     warn!(
-                        "Key {} has expired (tolerance period ended). Expires at: {}, Tolerance period: {}s, Now: {}",
+                        "Key {} has expired beyond tolerance period. Expires at: {}, Tolerance: {}s, Now: {}",
                         key_id, key_record.expires_at, app_state.tolerance_seconds, now
                     );
                     let duration = start_time.elapsed().as_secs_f64();
@@ -373,17 +369,14 @@ async fn get_secret_key_handler(
                     return Err(KsError::KeyNotFound(key_id));
                 }
 
-                if is_in_tolerance {
+                // 记录是否在容忍期内（用于日志）
+                if key_record.expires_at < now {
                     warn!(
                         "Key {} is in tolerance period (expired at: {}, now: {})",
                         key_id, key_record.expires_at, now
                     );
                 }
-
-                is_in_tolerance
-            } else {
-                false // 永不过期的密钥不在容忍期
-            };
+            }
 
             // 获取私钥
             let secret_key = app_state
@@ -396,7 +389,7 @@ async fn get_secret_key_handler(
                 key_id,
                 secret_key,
                 expires_at: key_record.expires_at,
-                in_tolerance_period,
+                tolerance_seconds: app_state.tolerance_seconds,
             };
 
             // 记录成功的请求指标
@@ -408,7 +401,10 @@ async fn get_secret_key_handler(
                 .with_label_values(&["ks", "GET", "/secret", "200"])
                 .inc();
 
-            debug!("Secret key retrieval successful");
+            info!(
+                "Returned secret key for key_id: {}, expires_at: {}",
+                key_id, key_record.expires_at
+            );
             Ok(Json(response))
         }
         None => {

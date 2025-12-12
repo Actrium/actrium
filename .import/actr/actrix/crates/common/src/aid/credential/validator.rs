@@ -18,8 +18,6 @@ use tracing::{debug, error};
 pub struct AIdCredentialValidator {
     key_cache: Arc<KeyCache>,
     ks_client: Arc<RwLock<GrpcClient>>,
-    /// 容忍期状态缓存 (key_id -> in_tolerance_period)
-    tolerance_cache: Arc<RwLock<std::collections::HashMap<u32, bool>>>,
 }
 
 static VALIDATOR_INSTANCE: OnceCell<Arc<AIdCredentialValidator>> = OnceCell::new();
@@ -52,12 +50,10 @@ impl AIdCredentialValidator {
         })?;
 
         let ks_client = Arc::new(RwLock::new(grpc_client));
-        let tolerance_cache = Arc::new(RwLock::new(std::collections::HashMap::new()));
 
         Ok(Self {
             key_cache,
             ks_client,
-            tolerance_cache,
         })
     }
 
@@ -99,11 +95,8 @@ impl AIdCredentialValidator {
         realm_id: u32,
     ) -> Result<(IdentityClaims, bool), AidError> {
         let validator = Self::get_instance()?;
-        let in_tolerance = validator
-            .get_key_tolerance_status(credential.token_key_id)
-            .await?;
-        let secret_key = validator
-            .get_secret_key_by_id(credential.token_key_id)
+        let (secret_key, in_tolerance) = validator
+            .get_secret_key_with_tolerance(credential.token_key_id)
             .await?;
         let claims = Self::check_with_key(credential, realm_id, &secret_key)?;
         Ok((claims, in_tolerance))
@@ -119,14 +112,14 @@ impl AIdCredentialValidator {
         let validator = Self::get_instance()?;
 
         // Use block_in_place to execute async operations without blocking the entire runtime
-        let secret_key = tokio::task::block_in_place(|| {
+        let (secret_key, _in_tolerance) = tokio::task::block_in_place(|| {
             let handle = tokio::runtime::Handle::try_current().map_err(|_| {
                 AidError::DecryptionFailed("Not in tokio runtime context".to_string())
             })?;
 
             handle.block_on(async {
                 validator
-                    .get_secret_key_by_id(credential.token_key_id)
+                    .get_secret_key_with_tolerance(credential.token_key_id)
                     .await
             })
         })?;
@@ -173,21 +166,26 @@ impl AIdCredentialValidator {
         Ok(claims)
     }
 
-    /// 根据 key_id 获取对应的密钥（生产逻辑）
+    /// 根据 key_id 获取对应的密钥和容忍期状态
     ///
     /// 实现完整的密钥管理逻辑：
-    /// 1. 首先尝试从本地缓存中读取私钥
+    /// 1. 首先尝试从本地 SQLite 缓存中读取私钥和元数据
     /// 2. 如果缓存中没有或已过期，则从 KS 服务获取
     /// 3. 更新本地缓存
-    /// 4. 返回密钥
-    async fn get_secret_key_by_id(&self, key_id: u32) -> Result<SecretKey, AidError> {
+    /// 4. 返回密钥和容忍期状态
+    async fn get_secret_key_with_tolerance(
+        &self,
+        key_id: u32,
+    ) -> Result<(SecretKey, bool), AidError> {
         debug!("Fetching secret key for key_id: {}", key_id);
 
-        // 1. 首先尝试从缓存获取
+        // 1. 首先尝试从 SQLite 缓存获取
         match self.key_cache.get_cached_key(key_id).await? {
-            Some(secret_key) => {
+            Some((secret_key, expires_at, tolerance_seconds)) => {
                 debug!("Found cached secret key for key_id: {}", key_id);
-                return Ok(secret_key);
+                // 计算是否在容忍期内
+                let in_tolerance = Self::calculate_tolerance_status(expires_at, tolerance_seconds);
+                return Ok((secret_key, in_tolerance));
             }
             None => {
                 debug!(
@@ -197,8 +195,8 @@ impl AIdCredentialValidator {
             }
         }
 
-        // 2. 从 KS 服务获取密钥、过期时间和容忍期状态
-        let (secret_key, expires_at, in_tolerance_period) = {
+        // 2. 从 KS 服务获取密钥、过期时间和容忍期秒数
+        let (secret_key, expires_at, tolerance_seconds) = {
             let mut client = self.ks_client.write().await;
             client.fetch_secret_key(key_id).await.map_err(|e| {
                 error!("Failed to fetch secret key {} from KS: {}", key_id, e);
@@ -206,14 +204,10 @@ impl AIdCredentialValidator {
             })?
         };
 
-        if in_tolerance_period {
-            debug!("Key {} is in tolerance period", key_id);
-        }
-
-        // 3. 更新缓存（使用 KS 返回的过期时间）
+        // 3. 更新 SQLite 缓存（包含过期时间和容忍期秒数）
         if let Err(cache_err) = self
             .key_cache
-            .cache_key(key_id, &secret_key, expires_at)
+            .cache_key(key_id, &secret_key, expires_at, tolerance_seconds)
             .await
         {
             // 缓存失败不应该影响主要功能，只记录错误
@@ -222,30 +216,24 @@ impl AIdCredentialValidator {
             debug!("Successfully cached secret key for key_id: {}", key_id);
         }
 
-        // 4. 缓存容忍期状态
-        {
-            let mut tolerance_cache = self.tolerance_cache.write().await;
-            tolerance_cache.insert(key_id, in_tolerance_period);
-        }
+        // 4. 计算容忍期状态
+        let in_tolerance = Self::calculate_tolerance_status(expires_at, tolerance_seconds);
 
-        Ok(secret_key)
+        Ok((secret_key, in_tolerance))
     }
 
-    /// 获取密钥的容忍期状态
-    async fn get_key_tolerance_status(&self, key_id: u32) -> Result<bool, AidError> {
-        // 首先尝试从缓存获取
-        {
-            let tolerance_cache = self.tolerance_cache.read().await;
-            if let Some(&in_tolerance) = tolerance_cache.get(&key_id) {
-                return Ok(in_tolerance);
-            }
+    /// 计算密钥是否在容忍期内
+    fn calculate_tolerance_status(expires_at: u64, tolerance_seconds: u64) -> bool {
+        if expires_at == 0 {
+            return false; // 永不过期的密钥不在容忍期
         }
 
-        // 如果缓存中没有，触发一次密钥获取（会更新缓存）
-        let _ = self.get_secret_key_by_id(key_id).await?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
-        // 再次从缓存读取
-        let tolerance_cache = self.tolerance_cache.read().await;
-        Ok(*tolerance_cache.get(&key_id).unwrap_or(&false))
+        // 在容忍期内：已过期但未超过容忍期
+        expires_at < now && now <= expires_at + tolerance_seconds
     }
 }

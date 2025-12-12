@@ -64,7 +64,8 @@ impl KeyCache {
                 key_id INTEGER PRIMARY KEY,
                 secret_key TEXT NOT NULL,
                 cached_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL
+                expires_at INTEGER NOT NULL,
+                tolerance_seconds INTEGER NOT NULL DEFAULT 0
             )
             "#,
         )
@@ -84,8 +85,13 @@ impl KeyCache {
         Ok(())
     }
 
-    /// 从缓存中获取密钥
-    pub async fn get_cached_key(&self, key_id: u32) -> Result<Option<SecretKey>, AidError> {
+    /// 从缓存中获取密钥及元数据
+    ///
+    /// 返回 (SecretKey, expires_at, tolerance_seconds)
+    pub async fn get_cached_key(
+        &self,
+        key_id: u32,
+    ) -> Result<Option<(SecretKey, u64, u64)>, AidError> {
         // 检查是否需要清理过期缓存
         self.maybe_cleanup().await;
 
@@ -94,14 +100,16 @@ impl KeyCache {
             .unwrap()
             .as_secs();
 
-        let result = sqlx::query("SELECT secret_key, expires_at FROM key_cache WHERE key_id = ?1")
-            .bind(key_id as i64)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| {
-                error!("Database error when querying cached key {}: {}", key_id, e);
-                AidError::DecryptionFailed(format!("Cache query error: {e}"))
-            })?;
+        let result = sqlx::query(
+            "SELECT secret_key, expires_at, tolerance_seconds FROM key_cache WHERE key_id = ?1",
+        )
+        .bind(key_id as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            error!("Database error when querying cached key {}: {}", key_id, e);
+            AidError::DecryptionFailed(format!("Cache query error: {e}"))
+        })?;
 
         match result {
             Some(row) => {
@@ -110,6 +118,11 @@ impl KeyCache {
                 })?;
                 let expires_at: i64 = row.try_get("expires_at").map_err(|e| {
                     AidError::DecryptionFailed(format!("Failed to get expires_at column: {e}"))
+                })?;
+                let tolerance_seconds: i64 = row.try_get("tolerance_seconds").map_err(|e| {
+                    AidError::DecryptionFailed(format!(
+                        "Failed to get tolerance_seconds column: {e}"
+                    ))
                 })?;
 
                 // 检查密钥是否过期（使用 KS 服务返回的过期时间）
@@ -143,7 +156,11 @@ impl KeyCache {
                 })?;
 
                 debug!("Found valid cached key for key_id: {}", key_id);
-                Ok(Some(secret_key))
+                Ok(Some((
+                    secret_key,
+                    expires_at as u64,
+                    tolerance_seconds as u64,
+                )))
             }
             None => {
                 debug!("No cached key found for key_id: {}", key_id);
@@ -152,12 +169,13 @@ impl KeyCache {
         }
     }
 
-    /// 将密钥存入缓存（使用 KS 返回的过期时间）
+    /// 将密钥存入缓存（使用 KS 返回的过期时间和容忍期）
     pub async fn cache_key(
         &self,
         key_id: u32,
         secret_key: &SecretKey,
         expires_at: u64,
+        tolerance_seconds: u64,
     ) -> Result<(), AidError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -169,17 +187,21 @@ impl KeyCache {
 
         // 使用 REPLACE 语句，如果存在则更新，不存在则插入
         sqlx::query(
-            "REPLACE INTO key_cache (key_id, secret_key, cached_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
+            "REPLACE INTO key_cache (key_id, secret_key, cached_at, expires_at, tolerance_seconds) VALUES (?1, ?2, ?3, ?4, ?5)",
         )
         .bind(key_id as i64)
         .bind(&secret_key_b64)
         .bind(now as i64)
         .bind(expires_at as i64)
+        .bind(tolerance_seconds as i64)
         .execute(&self.pool)
         .await
         .map_err(|e| AidError::DecryptionFailed(format!("Failed to cache key: {e}")))?;
 
-        debug!("Cached key {} with KS expires_at: {}", key_id, expires_at);
+        debug!(
+            "Cached key {} with KS expires_at: {}, tolerance: {}s",
+            key_id, expires_at, tolerance_seconds
+        );
         Ok(())
     }
 
@@ -281,22 +303,28 @@ mod tests {
         // 生成测试密钥
         let (secret_key, _) = ecies::utils::generate_keypair();
 
-        // 缓存密钥（设置1小时后过期）
+        // 缓存密钥（设置1小时后过期，容忍期600秒）
         let expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs()
             + 3600;
-        cache.cache_key(1, &secret_key, expires_at).await.unwrap();
+        let tolerance_seconds = 600;
+        cache
+            .cache_key(1, &secret_key, expires_at, tolerance_seconds)
+            .await
+            .unwrap();
         assert_eq!(cache.get_cached_key_count().await.unwrap(), 1);
 
         // 检索密钥
-        let cached_key = cache.get_cached_key(1).await.unwrap();
-        assert!(cached_key.is_some());
+        let cached_result = cache.get_cached_key(1).await.unwrap();
+        assert!(cached_result.is_some());
 
         // 验证密钥一致性
-        let retrieved_key = cached_key.unwrap();
+        let (retrieved_key, retrieved_expires_at, retrieved_tolerance) = cached_result.unwrap();
         assert_eq!(secret_key.serialize(), retrieved_key.serialize());
+        assert_eq!(expires_at, retrieved_expires_at);
+        assert_eq!(tolerance_seconds, retrieved_tolerance);
     }
 
     #[tokio::test]
@@ -312,7 +340,10 @@ mod tests {
             .unwrap()
             .as_secs()
             + 1;
-        cache.cache_key(1, &secret_key, expires_at).await.unwrap();
+        cache
+            .cache_key(1, &secret_key, expires_at, 0)
+            .await
+            .unwrap();
 
         // 等待过期
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -335,7 +366,10 @@ mod tests {
             .unwrap()
             .as_secs()
             + 1;
-        cache.cache_key(1, &secret_key, expires_at).await.unwrap();
+        cache
+            .cache_key(1, &secret_key, expires_at, 0)
+            .await
+            .unwrap();
         assert_eq!(cache.get_cached_key_count().await.unwrap(), 1);
 
         // 等待过期
