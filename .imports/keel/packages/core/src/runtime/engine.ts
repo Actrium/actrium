@@ -575,6 +575,8 @@ export class Engine implements IEngine {
         case 'react/jsx-runtime':
           return ReactJSXRuntime;
         case 'rill/reconciler':
+        case '@rill/core':
+          // Support both old and new module names
           return RillReconciler;
         case 'rill/sdk':
           // Virtual module that provides component names (strings) and host hooks
@@ -886,8 +888,19 @@ export class Engine implements IEngine {
       message.args
     );
     try {
+      // ✅ 优先走 Host 侧 CallbackRegistry：
+      // - RNQuickJS / VMProvider 场景下，reconciler 运行在 Host（Hermes/Node）侧，
+      //   serializePropsWithTracking() 会把 Guest 侧传来的函数句柄注册进 CallbackRegistry。
+      // - Receiver 触发事件时只带 fnId；此处直接通过 registry 调用即可。
+      // - 兼容：若 registry 中不存在该 fnId，则回退到 Guest runtime 注入的 __invokeCallback（旧链路）。
+      if (typeof RillReconciler.hasCallback === 'function' && RillReconciler.hasCallback(message.fnId)) {
+        RillReconciler.invokeCallback(message.fnId, message.args);
+        console.log('[rill:Engine] 🔴 Successfully invoked callback (host registry)');
+        return;
+      }
+
       await this.evalCode(`__invokeCallback("${message.fnId}", ${JSON.stringify(message.args)})`);
-      console.log('[rill:Engine] 🔴 Successfully invoked callback');
+      console.log('[rill:Engine] 🔴 Successfully invoked callback (sandbox eval)');
     } catch (error) {
       this.options.logger.error(`[rill] Failed to invoke callback ${message.fnId}:`, error);
       console.log('[rill:Engine] 🔴 Failed to invoke callback:', error);
