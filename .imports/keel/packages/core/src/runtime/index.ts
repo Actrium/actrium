@@ -8,9 +8,9 @@
 // Development-time version check to help align React and react-reconciler peer versions
 (() => {
   try {
-    const env =
-      (typeof process !== 'undefined' && process && process.env && process.env.NODE_ENV) ||
-      'production';
+    const maybeProcess = (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } })
+      .process;
+    const env = maybeProcess?.env?.NODE_ENV ?? 'production';
     if (env !== 'production') {
       // Dynamically resolve versions without creating hard dependencies
       let reactVersion: string | undefined;
@@ -32,13 +32,22 @@
         // Basic guidance mapping; keep in sync with README compatibility table
         const guidance: Array<{ r: RegExp; allowed: RegExp; recommend: string }> = [
           { r: /^18\./, allowed: /^(0\.(29|30|31))\./, recommend: 'react-reconciler ^0.31' },
-          { r: /^19\.0\./, allowed: /^0\.32\./, recommend: 'react-reconciler ^0.32' },
+          // React 19.0.x 目前与 react-reconciler 0.31.x 的 peer 约束保持一致
+          { r: /^19\.0\./, allowed: /^0\.31\./, recommend: 'react-reconciler ^0.31' },
+          { r: /^19\.1\./, allowed: /^0\.32\./, recommend: 'react-reconciler ^0.32' },
           { r: /^19\.(2|3|4|5)\./, allowed: /^0\.33\./, recommend: 'react-reconciler ^0.33' },
         ];
         const match = guidance.find((g) => g.r.test(reactVersion!));
         if (match && !match.allowed.test(reconcilerVersion)) {
+          const isReactNative =
+            typeof (globalThis as unknown as { navigator?: { product?: string } }).navigator !==
+              'undefined' &&
+            (globalThis as unknown as { navigator?: { product?: string } }).navigator?.product ===
+              'ReactNative';
+          const logFn = isReactNative ? console.log : console.warn;
+          // 在 React Native 上 console.warn 会触发 LogBox；macOS RN 的 LogBox 在部分版本上可能崩溃（NULL CGColor）。
           // eslint-disable-next-line no-console
-          console.warn(
+          logFn(
             `[rill] Detected React ${reactVersion} with react-reconciler ${reconcilerVersion}. ` +
               `Recommended pairing: ${match.recommend}. ` +
               `Refer to README Compatibility for details.`
@@ -53,7 +62,10 @@
 
 // Backward compatibility type aliases
 export type {
+  EngineActivityStats,
+  EngineDiagnostics,
   EngineEvents,
+  EngineHealth,
   EngineOptions,
   GuestMessage,
   JSEngineContext,

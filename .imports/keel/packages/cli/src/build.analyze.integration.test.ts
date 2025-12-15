@@ -50,7 +50,14 @@ export default function Guest(){
 
     // Now run analyze manually (should pass and not throw)
     await analyze(bundlePath, {
-      whitelist: ['react', 'react-native', 'react/jsx-runtime', '@rill/core', '@rill/core/sdk'],
+      whitelist: [
+        'react',
+        'react-native',
+        'react/jsx-runtime',
+        '@rill/core',
+        '@rill/core/sdk',
+        'rill/reconciler',
+      ],
       failOnViolation: true,
       treatEvalAsViolation: true,
       treatDynamicNonLiteralAsViolation: true,

@@ -48,6 +48,7 @@ declare global {
 import type {
   AppendOperation,
   CreateOperation,
+  DeleteOperation,
   InsertOperation,
   Operation,
   OperationBatch,
@@ -69,6 +70,7 @@ import type {
 export class CallbackRegistry {
   private callbacks = new Map<string, (...args: unknown[]) => unknown>();
   private counter = 0;
+  private instanceId = Math.random().toString(36).substring(2, 7);
 
   /**
    * Get internal callbacks Map (for syncing with globalThis.__callbacks)
@@ -81,7 +83,7 @@ export class CallbackRegistry {
    * Register callback function
    */
   register(fn: (...args: unknown[]) => unknown): string {
-    const fnId = `fn_${++this.counter}_${Date.now().toString(36)}`;
+    const fnId = `fn_${this.instanceId}_${++this.counter}`;
     this.callbacks.set(fnId, fn);
     return fnId;
   }
@@ -416,24 +418,26 @@ interface ExtendedHostConfig
 /**
  * Create custom renderer
  */
-export function createReconciler(sendToHost: SendToHost): {
+export function createReconciler(
+  sendToHost: SendToHost,
+  callbackRegistry: CallbackRegistry
+): {
   reconciler: RillReconciler;
   callbackRegistry: CallbackRegistry;
   collector: OperationCollector;
 } {
   // react-reconciler is already statically imported at the top of this file
 
-  const callbackRegistry = new CallbackRegistry();
   const collector = new OperationCollector();
   let nodeIdCounter = 0;
+  const pendingDeleteRoots = new Map<number, VNode>();
 
   // 🔧 FIX: Sync callbackRegistry with globalThis.__callbacks
   // This allows Engine.handleCallFunction() to find callbacks via __invokeCallback()
   if (typeof globalThis !== 'undefined') {
-    // @ts-ignore - __callbacks is injected by Guest runtime
-    globalThis.__callbacks = callbackRegistry.getMap();
+    (globalThis as any).__callbacks = callbackRegistry.getMap();
     console.log('[rill:reconciler] 🔧 Synced callbackRegistry to globalThis.__callbacks');
-    console.log('[rill:reconciler] 🔧 Callbacks Map:', globalThis.__callbacks);
+    console.log('[rill:reconciler] 🔧 Callbacks Map:', (globalThis as any).__callbacks);
   }
 
   const hostConfig: ExtendedHostConfig = {
@@ -500,6 +504,7 @@ export function createReconciler(sendToHost: SendToHost): {
 
       parent.children.push(child);
       child.parent = parent;
+      pendingDeleteRoots.delete(child.id);
 
       // 🔴 FIX: Send APPEND operation during initial render to establish parent-child relationships
       console.log(
@@ -532,6 +537,7 @@ export function createReconciler(sendToHost: SendToHost): {
       );
       parent.children.push(child);
       child.parent = parent;
+      pendingDeleteRoots.delete(child.id);
 
       const op: AppendOperation = {
         op: 'APPEND',
@@ -557,6 +563,7 @@ export function createReconciler(sendToHost: SendToHost): {
         child.type
       );
       container.children.push(child);
+      pendingDeleteRoots.delete(child.id);
 
       const op: AppendOperation = {
         op: 'APPEND',
@@ -576,6 +583,7 @@ export function createReconciler(sendToHost: SendToHost): {
         parent.children.push(child);
       }
       child.parent = parent;
+      pendingDeleteRoots.delete(child.id);
 
       const op: InsertOperation = {
         op: 'INSERT',
@@ -594,6 +602,7 @@ export function createReconciler(sendToHost: SendToHost): {
       } else {
         container.children.push(child);
       }
+      pendingDeleteRoots.delete(child.id);
 
       const op: InsertOperation = {
         op: 'INSERT',
@@ -611,6 +620,7 @@ export function createReconciler(sendToHost: SendToHost): {
         parent.children.splice(index, 1);
       }
       child.parent = null;
+      pendingDeleteRoots.set(child.id, child);
 
       const op: RemoveOperation = {
         op: 'REMOVE',
@@ -619,9 +629,6 @@ export function createReconciler(sendToHost: SendToHost): {
         childId: child.id,
       };
       collector.add(op);
-
-      // Clean up callbacks for this node and its children
-      cleanupNodeCallbacks(child, callbackRegistry);
     },
 
     removeChildFromContainer(container: RootContainer, child: VNode): void {
@@ -629,6 +636,7 @@ export function createReconciler(sendToHost: SendToHost): {
       if (index !== -1) {
         container.children.splice(index, 1);
       }
+      pendingDeleteRoots.set(child.id, child);
 
       const op: RemoveOperation = {
         op: 'REMOVE',
@@ -637,8 +645,6 @@ export function createReconciler(sendToHost: SendToHost): {
         childId: child.id,
       };
       collector.add(op);
-
-      cleanupNodeCallbacks(child, callbackRegistry);
     },
 
     prepareUpdate(
@@ -654,14 +660,28 @@ export function createReconciler(sendToHost: SendToHost): {
       return oldProps !== newProps ? {} : null;
     },
 
+    // React 18/19: commitUpdate 的“类型签名”与“运行时调用”可能不一致：
+    // - React 18（类型常见）：commitUpdate(instance, updatePayload, type, prevProps, nextProps, internalHandle)
+    // - React 19（运行时）：commitUpdate(instance, type, prevProps, nextProps, internalHandle)
+    // 这里用运行时判别兼容两种调用，避免把 internalHandle(Fiber) 当成 props。
     commitUpdate(
       instance: VNode,
-      _updatePayload: unknown,
-      _type: string,
-      oldProps: Record<string, unknown>,
-      newProps: Record<string, unknown>,
-      _internalHandle: unknown
+      updatePayloadOrType: unknown,
+      typeOrPrevProps: unknown,
+      prevPropsOrNextProps: unknown,
+      nextPropsOrInternalHandle: unknown,
+      _internalHandleMaybe?: unknown
     ): void {
+      const isReact19 = typeof updatePayloadOrType === 'string';
+      const oldProps = (isReact19 ? typeOrPrevProps : prevPropsOrNextProps) as Record<
+        string,
+        unknown
+      >;
+      const newProps = (isReact19 ? prevPropsOrNextProps : nextPropsOrInternalHandle) as Record<
+        string,
+        unknown
+      >;
+
       // Find removed properties
       const removedProps = getRemovedProps(oldProps, newProps);
 
@@ -718,6 +738,12 @@ export function createReconciler(sendToHost: SendToHost): {
     },
 
     resetAfterCommit(): void {
+      for (const [id, root] of pendingDeleteRoots) {
+        const op: DeleteOperation = { op: 'DELETE', id };
+        collector.add(op);
+        cleanupNodeCallbacks(root, callbackRegistry);
+      }
+      pendingDeleteRoots.clear();
       collector.flush(sendToHost);
     },
 
@@ -768,6 +794,20 @@ export function createReconciler(sendToHost: SendToHost): {
     },
 
     clearContainer(container: RootContainer): void {
+      // React may call clearContainer() during unmount. We translate that into
+      // explicit REMOVE ops + deferred DELETE (in resetAfterCommit) so that:
+      // - Host Receiver detaches root children
+      // - CallbackRegistry does not leak function IDs
+      for (const child of container.children) {
+        pendingDeleteRoots.set(child.id, child);
+        const op: RemoveOperation = {
+          op: 'REMOVE',
+          id: child.id,
+          parentId: 0,
+          childId: child.id,
+        };
+        collector.add(op);
+      }
       container.children = [];
     },
 
@@ -824,7 +864,7 @@ function cleanupNodeCallbacks(node: VNode, registry: CallbackRegistry): void {
   }
 }
 
-// ============ Render Entry ============
+// ============ Reconciler Entry ============
 
 /**
  * Reconciler instance data for each guest
@@ -842,6 +882,11 @@ interface ReconcilerInstance {
  * This allows multiple guests to each have their own isolated reconciler
  */
 const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
+
+// Create a single, global instance of the callback registry
+// This ensures that callbacks are preserved across engine re-creations,
+// fixing the "Callback not found" issue caused by component remounts.
+const globalCallbackRegistry = new CallbackRegistry();
 
 /**
  * Render React element
@@ -866,7 +911,7 @@ export function render(element: ReactElement, sendToHost: SendToHost): void {
 
   if (!instance) {
     // Create new reconciler instance for this guest
-    const reconcilerInstance = createReconciler(sendToHost);
+    const reconcilerInstance = createReconciler(sendToHost, globalCallbackRegistry);
     const container: RootContainer = { children: [] };
     const root = reconcilerInstance.reconciler.createContainer(
       container,
@@ -894,15 +939,16 @@ export function render(element: ReactElement, sendToHost: SendToHost): void {
 /**
  * Unmount a specific guest instance
  */
-export function unmount(sendToHost: SendToHost): void {
+export function unmount(sendToHost?: SendToHost): void {
+  if (!sendToHost) return;
   const instance = reconcilerMap.get(sendToHost);
   if (instance) {
     instance.reconciler.updateContainer(null, instance.root, null, () => {});
-    instance.callbackRegistry.clear();
+    // DO NOT clear the global callback registry here, as it's shared
+    // instance.callbackRegistry.clear();
     reconcilerMap.delete(sendToHost);
   }
 }
-
 /**
  * Unmount all guest instances
  */
@@ -924,6 +970,23 @@ export function getCallbackRegistry(sendToHost?: SendToHost): CallbackRegistry |
   }
   const instance = reconcilerMap.get(sendToHost);
   return instance ? instance.callbackRegistry : null;
+}
+
+/**
+ * 是否存在某个回调（全局 registry）
+ *
+ * 说明：在 RN / VM 等运行时，Guest 侧的函数会以“可调用句柄”的形式被 Host 侧 reconciler 看到并注册进 CallbackRegistry。
+ * 此时不需要依赖 Guest runtime 注入的 globalThis.__callbacks / __invokeCallback。
+ */
+export function hasCallback(fnId: string): boolean {
+  return globalCallbackRegistry.getMap().has(fnId);
+}
+
+/**
+ * 调用某个回调（全局 registry）
+ */
+export function invokeCallback(fnId: string, args: unknown[] = []): unknown {
+  return globalCallbackRegistry.invoke(fnId, args);
 }
 
 export type { VNode, Operation, OperationBatch, SendToHost };

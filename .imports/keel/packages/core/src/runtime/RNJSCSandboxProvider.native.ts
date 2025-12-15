@@ -36,8 +36,14 @@ export interface JSCSandboxProviderLike {
 }
 
 export interface JSCSandboxModule {
-  JSCSandboxProvider: new (options?: { timeout?: number; memoryLimit?: number }) => JSCSandboxProviderLike;
-  createJSCSandboxProvider: (options?: { timeout?: number; memoryLimit?: number }) => JSCSandboxProviderLike;
+  JSCSandboxProvider: new (options?: {
+    timeout?: number;
+    memoryLimit?: number;
+  }) => JSCSandboxProviderLike;
+  createJSCSandboxProvider: (options?: {
+    timeout?: number;
+    memoryLimit?: number;
+  }) => JSCSandboxProviderLike;
   isJSCSandboxAvailable: () => boolean;
 }
 

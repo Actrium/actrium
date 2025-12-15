@@ -66,15 +66,153 @@ export interface ReceiverOptions {
   onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
   maxBatchSize?: number;
   debug?: boolean;
+  /**
+   * 归因窗口（最近 N 秒聚合），用于“谁在耗/为什么耗”的趋势归因。
+   * @default 5000
+   */
+  attributionWindowMs?: number;
+  /**
+   * 归因历史保留时长（ms），超出后会被丢弃。
+   * @default 60000
+   */
+  attributionHistoryMs?: number;
+  /**
+   * 归因历史最大样本数（batch 数），用于兜底限制内存。
+   * @default 200
+   */
+  attributionMaxSamples?: number;
+}
+
+export interface ReceiverApplyStats {
+  batchId?: number;
+  total: number;
+  applied: number;
+  skipped: number;
+  failed: number;
+  at: number;
+  durationMs: number;
+
+  /**
+   * 批次前后的节点数变化（用于“谁在增长”）
+   */
+  nodesBefore: number;
+  nodesAfter: number;
+  nodeDelta: number;
+
+  /**
+   * 本批次 op 分布（仅统计 applied）
+   */
+  opCounts: Record<string, number>;
+
+  /**
+   * 本批次被跳过的 op 分布（仅在 backpressure/limit 触发时存在）
+   */
+  skippedOpCounts: Record<string, number>;
+
+  /**
+   * 本批次触达的节点 type TopN（用于归因）
+   */
+  topNodeTypes: Array<{ type: string; ops: number }>;
+  topNodeTypesSkipped: Array<{ type: string; ops: number }>;
+}
+
+export interface ReceiverStats {
+  nodeCount: number;
+  rootChildrenCount: number;
+  renderCount: number;
+  lastRenderAt: number | null;
+  lastRenderDurationMs: number | null;
+  totalBatches: number;
+  totalOps: {
+    received: number;
+    applied: number;
+    skipped: number;
+    failed: number;
+  };
+  lastApply: ReceiverApplyStats | null;
+  attribution: ReceiverAttributionWindow | null;
+}
+
+export type ReceiverAttributionWorstKind = 'largest' | 'slowest' | 'mostSkipped' | 'mostGrowth';
+
+export interface ReceiverAttributionWorstBatch {
+  kind: ReceiverAttributionWorstKind;
+  batchId?: number;
+  at: number;
+  total: number;
+  applied: number;
+  skipped: number;
+  failed: number;
+  durationMs: number;
+  nodeDelta: number;
+}
+
+export interface ReceiverAttributionWindow {
+  /**
+   * 本次聚合覆盖的时间窗口（ms）
+   */
+  windowMs: number;
+  /**
+   * 落入窗口的 batch 样本数量
+   */
+  sampleCount: number;
+  /**
+   * 窗口内 ops 总量（received）
+   */
+  total: number;
+  applied: number;
+  skipped: number;
+  failed: number;
+  /**
+   * 窗口内 applyBatch 耗时求和（ms）
+   */
+  durationMs: number;
+  /**
+   * 窗口内节点增量求和（可粗略判断“树在增长还是收缩”）
+   */
+  nodeDelta: number;
+  /**
+   * 窗口内 op 分布（applied 聚合）
+   */
+  opCounts: Record<string, number>;
+  /**
+   * 窗口内 skipped op 分布（skipped 聚合）
+   */
+  skippedOpCounts: Record<string, number>;
+  /**
+   * 窗口内触达的节点 type TopN（applied 聚合）
+   */
+  topNodeTypes: Array<{ type: string; ops: number }>;
+  /**
+   * 窗口内触达的节点 type TopN（skipped 聚合）
+   */
+  topNodeTypesSkipped: Array<{ type: string; ops: number }>;
+  /**
+   * 窗口内异常 batch 留样（用于快速定位“巨大/慢/跳过激增/节点增长”）
+   */
+  worstBatches: ReceiverAttributionWorstBatch[];
 }
 
 export class Receiver {
+  private attributionWindowMs: number;
+  private attributionHistoryMs: number;
+  private attributionMaxSamples: number;
+  private applyHistory: ReceiverApplySample[] = [];
   private nodeMap = new Map<number, NodeInstance>();
   private rootChildren: number[] = [];
   private registry: ComponentRegistry;
   private sendToSandbox: SendToSandbox;
   private onUpdate: () => void;
   private updateScheduled = false;
+  private renderCount = 0;
+  private lastRenderAt: number | null = null;
+  private lastRenderDurationMs: number | null = null;
+  private lastApply: ReceiverApplyStats | null = null;
+  private totalBatches = 0;
+  private totalOpsReceived = 0;
+  private totalOpsApplied = 0;
+  private totalOpsSkipped = 0;
+  private totalOpsFailed = 0;
   private opts: {
     onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
     maxBatchSize: number;
@@ -87,6 +225,13 @@ export class Receiver {
     onUpdate: () => void,
     options?: ReceiverOptions
   ) {
+    this.attributionWindowMs = options?.attributionWindowMs ?? 5000;
+    this.attributionHistoryMs = options?.attributionHistoryMs ?? 60_000;
+    this.attributionMaxSamples = options?.attributionMaxSamples ?? 200;
+    if (this.attributionHistoryMs < this.attributionWindowMs) {
+      this.attributionHistoryMs = this.attributionWindowMs;
+    }
+
     this.registry = registry;
     this.sendToSandbox = sendToSandbox;
     this.onUpdate = onUpdate;
@@ -106,22 +251,82 @@ export class Receiver {
   /**
    * Apply operation batch
    */
-  applyBatch(batch: OperationBatch): void {
+  applyBatch(batch: OperationBatch): ReceiverApplyStats {
     const start = Date.now();
+    const nodesBefore = this.nodeMap.size;
     const limit = this.opts.maxBatchSize;
     let applied = 0;
     let skipped = 0;
     let failed = 0;
+
+    const opCounts: Record<string, number> = {};
+    const skippedOpCounts: Record<string, number> = {};
+    const nodeTypeCounts = new Map<string, number>();
+    const skippedNodeTypeCounts = new Map<string, number>();
+
+    const incRecord = (rec: Record<string, number>, key: string, n = 1) => {
+      rec[key] = (rec[key] ?? 0) + n;
+    };
+    const incMap = (m: Map<string, number>, key: string, n = 1) => {
+      m.set(key, (m.get(key) ?? 0) + n);
+    };
+    const getTouchedTypes = (op: Operation): string[] => {
+      switch (op.op) {
+        case 'CREATE':
+          return [op.type];
+        case 'UPDATE':
+        case 'DELETE':
+        case 'TEXT': {
+          const t = this.nodeMap.get(op.id)?.type;
+          return t ? [t] : [];
+        }
+        case 'APPEND':
+        case 'INSERT':
+        case 'REMOVE': {
+          const types: string[] = [];
+          if (op.parentId !== 0) {
+            const pt = this.nodeMap.get(op.parentId)?.type;
+            if (pt) types.push(pt);
+          }
+          const ct = this.nodeMap.get(op.childId)?.type;
+          if (ct) types.push(ct);
+          return types;
+        }
+        case 'REORDER': {
+          if (op.parentId === 0) return [];
+          const pt = this.nodeMap.get(op.parentId)?.type;
+          return pt ? [pt] : [];
+        }
+        default:
+          return [];
+      }
+    };
+    const topN = (m: Map<string, number>, n: number) =>
+      Array.from(m.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, n)
+        .map(([type, ops]) => ({ type, ops }));
+
     for (let i = 0; i < batch.operations.length; i++) {
       if (applied >= limit) {
+        // 记录被跳过的 op 分布与归因（用于定位 backpressure）
+        for (let j = i; j < batch.operations.length; j++) {
+          const op = batch.operations[j];
+          if (!op) continue;
+          incRecord(skippedOpCounts, op.op);
+          for (const t of getTouchedTypes(op)) incMap(skippedNodeTypeCounts, t);
+        }
         skipped += batch.operations.length - i;
         break;
       }
       const op = batch.operations[i];
       if (!op) continue;
       try {
+        const touchedTypes = getTouchedTypes(op);
         this.applyOperation(op);
         applied++;
+        incRecord(opCounts, op.op);
+        for (const t of touchedTypes) incMap(nodeTypeCounts, t);
       } catch (_e) {
         failed++;
         // continue applying remaining operations
@@ -133,6 +338,37 @@ export class Receiver {
       failed,
       total: batch.operations.length,
     });
+
+    const durationMs = Date.now() - start;
+    this.totalBatches += 1;
+    this.totalOpsReceived += batch.operations.length;
+    this.totalOpsApplied += applied;
+    this.totalOpsSkipped += skipped;
+    this.totalOpsFailed += failed;
+    const nodesAfter = this.nodeMap.size;
+    const nodeDelta = nodesAfter - nodesBefore;
+    const applyStats: ReceiverApplyStats = {
+      batchId: batch.batchId,
+      total: batch.operations.length,
+      applied,
+      skipped,
+      failed,
+      at: Date.now(),
+      durationMs,
+      nodesBefore,
+      nodesAfter,
+      nodeDelta,
+      opCounts,
+      skippedOpCounts,
+      topNodeTypes: topN(nodeTypeCounts, 6),
+      topNodeTypesSkipped: topN(skippedNodeTypeCounts, 6),
+    };
+    this.lastApply = applyStats;
+    this.recordApplySample(
+      applyStats,
+      Object.fromEntries(nodeTypeCounts.entries()),
+      Object.fromEntries(skippedNodeTypeCounts.entries())
+    );
 
     if (skipped > 0) {
       // Inform guest about backpressure/skip to allow adaptive throttling upstream
@@ -148,6 +384,163 @@ export class Receiver {
     }
 
     this.scheduleUpdate();
+    return applyStats;
+  }
+
+  private recordApplySample(
+    stats: ReceiverApplyStats,
+    nodeTypeCountsAll: Record<string, number>,
+    skippedNodeTypeCountsAll: Record<string, number>
+  ): void {
+    this.applyHistory.push({ ...stats, nodeTypeCountsAll, skippedNodeTypeCountsAll });
+    this.trimApplyHistory(stats.at);
+  }
+
+  private trimApplyHistory(now: number): void {
+    const cutoff = now - this.attributionHistoryMs;
+    while (this.applyHistory.length > 0 && this.applyHistory[0]!.at < cutoff) {
+      this.applyHistory.shift();
+    }
+    if (this.applyHistory.length > this.attributionMaxSamples) {
+      this.applyHistory.splice(0, this.applyHistory.length - this.attributionMaxSamples);
+    }
+  }
+
+  private computeAttributionWindow(now: number): ReceiverAttributionWindow | null {
+    if (this.applyHistory.length === 0) return null;
+    const cutoff = now - this.attributionWindowMs;
+    const samples = this.applyHistory.filter((s) => s.at >= cutoff);
+    if (samples.length === 0) return null;
+
+    const incRecord = (rec: Record<string, number>, key: string, n = 1) => {
+      rec[key] = (rec[key] ?? 0) + n;
+    };
+    const incMap = (m: Map<string, number>, key: string, n = 1) => {
+      m.set(key, (m.get(key) ?? 0) + n);
+    };
+    const topN = (m: Map<string, number>, n: number) =>
+      Array.from(m.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, n)
+        .map(([type, ops]) => ({ type, ops }));
+
+    let total = 0;
+    let applied = 0;
+    let skipped = 0;
+    let failed = 0;
+    let durationMs = 0;
+    let nodeDelta = 0;
+
+    const opCounts: Record<string, number> = {};
+    const skippedOpCounts: Record<string, number> = {};
+    const nodeTypeCounts = new Map<string, number>();
+    const skippedNodeTypeCounts = new Map<string, number>();
+
+    for (const s of samples) {
+      total += s.total;
+      applied += s.applied;
+      skipped += s.skipped;
+      failed += s.failed;
+      durationMs += s.durationMs;
+      nodeDelta += s.nodeDelta;
+
+      for (const [k, v] of Object.entries(s.opCounts)) incRecord(opCounts, k, v);
+      for (const [k, v] of Object.entries(s.skippedOpCounts)) incRecord(skippedOpCounts, k, v);
+
+      for (const [t, v] of Object.entries(s.nodeTypeCountsAll)) incMap(nodeTypeCounts, t, v);
+      for (const [t, v] of Object.entries(s.skippedNodeTypeCountsAll))
+        incMap(skippedNodeTypeCounts, t, v);
+    }
+
+    const pickMax = (metric: (s: ReceiverApplyStats) => number): ReceiverApplyStats | null => {
+      let best: ReceiverApplyStats | null = null;
+      let bestV = -Infinity;
+      for (const s of samples) {
+        const v = metric(s);
+        if (v > bestV) {
+          bestV = v;
+          best = s;
+        }
+      }
+      return best;
+    };
+
+    const worstBatches: ReceiverAttributionWorstBatch[] = [];
+    const largest = pickMax((s) => s.total);
+    if (largest) {
+      worstBatches.push({
+        kind: 'largest',
+        batchId: largest.batchId,
+        at: largest.at,
+        total: largest.total,
+        applied: largest.applied,
+        skipped: largest.skipped,
+        failed: largest.failed,
+        durationMs: largest.durationMs,
+        nodeDelta: largest.nodeDelta,
+      });
+    }
+
+    const slowest = pickMax((s) => s.durationMs);
+    if (slowest && slowest.durationMs > 0) {
+      worstBatches.push({
+        kind: 'slowest',
+        batchId: slowest.batchId,
+        at: slowest.at,
+        total: slowest.total,
+        applied: slowest.applied,
+        skipped: slowest.skipped,
+        failed: slowest.failed,
+        durationMs: slowest.durationMs,
+        nodeDelta: slowest.nodeDelta,
+      });
+    }
+
+    const mostSkipped = pickMax((s) => s.skipped);
+    if (mostSkipped && mostSkipped.skipped > 0) {
+      worstBatches.push({
+        kind: 'mostSkipped',
+        batchId: mostSkipped.batchId,
+        at: mostSkipped.at,
+        total: mostSkipped.total,
+        applied: mostSkipped.applied,
+        skipped: mostSkipped.skipped,
+        failed: mostSkipped.failed,
+        durationMs: mostSkipped.durationMs,
+        nodeDelta: mostSkipped.nodeDelta,
+      });
+    }
+
+    const mostGrowth = pickMax((s) => s.nodeDelta);
+    if (mostGrowth && mostGrowth.nodeDelta !== 0) {
+      worstBatches.push({
+        kind: 'mostGrowth',
+        batchId: mostGrowth.batchId,
+        at: mostGrowth.at,
+        total: mostGrowth.total,
+        applied: mostGrowth.applied,
+        skipped: mostGrowth.skipped,
+        failed: mostGrowth.failed,
+        durationMs: mostGrowth.durationMs,
+        nodeDelta: mostGrowth.nodeDelta,
+      });
+    }
+
+    return {
+      windowMs: this.attributionWindowMs,
+      sampleCount: samples.length,
+      total,
+      applied,
+      skipped,
+      failed,
+      durationMs,
+      nodeDelta,
+      opCounts,
+      skippedOpCounts,
+      topNodeTypes: topN(nodeTypeCounts, 6),
+      topNodeTypesSkipped: topN(skippedNodeTypeCounts, 6),
+      worstBatches,
+    };
   }
 
   /**
@@ -331,6 +724,18 @@ export class Receiver {
    * Handle delete operation
    */
   private handleDelete(op: Extract<Operation, { op: 'DELETE' }>): void {
+    // Best-effort: detach from root/parents to avoid stale references.
+    // Protocol-wise, callers SHOULD send REMOVE before DELETE, but we keep Receiver resilient.
+    const rootIndex = this.rootChildren.indexOf(op.id);
+    if (rootIndex !== -1) {
+      this.rootChildren.splice(rootIndex, 1);
+    }
+
+    for (const node of this.nodeMap.values()) {
+      const idx = node.children.indexOf(op.id);
+      if (idx !== -1) node.children.splice(idx, 1);
+    }
+
     this.deleteNodeRecursive(op.id);
   }
 
@@ -436,6 +841,7 @@ export class Receiver {
    */
   render(): React.ReactElement | string | null {
     const t0 = Date.now();
+    this.renderCount += 1;
     this.log(
       'render() called, rootChildren:',
       this.rootChildren.length,
@@ -444,7 +850,10 @@ export class Receiver {
     );
     if (this.rootChildren.length === 0) {
       this.log('render() returning null (no root children)');
-      this.opts.onMetric?.('receiver.render', Date.now() - t0, { nodeCount: this.nodeMap.size });
+      const durationMs = Date.now() - t0;
+      this.lastRenderAt = Date.now();
+      this.lastRenderDurationMs = durationMs;
+      this.opts.onMetric?.('receiver.render', durationMs, { nodeCount: this.nodeMap.size });
       return null;
     }
 
@@ -463,7 +872,10 @@ export class Receiver {
         }
       }
       this.log('render() returning single element, type:', elType);
-      this.opts.onMetric?.('receiver.render', Date.now() - t0, { nodeCount: this.nodeMap.size });
+      const durationMs = Date.now() - t0;
+      this.lastRenderAt = Date.now();
+      this.lastRenderDurationMs = durationMs;
+      this.opts.onMetric?.('receiver.render', durationMs, { nodeCount: this.nodeMap.size });
       return el;
     }
 
@@ -474,7 +886,10 @@ export class Receiver {
       ...this.rootChildren.map((id) => this.renderNode(id))
     );
     this.log('render() returning Fragment with', this.rootChildren.length, 'children');
-    this.opts.onMetric?.('receiver.render', Date.now() - t0, { nodeCount: this.nodeMap.size });
+    const durationMs = Date.now() - t0;
+    this.lastRenderAt = Date.now();
+    this.lastRenderDurationMs = durationMs;
+    this.opts.onMetric?.('receiver.render', durationMs, { nodeCount: this.nodeMap.size });
     return el;
   }
 
@@ -537,6 +952,25 @@ export class Receiver {
     this.rootChildren = [];
   }
 
+  getStats(): ReceiverStats {
+    return {
+      nodeCount: this.nodeMap.size,
+      rootChildrenCount: this.rootChildren.length,
+      renderCount: this.renderCount,
+      lastRenderAt: this.lastRenderAt,
+      lastRenderDurationMs: this.lastRenderDurationMs,
+      totalBatches: this.totalBatches,
+      totalOps: {
+        received: this.totalOpsReceived,
+        applied: this.totalOpsApplied,
+        skipped: this.totalOpsSkipped,
+        failed: this.totalOpsFailed,
+      },
+      lastApply: this.lastApply,
+      attribution: this.computeAttributionWindow(Date.now()),
+    };
+  }
+
   /**
    * Get debug info
    */
@@ -579,4 +1013,9 @@ export class Receiver {
         typeof globalThis !== 'undefined' ? globalThis.__LAST_FUNCTION_FNID : undefined,
     };
   }
+}
+
+interface ReceiverApplySample extends ReceiverApplyStats {
+  nodeTypeCountsAll: Record<string, number>;
+  skippedNodeTypeCountsAll: Record<string, number>;
 }

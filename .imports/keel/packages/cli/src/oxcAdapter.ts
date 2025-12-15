@@ -133,12 +133,15 @@ export async function analyzeModuleIDs(code: string): Promise<ScanResult> {
               const value = firstArg.value;
               if (typeof value === 'string') {
                 foundStatic.add(value);
-                details.push({
+                const detail: ScanDetail = {
                   moduleId: value,
                   kind: 'require',
-                  start: (node as ASTNode & { start?: number }).start,
-                  end: (node as ASTNode & { end?: number }).end,
-                });
+                };
+                const start = (node as ASTNode & { start?: number }).start;
+                const end = (node as ASTNode & { end?: number }).end;
+                if (start !== undefined) detail.start = start;
+                if (end !== undefined) detail.end = end;
+                details.push(detail);
               }
             }
           }

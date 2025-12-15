@@ -6,7 +6,7 @@
  */
 
 import type { OperationBatch, SerializedValue } from '../types';
-import type { Receiver } from './receiver';
+import type { Receiver, ReceiverStats } from './receiver';
 import type { ComponentMap, ComponentRegistry } from './registry';
 
 /**
@@ -52,6 +52,110 @@ export interface ResourceStats {
   timers: number;
   nodes: number;
   callbacks: number;
+}
+
+export interface EngineActivityStats {
+  /**
+   * 统计窗口（毫秒），用于计算 ops/s 与 batch/s
+   */
+  windowMs: number;
+  /**
+   * 最近窗口内 ops/秒
+   */
+  opsPerSecond: number;
+  /**
+   * 最近窗口内 batch/秒
+   */
+  batchesPerSecond: number;
+  /**
+   * 累计接收的 batch 数量
+   */
+  totalBatches: number;
+  /**
+   * 累计接收的 ops 数量（按 batch.operations.length 计）
+   */
+  totalOps: number;
+  /**
+   * 最近一次 batch 信息
+   */
+  lastBatch: {
+    batchId: number;
+    at: number;
+    totalOps: number;
+    applyDurationMs: number | null;
+  } | null;
+
+  /**
+   * 活动时间线（用于 Host 侧趋势图/归因提示）
+   * - points 为等宽桶聚合（ops/batch/skip/apply 耗时）
+   * - 适合直接用于 sparkline / bar chart
+   */
+  timeline?: EngineActivityTimeline;
+}
+
+export interface EngineActivityTimelinePoint {
+  /**
+   * 桶结束时间戳（ms）
+   */
+  at: number;
+  /**
+   * 桶内 ops 总数
+   */
+  ops: number;
+  /**
+   * 桶内 batch 数量
+   */
+  batches: number;
+  /**
+   * 桶内被 Receiver 跳过的 ops 数量（背压信号）
+   */
+  skippedOps: number;
+  /**
+   * 桶内 applyBatch 平均耗时（ms），无样本则为 null
+   */
+  applyDurationMsAvg: number | null;
+  /**
+   * 桶内 applyBatch 最大耗时（ms），无样本则为 null
+   */
+  applyDurationMsMax: number | null;
+}
+
+export interface EngineActivityTimeline {
+  /**
+   * 时间线覆盖窗口（ms）
+   */
+  windowMs: number;
+  /**
+   * 单个时间桶宽度（ms）
+   */
+  bucketMs: number;
+  /**
+   * 从旧到新排列的桶
+   */
+  points: EngineActivityTimelinePoint[];
+}
+
+/**
+ * Engine 诊断快照（用于 Host 侧“任务管理器/资源监视器”）
+ */
+export interface EngineDiagnostics {
+  id: string;
+  health: EngineHealth;
+  resources: ResourceStats;
+  activity: EngineActivityStats;
+  receiver: ReceiverStats | null;
+  host: {
+    lastEventName: string | null;
+    lastEventAt: number | null;
+    lastPayloadBytes: number | null;
+  };
+  guest: {
+    lastEventName: string | null;
+    lastEventAt: number | null;
+    lastPayloadBytes: number | null;
+    sleeping: boolean | null;
+    sleepingAt: number | null;
+  };
 }
 
 /**
@@ -128,6 +232,11 @@ export interface IEngine {
    * Get resource statistics for monitoring
    */
   getResourceStats(): ResourceStats;
+
+  /**
+   * Get diagnostic snapshot for host-side monitoring UI
+   */
+  getDiagnostics(): EngineDiagnostics;
 
   /**
    * Set maximum number of listeners per event before warning

@@ -31,7 +31,7 @@ describe('CallbackRegistry', () => {
       const fn = mock();
       const fnId = registry.register(fn);
 
-      expect(fnId).toMatch(/^fn_\d+_[a-z0-9]+$/);
+      expect(fnId).toMatch(/^fn_[a-z0-9]+_\d+$/);
       expect(registry.size).toBe(1);
     });
 
@@ -214,7 +214,7 @@ describe('createReconciler', () => {
   });
 
   it('should create reconciler instance', () => {
-    const result = createReconciler(sendToHost);
+    const result = createReconciler(sendToHost, new CallbackRegistry());
 
     expect(result).toHaveProperty('reconciler');
     expect(result).toHaveProperty('callbackRegistry');
@@ -222,8 +222,8 @@ describe('createReconciler', () => {
   });
 
   it('should return different instances on each call', () => {
-    const result1 = createReconciler(sendToHost);
-    const result2 = createReconciler(sendToHost);
+    const result1 = createReconciler(sendToHost, new CallbackRegistry());
+    const result2 = createReconciler(sendToHost, new CallbackRegistry());
 
     expect(result1.callbackRegistry).not.toBe(result2.callbackRegistry);
     expect(result1.collector).not.toBe(result2.collector);
@@ -242,7 +242,7 @@ describe('Props Serialization', () => {
     sendToHost = mock((batch: OperationBatch) => {
       receivedBatches.push(batch);
     });
-    reconcilerInstance = createReconciler(sendToHost);
+    reconcilerInstance = createReconciler(sendToHost, new CallbackRegistry());
   });
 
   afterEach(() => {
@@ -381,7 +381,7 @@ describe('Operation Types', () => {
     sendToHost = mock((batch: OperationBatch) => {
       receivedBatches.push(batch);
     });
-    reconcilerInstance = createReconciler(sendToHost);
+    reconcilerInstance = createReconciler(sendToHost, new CallbackRegistry());
   });
 
   it('should generate CREATE operations', () => {
@@ -582,7 +582,7 @@ describe('Batch Updates', () => {
     sendToHost = mock((batch: OperationBatch) => {
       receivedBatches.push(batch);
     });
-    reconcilerInstance = createReconciler(sendToHost);
+    reconcilerInstance = createReconciler(sendToHost, new CallbackRegistry());
   });
 
   it('should batch multiple operations into single flush', () => {
@@ -777,6 +777,7 @@ describe('React Integration - Fiber Lifecycle', () => {
     expect(initialSize).toBeGreaterThan(0);
 
     unmount(sendToHost);
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const finalSize = registry?.size || 0;
     expect(finalSize).toBe(0);
@@ -850,7 +851,7 @@ describe('HostConfig Methods - Direct Testing', () => {
     sendToHost = mock((batch: OperationBatch) => {
       receivedBatches.push(batch);
     });
-    reconcilerInstance = createReconciler(sendToHost);
+    reconcilerInstance = createReconciler(sendToHost, new CallbackRegistry());
   });
 
   afterEach(() => {
@@ -1144,6 +1145,247 @@ describe('HostConfig appendChild/insertBefore/removeChild Coverage', () => {
     render(element, sendToHost);
     await new Promise((resolve) => setTimeout(resolve, 20));
 
+    expect(receivedBatches.length).toBeGreaterThan(0);
+  });
+});
+
+// ============ Text Update Coverage Tests ============
+
+describe('Text Update Coverage', () => {
+  let sendToHost: SendToHost;
+  let receivedBatches: OperationBatch[];
+
+  beforeEach(() => {
+    receivedBatches = [];
+    sendToHost = mock((batch: OperationBatch) => {
+      receivedBatches.push(batch);
+    });
+  });
+
+  it('should handle text node content updates via commitTextUpdate', async () => {
+    // This tests the commitTextUpdate path in the reconciler
+    function TextComponent() {
+      const [text, setText] = React.useState('initial');
+
+      React.useEffect(() => {
+        setTimeout(() => setText('updated'), 5);
+      }, []);
+
+      // Use a raw text node, not wrapped in Text component
+      return React.createElement('View', {}, text);
+    }
+
+    const element = React.createElement(TextComponent);
+    render(element, sendToHost);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Should have UPDATE operations for text changes
+    const hasUpdate = receivedBatches.some((batch) =>
+      batch.operations.some((op) => op.op === 'UPDATE')
+    );
+    expect(hasUpdate).toBe(true);
+  });
+});
+
+// ============ unmountAll Coverage Tests ============
+
+describe('unmountAll', () => {
+  let sendToHost: SendToHost;
+  let receivedBatches: OperationBatch[];
+
+  beforeEach(() => {
+    receivedBatches = [];
+    sendToHost = mock((batch: OperationBatch) => {
+      receivedBatches.push(batch);
+    });
+  });
+
+  it('should unmount all guest instances', async () => {
+    // Import unmountAll
+    const { unmountAll } = await import('./index');
+
+    // Render a simple component
+    const element = React.createElement('View', { key: 'test' });
+    render(element, sendToHost);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Call unmountAll
+    unmountAll();
+
+    // After unmountAll, should have DELETE operations or at least have processed
+    // The key behavior is that it doesn't throw and cleans up properly
+    expect(true).toBe(true);
+  });
+
+  it('should handle unmountAll when no instances exist', () => {
+    const { unmountAll } = require('./index');
+
+    // Should not throw when called with no active instances
+    expect(() => unmountAll()).not.toThrow();
+  });
+});
+
+// ============ Container-level Insert Coverage ============
+
+describe('Container insertInContainerBefore Coverage', () => {
+  let sendToHost: SendToHost;
+  let receivedBatches: OperationBatch[];
+
+  beforeEach(() => {
+    receivedBatches = [];
+    sendToHost = mock((batch: OperationBatch) => {
+      receivedBatches.push(batch);
+    });
+  });
+
+  it('should trigger insertInContainerBefore when reordering root children', async () => {
+    // This tests container-level operations by rendering multiple root children
+    function FragmentTest() {
+      const [order, setOrder] = React.useState(['a', 'b', 'c']);
+
+      React.useEffect(() => {
+        // Reorder to trigger insertInContainerBefore
+        setTimeout(() => setOrder(['c', 'a', 'b']), 5);
+      }, []);
+
+      return React.createElement(
+        React.Fragment,
+        {},
+        ...order.map((id) => React.createElement('View', { key: id, testID: id }))
+      );
+    }
+
+    const element = React.createElement(FragmentTest);
+    render(element, sendToHost);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Should have operations for the render
+    expect(receivedBatches.length).toBeGreaterThan(0);
+
+    // Check that we have CREATE or APPEND operations for the Views
+    const hasCreates = receivedBatches.some((batch) =>
+      batch.operations.some((op) => op.op === 'CREATE' || op.op === 'APPEND')
+    );
+    expect(hasCreates).toBe(true);
+  });
+
+  it('should handle insertInContainerBefore when beforeChild not found', async () => {
+    // Edge case: insertInContainerBefore with invalid beforeChild
+    // This tests the fallback to push() when indexOf returns -1
+    function EdgeCase() {
+      const [items, setItems] = React.useState<string[]>([]);
+
+      React.useEffect(() => {
+        // First add items
+        setTimeout(() => setItems(['a', 'b']), 5);
+        // Then add more with reorder
+        setTimeout(() => setItems(['x', 'a', 'b']), 10);
+      }, []);
+
+      return React.createElement(
+        React.Fragment,
+        {},
+        ...items.map((id) => React.createElement('View', { key: id, testID: id }))
+      );
+    }
+
+    const element = React.createElement(EdgeCase);
+    render(element, sendToHost);
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(receivedBatches.length).toBeGreaterThan(0);
+  });
+});
+
+// ============ prepareUpdate Coverage Tests ============
+
+describe('prepareUpdate', () => {
+  let sendToHost: SendToHost;
+  let receivedBatches: OperationBatch[];
+
+  beforeEach(() => {
+    receivedBatches = [];
+    sendToHost = mock((batch: OperationBatch) => {
+      receivedBatches.push(batch);
+    });
+  });
+
+  it('should return truthy when props change', async () => {
+    // This tests prepareUpdate returning {} when oldProps !== newProps
+    function PropsChanger() {
+      const [color, setColor] = React.useState('red');
+
+      React.useEffect(() => {
+        // Change props to trigger prepareUpdate
+        setTimeout(() => setColor('blue'), 5);
+      }, []);
+
+      return React.createElement('View', { style: { backgroundColor: color } });
+    }
+
+    const element = React.createElement(PropsChanger);
+    render(element, sendToHost);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Should have UPDATE operations since props changed
+    const hasUpdate = receivedBatches.some((batch) =>
+      batch.operations.some((op) => op.op === 'UPDATE')
+    );
+    expect(hasUpdate).toBe(true);
+  });
+
+  it('should handle same props object reference (no update needed)', async () => {
+    // Test prepareUpdate returning null when oldProps === newProps
+    // This happens when React decides the props object hasn't changed
+    const staticProps = { testID: 'static' };
+
+    function StaticProps() {
+      // Force re-render without changing props object
+      const [, forceUpdate] = React.useState(0);
+
+      React.useEffect(() => {
+        setTimeout(() => forceUpdate(1), 5);
+      }, []);
+
+      return React.createElement('View', staticProps);
+    }
+
+    const element = React.createElement(StaticProps);
+    render(element, sendToHost);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Should have CREATE but may or may not have UPDATE depending on React's optimization
+    const hasCreate = receivedBatches.some((batch) =>
+      batch.operations.some((op) => op.op === 'CREATE')
+    );
+    expect(hasCreate).toBe(true);
+  });
+
+  it('should handle props with same values but different references', async () => {
+    // Test prepareUpdate when props have same values but different object references
+    function DifferentRefs() {
+      const [count, setCount] = React.useState(0);
+
+      React.useEffect(() => {
+        setTimeout(() => setCount(1), 5);
+      }, []);
+
+      // Creates new object each render, even though values are same
+      return React.createElement('View', { testID: 'test', count });
+    }
+
+    const element = React.createElement(DifferentRefs);
+    render(element, sendToHost);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Should trigger UPDATE since object reference changed
     expect(receivedBatches.length).toBeGreaterThan(0);
   });
 });

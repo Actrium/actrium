@@ -301,4 +301,58 @@ describe('Engine async error handling', () => {
       engine.destroy();
     });
   });
+
+  describe('Unhandled Promise Rejection', () => {
+    it('should emit error events when errors occur', async () => {
+      const provider = createMockQuickJSProvider();
+      const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
+
+      const errorsCaught: Error[] = [];
+      engine.on('error', (error: Error) => {
+        errorsCaught.push(error);
+      });
+
+      await engine.loadBundle(`// init`);
+
+      // Engine is loaded and can handle errors
+      expect(engine.isLoaded).toBe(true);
+
+      // Manually emit an error to test the error handler
+      engine.emit('error', new Error('Test error'));
+
+      expect(errorsCaught.length).toBe(1);
+      expect(errorsCaught[0].message).toBe('Test error');
+
+      engine.destroy();
+    });
+
+    it('should track error count correctly', async () => {
+      const provider = createMockQuickJSProvider();
+      const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
+
+      await engine.loadBundle(`// init`);
+
+      const initialErrorCount = engine.errorCount;
+
+      // Trigger an error through setTimeout
+      const guestSetTimeout = engine.context?.getGlobal('setTimeout') as (
+        fn: () => void,
+        delay: number
+      ) => number;
+
+      if (guestSetTimeout) {
+        guestSetTimeout(() => {
+          throw new Error('Timer error');
+        }, 5);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Error count should increase
+      expect(engine.errorCount).toBeGreaterThan(initialErrorCount);
+      expect(engine.lastErrorAt).toBeGreaterThan(0);
+
+      engine.destroy();
+    });
+  });
 });
