@@ -27,6 +27,7 @@ export class RNJSCSandboxProvider implements JSEngineProvider {
     );
   }
 
+  /* v8 ignore next 3 -- unreachable: constructor throws */
   createRuntime(): JSEngineRuntime {
     throw new Error('[RNJSCSandboxProvider] Not available in this environment.');
   }
