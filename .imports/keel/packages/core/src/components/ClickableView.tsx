@@ -52,18 +52,19 @@ export function ClickableView({
   const combinedStyle: ViewStyle = {
     ...style,
     opacity: isPressed ? activeOpacity : 1,
-    cursor: disabled ? 'default' : 'pointer',
+    cursor: disabled ? 'auto' : 'pointer',
   };
+
+  const mouseHandlers = {
+    onMouseDown: handleMouseDown,
+    onMouseUp: handleMouseUp,
+    onMouseLeave: handleMouseLeave,
+  } as any;
 
   return (
     <View
       style={combinedStyle}
-      // @ts-expect-error - onMouseDown exists in React Native macOS
-      onMouseDown={handleMouseDown}
-      // @ts-expect-error - onMouseUp exists in React Native macOS
-      onMouseUp={handleMouseUp}
-      // @ts-expect-error - onMouseLeave exists in React Native macOS
-      onMouseLeave={handleMouseLeave}
+      {...mouseHandlers}
       testID={testID}
       accessible={accessible}
       accessibilityLabel={accessibilityLabel}

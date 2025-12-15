@@ -140,7 +140,7 @@ const RUNTIME_INJECT = `
         }
         break;
       case 'DESTROY':
-        __callbacks.clear();
+        // Do not clear callbacks, as the registry is now global across engine instances
         __hostEventListeners.clear();
         break;
     }
@@ -169,7 +169,7 @@ const AUTO_RENDER_FOOTER = `
 
       // Import render function from reconciler
       // In Engine's mock runtime, this will be available via require polyfill
-      var reconciler = typeof require === 'function' ? require('@rill/core') : null;
+      var reconciler = typeof require === 'function' ? require('rill/reconciler') : null;
 
       if (!reconciler || !reconciler.render) {
         console.error('[rill] Reconciler not found, cannot auto-render');
@@ -475,6 +475,7 @@ export async function build(options: BuildOptions): Promise<void> {
               'react/jsx-runtime',
               '@rill/core',
               '@rill/core/sdk',
+              'rill/reconciler',
             ],
             failOnViolation: true,
             treatEvalAsViolation: true,
@@ -666,9 +667,9 @@ export async function analyze(
         unknown
       >;
       sourceMapSummary = {
-        version: mapJson.version,
-        sources: mapJson.sources,
-        file: mapJson.file,
+        version: mapJson['version'],
+        sources: mapJson['sources'],
+        file: mapJson['file'],
       };
     } catch {
       sourceMapSummary = { error: 'failed_to_parse' };
@@ -697,6 +698,7 @@ export async function analyze(
       'react/jsx-runtime',
       '@rill/core',
       '@rill/core/sdk',
+      'rill/reconciler',
     ]
   );
   const violations: string[] = Array.from(found).filter((m) => {

@@ -21,7 +21,7 @@ import type {
   OperationBatch,
   SerializedValue,
 } from '../types';
-import type { EngineEvents, EngineHealth, IEngine } from './IEngine';
+import type { EngineDiagnostics, EngineEvents, EngineHealth, IEngine } from './IEngine';
 import { Receiver } from './receiver';
 import type { ComponentMap } from './registry';
 import { ComponentRegistry } from './registry';
@@ -35,6 +35,12 @@ export interface EngineOptions {
    * Optional - if not provided, a default will be selected based on the environment.
    */
   provider?: JSEngineProvider;
+
+  /**
+   * 兼容旧参数：`quickjs`（等价于 `provider`）
+   * @deprecated 请使用 `provider`
+   */
+  quickjs?: JSEngineProvider;
 
   /**
    * Explicitly select a sandbox mode.
@@ -84,10 +90,40 @@ export interface EngineOptions {
    * @default 5000
    */
   receiverMaxBatchSize?: number;
+
+  /**
+   * 诊断相关参数（用于 Host 侧任务管理器/资源监视器）
+   */
+  diagnostics?: {
+    /**
+     * 计算 ops/s 与 batch/s 的统计窗口（ms）
+     * @default 5000
+     */
+    activityWindowMs?: number;
+    /**
+     * 活动样本保留时长（ms），用于时间线聚合
+     * @default 60000
+     */
+    activityHistoryMs?: number;
+    /**
+     * 时间线桶宽（ms）
+     * @default 2000
+     */
+    activityBucketMs?: number;
+  };
 }
 
 // Re-export types for convenience
-export type { EngineEvents, EngineHealth, GuestMessage, IEngine } from './IEngine';
+export type {
+  EngineActivityStats,
+  EngineActivityTimeline,
+  EngineActivityTimelinePoint,
+  EngineDiagnostics,
+  EngineEvents,
+  EngineHealth,
+  GuestMessage,
+  IEngine,
+} from './IEngine';
 
 /**
  * Event listener
@@ -102,7 +138,7 @@ export interface JSEngineContext {
   evalAsync?(code: string): Promise<unknown>;
   setGlobal(name: string, value: unknown): void;
   getGlobal(name: string): unknown;
-  dispose(): void;
+  dispose(): void | Promise<void>;
 
   /**
    * Set an interrupt handler for execution budget control.
@@ -120,7 +156,7 @@ export interface JSEngineContext {
 
 export interface JSEngineRuntime {
   createContext(): JSEngineContext;
-  dispose(): void;
+  dispose(): void | Promise<void>;
 }
 
 /**
@@ -213,13 +249,48 @@ export class Engine implements IEngine {
   // sendToHost reference for callback registry access
   private sendToHostFn: ((batch: OperationBatch) => void) | null = null;
 
+  // Host-side activity tracking（用于任务管理器/资源监视器）
+  private activityWindowMs = 5000;
+  private activityHistoryMs = 60_000;
+  private activityBucketMs = 2000;
+  private activitySamples: Array<{
+    at: number;
+    ops: number;
+    appliedOps: number;
+    skippedOps: number;
+    failedOps: number;
+    applyDurationMs: number | null;
+  }> = [];
+  private totalBatches = 0;
+  private totalOps = 0;
+  private lastBatch: {
+    batchId: number;
+    at: number;
+    totalOps: number;
+    applyDurationMs: number | null;
+  } | null = null;
+
+  // Guest 主动上报事件的可观测性（用于 Host 侧监视与“督促配合”）
+  private lastGuestEventName: string | null = null;
+  private lastGuestEventAt: number | null = null;
+  private lastGuestPayloadBytes: number | null = null;
+  private guestSleeping: boolean | null = null;
+  private guestSleepingAt: number | null = null;
+
+  // Host → Guest 事件的可观测性（用于 Host 侧“任务管理器/资源监视器”）
+  private lastHostEventName: string | null = null;
+  private lastHostEventAt: number | null = null;
+  private lastHostPayloadBytes: number | null = null;
+
   constructor(options: EngineOptions = {}) {
     const defaultWhitelist = new Set([
       'react',
       'react-native',
       'react/jsx-runtime',
       'rill/reconciler',
+      '@rill/core', // Support old module name
       'rill/sdk',
+      '@rill/core/sdk', // Support old module name
     ]);
     // Provide a safe fallback logger if console is not available
     const defaultLogger =
@@ -233,7 +304,7 @@ export class Engine implements IEngine {
             debug: () => {},
           };
     this.options = {
-      provider: options.provider,
+      provider: options.provider ?? options.quickjs,
       timeout: options.timeout ?? 5000,
       debug: options.debug ?? false,
       logger: options.logger ?? defaultLogger,
@@ -241,6 +312,16 @@ export class Engine implements IEngine {
       onMetric: options.onMetric,
       receiverMaxBatchSize: options.receiverMaxBatchSize ?? 5000,
     };
+
+    this.activityWindowMs = options.diagnostics?.activityWindowMs ?? this.activityWindowMs;
+    this.activityHistoryMs = options.diagnostics?.activityHistoryMs ?? this.activityHistoryMs;
+    this.activityBucketMs = options.diagnostics?.activityBucketMs ?? this.activityBucketMs;
+    if (this.activityHistoryMs < this.activityWindowMs) {
+      this.activityHistoryMs = this.activityWindowMs;
+    }
+    if (!Number.isFinite(this.activityBucketMs) || this.activityBucketMs <= 0) {
+      this.activityBucketMs = 2000;
+    }
 
     this.registry = new ComponentRegistry();
 
@@ -579,6 +660,7 @@ export class Engine implements IEngine {
           // Support both old and new module names
           return RillReconciler;
         case 'rill/sdk':
+        case '@rill/core/sdk':
           // Virtual module that provides component names (strings) and host hooks
           // Component names are used by rill reconciler to look up registered components
           return {
@@ -767,12 +849,49 @@ export class Engine implements IEngine {
       if (debug) {
         logger.log(`[rill:${this.id}] __sendToHost called, operations:`, batch.operations.length);
       }
+      // 记录 batch 活动（无论是否有 receiver）
+      const at = Date.now();
+      const totalOps = batch.operations.length;
+      this.totalBatches += 1;
+      this.totalOps += totalOps;
+      this.lastBatch = {
+        batchId: batch.batchId,
+        at,
+        totalOps,
+        applyDurationMs: null,
+      };
+      const sample: (typeof this.activitySamples)[number] = {
+        at,
+        ops: totalOps,
+        appliedOps: 0,
+        skippedOps: 0,
+        failedOps: 0,
+        applyDurationMs: null,
+      };
+      this.activitySamples.push(sample);
+      // 修剪窗口外样本，避免无限增长
+      const cutoff = at - this.activityHistoryMs;
+      while (this.activitySamples.length > 0 && this.activitySamples[0]!.at < cutoff) {
+        this.activitySamples.shift();
+      }
+      // 兜底限制（极端情况下）
+      if (this.activitySamples.length > 2000) {
+        this.activitySamples = this.activitySamples.slice(-1000);
+      }
+
       this.emit('operation', batch);
       if (this.receiver) {
         if (debug) {
           logger.log(`[rill:${this.id}] Applying batch to receiver`);
         }
-        this.receiver.applyBatch(batch);
+        const applyStats = this.receiver.applyBatch(batch);
+        sample.appliedOps = applyStats.applied;
+        sample.skippedOps = applyStats.skipped;
+        sample.failedOps = applyStats.failed;
+        sample.applyDurationMs = applyStats.durationMs;
+        if (this.lastBatch && this.lastBatch.batchId === batch.batchId) {
+          this.lastBatch.applyDurationMs = applyStats.durationMs;
+        }
       } else {
         logger.warn(`[rill:${this.id}] No receiver to apply batch!`);
       }
@@ -789,6 +908,26 @@ export class Engine implements IEngine {
     this.context.setGlobal('__sendEventToHost', (eventName: string, payload?: unknown) => {
       if (debug) {
         logger.log('[rill] Guest event:', eventName, payload);
+      }
+      this.lastGuestEventName = eventName;
+      this.lastGuestEventAt = Date.now();
+      if (payload === undefined) {
+        this.lastGuestPayloadBytes = 0;
+      } else {
+        try {
+          this.lastGuestPayloadBytes = JSON.stringify(payload).length;
+        } catch {
+          this.lastGuestPayloadBytes = null;
+        }
+      }
+
+      // 特殊约定：Guest 上报自己的睡眠状态（配合 HOST_VISIBILITY）
+      if (eventName === 'GUEST_SLEEP_STATE' && payload && typeof payload === 'object') {
+        const sleeping = (payload as { sleeping?: unknown }).sleeping;
+        if (typeof sleeping === 'boolean') {
+          this.guestSleeping = sleeping;
+          this.guestSleepingAt = Date.now();
+        }
       }
       this.emit('message', { event: eventName, payload });
     });
@@ -893,7 +1032,10 @@ export class Engine implements IEngine {
       //   serializePropsWithTracking() 会把 Guest 侧传来的函数句柄注册进 CallbackRegistry。
       // - Receiver 触发事件时只带 fnId；此处直接通过 registry 调用即可。
       // - 兼容：若 registry 中不存在该 fnId，则回退到 Guest runtime 注入的 __invokeCallback（旧链路）。
-      if (typeof RillReconciler.hasCallback === 'function' && RillReconciler.hasCallback(message.fnId)) {
+      if (
+        typeof RillReconciler.hasCallback === 'function' &&
+        RillReconciler.hasCallback(message.fnId)
+      ) {
         RillReconciler.invokeCallback(message.fnId, message.args);
         console.log('[rill:Engine] 🔴 Successfully invoked callback (host registry)');
         return;
@@ -996,6 +1138,18 @@ export class Engine implements IEngine {
    * Send event to sandbox guest
    */
   sendEvent(eventName: string, payload?: unknown): void {
+    this.lastHostEventName = eventName;
+    this.lastHostEventAt = Date.now();
+    if (payload === undefined) {
+      this.lastHostPayloadBytes = 0;
+    } else {
+      try {
+        this.lastHostPayloadBytes = JSON.stringify(payload).length;
+      } catch {
+        this.lastHostPayloadBytes = null;
+      }
+    }
+
     void this.sendToSandbox({
       type: 'HOST_EVENT',
       eventName,
@@ -1199,6 +1353,99 @@ export class Engine implements IEngine {
       timers: this.timeoutMap.size + this.intervalMap.size,
       nodes: this.receiver?.nodeCount ?? 0,
       callbacks: callbackRegistry?.size ?? 0,
+    };
+  }
+
+  getDiagnostics(): EngineDiagnostics {
+    const now = Date.now();
+    const cutoff = now - this.activityWindowMs;
+
+    // 统计窗口内的 ops 与 batch
+    let windowOps = 0;
+    let windowBatches = 0;
+    for (let i = this.activitySamples.length - 1; i >= 0; i--) {
+      const s = this.activitySamples[i]!;
+      if (s.at < cutoff) break;
+      windowOps += s.ops;
+      windowBatches += 1;
+    }
+
+    const seconds = this.activityWindowMs / 1000;
+    const opsPerSecond = seconds > 0 ? windowOps / seconds : 0;
+    const batchesPerSecond = seconds > 0 ? windowBatches / seconds : 0;
+
+    // 时间线（用于趋势/归因）：按固定桶聚合最近 activityHistoryMs
+    const bucketMs = this.activityBucketMs;
+    const bucketCount = Math.max(1, Math.ceil(this.activityHistoryMs / bucketMs));
+    const timelineWindowMs = bucketCount * bucketMs;
+    const timelineStart = now - timelineWindowMs;
+    const timelineEnd = timelineStart + timelineWindowMs;
+
+    const buckets = Array.from({ length: bucketCount }, () => ({
+      ops: 0,
+      batches: 0,
+      skippedOps: 0,
+      applyMsSum: 0,
+      applyMsCount: 0,
+      applyMsMax: 0,
+    }));
+
+    for (const s of this.activitySamples) {
+      if (s.at < timelineStart) continue;
+      const atForBucket = Math.min(s.at, timelineEnd - 1);
+      if (atForBucket < timelineStart) continue;
+      const idx = Math.floor((atForBucket - timelineStart) / bucketMs);
+      if (idx < 0 || idx >= buckets.length) continue;
+      const b = buckets[idx]!;
+      b.ops += s.ops;
+      b.batches += 1;
+      b.skippedOps += s.skippedOps;
+      if (s.applyDurationMs != null) {
+        b.applyMsSum += s.applyDurationMs;
+        b.applyMsCount += 1;
+        b.applyMsMax = Math.max(b.applyMsMax, s.applyDurationMs);
+      }
+    }
+
+    const timeline = {
+      windowMs: timelineWindowMs,
+      bucketMs,
+      points: buckets.map((b, i) => ({
+        at: timelineStart + (i + 1) * bucketMs,
+        ops: b.ops,
+        batches: b.batches,
+        skippedOps: b.skippedOps,
+        applyDurationMsAvg: b.applyMsCount > 0 ? b.applyMsSum / b.applyMsCount : null,
+        applyDurationMsMax: b.applyMsCount > 0 ? b.applyMsMax : null,
+      })),
+    };
+
+    return {
+      id: this.id,
+      health: this.getHealth(),
+      resources: this.getResourceStats(),
+      activity: {
+        windowMs: this.activityWindowMs,
+        opsPerSecond,
+        batchesPerSecond,
+        totalBatches: this.totalBatches,
+        totalOps: this.totalOps,
+        lastBatch: this.lastBatch,
+        timeline,
+      },
+      receiver: this.receiver ? this.receiver.getStats() : null,
+      host: {
+        lastEventName: this.lastHostEventName,
+        lastEventAt: this.lastHostEventAt,
+        lastPayloadBytes: this.lastHostPayloadBytes,
+      },
+      guest: {
+        lastEventName: this.lastGuestEventName,
+        lastEventAt: this.lastGuestEventAt,
+        lastPayloadBytes: this.lastGuestPayloadBytes,
+        sleeping: this.guestSleeping,
+        sleepingAt: this.guestSleepingAt,
+      },
     };
   }
 }

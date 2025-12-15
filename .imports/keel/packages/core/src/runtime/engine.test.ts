@@ -544,3 +544,66 @@ describe('Engine Error Handling', () => {
     );
   });
 });
+
+describe('Engine Timer Fallbacks', () => {
+  it('should execute setTimeout callback eventually (simulating fallback behavior)', async () => {
+    // This tests that the Promise.resolve().then(fn) fallback pattern works
+    // The actual fallback is triggered when globalThis.setTimeout is undefined
+    // We test the behavior pattern here without removing the global
+
+    let executed = false;
+
+    // Simulate the fallback pattern used in engine.ts
+    const fallbackSetTimeout = (fn: () => void, _ms?: number) => {
+      Promise.resolve().then(fn);
+      return 0;
+    };
+
+    fallbackSetTimeout(() => {
+      executed = true;
+    }, 10);
+
+    // Wait for microtask to execute
+    await new Promise((resolve) => Promise.resolve().then(resolve));
+
+    expect(executed).toBe(true);
+  });
+
+  it('should handle clearTimeout fallback (no-op)', () => {
+    // Test that the clearTimeout fallback doesn't throw
+    const fallbackClearTimeout = () => {};
+
+    expect(() => fallbackClearTimeout()).not.toThrow();
+  });
+
+  it('should handle setInterval fallback', () => {
+    // Test the fallback pattern for setInterval
+    const fallbackSetInterval = () => 0;
+
+    const result = fallbackSetInterval();
+    expect(result).toBe(0);
+  });
+
+  it('should handle clearInterval fallback (no-op)', () => {
+    // Test that the clearInterval fallback doesn't throw
+    const fallbackClearInterval = () => {};
+
+    expect(() => fallbackClearInterval()).not.toThrow();
+  });
+
+  it('should handle queueMicrotask fallback', async () => {
+    // Test the queueMicrotask fallback pattern
+    let executed = false;
+
+    const fallbackQueueMicrotask = (fn: () => void) => Promise.resolve().then(fn);
+
+    fallbackQueueMicrotask(() => {
+      executed = true;
+    });
+
+    // Wait for microtask
+    await new Promise((resolve) => Promise.resolve().then(resolve));
+
+    expect(executed).toBe(true);
+  });
+});

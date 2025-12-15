@@ -92,6 +92,8 @@ export class WorkerJSEngineProvider implements JSEngineProvider {
       },
 
       dispose: () => {
+        // Don't wait for dispose response - just terminate the worker
+        // This prevents hanging when dispose is called from synchronous destroy()
         post({ type: 'dispose' });
         worker.terminate();
         interruptHandler = null;

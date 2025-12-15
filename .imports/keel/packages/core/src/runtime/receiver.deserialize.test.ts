@@ -382,4 +382,42 @@ describe('Receiver Metrics', () => {
     expect(batchMetric?.extra?.applied).toBe(2);
     expect(batchMetric?.extra?.skipped).toBe(2);
   });
+
+  it('should return applyStats with opCounts/topNodeTypes and nodeDelta', () => {
+    const registry = new ComponentRegistry();
+    registry.register('View', MockView);
+
+    const receiver = new Receiver(registry, mock(), mock(), {
+      maxBatchSize: 2,
+    });
+
+    const stats = receiver.applyBatch({
+      version: 1,
+      batchId: 1,
+      operations: [
+        { op: 'CREATE', id: 1, type: 'View', props: {} },
+        { op: 'CREATE', id: 2, type: 'Text', props: {} },
+        { op: 'CREATE', id: 3, type: 'Image', props: {} },
+        { op: 'UPDATE', id: 1, props: { foo: 'bar' } },
+      ],
+    });
+
+    expect(stats.applied).toBe(2);
+    expect(stats.skipped).toBe(2);
+    expect(stats.nodesBefore).toBe(0);
+    expect(stats.nodesAfter).toBe(2);
+    expect(stats.nodeDelta).toBe(2);
+
+    expect(stats.opCounts.CREATE).toBe(2);
+    expect(stats.skippedOpCounts.CREATE).toBe(1);
+    expect(stats.skippedOpCounts.UPDATE).toBe(1);
+
+    const appliedTypes = new Map(stats.topNodeTypes.map((t) => [t.type, t.ops]));
+    expect(appliedTypes.get('View')).toBe(1);
+    expect(appliedTypes.get('Text')).toBe(1);
+
+    const skippedTypes = new Map(stats.topNodeTypesSkipped.map((t) => [t.type, t.ops]));
+    expect(skippedTypes.get('Image')).toBe(1);
+    expect(skippedTypes.get('View')).toBe(1);
+  });
 });
