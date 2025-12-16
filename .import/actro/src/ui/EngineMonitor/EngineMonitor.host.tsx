@@ -201,8 +201,9 @@ export function EngineMonitorOverlay({
         <View style={styles.monitorOverlay}>
           <Text style={styles.monitorTitle}>Engine Resource Monitor</Text>
           <Text style={styles.monitorHint}>
-            Recommend Guest listen to HOST_VISIBILITY and pause interval/animation/polling when not visible
-            to reduce background resource consumption; also report GUEST_SLEEP_STATE for Host diagnosis.
+            Recommend Guest listen to HOST_VISIBILITY and pause interval/animation/polling when not
+            visible to reduce background resource consumption; also report GUEST_SLEEP_STATE for
+            Host diagnosis.
           </Text>
           <ScrollView style={styles.monitorList} contentContainerStyle={{ paddingBottom: 16 }}>
             {rows.map((row) => {
@@ -341,7 +342,8 @@ export function EngineMonitorOverlay({
                     engineId: {row.engineId ?? '(Uninitialized)'}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    Resources: timers={resources?.timers ?? 0} nodes={resources?.nodes ?? 0} callbacks=
+                    Resources: timers={resources?.timers ?? 0} nodes={resources?.nodes ?? 0}{' '}
+                    callbacks=
                     {resources?.callbacks ?? 0}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
@@ -356,7 +358,8 @@ export function EngineMonitorOverlay({
                       : ''}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    Attribution (past {attrWindowSec ?? '—'}s): samples={attr?.sampleCount ?? '—'} nodeΔ=
+                    Attribution (past {attrWindowSec ?? '—'}s): samples={attr?.sampleCount ?? '—'}{' '}
+                    nodeΔ=
                     {attr?.nodeDelta ?? '—'} totalOps={attr?.total ?? '—'} skipped=
                     {attr?.skipped ?? '—'}
                     {'  '}ops={attrCountsText} top={attrTopTypesText}
@@ -395,8 +398,8 @@ export function EngineMonitorOverlay({
                   )}
                   {skippedOver && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ SkippedOps over budget: check rendering frequency/batch size, consider Guest-side throttling or respond to
-                      RECEIVER_BACKPRESSURE
+                      ⚠️ SkippedOps over budget: check rendering frequency/batch size, consider
+                      Guest-side throttling or respond to RECEIVER_BACKPRESSURE
                     </Text>
                   )}
                   {isBackgroundBusy && (
@@ -406,23 +409,28 @@ export function EngineMonitorOverlay({
                   )}
                   {guestNotCooperating && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ Guest still marked as "active" (recommend responding to HOST_VISIBILITY and reporting GUEST_SLEEP_STATE)
+                      ⚠️ Guest still marked as "active" (recommend responding to HOST_VISIBILITY and
+                      reporting GUEST_SLEEP_STATE)
                     </Text>
                   )}
                   {guestNotCooperatingAfterVisibility && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ Host sent HOST_VISIBILITY, but Guest has not entered sleep (check if Guest handles visibility correctly/missing reports)
+                      ⚠️ Host sent HOST_VISIBILITY, but Guest has not entered sleep (check if Guest
+                      handles visibility correctly/missing reports)
                     </Text>
                   )}
                   {resourceOver && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ Resources over budget: timers&lt;={b.timers} nodes&lt;={b.nodes} callbacks&lt;=
-                      {b.callbacks} (recommend clearing intervals, avoiding unlimited node growth, releasing callback references)
+                      ⚠️ Resources over budget: timers&lt;={b.timers} nodes&lt;={b.nodes}{' '}
+                      callbacks&lt;=
+                      {b.callbacks} (recommend clearing intervals, avoiding unlimited node growth,
+                      releasing callback references)
                     </Text>
                   )}
                   {applyOver && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ ApplyBatch duration too high (recommend reducing batch size/update frequency, or use virtual lists/chunked rendering)
+                      ⚠️ ApplyBatch duration too high (recommend reducing batch size/update
+                      frequency, or use virtual lists/chunked rendering)
                     </Text>
                   )}
                   {contractViolationCount > 0 && (
@@ -432,7 +440,8 @@ export function EngineMonitorOverlay({
                   )}
                   {receiverNodeCount != null && receiverNodeCount > b.nodes && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ Node count too high: consider pagination/virtualization/recycling invisible subtrees
+                      ⚠️ Node count too high: consider pagination/virtualization/recycling invisible
+                      subtrees
                     </Text>
                   )}
                 </View>

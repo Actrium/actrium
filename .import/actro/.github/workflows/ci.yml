@@ -29,7 +29,7 @@ jobs:
         run: bun run lint
 
       - name: Run formatter check
-        run: bun run fmt:check
+        run: bun run format:check
 
       - name: Run tests
         run: bun test
