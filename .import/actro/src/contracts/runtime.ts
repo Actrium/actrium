@@ -86,8 +86,8 @@ export function createHostToGuestSender(
         reason: 'not declared in hostToGuest contracts',
       };
       options?.onViolation?.(v);
-      if (mode === 'throw') throw new Error(`[ask/contracts] 未声明事件: ${eventName}`);
-      if (mode === 'warn') console.warn('[ask/contracts] 未声明事件:', v);
+      if (mode === 'throw') throw new Error(`[ask/contracts] undeclared event: ${eventName}`);
+      if (mode === 'warn') console.warn('[ask/contracts] undeclared event:', v);
       return;
     }
 
@@ -101,8 +101,8 @@ export function createHostToGuestSender(
         reason: 'payload does not satisfy contracts schema',
       };
       options?.onViolation?.(v);
-      if (mode === 'throw') throw new Error(`[ask/contracts] payload 不合法: ${eventName}`);
-      if (mode === 'warn') console.warn('[ask/contracts] payload 不合法:', v);
+      if (mode === 'throw') throw new Error(`[ask/contracts] invalid payload: ${eventName}`);
+      if (mode === 'warn') console.warn('[ask/contracts] invalid payload:', v);
       return;
     }
 
@@ -140,8 +140,8 @@ export function createGuestToHostSender(
         reason: 'not declared in guestToHost contracts',
       };
       options?.onViolation?.(v);
-      if (mode === 'throw') throw new Error(`[ask/contracts] 未声明事件: ${eventName}`);
-      if (mode === 'warn') console.warn('[ask/contracts] 未声明事件:', v);
+      if (mode === 'throw') throw new Error(`[ask/contracts] undeclared event: ${eventName}`);
+      if (mode === 'warn') console.warn('[ask/contracts] undeclared event:', v);
       return;
     }
 
@@ -155,8 +155,8 @@ export function createGuestToHostSender(
         reason: 'payload does not satisfy contracts schema',
       };
       options?.onViolation?.(v);
-      if (mode === 'throw') throw new Error(`[ask/contracts] payload 不合法: ${eventName}`);
-      if (mode === 'warn') console.warn('[ask/contracts] payload 不合法:', v);
+      if (mode === 'throw') throw new Error(`[ask/contracts] invalid payload: ${eventName}`);
+      if (mode === 'warn') console.warn('[ask/contracts] invalid payload:', v);
       return;
     }
 

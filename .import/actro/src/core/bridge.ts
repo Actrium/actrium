@@ -28,14 +28,14 @@ export type GuestMessageHandlerOptions = {
   onContractEvent?: (eventName: string, payload: unknown) => void;
   onContractViolation?: (violation: ContractViolation) => void;
   /**
-   * Guest 声明的 permissions（来自 `.actr/manifest.json`）。
+   * Guest declared permissions (from `.actr/manifest.json`).
    */
   permissions?: readonly string[];
   /**
-   * 权限策略：
-   * - allow：不做检查
-   * - warn：记录违规但继续执行
-   * - deny：记录违规并拒绝执行
+   * Permission policy:
+   * - allow: no check
+   * - warn: log violation but continue execution
+   * - deny: log violation and refuse execution
    */
   permissionMode?: 'allow' | 'warn' | 'deny';
 };
