@@ -1,8 +1,15 @@
 {
-  "name": "rill-workspace",
+  "name": "rill",
   "version": "0.1.0",
-  "private": true,
-  "description": "Rill monorepo workspace",
+  "description": "A lightweight, headless, sandboxed dynamic UI rendering engine for React Native",
+  "main": "./packages/core/src/runtime/index.ts",
+  "types": "./packages/core/src/runtime/index.ts",
+  "exports": {
+    ".": "./packages/core/src/runtime/index.ts",
+    "./sdk": "./packages/core/src/sdk/index.ts",
+    "./types": "./packages/core/src/types.ts",
+    "./devtools": "./packages/core/src/devtools/index.ts"
+  },
   "workspaces": [
     "packages/*"
   ],
@@ -19,6 +26,24 @@
   "engines": {
     "node": ">=18.0.0",
     "bun": ">=1.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.70.0",
+    "react-reconciler": ">=0.29.0",
+    "react-native-jsc-sandbox": "github:GoAskAway/react-native-jsc-sandbox",
+    "react-native-quickjs": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    },
+    "react-native-jsc-sandbox": {
+      "optional": true
+    },
+    "react-native-quickjs": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.8",
