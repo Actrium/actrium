@@ -25,4 +25,3 @@ export const Panel = {
   Left: createPanel('left'),
   Right: createPanel('right'),
 };
-

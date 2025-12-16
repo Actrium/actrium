@@ -45,7 +45,10 @@ export type GuestMessageHandlerOptions = {
  *
  * Simplified implementation that inlines validation and parsing for better performance.
  */
-export function handleGuestMessage(message: GuestMessage, options?: GuestMessageHandlerOptions): unknown {
+export function handleGuestMessage(
+  message: GuestMessage,
+  options?: GuestMessageHandlerOptions
+): unknown {
   // Inline validation
   if (
     !message ||

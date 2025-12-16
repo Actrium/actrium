@@ -13,4 +13,3 @@ export const PanelMarker: React.FC<PanelMarkerProps> = ({ children }) => (
 );
 
 PanelMarker.displayName = 'PanelMarker';
-

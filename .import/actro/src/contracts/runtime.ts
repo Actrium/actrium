@@ -29,9 +29,7 @@ export type ContractViolationSummary = {
   recent: readonly ContractViolation[];
 };
 
-export function createContractViolationCollector(options?: {
-  max?: number;
-}): {
+export function createContractViolationCollector(options?: { max?: number }): {
   record: (violation: Omit<ContractViolation, 'at'> & { at?: number }) => void;
   summary: () => ContractViolationSummary;
 } {
@@ -57,12 +55,15 @@ export function createContractViolationCollector(options?: {
 export function createHostToGuestSender(engine: {
   sendEvent: (eventName: string, payload?: unknown) => void;
 }): <E extends HostToGuestEventName>(eventName: E, payload: HostToGuestEventPayloads[E]) => void;
-export function createHostToGuestSender(engine: {
-  sendEvent: (eventName: string, payload?: unknown) => void;
-}, options?: {
-  onViolation?: (violation: ContractViolation) => void;
-  mode?: 'warn' | 'throw' | 'silent';
-}): <E extends HostToGuestEventName>(eventName: E, payload: HostToGuestEventPayloads[E]) => void;
+export function createHostToGuestSender(
+  engine: {
+    sendEvent: (eventName: string, payload?: unknown) => void;
+  },
+  options?: {
+    onViolation?: (violation: ContractViolation) => void;
+    mode?: 'warn' | 'throw' | 'silent';
+  }
+): <E extends HostToGuestEventName>(eventName: E, payload: HostToGuestEventPayloads[E]) => void;
 export function createHostToGuestSender(
   engine: {
     sendEvent: (eventName: string, payload?: unknown) => void;
@@ -109,12 +110,9 @@ export function createHostToGuestSender(
   };
 }
 
-export function createGuestToHostSender(sendToHost: (eventName: string, payload?: unknown) => void): <
-  E extends GuestToHostEventName
->(
-  eventName: E,
-  payload: GuestToHostEventPayloads[E]
-) => void;
+export function createGuestToHostSender(
+  sendToHost: (eventName: string, payload?: unknown) => void
+): <E extends GuestToHostEventName>(eventName: E, payload: GuestToHostEventPayloads[E]) => void;
 export function createGuestToHostSender(
   sendToHost: (eventName: string, payload?: unknown) => void,
   options?: {

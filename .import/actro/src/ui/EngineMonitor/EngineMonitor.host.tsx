@@ -171,7 +171,7 @@ export function EngineMonitorOverlay({
       if (cancelled) return;
       const nextRows = tabs.map((tab) => {
         const engine = getEngine(tab.id);
-        const diagnostics = engine ? engine.getDiagnostics?.() ?? null : null;
+        const diagnostics = engine ? (engine.getDiagnostics?.() ?? null) : null;
         return {
           tabId: tab.id,
           title: tab.title || '未命名',
@@ -193,10 +193,7 @@ export function EngineMonitorOverlay({
 
   return (
     <>
-      <TouchableOpacity
-        onPress={() => setVisible(!isVisible)}
-        style={styles.monitorButton}
-      >
+      <TouchableOpacity onPress={() => setVisible(!isVisible)} style={styles.monitorButton}>
         <Text style={styles.monitorButtonText}>{isVisible ? '关闭监视器' : '打开监视器'}</Text>
       </TouchableOpacity>
 
@@ -204,7 +201,8 @@ export function EngineMonitorOverlay({
         <View style={styles.monitorOverlay}>
           <Text style={styles.monitorTitle}>Engine 资源监视器</Text>
           <Text style={styles.monitorHint}>
-            建议 Guest 监听 HOST_VISIBILITY，并在不可见时暂停 interval/动画/轮询，以降低后台资源消耗；同时上报 GUEST_SLEEP_STATE 以便 Host 诊断。
+            建议 Guest 监听 HOST_VISIBILITY，并在不可见时暂停
+            interval/动画/轮询，以降低后台资源消耗；同时上报 GUEST_SLEEP_STATE 以便 Host 诊断。
           </Text>
           <ScrollView style={styles.monitorList} contentContainerStyle={{ paddingBottom: 16 }}>
             {rows.map((row) => {
@@ -281,7 +279,9 @@ export function EngineMonitorOverlay({
                 activity?.lastBatch?.applyDurationMs ??
                 (timelinePoints.length > 0
                   ? Math.max(
-                      ...timelinePoints.map((p) => (typeof p.applyDurationMsMax === 'number' ? p.applyDurationMsMax : 0))
+                      ...timelinePoints.map((p) =>
+                        typeof p.applyDurationMsMax === 'number' ? p.applyDurationMsMax : 0
+                      )
                     )
                   : null);
 
@@ -298,7 +298,9 @@ export function EngineMonitorOverlay({
               const skippedTopTypesText = formatTopTypes(lastApply?.topNodeTypesSkipped);
 
               const attrWindowSec =
-                typeof attr?.windowMs === 'number' ? Math.max(1, Math.round(attr.windowMs / 1000)) : null;
+                typeof attr?.windowMs === 'number'
+                  ? Math.max(1, Math.round(attr.windowMs / 1000))
+                  : null;
               const attrCountsText = formatCounts(attr?.opCounts);
               const attrTopTypesText = formatTopTypes(attr?.topNodeTypes);
               const attrSkippedCountsText = formatCounts(attr?.skippedOpCounts);
@@ -319,34 +321,45 @@ export function EngineMonitorOverlay({
                       ? `${tab.contract.name}@v${tab.contract.version}`
                       : '（未声明/兼容模式）';
                     const permText =
-                      tab.permissions && tab.permissions.length > 0 ? tab.permissions.join(', ') : '（无）';
+                      tab.permissions && tab.permissions.length > 0
+                        ? tab.permissions.join(', ')
+                        : '（无）';
                     return (
                       <>
                         <Text style={styles.monitorRowMeta}>
-                          合规：contract={contractText}  permissions={permText}
+                          合规：contract={contractText} permissions={permText}
                         </Text>
                         {tab.status === 'blocked' && (
-                          <Text style={styles.monitorWarn}>⛔ 已阻止运行：{tab.blockedReason ?? '未知原因'}</Text>
+                          <Text style={styles.monitorWarn}>
+                            ⛔ 已阻止运行：{tab.blockedReason ?? '未知原因'}
+                          </Text>
                         )}
                       </>
                     );
                   })()}
-                  <Text style={styles.monitorRowMeta}>engineId: {row.engineId ?? '（未初始化）'}</Text>
                   <Text style={styles.monitorRowMeta}>
-                    资源：timers={resources?.timers ?? 0}  nodes={resources?.nodes ?? 0}  callbacks=
+                    engineId: {row.engineId ?? '（未初始化）'}
+                  </Text>
+                  <Text style={styles.monitorRowMeta}>
+                    资源：timers={resources?.timers ?? 0} nodes={resources?.nodes ?? 0} callbacks=
                     {resources?.callbacks ?? 0}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    活动：ops/s={opsPerSecond.toFixed(2)}  batch/s={(activity?.batchesPerSecond ?? 0).toFixed(2)}  lastBatch={ageText}  applyMs=
-                    {activity?.lastBatch?.applyDurationMs ?? '—'}  recvMs={lastApplyMs ?? '—'}
+                    活动：ops/s={opsPerSecond.toFixed(2)} batch/s=
+                    {(activity?.batchesPerSecond ?? 0).toFixed(2)} lastBatch={ageText} applyMs=
+                    {activity?.lastBatch?.applyDurationMs ?? '—'} recvMs={lastApplyMs ?? '—'}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    归因：nodeΔ={nodeDelta ?? '—'}  ops={opCountsText}  top={topTypesText}
-                    {skipped > 0 ? `  skippedOps=${skipped}(${skippedCountsText})  skippedTop=${skippedTopTypesText}` : ''}
+                    归因：nodeΔ={nodeDelta ?? '—'} ops={opCountsText} top={topTypesText}
+                    {skipped > 0
+                      ? `  skippedOps=${skipped}(${skippedCountsText})  skippedTop=${skippedTopTypesText}`
+                      : ''}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    归因（近{attrWindowSec ?? '—'}s）：samples={attr?.sampleCount ?? '—'}  nodeΔ={attr?.nodeDelta ?? '—'}  totalOps={attr?.total ?? '—'}  skipped={attr?.skipped ?? '—'}
-                    {'  '}ops={attrCountsText}  top={attrTopTypesText}
+                    归因（近{attrWindowSec ?? '—'}s）：samples={attr?.sampleCount ?? '—'} nodeΔ=
+                    {attr?.nodeDelta ?? '—'} totalOps={attr?.total ?? '—'} skipped=
+                    {attr?.skipped ?? '—'}
+                    {'  '}ops={attrCountsText} top={attrTopTypesText}
                     {typeof attr?.skipped === 'number' && attr.skipped > 0
                       ? `  skippedOps(${attrSkippedCountsText})  skippedTop=${attrSkippedTopTypesText}`
                       : ''}
@@ -354,56 +367,74 @@ export function EngineMonitorOverlay({
                   </Text>
                   {timelineHasData && (
                     <View style={styles.sparklineRow}>
-                      <View style={styles.sparklineBars}>
-                        {renderTimelineBars(timelinePoints)}
-                      </View>
+                      <View style={styles.sparklineBars}>{renderTimelineBars(timelinePoints)}</View>
                       <Text style={styles.sparklineLegend}>
                         近 {Math.round(timelineWindowMs / 1000)}s：sumOps=
-                        {timelinePoints.reduce((s, p) => s + (p.ops ?? 0), 0)}  skipped=
+                        {timelinePoints.reduce((s, p) => s + (p.ops ?? 0), 0)} skipped=
                         {timelineSkipped}
                       </Text>
                     </View>
                   )}
                   <Text style={styles.monitorRowMeta}>
-                    Guest：sleep={guestSleepingText}  lastEvent={guest?.lastEventName ?? '—'}  age=
-                    {guestAgeText}  bytes={guest?.lastPayloadBytes ?? '—'}
+                    Guest：sleep={guestSleepingText} lastEvent={guest?.lastEventName ?? '—'} age=
+                    {guestAgeText} bytes={guest?.lastPayloadBytes ?? '—'}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    Host→Guest：lastEvent={hostLastEvent}  age={hostAgeText}  bytes=
+                    Host→Guest：lastEvent={hostLastEvent} age={hostAgeText} bytes=
                     {host?.lastPayloadBytes ?? '—'}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    Contracts：violations={contractViolationCount}  last={contracts?.lastViolation ?? '—'}  age=
+                    Contracts：violations={contractViolationCount} last=
+                    {contracts?.lastViolation ?? '—'} age=
                     {contractAgeText}
                   </Text>
                   {skipped > 0 && (
-                    <Text style={styles.monitorWarn}>⚠️ Receiver 发生 backpressure：skipped={skipped}</Text>
+                    <Text style={styles.monitorWarn}>
+                      ⚠️ Receiver 发生 backpressure：skipped={skipped}
+                    </Text>
                   )}
                   {skippedOver && (
-                    <Text style={styles.monitorWarn}>⚠️ skippedOps 超预算：请检查渲染频率/批次大小，并考虑 Guest 侧节流或响应 RECEIVER_BACKPRESSURE</Text>
+                    <Text style={styles.monitorWarn}>
+                      ⚠️ skippedOps 超预算：请检查渲染频率/批次大小，并考虑 Guest 侧节流或响应
+                      RECEIVER_BACKPRESSURE
+                    </Text>
                   )}
                   {isBackgroundBusy && (
-                    <Text style={styles.monitorWarn}>⚠️ 后台仍在产出 ops（建议 Guest 进入睡眠）</Text>
+                    <Text style={styles.monitorWarn}>
+                      ⚠️ 后台仍在产出 ops（建议 Guest 进入睡眠）
+                    </Text>
                   )}
                   {guestNotCooperating && (
-                    <Text style={styles.monitorWarn}>⚠️ Guest 仍标记为“活跃”（建议响应 HOST_VISIBILITY 并上报 GUEST_SLEEP_STATE）</Text>
+                    <Text style={styles.monitorWarn}>
+                      ⚠️ Guest 仍标记为“活跃”（建议响应 HOST_VISIBILITY 并上报 GUEST_SLEEP_STATE）
+                    </Text>
                   )}
                   {guestNotCooperatingAfterVisibility && (
-                    <Text style={styles.monitorWarn}>⚠️ Host 已发送 HOST_VISIBILITY，但 Guest 仍未进入睡眠（优先检查 Guest 是否正确处理可见性/是否遗漏上报）</Text>
+                    <Text style={styles.monitorWarn}>
+                      ⚠️ Host 已发送 HOST_VISIBILITY，但 Guest 仍未进入睡眠（优先检查 Guest
+                      是否正确处理可见性/是否遗漏上报）
+                    </Text>
                   )}
                   {resourceOver && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ 资源超预算：timers&lt;={b.timers} nodes&lt;={b.nodes} callbacks&lt;={b.callbacks}（建议清理 interval、避免无限节点增长、释放回调引用）
+                      ⚠️ 资源超预算：timers&lt;={b.timers} nodes&lt;={b.nodes} callbacks&lt;=
+                      {b.callbacks}（建议清理 interval、避免无限节点增长、释放回调引用）
                     </Text>
                   )}
                   {applyOver && (
-                    <Text style={styles.monitorWarn}>⚠️ applyBatch 耗时过高（建议降低 batch 体积/更新频率，或使用虚拟列表/分片渲染）</Text>
+                    <Text style={styles.monitorWarn}>
+                      ⚠️ applyBatch 耗时过高（建议降低 batch 体积/更新频率，或使用虚拟列表/分片渲染）
+                    </Text>
                   )}
                   {contractViolationCount > 0 && (
-                    <Text style={styles.monitorWarn}>⚠️ Contracts 违规：请检查事件名/ payload 是否符合规范</Text>
+                    <Text style={styles.monitorWarn}>
+                      ⚠️ Contracts 违规：请检查事件名/ payload 是否符合规范
+                    </Text>
                   )}
                   {receiverNodeCount != null && receiverNodeCount > b.nodes && (
-                    <Text style={styles.monitorWarn}>⚠️ 节点数过高：考虑分页/虚拟化/回收不可见子树</Text>
+                    <Text style={styles.monitorWarn}>
+                      ⚠️ 节点数过高：考虑分页/虚拟化/回收不可见子树
+                    </Text>
                   )}
                 </View>
               );
@@ -435,7 +466,12 @@ function renderTimelineBars(
     const applyH = Math.round((apply / maxApply) * 28);
     return (
       <View key={i} style={styles.sparklineBar}>
-        <View style={[styles.sparklineBarOps, { height: opsH, backgroundColor: skipped ? '#ffcc66' : '#94a3b8' }]} />
+        <View
+          style={[
+            styles.sparklineBarOps,
+            { height: opsH, backgroundColor: skipped ? '#ffcc66' : '#94a3b8' },
+          ]}
+        />
         <View style={[styles.sparklineBarApply, { height: applyH }]} />
       </View>
     );
@@ -444,7 +480,9 @@ function renderTimelineBars(
 
 function formatCounts(counts?: Record<string, number> | null): string {
   if (!counts) return '—';
-  const entries = Object.entries(counts).filter((e): e is [string, number] => typeof e[1] === 'number' && e[1] > 0);
+  const entries = Object.entries(counts).filter(
+    (e): e is [string, number] => typeof e[1] === 'number' && e[1] > 0
+  );
   if (entries.length === 0) return '—';
   return entries
     .sort((a, b) => b[1] - a[1])
@@ -463,15 +501,13 @@ function formatTopTypes(list?: Array<{ type: string; ops: number }> | null): str
 }
 
 function formatWorstBatches(
-  list?:
-    | Array<{
-        kind?: 'largest' | 'slowest' | 'mostSkipped' | 'mostGrowth';
-        total?: number;
-        skipped?: number;
-        durationMs?: number;
-        nodeDelta?: number;
-      }>
-    | null
+  list?: Array<{
+    kind?: 'largest' | 'slowest' | 'mostSkipped' | 'mostGrowth';
+    total?: number;
+    skipped?: number;
+    durationMs?: number;
+    nodeDelta?: number;
+  }> | null
 ): string {
   if (!list || list.length === 0) return '—';
   const kindText = (k?: string) => {

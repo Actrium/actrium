@@ -73,4 +73,3 @@ describe('Core Bridge - permissions', () => {
     expect(violations).toHaveLength(0);
   });
 });
-

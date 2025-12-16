@@ -37,11 +37,15 @@ describe('Core Bridge - Additional Coverage', () => {
     });
 
     it('should handle unknown module without crashing', () => {
-      expect(() => handleGuestMessage({ event: 'askit:unknownmodule:method', payload: null })).not.toThrow();
+      expect(() =>
+        handleGuestMessage({ event: 'askit:unknownmodule:method', payload: null })
+      ).not.toThrow();
     });
 
     it('should handle unknown method without crashing', () => {
-      expect(() => handleGuestMessage({ event: 'askit:toast:unknownmethod', payload: null })).not.toThrow();
+      expect(() =>
+        handleGuestMessage({ event: 'askit:toast:unknownmethod', payload: null })
+      ).not.toThrow();
     });
   });
 
@@ -50,10 +54,12 @@ describe('Core Bridge - Additional Coverage', () => {
       // The bridge doesn't validate payload types strictly in production
       // It relies on TypeScript for compile-time safety
       // This test verifies the bridge doesn't crash with invalid data
-      expect(() => handleGuestMessage({ 
-        event: 'askit:toast:show', 
-        payload: { message: 123 } // Invalid type, but won't crash
-      })).not.toThrow();
+      expect(() =>
+        handleGuestMessage({
+          event: 'askit:toast:show',
+          payload: { message: 123 }, // Invalid type, but won't crash
+        })
+      ).not.toThrow();
     });
   });
 });

@@ -38,7 +38,14 @@ export type {
   ViewStyle,
 } from './types';
 // UI Components
-export { ChatBubble, EngineMonitorOverlay, PanelMarker, StepList, ThemeView, UserAvatar } from './ui/index.host';
+export {
+  ChatBubble,
+  EngineMonitorOverlay,
+  PanelMarker,
+  StepList,
+  ThemeView,
+  UserAvatar,
+} from './ui/index.host';
 
 // Panel utilities (Host-only)
 export { extractPanels } from './ui/Panel/extractPanels.host';

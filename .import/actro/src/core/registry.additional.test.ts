@@ -19,7 +19,7 @@ describe('Registry - Additional Coverage', () => {
 
       // Clear handler
       clearHapticHandler();
-      
+
       // After clearing, should use fallback (console.log)
       const originalLog = console.log;
       const logs: unknown[] = [];

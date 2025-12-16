@@ -46,10 +46,10 @@ describe('EventEmitter (Guest)', () => {
 
   afterEach(() => {
     // Clear any pending timers to prevent tests from hanging
-    if (emitter && typeof (emitter as any)._clearRetryTimer === 'function') {
-      (emitter as any)._clearRetryTimer();
+    if (emitter && '_clearRetryTimer' in emitter) {
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
     }
-    
+
     // Restore original globals
     sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
     sandboxGlobal.onHostEvent = originalOnHostEvent as SandboxGlobal['onHostEvent'];
@@ -135,7 +135,7 @@ describe('EventEmitter (Guest)', () => {
       expect(JSON.stringify(errors)).toContain('Failed to send event');
 
       // Cleanup
-      (newBus as any)._clearRetryTimer();
+      (newBus as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
       console.error = originalError;
     });
   });
@@ -339,7 +339,7 @@ describe('EventEmitter (Guest)', () => {
       expect(JSON.stringify(warnings)).toContain('sendToHost not available');
 
       // Cleanup
-      (busWithoutHost as any)._clearRetryTimer();
+      (busWithoutHost as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
       console.warn = consoleWarn;
     });
   });

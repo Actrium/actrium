@@ -28,4 +28,8 @@ export type {
   ContractViolationKind,
   ContractViolationSummary,
 } from './runtime';
-export { createContractViolationCollector, createGuestToHostSender, createHostToGuestSender } from './runtime';
+export {
+  createContractViolationCollector,
+  createGuestToHostSender,
+  createHostToGuestSender,
+} from './runtime';
