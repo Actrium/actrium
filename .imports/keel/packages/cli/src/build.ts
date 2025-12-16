@@ -667,9 +667,9 @@ export async function analyze(
         unknown
       >;
       sourceMapSummary = {
-        version: mapJson['version'],
-        sources: mapJson['sources'],
-        file: mapJson['file'],
+        version: mapJson.version,
+        sources: mapJson.sources,
+        file: mapJson.file,
       };
     } catch {
       sourceMapSummary = { error: 'failed_to_parse' };
