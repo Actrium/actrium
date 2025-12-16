@@ -40,6 +40,7 @@ import type {
   SerializedFunction,
   SerializedProps,
 } from '../types';
+import { hasCallback, invokeCallback } from '../reconciler';
 import type { ComponentRegistry } from './registry';
 
 /**
@@ -804,20 +805,23 @@ export class Receiver {
 
     if (isSerializedFunction(value)) {
       // 🔴 TRACK: Log function creation
-      if (typeof globalThis !== 'undefined') {
-        globalThis.__RECEIVER_FUNCTION_COUNT = (globalThis.__RECEIVER_FUNCTION_COUNT || 0) + 1;
-        globalThis.__LAST_FUNCTION_FNID = value.__fnId;
-      }
-
       // Create proxy function
       return (...args: unknown[]) => {
-        console.log('[rill:Receiver] 🔴 Event handler called, fnId:', value.__fnId, 'args:', args);
+        // Try to invoke locally first (if React is running in Host)
+        if (hasCallback(value.__fnId)) {
+          try {
+            invokeCallback(value.__fnId, args);
+            return;
+          } catch (e) {
+            console.error('[rill:Receiver] Local callback execution failed:', e);
+          }
+        }
+
         this.sendToSandbox({
           type: 'CALL_FUNCTION',
           fnId: value.__fnId,
           args: args as [],
         });
-        console.log('[rill:Receiver] 🔴 Sent CALL_FUNCTION to sandbox');
       };
     }
 

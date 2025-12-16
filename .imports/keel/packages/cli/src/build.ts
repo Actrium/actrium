@@ -76,13 +76,13 @@ const RUNTIME_INJECT = `
   // Register callback
   globalThis.__registerCallback = function(fn) {
     var id = 'fn_' + (++globalThis.__callbackId);
-    __callbacks.set(id, fn);
+    globalThis.__callbacks.set(id, fn);
     return id;
   };
 
   // Invoke callback
   globalThis.__invokeCallback = function(fnId, args) {
-    var fn = __callbacks.get(fnId);
+    var fn = globalThis.__callbacks.get(fnId);
     if (fn) {
       try {
         return fn.apply(null, args || []);
@@ -91,13 +91,13 @@ const RUNTIME_INJECT = `
       }
     } else {
       console.warn('[rill] Callback not found:', fnId);
-      console.warn('[rill] Available callbacks:', Array.from(__callbacks.keys()).join(', '));
+      console.warn('[rill] Available callbacks:', Array.from(globalThis.__callbacks.keys()).join(', '));
     }
   };
 
   // Remove callback
   globalThis.__removeCallback = function(fnId) {
-    __callbacks.delete(fnId);
+    globalThis.__callbacks.delete(fnId);
   };
 
   // Host event listeners
