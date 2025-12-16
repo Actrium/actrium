@@ -2,13 +2,13 @@ import SwiftUI
 
 /// View for the detached DevTools window
 struct DevToolsWindowView: View {
-    @ObservedObject var viewModel: BrowserViewModel
+    var viewModel: BrowserViewModel?
     @ObservedObject private var devTools = DevToolsManager.shared
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         Group {
-            if viewModel.canvasMode.isInFocusMode {
+            if let viewModel = viewModel, viewModel.canvasMode.isInFocusMode {
                 // Normal DevTools panel when in Focus mode
                 DevToolsPanel(
                     devTools: devTools,
@@ -16,7 +16,7 @@ struct DevToolsWindowView: View {
                     isDetached: true
                 )
             } else {
-                // Blank state when in Overview mode
+                // Blank state when in Overview mode or no viewModel
                 DevToolsOverviewPlaceholder()
             }
         }
@@ -69,7 +69,7 @@ private struct DevToolsOverviewPlaceholder: View {
 
 // MARK: - Preview
 
-#Preview("DevTools Window") {
-    DevToolsWindowView(viewModel: BrowserViewModel())
+#Preview("DevTools Window - No ViewModel") {
+    DevToolsWindowView(viewModel: nil)
         .frame(width: 900, height: 500)
 }

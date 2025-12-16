@@ -56,7 +56,7 @@ class BrowserViewModel: ObservableObject {
 
             // 延迟加载开发目录，避免在 SwiftUI 初始化期间阻塞主线程
             let url = URL(fileURLWithPath: counterAppDevPath)
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            Task { @MainActor [weak self] in
                 self?.loadFromDevDirectory(url)
             }
             return
