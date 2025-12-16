@@ -43,6 +43,8 @@ declare global {
   var __APPEND_CHILD_CALLED: number | undefined;
   // eslint-disable-next-line no-var
   var __APPEND_TO_CONTAINER_CALLED: number | undefined;
+  // eslint-disable-next-line no-var
+  var __callbacks: Map<string, (...args: unknown[]) => unknown> | undefined;
 }
 
 import type {
@@ -435,9 +437,7 @@ export function createReconciler(
   // 🔧 FIX: Sync callbackRegistry with globalThis.__callbacks
   // This allows Engine.handleCallFunction() to find callbacks via __invokeCallback()
   if (typeof globalThis !== 'undefined') {
-    (globalThis as any).__callbacks = callbackRegistry.getMap();
-    console.log('[rill:reconciler] 🔧 Synced callbackRegistry to globalThis.__callbacks');
-    console.log('[rill:reconciler] 🔧 Callbacks Map:', (globalThis as any).__callbacks);
+    globalThis.__callbacks = callbackRegistry.getMap();
   }
 
   const hostConfig: ExtendedHostConfig = {
@@ -507,12 +507,6 @@ export function createReconciler(
       pendingDeleteRoots.delete(child.id);
 
       // 🔴 FIX: Send APPEND operation during initial render to establish parent-child relationships
-      console.log(
-        '[rill:reconciler] 🟢 appendInitialChild called, parent:',
-        parent.id,
-        'child:',
-        child.id
-      );
       const op: AppendOperation = {
         op: 'APPEND',
         id: child.id,
@@ -520,21 +514,9 @@ export function createReconciler(
         childId: child.id,
       };
       collector.add(op);
-      console.log('[rill:reconciler] 🟢 APPEND operation added to collector');
     },
 
     appendChild(parent: VNode, child: VNode): void {
-      // 🔴 TRACK: Use global variable since console.log is filtered
-      if (typeof globalThis !== 'undefined') {
-        globalThis.__APPEND_CHILD_CALLED = (globalThis.__APPEND_CHILD_CALLED || 0) + 1;
-      }
-
-      console.log(
-        '[rill:reconciler] 🟡 appendChild called, parent:',
-        parent.id,
-        'child:',
-        child.id
-      );
       parent.children.push(child);
       child.parent = parent;
       pendingDeleteRoots.delete(child.id);
@@ -546,22 +528,9 @@ export function createReconciler(
         childId: child.id,
       };
       collector.add(op);
-      console.log('[rill:reconciler] 🟡 APPEND operation added');
     },
 
     appendChildToContainer(container: RootContainer, child: VNode): void {
-      // 🔴 TRACK: Use global variable since console.log is filtered
-      if (typeof globalThis !== 'undefined') {
-        globalThis.__APPEND_TO_CONTAINER_CALLED =
-          (globalThis.__APPEND_TO_CONTAINER_CALLED || 0) + 1;
-      }
-
-      console.log(
-        '[rill:reconciler] 🔵 appendChildToContainer called, child:',
-        child.id,
-        'type:',
-        child.type
-      );
       container.children.push(child);
       pendingDeleteRoots.delete(child.id);
 
@@ -572,7 +541,6 @@ export function createReconciler(
         childId: child.id,
       };
       collector.add(op);
-      console.log('[rill:reconciler] 🔵 APPEND to root operation added');
     },
 
     insertBefore(parent: VNode, child: VNode, beforeChild: VNode): void {
@@ -895,18 +863,6 @@ const globalCallbackRegistry = new CallbackRegistry();
  * This allows multiple guests to run simultaneously without interfering with each other.
  */
 export function render(element: ReactElement, sendToHost: SendToHost): void {
-  // 🔴 TEST: Set global variable to prove this code executes
-  if (typeof globalThis !== 'undefined') {
-    globalThis.__RILL_RENDER_CALLED = true;
-    globalThis.__RILL_RENDER_COUNT = (globalThis.__RILL_RENDER_COUNT || 0) + 1;
-  }
-
-  // 🔴 CRITICAL DEBUG: This should ALWAYS execute when Guest renders
-  // Use globalThis.console to bypass Guest console wrapper
-  if (typeof globalThis !== 'undefined' && globalThis.console) {
-    globalThis.console.log('[rill:reconciler] 🔴🔴🔴 RENDER CALLED (globalThis) 🔴🔴🔴');
-  }
-  console.log('[rill:reconciler] 🔴🔴🔴 RENDER CALLED (console) 🔴🔴🔴');
   let instance = reconcilerMap.get(sendToHost);
 
   if (!instance) {

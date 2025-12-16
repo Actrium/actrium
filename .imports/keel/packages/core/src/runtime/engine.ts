@@ -5,14 +5,16 @@
  * Uses react-native-quickjs for sandboxed JavaScript execution.
  */
 
+// Augment globalThis for DevTools integration
+declare global {
+  // eslint-disable-next-line no-var
+  var __sendEventToHost: ((eventName: string, payload?: unknown) => void) | undefined;
+}
+
 import * as React from 'react';
 import * as ReactJSXRuntime from 'react/jsx-runtime';
 
 import * as RillReconciler from '../reconciler';
-
-// 🔵 DEBUG: Verify reconciler has debug logs
-console.log('[rill:engine] 🔵 RillReconciler imported, checking source...');
-console.log('[rill:engine] 🔵 reconciler.render type:', typeof RillReconciler.render);
 
 import type {
   CallFunctionMessage,
@@ -849,6 +851,12 @@ export class Engine implements IEngine {
       if (debug) {
         logger.log(`[rill:${this.id}] __sendToHost called, operations:`, batch.operations.length);
       }
+      
+      // Send to DevTools
+      if (typeof globalThis.__sendEventToHost === 'function') {
+        globalThis.__sendEventToHost('DEVTOOLS_OPERATIONS', batch);
+      }
+
       // 记录 batch 活动（无论是否有 receiver）
       const at = Date.now();
       const totalOps = batch.operations.length;
@@ -1020,12 +1028,14 @@ export class Engine implements IEngine {
   private async handleCallFunction(message: CallFunctionMessage): Promise<void> {
     if (!this.context) return;
 
-    console.log(
-      '[rill:Engine] 🔴 handleCallFunction called, fnId:',
-      message.fnId,
-      'args:',
-      message.args
-    );
+    if (this.options.debug) {
+      this.options.logger.log(
+        `[rill:${this.id}] handleCallFunction called, fnId:`,
+        message.fnId,
+        'args:',
+        message.args
+      );
+    }
     try {
       // ✅ 优先走 Host 侧 CallbackRegistry：
       // - RNQuickJS / VMProvider 场景下，reconciler 运行在 Host（Hermes/Node）侧，
@@ -1037,15 +1047,18 @@ export class Engine implements IEngine {
         RillReconciler.hasCallback(message.fnId)
       ) {
         RillReconciler.invokeCallback(message.fnId, message.args);
-        console.log('[rill:Engine] 🔴 Successfully invoked callback (host registry)');
+        if (this.options.debug) {
+          this.options.logger.log(`[rill:${this.id}] Successfully invoked callback (host registry)`);
+        }
         return;
       }
 
       await this.evalCode(`__invokeCallback("${message.fnId}", ${JSON.stringify(message.args)})`);
-      console.log('[rill:Engine] 🔴 Successfully invoked callback (sandbox eval)');
+      if (this.options.debug) {
+        this.options.logger.log(`[rill:${this.id}] Successfully invoked callback (sandbox eval)`);
+      }
     } catch (error) {
-      this.options.logger.error(`[rill] Failed to invoke callback ${message.fnId}:`, error);
-      console.log('[rill:Engine] 🔴 Failed to invoke callback:', error);
+      this.options.logger.error(`[rill:${this.id}] Failed to invoke callback ${message.fnId}:`, error);
     }
   }
 

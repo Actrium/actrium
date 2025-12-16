@@ -55,11 +55,12 @@ export function ClickableView({
     cursor: disabled ? 'auto' : 'pointer',
   };
 
-  const mouseHandlers = {
+  // Mouse handlers for macOS - not in RN's View type but supported by react-native-macos
+  const mouseHandlers: Record<string, () => void> = {
     onMouseDown: handleMouseDown,
     onMouseUp: handleMouseUp,
     onMouseLeave: handleMouseLeave,
-  } as any;
+  };
 
   return (
     <View
