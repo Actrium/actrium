@@ -342,7 +342,7 @@ struct CanvasApp: App {
 
         // Detached DevTools window
         Window("DevTools", id: "devtools") {
-            DevToolsWindowView(viewModel: focusedViewModel ?? BrowserViewModel())
+            DevToolsWindowView(viewModel: focusedViewModel)
                 .frame(minWidth: 600, minHeight: 400)
         }
         .windowResizability(.contentSize)
