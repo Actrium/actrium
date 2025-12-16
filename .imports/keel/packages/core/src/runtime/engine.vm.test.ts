@@ -35,9 +35,9 @@ describe.skipIf(!vm)('VMProvider', () => {
     const context = runtime.createContext();
 
     // Test setInterruptHandler
-    let handlerCalled = false;
+    let _handlerCalled = false;
     const handler = () => {
-      handlerCalled = true;
+      _handlerCalled = true;
       return false; // Don't interrupt
     };
 

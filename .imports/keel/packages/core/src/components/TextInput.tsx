@@ -4,7 +4,7 @@
  * Default TextInput component implementation, wrapping React Native TextInput
  */
 
-import type React from 'react';
+import React from 'react';
 import { TextInput as RNTextInput, type TextStyle, type ViewStyle } from 'react-native';
 
 export interface TextInputProps {
