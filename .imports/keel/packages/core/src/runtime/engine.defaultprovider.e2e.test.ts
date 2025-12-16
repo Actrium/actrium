@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { Engine } from './engine';
+import { DefaultJSEngineProvider } from './DefaultJSEngineProvider';
 
-// Check if node:vm is available for timeout interruption
-let vmAvailable = false;
-try {
-  require('node:vm');
-  vmAvailable = typeof globalThis.process !== 'undefined';
-} catch {
-  vmAvailable = false;
-}
+// Check if a timeout-capable provider is available
+// NoSandboxProvider uses eval() which cannot interrupt infinite loops
+const testProvider = DefaultJSEngineProvider.create({ timeout: 100 });
+const canInterruptLoop = testProvider.constructor.name !== 'NoSandboxProvider';
 
 describe('DefaultJSEngineProvider (auto) - Node/Web', () => {
   it('simple eval without passing quickjs', async () => {
@@ -28,9 +25,9 @@ describe('DefaultJSEngineProvider (auto) - Node/Web', () => {
     engine.destroy();
   });
 
-  // Skip this test if VMProvider is not available, as NoSandboxProvider
+  // Skip this test if we're using NoSandboxProvider, as it
   // cannot interrupt infinite loops (it uses eval which blocks forever)
-  it.skipIf(!vmAvailable)('dead-loop should be interrupted by timeout', async () => {
+  it.skipIf(!canInterruptLoop)('dead-loop should be interrupted by timeout', async () => {
     // This test relies on the default provider (VMProvider in this env)
     // to handle the timeout correctly via the engine's timeout option.
     const engine = new Engine({
