@@ -1,8 +1,8 @@
 /**
  * AskIt Registry - Modules Only
  *
- * 仅包含 Bridge 需要的模块注册（toast/haptic...），避免引入 Host UI 组件，
- * 使得 core/bridge 可以在非 RN 环境（bun test）下被安全导入。
+ * Only contains module registration needed by Bridge (toast/haptic...), avoiding Host UI components,
+ * so that core/bridge can be safely imported in non-RN environments (bun test).
  */
 
 import {
@@ -23,10 +23,10 @@ export const modules = {
 } as const;
 
 /**
- * AskIt 模块权限约束（Phase 2：可选拒绝/降级）
+ * AskIt module permission constraints (Phase 2: optional reject/degrade)
  *
- * 约定：Guest 通过 `.actr/manifest.json -> permissions: string[]` 声明权限；
- * Host 可选择在 bridge 层做 warn/deny。
+ * Convention: Guest declares permissions via `.actr/manifest.json -> permissions: string[]`;
+ * Host can optionally do warn/deny at bridge layer.
  */
 export const MODULE_PERMISSIONS: Record<string, string | undefined> = {
   toast: 'toast',

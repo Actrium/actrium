@@ -95,21 +95,21 @@ export type EngineMonitorDiagnostics = {
 
 export type EngineMonitorBudgets = {
   /**
-   * 后台 tab ops/s 超过该阈值就告警（默认 0.2）
+   * Alert when background tab ops/s exceeds threshold (default 0.2)
    */
   backgroundOpsPerSecond?: number;
   /**
-   * 资源阈值（超过则告警）
+   * Resource threshold (alert if exceeded)
    */
   timers?: number;
   nodes?: number;
   callbacks?: number;
   /**
-   * applyBatch 最大耗时阈值（ms，超过则告警）
+   * Max applyBatch duration threshold (ms, alert if exceeded)
    */
   applyDurationMsMax?: number;
   /**
-   * 允许的 skippedOps（背压）阈值（默认 0）
+   * Allowed skippedOps (backpressure) threshold (default 0)
    */
   skippedOps?: number;
 };
@@ -174,7 +174,7 @@ export function EngineMonitorOverlay({
         const diagnostics = engine ? (engine.getDiagnostics?.() ?? null) : null;
         return {
           tabId: tab.id,
-          title: tab.title || '未命名',
+          title: tab.title || 'Untitled',
           isActive: tab.id === activeTabId,
           engineId: engine?.id ?? null,
           diagnostics,
@@ -194,15 +194,15 @@ export function EngineMonitorOverlay({
   return (
     <>
       <TouchableOpacity onPress={() => setVisible(!isVisible)} style={styles.monitorButton}>
-        <Text style={styles.monitorButtonText}>{isVisible ? '关闭监视器' : '打开监视器'}</Text>
+        <Text style={styles.monitorButtonText}>{isVisible ? 'Close Monitor' : 'Open Monitor'}</Text>
       </TouchableOpacity>
 
       {isVisible && (
         <View style={styles.monitorOverlay}>
-          <Text style={styles.monitorTitle}>Engine 资源监视器</Text>
+          <Text style={styles.monitorTitle}>Engine Resource Monitor</Text>
           <Text style={styles.monitorHint}>
-            建议 Guest 监听 HOST_VISIBILITY，并在不可见时暂停
-            interval/动画/轮询，以降低后台资源消耗；同时上报 GUEST_SLEEP_STATE 以便 Host 诊断。
+            Recommend Guest listen to HOST_VISIBILITY and pause interval/animation/polling when not visible
+            to reduce background resource consumption; also report GUEST_SLEEP_STATE for Host diagnosis.
           </Text>
           <ScrollView style={styles.monitorList} contentContainerStyle={{ paddingBottom: 16 }}>
             {rows.map((row) => {
@@ -241,7 +241,7 @@ export function EngineMonitorOverlay({
               const guestAgeText = guestAgeMs === null ? '—' : `${(guestAgeMs / 1000).toFixed(1)}s`;
               const guestSleepingValue = guest?.sleeping;
               const guestSleepingText =
-                guestSleepingValue == null ? '未知' : guestSleepingValue ? '睡眠' : '活跃';
+                guestSleepingValue == null ? 'Unknown' : guestSleepingValue ? 'Sleeping' : 'Active';
               const guestNotCooperating = !row.isActive && guestSleepingValue === false;
 
               const hostAgeMs =
@@ -319,44 +319,44 @@ export function EngineMonitorOverlay({
                     if (!tab) return null;
                     const contractText = tab.contract
                       ? `${tab.contract.name}@v${tab.contract.version}`
-                      : '（未声明/兼容模式）';
+                      : '(Undeclared/Compatibility Mode)';
                     const permText =
                       tab.permissions && tab.permissions.length > 0
                         ? tab.permissions.join(', ')
-                        : '（无）';
+                        : '(None)';
                     return (
                       <>
                         <Text style={styles.monitorRowMeta}>
-                          合规：contract={contractText} permissions={permText}
+                          Compliance: contract={contractText} permissions={permText}
                         </Text>
                         {tab.status === 'blocked' && (
                           <Text style={styles.monitorWarn}>
-                            ⛔ 已阻止运行：{tab.blockedReason ?? '未知原因'}
+                            ⛔ Blocked: {tab.blockedReason ?? 'Unknown reason'}
                           </Text>
                         )}
                       </>
                     );
                   })()}
                   <Text style={styles.monitorRowMeta}>
-                    engineId: {row.engineId ?? '（未初始化）'}
+                    engineId: {row.engineId ?? '(Uninitialized)'}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    资源：timers={resources?.timers ?? 0} nodes={resources?.nodes ?? 0} callbacks=
+                    Resources: timers={resources?.timers ?? 0} nodes={resources?.nodes ?? 0} callbacks=
                     {resources?.callbacks ?? 0}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    活动：ops/s={opsPerSecond.toFixed(2)} batch/s=
+                    Activity: ops/s={opsPerSecond.toFixed(2)} batch/s=
                     {(activity?.batchesPerSecond ?? 0).toFixed(2)} lastBatch={ageText} applyMs=
                     {activity?.lastBatch?.applyDurationMs ?? '—'} recvMs={lastApplyMs ?? '—'}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    归因：nodeΔ={nodeDelta ?? '—'} ops={opCountsText} top={topTypesText}
+                    Attribution: nodeΔ={nodeDelta ?? '—'} ops={opCountsText} top={topTypesText}
                     {skipped > 0
                       ? `  skippedOps=${skipped}(${skippedCountsText})  skippedTop=${skippedTopTypesText}`
                       : ''}
                   </Text>
                   <Text style={styles.monitorRowMeta}>
-                    归因（近{attrWindowSec ?? '—'}s）：samples={attr?.sampleCount ?? '—'} nodeΔ=
+                    Attribution (past {attrWindowSec ?? '—'}s): samples={attr?.sampleCount ?? '—'} nodeΔ=
                     {attr?.nodeDelta ?? '—'} totalOps={attr?.total ?? '—'} skipped=
                     {attr?.skipped ?? '—'}
                     {'  '}ops={attrCountsText} top={attrTopTypesText}
@@ -369,7 +369,7 @@ export function EngineMonitorOverlay({
                     <View style={styles.sparklineRow}>
                       <View style={styles.sparklineBars}>{renderTimelineBars(timelinePoints)}</View>
                       <Text style={styles.sparklineLegend}>
-                        近 {Math.round(timelineWindowMs / 1000)}s：sumOps=
+                        Past {Math.round(timelineWindowMs / 1000)}s: sumOps=
                         {timelinePoints.reduce((s, p) => s + (p.ops ?? 0), 0)} skipped=
                         {timelineSkipped}
                       </Text>
@@ -390,50 +390,49 @@ export function EngineMonitorOverlay({
                   </Text>
                   {skipped > 0 && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ Receiver 发生 backpressure：skipped={skipped}
+                      ⚠️ Receiver backpressure: skipped={skipped}
                     </Text>
                   )}
                   {skippedOver && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ skippedOps 超预算：请检查渲染频率/批次大小，并考虑 Guest 侧节流或响应
+                      ⚠️ SkippedOps over budget: check rendering frequency/batch size, consider Guest-side throttling or respond to
                       RECEIVER_BACKPRESSURE
                     </Text>
                   )}
                   {isBackgroundBusy && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ 后台仍在产出 ops（建议 Guest 进入睡眠）
+                      ⚠️ Background still producing ops (recommend Guest enter sleep)
                     </Text>
                   )}
                   {guestNotCooperating && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ Guest 仍标记为“活跃”（建议响应 HOST_VISIBILITY 并上报 GUEST_SLEEP_STATE）
+                      ⚠️ Guest still marked as "active" (recommend responding to HOST_VISIBILITY and reporting GUEST_SLEEP_STATE)
                     </Text>
                   )}
                   {guestNotCooperatingAfterVisibility && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ Host 已发送 HOST_VISIBILITY，但 Guest 仍未进入睡眠（优先检查 Guest
-                      是否正确处理可见性/是否遗漏上报）
+                      ⚠️ Host sent HOST_VISIBILITY, but Guest has not entered sleep (check if Guest handles visibility correctly/missing reports)
                     </Text>
                   )}
                   {resourceOver && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ 资源超预算：timers&lt;={b.timers} nodes&lt;={b.nodes} callbacks&lt;=
-                      {b.callbacks}（建议清理 interval、避免无限节点增长、释放回调引用）
+                      ⚠️ Resources over budget: timers&lt;={b.timers} nodes&lt;={b.nodes} callbacks&lt;=
+                      {b.callbacks} (recommend clearing intervals, avoiding unlimited node growth, releasing callback references)
                     </Text>
                   )}
                   {applyOver && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ applyBatch 耗时过高（建议降低 batch 体积/更新频率，或使用虚拟列表/分片渲染）
+                      ⚠️ ApplyBatch duration too high (recommend reducing batch size/update frequency, or use virtual lists/chunked rendering)
                     </Text>
                   )}
                   {contractViolationCount > 0 && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ Contracts 违规：请检查事件名/ payload 是否符合规范
+                      ⚠️ Contracts violation: check if event names/payloads conform to specification
                     </Text>
                   )}
                   {receiverNodeCount != null && receiverNodeCount > b.nodes && (
                     <Text style={styles.monitorWarn}>
-                      ⚠️ 节点数过高：考虑分页/虚拟化/回收不可见子树
+                      ⚠️ Node count too high: consider pagination/virtualization/recycling invisible subtrees
                     </Text>
                   )}
                 </View>
@@ -513,15 +512,15 @@ function formatWorstBatches(
   const kindText = (k?: string) => {
     switch (k) {
       case 'largest':
-        return '最大';
+        return 'Largest';
       case 'slowest':
-        return '最慢';
+        return 'Slowest';
       case 'mostSkipped':
-        return '跳过多';
+        return 'Most Skipped';
       case 'mostGrowth':
-        return '增长多';
+        return 'Most Growth';
       default:
-        return '异常';
+        return 'Abnormal';
     }
   };
   return list
