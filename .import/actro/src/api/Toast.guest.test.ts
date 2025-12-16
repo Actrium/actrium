@@ -7,20 +7,26 @@
 import { Toast } from './Toast.guest';
 
 describe('Toast (Remote)', () => {
+  type SandboxGlobal = typeof globalThis & {
+    sendToHost?: (event: string, payload?: unknown) => void;
+  };
+
+  const sandboxGlobal = globalThis as SandboxGlobal;
+
   let sentMessages: Array<{ event: string; payload: unknown }>;
   let originalSendToHost: unknown;
 
   beforeEach(() => {
-    originalSendToHost = (globalThis as Record<string, unknown>).sendToHost;
+    originalSendToHost = sandboxGlobal.sendToHost;
     sentMessages = [];
 
-    (globalThis as Record<string, unknown>).sendToHost = (event: string, payload?: unknown) => {
+    sandboxGlobal.sendToHost = (event: string, payload?: unknown) => {
       sentMessages.push({ event, payload });
     };
   });
 
   afterEach(() => {
-    (globalThis as Record<string, unknown>).sendToHost = originalSendToHost;
+    sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
   });
 
   describe('show', () => {
@@ -74,7 +80,7 @@ describe('Toast (Remote)', () => {
 
   describe('without sendToHost', () => {
     it('should warn and log when sendToHost is not available', () => {
-      (globalThis as Record<string, unknown>).sendToHost = undefined;
+      sandboxGlobal.sendToHost = undefined;
 
       const warnings: unknown[] = [];
       const logs: unknown[] = [];
@@ -96,7 +102,7 @@ describe('Toast (Remote)', () => {
 
   describe('error handling', () => {
     it('should handle sendToHost throwing exception', () => {
-      (globalThis as Record<string, unknown>).sendToHost = () => {
+      sandboxGlobal.sendToHost = () => {
         throw new Error('Bridge failure');
       };
 

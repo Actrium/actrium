@@ -10,6 +10,7 @@ declare function expect(actual: unknown): {
   toEqual(expected: unknown): void;
   toBe(expected: unknown): void;
   toBeGreaterThanOrEqual(n: number): void;
+  toBeLessThan(n: number): void;
   toContain(s: string): void;
   toHaveLength(n: number): void;
   toBeTruthy(): void;
@@ -24,6 +25,9 @@ declare function expect(actual: unknown): {
     toHaveBeenCalled(): void;
     toBe(expected: unknown): void;
     toThrow(): void;
+    toBeNull(): void;
+    toContain(s: string): void;
+    toContainEqual(expected: unknown): void;
   };
   [key: string]: (...args: unknown[]) => void;
 };

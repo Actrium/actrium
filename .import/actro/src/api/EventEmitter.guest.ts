@@ -475,6 +475,19 @@ class GuestEventEmitter implements EventEmitterAPI {
   _simulateHostEvent(event: string, payload: unknown): void {
     this.handleHostEvent(event, payload);
   }
+
+  /**
+   * Clear retry timer (for testing cleanup)
+   * @internal
+   */
+  _clearRetryTimer(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    // Clear message queue to prevent further retries
+    this.messageQueue = [];
+  }
 }
 
 // Export singleton instance

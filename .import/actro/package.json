@@ -5,6 +5,7 @@
   "description": "AskAway Client Kit - Isomorphic UI components and APIs for Host and Guest",
   "license": "Apache-2.0",
   "author": "kookyleo <87705880+kookyleo@users.noreply.github.com>",
+  "react-native": "./src/index.host.ts",
   "main": "./src/index.guest.ts",
   "types": "./src/index.guest.ts",
   "exports": {
@@ -12,7 +13,8 @@
       "react-native": "./src/index.host.ts",
       "default": "./src/index.guest.ts"
     },
-    "./core": "./src/core/index.ts"
+    "./core": "./src/core/index.ts",
+    "./contracts": "./src/contracts/index.ts"
   },
   "sideEffects": [
     "./src/api/Toast.host.ts"
@@ -23,7 +25,10 @@
     "LICENSE"
   ],
   "scripts": {
+    "actr": "bun run cli/actr.ts",
+    "generate:contracts": "bun run scripts/generate-contracts.ts",
     "typecheck": "tsc --noEmit",
+    "typecheck:cli": "tsc --noEmit -p cli/tsconfig.json",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
