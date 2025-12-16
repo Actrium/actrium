@@ -4,7 +4,7 @@
  * Default Switch component implementation, wrapping React Native Switch
  */
 
-import React from 'react';
+import type React from 'react';
 import { Switch as RNSwitch } from 'react-native';
 
 export interface SwitchProps {

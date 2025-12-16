@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { Engine } from './engine';
 import { DefaultJSEngineProvider } from './DefaultJSEngineProvider';
+import { Engine } from './engine';
 
 // Check if a timeout-capable provider is available
 // NoSandboxProvider uses eval() which cannot interrupt infinite loops
