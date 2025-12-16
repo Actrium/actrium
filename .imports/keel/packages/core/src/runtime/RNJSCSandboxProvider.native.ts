@@ -19,7 +19,7 @@ import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from './engin
 export interface JSCSandboxContext {
   eval(code: string): unknown;
   evalAsync(code: string): Promise<unknown>;
-  setGlobal(name: string, value: unknown): void;
+  setGlobal(name: string, value: unknown): Promise<void>;
   getGlobal(name: string): Promise<unknown>;
   dispose(): void;
   setInterruptHandler?(handler: () => boolean): void;
