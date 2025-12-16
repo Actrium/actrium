@@ -7,6 +7,13 @@
 import { GuestEventEmitter } from './EventEmitter.guest';
 
 describe('EventEmitter (Guest)', () => {
+  type SandboxGlobal = typeof globalThis & {
+    sendToHost?: (event: string, payload?: unknown) => void;
+    onHostEvent?: (callback: (event: string, payload: unknown) => void) => void;
+  };
+
+  const sandboxGlobal = globalThis as SandboxGlobal;
+
   let emitter: GuestEventEmitter;
   let sentMessages: Array<{ event: string; payload: unknown }>;
   let originalSendToHost: unknown;
@@ -16,22 +23,20 @@ describe('EventEmitter (Guest)', () => {
 
   beforeEach(() => {
     // Save original globals
-    originalSendToHost = (globalThis as Record<string, unknown>).sendToHost;
-    originalOnHostEvent = (globalThis as Record<string, unknown>).onHostEvent;
+    originalSendToHost = sandboxGlobal.sendToHost;
+    originalOnHostEvent = sandboxGlobal.onHostEvent;
 
     // Reset test state
     sentMessages = [];
     hostEventCallback = null;
 
     // Setup simulated sandbox globals
-    (globalThis as Record<string, unknown>).sendToHost = (event: string, payload?: unknown) => {
+    sandboxGlobal.sendToHost = (event: string, payload?: unknown) => {
       sentMessages.push({ event, payload });
     };
 
     // Setup onHostEvent to capture the callback
-    (globalThis as Record<string, unknown>).onHostEvent = (
-      callback: (event: string, payload: unknown) => void
-    ) => {
+    sandboxGlobal.onHostEvent = (callback: (event: string, payload: unknown) => void) => {
       hostEventCallback = callback;
     };
 
@@ -40,9 +45,14 @@ describe('EventEmitter (Guest)', () => {
   });
 
   afterEach(() => {
+    // Clear any pending timers to prevent tests from hanging
+    if (emitter && typeof (emitter as any)._clearRetryTimer === 'function') {
+      (emitter as any)._clearRetryTimer();
+    }
+    
     // Restore original globals
-    (globalThis as Record<string, unknown>).sendToHost = originalSendToHost;
-    (globalThis as Record<string, unknown>).onHostEvent = originalOnHostEvent;
+    sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
+    sandboxGlobal.onHostEvent = originalOnHostEvent as SandboxGlobal['onHostEvent'];
   });
 
   describe('emit', () => {
@@ -113,7 +123,7 @@ describe('EventEmitter (Guest)', () => {
       console.error = (...args) => errors.push(args);
 
       // Mock sendToHost to throw
-      (globalThis as Record<string, unknown>).sendToHost = () => {
+      sandboxGlobal.sendToHost = () => {
         throw new Error('Network failure');
       };
 
@@ -124,6 +134,8 @@ describe('EventEmitter (Guest)', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(JSON.stringify(errors)).toContain('Failed to send event');
 
+      // Cleanup
+      (newBus as any)._clearRetryTimer();
       console.error = originalError;
     });
   });
@@ -314,7 +326,7 @@ describe('EventEmitter (Guest)', () => {
   describe('without sendToHost', () => {
     it('should warn when sendToHost is not available', () => {
       // Remove sendToHost
-      (globalThis as Record<string, unknown>).sendToHost = undefined;
+      sandboxGlobal.sendToHost = undefined;
 
       const busWithoutHost = new GuestEventEmitter();
 
@@ -326,6 +338,8 @@ describe('EventEmitter (Guest)', () => {
 
       expect(JSON.stringify(warnings)).toContain('sendToHost not available');
 
+      // Cleanup
+      (busWithoutHost as any)._clearRetryTimer();
       console.warn = consoleWarn;
     });
   });
@@ -427,7 +441,7 @@ describe('EventEmitter (Guest)', () => {
     it('should catch and queue messages when sendToHost throws error', () => {
       const errors: string[] = [];
 
-      (globalThis as Record<string, unknown>).sendToHost = () => {
+      sandboxGlobal.sendToHost = () => {
         throw new Error('Network failure');
       };
 

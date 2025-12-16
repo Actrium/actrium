@@ -38,4 +38,4 @@ export type {
   ViewStyle,
 } from './types';
 // UI Components (DSL identifiers)
-export { ChatBubble, StepList, ThemeView, UserAvatar } from './ui/index.guest';
+export { ChatBubble, Panel, StepList, ThemeView, UserAvatar } from './ui/index.guest';

@@ -12,7 +12,9 @@ import {
   NOTIFY_SYMBOL,
 } from '../api/EventEmitter.host';
 import { logger } from './logger';
-import { modules } from './registry';
+import { modules, MODULE_PERMISSIONS } from './registry.modules';
+import type { ContractViolation } from '../contracts/runtime';
+import { isGuestToHostEventName, validateGuestToHostPayload } from '../contracts/generated';
 
 /**
  * Message types from guests
@@ -22,12 +24,28 @@ interface GuestMessage {
   payload?: unknown;
 }
 
+export type GuestMessageHandlerOptions = {
+  onContractEvent?: (eventName: string, payload: unknown) => void;
+  onContractViolation?: (violation: ContractViolation) => void;
+  /**
+   * Guest 声明的 permissions（来自 `.actr/manifest.json`）。
+   */
+  permissions?: readonly string[];
+  /**
+   * 权限策略：
+   * - allow：不做检查
+   * - warn：记录违规但继续执行
+   * - deny：记录违规并拒绝执行
+   */
+  permissionMode?: 'allow' | 'warn' | 'deny';
+};
+
 /**
  * Handle incoming message from guest
  *
  * Simplified implementation that inlines validation and parsing for better performance.
  */
-export function handleGuestMessage(message: GuestMessage): unknown {
+export function handleGuestMessage(message: GuestMessage, options?: GuestMessageHandlerOptions): unknown {
   // Inline validation
   if (
     !message ||
@@ -67,6 +85,30 @@ export function handleGuestMessage(message: GuestMessage): unknown {
       const moduleNameStr = parts[0]!;
       const methodNameStr = parts[1]!;
       if (validName.test(moduleNameStr) && validName.test(methodNameStr)) {
+        const requiredPermission = MODULE_PERMISSIONS[moduleNameStr];
+        const mode = options?.permissionMode ?? 'allow';
+        if (requiredPermission && mode !== 'allow') {
+          const declared = options?.permissions ?? [];
+          const hasPermission = declared.includes(requiredPermission);
+          if (!hasPermission) {
+            const v: ContractViolation = {
+              at: Date.now(),
+              direction: 'guestToHost',
+              kind: 'missing_permission',
+              eventName: event,
+              payload,
+              reason: `missing permission: ${requiredPermission}`,
+            };
+            options?.onContractViolation?.(v);
+            logger.warn(
+              'Bridge',
+              `Permission not declared: ${requiredPermission} (module ${moduleNameStr}.${methodNameStr})`,
+              { permission: requiredPermission, module: moduleNameStr, method: methodNameStr }
+            );
+            if (mode === 'deny') return undefined;
+          }
+        }
+
         const module = modules[moduleNameStr as keyof typeof modules];
         if (module) {
           const method = module[methodNameStr as keyof typeof module];
@@ -92,6 +134,34 @@ export function handleGuestMessage(message: GuestMessage): unknown {
   }
 
   // Unknown event
+  // Contract events (Guest -> Host)
+  if (isGuestToHostEventName(event)) {
+    if (validateGuestToHostPayload(event, payload)) {
+      options?.onContractEvent?.(event, payload);
+      return undefined;
+    }
+
+    const v: ContractViolation = {
+      at: Date.now(),
+      direction: 'guestToHost',
+      kind: 'invalid_payload',
+      eventName: event,
+      payload,
+      reason: 'payload does not satisfy contracts schema',
+    };
+    options?.onContractViolation?.(v);
+    logger.error('Bridge', `Invalid contract payload: ${event}`, { event });
+    return undefined;
+  }
+
+  options?.onContractViolation?.({
+    at: Date.now(),
+    direction: 'guestToHost',
+    kind: 'unknown_event',
+    eventName: event,
+    payload,
+    reason: 'event not declared in ask contracts',
+  });
   logger.warn('Bridge', `Unknown event: ${event}`, { event });
   return undefined;
 }
@@ -99,13 +169,13 @@ export function handleGuestMessage(message: GuestMessage): unknown {
 /**
  * Engine interface for adapter
  */
-interface EngineInterface {
+export type EngineInterface = {
   on: (
     event: 'message',
-    callback: (message: { event: string; payload: unknown }) => void
+    callback: (message: { event: string; payload?: unknown }) => void
   ) => () => void;
   sendEvent: (event: string, payload?: unknown) => void;
-}
+};
 
 /**
  * Create engine adapter for Rill integration
@@ -122,6 +192,18 @@ interface EngineInterface {
  */
 export function createEngineAdapter(engine: EngineInterface): {
   dispose: () => void;
+};
+export function createEngineAdapter(
+  engine: EngineInterface,
+  options?: GuestMessageHandlerOptions
+): {
+  dispose: () => void;
+};
+export function createEngineAdapter(
+  engine: EngineInterface,
+  options?: GuestMessageHandlerOptions
+): {
+  dispose: () => void;
 } {
   // Forward EventEmitter events to engine with askit:event: prefix
   (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL]((event: string, payload: unknown) => {
@@ -130,7 +212,7 @@ export function createEngineAdapter(engine: EngineInterface): {
 
   // Listen for guest messages and route them
   const unsubscribeMessage = engine.on('message', (message) => {
-    handleGuestMessage({ event: message.event, payload: message.payload });
+    handleGuestMessage({ event: message.event, payload: message.payload }, options);
   });
 
   return {
