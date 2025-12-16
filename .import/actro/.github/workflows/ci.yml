@@ -30,9 +30,17 @@ jobs:
       - name: Build packages
         run: bun run build
 
-      - name: Run tests (bun)
-        run: bun test --no-coverage --timeout 60000 --bail
-        timeout-minutes: 10
+      - name: Run CLI tests
+        run: |
+          cd packages/cli
+          bun test --no-coverage --timeout 30000 --bail
+        timeout-minutes: 5
+
+      - name: Run Core tests
+        run: |
+          cd packages/core
+          bun test --no-coverage --timeout 30000 --bail
+        timeout-minutes: 5
 
       - name: Check test coverage thresholds
         run: |
