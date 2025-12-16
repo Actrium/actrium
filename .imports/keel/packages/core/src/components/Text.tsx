@@ -4,7 +4,7 @@
  * Default Text component implementation, wrapping React Native Text
  */
 
-import React from 'react';
+import type React from 'react';
 import { Text as RNText, type TextStyle } from 'react-native';
 
 export interface TextProps {

@@ -93,8 +93,8 @@ export class RNJSCSandboxProvider implements JSEngineProvider {
             return ctx.evalAsync(code);
           },
 
-          setGlobal: (name: string, value: unknown): void => {
-            ctx.setGlobal(name, value);
+          setGlobal: (name: string, value: unknown): Promise<void> => {
+            return ctx.setGlobal(name, value);
           },
 
           getGlobal: (name: string): unknown => {

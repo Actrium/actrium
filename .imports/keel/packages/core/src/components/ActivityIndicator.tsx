@@ -4,7 +4,7 @@
  * Default ActivityIndicator component implementation, wrapping React Native ActivityIndicator
  */
 
-import React from 'react';
+import type React from 'react';
 import { ActivityIndicator as RNActivityIndicator, type ViewStyle } from 'react-native';
 
 export interface ActivityIndicatorProps {
