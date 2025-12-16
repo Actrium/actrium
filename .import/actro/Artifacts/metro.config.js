@@ -113,10 +113,6 @@ const customConfig = {
       // Force single React instance to avoid resolution oddities
       'react': path.resolve(projectRoot, 'node_modules/react'),
       'react-dom': path.resolve(projectRoot, 'node_modules/react-dom'),
-      'react-native-safe-area-context': path.resolve(
-        __dirname,
-        './src/actr-host/shims/react-native-safe-area-context',
-      ),
       'react-reconciler': path.resolve(projectRoot, 'node_modules/react-reconciler'),
       // Direct GitHub dependencies
       'rill': path.resolve(projectRoot, 'node_modules/rill'),
