@@ -583,7 +583,7 @@ export class Engine implements IEngine {
       // The lazy getters will call require() at access time when bundle runs
       const REACT_GLOBALS = `
 (function(){
-  if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] Defining React/ReactJSXRuntime getters, require=' + typeof require);
+  if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] Defining React/ReactJSXRuntime/ReactNative getters, require=' + typeof require);
   if (typeof globalThis.React === 'undefined') {
     Object.defineProperty(globalThis, 'React', {
       get: function() {
@@ -602,10 +602,19 @@ export class Engine implements IEngine {
       configurable: true
     });
   }
+  if (typeof globalThis.ReactNative === 'undefined') {
+    Object.defineProperty(globalThis, 'ReactNative', {
+      get: function() {
+        if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] ReactNative getter called');
+        return require('react-native');
+      },
+      configurable: true
+    });
+  }
 })();`;
       try {
         await this.evalCode(REACT_GLOBALS);
-        if (debug) logger.log(`[rill:${this.id}] setGlobal: React/ReactJSXRuntime defined via require() in sandbox`);
+        if (debug) logger.log(`[rill:${this.id}] setGlobal: React/ReactJSXRuntime/ReactNative defined via require() in sandbox`);
       } catch (e) {
         logger.warn(`[rill:${this.id}] Failed to define React globals:`, e);
       }
