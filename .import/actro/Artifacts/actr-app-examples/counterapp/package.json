@@ -1,0 +1,16 @@
+{
+  "name": "counterapp",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "rill build"
+  },
+  "dependencies": {
+    "askit": "file:../../../askit",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.2"
+  }
+}
