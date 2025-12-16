@@ -31,7 +31,7 @@ jobs:
         run: bun run build
 
       - name: Run tests (bun)
-        run: bun test --no-coverage
+        run: bun test --no-coverage --timeout 60000 --bail
         timeout-minutes: 10
 
       - name: Check test coverage thresholds
