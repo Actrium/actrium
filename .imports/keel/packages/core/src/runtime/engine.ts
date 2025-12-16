@@ -851,7 +851,7 @@ export class Engine implements IEngine {
       if (debug) {
         logger.log(`[rill:${this.id}] __sendToHost called, operations:`, batch.operations.length);
       }
-      
+
       // Send to DevTools
       if (typeof globalThis.__sendEventToHost === 'function') {
         globalThis.__sendEventToHost('DEVTOOLS_OPERATIONS', batch);
@@ -1048,7 +1048,9 @@ export class Engine implements IEngine {
       ) {
         RillReconciler.invokeCallback(message.fnId, message.args);
         if (this.options.debug) {
-          this.options.logger.log(`[rill:${this.id}] Successfully invoked callback (host registry)`);
+          this.options.logger.log(
+            `[rill:${this.id}] Successfully invoked callback (host registry)`
+          );
         }
         return;
       }
@@ -1058,7 +1060,10 @@ export class Engine implements IEngine {
         this.options.logger.log(`[rill:${this.id}] Successfully invoked callback (sandbox eval)`);
       }
     } catch (error) {
-      this.options.logger.error(`[rill:${this.id}] Failed to invoke callback ${message.fnId}:`, error);
+      this.options.logger.error(
+        `[rill:${this.id}] Failed to invoke callback ${message.fnId}:`,
+        error
+      );
     }
   }
 
