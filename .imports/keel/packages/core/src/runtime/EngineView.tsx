@@ -4,7 +4,7 @@
  * React Native component for rendering Guest UI in sandbox
  */
 
-import React from 'react';
+import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import type { Engine } from './engine';
