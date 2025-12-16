@@ -18,4 +18,3 @@ export { Panel } from './Panel/Panel.guest';
 export { StepList } from './StepList/StepList.guest';
 export { ThemeView } from './ThemeView/ThemeView.guest';
 export { UserAvatar } from './UserAvatar/UserAvatar.guest';
-export { Panel } from './Panel/Panel.guest';
