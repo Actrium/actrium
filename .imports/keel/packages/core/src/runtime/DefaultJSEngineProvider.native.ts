@@ -8,8 +8,8 @@
  */
 
 import { NoSandboxProvider } from './NoSandboxProvider';
+import { isApplePlatform, RNJSCSandboxProvider, resolveJSCSandbox } from './RNJSCSandboxProvider';
 import { RNQuickJSProvider, resolveRNQuickJS } from './RNQuickJSProvider';
-import { RNJSCSandboxProvider, isApplePlatform, resolveJSCSandbox } from './RNJSCSandboxProvider';
 
 export type DefaultProviderOptions = {
   timeout?: number;

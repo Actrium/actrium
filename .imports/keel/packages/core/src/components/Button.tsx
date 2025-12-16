@@ -4,7 +4,7 @@
  * Default Button component implementation, wrapping React Native Button
  */
 
-import React from 'react';
+import type React from 'react';
 import { Button as RNButton } from 'react-native';
 
 export interface ButtonProps {
