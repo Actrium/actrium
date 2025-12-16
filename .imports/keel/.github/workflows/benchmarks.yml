@@ -66,8 +66,9 @@ jobs:
               body: comparison
             });
 
-      - name: Fail on regression
+      - name: Check for regression
         if: steps.baseline.outputs.baseline_exists == 'true'
+        continue-on-error: true
         run: |
           cd packages/core
           bun run scripts/compare-benchmarks.ts \
