@@ -36,11 +36,26 @@ jobs:
           bun test --no-coverage --timeout 30000 --bail
         timeout-minutes: 5
 
-      - name: Run Core tests
+      - name: Run Core tests (runtime)
         run: |
           cd packages/core
-          bun test --no-coverage --timeout 30000 --bail
-        timeout-minutes: 5
+          echo "Testing runtime..."
+          bun test src/runtime --no-coverage --timeout 30000 --bail 2>&1 || exit 1
+        timeout-minutes: 3
+
+      - name: Run Core tests (reconciler)
+        run: |
+          cd packages/core
+          echo "Testing reconciler..."
+          bun test src/reconciler --no-coverage --timeout 30000 --bail 2>&1 || exit 1
+        timeout-minutes: 2
+
+      - name: Run Core tests (other)
+        run: |
+          cd packages/core
+          echo "Testing other..."
+          bun test src/types.test.ts src/devtools --no-coverage --timeout 30000 --bail 2>&1 || exit 1
+        timeout-minutes: 1
 
       - name: Check test coverage thresholds
         run: |
