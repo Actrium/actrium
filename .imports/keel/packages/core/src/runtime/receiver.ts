@@ -68,17 +68,17 @@ export interface ReceiverOptions {
   maxBatchSize?: number;
   debug?: boolean;
   /**
-   * 归因窗口（最近 N 秒聚合），用于“谁在耗/为什么耗”的趋势归因。
+   * Attribution window (aggregate recent N seconds) for trend attribution ("who/why consuming").
    * @default 5000
    */
   attributionWindowMs?: number;
   /**
-   * 归因历史保留时长（ms），超出后会被丢弃。
+   * Attribution history retention (ms), older entries are discarded.
    * @default 60000
    */
   attributionHistoryMs?: number;
   /**
-   * 归因历史最大样本数（batch 数），用于兜底限制内存。
+   * Maximum attribution history samples (batch count), for memory limit fallback.
    * @default 200
    */
   attributionMaxSamples?: number;
@@ -94,24 +94,24 @@ export interface ReceiverApplyStats {
   durationMs: number;
 
   /**
-   * 批次前后的节点数变化（用于“谁在增长”）
+   * Node count change before/after batch (for "who is growing")
    */
   nodesBefore: number;
   nodesAfter: number;
   nodeDelta: number;
 
   /**
-   * 本批次 op 分布（仅统计 applied）
+   * Operation distribution for this batch (applied only)
    */
   opCounts: Record<string, number>;
 
   /**
-   * 本批次被跳过的 op 分布（仅在 backpressure/limit 触发时存在）
+   * Skipped operation distribution (only when backpressure/limit triggered)
    */
   skippedOpCounts: Record<string, number>;
 
   /**
-   * 本批次触达的节点 type TopN（用于归因）
+   * Top N node types touched in this batch (for attribution)
    */
   topNodeTypes: Array<{ type: string; ops: number }>;
   topNodeTypesSkipped: Array<{ type: string; ops: number }>;
@@ -150,46 +150,46 @@ export interface ReceiverAttributionWorstBatch {
 
 export interface ReceiverAttributionWindow {
   /**
-   * 本次聚合覆盖的时间窗口（ms）
+   * Time window covered by this aggregation (ms)
    */
   windowMs: number;
   /**
-   * 落入窗口的 batch 样本数量
+   * Number of batch samples within the window
    */
   sampleCount: number;
   /**
-   * 窗口内 ops 总量（received）
+   * Total ops in window (received)
    */
   total: number;
   applied: number;
   skipped: number;
   failed: number;
   /**
-   * 窗口内 applyBatch 耗时求和（ms）
+   * Sum of applyBatch duration within window (ms)
    */
   durationMs: number;
   /**
-   * 窗口内节点增量求和（可粗略判断“树在增长还是收缩”）
+   * Sum of node delta within window (rough indicator of tree growing/shrinking)
    */
   nodeDelta: number;
   /**
-   * 窗口内 op 分布（applied 聚合）
+   * Operation distribution within window (applied aggregation)
    */
   opCounts: Record<string, number>;
   /**
-   * 窗口内 skipped op 分布（skipped 聚合）
+   * Skipped operation distribution within window (skipped aggregation)
    */
   skippedOpCounts: Record<string, number>;
   /**
-   * 窗口内触达的节点 type TopN（applied 聚合）
+   * Top N node types touched within window (applied aggregation)
    */
   topNodeTypes: Array<{ type: string; ops: number }>;
   /**
-   * 窗口内触达的节点 type TopN（skipped 聚合）
+   * Top N node types touched within window (skipped aggregation)
    */
   topNodeTypesSkipped: Array<{ type: string; ops: number }>;
   /**
-   * 窗口内异常 batch 留样（用于快速定位“巨大/慢/跳过激增/节点增长”）
+   * Worst batch samples within window (for quick identification of "large/slow/skip surge/node growth")
    */
   worstBatches: ReceiverAttributionWorstBatch[];
 }
@@ -310,7 +310,7 @@ export class Receiver {
 
     for (let i = 0; i < batch.operations.length; i++) {
       if (applied >= limit) {
-        // 记录被跳过的 op 分布与归因（用于定位 backpressure）
+        // Record skipped op distribution and attribution (for backpressure diagnosis)
         for (let j = i; j < batch.operations.length; j++) {
           const op = batch.operations[j];
           if (!op) continue;

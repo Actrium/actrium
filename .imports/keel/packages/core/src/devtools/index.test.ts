@@ -15,7 +15,7 @@ import {
 // Helper to wait for real time
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// ============ ComponentInspector 测试 ============
+// ============ ComponentInspector Tests ============
 
 describe('ComponentInspector', () => {
   let inspector: ComponentInspector;
@@ -68,7 +68,7 @@ describe('ComponentInspector', () => {
       const tree = inspector.buildTree(nodeMap, [1]);
 
       expect(tree[0].children).toHaveLength(1);
-      expect(tree[0].children[0].children).toHaveLength(0); // 深度限制
+      expect(tree[0].children[0].children).toHaveLength(0); // depth limit
     });
 
     it('should filter specified props', () => {
@@ -231,7 +231,7 @@ describe('ComponentInspector', () => {
   });
 });
 
-// ============ OperationLogger 测试 ============
+// ============ OperationLogger Tests ============
 
 describe('OperationLogger', () => {
   let logger: OperationLogger;
@@ -288,7 +288,7 @@ describe('OperationLogger', () => {
       }
 
       expect(logger.getLogs()).toHaveLength(10);
-      expect(logger.getLogs()[0].batchId).toBe(5); // 前 5 个被移除
+      expect(logger.getLogs()[0].batchId).toBe(5); // first 5 removed
     });
   });
 
@@ -400,7 +400,7 @@ describe('OperationLogger', () => {
   });
 });
 
-// ============ TimelineRecorder 测试 ============
+// ============ TimelineRecorder Tests ============
 
 describe('TimelineRecorder', () => {
   let recorder: TimelineRecorder;
@@ -552,7 +552,7 @@ describe('TimelineRecorder', () => {
   });
 });
 
-// ============ DevTools 测试 ============
+// ============ DevTools Tests ============
 
 describe('DevTools', () => {
   let devtools: DevTools;
@@ -701,7 +701,7 @@ describe('DevTools', () => {
   });
 });
 
-// ============ createDevTools 测试 ============
+// ============ createDevTools Tests ============
 
 describe('createDevTools', () => {
   it('should create DevTools with default config', () => {

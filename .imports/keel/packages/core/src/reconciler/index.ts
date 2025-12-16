@@ -628,10 +628,10 @@ export function createReconciler(
       return oldProps !== newProps ? {} : null;
     },
 
-    // React 18/19: commitUpdate 的“类型签名”与“运行时调用”可能不一致：
-    // - React 18（类型常见）：commitUpdate(instance, updatePayload, type, prevProps, nextProps, internalHandle)
-    // - React 19（运行时）：commitUpdate(instance, type, prevProps, nextProps, internalHandle)
-    // 这里用运行时判别兼容两种调用，避免把 internalHandle(Fiber) 当成 props。
+    // React 18/19: commitUpdate signature vs runtime call may differ:
+    // - React 18 (common type): commitUpdate(instance, updatePayload, type, prevProps, nextProps, internalHandle)
+    // - React 19 (runtime): commitUpdate(instance, type, prevProps, nextProps, internalHandle)
+    // Use runtime type check to handle both, avoiding treating internalHandle(Fiber) as props.
     commitUpdate(
       instance: VNode,
       updatePayloadOrType: unknown,
@@ -929,17 +929,18 @@ export function getCallbackRegistry(sendToHost?: SendToHost): CallbackRegistry |
 }
 
 /**
- * 是否存在某个回调（全局 registry）
+ * Check if a callback exists (global registry)
  *
- * 说明：在 RN / VM 等运行时，Guest 侧的函数会以“可调用句柄”的形式被 Host 侧 reconciler 看到并注册进 CallbackRegistry。
- * 此时不需要依赖 Guest runtime 注入的 globalThis.__callbacks / __invokeCallback。
+ * Note: In RN / VM runtimes, Guest-side functions are seen by Host-side reconciler
+ * as callable handles and registered in CallbackRegistry.
+ * No need to rely on Guest runtime injected globalThis.__callbacks / __invokeCallback.
  */
 export function hasCallback(fnId: string): boolean {
   return globalCallbackRegistry.getMap().has(fnId);
 }
 
 /**
- * 调用某个回调（全局 registry）
+ * Invoke a callback (global registry)
  */
 export function invokeCallback(fnId: string, args: unknown[] = []): unknown {
   return globalCallbackRegistry.invoke(fnId, args);

@@ -32,7 +32,7 @@
         // Basic guidance mapping; keep in sync with README compatibility table
         const guidance: Array<{ r: RegExp; allowed: RegExp; recommend: string }> = [
           { r: /^18\./, allowed: /^(0\.(29|30|31))\./, recommend: 'react-reconciler ^0.31' },
-          // React 19.0.x 目前与 react-reconciler 0.31.x 的 peer 约束保持一致
+          // React 19.0.x currently aligns with react-reconciler 0.31.x peer constraints
           { r: /^19\.0\./, allowed: /^0\.31\./, recommend: 'react-reconciler ^0.31' },
           { r: /^19\.1\./, allowed: /^0\.32\./, recommend: 'react-reconciler ^0.32' },
           { r: /^19\.(2|3|4|5)\./, allowed: /^0\.33\./, recommend: 'react-reconciler ^0.33' },
@@ -45,7 +45,7 @@
             (globalThis as unknown as { navigator?: { product?: string } }).navigator?.product ===
               'ReactNative';
           const logFn = isReactNative ? console.log : console.warn;
-          // 在 React Native 上 console.warn 会触发 LogBox；macOS RN 的 LogBox 在部分版本上可能崩溃（NULL CGColor）。
+          // On React Native, console.warn triggers LogBox; macOS RN LogBox may crash on some versions (NULL CGColor).
           // eslint-disable-next-line no-console
           logFn(
             `[rill] Detected React ${reactVersion} with react-reconciler ${reconcilerVersion}. ` +

@@ -26,7 +26,7 @@ const sleep = (ms: number) => {
   }
 };
 
-// ============ OperationMerger 测试 ============
+// ============ OperationMerger Tests ============
 
 describe('OperationMerger', () => {
   let merger: OperationMerger;
@@ -139,7 +139,7 @@ describe('OperationMerger', () => {
   });
 });
 
-// ============ ThrottledScheduler 测试 ============
+// ============ ThrottledScheduler Tests ============
 
 describe('ThrottledScheduler', () => {
   let scheduler: ThrottledScheduler;
@@ -161,7 +161,7 @@ describe('ThrottledScheduler', () => {
 
       expect(scheduler.pendingCount).toBe(1);
 
-      // 执行 microtask
+      // Execute microtask
       await Promise.resolve();
 
       expect(flushCallback).toHaveBeenCalledTimes(1);
@@ -317,7 +317,7 @@ describe('ThrottledScheduler', () => {
   });
 });
 
-// ============ VirtualScrollCalculator 测试 ============
+// ============ VirtualScrollCalculator Tests ============
 
 describe('VirtualScrollCalculator', () => {
   let calculator: VirtualScrollCalculator;
@@ -398,17 +398,17 @@ describe('VirtualScrollCalculator', () => {
 
     it('should calculate visible range at middle', () => {
       calculator.setTotalItems(100);
-      // 滚动到第 20 个项目 (20 * 50 = 1000px)
+      // Scroll to item 20 (20 * 50 = 1000px)
       const state = calculator.calculate(1000, 300);
 
       expect(state.startIndex).toBeLessThanOrEqual(20);
-      expect(state.startIndex).toBeGreaterThanOrEqual(15); // with overscan (允许更大范围)
+      expect(state.startIndex).toBeGreaterThanOrEqual(15); // with overscan (allow wider range)
       expect(state.endIndex).toBeGreaterThan(20);
     });
 
     it('should calculate visible range at bottom', () => {
       calculator.setTotalItems(100);
-      // 滚动到底部 (100 * 50 - 300 = 4700px)
+      // Scroll to bottom (100 * 50 - 300 = 4700px)
       const state = calculator.calculate(4700, 300);
 
       expect(state.endIndex).toBe(100);
@@ -433,7 +433,7 @@ describe('VirtualScrollCalculator', () => {
 
       expect(state.offsetTop).toBeGreaterThan(0);
       expect(state.offsetBottom).toBeGreaterThan(0);
-      expect(state.offsetTop + state.offsetBottom).toBeLessThan(5000); // 总高度
+      expect(state.offsetTop + state.offsetBottom).toBeLessThan(5000); // total height
     });
 
     it('should generate visibleItems array', () => {
@@ -457,7 +457,7 @@ describe('VirtualScrollCalculator', () => {
   });
 });
 
-// ============ ScrollThrottler 测试 ============
+// ============ ScrollThrottler Tests ============
 
 describe('ScrollThrottler', () => {
   let throttler: ScrollThrottler;
@@ -533,7 +533,7 @@ describe('ScrollThrottler', () => {
   });
 });
 
-// ============ PerformanceMonitor 测试 ============
+// ============ PerformanceMonitor Tests ============
 
 describe('PerformanceMonitor', () => {
   let monitor: PerformanceMonitor;

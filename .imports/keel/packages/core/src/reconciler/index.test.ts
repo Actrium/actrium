@@ -588,7 +588,7 @@ describe('Batch Updates', () => {
   it('should batch multiple operations into single flush', () => {
     const { collector } = reconcilerInstance;
 
-    // 模拟多个操作
+    // Simulate multiple operations
     collector.add({ op: 'CREATE', id: 1, type: 'View', props: {} });
     collector.add({ op: 'CREATE', id: 2, type: 'Text', props: {} });
     collector.add({ op: 'APPEND', id: 2, parentId: 1, childId: 2 });
@@ -596,10 +596,10 @@ describe('Batch Updates', () => {
 
     collector.flush(sendToHost);
 
-    // 应该只有一次调用
+    // Should only have one call
     expect(sendToHost).toHaveBeenCalledTimes(1);
 
-    // 批次中包含所有操作
+    // Batch contains all operations
     expect(receivedBatches[0].operations).toHaveLength(4);
     expect(receivedBatches[0].operations.map((op) => op.op)).toEqual([
       'CREATE',

@@ -336,21 +336,21 @@ describe('Hooks', () => {
   });
 });
 
-// ============ 类型导出测试 ============
+// ============ Type Export Tests ============
 
 describe('Type Exports', () => {
   it('should export StyleProp type', async () => {
-    // 通过导入验证类型存在
+    // Verify type existence through import
     const module = await import('./index');
     expect(module).toBeDefined();
   });
 });
 
-// ============ Props 类型测试 (编译时) ============
+// ============ Props Type Tests (Compile-time) ============
 
 describe('Props Types', () => {
   it('ViewProps should accept style and children', () => {
-    // 这是编译时测试，运行时只验证类型存在
+    // This is compile-time test, runtime only verifies type existence
     const viewProps = {
       style: { flex: 1, backgroundColor: 'red' },
       testID: 'test-view',
@@ -421,7 +421,7 @@ describe('Props Types', () => {
   });
 });
 
-// ============ 事件类型测试 ============
+// ============ Event Type Tests ============
 
 describe('Event Types', () => {
   it('LayoutEvent should have correct structure', () => {
@@ -450,7 +450,7 @@ describe('Event Types', () => {
   });
 });
 
-// ============ ImageSource 类型测试 ============
+// ============ ImageSource Type Tests ============
 
 describe('ImageSource Type', () => {
   it('should accept URI object', () => {
@@ -473,14 +473,14 @@ describe('ImageSource Type', () => {
   });
 });
 
-// ============ 零依赖验证 ============
+// ============ Zero-dependency Verification ============
 
 describe('Zero Runtime Dependencies', () => {
   it('SDK should not import react-native', async () => {
-    // 验证模块不包含 react-native 导入
+    // Verify module doesn't include react-native imports
     const moduleSource = await import('./index');
 
-    // 所有组件都应该是字符串，不是实际组件
+    // All components should be strings, not actual components
     expect(typeof moduleSource.View).toBe('string');
     expect(typeof moduleSource.Text).toBe('string');
     expect(typeof moduleSource.Image).toBe('string');
@@ -489,7 +489,7 @@ describe('Zero Runtime Dependencies', () => {
   it('SDK should only export primitives and functions', async () => {
     const moduleSource = await import('./index');
 
-    // 组件是字符串
+    // Components are strings
     const components = [
       moduleSource.View,
       moduleSource.Text,
@@ -502,7 +502,7 @@ describe('Zero Runtime Dependencies', () => {
       expect(['string', 'function']).toContain(typeof component);
     });
 
-    // Hooks 是函数
+    // Hooks are functions
     expect(typeof moduleSource.useHostEvent).toBe('function');
     expect(typeof moduleSource.useConfig).toBe('function');
     expect(typeof moduleSource.useSendToHost).toBe('function');
