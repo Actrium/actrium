@@ -3,9 +3,20 @@
  * Tests for the actual createEngineAdapter implementation in bridge.ts
  */
 
-import { createEngineAdapter, handleGuestMessage, type EngineInterface, type GuestMessageHandlerOptions } from './bridge';
+import {
+  createEngineAdapter,
+  handleGuestMessage,
+  type EngineInterface,
+  type GuestMessageHandlerOptions,
+} from './bridge';
 import { EventEmitter, type HostEventEmitter } from '../api/EventEmitter.host';
 import { Toast, type HostToast, TOAST_SET_HANDLER, TOAST_CLEAR_HANDLER } from '../api/Toast.host';
+
+// Type for contract violation used in tests
+interface TestContractViolation {
+  kind: 'unknown_event' | 'invalid_payload' | 'missing_permission';
+  eventName?: string;
+}
 
 describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
   describe('createEngineAdapter', () => {
@@ -17,7 +28,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       toastCalls = [];
       originalWarn = console.warn;
       originalError = console.error;
-      
+
       // Set up toast handler to capture calls
       (Toast as HostToast)[TOAST_SET_HANDLER]((message, options) => {
         toastCalls.push({ message, options });
@@ -32,7 +43,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
     it('should forward EventEmitter events to engine.sendEvent with askit:event: prefix', () => {
       const sentEvents: Array<{ event: string; payload: unknown }> = [];
-      
+
       const mockEngine: EngineInterface = {
         on: () => () => {}, // Return unsubscribe function
         sendEvent: (event: string, payload?: unknown) => {
@@ -54,7 +65,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
     it('should handle nested event names with multiple colons', () => {
       const sentEvents: Array<{ event: string; payload: unknown }> = [];
-      
+
       const mockEngine: EngineInterface = {
         on: () => () => {},
         sendEvent: (event: string, payload?: unknown) => {
@@ -75,7 +86,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
     it('should route incoming engine messages to handleGuestMessage', () => {
       let messageHandler: ((message: { event: string; payload?: unknown }) => void) | null = null;
-      
+
       const mockEngine: EngineInterface = {
         on: (event: string, callback: (message: { event: string; payload?: unknown }) => void) => {
           if (event === 'message') {
@@ -99,7 +110,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
     it('should pass options to handleGuestMessage', () => {
       const violations: unknown[] = [];
       let messageHandler: ((message: { event: string; payload?: unknown }) => void) | null = null;
-      
+
       const mockEngine: EngineInterface = {
         on: (event: string, callback: (message: { event: string; payload?: unknown }) => void) => {
           if (event === 'message') {
@@ -121,7 +132,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
       // Should call onContractViolation for unknown events
       expect(violations.length).toBeGreaterThan(0);
-      const violation = violations[0] as any;
+      const violation = violations[0] as TestContractViolation;
       expect(violation.kind).toBe('unknown_event');
       expect(violation.eventName).toBe('unknown:event:type');
     });
@@ -129,7 +140,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
     it('should call unsubscribe function on dispose', () => {
       let unsubscribeCalled = false;
       const sentEvents: string[] = [];
-      
+
       const mockEngine: EngineInterface = {
         on: () => {
           // Return unsubscribe function
@@ -162,7 +173,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
     it('should handle engine message with complex payload', () => {
       let messageHandler: ((message: { event: string; payload?: unknown }) => void) | null = null;
-      
+
       const mockEngine: EngineInterface = {
         on: (event: string, callback: (message: { event: string; payload?: unknown }) => void) => {
           if (event === 'message') {
@@ -176,13 +187,13 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       createEngineAdapter(mockEngine);
 
       // Send toast with complex options
-      messageHandler!({ 
-        event: 'askit:toast:show', 
-        payload: ['Complex message', { duration: 'long', position: 'top' }] 
+      messageHandler!({
+        event: 'askit:toast:show',
+        payload: ['Complex message', { duration: 'long', position: 'top' }],
       });
 
       expect(toastCalls).toEqual([
-        { message: 'Complex message', options: { duration: 'long', position: 'top' } }
+        { message: 'Complex message', options: { duration: 'long', position: 'top' } },
       ]);
     });
   });
@@ -190,7 +201,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
   describe('handleGuestMessage - EventEmitter NOTIFY_SYMBOL coverage', () => {
     it('should call NOTIFY_SYMBOL when receiving askit:event: messages', () => {
       const receivedEvents: Array<{ event: string; payload: unknown }> = [];
-      
+
       // Listen to an event
       const unsubscribe = (EventEmitter as HostEventEmitter).on('coverage:test', (payload) => {
         receivedEvents.push({ event: 'coverage:test', payload });
@@ -200,16 +211,14 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       handleGuestMessage({ event: 'askit:event:coverage:test', payload: { test: 'data' } });
 
       // Should trigger the listener via NOTIFY_SYMBOL
-      expect(receivedEvents).toEqual([
-        { event: 'coverage:test', payload: { test: 'data' } }
-      ]);
+      expect(receivedEvents).toEqual([{ event: 'coverage:test', payload: { test: 'data' } }]);
 
       unsubscribe();
     });
 
     it('should handle askit:event: with null payload', () => {
       const receivedEvents: unknown[] = [];
-      
+
       const unsubscribe = (EventEmitter as HostEventEmitter).on('null:test', (payload) => {
         receivedEvents.push(payload);
       });
@@ -223,7 +232,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
     it('should handle askit:event: with undefined payload', () => {
       const receivedEvents: unknown[] = [];
-      
+
       const unsubscribe = (EventEmitter as HostEventEmitter).on('undefined:test', (payload) => {
         receivedEvents.push(payload);
       });
@@ -245,7 +254,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       toastCalls = [];
       originalWarn = console.warn;
       originalError = console.error;
-      
+
       // Set up toast handler to capture calls
       (Toast as HostToast)[TOAST_SET_HANDLER]((message, options) => {
         toastCalls.push({ message, options });
@@ -260,7 +269,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
     it('should call onContractEvent when provided with valid contract event', () => {
       const contractEvents: Array<{ eventName: string; payload: unknown }> = [];
-      
+
       // GUEST_SLEEP_STATE is a valid contract event
       handleGuestMessage(
         { event: 'GUEST_SLEEP_STATE', payload: { sleeping: true, tabId: 't1' } },
@@ -272,13 +281,13 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       );
 
       expect(contractEvents).toEqual([
-        { eventName: 'GUEST_SLEEP_STATE', payload: { sleeping: true, tabId: 't1' } }
+        { eventName: 'GUEST_SLEEP_STATE', payload: { sleeping: true, tabId: 't1' } },
       ]);
     });
 
     it('should call onContractViolation when contract validation fails', () => {
       const violations: unknown[] = [];
-      
+
       // Invalid payload for GUEST_SLEEP_STATE (missing required fields)
       handleGuestMessage(
         { event: 'GUEST_SLEEP_STATE', payload: { invalid: 'data' } },
@@ -290,13 +299,13 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       );
 
       expect(violations.length).toBeGreaterThan(0);
-      const violation = violations[0] as any;
+      const violation = violations[0] as TestContractViolation;
       expect(violation.kind).toBe('invalid_payload');
     });
 
     it('should call onContractViolation for unknown event formats', () => {
       const violations: unknown[] = [];
-      
+
       handleGuestMessage(
         { event: 'some:random:event', payload: null },
         {
@@ -307,14 +316,14 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       );
 
       expect(violations.length).toBeGreaterThan(0);
-      const violation = violations[0] as any;
+      const violation = violations[0] as TestContractViolation;
       expect(violation.kind).toBe('unknown_event');
       expect(violation.eventName).toBe('some:random:event');
     });
 
     it('should handle permission checks when permissionMode is deny', () => {
       const violations: unknown[] = [];
-      
+
       handleGuestMessage(
         { event: 'askit:toast:show', payload: ['Test'] },
         {
@@ -328,13 +337,13 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
       // Should violate due to missing permission
       expect(violations.length).toBeGreaterThan(0);
-      const violation = violations[0] as any;
+      const violation = violations[0] as TestContractViolation;
       expect(violation.kind).toBe('missing_permission');
     });
 
     it('should allow execution when permission is declared', () => {
       const callsBefore = toastCalls.length;
-      
+
       handleGuestMessage(
         { event: 'askit:toast:show', payload: ['Test with permission'] },
         {

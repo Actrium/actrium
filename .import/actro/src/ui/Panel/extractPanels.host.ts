@@ -45,4 +45,3 @@ export function extractPanels(tree: React.ReactElement | string | null): Extract
     right: findPanel(tree, 'right'),
   };
 }
-

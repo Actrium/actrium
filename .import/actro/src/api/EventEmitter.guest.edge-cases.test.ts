@@ -37,10 +37,10 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
   afterEach(() => {
     sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
     sandboxGlobal.onHostEvent = originalOnHostEvent as SandboxGlobal['onHostEvent'];
-    
+
     // Clear any pending timers to prevent tests from hanging
-    if (emitter && typeof (emitter as any)._clearRetryTimer === 'function') {
-      (emitter as any)._clearRetryTimer();
+    if (emitter && '_clearRetryTimer' in emitter) {
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
     }
   });
 
@@ -113,7 +113,7 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       // Suppress expected error logs
       const originalError = console.error;
       console.error = () => {}; // Suppress logs for this test
-      
+
       let callCount = 0;
       sandboxGlobal.sendToHost = () => {
         callCount++;
@@ -127,7 +127,7 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       emitter.emit('test:event', { data: 'test' });
 
       expect(callCount).toBe(1); // Initial attempt failed
-      
+
       console.error = originalError;
     });
 
@@ -135,7 +135,7 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       const warnings: unknown[] = [];
       const originalWarn = console.warn;
       const originalError = console.error;
-      
+
       console.warn = (...args: unknown[]) => warnings.push(args);
       console.error = () => {}; // Suppress expected error logs (105 failed sends)
 
@@ -316,7 +316,7 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       // Suppress expected error logs
       const originalError = console.error;
       console.error = () => {};
-      
+
       let retryCount = 0;
       const originalSetTimeout = globalThis.setTimeout;
       globalThis.setTimeout = ((fn: () => void, delay: number) => {

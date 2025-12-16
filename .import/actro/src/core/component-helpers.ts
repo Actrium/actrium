@@ -17,7 +17,9 @@ export interface GuestComponent<T = unknown> {
 /**
  * Development mode detection
  */
-const isDev = (globalThis as any).process?.env?.NODE_ENV === 'development';
+const isDev =
+  (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } }).process?.env
+    ?.NODE_ENV === 'development';
 
 /**
  * Validation rules for component props

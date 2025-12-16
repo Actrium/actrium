@@ -29,7 +29,9 @@ describe('Core Bridge - contracts', () => {
       }
     );
 
-    expect(events).toEqual([{ eventName: 'GUEST_SLEEP_STATE', payload: { sleeping: true, tabId: 't1' } }]);
+    expect(events).toEqual([
+      { eventName: 'GUEST_SLEEP_STATE', payload: { sleeping: true, tabId: 't1' } },
+    ]);
     expect(warnings).toHaveLength(0);
     expect(errors).toHaveLength(0);
   });
@@ -66,4 +68,3 @@ describe('Core Bridge - contracts', () => {
     expect(warnings.length).toBeGreaterThan(0);
   });
 });
-

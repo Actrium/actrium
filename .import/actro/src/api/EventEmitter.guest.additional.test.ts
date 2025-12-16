@@ -29,8 +29,8 @@ describe('EventEmitter (Guest) - Additional Coverage', () => {
 
   afterEach(() => {
     // Clear any pending timers
-    if (emitter && typeof (emitter as any)._clearRetryTimer === 'function') {
-      (emitter as any)._clearRetryTimer();
+    if (emitter && '_clearRetryTimer' in emitter) {
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
     }
 
     sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
