@@ -344,6 +344,63 @@ describe('EventEmitter (Guest)', () => {
     });
   });
 
+  describe('retry queue mechanism', () => {
+    it('should warn and queue when sendToHost is unavailable', () => {
+      // Start without sendToHost
+      sandboxGlobal.sendToHost = undefined;
+
+      const retryEmitter = new GuestEventEmitter();
+      const warnings: string[] = [];
+
+      // Capture warnings
+      const originalWarn = console.warn;
+      console.warn = (...args) => warnings.push(args.join(' '));
+
+      // Emit while sendToHost is unavailable - should warn
+      retryEmitter.emit('queued:event', { data: 'test' });
+
+      // Should have warned about sendToHost not available
+      expect(warnings.some((w) => w.includes('sendToHost not available'))).toBe(true);
+
+      // Cleanup
+      (retryEmitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
+      console.warn = originalWarn;
+    });
+
+    it('should log error and queue when sendToHost throws', () => {
+      // sendToHost throws error
+      sandboxGlobal.sendToHost = () => {
+        throw new Error('Send failed');
+      };
+
+      const retryEmitter = new GuestEventEmitter();
+      const errors: string[] = [];
+
+      // Capture errors
+      const originalError = console.error;
+      console.error = (...args) => errors.push(JSON.stringify(args));
+
+      // Emit - will fail
+      retryEmitter.emit('failed:event', { data: 'test' });
+
+      // Should have logged error about send failure
+      expect(errors.some((e) => e.includes('Failed to send event'))).toBe(true);
+
+      // Cleanup
+      (retryEmitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
+      console.error = originalError;
+    });
+
+    it('should not throw when clearing timer on fresh instance', () => {
+      const retryEmitter = new GuestEventEmitter();
+
+      // Should not throw
+      expect(() => {
+        (retryEmitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
+      }).not.toThrow();
+    });
+  });
+
   describe('wildcard pattern matching', () => {
     it('should match single-level wildcard (user:*)', () => {
       const received: unknown[] = [];
