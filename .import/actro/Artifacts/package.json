@@ -16,15 +16,11 @@
   "type": "commonjs",
   "dependencies": {
     "@babel/runtime": "^7.28.4",
-    "@react-navigation/native": "^7.1.20",
-    "@react-navigation/stack": "^7.6.4",
     "askit": "github:GoAskAway/askit",
     "react": "19.0.0",
     "react-native": "0.79.6",
     "react-native-jsc-sandbox": "github:GoAskAway/react-native-jsc-sandbox",
     "react-native-macos": "^0.79.1",
-    "react-native-safe-area-context": "^5.6.2",
-    "react-native-screens": "^4.18.0",
     "react-reconciler": "^0.31.0",
     "rill": "github:GoAskAway/rill"
   },
