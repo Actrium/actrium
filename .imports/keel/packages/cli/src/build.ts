@@ -662,14 +662,15 @@ export async function analyze(
   let sourceMapSummary: SourceMapSummary = null;
   if (sourceMapPath) {
     try {
-      const mapJson = JSON.parse(fs.readFileSync(sourceMapPath, 'utf-8')) as Record<
-        string,
-        unknown
-      >;
+      const mapJson = JSON.parse(fs.readFileSync(sourceMapPath, 'utf-8')) as {
+        version?: unknown;
+        sources?: unknown;
+        file?: unknown;
+      };
       sourceMapSummary = {
-        version: mapJson['version'],
-        sources: mapJson['sources'],
-        file: mapJson['file'],
+        version: mapJson.version,
+        sources: mapJson.sources,
+        file: mapJson.file,
       };
     } catch {
       sourceMapSummary = { error: 'failed_to_parse' };
