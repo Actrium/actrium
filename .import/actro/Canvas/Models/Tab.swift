@@ -1,4 +1,24 @@
-import AppKit
+import Foundation
+
+/// System tab types for built-in pages (like Chrome's chrome://history)
+enum SystemTabType: String, Codable {
+    case history
+    case bookmarks
+
+    var title: String {
+        switch self {
+        case .history: return "History"
+        case .bookmarks: return "Bookmarks"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .history: return "clock.arrow.circlepath"
+        case .bookmarks: return "bookmark"
+        }
+    }
+}
 
 struct Tab: Identifiable {
     let id = UUID()
@@ -6,19 +26,37 @@ struct Tab: Identifiable {
     var url: URL?
     var htmlContent: String?
 
+    /// System tab type (nil for regular tabs, set for built-in pages like History/Bookmarks)
+    var systemTabType: SystemTabType?
+
+    /// Tab group ID (nil if not in a group)
+    var groupId: UUID?
+
     /// Guest 应用脚本 (已废弃，使用 leftPanelScript 和 rightPanelScript 代替)
     var guestScript: String?
 
-    /// 左侧面板脚本 (menu.js)
+    /// 左侧面板脚本 (menu.js) - Legacy 双 Engine 架构
     var leftPanelScript: String?
 
-    /// 右侧扩展面板脚本 (ext.js) - 按需加载
+    /// 右侧扩展面板脚本 (ext.js) - Legacy 双 Engine 架构
     var rightPanelScript: String?
+
+    /// v2.0: 统一脚本 (unified-app.js) - Single Engine 架构
+    var unifiedScript: String?
+
+    /// contracts（Phase 1）：用于宿主提示与版本兼容
+    var contractName: String?
+    var contractVersion: Int?
+
+    /// permissions（Phase 1）：用于宿主提示（后续可用于 gating）
+    var permissions: [String]
+
+    /// 左侧面板默认是否可见
+    var leftPanelDefaultVisible: Bool
 
     /// 右侧面板默认是否可见
     var rightPanelDefaultVisible: Bool
 
-    var snapshot: NSImage?
     /// Background color for this tab (Hex format: "#rrggbb")
     var backgroundColor: String
 
@@ -26,21 +64,33 @@ struct Tab: Identifiable {
         title: String,
         url: URL? = nil,
         htmlContent: String? = nil,
+        systemTabType: SystemTabType? = nil,
+        groupId: UUID? = nil,
         guestScript: String? = nil,
         leftPanelScript: String? = nil,
         rightPanelScript: String? = nil,
+        unifiedScript: String? = nil,
+        contractName: String? = nil,
+        contractVersion: Int? = nil,
+        permissions: [String] = [],
+        leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
-        snapshot: NSImage? = nil,
         backgroundColor: String? = nil
     ) {
         self.title = title
         self.url = url
         self.htmlContent = htmlContent
+        self.systemTabType = systemTabType
+        self.groupId = groupId
         self.guestScript = guestScript
         self.leftPanelScript = leftPanelScript
         self.rightPanelScript = rightPanelScript
+        self.unifiedScript = unifiedScript
+        self.contractName = contractName
+        self.contractVersion = contractVersion
+        self.permissions = permissions
+        self.leftPanelDefaultVisible = leftPanelDefaultVisible
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
-        self.snapshot = snapshot
         self.backgroundColor = backgroundColor ?? Self.generateRandomColor()
     }
 

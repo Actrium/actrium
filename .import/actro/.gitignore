@@ -19,7 +19,7 @@ Pods/
 Podfile.lock
 
 # React Native / Node.js
-actr-host/node_modules/
+Artifacts/node_modules/
 rn/.metro-health-check*
 *.log
 npm-debug.log*
@@ -33,3 +33,4 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.temp
+Artifacts/bun.lock

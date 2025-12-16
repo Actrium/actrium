@@ -1,10 +1,12 @@
 {
-  "name": "actr-host",
+  "name": "canvas-artifacts",
   "version": "1.0.0",
-  "description": "Canvas ActrApp Host - React Native runtime for .actr applications",
+  "description": "Canvas Artifacts - React Native runtime for actr apps and system apps",
   "main": "index.js",
   "scripts": {
-    "start": "react-native start",
+    "start": "react-native start --verbose",
+    "log": "bun log-server.ts",
+    "dev": "bun scripts/dev.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -16,17 +18,24 @@
     "@babel/runtime": "^7.28.4",
     "@react-navigation/native": "^7.1.20",
     "@react-navigation/stack": "^7.6.4",
+    "askit": "github:GoAskAway/askit",
     "react": "19.0.0",
+    "react-native": "0.79.6",
+    "react-native-jsc-sandbox": "file:../../react-native-jsc-sandbox",
     "react-native-macos": "^0.79.1",
     "react-native-safe-area-context": "^5.6.2",
-    "react-native-screens": "^4.18.0"
+    "react-native-screens": "^4.18.0",
+    "react-reconciler": "^0.31.0",
+    "rill": "file:../../rill/packages/core"
   },
   "devDependencies": {
     "@react-native-community/cli": "^20.0.2",
-    "@react-native/metro-config": "^0.82.1",
+    "@react-native/metro-config": "^0.79.1",
     "@tsconfig/react-native": "^3.0.0",
     "@types/react": "19.0.0",
-    "@types/react-native": "^0.73.0",
     "typescript": "^5.6.3"
+  },
+  "overrides": {
+    "rill": "file:../../rill/packages/core"
   }
 }

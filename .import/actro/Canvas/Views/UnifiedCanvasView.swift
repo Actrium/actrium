@@ -13,15 +13,14 @@ import UniformTypeIdentifiers
 /// - 只通过 scale + offset 变换实现模式切换
 struct UnifiedCanvasView: View {
     @ObservedObject var viewModel: BrowserViewModel
+    @ObservedObject var historyVM: HistoryViewModel
+    @ObservedObject var bookmarkVM: BookmarkViewModel
 
-    // 模式定义
-    enum Mode: Equatable {
-        case overview
-        case focus(tabId: UUID)
-    }
+    // Mode is stored in viewModel.canvasMode to survive view recreation
+    // (e.g., when DevTools layout changes from docked to detached)
 
-    @State private var mode: Mode = .overview
     @State private var isACTRDropTarget: Bool = false
+    @State private var showingBookmarkSheet: Bool = false
 
     // Toolbar 状态
     @State private var addressInputText: String = ""
@@ -54,7 +53,7 @@ struct UnifiedCanvasView: View {
     // 为过滤后的 tabs 创建新的位置映射（重新排列，从 0 开始连续）
     private var filteredTabPositions: [UUID: Int] {
         guard !searchTabsText.isEmpty else {
-            return viewModel.tabSpiralPositions
+            return viewModel.tabSlotPositions
         }
         var newPositions: [UUID: Int] = [:]
         for (index, tab) in filteredTabs.enumerated() {
@@ -98,7 +97,7 @@ struct UnifiedCanvasView: View {
 
             // 计算变换
             let transform: (scale: CGFloat, offset: CGPoint) = {
-                switch mode {
+                switch viewModel.canvasMode {
                 case .overview:
                     return calculateOverviewTransform(
                         canvasSize: canvasSize,
@@ -120,22 +119,27 @@ struct UnifiedCanvasView: View {
                     .ignoresSafeArea()
 
                 // 统一渲染 Canvas（Overview 和 Focus 共用同一个视图，通过 transform 动画切换）
+                // 每个 Tab 卡片包含独立的 RCTRootView，实现真正的缩放
                 CanvasView(
                     tabs: filteredTabs,
-                    tabSpiralPositions: filteredTabPositions,
+                    tabSlotPositions: filteredTabPositions,
                     positions: gridResult.positions,
                     cardWidth: gridResult.cardWidth,
                     cardHeight: gridResult.cardHeight,
                     titleBarRatio: titleBarRatio,
                     toolbarHeight: toolbarHeight,
                     currentScale: transform.scale,
-                    mode: mode,
+                    mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
+                    viewportSize: viewportSize,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
                     onSelectTab: { tabId in
                         switchToFocus(tabId: tabId)
                     },
                     onSwapPositions: { tabId1, tabId2 in
-                        viewModel.swapSpiralPositions(tabId1: tabId1, tabId2: tabId2)
+                        viewModel.swapSlotPositions(tabId1: tabId1, tabId2: tabId2)
                     },
                     onNewTab: {
                         viewModel.addNewTab()
@@ -149,10 +153,11 @@ struct UnifiedCanvasView: View {
                 .frame(width: canvasSize.width, height: canvasSize.height)
                 .scaleEffect(transform.scale, anchor: .topLeading)
                 .offset(x: transform.offset.x, y: transform.offset.y)
+                .animation(.easeInOut(duration: 0.3), value: viewModel.canvasMode)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     // Focus 模式下点击内容区域取消地址栏编辑
-                    if case .focus = mode, isAddressBarEditing {
+                    if case .focus = viewModel.canvasMode, isAddressBarEditing {
                         isAddressBarEditing = false
                         isAddressBarFirstResponder = false
                     }
@@ -162,10 +167,19 @@ struct UnifiedCanvasView: View {
                 GlassViewOnlyRepresentable(
                     onDropACTR: { url in
                         Task { @MainActor in
-                            if case .overview = mode {
+                            if case .overview = viewModel.canvasMode {
                                 searchTabsText = ""
                             }
-                            viewModel.importACTRPackage(from: url)
+
+                            // Check if it's a directory or .actr file
+                            var isDirectory: ObjCBool = false
+                            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+                                if isDirectory.boolValue {
+                                    viewModel.loadFromDevDirectory(url)
+                                } else {
+                                    viewModel.importACTRPackage(from: url)
+                                }
+                            }
 
                             // 导入完成后自动切换到新 Tab 的 Focus 模式
                             if let newTabId = viewModel.currentTabId {
@@ -176,25 +190,11 @@ struct UnifiedCanvasView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Focus 模式下的 React Native 内容覆盖层
-                if case .focus(let tabId) = mode,
-                   let tab = viewModel.tabs.first(where: { $0.id == tabId }),
-                   tab.guestScript != nil || tab.htmlContent != nil {
-                    ReactNativeTabHostView(
-                        viewModel: viewModel,
-                        isLeftPanelVisible: viewModel.isLeftPanelVisible(for: tabId),
-                        isRightPanelVisible: true,
-                        onCoordinatorReady: { coordinator in
-                            print("✅ Focus模式 - React Native Coordinator 已就绪，Tab: \(tab.title)")
-                        }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .id("rn-overlay-\(tabId.uuidString)")
-                    .zIndex(1000)  // 确保在最上层
-                }
+                // 注意：RN 内容层已移至每个 TabCardView 内部
+                // 每个 Tab 都有独立的 RCTRootView，实现真正的缩放
 
                 // Search Tabs 搜索框 - 仅在 Overview 模式显示
-                if case .overview = mode {
+                if case .overview = viewModel.canvasMode {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
@@ -222,7 +222,7 @@ struct UnifiedCanvasView: View {
                         Spacer(minLength: 0)
 
                         // Overview 模式：显示空状态；Focus 模式：显示地址栏
-                        if case .overview = mode {
+                        if case .overview = viewModel.canvasMode {
                             // Overview 模式下的空占位
                             Color.clear
                                 .frame(width: addressBarContainerWidth, height: 28)
@@ -232,13 +232,25 @@ struct UnifiedCanvasView: View {
                                 inputText: $addressInputText,
                                 isEditing: $isAddressBarEditing,
                                 isFirstResponder: $isAddressBarFirstResponder,
+                                isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
                                 toggleLeftPanel: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         viewModel.toggleLeftPanelForCurrentTab()
                                     }
                                 },
+                                toggleBookmark: {
+                                    if let tab = viewModel.currentTab {
+                                        if bookmarkVM.isBookmarked(tab: tab) {
+                                            // Already bookmarked - open edit sheet
+                                            showingBookmarkSheet = true
+                                        } else {
+                                            // Not bookmarked - show add sheet
+                                            showingBookmarkSheet = true
+                                        }
+                                    }
+                                },
                                 refreshAction: {
-                                    // TODO: 刷新逻辑
+                                    viewModel.reloadCurrentTab()
                                 }
                             )
                             .frame(width: addressBarContainerWidth)
@@ -271,7 +283,7 @@ struct UnifiedCanvasView: View {
                 }
             }
         }
-        .onChange(of: mode) { oldValue, newValue in
+        .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 进入 Overview 模式时自动聚焦搜索框
             if case .overview = newValue {
                 // 延迟一帧，确保搜索框已渲染
@@ -285,10 +297,22 @@ struct UnifiedCanvasView: View {
             }
         }
         .onAppear {
+            // 🔴 开发调试：如果设置了启动时进入 Focus 模式，直接切换
+            if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
+                print("🚀 [UnifiedCanvasView] 启动时直接进入 Focus 模式")
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        viewModel.canvasMode = .focus(tabId: tabId)
+                    }
+                    viewModel.shouldStartInFocusMode = false  // 重置标志
+                }
+            }
+            // Note: canvasMode defaults to .overview, no need to set explicitly
+
             // 监听 ESC 键
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 if event.keyCode == 53 { // ESC key code
-                    if case .overview = mode {
+                    if case .overview = viewModel.canvasMode {
                         switchToFocus(tabId: viewModel.currentTabId ?? viewModel.tabs.first!.id)
                         return nil
                     }
@@ -308,12 +332,22 @@ struct UnifiedCanvasView: View {
                 NSEvent.removeMonitor(monitor)
             }
         }
+        .sheet(isPresented: $showingBookmarkSheet) {
+            if let tab = viewModel.currentTab {
+                let existingBookmark = bookmarkVM.getBookmark(for: tab)
+                BookmarkEditSheet(
+                    viewModel: bookmarkVM,
+                    tab: existingBookmark == nil ? tab : nil,
+                    existingBookmark: existingBookmark
+                )
+            }
+        }
     }
 
     // MARK: - Mode Switching
 
     private func toggleMode() {
-        if case .overview = mode {
+        if case .overview = viewModel.canvasMode {
             // 从 Overview 切换到第一个 Tab
             if let firstTab = viewModel.tabs.first {
                 switchToFocus(tabId: firstTab.id)
@@ -325,18 +359,18 @@ struct UnifiedCanvasView: View {
     }
 
     private func switchToOverview() {
-        guard case .focus = mode else { return }
+        guard case .focus = viewModel.canvasMode else { return }
 
         withAnimation(.easeInOut(duration: 0.3)) {
-            mode = .overview
+            viewModel.canvasMode = .overview
         }
     }
 
     private func switchToFocus(tabId: UUID) {
-        guard mode != .focus(tabId: tabId) else { return }
+        guard viewModel.canvasMode != .focus(tabId: tabId) else { return }
 
         withAnimation(.easeInOut(duration: 0.3)) {
-            mode = .focus(tabId: tabId)
+            viewModel.canvasMode = .focus(tabId: tabId)
         }
     }
 
@@ -376,7 +410,7 @@ struct UnifiedCanvasView: View {
         viewportSize: CGSize,
         titleBarRatio: CGFloat
     ) -> (scale: CGFloat, offset: CGPoint) {
-        guard let position = viewModel.tabSpiralPositions[tabId],
+        guard let position = viewModel.tabSlotPositions[tabId],
               position < gridResult.positions.count else {
             return (1.0, .zero)
         }
@@ -521,15 +555,20 @@ struct UnifiedCanvasView: View {
 
 private struct CanvasView: View {
     let tabs: [Tab]
-    let tabSpiralPositions: [UUID: Int]
+    let tabSlotPositions: [UUID: Int]
     let positions: [CGPoint]
     let cardWidth: CGFloat
     let cardHeight: CGFloat
     let titleBarRatio: CGFloat  // 标题栏高度占卡片高度的比例
     let toolbarHeight: CGFloat  // toolbar 实际高度
     let currentScale: CGFloat
-    let mode: UnifiedCanvasView.Mode
+    let mode: CanvasMode
     let showNewTabButton: Bool  // 是否显示 [+] 按钮（搜索过滤时隐藏）
+    let viewportSize: CGSize    // 视口尺寸，用于 RN 渲染
+    // 新增：用于创建 SingleTabRootView
+    @ObservedObject var viewModel: BrowserViewModel
+    var historyVM: HistoryViewModel?
+    var bookmarkVM: BookmarkViewModel?
     let onSelectTab: (UUID) -> Void
     let onSwapPositions: (UUID?, UUID?) -> Void
     let onNewTab: () -> Void
@@ -551,7 +590,7 @@ private struct CanvasView: View {
 
         // 添加所有 tabs
         for tab in tabs {
-            if let position = tabSpiralPositions[tab.id] {
+            if let position = tabSlotPositions[tab.id] {
                 items.append((position, .tab(tab)))
             }
         }
@@ -601,6 +640,10 @@ private struct CanvasView: View {
                         isBeingDragged: isBeingDragged,
                         isHovering: isHovering,
                         isSwapping: isSwapping,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM,
+                        viewportSize: viewportSize,
                         onSelect: {
                             onSelectTab(tab.id)
                         },
@@ -612,7 +655,7 @@ private struct CanvasView: View {
 
                             // 设置新的拖动状态
                             draggingTabId = tab.id
-                            dragSourceSlotIndexFixed = tabSpiralPositions[tab.id]
+                            dragSourceSlotIndexFixed = tabSlotPositions[tab.id]
                             return NSItemProvider(object: tab.id.uuidString as NSString)
                         },
                         onClose: {
@@ -625,7 +668,7 @@ private struct CanvasView: View {
                         draggingTabId: $draggingTabId,
                         hoveringOverTabId: $hoveringOverTabId,
                         dropTargetSlotIndexFixed: $dropTargetSlotIndexFixed,
-                        tabSpiralPositions: tabSpiralPositions,
+                        tabSlotPositions: tabSlotPositions,
                         onSwapPositions: { tabId1, tabId2 in
                             // 标记目标卡片为交换中（触发淡入动画）
                             // 注意：此时 hoveringOverTabId 还是 tabId2，所以 B 卡片还是半透明的
@@ -755,7 +798,7 @@ private struct TabSwapDropDelegate: DropDelegate {
     @Binding var draggingTabId: UUID?
     @Binding var hoveringOverTabId: UUID?
     @Binding var dropTargetSlotIndexFixed: Int?
-    let tabSpiralPositions: [UUID: Int]
+    let tabSlotPositions: [UUID: Int]
     let onSwapPositions: (UUID?, UUID?) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -791,7 +834,7 @@ private struct TabSwapDropDelegate: DropDelegate {
            targetId != draggingId {  // 忽略拖到自己身上
             hoveringOverTabId = targetId
             // 更新目标槽位索引（跟随 hover 目标变化）
-            dropTargetSlotIndexFixed = tabSpiralPositions[targetId]
+            dropTargetSlotIndexFixed = tabSlotPositions[targetId]
         }
     }
 
@@ -885,7 +928,9 @@ private struct AddressBarContainer: View {
     @Binding var inputText: String
     @Binding var isEditing: Bool
     @Binding var isFirstResponder: Bool
+    var isBookmarked: Bool
     var toggleLeftPanel: () -> Void
+    var toggleBookmark: () -> Void
     var refreshAction: () -> Void
 
     private let placeholder = "Search from bookmark or enter app id"
@@ -932,6 +977,14 @@ private struct AddressBarContainer: View {
                             }
                         }
 
+                    // Star button for bookmarking
+                    Button(action: toggleBookmark) {
+                        Image(systemName: isBookmarked ? "star.fill" : "star")
+                            .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
+                    }
+                    .buttonStyle(.borderless)
+                    .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
+
                     Button(action: refreshAction) {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -963,7 +1016,7 @@ private struct AddressBarContainer: View {
                 // 从略大的、透明的蓝圈收缩到正常大小并渐显
                 focusRingScale = 1.08
                 focusRingOpacity = 0.0
-                withAnimation(.spring(response: 2.5, dampingFraction: 0.7, blendDuration: 0.1)) {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.7, blendDuration: 0.1)) {
                     focusRingScale = 1.0
                     focusRingOpacity = 1.0
                 }
@@ -1060,6 +1113,11 @@ private struct TabCardView: View {
     let isBeingDragged: Bool
     let isHovering: Bool
     let isSwapping: Bool  // 正在交换过程中（用于淡入动画）
+    // 新增：用于创建 SingleTabRootView
+    @ObservedObject var viewModel: BrowserViewModel
+    var historyVM: HistoryViewModel?
+    var bookmarkVM: BookmarkViewModel?
+    let viewportSize: CGSize  // 视口尺寸，用于 RN 渲染
     let onSelect: () -> Void
     let onDragStart: () -> NSItemProvider
     let onClose: () -> Void
@@ -1087,16 +1145,15 @@ private struct TabCardView: View {
         // 卡片层（纯内容，无边框）
         // 边框只在槽位层显示，卡片本身不应该有任何边框
         VStack(spacing: 0) {
-                // 标题栏 - Focus 模式时隐藏但保持结构
+                // 标题栏 - Focus 模式时会被缩放到视口外，不需要手动隐藏
                 titleBarView
                     .frame(height: titleBarHeight)
-                    .opacity(isFocused ? 0 : 1)
 
                 // 内容区域
                 contentView
             }
             .frame(width: cardWidth, height: cardHeight)
-            .cornerRadius(isFocused ? 0 : 10)
+            .cornerRadius(10)
             // 被拖动的卡片：隐藏（由拖拽预览显示）
             .opacity(isBeingDragged ? 0.001 : 1.0)
             // hover 时半透明，交换过程中淡入到完全不透明
@@ -1160,20 +1217,12 @@ private struct TabCardView: View {
 
             // 内容区域
             ZStack {
-                // 底层背景
-                Color(nsColor: NSColor(white: 0.15, alpha: 1.0))
+                // 底层背景 - 使用 Tab 的随机背景颜色
+                Color(hslString: tab.backgroundColor)
 
-                if let snapshot = tab.snapshot {
-                    Image(nsImage: snapshot)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                } else {
-                    Image(systemName: "globe")
-                        .font(.system(size: 32))
-                        .foregroundColor(.white.opacity(0.3))
-                }
+                Image(systemName: "globe")
+                    .font(.system(size: 32))
+                    .foregroundColor(.white.opacity(0.3))
             }
             .frame(maxHeight: .infinity)
         }
@@ -1253,51 +1302,59 @@ private struct TabCardView: View {
         .contentShape(Rectangle())
     }
 
+    // 卡片内容区域尺寸（不含标题栏）
+    private var cardContentSize: CGSize {
+        CGSize(width: cardWidth, height: cardHeight * (1 - titleBarRatio))
+    }
+
+    // RN 渲染尺寸（使用视口尺寸，确保布局正确）
+    private var rnRenderSize: CGSize {
+        CGSize(width: viewportSize.width, height: viewportSize.height - toolbarHeight)
+    }
+
+    // RN 视图需要缩放的比例（从视口尺寸缩放到卡片内容尺寸）
+    private var rnScaleFactor: CGFloat {
+        guard rnRenderSize.width > 0, rnRenderSize.height > 0 else { return 1 }
+        let scaleX = cardContentSize.width / rnRenderSize.width
+        let scaleY = cardContentSize.height / rnRenderSize.height
+        return min(scaleX, scaleY)
+    }
+
+    // 判断 Tab 是否有 RN 内容需要渲染
+    private var hasRNContent: Bool {
+        tab.systemTabType != nil ||
+        tab.unifiedScript != nil ||
+        tab.leftPanelScript != nil ||
+        tab.guestScript != nil
+    }
+
     // 内容区域视图
     private var contentView: some View {
         ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
-            // 优先级：guestScript > htmlContent > snapshot > 默认图标
-            if let _ = tab.guestScript {
-                // 有 guestScript，显示 React Native 内容
-                // 注意：这里不能直接嵌入 ReactNativeTabHostView，因为会有性能问题
-                // 只有在 Focus 模式时才会加载 React Native
-                if isFocused {
-                    Text("React Native Content")
-                        .foregroundColor(.white.opacity(0.6))
-                } else if let snapshot = tab.snapshot {
-                    Image(nsImage: snapshot)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                } else {
-                    Image(systemName: "app.badge")
-                        .font(.system(size: 32))
-                        .foregroundColor(.white.opacity(0.3))
-                }
+            // 每个 Tab 都有独立的 RCTRootView - 实现真正的缩放
+            if hasRNContent {
+                // RN 视图用视口尺寸渲染（布局正确），然后缩放到卡片尺寸
+                SingleTabRootView(
+                    tab: tab,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    containerSize: rnRenderSize
+                )
+                .frame(width: rnRenderSize.width, height: rnRenderSize.height)
+                .scaleEffect(rnScaleFactor, anchor: .topLeading)
+                .frame(width: cardContentSize.width, height: cardContentSize.height, alignment: .topLeading)
+                .clipped()
             } else if let _ = tab.htmlContent {
-                // 有 htmlContent，显示网页内容
-                if let snapshot = tab.snapshot {
-                    Image(nsImage: snapshot)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                } else {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 32))
-                        .foregroundColor(.white.opacity(0.3))
-                }
-            } else if let snapshot = tab.snapshot {
-                Image(nsImage: snapshot)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
+                // 有 htmlContent，显示网页内容（暂时用占位）
+                Image(systemName: "doc.text")
+                    .font(.system(size: 32))
+                    .foregroundColor(.white.opacity(0.3))
             } else {
+                // 空白 Tab
                 Image(systemName: "globe")
                     .font(.system(size: 32))
                     .foregroundColor(.white.opacity(0.3))
@@ -1373,5 +1430,5 @@ private struct NewTabCardView: View {
 }
 
 #Preview {
-    UnifiedCanvasView(viewModel: BrowserViewModel())
+    UnifiedCanvasView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel())
 }

@@ -4,6 +4,8 @@ import AppKit // Import AppKit for NSImage
 
 struct MainContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
+    @ObservedObject var historyVM: HistoryViewModel
+    @ObservedObject var bookmarkVM: BookmarkViewModel
     @Binding var isTabOverviewVisible: Bool
     @State private var isRightPanelVisible: Bool = true
     @State private var addressInputText: String = ""
@@ -11,14 +13,11 @@ struct MainContentView: View {
     @State private var isAddressBarFirstResponder: Bool = false
     @State private var eventMonitor: Any?
 
-    init(viewModel: BrowserViewModel, isTabOverviewVisible: Binding<Bool>) {
+    init(viewModel: BrowserViewModel, historyVM: HistoryViewModel, bookmarkVM: BookmarkViewModel, isTabOverviewVisible: Binding<Bool>) {
         self.viewModel = viewModel
+        self.historyVM = historyVM
+        self.bookmarkVM = bookmarkVM
         _isTabOverviewVisible = isTabOverviewVisible
-        // 在视图初始化时设置错误处理
-        #if DEBUG
-        // 开发模式下，我们知道某些系统警告会出现
-        // 这些不影响功能，可以安全忽略
-        #endif
     }
 
     var body: some View {
@@ -26,6 +25,8 @@ struct MainContentView: View {
             let isLeftPanelVisible = viewModel.isLeftPanelVisible(for: viewModel.currentTabId)
             TabContentView(
                 viewModel: viewModel,
+                historyVM: historyVM,
+                bookmarkVM: bookmarkVM,
                 isLeftPanelVisible: isLeftPanelVisible,
                 isRightPanelVisible: isRightPanelVisible
             )
@@ -137,7 +138,7 @@ struct MainContentView: View {
 }
 
 #Preview {
-    MainContentView(viewModel: BrowserViewModel(), isTabOverviewVisible: .constant(false))
+    MainContentView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel(), isTabOverviewVisible: .constant(false))
 }
 
 // MARK: - Address Bar Container
@@ -225,7 +226,7 @@ private struct AddressBarContainer: View {
                 // 从略大的、透明的蓝圈收缩到正常大小并渐显
                 focusRingScale = 1.08
                 focusRingOpacity = 0.0
-                withAnimation(.spring(response: 2.5, dampingFraction: 0.7, blendDuration: 0.1)) {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.7, blendDuration: 0.1)) {
                     focusRingScale = 1.0
                     focusRingOpacity = 1.0
                 }
@@ -247,27 +248,29 @@ private func endEditing() {
 
 struct TabContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
+    @ObservedObject var historyVM: HistoryViewModel
+    @ObservedObject var bookmarkVM: BookmarkViewModel
     let isLeftPanelVisible: Bool
     let isRightPanelVisible: Bool
     @State private var reactCoordinator: ReactNativeRootRepresentable.Coordinator?
-    
+
     var body: some View {
-        ReactNativeTabHostView(
-            viewModel: viewModel,
-            isLeftPanelVisible: isLeftPanelVisible,
-            isRightPanelVisible: isRightPanelVisible,
-            onCoordinatorReady: { coordinator in
-                reactCoordinator = coordinator
-                print("✅ React Native Coordinator 已就绪")
-            }
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .id("tab-content-\(viewModel.currentTabId?.uuidString ?? "none")")
-        .onDisappear {
-            // 当视图即将消失时（例如切换到 Overview），捕获快照
-            print("👋 TabContentView 即将消失，尝试捕获快照...")
-            reactCoordinator?.captureCurrentSnapshot()
+        // All tabs (including system tabs like History/Bookmarks) are rendered by React Native
+        GeometryReader { geometry in
+            ReactNativeTabHostView(
+                viewModel: viewModel,
+                historyVM: historyVM,
+                bookmarkVM: bookmarkVM,
+                isLeftPanelVisible: isLeftPanelVisible,
+                isRightPanelVisible: isRightPanelVisible,
+                containerSize: geometry.size,
+                onCoordinatorReady: { coordinator in
+                    reactCoordinator = coordinator
+                    print("✅ React Native Coordinator 已就绪")
+                }
+            )
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

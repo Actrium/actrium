@@ -567,7 +567,7 @@ babel src --out-dir dist --presets @babel/preset-react
 
 ```bash
 # 使用提供的打包脚本
-cd /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/TestData
+cd /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Artifacts/actr-app-examples
 ./pack-actr.sh my-app
 
 # 输出: my-app.actr (实际上是 zip 文件)
@@ -861,12 +861,12 @@ cd /path/to/my-issue-tracker
 
 ```bash
 # 复制文件到 TestData 目录
-mkdir -p /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/TestData/my-issue-tracker
-cp dist/guest.js /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/TestData/my-issue-tracker/
-cp manifest.json /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/TestData/my-issue-tracker/
+mkdir -p /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Artifacts/actr-app-examples/my-issue-tracker
+cp dist/guest.js /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Artifacts/actr-app-examples/my-issue-tracker/
+cp manifest.json /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Artifacts/actr-app-examples/my-issue-tracker/
 
 # 打包
-cd /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/TestData
+cd /Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Artifacts/actr-app-examples
 ./pack-actr.sh my-issue-tracker
 
 # 生成: my-issue-tracker.actr
@@ -905,7 +905,7 @@ set -e
 
 PROJECT_NAME="my-issue-tracker"
 RILL_CLI="/Users/example-dev-2/Projects/example-workspace-2/GoAskAway/rill/dist/cli/index.js"
-TEST_DATA_DIR="/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/TestData"
+TEST_DATA_DIR="/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Artifacts/actr-app-examples"
 
 echo "📦 Building Guest application..."
 $RILL_CLI build src/App.tsx -o dist/guest.js
@@ -1071,15 +1071,15 @@ useHostEvent('STORAGE_RESPONSE', ({ key, value }) => {
 
 ### 示例应用
 
-- **HelloWorld**: `Canvas/TestData/helloworld/`
-- **Issue Manager**: `Canvas/TestData/issue-manager/`
+- **HelloWorld**: `Canvas/Artifacts/actr-app-examples/helloworld/`
+- **Issue Manager**: `Canvas/Artifacts/actr-app-examples/issue-manager/`
 
 ### 核心文件
 
 - **Rill Engine**: `rill/src/runtime/Engine.ts`
 - **Rill EngineView**: `rill/src/runtime/EngineView.native.tsx`
 - **GuestAppView**: `Canvas/actr-host/src/GuestAppView.tsx`
-- **打包脚本**: `Canvas/TestData/pack-actr.sh`
+- **打包脚本**: `Canvas/Artifacts/actr-app-examples/pack-actr.sh`
 
 ---
 
@@ -1094,9 +1094,3 @@ Rill + Askit 体系提供了一个安全、高效的跨平台 Guest 应用开发
 5. **简单打包**: .actr 格式便于分发和安装
 
 按照本文档的指导，你可以快速开发出功能完整、体验流畅的 Guest 应用！
-
----
-
-**文档版本**: 1.0
-**最后更新**: 2025-01-27
-**作者**: Canvas 开发团队
