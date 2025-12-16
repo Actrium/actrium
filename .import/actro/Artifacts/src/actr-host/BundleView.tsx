@@ -149,7 +149,7 @@ const LocalEngineView: React.FC<{ containerHeight?: number; containerWidth?: num
               break;
             }
           } catch (e) {
-            console.warn('[LocalEngineView] 方法', method, '失败:', e.message);
+            console.warn('[LocalEngineView] 方法', method, '失败:', e instanceof Error ? e.message : e);
           }
         }
         if (!injectionSuccess) {
