@@ -5,14 +5,14 @@
  */
 
 export type { EngineEvents, EngineOptions } from './engine';
-// 核心导出
+// Core exports
 export { Engine } from './engine';
 
-// EngineView 需要 React Native 环境，在 check 中排除
+// EngineView requires React Native environment, excluded in check
 // export { EngineView } from './EngineView';
 // export type { EngineViewProps } from './EngineView';
 
-// 类型导出
+// Type exports
 export type {
   AppendOperation,
   CallFunctionMessage,
@@ -44,7 +44,7 @@ export type {
   VirtualScrollConfig,
   VirtualScrollState,
 } from './performance';
-// 性能优化
+// Performance optimizations
 export {
   OperationMerger,
   PerformanceMonitor,

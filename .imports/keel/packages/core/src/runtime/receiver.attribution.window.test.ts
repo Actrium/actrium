@@ -90,14 +90,14 @@ describe('Receiver attribution window', () => {
     (Date as any).now = () => now;
     try {
       receiver.applyBatch(batch1());
-      now = 2000; // 超出 historyMs（1500），会触发 trim
+      now = 2000; // Exceeds historyMs (1500), triggers trim
       receiver.applyBatch(batch2());
 
       const stats = receiver.getStats();
       expect(stats.attribution).not.toBeNull();
       const w = stats.attribution!;
 
-      // batch1 已被 trim，窗口内只剩 batch2
+      // batch1 has been trimmed, only batch2 remains in window
       expect(w.sampleCount).toBe(1);
       expect(w.total).toBe(2);
       expect(w.opCounts.UPDATE).toBe(1);

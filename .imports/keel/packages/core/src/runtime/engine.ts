@@ -39,8 +39,8 @@ export interface EngineOptions {
   provider?: JSEngineProvider;
 
   /**
-   * 兼容旧参数：`quickjs`（等价于 `provider`）
-   * @deprecated 请使用 `provider`
+   * Legacy parameter: `quickjs` (equivalent to `provider`)
+   * @deprecated Use `provider` instead
    */
   quickjs?: JSEngineProvider;
 
@@ -94,21 +94,21 @@ export interface EngineOptions {
   receiverMaxBatchSize?: number;
 
   /**
-   * 诊断相关参数（用于 Host 侧任务管理器/资源监视器）
+   * Diagnostics parameters (for Host-side Task Manager/Resource Monitor)
    */
   diagnostics?: {
     /**
-     * 计算 ops/s 与 batch/s 的统计窗口（ms）
+     * Stats window (ms) for calculating ops/s and batch/s
      * @default 5000
      */
     activityWindowMs?: number;
     /**
-     * 活动样本保留时长（ms），用于时间线聚合
+     * Activity sample retention duration (ms), for timeline aggregation
      * @default 60000
      */
     activityHistoryMs?: number;
     /**
-     * 时间线桶宽（ms）
+     * Timeline bucket width (ms)
      * @default 2000
      */
     activityBucketMs?: number;
@@ -251,7 +251,7 @@ export class Engine implements IEngine {
   // sendToHost reference for callback registry access
   private sendToHostFn: ((batch: OperationBatch) => void) | null = null;
 
-  // Host-side activity tracking（用于任务管理器/资源监视器）
+  // Host-side activity tracking (for Task Manager/Resource Monitor)
   private activityWindowMs = 5000;
   private activityHistoryMs = 60_000;
   private activityBucketMs = 2000;
@@ -272,14 +272,14 @@ export class Engine implements IEngine {
     applyDurationMs: number | null;
   } | null = null;
 
-  // Guest 主动上报事件的可观测性（用于 Host 侧监视与“督促配合”）
+  // Guest proactive event reporting observability (for Host-side monitoring)
   private lastGuestEventName: string | null = null;
   private lastGuestEventAt: number | null = null;
   private lastGuestPayloadBytes: number | null = null;
   private guestSleeping: boolean | null = null;
   private guestSleepingAt: number | null = null;
 
-  // Host → Guest 事件的可观测性（用于 Host 侧“任务管理器/资源监视器”）
+  // Host → Guest event observability (for Host-side Task Manager/Resource Monitor)
   private lastHostEventName: string | null = null;
   private lastHostEventAt: number | null = null;
   private lastHostPayloadBytes: number | null = null;
@@ -857,7 +857,7 @@ export class Engine implements IEngine {
         globalThis.__sendEventToHost('DEVTOOLS_OPERATIONS', batch);
       }
 
-      // 记录 batch 活动（无论是否有 receiver）
+      // Record batch activity (regardless of receiver presence)
       const at = Date.now();
       const totalOps = batch.operations.length;
       this.totalBatches += 1;
@@ -877,12 +877,12 @@ export class Engine implements IEngine {
         applyDurationMs: null,
       };
       this.activitySamples.push(sample);
-      // 修剪窗口外样本，避免无限增长
+      // Trim samples outside window to prevent unbounded growth
       const cutoff = at - this.activityHistoryMs;
       while (this.activitySamples.length > 0 && this.activitySamples[0]!.at < cutoff) {
         this.activitySamples.shift();
       }
-      // 兜底限制（极端情况下）
+      // Fallback limit (for extreme cases)
       if (this.activitySamples.length > 2000) {
         this.activitySamples = this.activitySamples.slice(-1000);
       }
@@ -929,7 +929,7 @@ export class Engine implements IEngine {
         }
       }
 
-      // 特殊约定：Guest 上报自己的睡眠状态（配合 HOST_VISIBILITY）
+      // Special convention: Guest reports its sleep state (used with HOST_VISIBILITY)
       if (eventName === 'GUEST_SLEEP_STATE' && payload && typeof payload === 'object') {
         const sleeping = (payload as { sleeping?: unknown }).sleeping;
         if (typeof sleeping === 'boolean') {
@@ -1037,11 +1037,11 @@ export class Engine implements IEngine {
       );
     }
     try {
-      // ✅ 优先走 Host 侧 CallbackRegistry：
-      // - RNQuickJS / VMProvider 场景下，reconciler 运行在 Host（Hermes/Node）侧，
-      //   serializePropsWithTracking() 会把 Guest 侧传来的函数句柄注册进 CallbackRegistry。
-      // - Receiver 触发事件时只带 fnId；此处直接通过 registry 调用即可。
-      // - 兼容：若 registry 中不存在该 fnId，则回退到 Guest runtime 注入的 __invokeCallback（旧链路）。
+      // ✅ Prefer Host-side CallbackRegistry:
+      // - In RNQuickJS / VMProvider scenarios, reconciler runs on Host (Hermes/Node) side,
+      //   serializePropsWithTracking() registers function handles from Guest into CallbackRegistry.
+      // - When Receiver triggers events, it only carries fnId; we can invoke directly via registry.
+      // - Fallback: if fnId not found in registry, fall back to Guest runtime's __invokeCallback (legacy path).
       if (
         typeof RillReconciler.hasCallback === 'function' &&
         RillReconciler.hasCallback(message.fnId)
@@ -1378,7 +1378,7 @@ export class Engine implements IEngine {
     const now = Date.now();
     const cutoff = now - this.activityWindowMs;
 
-    // 统计窗口内的 ops 与 batch
+    // Calculate ops and batches within stats window
     let windowOps = 0;
     let windowBatches = 0;
     for (let i = this.activitySamples.length - 1; i >= 0; i--) {
@@ -1392,7 +1392,7 @@ export class Engine implements IEngine {
     const opsPerSecond = seconds > 0 ? windowOps / seconds : 0;
     const batchesPerSecond = seconds > 0 ? windowBatches / seconds : 0;
 
-    // 时间线（用于趋势/归因）：按固定桶聚合最近 activityHistoryMs
+    // Timeline (for trends/attribution): aggregate recent activityHistoryMs into fixed buckets
     const bucketMs = this.activityBucketMs;
     const bucketCount = Math.max(1, Math.ceil(this.activityHistoryMs / bucketMs));
     const timelineWindowMs = bucketCount * bucketMs;

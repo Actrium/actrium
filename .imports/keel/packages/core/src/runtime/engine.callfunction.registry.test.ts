@@ -4,8 +4,8 @@ import * as RillReconciler from '../reconciler';
 import { Engine } from './engine';
 
 describe('Engine CALL_FUNCTION (host callback registry)', () => {
-  it('不依赖 Guest __invokeCallback 也能触发回调', async () => {
-    // 先通过 reconciler 初始化全局 CallbackRegistry
+  it('should invoke callback without relying on Guest __invokeCallback', async () => {
+    // Initialize global CallbackRegistry via reconciler
     const sendToHost = () => {};
     RillReconciler.render(React.createElement('View', null), sendToHost);
     const registry = RillReconciler.getCallbackRegistry(sendToHost);
@@ -16,16 +16,16 @@ describe('Engine CALL_FUNCTION (host callback registry)', () => {
       called = true;
     });
 
-    // 加载一个不注入 __invokeCallback 的最小 bundle
+    // Load a minimal bundle that doesn't inject __invokeCallback
     const engine = new Engine({ debug: false });
     await engine.loadBundle('console.log("loaded")');
 
-    // 如果 Engine 仍然走 sandbox eval 的 __invokeCallback，这里会找不到函数而导致 called=false
+    // If Engine still uses sandbox eval's __invokeCallback, the function won't be found and called=false
     await engine.sendToSandbox({ type: 'CALL_FUNCTION', fnId, args: [] });
 
     expect(called).toBe(true);
 
-    // 清理
+    // Cleanup
     registry!.remove(fnId);
     engine.destroy();
     RillReconciler.unmount(sendToHost);

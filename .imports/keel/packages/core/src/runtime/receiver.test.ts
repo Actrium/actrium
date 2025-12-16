@@ -8,7 +8,7 @@ import type { HostMessage, OperationBatch } from '../types';
 import { Receiver, type SendToSandbox } from './receiver';
 import { ComponentRegistry } from './registry';
 
-// Mock 组件
+// Mock components
 const MockView: React.FC<{ style?: object; children?: React.ReactNode }> = ({ children }) =>
   React.createElement('View', null, children);
 
@@ -64,7 +64,7 @@ describe('Receiver', () => {
 
       receiver.applyBatch(batch);
 
-      // 等待 microtask 完成
+      // Wait for microtask to complete
       await new Promise((resolve) => queueMicrotask(resolve));
 
       expect(receiver.nodeCount).toBe(2);
@@ -87,7 +87,7 @@ describe('Receiver', () => {
       receiver.applyBatch(batch1);
       receiver.applyBatch(batch2);
 
-      // 等待 microtask 完成
+      // Wait for microtask to complete
       await new Promise((resolve) => queueMicrotask(resolve));
 
       // onUpdate should be called only once

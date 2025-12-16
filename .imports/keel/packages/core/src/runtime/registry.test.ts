@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import React from 'react';
 import { ComponentRegistry, createRegistry } from './registry';
 
-// Mock 组件
+// Mock components
 const MockView: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
   React.createElement('View', null, children);
 

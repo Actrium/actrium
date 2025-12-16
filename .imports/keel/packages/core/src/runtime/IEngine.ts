@@ -56,27 +56,27 @@ export interface ResourceStats {
 
 export interface EngineActivityStats {
   /**
-   * 统计窗口（毫秒），用于计算 ops/s 与 batch/s
+   * Stats window (ms), used for calculating ops/s and batch/s
    */
   windowMs: number;
   /**
-   * 最近窗口内 ops/秒
+   * ops/s within recent window
    */
   opsPerSecond: number;
   /**
-   * 最近窗口内 batch/秒
+   * batch/s within recent window
    */
   batchesPerSecond: number;
   /**
-   * 累计接收的 batch 数量
+   * Total batches received
    */
   totalBatches: number;
   /**
-   * 累计接收的 ops 数量（按 batch.operations.length 计）
+   * Total ops received (by batch.operations.length)
    */
   totalOps: number;
   /**
-   * 最近一次 batch 信息
+   * Last batch info
    */
   lastBatch: {
     batchId: number;
@@ -86,57 +86,57 @@ export interface EngineActivityStats {
   } | null;
 
   /**
-   * 活动时间线（用于 Host 侧趋势图/归因提示）
-   * - points 为等宽桶聚合（ops/batch/skip/apply 耗时）
-   * - 适合直接用于 sparkline / bar chart
+   * Activity timeline (for Host-side trend charts/attribution hints)
+   * - points are fixed-width bucket aggregations (ops/batch/skip/apply duration)
+   * - suitable for sparkline / bar chart
    */
   timeline?: EngineActivityTimeline;
 }
 
 export interface EngineActivityTimelinePoint {
   /**
-   * 桶结束时间戳（ms）
+   * Bucket end timestamp (ms)
    */
   at: number;
   /**
-   * 桶内 ops 总数
+   * Total ops in bucket
    */
   ops: number;
   /**
-   * 桶内 batch 数量
+   * Batch count in bucket
    */
   batches: number;
   /**
-   * 桶内被 Receiver 跳过的 ops 数量（背压信号）
+   * Ops skipped by Receiver in bucket (backpressure signal)
    */
   skippedOps: number;
   /**
-   * 桶内 applyBatch 平均耗时（ms），无样本则为 null
+   * Average applyBatch duration in bucket (ms), null if no samples
    */
   applyDurationMsAvg: number | null;
   /**
-   * 桶内 applyBatch 最大耗时（ms），无样本则为 null
+   * Max applyBatch duration in bucket (ms), null if no samples
    */
   applyDurationMsMax: number | null;
 }
 
 export interface EngineActivityTimeline {
   /**
-   * 时间线覆盖窗口（ms）
+   * Timeline coverage window (ms)
    */
   windowMs: number;
   /**
-   * 单个时间桶宽度（ms）
+   * Single time bucket width (ms)
    */
   bucketMs: number;
   /**
-   * 从旧到新排列的桶
+   * Buckets sorted from oldest to newest
    */
   points: EngineActivityTimelinePoint[];
 }
 
 /**
- * Engine 诊断快照（用于 Host 侧“任务管理器/资源监视器”）
+ * Engine diagnostics snapshot (for Host-side "Task Manager/Resource Monitor")
  */
 export interface EngineDiagnostics {
   id: string;

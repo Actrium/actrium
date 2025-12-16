@@ -23,7 +23,7 @@ interface MockQuickJSProvider {
   createRuntime(): MockQuickJSRuntime;
 }
 
-// Mock 组件
+// Mock components
 const MockView: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
   React.createElement('View', null, children);
 
@@ -420,7 +420,7 @@ describe('Engine Polyfills', () => {
   });
 
   it('should provide console polyfill', async () => {
-    // console 应该在沙箱中可用
+    // console should be available in the sandbox
     await engine.loadBundle(`
       console.log('Log message');
       console.warn('Warn message');

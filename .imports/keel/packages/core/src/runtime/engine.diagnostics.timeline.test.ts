@@ -70,7 +70,7 @@ describe('Engine diagnostics timeline', () => {
     const totalOps = timeline!.points.reduce((sum, p) => sum + p.ops, 0);
     const totalSkipped = timeline!.points.reduce((sum, p) => sum + p.skippedOps, 0);
     expect(totalOps).toBe(8);
-    // 第一批 5 ops，receiverMaxBatchSize=2 => skipped 3；第二批 3 ops => skipped 1
+    // First batch 5 ops, receiverMaxBatchSize=2 => skipped 3; second batch 3 ops => skipped 1
     expect(totalSkipped).toBe(4);
     expect(timeline!.points.some((p) => p.applyDurationMsAvg != null)).toBe(true);
   });
