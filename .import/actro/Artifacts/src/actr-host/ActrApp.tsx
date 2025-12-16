@@ -167,14 +167,22 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   // 更新回调：提取面板（使用 ref，避免依赖引起的重建）
   const handleUpdate = useCallback(() => {
+    nlog(`[ActrTabView] handleUpdate 被调用, isActive=${isActiveRef.current}, tab=${tab.id}`);
     if (!isActiveRef.current) {
       pendingUpdateRef.current = true;
+      nlog(`[ActrTabView] handleUpdate: 非活动状态，跳过`);
       return;
     }
     const eng = engineRef.current;
-    if (!eng) return;
+    if (!eng) {
+      nlog(`[ActrTabView] handleUpdate: engineRef.current 为空`);
+      return;
+    }
     const receiver = eng.getReceiver();
-    if (!receiver) return;
+    if (!receiver) {
+      nlog(`[ActrTabView] handleUpdate: receiver 为空`);
+      return;
+    }
 
     if (typeof extractPanels !== 'function') {
       if (!warnedAskItHostExportsMissing) {
@@ -186,6 +194,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     nlog(`[ActrTabView] handleUpdate: 提取面板... tab=${tab.id}`);
     const fullTree = receiver.render();
+    nlog(`[ActrTabView] fullTree 类型: ${typeof fullTree}, 是 ReactElement: ${React.isValidElement(fullTree)}`);
+    if (React.isValidElement(fullTree)) {
+      const treeType = fullTree.type;
+      nlog(`[ActrTabView] fullTree.type: ${typeof treeType === 'string' ? treeType : (treeType as any)?.displayName || (treeType as any)?.name || 'unknown'}`);
+    }
     const panels = extractPanels(fullTree);
 
     nlog(`[ActrTabView] 提取结果: left=${!!panels.left}, right=${!!panels.right}, tab=${tab.id}`);
@@ -325,32 +338,33 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     async function loadUnifiedBundle() {
       const perf = perfTimers.get(tab.id) || new PerfTimer(tab.id.substring(0, 8));
+      nlog(`🔄 [ActrTabView] loadUnifiedBundle 开始 tab=${tab.id}, script长度=${script.length}`);
 
       try {
         perf.mark('bundle_load_start');
         loadedUnifiedScriptRef.current = script;
 
+        nlog(`🔄 [ActrTabView] 创建 receiver...`);
         eng.createReceiver(handleUpdate);
         perf.mark('receiver_created');
 
-        // 初始化运行时
-        await (eng as any).initializeRuntime();
-        perf.mark('runtime_initialized');
-
-        // 加载脚本
+        // loadBundle 内部会调用 initializeRuntime，无需单独调用
         const scriptSize = script.length;
+        nlog(`🔄 [ActrTabView] 加载 bundle (${Math.round(scriptSize / 1024)}KB)...`);
         await eng.loadBundle(script, {
           containerHeight: 977,
           containerWidth: 1400,
         });
         perf.mark(`bundle_executed (${Math.round(scriptSize / 1024)}KB)`);
+        nlog(`🔄 [ActrTabView] bundle 加载完成`);
 
         // 有时 receiver 的更新回调可能不会立刻触发，手动提取一次确保面板可见
+        nlog(`🔄 [ActrTabView] 手动调用 handleUpdate...`);
         handleUpdate();
         perf.mark('first_render');
 
         nlog(`⏱️ [Perf:${tab.id.substring(0, 8)}] === Bundle 加载完成，总耗时: ${perf.total()}ms ===`);
-        
+
         // Phase 2: 通知 Native 内容已加载完成，可以捕获快照
         try {
           NativeModules.SnapshotModule?.onContentReady?.(tab.id);
@@ -360,6 +374,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         }
       } catch (err: any) {
         nerror(`[ActrTabView] 加载 unified bundle 失败 tab=${tab.id}: ${err?.message}`);
+        nerror(`[ActrTabView] 错误堆栈: ${err?.stack?.substring(0, 500)}`);
       }
     }
 
