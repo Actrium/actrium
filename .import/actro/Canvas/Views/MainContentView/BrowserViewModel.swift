@@ -475,29 +475,49 @@ class BrowserViewModel: ObservableObject {
             return
         }
 
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+        // Check if it's a directory (dev mode) or archive
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
+
+        let rootDir: URL
+        let tempDir: URL?
+
+        if isDirectory.boolValue {
+            // Directory mode - use directly
+            rootDir = resolvedURL
+            tempDir = nil
+        } else {
+            // Archive mode - extract to temp
+            let temp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: temp)
+            } catch {
+                print("❌ [restoreGroup] .actr 装载失败：\(error.localizedDescription)")
+                return
+            }
+            rootDir = temp
+            tempDir = temp
+        }
 
         do {
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            try unzipACTR(archive: resolvedURL, to: tempDir)
-
-            let manifestInfo = try readManifestJSON(fromRoot: tempDir)
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
-            let guestScript = readGuestScript(fromRoot: tempDir)
+            let guestScript = readGuestScript(fromRoot: rootDir)
             var unifiedScript: String? = nil
             if let unifiedFileName = manifestInfo.unifiedScript {
-                unifiedScript = readScript(fromRoot: tempDir, fileName: unifiedFileName)
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
             }
 
             var leftPanelScript: String? = nil
             var rightPanelScript: String? = nil
             if let leftFileName = manifestInfo.leftPanelScript {
-                leftPanelScript = readScript(fromRoot: tempDir, fileName: leftFileName)
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
             }
             if let rightFileName = manifestInfo.rightPanelScript {
-                rightPanelScript = readScript(fromRoot: tempDir, fileName: rightFileName)
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
             }
 
             // Create tab with groupId
@@ -680,31 +700,48 @@ class BrowserViewModel: ObservableObject {
             return
         }
 
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+        // Check if it's a directory (dev mode) or archive
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
+
+        let rootDir: URL
+
+        if isDirectory.boolValue {
+            // Directory mode - use directly
+            rootDir = resolvedURL
+        } else {
+            // Archive mode - extract to temp
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: tempDir)
+            } catch {
+                print("❌ [reloadCurrentTab] 解压失败：\(error.localizedDescription)")
+                return
+            }
+            rootDir = tempDir
+        }
 
         do {
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            try unzipACTR(archive: resolvedURL, to: tempDir)
-
-            let manifestInfo = try readManifestJSON(fromRoot: tempDir)
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
 
             // Read scripts
             var unifiedScript: String? = nil
             if let unifiedFileName = manifestInfo.unifiedScript {
-                unifiedScript = readScript(fromRoot: tempDir, fileName: unifiedFileName)
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
             }
 
             var leftPanelScript: String? = nil
             var rightPanelScript: String? = nil
             if let leftFileName = manifestInfo.leftPanelScript {
-                leftPanelScript = readScript(fromRoot: tempDir, fileName: leftFileName)
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
             }
             if let rightFileName = manifestInfo.rightPanelScript {
-                rightPanelScript = readScript(fromRoot: tempDir, fileName: rightFileName)
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
             }
 
-            let guestScript = readGuestScript(fromRoot: tempDir)
+            let guestScript = readGuestScript(fromRoot: rootDir)
 
             // Update the tab in place
             tabs[index].unifiedScript = unifiedScript
@@ -763,23 +800,40 @@ class BrowserViewModel: ObservableObject {
             return
         }
 
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+        // Check if it's a directory (dev mode) or archive
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
+
+        let rootDir: URL
+
+        if isDirectory.boolValue {
+            // Directory mode - use directly
+            rootDir = resolvedURL
+        } else {
+            // Archive mode - extract to temp
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: tempDir)
+            } catch {
+                print("❌ .actr 装载失败：\(error.localizedDescription)")
+                return
+            }
+            rootDir = tempDir
+        }
 
         do {
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            try unzipACTR(archive: resolvedURL, to: tempDir)
-
-            let manifestInfo = try readManifestJSON(fromRoot: tempDir)
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
             // 读取 guest 脚本
-            let guestScript = readGuestScript(fromRoot: tempDir)
+            let guestScript = readGuestScript(fromRoot: rootDir)
 
             // v2.0: 优先读取 unified script (Single Engine 架构)
             var unifiedScript: String? = nil
             if let unifiedFileName = manifestInfo.unifiedScript {
-                unifiedScript = readScript(fromRoot: tempDir, fileName: unifiedFileName)
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
                 print("✅ [BrowserViewModel] 从 manifest.json 读取 unified: \(unifiedFileName), 脚本存在: \(unifiedScript != nil)")
             }
 
@@ -788,12 +842,12 @@ class BrowserViewModel: ObservableObject {
             var rightPanelScript: String? = nil
 
             if let leftFileName = manifestInfo.leftPanelScript {
-                leftPanelScript = readScript(fromRoot: tempDir, fileName: leftFileName)
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
                 print("🔍 [BrowserViewModel] 从 manifest.json 读取 leftPanel: \(leftFileName), 脚本存在: \(leftPanelScript != nil)")
             }
 
             if let rightFileName = manifestInfo.rightPanelScript {
-                rightPanelScript = readScript(fromRoot: tempDir, fileName: rightFileName)
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
                 print("🔍 [BrowserViewModel] 从 manifest.json 读取 rightPanel: \(rightFileName), 脚本存在: \(rightPanelScript != nil)")
             }
 
@@ -871,30 +925,47 @@ class BrowserViewModel: ObservableObject {
             return
         }
 
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+        // Check if it's a directory (dev mode) or archive
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
+
+        let rootDir: URL
+
+        if isDirectory.boolValue {
+            // Directory mode - use directly
+            rootDir = resolvedURL
+        } else {
+            // Archive mode - extract to temp
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: tempDir)
+            } catch {
+                print("❌ .actr 装载失败：\(error.localizedDescription)")
+                return
+            }
+            rootDir = tempDir
+        }
 
         do {
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            try unzipACTR(archive: resolvedURL, to: tempDir)
-
-            let manifestInfo = try readManifestJSON(fromRoot: tempDir)
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
-            let guestScript = readGuestScript(fromRoot: tempDir)
+            let guestScript = readGuestScript(fromRoot: rootDir)
 
             var unifiedScript: String? = nil
             if let unifiedFileName = manifestInfo.unifiedScript {
-                unifiedScript = readScript(fromRoot: tempDir, fileName: unifiedFileName)
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
             }
 
             var leftPanelScript: String? = nil
             var rightPanelScript: String? = nil
             if let leftFileName = manifestInfo.leftPanelScript {
-                leftPanelScript = readScript(fromRoot: tempDir, fileName: leftFileName)
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
             }
             if let rightFileName = manifestInfo.rightPanelScript {
-                rightPanelScript = readScript(fromRoot: tempDir, fileName: rightFileName)
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
             }
 
             // Update UI on main thread
