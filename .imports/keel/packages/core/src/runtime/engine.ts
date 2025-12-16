@@ -512,11 +512,16 @@ export class Engine implements IEngine {
     if (!this.options.provider) {
       throw new Error('[rill] QuickJS provider not initialized');
     }
+    this.options.logger.log(`[rill:${this.id}] initializeRuntime: creating runtime...`);
     this.runtime = await this.options.provider.createRuntime();
+    this.options.logger.log(`[rill:${this.id}] initializeRuntime: runtime created`);
     this.context = this.runtime.createContext();
+    this.options.logger.log(`[rill:${this.id}] initializeRuntime: context created, injecting polyfills...`);
 
     await this.injectPolyfills();
+    this.options.logger.log(`[rill:${this.id}] initializeRuntime: polyfills done, injecting runtimeAPI...`);
     await this.injectRuntimeAPI();
+    this.options.logger.log(`[rill:${this.id}] initializeRuntime: done`);
 
     const dur = Date.now() - start;
     this.options.onMetric?.('engine.initializeRuntime', dur);
@@ -531,8 +536,18 @@ export class Engine implements IEngine {
     const logger = this.options.logger;
     const debug = this.options.debug;
 
-    // Collect all setGlobal promises (may be sync or async depending on provider)
-    const setGlobalPromises: (void | Promise<void>)[] = [];
+    // Helper to await and log setGlobal calls for debugging
+    const setGlobalWithLog = async (name: string, value: unknown): Promise<void> => {
+      if (debug) logger.log(`[rill:${this.id}] setGlobal: ${name} starting...`);
+      const start = Date.now();
+      try {
+        await this.context!.setGlobal(name, value);
+        if (debug) logger.log(`[rill:${this.id}] setGlobal: ${name} done (${Date.now() - start}ms)`);
+      } catch (e) {
+        logger.error(`[rill:${this.id}] setGlobal: ${name} failed:`, e);
+        throw e;
+      }
+    };
 
     // Save native timer functions to avoid recursion issues (with fallbacks for test environments)
     const nativeSetTimeout =
@@ -559,13 +574,47 @@ export class Engine implements IEngine {
         ? globalThis.queueMicrotask.bind(globalThis)
         : (fn: () => void) => Promise.resolve().then(fn);
 
-    // Inject React and ReactJSXRuntime as global variables
-    // This is required for bundles compiled with rill CLI
-    setGlobalPromises.push(this.context.setGlobal('React', React));
-    setGlobalPromises.push(this.context.setGlobal('ReactJSXRuntime', ReactJSXRuntime));
+    // For JSC sandbox, we can't pass complex objects like React directly through the bridge.
+    // Instead, we define global variables in the sandbox that call require() to get these modules.
+    // This works because require() is implemented via callback proxy mechanism.
+    // NOTE: This must be executed AFTER 'require' is set up as a global
+    const defineReactGlobals = async () => {
+      // NOTE: We use __console_log directly because console object isn't constructed yet in sandbox
+      // The lazy getters will call require() at access time when bundle runs
+      const REACT_GLOBALS = `
+(function(){
+  if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] Defining React/ReactJSXRuntime getters, require=' + typeof require);
+  if (typeof globalThis.React === 'undefined') {
+    Object.defineProperty(globalThis, 'React', {
+      get: function() {
+        if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] React getter called');
+        return require('react');
+      },
+      configurable: true
+    });
+  }
+  if (typeof globalThis.ReactJSXRuntime === 'undefined') {
+    Object.defineProperty(globalThis, 'ReactJSXRuntime', {
+      get: function() {
+        if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] ReactJSXRuntime getter called');
+        return require('react/jsx-runtime');
+      },
+      configurable: true
+    });
+  }
+})();`;
+      try {
+        await this.evalCode(REACT_GLOBALS);
+        if (debug) logger.log(`[rill:${this.id}] setGlobal: React/ReactJSXRuntime defined via require() in sandbox`);
+      } catch (e) {
+        logger.warn(`[rill:${this.id}] Failed to define React globals:`, e);
+      }
+    };
+
 
     // Inject RillSDK as global variable for IIFE bundles
     // Bundle format: (function(ReactJSXRuntime, React, RillSDK) { ... })(ReactJSXRuntime, React, RillSDK)
+    // Note: This object only contains strings and nulls, so it should serialize fine
     const RillSDKModule = {
       // React Native components (as string names)
       View: 'View',
@@ -583,7 +632,7 @@ export class Engine implements IEngine {
       useConfig: null,
       useSendToHost: null,
     };
-    setGlobalPromises.push(this.context.setGlobal('RillSDK', RillSDKModule));
+    await setGlobalWithLog('RillSDK', RillSDKModule);
 
     // Helper to format objects for logging (handles circular references)
     const formatArg = (arg: unknown, seen = new WeakSet()): unknown => {
@@ -627,161 +676,152 @@ export class Engine implements IEngine {
 
     const engineId = this.id;
 
-    // console - with enhanced object formatting
-    setGlobalPromises.push(
-      this.context.setGlobal('console', {
-        log: (...args: unknown[]) => {
-          if (debug) logger.log(`[rill:${engineId}][Guest]`, ...formatArgs(args));
-        },
-        warn: (...args: unknown[]) => logger.warn(`[rill:${engineId}][Guest]`, ...formatArgs(args)),
-        error: (...args: unknown[]) =>
-          logger.error(`[rill:${engineId}][Guest]`, ...formatArgs(args)),
-        debug: (...args: unknown[]) => {
-          if (debug) logger.log(`[rill:${engineId}][Guest:debug]`, ...formatArgs(args));
-        },
-        info: (...args: unknown[]) => {
-          if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatArgs(args));
-        },
-      })
-    );
+    // console - Register each method separately for JSC sandbox compatibility
+    // JSC sandbox can't handle objects with function properties via RN bridge
+    await setGlobalWithLog('__console_log', (...args: unknown[]) => {
+      if (debug) logger.log(`[rill:${engineId}][Guest]`, ...formatArgs(args));
+    });
+    await setGlobalWithLog('__console_warn', (...args: unknown[]) => {
+      logger.warn(`[rill:${engineId}][Guest]`, ...formatArgs(args));
+    });
+    await setGlobalWithLog('__console_error', (...args: unknown[]) => {
+      logger.error(`[rill:${engineId}][Guest]`, ...formatArgs(args));
+    });
+    await setGlobalWithLog('__console_debug', (...args: unknown[]) => {
+      if (debug) logger.log(`[rill:${engineId}][Guest:debug]`, ...formatArgs(args));
+    });
+    await setGlobalWithLog('__console_info', (...args: unknown[]) => {
+      if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatArgs(args));
+    });
 
     // require: module loader for Guest code
-    setGlobalPromises.push(
-      this.context.setGlobal('require', (moduleName: string) => {
-        if (debug) {
-          logger.log('[rill:require]', moduleName);
-        }
+    await setGlobalWithLog('require', (moduleName: string) => {
+      if (debug) {
+        logger.log('[rill:require]', moduleName);
+      }
 
-        if (!this.options.requireWhitelist.has(moduleName)) {
-          throw new RequireError(`[rill] Unsupported require("${moduleName}")`);
-        }
+      if (!this.options.requireWhitelist.has(moduleName)) {
+        throw new RequireError(`[rill] Unsupported require("${moduleName}")`);
+      }
 
-        switch (moduleName) {
-          case 'react':
-            return React;
-          case 'react-native':
-            // Return RillSDK which is set as ReactNative global
-            return this.context?.getGlobal('ReactNative');
-          case 'react/jsx-runtime':
-            return ReactJSXRuntime;
-          case 'rill/reconciler':
-          case '@rill/core':
-            // Support both old and new module names
-            return RillReconciler;
-          case 'rill/sdk':
-          case '@rill/core/sdk':
-            // Virtual module that provides component names (strings) and host hooks
-            // Component names are used by rill reconciler to look up registered components
-            return {
-              // React Native components (as string names)
-              View: 'View',
-              Text: 'Text',
-              Image: 'Image',
-              ScrollView: 'ScrollView',
-              TouchableOpacity: 'TouchableOpacity',
-              Button: 'Button',
-              ActivityIndicator: 'ActivityIndicator',
-              FlatList: 'FlatList',
-              TextInput: 'TextInput',
-              Switch: 'Switch',
-              // Host communication hooks (need access to sandbox globals)
-              useHostEvent: this.context!.getGlobal('__useHostEvent'),
-              useConfig: this.context!.getGlobal('__getConfig'),
-              useSendToHost: () => this.context!.getGlobal('__sendEventToHost'),
-            };
-          default:
-            throw new Error(`[rill] Unsupported require("${moduleName}")`);
-        }
-      })
-    );
+      switch (moduleName) {
+        case 'react':
+          return React;
+        case 'react-native':
+          // Return RillSDK which is set as ReactNative global
+          return this.context?.getGlobal('ReactNative');
+        case 'react/jsx-runtime':
+          return ReactJSXRuntime;
+        case 'rill/reconciler':
+        case '@rill/core':
+          // Support both old and new module names
+          return RillReconciler;
+        case 'rill/sdk':
+        case '@rill/core/sdk':
+          // Virtual module that provides component names (strings) and host hooks
+          // Component names are used by rill reconciler to look up registered components
+          return {
+            // React Native components (as string names)
+            View: 'View',
+            Text: 'Text',
+            Image: 'Image',
+            ScrollView: 'ScrollView',
+            TouchableOpacity: 'TouchableOpacity',
+            Button: 'Button',
+            ActivityIndicator: 'ActivityIndicator',
+            FlatList: 'FlatList',
+            TextInput: 'TextInput',
+            Switch: 'Switch',
+            // Host communication hooks (need access to sandbox globals)
+            useHostEvent: this.context!.getGlobal('__useHostEvent'),
+            useConfig: this.context!.getGlobal('__getConfig'),
+            useSendToHost: () => this.context!.getGlobal('__sendEventToHost'),
+          };
+        default:
+          throw new Error(`[rill] Unsupported require("${moduleName}")`);
+      }
+    });
+
+    // Now that require is set up, define React/ReactJSXRuntime lazy getters
+    await defineReactGlobals();
 
     // Store native clear functions for cleanup
     this.nativeClearTimeout = nativeClearTimeout;
     this.nativeClearInterval = nativeClearInterval;
 
     // setTimeout / clearTimeout - use instance maps for cleanup
-    setGlobalPromises.push(
-      this.context.setGlobal('setTimeout', (fn: () => void, delay: number) => {
-        const id = ++this.timeoutIdCounter;
-        const handle = nativeSetTimeout(() => {
-          this.timeoutMap.delete(id);
-          try {
-            fn();
-          } catch (error) {
-            // Enhanced error handling for timer callbacks
-            const err = error instanceof Error ? error : new Error(String(error));
-            logger.error(`[rill:${this.id}][Guest] setTimeout error:`, err);
+    await setGlobalWithLog('setTimeout', (fn: () => void, delay: number) => {
+      const id = ++this.timeoutIdCounter;
+      const handle = nativeSetTimeout(() => {
+        this.timeoutMap.delete(id);
+        try {
+          fn();
+        } catch (error) {
+          // Enhanced error handling for timer callbacks
+          const err = error instanceof Error ? error : new Error(String(error));
+          logger.error(`[rill:${this.id}][Guest] setTimeout error:`, err);
 
-            // Track error for monitoring
-            this.errorCount++;
-            this.lastErrorAt = Date.now();
+          // Track error for monitoring
+          this.errorCount++;
+          this.lastErrorAt = Date.now();
 
-            // Emit error event so Host can handle it
-            this.emit('error', err);
-          }
-        }, delay);
-        this.timeoutMap.set(id, handle as ReturnType<typeof setTimeout>);
-        return id;
-      })
-    );
-
-    setGlobalPromises.push(
-      this.context.setGlobal('clearTimeout', (id: number) => {
-        const handle = this.timeoutMap.get(id);
-        if (handle !== undefined) {
-          nativeClearTimeout(handle);
-          this.timeoutMap.delete(id);
+          // Emit error event so Host can handle it
+          this.emit('error', err);
         }
-      })
-    );
+      }, delay);
+      this.timeoutMap.set(id, handle as ReturnType<typeof setTimeout>);
+      return id;
+    });
+
+    await setGlobalWithLog('clearTimeout', (id: number) => {
+      const handle = this.timeoutMap.get(id);
+      if (handle !== undefined) {
+        nativeClearTimeout(handle);
+        this.timeoutMap.delete(id);
+      }
+    });
 
     // setInterval / clearInterval - use instance maps for cleanup
-    setGlobalPromises.push(
-      this.context.setGlobal('setInterval', (fn: () => void, delay: number) => {
-        const id = ++this.intervalIdCounter;
-        const handle = nativeSetInterval(() => {
-          try {
-            fn();
-          } catch (error) {
-            // Enhanced error handling for interval callbacks
-            const err = error instanceof Error ? error : new Error(String(error));
-            logger.error(`[rill:${this.id}][Guest] setInterval error:`, err);
+    await setGlobalWithLog('setInterval', (fn: () => void, delay: number) => {
+      const id = ++this.intervalIdCounter;
+      const handle = nativeSetInterval(() => {
+        try {
+          fn();
+        } catch (error) {
+          // Enhanced error handling for interval callbacks
+          const err = error instanceof Error ? error : new Error(String(error));
+          logger.error(`[rill:${this.id}][Guest] setInterval error:`, err);
 
-            // Track error for monitoring
-            this.errorCount++;
-            this.lastErrorAt = Date.now();
+          // Track error for monitoring
+          this.errorCount++;
+          this.lastErrorAt = Date.now();
 
-            // Emit error event so Host can handle it
-            this.emit('error', err);
-          }
-        }, delay);
-        this.intervalMap.set(id, handle as ReturnType<typeof setInterval>);
-        return id;
-      })
-    );
-
-    setGlobalPromises.push(
-      this.context.setGlobal('clearInterval', (id: number) => {
-        const handle = this.intervalMap.get(id);
-        if (handle !== undefined) {
-          nativeClearInterval(handle);
-          this.intervalMap.delete(id);
+          // Emit error event so Host can handle it
+          this.emit('error', err);
         }
-      })
-    );
+      }, delay);
+      this.intervalMap.set(id, handle as ReturnType<typeof setInterval>);
+      return id;
+    });
+
+    await setGlobalWithLog('clearInterval', (id: number) => {
+      const handle = this.intervalMap.get(id);
+      if (handle !== undefined) {
+        nativeClearInterval(handle);
+        this.intervalMap.delete(id);
+      }
+    });
 
     // queueMicrotask
-    setGlobalPromises.push(
-      this.context.setGlobal('queueMicrotask', (fn: () => void) => {
-        nativeQueueMicrotask(() => {
-          try {
-            fn();
-          } catch (error) {
-            logger.error('[Guest] queueMicrotask error:', error);
-          }
-        });
-      })
-    );
+    await setGlobalWithLog('queueMicrotask', (fn: () => void) => {
+      nativeQueueMicrotask(() => {
+        try {
+          fn();
+        } catch (error) {
+          logger.error('[Guest] queueMicrotask error:', error);
+        }
+      });
+    });
 
     // Unhandled Promise Rejection monitoring
     // This catches Promise rejections that are not handled with .catch()
@@ -821,9 +861,7 @@ export class Engine implements IEngine {
       }
 
       // Inject into sandbox context
-      setGlobalPromises.push(
-        this.context.setGlobal('onunhandledrejection', unhandledRejectionHandler)
-      );
+      await setGlobalWithLog('onunhandledrejection', unhandledRejectionHandler);
     } catch (_err) {
       // Silently fail if unhandledrejection is not supported
       if (debug) {
@@ -831,8 +869,28 @@ export class Engine implements IEngine {
       }
     }
 
-    // Wait for all setGlobal operations to complete (important for async providers like JSC)
-    await Promise.all(setGlobalPromises);
+    // Construct console object in sandbox using the registered callbacks
+    // This is necessary because JSC sandbox can't handle objects with function properties
+    const CONSOLE_SETUP = `
+(function(){
+  if (typeof globalThis.console === 'undefined') {
+    globalThis.console = {
+      log: function() { __console_log.apply(null, arguments); },
+      warn: function() { __console_warn.apply(null, arguments); },
+      error: function() { __console_error.apply(null, arguments); },
+      debug: function() { __console_debug.apply(null, arguments); },
+      info: function() { __console_info.apply(null, arguments); }
+    };
+  }
+})();`;
+    try {
+      await this.evalCode(CONSOLE_SETUP);
+      if (debug) {
+        logger.log(`[rill:${this.id}] injectPolyfills: console object constructed in sandbox`);
+      }
+    } catch (e) {
+      logger.warn(`[rill:${this.id}] Failed to construct console in sandbox:`, e);
+    }
   }
 
   /**
@@ -975,30 +1033,19 @@ export class Engine implements IEngine {
       })
     );
 
-    // Update RillSDK with actual host hooks (after runtime API is injected)
-    const RillSDKWithHooks = {
-      // React Native components (as string names)
-      View: 'View',
-      Text: 'Text',
-      Image: 'Image',
-      ScrollView: 'ScrollView',
-      TouchableOpacity: 'TouchableOpacity',
-      Button: 'Button',
-      ActivityIndicator: 'ActivityIndicator',
-      FlatList: 'FlatList',
-      TextInput: 'TextInput',
-      Switch: 'Switch',
-      // Host communication hooks (now available)
-      useHostEvent: this.context.getGlobal('__useHostEvent'),
-      useConfig: this.context.getGlobal('__getConfig'),
-      useSendToHost: () => this.context!.getGlobal('__sendEventToHost'),
-    };
-    setGlobalPromises.push(this.context.setGlobal('RillSDK', RillSDKWithHooks));
-    // Alias for compatibility with bundles built with react-native imports
-    setGlobalPromises.push(this.context.setGlobal('ReactNative', RillSDKWithHooks));
+    // Skip RillSDK/ReactNative hooks update for JSC sandbox
+    // The hooks (__useHostEvent, __getConfig, __sendEventToHost) are already available as global functions
+    // Bundles use require('rill/sdk') which returns these via the callback proxy mechanism
+    // Trying to pass an object with getGlobal results (Promises in JSC) causes serialization issues
+    if (debug) {
+      logger.log(`[rill:${this.id}] injectRuntimeAPI: skipping RillSDK hooks update (available via require())`);
+    }
 
     // Wait for all setGlobal operations to complete (important for async providers like JSC)
     await Promise.all(setGlobalPromises);
+    if (debug) {
+      logger.log(`[rill:${this.id}] injectRuntimeAPI: all setGlobal operations done`);
+    }
   }
 
   /**
