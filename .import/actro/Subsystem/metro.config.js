@@ -85,6 +85,10 @@ const customConfig = {
       if (moduleName === 'react-reconciler') {
         return { type: 'sourceFile', filePath: path.resolve(projectRoot, 'node_modules', 'react-reconciler', 'index.js') };
       }
+      // Fix pnpm dependency isolation issue for react-native-macos peer dependencies
+      if (moduleName === '@react-native-macos/virtualized-lists') {
+        return { type: 'sourceFile', filePath: path.resolve(projectRoot, 'node_modules', '@react-native-macos', 'virtualized-lists', 'index.js') };
+      }
 
       return resolve(context, moduleName, platform);
     },
