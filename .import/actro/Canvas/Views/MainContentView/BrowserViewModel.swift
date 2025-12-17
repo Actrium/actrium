@@ -779,10 +779,17 @@ class BrowserViewModel: ObservableObject {
     }
 
     func toggleLeftPanelForCurrentTab() {
-        guard let id = currentTabId else {
-            print("⚠️ [toggleLeftPanel] currentTabId 为 nil，无法切换")
+        // Focus 模式下使用 focus tabId，否则使用 currentTabId
+        let id: UUID
+        if case .focus(let focusTabId) = canvasMode {
+            id = focusTabId
+        } else if let currentId = currentTabId {
+            id = currentId
+        } else {
+            print("⚠️ [toggleLeftPanel] 无法确定当前 tab，无法切换")
             return
         }
+
         var visibility = leftPanelVisibility
         let current = visibility[id] ?? true
         visibility[id] = !current
