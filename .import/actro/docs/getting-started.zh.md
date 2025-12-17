@@ -51,8 +51,8 @@ const adapter = createEngineAdapter(engine);
 // 注册所有 askit 组件
 engine.register(components);
 
-// 加载并运行插件
-await engine.loadGuest('https://example.com/guest.js');
+// 加载并运行插件（支持 URL 或打包代码字符串）
+await engine.loadBundle('https://example.com/guest.js');
 ```
 
 ## 项目结构

@@ -196,11 +196,12 @@ function createEngineAdapter(engine: EngineInterface) {
 
 ```typescript
 export const components = {
+  PanelMarker,
   StepList,
   ThemeView,
   UserAvatar,
   ChatBubble
-};
+} as const;
 
 export const modules = {
   toast: Toast,    // Host Toast 实现

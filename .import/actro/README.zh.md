@@ -90,8 +90,8 @@ const adapter = createEngineAdapter(engine);
 // 注册组件以渲染插件 UI
 engine.register(components);
 
-// 启动插件
-engine.loadGuest('./guest.js');
+// 启动插件（支持 URL 或打包代码字符串）
+await engine.loadBundle('https://example.com/guest.js');
 ```
 
 ## API 参考
@@ -144,15 +144,30 @@ Haptic.trigger(type?: 'light' | 'medium' | 'heavy' | 'selection' | 'success' | '
 | `ThemeView` | 主题感知容器视图 |
 | `UserAvatar` | 带降级支持的用户头像 |
 | `ChatBubble` | 聊天消息气泡 |
+| `PanelMarker` | 面板标记，用于识别左/右面板 (仅 Host) |
+| `EngineMonitorOverlay` | rill 引擎监控调试覆盖层 (仅 Host) |
+
+### 仅 Host 端工具
+
+| 工具 | 描述 |
+|------|------|
+| `extractPanels` | 从 React 元素树中提取左/右面板 |
 
 ## 模块结构
 
 ```
-askit
-├── index.ts          # 通用导出 (EventEmitter, Toast, Haptic, Components)
-└── core/
-    ├── registry.ts   # 组件和模块注册
-    └── bridge.ts     # Host-Guest 消息桥接
+askit/src
+├── index.host.ts     # Host 入口 (React Native)
+├── index.guest.ts    # Guest 入口 (QuickJS sandbox)
+├── api/              # EventEmitter, Toast, Haptic 实现
+├── ui/               # UI 组件 (StepList, ThemeView 等)
+├── core/             # 仅 Host 端桥接和工具
+│   ├── bridge.ts     # Host-Guest 消息桥接
+│   ├── registry.ts   # 组件和模块注册
+│   ├── throttle.ts   # 节流限速工具
+│   └── typed-bridge.ts # 类型安全桥接辅助
+├── contracts/        # Host-Guest 通信类型契约
+└── types/            # 共享 TypeScript 类型
 ```
 
 ### 条件导出
@@ -166,13 +181,15 @@ askit
       "react-native": "./src/index.host.ts",
       "default": "./src/index.guest.ts"
     },
-    "./core": "./src/core/index.ts"
+    "./core": "./src/core/index.ts",
+    "./contracts": "./src/contracts/index.ts"
   }
 }
 ```
 
 - **React Native**：获取原生实现，包含真实 UI 组件
 - **Default** (QuickJS/Node)：获取远程实现，通过消息传递
+- **contracts**：Host-Guest 通信的类型契约
 
 ## 开发
 

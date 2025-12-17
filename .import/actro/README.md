@@ -90,8 +90,8 @@ const adapter = createEngineAdapter(engine);
 // Register components for rendering guest UI
 engine.register(components);
 
-// Start guest
-engine.loadGuest('./guest.js');
+// Start guest (supports URL or bundled code string)
+await engine.loadBundle('https://example.com/guest.js');
 ```
 
 ## API Reference
@@ -144,15 +144,30 @@ Haptic.trigger(type?: 'light' | 'medium' | 'heavy' | 'selection' | 'success' | '
 | `ThemeView` | Theme-aware container view |
 | `UserAvatar` | User avatar with fallback support |
 | `ChatBubble` | Chat message bubble |
+| `PanelMarker` | Panel marker for left/right panel identification (Host-only) |
+| `EngineMonitorOverlay` | Debug overlay for rill engine monitoring (Host-only) |
+
+### Host-only Utilities
+
+| Utility | Description |
+|---------|-------------|
+| `extractPanels` | Extract left/right panels from React element tree |
 
 ## Module Structure
 
 ```
-askit
-├── index.ts          # Universal exports (EventEmitter, Toast, Haptic, Components)
-└── core/
-    ├── registry.ts   # Component and module registration
-    └── bridge.ts     # Host-Guest message bridge
+askit/src
+├── index.host.ts     # Host entry (React Native)
+├── index.guest.ts    # Guest entry (QuickJS sandbox)
+├── api/              # EventEmitter, Toast, Haptic implementations
+├── ui/               # UI components (StepList, ThemeView, etc.)
+├── core/             # Host-only bridging and utilities
+│   ├── bridge.ts     # Host-Guest message bridge
+│   ├── registry.ts   # Component and module registration
+│   ├── throttle.ts   # Rate limiting utilities
+│   └── typed-bridge.ts # Type-safe bridge helpers
+├── contracts/        # Type contracts for Host-Guest communication
+└── types/            # Shared TypeScript types
 ```
 
 ### Conditional Exports
@@ -166,7 +181,8 @@ The package uses conditional exports to serve different implementations:
       "react-native": "./src/index.host.ts",
       "default": "./src/index.guest.ts"
     },
-    "./core": "./src/core/index.ts"
+    "./core": "./src/core/index.ts",
+    "./contracts": "./src/contracts/index.ts"
   }
 }
 ```

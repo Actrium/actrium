@@ -81,7 +81,7 @@ const adapter = createEngineAdapter(engine);
 engine.register(components);
 
 // Step 4: Load Guest bundle
-await engine.loadGuest('https://cdn.example.com/guest.js');
+await engine.loadBundle('https://cdn.example.com/guest.js');
 ```
 
 **Visual Flow:**
@@ -100,9 +100,9 @@ Host App Startup
      │
      ├─► engine.register(components)
      │        │
-     │        └─► Register: StepList, ThemeView, UserAvatar, ChatBubble
+     │        └─► Register: PanelMarker, StepList, ThemeView, UserAvatar, ChatBubble
      │
-     └─► engine.loadGuest(url)
+     └─► engine.loadBundle(url)
               │
               ├─► Download Guest bundle
               ├─► Execute in QuickJS sandbox
@@ -328,7 +328,7 @@ export default function GuestUI(props) {
 │  ASKIT BRIDGE   │ ← Listening for messages
 └─────┬───────────┘
       │
-      │ 4. engine.loadGuest(url)
+      │ 4. engine.loadBundle(url)
       │
       ▼
 ┌──────────────┐
@@ -384,6 +384,7 @@ The bridge adapter connects askit to rill's message system:
 `components` maps string identifiers to React components:
 ```typescript
 {
+  PanelMarker,
   StepList,
   ThemeView,
   UserAvatar,
@@ -417,7 +418,7 @@ console.log('Can send to host:', typeof global.sendToHost === 'function');
 ## Best Practices
 
 1. **Always create the bridge adapter** before loading Guest code
-2. **Register components** before calling `engine.loadGuest()`
+2. **Register components** before calling `engine.loadBundle()`
 3. **Use EventEmitter for bidirectional events**, not direct message passing
 4. **Keep Guest bundles small** - askit is already included via `rill/sdk`
 5. **Handle errors gracefully** - Guest crashes shouldn't crash Host
@@ -426,10 +427,10 @@ console.log('Can send to host:', typeof global.sendToHost === 'function');
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| "sendToHost is not a function" | Guest loaded before engine setup | Create adapter before `loadGuest()` |
+| "sendToHost is not a function" | Guest loaded before engine setup | Create adapter before `loadBundle()` |
 | Component not rendering | Component not registered | Add to `components` and call `engine.register()` |
 | Messages not received | Bridge not created | Call `createEngineAdapter(engine)` |
-| EventEmitter events not working | Adapter created after loadGuest | Create adapter during engine setup |
+| EventEmitter events not working | Adapter created after loadBundle | Create adapter during engine setup |
 
 ## Next Steps
 
