@@ -17,10 +17,9 @@
 
 // Type exports
 export type { AskitMessageMap, EventEmitterMessageMap, TypedSendToHost } from '../types';
-
+export type { GuestMessageHandlerOptions } from './bridge';
 // Bridge exports
 export { Bridge, createEngineAdapter, handleGuestMessage } from './bridge';
-export type { GuestMessageHandlerOptions } from './bridge';
 export type { GuestComponent, ValidationRule } from './component-helpers';
 export { createGuestComponent, validateProps, validators } from './component-helpers';
 // Registry exports

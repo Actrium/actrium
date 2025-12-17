@@ -48,9 +48,9 @@ function getPadding(padding?: ThemeViewProps['padding']): number {
     return padding;
   }
   if (typeof padding === 'string') {
-    return PADDING_MAP[padding] ?? PADDING_MAP['medium'] ?? 16;
+    return PADDING_MAP[padding] ?? PADDING_MAP.medium ?? 16;
   }
-  return PADDING_MAP['medium'] ?? 16;
+  return PADDING_MAP.medium ?? 16;
 }
 
 /**

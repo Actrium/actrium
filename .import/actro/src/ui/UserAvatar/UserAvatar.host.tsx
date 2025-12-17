@@ -71,7 +71,7 @@ function getSize(size?: UserAvatarProps['size']): number {
   if (typeof size === 'number') {
     return size;
   }
-  return SIZE_MAP[size || 'medium'] ?? SIZE_MAP['medium'] ?? 48;
+  return SIZE_MAP[size || 'medium'] ?? SIZE_MAP.medium ?? 48;
 }
 
 /**

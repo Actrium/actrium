@@ -3,8 +3,8 @@
  * Tests for clearHapticHandler
  */
 
-import { clearHapticHandler, configureHaptic } from './registry.modules';
 import { Haptic } from '../api/Haptic.host';
+import { clearHapticHandler, configureHaptic } from './registry.modules';
 
 describe('Registry - Additional Coverage', () => {
   describe('clearHapticHandler', () => {

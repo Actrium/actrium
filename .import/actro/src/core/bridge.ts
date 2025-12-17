@@ -11,10 +11,10 @@ import {
   type HostEventEmitter,
   NOTIFY_SYMBOL,
 } from '../api/EventEmitter.host';
-import { logger } from './logger';
-import { modules, MODULE_PERMISSIONS } from './registry.modules';
-import type { ContractViolation } from '../contracts/runtime';
 import { isGuestToHostEventName, validateGuestToHostPayload } from '../contracts/generated';
+import type { ContractViolation } from '../contracts/runtime';
+import { logger } from './logger';
+import { MODULE_PERMISSIONS, modules } from './registry.modules';
 
 /**
  * Message types from guests

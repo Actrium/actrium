@@ -158,10 +158,9 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       expect(warnings.length).toBeGreaterThan(0);
     });
 
-    it('should retry messages when sendToHost becomes available', async () => {
-      // SKIPPED: This test causes the test suite to hang when run with all tests
-      // It works fine when run individually but has timing issues in the full suite
-      return;
+    // SKIPPED: This test causes the test suite to hang when run with all tests
+    // It works fine when run individually but has timing issues in the full suite
+    it.skip('should retry messages when sendToHost becomes available', async () => {
       let sendToHostAvailable = false;
       const successfulMessages: string[] = [];
 
@@ -188,9 +187,8 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       expect(successfulMessages.length).toBeGreaterThan(0);
     });
 
-    it('should drop messages after max retries', async () => {
-      // SKIPPED: This test takes 3+ seconds and may cause timing issues in the full suite
-      return;
+    // SKIPPED: This test takes 3+ seconds and may cause timing issues in the full suite
+    it.skip('should drop messages after max retries', async () => {
       const droppedLogs: unknown[] = [];
       const originalError = console.error;
       console.error = (...args: unknown[]) => droppedLogs.push(args);
@@ -212,9 +210,8 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       expect(droppedLogs.length).toBeGreaterThan(0);
     });
 
-    it('should handle missing sendToHost gracefully when processing queue', async () => {
-      // SKIPPED: This test has timing issues when run with the full suite
-      return;
+    // SKIPPED: This test has timing issues when run with the full suite
+    it.skip('should handle missing sendToHost gracefully when processing queue', async () => {
       // Start with working sendToHost
       let callCount = 0;
       sandboxGlobal.sendToHost = () => {
