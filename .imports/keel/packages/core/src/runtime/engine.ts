@@ -516,10 +516,14 @@ export class Engine implements IEngine {
     this.runtime = await this.options.provider.createRuntime();
     this.options.logger.log(`[rill:${this.id}] initializeRuntime: runtime created`);
     this.context = this.runtime.createContext();
-    this.options.logger.log(`[rill:${this.id}] initializeRuntime: context created, injecting polyfills...`);
+    this.options.logger.log(
+      `[rill:${this.id}] initializeRuntime: context created, injecting polyfills...`
+    );
 
     await this.injectPolyfills();
-    this.options.logger.log(`[rill:${this.id}] initializeRuntime: polyfills done, injecting runtimeAPI...`);
+    this.options.logger.log(
+      `[rill:${this.id}] initializeRuntime: polyfills done, injecting runtimeAPI...`
+    );
     await this.injectRuntimeAPI();
     this.options.logger.log(`[rill:${this.id}] initializeRuntime: done`);
 
@@ -542,7 +546,8 @@ export class Engine implements IEngine {
       const start = Date.now();
       try {
         await this.context!.setGlobal(name, value);
-        if (debug) logger.log(`[rill:${this.id}] setGlobal: ${name} done (${Date.now() - start}ms)`);
+        if (debug)
+          logger.log(`[rill:${this.id}] setGlobal: ${name} done (${Date.now() - start}ms)`);
       } catch (e) {
         logger.error(`[rill:${this.id}] setGlobal: ${name} failed:`, e);
         throw e;
@@ -614,12 +619,14 @@ export class Engine implements IEngine {
 })();`;
       try {
         await this.evalCode(REACT_GLOBALS);
-        if (debug) logger.log(`[rill:${this.id}] setGlobal: React/ReactJSXRuntime/ReactNative defined via require() in sandbox`);
+        if (debug)
+          logger.log(
+            `[rill:${this.id}] setGlobal: React/ReactJSXRuntime/ReactNative defined via require() in sandbox`
+          );
       } catch (e) {
         logger.warn(`[rill:${this.id}] Failed to define React globals:`, e);
       }
     };
-
 
     // Inject RillSDK as global variable for IIFE bundles
     // Bundle format: (function(ReactJSXRuntime, React, RillSDK) { ... })(ReactJSXRuntime, React, RillSDK)
@@ -1047,7 +1054,9 @@ export class Engine implements IEngine {
     // Bundles use require('rill/sdk') which returns these via the callback proxy mechanism
     // Trying to pass an object with getGlobal results (Promises in JSC) causes serialization issues
     if (debug) {
-      logger.log(`[rill:${this.id}] injectRuntimeAPI: skipping RillSDK hooks update (available via require())`);
+      logger.log(
+        `[rill:${this.id}] injectRuntimeAPI: skipping RillSDK hooks update (available via require())`
+      );
     }
 
     // Wait for all setGlobal operations to complete (important for async providers like JSC)

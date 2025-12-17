@@ -336,8 +336,11 @@ interface RillErrorBoundaryState {
  * ```
  */
 // Note: We use React.Component here because ErrorBoundary must be a class component
+// Check that globalThis.React.Component is a valid constructor (not just an object from shims)
 const React =
-  typeof globalThis !== 'undefined' && globalThis.React
+  typeof globalThis !== 'undefined' &&
+  globalThis.React &&
+  typeof (globalThis.React as { Component?: unknown }).Component === 'function'
     ? globalThis.React
     : { Component: class {} };
 
