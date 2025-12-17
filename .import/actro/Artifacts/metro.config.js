@@ -17,6 +17,7 @@ defaultConfig.resolver.platforms = Array.from(
   new Set([...(defaultConfig.resolver.platforms || []), 'macos']),
 );
 
+
 // Prevent RN interop-with-react-19 stack from trying to import inline-requires-plugin relative to React
 // and avoid hoisted duplicate copies of React/React-RC
 defaultConfig.resolver.blockList = [
@@ -50,6 +51,22 @@ const customConfig = {
      */
     resolveRequest: (context, moduleName, platform) => {
       const toSourceFile = (filePath) => ({ type: 'sourceFile', filePath });
+
+      // macOS 平台：启用 .native 扩展名支持（与 iOS/Android 行为一致）
+      // 默认 macOS 只尝试 .macos.ts → .ts，不包含 .native.ts
+      // 设置 preferNativePlatform=true 后解析顺序变为: .macos.ts → .native.ts → .ts
+      if (platform === 'macos' && !context._nativeFallbackAttempted) {
+        const nativeContext = {
+          ...context,
+          preferNativePlatform: true,
+          _nativeFallbackAttempted: true, // 防止无限递归
+        };
+        try {
+          return resolve(nativeContext, moduleName, platform);
+        } catch (e) {
+          // 如果带 preferNativePlatform 的解析失败，继续使用原始 context
+        }
+      }
 
       // askit（Host 入口）
       if (moduleName === 'askit') {
