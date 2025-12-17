@@ -103,11 +103,19 @@ export function resolveJSCSandbox(): JSCSandboxModule | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod = require('react-native-jsc-sandbox');
-    if (typeof mod?.getJSCSandboxModule === 'function') {
-      return mod.getJSCSandboxModule() as JSCSandboxModule | null;
+
+    if (typeof mod?.isJSCSandboxAvailable === 'function') {
+      const available = mod.isJSCSandboxAvailable();
+
+      if (available && typeof mod?.getJSCSandboxModule === 'function') {
+        const jscModule = mod.getJSCSandboxModule();
+        if (jscModule) {
+          return jscModule as JSCSandboxModule;
+        }
+      }
     }
   } catch {
-    // Package not available
+    // JSC sandbox not available
   }
 
   return null;
