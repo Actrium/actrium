@@ -51,8 +51,8 @@ const adapter = createEngineAdapter(engine);
 // Register all askit components
 engine.register(components);
 
-// Load and run guest
-await engine.loadGuest('https://example.com/guest.js');
+// Load and run guest (supports URL or bundled code string)
+await engine.loadBundle('https://example.com/guest.js');
 ```
 
 ## Project Structure

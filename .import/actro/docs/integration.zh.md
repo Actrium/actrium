@@ -80,7 +80,7 @@ const adapter = createEngineAdapter(engine);
 engine.register(components);
 
 // 步骤 4: 加载 Guest bundle
-await engine.loadGuest('https://cdn.example.com/guest.js');
+await engine.loadBundle('https://cdn.example.com/guest.js');
 ```
 
 **可视化流程：**
@@ -99,9 +99,9 @@ Host App 启动
      │
      ├─► engine.register(components)
      │        │
-     │        └─► 注册：StepList, ThemeView, UserAvatar, ChatBubble
+     │        └─► 注册：PanelMarker, StepList, ThemeView, UserAvatar, ChatBubble
      │
-     └─► engine.loadGuest(url)
+     └─► engine.loadBundle(url)
               │
               ├─► 下载 Guest bundle
               ├─► 在 QuickJS 沙箱中执行
@@ -327,7 +327,7 @@ export default function GuestUI(props) {
 │  ASKIT 桥接     │ ← 监听消息
 └─────┬───────────┘
       │
-      │ 4. engine.loadGuest(url)
+      │ 4. engine.loadBundle(url)
       │
       ▼
 ┌──────────────┐
@@ -383,6 +383,7 @@ askit 使用 package.json 的 `exports` 提供不同的实现：
 `components` 将字符串标识符映射到 React 组件：
 ```typescript
 {
+  PanelMarker,
   StepList,
   ThemeView,
   UserAvatar,
@@ -416,7 +417,7 @@ console.log('可以发送到 host：', typeof global.sendToHost === 'function');
 ## 最佳实践
 
 1. **始终先创建桥接适配器**，再加载 Guest 代码
-2. **在调用 `engine.loadGuest()` 之前注册组件**
+2. **在调用 `engine.loadBundle()` 之前注册组件**
 3. **使用 EventEmitter 进行双向事件通信**，而不是直接消息传递
 4. **保持 Guest bundle 小巧** - askit 已通过 `rill/sdk` 包含
 5. **优雅地处理错误** - Guest 崩溃不应导致 Host 崩溃
@@ -425,10 +426,10 @@ console.log('可以发送到 host：', typeof global.sendToHost === 'function');
 
 | 问题 | 原因 | 解决方案 |
 |------|------|----------|
-| "sendToHost is not a function" | 引擎设置前加载了 Guest | 在 `loadGuest()` 前创建适配器 |
+| "sendToHost is not a function" | 引擎设置前加载了 Guest | 在 `loadBundle()` 前创建适配器 |
 | 组件未渲染 | 组件未注册 | 添加到 `components` 并调用 `engine.register()` |
 | 消息未收到 | 未创建桥接 | 调用 `createEngineAdapter(engine)` |
-| EventEmitter 事件不工作 | loadGuest 后才创建适配器 | 在引擎设置期间创建适配器 |
+| EventEmitter 事件不工作 | loadBundle 后才创建适配器 | 在引擎设置期间创建适配器 |
 
 ## 下一步
 
