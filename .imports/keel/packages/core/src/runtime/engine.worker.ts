@@ -78,7 +78,7 @@ globalThis.require = function(moduleName) {
 `;
 
 interface WorkerRequest {
-  type: 'init' | 'eval' | 'dispose' | 'setGlobal' | 'getGlobal';
+  type: 'init' | 'eval' | 'dispose' | 'setGlobal';
   id?: string;
   code?: string;
   name?: string;
@@ -161,15 +161,6 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
           pendingGlobals.set(name, value);
         }
         // No response needed for fire-and-forget
-        break;
-      }
-
-      case 'getGlobal': {
-        // In v3 API we can't easily get globals between sandbox runs
-        // since each runSandboxed creates a fresh context.
-        // Return undefined or stored value
-        const storedValue = name !== undefined ? pendingGlobals.get(name) : undefined;
-        postResponse({ type: 'result', id, result: storedValue });
         break;
       }
     }

@@ -17,9 +17,8 @@ declare global {
  * using `eval`. This is insecure and should only be used with trusted code, but
  * offers maximum performance and easier debugging.
  *
- * Timeout/Interrupt Support:
- * - setInterruptHandler: Supported, but only effective if guest code cooperatively
- *   calls __checkBudget() periodically (e.g., in loops).
+ * Timeout Support:
+ * - Cooperative timeout via __checkBudget() that guest code can call periodically.
  * - Hard timeout: NOT supported. Native eval cannot be interrupted externally.
  *   For production use with untrusted code, use VMProvider or WorkerJSEngineProvider.
  */
@@ -31,7 +30,6 @@ export class NoSandboxProvider implements JSEngineProvider {
   }
 
   createRuntime(): JSEngineRuntime {
-    let interruptHandler: (() => boolean) | null = null;
     let budgetCheckInjected = false;
 
     const context: JSEngineContext = {
@@ -60,11 +58,6 @@ export class NoSandboxProvider implements JSEngineProvider {
           };
         }
 
-        // Check interrupt handler before eval (won't help during eval, but catches between calls)
-        if (interruptHandler?.()) {
-          throw new Error('[NoSandboxProvider] Execution interrupted by handler');
-        }
-
         // Direct, unscoped eval in the global context.
         return (0, eval)(code);
       },
@@ -83,20 +76,6 @@ export class NoSandboxProvider implements JSEngineProvider {
         delete globalThis.__rill_budget_timeout;
         delete globalThis.__rill_budget_ops;
         delete globalThis.__checkBudget;
-        interruptHandler = null;
-      },
-
-      /**
-       * Set interrupt handler. Note: This is only checked BETWEEN eval calls,
-       * not during synchronous execution. For cooperative timeout during execution,
-       * guest code must call __checkBudget() periodically.
-       */
-      setInterruptHandler: (handler: () => boolean) => {
-        interruptHandler = handler;
-      },
-
-      clearInterruptHandler: () => {
-        interruptHandler = null;
       },
     };
 

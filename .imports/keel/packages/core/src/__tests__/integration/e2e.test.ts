@@ -15,6 +15,7 @@ import { CallbackRegistry, OperationCollector } from '../../reconciler';
 import { Engine } from '../../runtime/engine';
 import { Receiver } from '../../runtime/receiver';
 import { ComponentRegistry } from '../../runtime/registry';
+import { createMockJSEngineProvider } from '../../runtime/test-utils';
 
 // TS type imports
 interface OperationBatch {
@@ -26,58 +27,6 @@ interface OperationBatch {
 interface HostMessage {
   type: string;
   [key: string]: unknown;
-}
-
-// Type definitions for mock QuickJS
-interface MockQuickJSContext {
-  eval(code: string): unknown;
-  setGlobal(name: string, value: unknown): void;
-  getGlobal(name: string): unknown;
-  dispose(): void;
-}
-
-interface MockQuickJSRuntime {
-  createContext(): MockQuickJSContext;
-  dispose(): void;
-}
-
-interface MockQuickJSProvider {
-  createRuntime(): MockQuickJSRuntime;
-}
-
-// Mock QuickJS Provider for tests
-function createMockQuickJSProvider(): MockQuickJSProvider {
-  return {
-    createRuntime(): MockQuickJSRuntime {
-      const globals = new Map<string, unknown>();
-      return {
-        createContext(): MockQuickJSContext {
-          return {
-            eval(code: string): unknown {
-              const globalNames = Array.from(globals.keys());
-              const globalValues = Array.from(globals.values());
-              try {
-                const fn = new Function(...globalNames, `"use strict"; ${code}`);
-                return fn(...globalValues);
-              } catch (e) {
-                throw e;
-              }
-            },
-            setGlobal(name: string, value: unknown): void {
-              globals.set(name, value);
-            },
-            getGlobal(name: string): unknown {
-              return globals.get(name);
-            },
-            dispose(): void {
-              globals.clear();
-            },
-          };
-        },
-        dispose(): void {},
-      };
-    },
-  };
 }
 
 // ============ Mock components ============
@@ -108,7 +57,7 @@ describe('E2E Integration Tests', () => {
     let _sentMessages: HostMessage[];
 
     beforeEach(() => {
-      engine = new Engine({ quickjs: createMockQuickJSProvider(), debug: false });
+      engine = new Engine({ quickjs: createMockJSEngineProvider(), debug: false });
       engine.register({
         View: MockView,
         Text: MockText,
@@ -434,7 +383,7 @@ describe('E2E Integration Tests', () => {
     let engine: Engine;
 
     beforeEach(() => {
-      engine = new Engine({ quickjs: createMockQuickJSProvider(), debug: false });
+      engine = new Engine({ quickjs: createMockJSEngineProvider(), debug: false });
       engine.register({
         View: MockView,
         Text: MockText,
@@ -528,7 +477,7 @@ describe('E2E Integration Tests', () => {
     let engine: Engine;
 
     beforeEach(() => {
-      engine = new Engine({ quickjs: createMockQuickJSProvider(), debug: false });
+      engine = new Engine({ quickjs: createMockJSEngineProvider(), debug: false });
     });
 
     afterEach(() => {
@@ -682,7 +631,7 @@ describe('E2E Integration Tests', () => {
 describe('Full Stack Simulation', () => {
   it('should simulate complete render cycle', async () => {
     // 1. Create Engine
-    const engine = new Engine({ quickjs: createMockQuickJSProvider() });
+    const engine = new Engine({ quickjs: createMockJSEngineProvider() });
     engine.register({
       View: MockView,
       Text: MockText,

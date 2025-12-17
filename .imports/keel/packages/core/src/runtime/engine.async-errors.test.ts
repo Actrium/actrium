@@ -1,57 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { Engine } from './engine';
-
-// Mock QuickJS Provider
-interface MockQuickJSContext {
-  eval(code: string): unknown;
-  setGlobal(name: string, value: unknown): void;
-  getGlobal(name: string): unknown;
-  dispose(): void;
-}
-
-interface MockQuickJSRuntime {
-  createContext(): MockQuickJSContext;
-  dispose(): void;
-}
-
-interface MockQuickJSProvider {
-  createRuntime(): MockQuickJSRuntime;
-}
-
-function createMockQuickJSProvider(): MockQuickJSProvider {
-  return {
-    createRuntime(): MockQuickJSRuntime {
-      const globals = new Map<string, unknown>();
-      return {
-        createContext(): MockQuickJSContext {
-          return {
-            eval(code: string): unknown {
-              const globalNames = Array.from(globals.keys());
-              const globalValues = Array.from(globals.values());
-              const fn = new Function(...globalNames, `"use strict"; ${code}`);
-              return fn(...globalValues);
-            },
-            setGlobal(name: string, value: unknown): void {
-              globals.set(name, value);
-            },
-            getGlobal(name: string): unknown {
-              return globals.get(name);
-            },
-            dispose(): void {
-              globals.clear();
-            },
-          };
-        },
-        dispose(): void {},
-      };
-    },
-  };
-}
+import { createMockJSEngineProvider } from './test-utils';
 
 describe('Engine async error handling', () => {
   describe('setInterval error handling', () => {
     it('should catch and emit errors from setInterval callbacks', async () => {
-      const provider = createMockQuickJSProvider();
+      const provider = createMockJSEngineProvider();
       const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
 
       const errorsCaught: Error[] = [];
@@ -104,7 +58,7 @@ describe('Engine async error handling', () => {
     });
 
     it('should not crash when interval callback throws non-Error', async () => {
-      const provider = createMockQuickJSProvider();
+      const provider = createMockJSEngineProvider();
       const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
 
       const errorsCaught: Error[] = [];
@@ -190,7 +144,7 @@ describe('Engine async error handling', () => {
 
   describe('handleCallFunction error handling', () => {
     it('should catch errors when invoking callbacks', async () => {
-      const provider = createMockQuickJSProvider();
+      const provider = createMockJSEngineProvider();
       const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
 
       await engine.loadBundle(`
@@ -216,7 +170,7 @@ describe('Engine async error handling', () => {
     });
 
     it('should handle missing context gracefully in handleCallFunction', async () => {
-      const provider = createMockQuickJSProvider();
+      const provider = createMockJSEngineProvider();
       const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
 
       await engine.loadBundle(`// init`);
@@ -237,7 +191,7 @@ describe('Engine async error handling', () => {
     });
 
     it('should handle evalCode failure in handleCallFunction', async () => {
-      const provider = createMockQuickJSProvider();
+      const provider = createMockJSEngineProvider();
       const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
 
       await engine.loadBundle(`// init`);
@@ -267,7 +221,7 @@ describe('Engine async error handling', () => {
 
   describe('error event emission', () => {
     it('should increment errorCount when errors occur', async () => {
-      const provider = createMockQuickJSProvider();
+      const provider = createMockJSEngineProvider();
       const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
 
       await engine.loadBundle(`// init`);
@@ -304,7 +258,7 @@ describe('Engine async error handling', () => {
 
   describe('Unhandled Promise Rejection', () => {
     it('should emit error events when errors occur', async () => {
-      const provider = createMockQuickJSProvider();
+      const provider = createMockJSEngineProvider();
       const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
 
       const errorsCaught: Error[] = [];
@@ -327,7 +281,7 @@ describe('Engine async error handling', () => {
     });
 
     it('should track error count correctly', async () => {
-      const provider = createMockQuickJSProvider();
+      const provider = createMockJSEngineProvider();
       const engine = new Engine({ quickjs: provider, timeout: 5000, debug: false });
 
       await engine.loadBundle(`// init`);

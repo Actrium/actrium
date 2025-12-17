@@ -1,57 +1,6 @@
 import { beforeAll, describe, expect, it, mock } from 'bun:test';
 import { Engine } from './engine';
-
-// Type definitions for mock QuickJS
-interface MockQuickJSContext {
-  eval(code: string): unknown;
-  setGlobal(name: string, value: unknown): void;
-  getGlobal(name: string): unknown;
-  dispose(): void;
-}
-
-interface MockQuickJSRuntime {
-  createContext(): MockQuickJSContext;
-  dispose(): void;
-}
-
-interface MockQuickJSProvider {
-  createRuntime(): MockQuickJSRuntime;
-}
-
-// Mock QuickJS Provider for tests
-function createMockQuickJSProvider(): MockQuickJSProvider {
-  return {
-    createRuntime(): MockQuickJSRuntime {
-      const globals = new Map<string, unknown>();
-      return {
-        createContext(): MockQuickJSContext {
-          return {
-            eval(code: string): unknown {
-              const globalNames = Array.from(globals.keys());
-              const globalValues = Array.from(globals.values());
-              try {
-                const fn = new Function(...globalNames, `"use strict"; ${code}`);
-                return fn(...globalValues);
-              } catch (e) {
-                throw e;
-              }
-            },
-            setGlobal(name: string, value: unknown): void {
-              globals.set(name, value);
-            },
-            getGlobal(name: string): unknown {
-              return globals.get(name);
-            },
-            dispose(): void {
-              globals.clear();
-            },
-          };
-        },
-        dispose(): void {},
-      };
-    },
-  };
-}
+import { createMockJSEngineProvider } from './test-utils';
 
 function buildBundle(code: string) {
   // Use var instead of const to avoid redeclaration error since React is already injected as global
@@ -64,9 +13,9 @@ function buildBundle(code: string) {
 }
 
 describe('Engine enhanced behaviors', () => {
-  let provider: MockQuickJSProvider;
+  let provider: ReturnType<typeof createMockJSEngineProvider>;
   beforeAll(() => {
-    provider = createMockQuickJSProvider();
+    provider = createMockJSEngineProvider();
   });
   it('enforces require whitelist', async () => {
     const engine = new Engine({ quickjs: provider, debug: false, requireWhitelist: ['react'] });

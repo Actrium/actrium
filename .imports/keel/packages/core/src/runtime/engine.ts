@@ -133,37 +133,31 @@ export type {
 type EventListener<T> = (data: T) => void;
 
 /**
- * QuickJS interface (provided by react-native-quickjs)
+ * JS Engine Context interface
+ * Based on react-native-quickjs native interface - all methods are synchronous.
  */
 export interface JSEngineContext {
+  /** Synchronous code evaluation */
   eval(code: string): unknown;
-  evalAsync?(code: string): Promise<unknown>;
-  setGlobal(name: string, value: unknown): void | Promise<void>;
+
+  /** Set a global variable in the sandbox */
+  setGlobal(name: string, value: unknown): void;
+
+  /** Get a global variable from the sandbox */
   getGlobal(name: string): unknown;
-  dispose(): void | Promise<void>;
 
-  /**
-   * Set an interrupt handler for execution budget control.
-   * The handler is called periodically during execution.
-   * Return `true` to interrupt execution, `false` to continue.
-   * Not all providers support this - check capabilities before use.
-   */
-  setInterruptHandler?(handler: () => boolean): void;
-
-  /**
-   * Clear the interrupt handler.
-   */
-  clearInterruptHandler?(): void;
+  /** Dispose the context and release resources */
+  dispose(): void;
 }
 
 export interface JSEngineRuntime {
   createContext(): JSEngineContext;
-  dispose(): void | Promise<void>;
+  dispose(): void;
 }
 
 /**
- * QuickJS provider interface
- * Allows injection of QuickJS runtime implementation
+ * JS Engine Provider interface
+ * createRuntime can be async (for Worker initialization) or sync (for native providers)
  */
 export interface JSEngineProvider {
   createRuntime(): Promise<JSEngineRuntime> | JSEngineRuntime;
@@ -586,14 +580,14 @@ export class Engine implements IEngine {
     const defineReactGlobals = async () => {
       // NOTE: We use __console_log directly because console object isn't constructed yet in sandbox
       // The lazy getters will call require() at access time when bundle runs
+      // Getters are defensive - they return undefined if require fails (e.g., module not in whitelist)
       const REACT_GLOBALS = `
 (function(){
   if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] Defining React/ReactJSXRuntime/ReactNative getters, require=' + typeof require);
   if (typeof globalThis.React === 'undefined') {
     Object.defineProperty(globalThis, 'React', {
       get: function() {
-        if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] React getter called');
-        return require('react');
+        try { return require('react'); } catch(e) { return undefined; }
       },
       configurable: true
     });
@@ -601,8 +595,7 @@ export class Engine implements IEngine {
   if (typeof globalThis.ReactJSXRuntime === 'undefined') {
     Object.defineProperty(globalThis, 'ReactJSXRuntime', {
       get: function() {
-        if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] ReactJSXRuntime getter called');
-        return require('react/jsx-runtime');
+        try { return require('react/jsx-runtime'); } catch(e) { return undefined; }
       },
       configurable: true
     });
@@ -610,8 +603,7 @@ export class Engine implements IEngine {
   if (typeof globalThis.ReactNative === 'undefined') {
     Object.defineProperty(globalThis, 'ReactNative', {
       get: function() {
-        if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] ReactNative getter called');
-        return require('react-native');
+        try { return require('react-native'); } catch(e) { return undefined; }
       },
       configurable: true
     });
@@ -711,6 +703,8 @@ export class Engine implements IEngine {
     });
 
     // require: module loader for Guest code
+    // Note: Globals like __useHostEvent, __getConfig, __sendEventToHost are defined AFTER require.
+    // They are accessed lazily when require('rill/sdk') is called (after injectPolyfills completes).
     await setGlobalWithLog('require', (moduleName: string) => {
       if (debug) {
         logger.log('[rill:require]', moduleName);
@@ -724,8 +718,18 @@ export class Engine implements IEngine {
         case 'react':
           return React;
         case 'react-native':
-          // Return RillSDK which is set as ReactNative global
-          return this.context?.getGlobal('ReactNative');
+          // Return a minimal RN shim - real RN module not available in sandbox
+          // Guest code should use string component names via rill/sdk, not RN directly
+          return {
+            Platform: {
+              OS: 'web',
+              select: (o: Record<string, unknown>) => o['default'] ?? o['web'],
+            },
+            StyleSheet: { create: (s: unknown) => s },
+            View: 'View',
+            Text: 'Text',
+            Image: 'Image',
+          };
         case 'react/jsx-runtime':
           return ReactJSXRuntime;
         case 'rill/reconciler':
@@ -736,6 +740,7 @@ export class Engine implements IEngine {
         case '@rill/core/sdk':
           // Virtual module that provides component names (strings) and host hooks
           // Component names are used by rill reconciler to look up registered components
+          // Host communication hooks are accessed lazily from sandbox globals
           return {
             // React Native components (as string names)
             View: 'View',
@@ -748,10 +753,10 @@ export class Engine implements IEngine {
             FlatList: 'FlatList',
             TextInput: 'TextInput',
             Switch: 'Switch',
-            // Host communication hooks (need access to sandbox globals)
-            useHostEvent: this.context!.getGlobal('__useHostEvent'),
-            useConfig: this.context!.getGlobal('__getConfig'),
-            useSendToHost: () => this.context!.getGlobal('__sendEventToHost'),
+            // Host communication hooks (lazily accessed from sandbox globals)
+            useHostEvent: this.context?.getGlobal('__useHostEvent'),
+            useConfig: this.context?.getGlobal('__getConfig'),
+            useSendToHost: () => this.context?.getGlobal('__sendEventToHost'),
           };
         default:
           throw new Error(`[rill] Unsupported require("${moduleName}")`);
@@ -1068,13 +1073,17 @@ export class Engine implements IEngine {
 
   /**
    * Helper to evaluate code - uses evalAsync if available (for Worker providers),
-   * otherwise falls back to sync eval
+   * otherwise falls back to sync eval.
+   * Note: evalAsync is a non-standard extension for async-only providers.
    */
   private async evalCode(code: string): Promise<void> {
     if (!this.context) return;
-    if (this.context.evalAsync) {
-      // Check evalAsync directly on context
-      await this.context.evalAsync(code);
+    // Check for non-standard evalAsync (Worker providers)
+    const ctx = this.context as JSEngineContext & {
+      evalAsync?: (code: string) => Promise<unknown>;
+    };
+    if (ctx.evalAsync) {
+      await ctx.evalAsync(code);
     } else {
       this.context.eval(code);
     }

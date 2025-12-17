@@ -52,7 +52,6 @@ export class RNJSCSandboxProvider implements JSEngineProvider {
 
         return {
           eval: (code: string): unknown => ctx.eval(code),
-          evalAsync: async (code: string): Promise<unknown> => ctx.eval(code),
           setGlobal: (name: string, value: unknown): void => ctx.setGlobal(name, value),
           getGlobal: (name: string): unknown => ctx.getGlobal(name),
           dispose: (): void => ctx.dispose(),
