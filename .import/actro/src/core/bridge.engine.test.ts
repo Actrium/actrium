@@ -3,14 +3,14 @@
  * Tests for the actual createEngineAdapter implementation in bridge.ts
  */
 
+import { EventEmitter, type HostEventEmitter } from '../api/EventEmitter.host';
+import { type HostToast, TOAST_CLEAR_HANDLER, TOAST_SET_HANDLER, Toast } from '../api/Toast.host';
 import {
   createEngineAdapter,
-  handleGuestMessage,
   type EngineInterface,
   type GuestMessageHandlerOptions,
+  handleGuestMessage,
 } from './bridge';
-import { EventEmitter, type HostEventEmitter } from '../api/EventEmitter.host';
-import { Toast, type HostToast, TOAST_SET_HANDLER, TOAST_CLEAR_HANDLER } from '../api/Toast.host';
 
 // Type for contract violation used in tests
 interface TestContractViolation {

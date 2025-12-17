@@ -1,8 +1,8 @@
 import {
+  isGuestToHostEventName,
+  isHostToGuestEventName,
   validateGuestToHostPayload,
   validateHostToGuestPayload,
-  isHostToGuestEventName,
-  isGuestToHostEventName,
 } from './generated';
 
 describe('contracts payload validators', () => {
