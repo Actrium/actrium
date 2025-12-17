@@ -16,9 +16,11 @@ import { Engine } from 'rill';
 
 console.log('[BundleView] ✅ rill Engine 导入成功 (内置 JSC sandbox)');
 
-// 🔴 本地简化版 EngineView - 绕过 Metro 路径解析问题
-const LocalEngineView: React.FC<{ containerHeight?: number; containerWidth?: number;
-  engine: any;
+// 简化版 EngineView - 正确使用 rill API
+const LocalEngineView: React.FC<{
+  containerHeight?: number;
+  containerWidth?: number;
+  engine: Engine;
   bundleUrl: string;
   style?: object;
   onLoad?: () => void;
@@ -31,203 +33,46 @@ const LocalEngineView: React.FC<{ containerHeight?: number; containerWidth?: num
   const [content, setContent] = React.useState<React.ReactElement | null>(null);
   const mountedRef = React.useRef(true);
 
-  console.log('[LocalEngineView] 🔵 渲染, state:', state);
-
   // 更新回调
   const handleUpdate = React.useCallback(() => {
-    nlog('[LocalEngineView] handleUpdate called, mounted=' + mountedRef.current);
     if (!mountedRef.current) return;
     const receiver = engine.getReceiver();
-    nlog('[LocalEngineView] receiver=' + !!receiver);
     if (receiver) {
       const newContent = receiver.render();
-      nlog('[LocalEngineView] receiver.render() returned: ' + (newContent ? 'element' : 'null'));
-
-      // 精简调试信息
-      const debugInfo = (receiver as any).getDebugInfo?.();
-      if (debugInfo && debugInfo.functionCount !== undefined) {
-        nlog('[LocalEngineView] Functions: ' + debugInfo.functionCount + ', Last fnId: ' + debugInfo.lastFunctionFnId);
+      // receiver.render() 可能返回 string | ReactElement | null
+      if (typeof newContent === 'string') {
+        // 如果是字符串，包装成 Text 组件
+        setContent(<Text>{newContent}</Text>);
+      } else {
+        setContent(newContent as React.ReactElement | null);
       }
-
-      // 简化内容检查
-      if (newContent) {
-        nlog('[LocalEngineView] ✅ Got new content');
-      }
-      setContent(newContent);
-      nlog('[LocalEngineView] setContent called');
     }
   }, [engine]);
 
   // 加载插件
   React.useEffect(() => {
     mountedRef.current = true;
-    console.log('[LocalEngineView] useEffect 触发，准备加载插件');
 
     async function loadPlugin() {
-      console.log('[LocalEngineView] loadPlugin 开始');
       if (engine.isLoaded || engine.isDestroyed) {
-        console.log('[LocalEngineView] 跳过加载: isLoaded=' + engine.isLoaded);
         return;
       }
 
       try {
-        console.log('[LocalEngineView] 创建 Receiver...');
+        // 创建 Receiver
         engine.createReceiver(handleUpdate);
 
-        // 初始化运行时
-        console.log('[LocalEngineView] 初始化运行时...');
-        await (engine as any).initializeRuntime();
-
-        // 注入回调保护机制
-        console.log('[LocalEngineView] 注入回调保护...');
-        const callbackProtectionScript = `
-(function() {
-  // 确保回调表存在并保护它不被意外清空
-  if (!globalThis.__callbacks) {
-    globalThis.__callbacks = new Map();
-    globalThis.__callbackId = 0;
-  }
-  
-  // 保存原始函数引用
-  const originalRegister = globalThis.__registerCallback;
-  const originalInvoke = globalThis.__invokeCallback;
-  
-  // 增强回调注册，添加调试信息
-  globalThis.__registerCallback = function(fn) {
-    const fnId = originalRegister ? originalRegister(fn) : ('fn_' + (++globalThis.__callbackId));
-    if (!originalRegister) {
-      globalThis.__callbacks.set(fnId, fn);
-    }
-    console.log('[CallbackProtection] Registered callback:', fnId, 'Total callbacks:', globalThis.__callbacks.size);
-    return fnId;
-  };
-  
-  // 增强回调调用，添加状态检查和调度
-  globalThis.__invokeCallback = function(fnId, args) {
-    console.log('[CallbackProtection] Invoking callback:', fnId, 'Available:', globalThis.__callbacks.size);
-    console.log('[CallbackProtection] Available callbacks:', Array.from(globalThis.__callbacks.keys()).slice(0, 10));
-    
-    const result = originalInvoke ? originalInvoke(fnId, args) : (() => {
-      const fn = globalThis.__callbacks.get(fnId);
-      if (fn) {
-        try {
-          return fn.apply(null, args || []);
-        } catch (e) {
-          console.error('[CallbackProtection] Callback error:', e);
-        }
-      } else {
-        console.warn('[CallbackProtection] Callback not found:', fnId);
-      }
-    })();
-    
-    // 强制触发一次调度来刷新UI
-    Promise.resolve().then(() => {
-      try {
-        // 尝试触发reconciler刷新
-        if (typeof globalThis.__flushUpdates === 'function') {
-          globalThis.__flushUpdates();
-        }
-      } catch (e) {
-        // 静默失败
-      }
-    });
-    
-    return result;
-  };
-  
-  console.log('[CallbackProtection] Callback protection installed, current callbacks:', globalThis.__callbacks.size);
-})();
-`;
-        // 尝试多种方式注入回调保护
-        let injectionSuccess = false;
-        for (const method of ['evaluate', 'runScript', 'exec', 'evaluateJavaScript']) {
-          try {
-            if (typeof (engine as any)[method] === 'function') {
-              await (engine as any)[method](callbackProtectionScript);
-              console.log('[LocalEngineView] ✅ 回调保护已安装 via', method);
-              injectionSuccess = true;
-              break;
-            }
-          } catch (e) {
-            console.warn('[LocalEngineView] 方法', method, '失败:', e instanceof Error ? e.message : e);
-          }
-        }
-        if (!injectionSuccess) {
-          console.warn('[LocalEngineView] ⚠️ 所有注入方法都失败，将在bundle加载后尝试');
-        }
-
-        console.log('[LocalEngineView] 调用 loadBundle...');
+        // loadBundle 内部会自动初始化运行时
+        nlog('[LocalEngineView] 调用 loadBundle...');
         await engine.loadBundle(bundleUrl, { containerHeight, containerWidth });
-        console.log('[LocalEngineView] ✅ loadBundle 完成');
-
-        // 在bundle加载后，通过receiver向沙箱注入回调修复
-        console.log('[LocalEngineView] 注入回调修复补丁...');
-        const receiver = engine.getReceiver();
-        if (receiver && typeof (receiver as any).sendMessage === 'function') {
-          try {
-            await (receiver as any).sendMessage({
-              type: 'EVAL',
-              code: `
-(function() {
-  console.log('[CallbackFix] Installing callback fix...');
-  
-  if (!globalThis.__callbacks) {
-    globalThis.__callbacks = new Map();
-    globalThis.__callbackId = 0;
-    console.log('[CallbackFix] Created new callback map');
-  }
-  
-  const originalInvoke = globalThis.__invokeCallback;
-  globalThis.__invokeCallback = function(fnId, args) {
-    console.log('[CallbackFix] Invoking:', fnId, 'Available callbacks:', globalThis.__callbacks.size);
-    console.log('[CallbackFix] Callback keys:', Array.from(globalThis.__callbacks.keys()).slice(0, 5));
-    
-    const fn = globalThis.__callbacks.get(fnId);
-    if (fn) {
-      console.log('[CallbackFix] Found callback, executing...');
-      try {
-        const result = fn.apply(null, args || []);
-        console.log('[CallbackFix] Callback executed successfully');
-        
-        // 强制触发重渲染
-        setTimeout(() => {
-          try {
-            if (typeof globalThis.__flushUpdates === 'function') {
-              globalThis.__flushUpdates();
-            }
-          } catch (e) {}
-        }, 0);
-        
-        return result;
-      } catch (e) {
-        console.error('[CallbackFix] Callback error:', e);
-      }
-    } else {
-      console.warn('[CallbackFix] Callback not found:', fnId);
-      if (originalInvoke) {
-        return originalInvoke(fnId, args);
-      }
-    }
-  };
-  
-  console.log('[CallbackFix] Callback fix installed, callbacks:', globalThis.__callbacks.size);
-})();
-`
-            });
-            console.log('[LocalEngineView] ✅ 回调修复补丁已发送');
-          } catch (e) {
-            console.warn('[LocalEngineView] 回调修复补丁发送失败:', e);
-          }
-        } else {
-          console.warn('[LocalEngineView] receiver.sendMessage 不可用，尝试其他方式...');
-        }
+        nlog('[LocalEngineView] ✅ loadBundle 完成');
 
         if (mountedRef.current) {
           setState('loaded');
           onLoad?.();
         }
-      } catch (err: any) {
-        console.error('[LocalEngineView] ❌ 加载失败:', err?.message);
+      } catch (err: unknown) {
+        nerror('[LocalEngineView] ❌ 加载失败: ' + (err instanceof Error ? err.message : String(err)));
         if (mountedRef.current) {
           const loadError = err instanceof Error ? err : new Error(String(err));
           setError(loadError);
@@ -242,7 +87,7 @@ const LocalEngineView: React.FC<{ containerHeight?: number; containerWidth?: num
     return () => {
       mountedRef.current = false;
     };
-  }, [engine, bundleUrl, handleUpdate, onLoad, onError]);
+  }, [engine, bundleUrl, containerHeight, containerWidth, handleUpdate, onLoad, onError]);
 
   // 渲染
   if (state === 'loading') {
@@ -253,12 +98,9 @@ const LocalEngineView: React.FC<{ containerHeight?: number; containerWidth?: num
     return <View style={[{ flex: 1 }, style]}>{renderError?.(error)}</View>;
   }
 
-  // 🔴 直接返回 content,不要包装器
-  // 测试: 包装器可能阻止了 children 的渲染
-  nlog('[LocalEngineView] Rendering content directly (no wrapper)');
   return content || (
-    <View style={[{ flex: 1, backgroundColor: '#ff0000' }, style]}>
-      <Text style={{ color: '#ffffff' }}>No content</Text>
+    <View style={[{ flex: 1, backgroundColor: '#1a1a2a' }, style]}>
+      <Text style={{ color: '#888' }}>Loading...</Text>
     </View>
   );
 };

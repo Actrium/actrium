@@ -310,6 +310,19 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     if (!isActive) return;
     if (gate.status === 'blocked') return;
     if (!engine) return;
+    if (engine.isDestroyed) {
+      nerror(`[ActrTabView] Engine 已销毁，重建 tab=${tab.id}`);
+      adapterRef.current?.dispose();
+      adapterRef.current = null;
+      engineRef.current = null;
+      onEngineChange?.(tab.id, null);
+      setEngine(null);
+      setIsLoading(true);
+      setLoadError(null);
+      setLeftPanel(null);
+      setRightPanel(null);
+      return;
+    }
     const eng = engine;
 
     const unifiedScript = tab.unifiedScript;
@@ -338,7 +351,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     async function loadUnifiedBundle() {
       const perf = perfTimers.get(tab.id) || new PerfTimer(tab.id.substring(0, 8));
-      nlog(`🔄 [ActrTabView] loadUnifiedBundle 开始 tab=${tab.id}, script长度=${script.length}`);
+        nlog(`🔄 [ActrTabView] loadUnifiedBundle 开始 tab=${tab.id}, script长度=${script.length}`);
 
       try {
         perf.mark('bundle_load_start');
@@ -361,6 +374,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         // 有时 receiver 的更新回调可能不会立刻触发，手动提取一次确保面板可见
         nlog(`🔄 [ActrTabView] 手动调用 handleUpdate...`);
         handleUpdate();
+        // 容错：有些情况下首帧回调不会立刻触发，补打一轮以确保面板提取
+        setTimeout(handleUpdate, 0);
+        setTimeout(handleUpdate, 50);
         perf.mark('first_render');
 
         nlog(`⏱️ [Perf:${tab.id.substring(0, 8)}] === Bundle 加载完成，总耗时: ${perf.total()}ms ===`);
@@ -375,6 +391,18 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       } catch (err: any) {
         nerror(`[ActrTabView] 加载 unified bundle 失败 tab=${tab.id}: ${err?.message}`);
         nerror(`[ActrTabView] 错误堆栈: ${err?.stack?.substring(0, 500)}`);
+        setLoadError(err instanceof Error ? err : new Error(String(err)));
+        if (eng.isDestroyed) {
+          nerror(`[ActrTabView] Engine 已销毁，准备重建 tab=${tab.id}`);
+          adapterRef.current?.dispose();
+          adapterRef.current = null;
+          engineRef.current = null;
+          onEngineChange?.(tab.id, null);
+          setEngine(null);
+          setIsLoading(true);
+          setLeftPanel(null);
+          setRightPanel(null);
+        }
       }
     }
 
