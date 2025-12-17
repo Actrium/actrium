@@ -1,29 +1,19 @@
 /**
  * RNJSCSandboxProvider - JavaScriptCore sandbox for React Native (Apple platforms)
  *
- * Uses react-native-jsc-sandbox which provides true sandbox isolation via Apple's
- * built-in JavaScriptCore engine. Available on all Apple platforms:
- * - iOS 13.0+
- * - macOS 10.15+
- * - tvOS 13.0+
- * - watchOS 6.0+
- * - visionOS 1.0+
- *
- * Zero binary size overhead since JSC is a system framework.
+ * Uses react-native-jsc-sandbox with JSI bindings for SYNCHRONOUS operations.
+ * Same interface as RNQuickJSProvider.
  */
 
 import { Platform } from 'react-native';
 import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from './engine';
 
-// Interface matching react-native-jsc-sandbox exports
+// Interface matching react-native-jsc-sandbox (same as QuickJS)
 export interface JSCSandboxContext {
   eval(code: string): unknown;
-  evalAsync(code: string): Promise<unknown>;
-  setGlobal(name: string, value: unknown): Promise<void>;
-  getGlobal(name: string): Promise<unknown>;
+  setGlobal(name: string, value: unknown): void;
+  getGlobal(name: string): unknown;
   dispose(): void;
-  setInterruptHandler?(handler: () => boolean): void;
-  clearInterruptHandler?(): void;
 }
 
 export interface JSCSandboxRuntime {
@@ -31,98 +21,44 @@ export interface JSCSandboxRuntime {
   dispose(): void;
 }
 
-export interface JSCSandboxProviderLike {
-  createRuntime(): JSCSandboxRuntime;
-}
-
 export interface JSCSandboxModule {
-  JSCSandboxProvider: new (options?: {
-    timeout?: number;
-    memoryLimit?: number;
-  }) => JSCSandboxProviderLike;
-  createJSCSandboxProvider: (options?: {
-    timeout?: number;
-    memoryLimit?: number;
-  }) => JSCSandboxProviderLike;
-  isJSCSandboxAvailable: () => boolean;
+  createRuntime(options?: { timeout?: number }): JSCSandboxRuntime;
 }
 
 export interface RNJSCSandboxProviderOptions {
   timeout?: number;
-  memoryLimit?: number;
 }
 
 /**
  * RNJSCSandboxProvider - Wraps react-native-jsc-sandbox for rill Engine
- *
- * This provider creates truly isolated JavaScript contexts using Apple's JavaScriptCore.
- * Each context is completely sandboxed - code in one context cannot access globals or
- * data from another context or the host application.
  */
 export class RNJSCSandboxProvider implements JSEngineProvider {
-  private provider: JSCSandboxProviderLike;
+  private mod: JSCSandboxModule;
   private options: RNJSCSandboxProviderOptions;
 
   constructor(mod: JSCSandboxModule, options?: RNJSCSandboxProviderOptions) {
+    this.mod = mod;
     this.options = options || {};
-
-    // Create the underlying JSC sandbox provider
-    this.provider = new mod.JSCSandboxProvider({
-      timeout: this.options.timeout,
-      memoryLimit: this.options.memoryLimit,
-    });
   }
 
   createRuntime(): JSEngineRuntime {
-    const rt = this.provider.createRuntime();
+    const rt = this.mod.createRuntime({
+      timeout: this.options.timeout,
+    });
 
     return {
       createContext: (): JSEngineContext => {
         const ctx = rt.createContext();
 
-        // Wrap to match rill's JSEngineContext interface
-        const wrappedContext: JSEngineContext = {
-          // JSC sandbox only supports async eval via native bridge
-          eval: (_code: string): unknown => {
-            throw new Error(
-              '[RNJSCSandboxProvider] Synchronous eval not supported. Use evalAsync instead.'
-            );
-          },
-
-          evalAsync: async (code: string): Promise<unknown> => {
-            return ctx.evalAsync(code);
-          },
-
-          setGlobal: (name: string, value: unknown): Promise<void> => {
-            return ctx.setGlobal(name, value);
-          },
-
-          getGlobal: (name: string): unknown => {
-            // Note: JSC sandbox getGlobal is async, but rill interface expects sync
-            // Return a promise - callers should use await
-            return ctx.getGlobal(name);
-          },
-
-          dispose: (): void => {
-            ctx.dispose();
-          },
-
-          // Pass through interrupt handler methods if available
-          setInterruptHandler: ctx.setInterruptHandler
-            ? (handler: () => boolean) => ctx.setInterruptHandler!(handler)
-            : undefined,
-
-          clearInterruptHandler: ctx.clearInterruptHandler
-            ? () => ctx.clearInterruptHandler!()
-            : undefined,
+        return {
+          eval: (code: string): unknown => ctx.eval(code),
+          evalAsync: async (code: string): Promise<unknown> => ctx.eval(code),
+          setGlobal: (name: string, value: unknown): void => ctx.setGlobal(name, value),
+          getGlobal: (name: string): unknown => ctx.getGlobal(name),
+          dispose: (): void => ctx.dispose(),
         };
-
-        return wrappedContext;
       },
-
-      dispose: (): void => {
-        rt.dispose();
-      },
+      dispose: (): void => rt.dispose(),
     };
   }
 }
@@ -136,13 +72,12 @@ export function isApplePlatform(): boolean {
     Platform.OS === 'macos' ||
     Platform.OS === 'tvos' ||
     Platform.OS === 'visionos' ||
-    // watchOS typically runs as watchOS app extension
     (Platform.OS as string) === 'watchos'
   );
 }
 
 /**
- * Check if react-native-jsc-sandbox is available
+ * Check if react-native-jsc-sandbox JSI is available
  */
 export function isJSCSandboxAvailable(): boolean {
   if (!isApplePlatform()) {
@@ -152,9 +87,7 @@ export function isJSCSandboxAvailable(): boolean {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod = require('react-native-jsc-sandbox');
-    return typeof mod?.isJSCSandboxAvailable === 'function'
-      ? mod.isJSCSandboxAvailable()
-      : !!mod?.JSCSandboxProvider;
+    return typeof mod?.isJSCSandboxAvailable === 'function' && mod.isJSCSandboxAvailable();
   } catch {
     return false;
   }
@@ -162,7 +95,6 @@ export function isJSCSandboxAvailable(): boolean {
 
 /**
  * Resolve the JSC sandbox module
- * Returns null if not available or not on Apple platform
  */
 export function resolveJSCSandbox(): JSCSandboxModule | null {
   if (!isApplePlatform()) {
@@ -171,9 +103,9 @@ export function resolveJSCSandbox(): JSCSandboxModule | null {
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('react-native-jsc-sandbox') as JSCSandboxModule;
-    if (mod?.JSCSandboxProvider) {
-      return mod;
+    const mod = require('react-native-jsc-sandbox');
+    if (typeof mod?.getJSCSandboxModule === 'function') {
+      return mod.getJSCSandboxModule() as JSCSandboxModule | null;
     }
   } catch {
     // Package not available
