@@ -4,6 +4,14 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const { resolve } = require('metro-resolver');
 
 const projectRoot = __dirname;
+const goAskAwayRoot = path.resolve(projectRoot, '../..');
+
+// Local development packages (symlinked via file: protocol)
+const localPackages = {
+  rill: path.resolve(goAskAwayRoot, 'rill'),
+  askit: path.resolve(goAskAwayRoot, 'askit'),
+  'react-native-jsc-sandbox': path.resolve(goAskAwayRoot, 'react-native-jsc-sandbox'),
+};
 
 const defaultConfig = getDefaultConfig(projectRoot);
 
@@ -13,14 +21,20 @@ defaultConfig.resolver.platforms = Array.from(
 );
 
 // Prevent RN interop-with-react-19 stack from trying to import inline-requires-plugin relative to React
+// Also block react from local packages' node_modules to ensure single React instance
 defaultConfig.resolver.blockList = [
   /.*node_modules\/react\/cjs\/react\.development\.js.*inline-requires-plugin.*/,
+  // Block react from symlinked local packages (rill, askit, react-native-jsc-sandbox)
+  new RegExp(`${goAskAwayRoot}/(rill|askit|react-native-jsc-sandbox)/node_modules/react/.*`),
+  new RegExp(`${goAskAwayRoot}/(rill|askit|react-native-jsc-sandbox)/node_modules/react-reconciler/.*`),
 ];
 
 const defaultPolyfills = defaultConfig.serializer?.getPolyfills?.() || [];
 
 /** @type {import('metro-config').MetroConfig} */
 const customConfig = {
+  // Watch local package directories for changes
+  watchFolders: Object.values(localPackages),
   serializer: {
     getPolyfills: () => [
       require.resolve('./src/ensure-console-assert.js'),
@@ -36,6 +50,12 @@ const customConfig = {
       path.resolve(projectRoot, 'node_modules'),
     ],
     resolveRequest: (context, moduleName, platform) => {
+      // macOS platform: redirect react-native to react-native-macos
+      // This ensures platform-specific implementations (Image.macos.js, etc.) are found
+      if (platform === 'macos' && moduleName === 'react-native') {
+        return resolve(context, 'react-native-macos', platform);
+      }
+
       // macOS platform: enable .native extension support (consistent with iOS/Android)
       // Default macOS only tries .macos.ts -> .ts, not .native.ts
       // With preferNativePlatform=true, resolution order becomes: .macos.ts -> .native.ts -> .ts

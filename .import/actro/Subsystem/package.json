@@ -16,13 +16,13 @@
   "type": "commonjs",
   "dependencies": {
     "@babel/runtime": "^7.28.4",
-    "askit": "github:GoAskAway/askit",
+    "askit": "file:../../askit",
     "react": "19.0.0",
     "react-native": "0.79.6",
-    "react-native-jsc-sandbox": "github:GoAskAway/react-native-jsc-sandbox",
+    "react-native-jsc-sandbox": "file:../../react-native-jsc-sandbox",
     "react-native-macos": "^0.79.1",
     "react-reconciler": "^0.31.0",
-    "rill": "github:GoAskAway/rill"
+    "rill": "file:../../rill"
   },
   "devDependencies": {
     "@react-native-community/cli": "^20.0.2",
@@ -30,8 +30,5 @@
     "@tsconfig/react-native": "^3.0.0",
     "@types/react": "19.0.0",
     "typescript": "^5.6.3"
-  },
-  "overrides": {
-    "rill": "github:GoAskAway/rill"
   }
 }
