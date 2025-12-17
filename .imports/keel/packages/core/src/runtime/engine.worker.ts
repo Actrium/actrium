@@ -2,6 +2,7 @@
 
 import variant from '@jitl/quickjs-wasmfile-release-sync';
 import { loadQuickJs } from '@sebastianwessel/quickjs';
+import { ALL_SHIMS } from './shims';
 
 interface WorkerOptions {
   timeout?: number;
@@ -24,52 +25,12 @@ async function getSandbox() {
 // Store globals that need to be set before eval
 const pendingGlobals = new Map<string, unknown>();
 
-// Built-in shims that will be injected into every eval
-// These provide React/JSX runtime compatibility in the QuickJS sandbox
+// Built-in shims - use shared implementation from shims.ts
+// Add require shim for worker context
 const BUILTIN_SHIMS = `
-// React shim
-globalThis.React = {
-  createElement: function(type, props) {
-    var children = Array.prototype.slice.call(arguments, 2);
-    return { $$typeof: Symbol.for('react.element'), type: type, props: Object.assign({}, props, { children: children.length === 1 ? children[0] : children }), key: props && props.key || null };
-  },
-  Fragment: Symbol.for('react.fragment'),
-  useState: function(init) { return [init, function() {}]; },
-  useEffect: function() {},
-  useCallback: function(fn) { return fn; },
-  useMemo: function(fn) { return fn(); },
-  useRef: function(init) { return { current: init }; },
-  useContext: function() { return undefined; },
-  createContext: function(def) { return { Provider: 'Provider', Consumer: 'Consumer', _currentValue: def }; },
-  memo: function(c) { return c; },
-  forwardRef: function(c) { return c; },
-};
+${ALL_SHIMS}
 
-// ReactJSXRuntime shim
-globalThis.ReactJSXRuntime = {
-  jsx: function(type, props, key) {
-    var p = Object.assign({}, props);
-    if (key !== undefined) p.key = key;
-    return { $$typeof: Symbol.for('react.element'), type: type, props: p, key: key || null };
-  },
-  jsxs: function(type, props, key) {
-    var p = Object.assign({}, props);
-    if (key !== undefined) p.key = key;
-    return { $$typeof: Symbol.for('react.element'), type: type, props: p, key: key || null };
-  },
-  Fragment: Symbol.for('react.fragment'),
-};
-
-// Console shim (output is lost in sandbox but prevents errors)
-globalThis.console = {
-  log: function() {},
-  warn: function() {},
-  error: function() {},
-  debug: function() {},
-  info: function() {},
-};
-
-// require shim
+// require shim for worker context
 globalThis.require = function(moduleName) {
   if (moduleName === 'react') return globalThis.React;
   if (moduleName === 'react/jsx-runtime') return globalThis.ReactJSXRuntime;

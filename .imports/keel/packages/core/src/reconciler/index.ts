@@ -162,7 +162,9 @@ export class OperationCollector {
    * Flush and send all operations
    */
   flush(sendToHost: SendToHost): void {
-    if (this.operations.length === 0) return;
+    if (this.operations.length === 0) {
+      return;
+    }
 
     // 🔴 TRACK: Count operation types using global variable
     if (typeof globalThis !== 'undefined') {
@@ -856,6 +858,89 @@ const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
 // fixing the "Callback not found" issue caused by component remounts.
 const globalCallbackRegistry = new CallbackRegistry();
 
+// Cache Host-side React element symbol for cross-engine compatibility
+const REACT_ELEMENT_TYPE = Symbol.for('react.element');
+const REACT_FRAGMENT_TYPE = Symbol.for('react.fragment');
+
+// String markers used by Guest shims (survive JSI serialization)
+const RILL_ELEMENT_MARKER = '__rill_react_element__';
+const RILL_FRAGMENT_MARKER = '__rill_react_fragment__';
+
+/**
+ * Transform Guest element to use Host's Symbol registry
+ *
+ * When Guest (JSC sandbox) creates React elements, it uses its own Symbol registry.
+ * Host (Hermes) has a different Symbol registry, so Symbol.for('react.element')
+ * returns different Symbols in each engine. Additionally, JSI doesn't preserve
+ * Symbols across the engine boundary at all - they become undefined.
+ *
+ * We use string markers (__rillTypeMarker, __rillFragmentType) that survive
+ * JSI serialization to identify React elements from the Guest.
+ *
+ * This function recursively transforms Guest elements to use Host Symbols.
+ */
+function transformGuestElement(element: unknown): ReactElement | null {
+  if (element === null || element === undefined) {
+    return null;
+  }
+
+  // Handle primitive values (text nodes)
+  if (typeof element !== 'object') {
+    return element as unknown as ReactElement;
+  }
+
+  // Handle arrays (children)
+  if (Array.isArray(element)) {
+    return element.map(transformGuestElement) as unknown as ReactElement;
+  }
+
+  const el = element as Record<string, unknown>;
+
+  // Check if this is a Rill Guest element using the string marker
+  // This marker survives JSI serialization while Symbols don't
+  const isRillElement = el.__rillTypeMarker === RILL_ELEMENT_MARKER;
+
+  // Also check for $$typeof Symbol (works when not crossing JSI, e.g., NoSandbox provider)
+  const hasSymbolType = typeof el.$$typeof === 'symbol';
+
+  if (!isRillElement && !hasSymbolType) {
+    // Not a React element, return as-is
+    return element as ReactElement;
+  }
+
+  // Determine if this is a Fragment
+  const isFragment =
+    el.__rillFragmentType === RILL_FRAGMENT_MARKER ||
+    (typeof el.type === 'symbol' && (el.type as symbol).description === 'react.fragment');
+
+  // Transform the element type
+  let transformedType = el.type;
+  if (isFragment) {
+    transformedType = REACT_FRAGMENT_TYPE;
+  }
+
+  // Transform children recursively
+  const props = el.props as Record<string, unknown> | undefined;
+  let transformedProps = props;
+  if (props && props.children !== undefined) {
+    const transformedChildren = Array.isArray(props.children)
+      ? props.children.map(transformGuestElement)
+      : transformGuestElement(props.children);
+    transformedProps = { ...props, children: transformedChildren };
+  }
+
+  // Create a new element with Host's Symbol
+  return {
+    $$typeof: REACT_ELEMENT_TYPE,
+    type: transformedType,
+    key: el.key,
+    ref: el.ref,
+    props: transformedProps,
+    _owner: el._owner,
+    _store: el._store,
+  } as unknown as ReactElement;
+}
+
 /**
  * Render React element
  *
@@ -863,6 +948,9 @@ const globalCallbackRegistry = new CallbackRegistry();
  * This allows multiple guests to run simultaneously without interfering with each other.
  */
 export function render(element: ReactElement, sendToHost: SendToHost): void {
+  // Transform Guest element to use Host's Symbol registry
+  const transformedElement = transformGuestElement(element);
+
   let instance = reconcilerMap.get(sendToHost);
 
   if (!instance) {
@@ -889,7 +977,7 @@ export function render(element: ReactElement, sendToHost: SendToHost): void {
     reconcilerMap.set(sendToHost, instance);
   }
 
-  instance.reconciler.updateContainer(element, instance.root, null, () => {});
+  instance.reconciler.updateContainer(transformedElement, instance.root, null, () => {});
 }
 
 /**

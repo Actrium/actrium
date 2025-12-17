@@ -11,10 +11,8 @@ declare global {
   var __sendEventToHost: ((eventName: string, payload?: unknown) => void) | undefined;
 }
 
-import * as React from 'react';
-import * as ReactJSXRuntime from 'react/jsx-runtime';
-
 import * as RillReconciler from '../reconciler';
+import { ALL_SHIMS, IS_SHIM_INJECTED } from './shims';
 
 import type {
   CallFunctionMessage,
@@ -331,6 +329,9 @@ export class Engine implements IEngine {
           timeout: this.options.timeout,
           sandbox: options.sandbox,
         });
+        // Log provider type using logger (shows in Xcode console)
+        const providerName = this.options.provider?.constructor?.name || 'unknown';
+        this.options.logger.log(`[rill] Provider type: ${providerName}`);
         if (this.options.debug)
           this.options.logger.log('[rill] Initialized DefaultJSEngineProvider');
       } catch (e) {
@@ -402,6 +403,8 @@ export class Engine implements IEngine {
       if (this.options.debug) {
         this.options.logger.log(`[rill:${this.id}] Bundle loaded, length:`, code.length);
         this.options.logger.log(`[rill:${this.id}] Bundle preview:`, code.substring(0, 200));
+        this.options.logger.log(`[rill:${this.id}] Bundle footer (last 500 chars):`, code.substring(code.length - 500));
+        this.options.logger.log(`[rill:${this.id}] Has Auto-render:`, code.includes('Auto-render'));
       }
 
       // Initialize sandbox and execute
@@ -472,22 +475,37 @@ export class Engine implements IEngine {
         this.options.logger.log(`[rill:${this.id}] DEBUG: __sendToHost type in sandbox:`, typeof sendToHostType);
 
         // Run diagnostic code in sandbox to check auto-render conditions
-        await this.evalCode(`
-          (function() {
-            console.log('[rill:DEBUG] Checking auto-render conditions...');
-            console.log('[rill:DEBUG] typeof __sendToHost:', typeof __sendToHost);
-            console.log('[rill:DEBUG] typeof __RillGuest:', typeof __RillGuest);
-            console.log('[rill:DEBUG] typeof require:', typeof require);
-            if (typeof require === 'function') {
-              try {
-                var reconciler = require('rill/reconciler');
-                console.log('[rill:DEBUG] reconciler:', typeof reconciler);
-                console.log('[rill:DEBUG] reconciler.render:', typeof (reconciler && reconciler.render));
-              } catch(e) {
-                console.error('[rill:DEBUG] require error:', e.message);
-              }
+        this.options.logger.log(`[rill:${this.id}] About to run evalCode diagnostics...`);
+        try {
+          // Check if console.log still works after bundle execution
+          await this.evalCode(`
+            // Try calling __console_log directly (bypassing console object)
+            if (typeof __console_log === 'function') {
+              __console_log('[rill:DEBUG] Direct __console_log works!');
             }
-          })();
+            // Check console object
+            if (typeof console !== 'undefined' && typeof console.log === 'function') {
+              console.log('[rill:DEBUG] console.log test');
+            }
+            // Store results in global for host to read
+            globalThis.__debugResults = {
+              console_exists: typeof console !== 'undefined',
+              console_log_type: typeof (console && console.log),
+              __console_log_type: typeof __console_log,
+            };
+          `);
+          const debugResults = this.context?.getGlobal('__debugResults');
+          this.options.logger.log(`[rill:${this.id}] Debug results:`, JSON.stringify(debugResults));
+        } catch (evalErr) {
+          this.options.logger.error(`[rill:${this.id}] evalCode failed:`, evalErr);
+        }
+
+        // Check __sendToHost in sandbox
+        await this.evalCode(`
+          if (typeof __console_log === 'function') {
+            __console_log('[rill:DEBUG] typeof __sendToHost:', typeof __sendToHost);
+            __console_log('[rill:DEBUG] typeof __RillGuest:', typeof __RillGuest);
+          }
         `);
       } catch (debugErr) {
         this.options.logger.warn(`[rill:${this.id}] DEBUG check failed:`, debugErr);
@@ -600,50 +618,25 @@ export class Engine implements IEngine {
         ? globalThis.queueMicrotask.bind(globalThis)
         : (fn: () => void) => Promise.resolve().then(fn);
 
-    // For JSC sandbox, we can't pass complex objects like React directly through the bridge.
-    // Instead, we define global variables in the sandbox that call require() to get these modules.
-    // This works because require() is implemented via callback proxy mechanism.
-    // NOTE: This must be executed AFTER 'require' is set up as a global
-    const defineReactGlobals = async () => {
-      // NOTE: We use __console_log directly because console object isn't constructed yet in sandbox
-      // The lazy getters will call require() at access time when bundle runs
-      // Getters are defensive - they return undefined if require fails (e.g., module not in whitelist)
-      const REACT_GLOBALS = `
-(function(){
-  if (typeof __console_log === 'function') __console_log('[REACT_GLOBALS] Defining React/ReactJSXRuntime/ReactNative getters, require=' + typeof require);
-  if (typeof globalThis.React === 'undefined') {
-    Object.defineProperty(globalThis, 'React', {
-      get: function() {
-        try { return require('react'); } catch(e) { return undefined; }
-      },
-      configurable: true
-    });
-  }
-  if (typeof globalThis.ReactJSXRuntime === 'undefined') {
-    Object.defineProperty(globalThis, 'ReactJSXRuntime', {
-      get: function() {
-        try { return require('react/jsx-runtime'); } catch(e) { return undefined; }
-      },
-      configurable: true
-    });
-  }
-  if (typeof globalThis.ReactNative === 'undefined') {
-    Object.defineProperty(globalThis, 'ReactNative', {
-      get: function() {
-        try { return require('react-native'); } catch(e) { return undefined; }
-      },
-      configurable: true
-    });
-  }
-})();`;
+    // Inject React/JSX shims into Guest sandbox
+    // React runs entirely within Guest - no cross-engine serialization needed
+    // This is the correct architecture: Guest has its own lightweight React implementation
+    const injectReactShims = async () => {
       try {
-        await this.evalCode(REACT_GLOBALS);
+        // Check if shims are already injected (e.g., from previous load)
+        const alreadyInjected = await this.evalCode(IS_SHIM_INJECTED);
+        if (alreadyInjected) {
+          if (debug) logger.log(`[rill:${this.id}] React shims already injected, skipping`);
+          return;
+        }
+
+        // Inject all shims (console, React, JSX runtime)
+        await this.evalCode(ALL_SHIMS);
+
         if (debug)
-          logger.log(
-            `[rill:${this.id}] setGlobal: React/ReactJSXRuntime/ReactNative defined via require() in sandbox`
-          );
+          logger.log(`[rill:${this.id}] React/JSX shims injected into Guest sandbox`);
       } catch (e) {
-        logger.warn(`[rill:${this.id}] Failed to define React globals:`, e);
+        logger.warn(`[rill:${this.id}] Failed to inject React shims:`, e);
       }
     };
 
@@ -729,6 +722,29 @@ export class Engine implements IEngine {
       if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatArgs(args));
     });
 
+    // DEBUG: Test if __console_log is accessible as a global variable in sandbox
+    try {
+      await this.evalCode(`
+        var testResult = {
+          console_log_type: typeof __console_log,
+          console_warn_type: typeof __console_warn,
+          console_error_type: typeof __console_error,
+        };
+        // Try to call __console_log directly
+        if (typeof __console_log === 'function') {
+          __console_log('[SANDBOX TEST] __console_log is accessible!');
+        }
+      `);
+      const testResult = this.context?.getGlobal('testResult') as Record<string, string>;
+      logger.log(`[rill:${this.id}] SANDBOX TEST:`, JSON.stringify(testResult));
+    } catch (e) {
+      logger.warn(`[rill:${this.id}] SANDBOX TEST failed:`, e);
+    }
+
+    // Inject React/JSX shims BEFORE require is set up
+    // This allows require('react') to return the Guest's shim
+    await injectReactShims();
+
     // require: module loader for Guest code
     // Note: Globals like __useHostEvent, __getConfig, __sendEventToHost are defined AFTER require.
     // They are accessed lazily when require('rill/sdk') is called (after injectPolyfills completes).
@@ -743,7 +759,9 @@ export class Engine implements IEngine {
 
       switch (moduleName) {
         case 'react':
-          return React;
+          // Return Guest's React shim (injected via injectReactShims)
+          // This avoids cross-engine serialization of complex Host objects
+          return this.context?.getGlobal('React');
         case 'react-native':
           // Return a minimal RN shim - real RN module not available in sandbox
           // Guest code should use string component names via rill/sdk, not RN directly
@@ -758,7 +776,8 @@ export class Engine implements IEngine {
             Image: 'Image',
           };
         case 'react/jsx-runtime':
-          return ReactJSXRuntime;
+          // Return Guest's JSX runtime shim (injected via injectReactShims)
+          return this.context?.getGlobal('ReactJSXRuntime');
         case 'rill/reconciler':
         case '@rill/core':
           // Support both old and new module names
@@ -790,8 +809,8 @@ export class Engine implements IEngine {
       }
     });
 
-    // Now that require is set up, define React/ReactJSXRuntime lazy getters
-    await defineReactGlobals();
+    // React/JSX shims are already injected before require was set up
+    // No need for lazy getters - Guest has its own React implementation
 
     // Store native clear functions for cleanup
     this.nativeClearTimeout = nativeClearTimeout;
@@ -1039,7 +1058,22 @@ export class Engine implements IEngine {
 
     // Save reference for callback registry access
     this.sendToHostFn = sendToHost;
-    setGlobalPromises.push(this.context.setGlobal('__sendToHost', sendToHost));
+    logger.log(`[rill:${this.id}] Setting __sendToHost, typeof sendToHost:`, typeof sendToHost);
+    logger.log(`[rill:${this.id}] context.setGlobal type:`, typeof this.context.setGlobal);
+    logger.log(`[rill:${this.id}] context.getGlobal type:`, typeof this.context.getGlobal);
+    const setResult = this.context.setGlobal('__sendToHost', sendToHost);
+    logger.log(`[rill:${this.id}] setGlobal returned:`, setResult, 'type:', typeof setResult);
+    setGlobalPromises.push(setResult);
+    // Immediately verify the value was set correctly
+    const verifyValue = this.context.getGlobal('__sendToHost');
+    logger.log(`[rill:${this.id}] After setGlobal, typeof getGlobal('__sendToHost'):`, typeof verifyValue);
+    logger.log(`[rill:${this.id}] getGlobal value === sendToHost:`, verifyValue === sendToHost);
+    logger.log(`[rill:${this.id}] getGlobal value:`, verifyValue);
+    // Check globalThis directly (for NoSandboxProvider debugging)
+    if (typeof globalThis !== 'undefined') {
+      logger.log(`[rill:${this.id}] globalThis.__sendToHost exists:`, '__sendToHost' in globalThis);
+      logger.log(`[rill:${this.id}] typeof globalThis.__sendToHost:`, typeof (globalThis as Record<string, unknown>).__sendToHost);
+    }
 
     // __getConfig: Get initial configuration
     setGlobalPromises.push(this.context.setGlobal('__getConfig', () => this.config));
