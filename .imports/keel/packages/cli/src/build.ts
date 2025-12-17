@@ -65,6 +65,14 @@ const RUNTIME_INJECT = `
 (function() {
   'use strict';
 
+  // DEBUG: Test if console is working
+  if (typeof console !== 'undefined' && typeof console.log === 'function') {
+    console.log('[rill:bundle] RUNTIME_INJECT starting, console.log works!');
+  }
+  if (typeof __console_log === 'function') {
+    __console_log('[rill:bundle] RUNTIME_INJECT: __console_log direct call works!');
+  }
+
   // Callback registry - persist across re-executions
   if (!globalThis.__callbacks) {
     globalThis.__callbacks = new Map();
@@ -156,11 +164,20 @@ const RUNTIME_INJECT = `
  * Auto-render footer code
  */
 const AUTO_RENDER_FOOTER = `
-/* Auto-render */
+/* Auto-render - uses globalThis.__RillGuest for JSC sandbox compatibility */
 (function() {
-  if (typeof __sendToHost === 'function' && typeof __RillGuest !== 'undefined') {
+  console.log('[rill:auto-render] Starting AUTO_RENDER_FOOTER...');
+  console.log('[rill:auto-render] typeof __sendToHost:', typeof __sendToHost);
+  console.log('[rill:auto-render] typeof globalThis.__RillGuest:', typeof globalThis.__RillGuest);
+
+  if (typeof __sendToHost === 'function' && typeof globalThis.__RillGuest !== 'undefined') {
+    console.log('[rill:auto-render] Conditions passed, entering try block');
     try {
-      var React = typeof require === 'function' ? require('react') : (typeof globalThis.React !== 'undefined' ? globalThis.React : null);
+      // Use globalThis.React directly (injected by REACT_SHIM)
+      // Don't use require('react') as it goes through JSI bridge and loses functions
+      var React = globalThis.React;
+      console.log('[rill:auto-render] React:', React ? 'found' : 'NOT found');
+      console.log('[rill:auto-render] React.createElement:', typeof React.createElement);
 
       if (!React) {
         console.error('[rill] React not found, cannot auto-render');
@@ -170,6 +187,8 @@ const AUTO_RENDER_FOOTER = `
       // Import render function from reconciler
       // In Engine's mock runtime, this will be available via require polyfill
       var reconciler = typeof require === 'function' ? require('rill/reconciler') : null;
+      console.log('[rill:auto-render] reconciler:', reconciler ? 'found' : 'NOT found');
+      console.log('[rill:auto-render] reconciler.render:', reconciler && reconciler.render ? 'found' : 'NOT found');
 
       if (!reconciler || !reconciler.render) {
         console.error('[rill] Reconciler not found, cannot auto-render');
@@ -177,10 +196,12 @@ const AUTO_RENDER_FOOTER = `
       }
 
       // Get the default export (the main component)
-      // IIFE format may return the component directly or as .default
-      var Component = typeof __RillGuest === 'function'
-        ? __RillGuest
-        : (__RillGuest.default || __RillGuest);
+      // IIFE format sets globalThis.__RillGuest, may return the component directly or as .default
+      var GuestExport = globalThis.__RillGuest;
+      var Component = typeof GuestExport === 'function'
+        ? GuestExport
+        : (GuestExport.default || GuestExport);
+      console.log('[rill:auto-render] Component type:', typeof Component);
 
       if (!Component || typeof Component !== 'function') {
         console.warn('[rill] No valid component found in guest');
@@ -189,9 +210,12 @@ const AUTO_RENDER_FOOTER = `
 
       // Create React element and render via reconciler
       var element = React.createElement(Component);
+      console.log('[rill:auto-render] element:', element ? 'created' : 'null');
 
       console.log('[rill] Auto-rendering guest component');
+      console.log('[rill:auto-render] Calling reconciler.render with sendToHost type:', typeof __sendToHost);
       reconciler.render(element, __sendToHost);
+      console.log('[rill:auto-render] reconciler.render returned');
 
       // 🔴 TRACK: Read after commit phase completes
       setTimeout(function() {
@@ -203,7 +227,12 @@ const AUTO_RENDER_FOOTER = `
       }, 100);
 
     } catch (error) {
-      console.error('[rill] Auto-render failed:', error);
+      // Better error logging - extract message and stack if available
+      var errMsg = error && error.message ? error.message : String(error);
+      var errStack = error && error.stack ? error.stack : '(no stack)';
+      var errName = error && error.name ? error.name : '(no name)';
+      console.error('[rill] Auto-render failed:', errName, '-', errMsg);
+      console.error('[rill] Error stack:', errStack);
     }
   }
 })();
@@ -288,6 +317,24 @@ export async function build(options: BuildOptions): Promise<void> {
           entryFileNames: outFileName,
         },
         plugins: [
+          // Transform var __RillGuest to globalThis.__RillGuest for JSC sandbox compatibility
+          // In JSC's evaluateScript, var declarations don't become globalThis properties
+          {
+            name: 'rill-globalThis-fix',
+            generateBundle(_options, bundle) {
+              for (const fileName in bundle) {
+                const item = bundle[fileName];
+                if (item && item.type === 'chunk') {
+                  const chunk = item;
+                  // Replace var __RillGuest= with globalThis.__RillGuest=
+                  chunk.code = chunk.code.replace(
+                    /^var __RillGuest\s*=/,
+                    'globalThis.__RillGuest='
+                  );
+                }
+              }
+            },
+          },
           // NOTE: Disabled transformation - use global variable injection at runtime instead
           // See FunctionQuickJSProvider for global variable setup
           /*

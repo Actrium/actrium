@@ -65,11 +65,17 @@ export type DefaultProviderOptions = {
  */
 export class DefaultJSEngineProvider {
   static create(options?: DefaultProviderOptions) {
+    const envInfo = {
+      isRN: isReactNativeEnv(),
+      isNode: isNodeEnv(),
+      isWorkerCapable: isWorkerCapable(),
+      hasVm: !!getVm(),
+      hasQuickJS: !!resolveRNQuickJS(),
+    };
+
     // 'none' is an explicit opt-out of sandboxing (dev-only)
     if (options?.sandbox === 'none') {
-      console.warn(
-        '[rill] NoSandboxProvider selected. This is insecure and should only be used in development.'
-      );
+      console.log('[rill] Provider: NoSandboxProvider (explicit)', envInfo);
       return new NoSandboxProvider({ timeout: options?.timeout });
     }
 
@@ -77,6 +83,7 @@ export class DefaultJSEngineProvider {
     if (options?.sandbox === 'rn') {
       const quickjsModule = resolveRNQuickJS();
       if (quickjsModule) {
+        console.log('[rill] Provider: RNQuickJSProvider (explicit)', envInfo);
         return new RNQuickJSProvider(quickjsModule, { timeout: options?.timeout });
       }
       console.warn('[rill] RNQuickJSProvider requested but react-native-quickjs not available.');
@@ -84,6 +91,7 @@ export class DefaultJSEngineProvider {
 
     if (options?.sandbox === 'vm') {
       if (isNodeEnv() && getVm()) {
+        console.log('[rill] Provider: VMProvider (explicit)', envInfo);
         return new VMProvider({ timeout: options?.timeout });
       }
       console.warn('[rill] VMProvider requested but not available in this environment.');
@@ -91,6 +99,7 @@ export class DefaultJSEngineProvider {
 
     if (options?.sandbox === 'worker') {
       if (isWorkerCapable() && !isReactNativeEnv()) {
+        console.log('[rill] Provider: WorkerJSEngineProvider (explicit)', envInfo);
         const createWorker = () =>
           new Worker(new URL('./engine.worker.ts', import.meta.url), { type: 'module' });
         return new WorkerJSEngineProvider(createWorker, { timeout: options?.timeout });
@@ -105,26 +114,28 @@ export class DefaultJSEngineProvider {
     if (isReactNativeEnv()) {
       const quickjsModule = resolveRNQuickJS();
       if (quickjsModule) {
+        console.log('[rill] Provider: RNQuickJSProvider (auto-detected RN)', envInfo);
         return new RNQuickJSProvider(quickjsModule, { timeout: options?.timeout });
       }
+      // RN but no QuickJS - will fallback below
     }
 
     // 2. Node/Bun environment - prefer VMProvider (native, fast, supports timeout)
     if (isNodeEnv() && getVm()) {
+      console.log('[rill] Provider: VMProvider (auto-detected Node)', envInfo);
       return new VMProvider({ timeout: options?.timeout });
     }
 
     // 3. Worker capable environment
     if (isWorkerCapable() && !isReactNativeEnv()) {
+      console.log('[rill] Provider: WorkerJSEngineProvider (auto-detected Worker)', envInfo);
       const createWorker = () =>
         new Worker(new URL('./engine.worker.ts', import.meta.url), { type: 'module' });
       return new WorkerJSEngineProvider(createWorker, { timeout: options?.timeout });
     }
 
     // Fallback (dev only): This should rarely happen
-    console.warn(
-      '[rill] No suitable JS engine provider found. Falling back to insecure eval provider (dev-only).'
-    );
+    console.log('[rill] Provider: NoSandboxProvider (FALLBACK - no sandbox available!)', envInfo);
     return new NoSandboxProvider({ timeout: options?.timeout });
   }
 }
