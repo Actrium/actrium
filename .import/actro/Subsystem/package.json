@@ -1,7 +1,7 @@
 {
-  "name": "canvas-artifacts",
+  "name": "canvas-subsystem",
   "version": "1.0.0",
-  "description": "Canvas Artifacts - React Native runtime for actr apps and system apps",
+  "description": "Canvas Subsystem - React Native runtime for actr apps and system apps",
   "main": "index.js",
   "scripts": {
     "start": "react-native start --verbose",

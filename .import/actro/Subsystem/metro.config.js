@@ -5,7 +5,7 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const { resolve } = require('metro-resolver');
 
 const projectRoot = __dirname;
-// Canvas/Artifacts -> Canvas -> GoAskAway
+// Canvas/Subsystem -> Canvas -> GoAskAway
 const workspaceRoot = path.resolve(__dirname, '..', '..');
 const workspaceAskitRoot = path.resolve(workspaceRoot, 'askit');
 const workspaceRillCoreRoot = path.resolve(workspaceRoot, 'rill', 'packages', 'core');
