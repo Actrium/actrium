@@ -231,7 +231,7 @@ final class CanvasReactNativeHost {
                 nlog("📊 [Native] ContentView 子视图数: \(contentView.subviews.count)")
                 if contentView.subviews.isEmpty {
                     nerror("❌ [Native] ContentView 无子视图！React 可能未渲染")
-                    nerror("👉 [Native] Debug：请确认 Metro 已启动（`cd Canvas/Artifacts && bun run start`）；Release：确保已生成 `actr.jsbundle`")
+                    nerror("👉 [Native] Debug：请确认 Metro 已启动（`cd Canvas/Subsystem && bun run start`）；Release：确保已生成 `actr.jsbundle`")
                 } else {
                     nlog("✅ [Native] React 已渲染 \(contentView.subviews.count) 个子视图")
                 }
