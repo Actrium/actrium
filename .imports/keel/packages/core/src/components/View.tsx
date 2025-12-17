@@ -4,7 +4,7 @@
  * Default View component implementation, wrapping React Native View
  */
 
-import type React from 'react';
+import React from 'react';
 import { View as RNView, type ViewStyle } from 'react-native';
 
 export interface ViewProps {

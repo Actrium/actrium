@@ -3,15 +3,16 @@
 
 import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from './engine';
 
+/**
+ * Native RN QuickJS context interface.
+ * Describes what the native package provides (may vary by package version).
+ */
 export interface RNQuickJSContext {
   eval(code: string): unknown;
   evalAsync?(code: string): Promise<unknown>;
   setGlobal(name: string, value: unknown): void;
   getGlobal(name: string): unknown;
   dispose(): void;
-  // Optional interrupt handler support (depends on native package version)
-  setInterruptHandler?(handler: () => boolean): void;
-  clearInterruptHandler?(): void;
 }
 
 export interface RNQuickJSRuntime {
@@ -58,20 +59,15 @@ export class RNQuickJSProvider implements JSEngineProvider {
         const ctx = rt.createContext();
 
         // Wrap the context to ensure interface compatibility
-        const wrappedContext: JSEngineContext = {
-          eval: (code: string) => ctx.eval(code),
-          evalAsync: ctx.evalAsync ? (code: string) => ctx.evalAsync!(code) : undefined,
-          setGlobal: (name: string, value: unknown) => ctx.setGlobal(name, value),
-          getGlobal: (name: string) => ctx.getGlobal(name),
-          dispose: () => ctx.dispose(),
-          // Pass through interrupt handler methods if available
-          setInterruptHandler: ctx.setInterruptHandler
-            ? (handler: () => boolean) => ctx.setInterruptHandler!(handler)
-            : undefined,
-          clearInterruptHandler: ctx.clearInterruptHandler
-            ? () => ctx.clearInterruptHandler!()
-            : undefined,
-        };
+        // Include evalAsync if native supports it (Engine detects via type assertion)
+        const wrappedContext: JSEngineContext & { evalAsync?: (code: string) => Promise<unknown> } =
+          {
+            eval: (code: string) => ctx.eval(code),
+            setGlobal: (name: string, value: unknown) => ctx.setGlobal(name, value),
+            getGlobal: (name: string) => ctx.getGlobal(name),
+            dispose: () => ctx.dispose(),
+            ...(ctx.evalAsync && { evalAsync: (code: string) => ctx.evalAsync!(code) }),
+          };
 
         return wrappedContext;
       },

@@ -5,23 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import React from 'react';
 import { Engine } from './engine';
-
-// Type definitions for mock QuickJS
-interface MockQuickJSContext {
-  eval(code: string): unknown;
-  setGlobal(name: string, value: unknown): void;
-  getGlobal(name: string): unknown;
-  dispose(): void;
-}
-
-interface MockQuickJSRuntime {
-  createContext(): MockQuickJSContext;
-  dispose(): void;
-}
-
-interface MockQuickJSProvider {
-  createRuntime(): MockQuickJSRuntime;
-}
+import { createMockJSEngineProvider } from './test-utils';
 
 // Mock components
 const MockView: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
@@ -34,47 +18,11 @@ const MockText: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
 const mockFetch = mock();
 global.fetch = mockFetch;
 
-// Mock QuickJS Provider for tests
-function createMockQuickJSProvider(): MockQuickJSProvider {
-  return {
-    createRuntime(): MockQuickJSRuntime {
-      const globals = new Map<string, unknown>();
-      return {
-        createContext(): MockQuickJSContext {
-          return {
-            eval(code: string): unknown {
-              // Simple mock eval using Function constructor
-              const globalNames = Array.from(globals.keys());
-              const globalValues = Array.from(globals.values());
-              try {
-                const fn = new Function(...globalNames, `"use strict"; ${code}`);
-                return fn(...globalValues);
-              } catch (e) {
-                throw e;
-              }
-            },
-            setGlobal(name: string, value: unknown): void {
-              globals.set(name, value);
-            },
-            getGlobal(name: string): unknown {
-              return globals.get(name);
-            },
-            dispose(): void {
-              globals.clear();
-            },
-          };
-        },
-        dispose(): void {},
-      };
-    },
-  };
-}
-
 describe('Engine', () => {
   let engine: Engine;
 
   beforeEach(() => {
-    engine = new Engine({ quickjs: createMockQuickJSProvider() });
+    engine = new Engine({ quickjs: createMockJSEngineProvider() });
     mockFetch.mockReset();
   });
 
@@ -84,7 +32,7 @@ describe('Engine', () => {
 
   describe('constructor', () => {
     it('should create engine with default options', () => {
-      const e = new Engine({ quickjs: createMockQuickJSProvider() });
+      const e = new Engine({ quickjs: createMockJSEngineProvider() });
       expect(e.isLoaded).toBe(false);
       expect(e.isDestroyed).toBe(false);
       e.destroy();
@@ -98,7 +46,7 @@ describe('Engine', () => {
       };
 
       const e = new Engine({
-        quickjs: createMockQuickJSProvider(),
+        quickjs: createMockJSEngineProvider(),
         timeout: 10000,
         debug: false,
         logger: customLogger,
@@ -412,7 +360,7 @@ describe('Engine Polyfills', () => {
   const mockLogger = { log: mock(), warn: mock(), error: mock() };
 
   beforeEach(() => {
-    engine = new Engine({ quickjs: createMockQuickJSProvider(), debug: true, logger: mockLogger });
+    engine = new Engine({ quickjs: createMockJSEngineProvider(), debug: true, logger: mockLogger });
   });
 
   afterEach(() => {
@@ -475,7 +423,7 @@ describe('Engine Runtime API', () => {
   let engine: Engine;
 
   beforeEach(() => {
-    engine = new Engine({ quickjs: createMockQuickJSProvider() });
+    engine = new Engine({ quickjs: createMockJSEngineProvider() });
   });
 
   afterEach(() => {
@@ -514,7 +462,7 @@ describe('Engine Error Handling', () => {
   let errorHandler: ReturnType<typeof mock>;
 
   beforeEach(() => {
-    engine = new Engine({ quickjs: createMockQuickJSProvider() });
+    engine = new Engine({ quickjs: createMockJSEngineProvider() });
     errorHandler = mock();
     engine.on('error', errorHandler);
   });

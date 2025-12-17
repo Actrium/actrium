@@ -4,7 +4,7 @@
  * React Native component for rendering Guest UI in sandbox
  */
 
-import type React from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import type { Engine } from './engine';
@@ -46,12 +46,12 @@ export interface EngineViewProps {
   /**
    * Custom loading indicator
    */
-  fallback?: React.ReactNode;
+  fallback?: ReactNode;
 
   /**
    * Custom error display
    */
-  renderError?: (error: Error) => React.ReactNode;
+  renderError?: (error: Error) => ReactNode;
 
   /**
    * Container style
@@ -91,10 +91,10 @@ export function EngineView({
   fallback,
   renderError,
   style,
-}: EngineViewProps): React.ReactElement {
+}: EngineViewProps): ReactElement {
   const [loadingState, setLoadingState] = useState<LoadingState>('idle');
   const [error, setError] = useState<Error | null>(null);
-  const [content, setContent] = useState<React.ReactElement | string | null>(null);
+  const [content, setContent] = useState<ReactElement | string | null>(null);
   const mountedRef = useRef(true);
 
   // Update callback

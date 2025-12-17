@@ -106,37 +106,6 @@ describe('NoSandboxProvider', () => {
     context.dispose();
   });
 
-  it('should support interrupt handler', () => {
-    const provider = new NoSandboxProvider();
-    const runtime = provider.createRuntime();
-    const context = runtime.createContext();
-
-    let interrupted = false;
-    context.setInterruptHandler?.(() => {
-      interrupted = true;
-      return true;
-    });
-
-    expect(() => context.eval('1 + 1')).toThrow('interrupted by handler');
-    expect(interrupted).toBe(true);
-
-    context.dispose();
-  });
-
-  it('should support clearInterruptHandler', () => {
-    const provider = new NoSandboxProvider();
-    const runtime = provider.createRuntime();
-    const context = runtime.createContext();
-
-    context.setInterruptHandler?.(() => true);
-    context.clearInterruptHandler?.();
-
-    // Should not throw after clearing handler
-    expect(() => context.eval('1 + 1')).not.toThrow();
-
-    context.dispose();
-  });
-
   it('should clean up globals on dispose', () => {
     const provider = new NoSandboxProvider({ timeout: 100 });
     const runtime = provider.createRuntime();

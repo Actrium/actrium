@@ -48,7 +48,13 @@ describe('Engine with WorkerJSEngineProvider (skeleton)', () => {
           });
         } else if (msg.type === 'eval') {
           queueMicrotask(() => {
-            this.onmessage?.({ data: { type: 'error', id: msg.id, error: 'Eval error' } } as any);
+            // Fail only on user bundle code (contains 'throw new Error'), succeed on setup code
+            const isUserCode = msg.code?.includes('throw new Error');
+            if (isUserCode) {
+              this.onmessage?.({ data: { type: 'error', id: msg.id, error: 'Eval error' } } as any);
+            } else {
+              this.onmessage?.({ data: { type: 'result', id: msg.id, result: null } } as any);
+            }
           });
         }
       }

@@ -29,31 +29,6 @@ describe.skipIf(!vm)('VMProvider', () => {
     engine.destroy();
   });
 
-  it('should set and clear interrupt handler', () => {
-    const provider = new VMProvider({ timeout: 1000 });
-    const runtime = provider.createRuntime();
-    const context = runtime.createContext();
-
-    // Test setInterruptHandler
-    let _handlerCalled = false;
-    const handler = () => {
-      _handlerCalled = true;
-      return false; // Don't interrupt
-    };
-
-    context.setInterruptHandler(handler);
-
-    // Handler should be stored (tested indirectly via eval behavior)
-    expect(context).toBeDefined();
-
-    // Clear interrupt handler
-    context.clearInterruptHandler();
-
-    // Clean up
-    context.dispose();
-    runtime.dispose();
-  });
-
   it('should handle dispose correctly', () => {
     const provider = new VMProvider({ timeout: 1000 });
     const runtime = provider.createRuntime();

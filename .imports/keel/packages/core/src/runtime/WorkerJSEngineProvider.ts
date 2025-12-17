@@ -1,7 +1,7 @@
 import type { JSEngineContext, JSEngineProvider } from './engine';
 
 export interface WorkerMessage {
-  type: 'init' | 'eval' | 'setGlobal' | 'getGlobal' | 'dispose';
+  type: 'init' | 'eval' | 'setGlobal' | 'dispose';
   id?: string;
   code?: string;
   name?: string;
@@ -10,13 +10,20 @@ export interface WorkerMessage {
 }
 
 /**
+ * Worker-specific context with async eval support.
+ * Extends JSEngineContext with non-standard evalAsync for async-only execution.
+ */
+interface WorkerJSEngineContext extends JSEngineContext {
+  /** Async code evaluation - Worker's primary execution method */
+  evalAsync(code: string): Promise<unknown>;
+}
+
+/**
  * An implementation of JSEngineProvider that runs code in a Web Worker
  * using @sebastianwessel/quickjs WASM sandbox.
  *
- * Timeout/Interrupt Support:
- * - Hard timeout: YES. QuickJS WASM supports executionTimeout with setInterruptHandler.
- * - setInterruptHandler: The actual interrupt handler is managed inside the worker.
- *   This interface method allows for pre-eval checks on the main thread.
+ * Note: Workers are inherently async and cannot implement sync eval().
+ * Engine detects evalAsync and uses it automatically.
  */
 export class WorkerJSEngineProvider implements JSEngineProvider {
   constructor(
@@ -60,7 +67,7 @@ export class WorkerJSEngineProvider implements JSEngineProvider {
     // Initialize worker and wait for ready
     await call({ type: 'init', options: { timeout: this.options?.timeout } });
 
-    const context: JSEngineContext = {
+    const context: WorkerJSEngineContext = {
       eval: (_code: string) => {
         // This provider is async-only.
         throw new Error('Use evalAsync with WorkerJSEngineProvider');
@@ -75,11 +82,13 @@ export class WorkerJSEngineProvider implements JSEngineProvider {
       },
 
       setGlobal: (name: string, value: unknown) => {
-        // Skip non-serializable values (functions, React objects, etc.)
-        // Worker sandbox should provide its own shims for these
-        if (typeof value === 'function') return;
+        // Functions cannot be serialized via postMessage - worker has built-in shims
+        if (typeof value === 'function') {
+          // Silent skip - worker provides its own require, console, etc.
+          return;
+        }
         if (value && typeof value === 'object') {
-          // Check if object contains functions (like console, React)
+          // Objects containing functions (like React) also can't be serialized
           const hasFunction = Object.values(value).some((v) => typeof v === 'function');
           if (hasFunction) return;
         }
@@ -87,28 +96,15 @@ export class WorkerJSEngineProvider implements JSEngineProvider {
         post({ type: 'setGlobal', name, value });
       },
 
-      getGlobal: async (name: string) => {
-        return await call({ type: 'getGlobal', name });
+      getGlobal: (_name: string): unknown => {
+        // Worker cannot do synchronous getGlobal - return undefined
+        return undefined;
       },
 
       dispose: () => {
         // Don't wait for dispose response - just terminate the worker
-        // This prevents hanging when dispose is called from synchronous destroy()
         post({ type: 'dispose' });
         worker.terminate();
-        interruptHandler = null;
-      },
-
-      /**
-       * Set interrupt handler. Note: The actual hard interrupt is handled by
-       * QuickJS executionTimeout inside the worker. This handler is checked
-       * before each evalAsync call on the main thread.
-       */
-      setInterruptHandler: (handler: () => boolean) => {
-        interruptHandler = handler;
-      },
-
-      clearInterruptHandler: () => {
         interruptHandler = null;
       },
     };

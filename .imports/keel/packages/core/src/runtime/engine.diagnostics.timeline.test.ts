@@ -1,35 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { JSEngineProvider } from './engine';
 import { Engine } from './engine';
-
-function createMockProvider(): JSEngineProvider {
-  return {
-    createRuntime: () => {
-      const globals = new Map<string, unknown>();
-      return {
-        createContext: () => ({
-          eval: (code: string) => {
-            const globalNames = Array.from(globals.keys());
-            const globalValues = Array.from(globals.values());
-            // eslint-disable-next-line no-new-func
-            const fn = new Function(...globalNames, `"use strict"; ${code}`);
-            return fn(...globalValues);
-          },
-          setGlobal: (name: string, value: unknown) => {
-            globals.set(name, value);
-          },
-          getGlobal: (name: string) => globals.get(name),
-          dispose: () => {
-            globals.clear();
-          },
-        }),
-        dispose: () => {
-          globals.clear();
-        },
-      };
-    },
-  };
-}
+import { createMockJSEngineProvider } from './test-utils';
 
 function makeBatch(batchId: number, ops: number) {
   return {
@@ -47,7 +18,7 @@ function makeBatch(batchId: number, ops: number) {
 describe('Engine diagnostics timeline', () => {
   it('aggregates ops/skip/apply into activity.timeline buckets', async () => {
     const engine = new Engine({
-      provider: createMockProvider(),
+      provider: createMockJSEngineProvider(),
       receiverMaxBatchSize: 2,
       diagnostics: { activityHistoryMs: 10_000, activityBucketMs: 1000 },
     });

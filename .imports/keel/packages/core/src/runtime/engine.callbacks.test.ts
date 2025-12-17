@@ -10,11 +10,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Engine } from './engine';
+import { createMockJSEngineProvider } from './test-utils';
 
-// Mock QuickJS Provider with callback tracking
-function createMockQuickJSProvider() {
+// Mock QuickJS Provider with callback tracking (uses sandboxed globalThis)
+function createMockQuickJSProviderWithTracking() {
   const evalCalls: string[] = [];
   const globals = new Map<string, unknown>();
+  const sandboxGlobalThis: Record<string, unknown> = {};
 
   return {
     evalCalls,
@@ -27,9 +29,17 @@ function createMockQuickJSProvider() {
             // Execute callback registry setup and invocations
             const globalNames = Array.from(globals.keys());
             const globalValues = Array.from(globals.values());
+
+            // Wrap code to use sandboxed globalThis
+            const wrappedCode = `
+              "use strict";
+              var globalThis = arguments[arguments.length - 1];
+              ${code}
+            `;
+
             try {
-              const fn = new Function(...globalNames, `"use strict"; ${code}`);
-              return fn(...globalValues);
+              const fn = new Function(...globalNames, wrappedCode);
+              return fn(...globalValues, sandboxGlobalThis);
             } catch (e) {
               throw e;
             }
@@ -40,12 +50,19 @@ function createMockQuickJSProvider() {
             evalAsync: async (code: string) => executeCode(code),
             setGlobal(name: string, value: unknown): void {
               globals.set(name, value);
+              sandboxGlobalThis[name] = value;
             },
             getGlobal(name: string): unknown {
+              if (name in sandboxGlobalThis) {
+                return sandboxGlobalThis[name];
+              }
               return globals.get(name);
             },
             dispose(): void {
               globals.clear();
+              for (const key of Object.keys(sandboxGlobalThis)) {
+                delete sandboxGlobalThis[key];
+              }
             },
           };
         },
@@ -57,10 +74,10 @@ function createMockQuickJSProvider() {
 
 describe('Engine Callback Handling', () => {
   let engine: Engine;
-  let mockProvider: ReturnType<typeof createMockQuickJSProvider>;
+  let mockProvider: ReturnType<typeof createMockQuickJSProviderWithTracking>;
 
   beforeEach(() => {
-    mockProvider = createMockQuickJSProvider();
+    mockProvider = createMockQuickJSProviderWithTracking();
     engine = new Engine({ quickjs: mockProvider });
   });
 
@@ -165,7 +182,7 @@ describe('Engine Event Listener Error Handling', () => {
       error: mock(),
     };
     engine = new Engine({
-      quickjs: createMockQuickJSProvider(),
+      quickjs: createMockJSEngineProvider(),
       logger: customLogger,
       debug: false,
     });
@@ -221,7 +238,7 @@ describe('Engine Metrics', () => {
   beforeEach(() => {
     metricsCollector = [];
     engine = new Engine({
-      quickjs: createMockQuickJSProvider(),
+      quickjs: createMockJSEngineProvider(),
       onMetric: (name, value, extra) => {
         metricsCollector.push({ name, value, extra });
       },
@@ -279,7 +296,7 @@ describe('Engine Metrics', () => {
 
 describe('Engine RequireWhitelist', () => {
   it('should use default whitelist when not provided', async () => {
-    const engine = new Engine({ quickjs: createMockQuickJSProvider() });
+    const engine = new Engine({ quickjs: createMockJSEngineProvider() });
 
     // Default whitelist includes react, react-native, etc.
     // Use var instead of const to avoid redeclaration error since React is already injected as global
@@ -294,7 +311,7 @@ describe('Engine RequireWhitelist', () => {
   it('should enforce custom whitelist', async () => {
     const customLogger = { log: mock(), warn: mock(), error: mock() };
     const engine = new Engine({
-      quickjs: createMockQuickJSProvider(),
+      quickjs: createMockJSEngineProvider(),
       requireWhitelist: ['custom-module'],
       logger: customLogger,
     });
@@ -307,7 +324,7 @@ describe('Engine RequireWhitelist', () => {
 
   it('should allow whitelisted modules', async () => {
     const engine = new Engine({
-      quickjs: createMockQuickJSProvider(),
+      quickjs: createMockJSEngineProvider(),
       requireWhitelist: ['react', 'my-custom-lib'],
     });
 
@@ -321,7 +338,7 @@ describe('Engine RequireWhitelist', () => {
 
 describe('Engine getHealth', () => {
   it('should return health snapshot', async () => {
-    const engine = new Engine({ quickjs: createMockQuickJSProvider() });
+    const engine = new Engine({ quickjs: createMockJSEngineProvider() });
 
     let health = engine.getHealth();
     expect(health.loaded).toBe(false);
@@ -340,7 +357,7 @@ describe('Engine getHealth', () => {
   });
 
   it('should track error count', async () => {
-    const engine = new Engine({ quickjs: createMockQuickJSProvider() });
+    const engine = new Engine({ quickjs: createMockJSEngineProvider() });
 
     try {
       await engine.loadBundle('throw new Error("test error")');
@@ -356,7 +373,7 @@ describe('Engine getHealth', () => {
   });
 
   it('should report receiver node count', async () => {
-    const engine = new Engine({ quickjs: createMockQuickJSProvider() });
+    const engine = new Engine({ quickjs: createMockJSEngineProvider() });
     engine.createReceiver(() => {});
 
     await engine.loadBundle(`
