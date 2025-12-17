@@ -465,6 +465,33 @@ export class Engine implements IEngine {
       if (this.options.debug) {
         this.options.logger.log(`[rill:${this.id}] Bundle executed successfully`);
       }
+
+      // DEBUG: Check Guest environment state after bundle execution
+      try {
+        const sendToHostType = this.context?.getGlobal('__sendToHost');
+        this.options.logger.log(`[rill:${this.id}] DEBUG: __sendToHost type in sandbox:`, typeof sendToHostType);
+
+        // Run diagnostic code in sandbox to check auto-render conditions
+        await this.evalCode(`
+          (function() {
+            console.log('[rill:DEBUG] Checking auto-render conditions...');
+            console.log('[rill:DEBUG] typeof __sendToHost:', typeof __sendToHost);
+            console.log('[rill:DEBUG] typeof __RillGuest:', typeof __RillGuest);
+            console.log('[rill:DEBUG] typeof require:', typeof require);
+            if (typeof require === 'function') {
+              try {
+                var reconciler = require('rill/reconciler');
+                console.log('[rill:DEBUG] reconciler:', typeof reconciler);
+                console.log('[rill:DEBUG] reconciler.render:', typeof (reconciler && reconciler.render));
+              } catch(e) {
+                console.error('[rill:DEBUG] require error:', e.message);
+              }
+            }
+          })();
+        `);
+      } catch (debugErr) {
+        this.options.logger.warn(`[rill:${this.id}] DEBUG check failed:`, debugErr);
+      }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.errorCount += 1;
