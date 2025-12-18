@@ -903,6 +903,12 @@ function transformGuestElement(element: unknown): ReactElement | null {
   // Also check for $$typeof Symbol (works when not crossing JSI, e.g., NoSandbox provider)
   const hasSymbolType = typeof el.$$typeof === 'symbol';
 
+  // DEBUG: Log detection result
+  console.log('[transformGuestElement] keys:', Object.keys(el).join(','),
+    'marker:', el.__rillTypeMarker,
+    'isRill:', isRillElement,
+    'hasSymbol:', hasSymbolType);
+
   if (!isRillElement && !hasSymbolType) {
     // Not a React element, return as-is
     return element as ReactElement;
@@ -948,8 +954,39 @@ function transformGuestElement(element: unknown): ReactElement | null {
  * This allows multiple guests to run simultaneously without interfering with each other.
  */
 export function render(element: ReactElement, sendToHost: SendToHost): void {
+  // DEBUG: Store debug info in global for native inspection
+  const debugInfo: Record<string, unknown> = {
+    timestamp: Date.now(),
+    elementType: typeof element,
+  };
+
+  if (element && typeof element === 'object') {
+    const el = element as Record<string, unknown>;
+    debugInfo.elementKeys = Object.keys(el);
+    debugInfo.hasRillMarker = el.__rillTypeMarker;
+    debugInfo.$$typeofType = typeof el.$$typeof;
+    debugInfo.typeType = typeof el.type;
+    debugInfo.typeValue = typeof el.type === 'function' ? 'function' : String(el.type);
+  }
+
+  // Store in global for debugging
+  if (typeof globalThis !== 'undefined') {
+    (globalThis as Record<string, unknown>).__reconcilerDebug = debugInfo;
+  }
+
+  console.log('[reconciler:render] DEBUG:', JSON.stringify(debugInfo, null, 2));
+
   // Transform Guest element to use Host's Symbol registry
   const transformedElement = transformGuestElement(element);
+
+  if (transformedElement && typeof transformedElement === 'object') {
+    const el = transformedElement as Record<string, unknown>;
+    debugInfo.transformedTypeofType = typeof el.$$typeof;
+    debugInfo.transformedType = typeof el.type === 'function' ? 'function' : String(el.type);
+    if (typeof globalThis !== 'undefined') {
+      (globalThis as Record<string, unknown>).__reconcilerDebug = debugInfo;
+    }
+  }
 
   let instance = reconcilerMap.get(sendToHost);
 
