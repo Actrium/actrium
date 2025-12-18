@@ -212,6 +212,13 @@ const AUTO_RENDER_FOOTER = `
       var element = React.createElement(Component);
       console.log('[rill:auto-render] element:', element ? 'created' : 'null');
 
+      // Debug: Check element structure (especially __rillTypeMarker for JSI serialization)
+      if (element) {
+        console.log('[rill:auto-render] element.__rillTypeMarker:', element.__rillTypeMarker);
+        console.log('[rill:auto-render] element.$$typeof:', typeof element.$$typeof, String(element.$$typeof));
+        console.log('[rill:auto-render] element.type:', typeof element.type, element.type);
+      }
+
       console.log('[rill] Auto-rendering guest component');
       console.log('[rill:auto-render] Calling reconciler.render with sendToHost type:', typeof __sendToHost);
       reconciler.render(element, __sendToHost);
