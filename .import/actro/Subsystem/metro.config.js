@@ -56,22 +56,6 @@ const customConfig = {
         return resolve(context, 'react-native-macos', platform);
       }
 
-      // macOS platform: enable .native extension support (consistent with iOS/Android)
-      // Default macOS only tries .macos.ts -> .ts, not .native.ts
-      // With preferNativePlatform=true, resolution order becomes: .macos.ts -> .native.ts -> .ts
-      if (platform === 'macos' && !context._nativeFallbackAttempted) {
-        const nativeContext = {
-          ...context,
-          preferNativePlatform: true,
-          _nativeFallbackAttempted: true,
-        };
-        try {
-          return resolve(nativeContext, moduleName, platform);
-        } catch (e) {
-          // If resolution with preferNativePlatform fails, continue with original context
-        }
-      }
-
       // Ensure single React instance
       if (moduleName === 'react') {
         return { type: 'sourceFile', filePath: path.resolve(projectRoot, 'node_modules', 'react', 'index.js') };
