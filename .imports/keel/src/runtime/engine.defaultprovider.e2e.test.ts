@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { DefaultProvider } from '../../sandbox/src/index';
+import { DefaultProvider } from '../../sandbox';
 import { Engine } from './engine';
 
 // Check if a timeout-capable provider is available

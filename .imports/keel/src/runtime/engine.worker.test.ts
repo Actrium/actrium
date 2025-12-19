@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { WorkerProvider } from '../../sandbox/src/index';
+import { WorkerProvider } from '../../sandbox';
 import { Engine } from './engine';
 
 // This is a smoke test for the evalAsync plumbing with WorkerProvider.
