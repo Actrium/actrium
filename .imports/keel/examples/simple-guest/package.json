@@ -4,14 +4,14 @@
   "private": true,
   "scripts": {
     "build": "rill build src/index.tsx -o dist/bundle.js",
-    "build:dev": "rill build src/index.tsx -o dist/bundle.js --no-minify --sourcemap",
-    "watch": "rill build src/index.tsx -o dist/bundle.js --watch"
+    "build:dev": "rill build src/index.tsx -o dist/bundle.js --no-minify --sourcemap"
   },
   "dependencies": {
-    "rill": "workspace:*"
+    "@rill/let": "workspace:*"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
+    "@rill/cli": "workspace:*",
+    "@types/react": "^19.0.0",
     "typescript": "^5.3.0"
   }
 }

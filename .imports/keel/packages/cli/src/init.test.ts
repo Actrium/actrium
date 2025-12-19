@@ -1,11 +1,14 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 
 const TMP_ROOT = path.join(process.cwd(), 'tmp_rovodev_cli_init');
 
 describe('CLI init', () => {
+  let logSpy: ReturnType<typeof spyOn>;
+
   beforeAll(() => {
+    logSpy = spyOn(console, 'log').mockImplementation(() => {});
     fs.mkdirSync(TMP_ROOT, { recursive: true });
   });
 
@@ -14,6 +17,7 @@ describe('CLI init', () => {
     try {
       fs.rmSync(TMP_ROOT, { recursive: true, force: true });
     } catch {}
+    logSpy.mockRestore();
   });
 
   it('should scaffold a minimal guest project', async () => {

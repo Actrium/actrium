@@ -12,7 +12,7 @@ import {
   useHostEvent,
   useSendToHost,
   View,
-} from '@rill/core/sdk';
+} from '@rill/let';
 import { useState } from 'react';
 
 interface Config {

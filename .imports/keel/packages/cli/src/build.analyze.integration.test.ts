@@ -1,32 +1,35 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
 // Integration test: run full build via build() then run analyze() on the output
-// Ensures that a typical guest using rill/sdk gets inlined and passes strict guard.
+// Ensures that a typical guest using @rill/let gets inlined and passes strict guard.
 describe('Analyze integration - build then analyze', () => {
   let tempDir: string;
   let originalCwd: string;
+  let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-ana-'));
     originalCwd = process.cwd();
     process.chdir(tempDir);
     fs.mkdirSync('src', { recursive: true });
+    logSpy = spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
     fs.rmSync(tempDir, { recursive: true, force: true });
+    logSpy.mockRestore();
   });
 
-  it('should build a guest with rill/sdk and pass strict guard', async () => {
+  it('should build a guest with @rill/let and pass strict guard', async () => {
     // Prepare minimal guest
     fs.writeFileSync(
       path.join('src', 'guest.tsx'),
       `import * as React from 'react';
-import { View, Text } from '@rill/core/sdk';
+import { View, Text } from '@rill/let';
 export default function Guest(){
   return <View><Text>OK</Text></View>;
 }
@@ -50,14 +53,7 @@ export default function Guest(){
 
     // Now run analyze manually (should pass and not throw)
     await analyze(bundlePath, {
-      whitelist: [
-        'react',
-        'react-native',
-        'react/jsx-runtime',
-        '@rill/core',
-        '@rill/core/sdk',
-        'rill/reconciler',
-      ],
+      whitelist: ['react', 'react-native', 'react/jsx-runtime', '@rill/let'],
       failOnViolation: true,
       treatEvalAsViolation: true,
       treatDynamicNonLiteralAsViolation: true,

@@ -58,7 +58,7 @@ program
     'react',
     'react-native',
     'react/jsx-runtime',
-    'rill/reconciler',
+    '@rill/let',
   ])
   .option('--fail-on-violation', 'Fail when non-whitelisted deps are found')
   .option('--treat-eval-as-violation', 'Treat eval() usage as violation')
@@ -126,13 +126,13 @@ program
           analyze: 'rill analyze dist/bundle.js',
         },
         devDependencies: {
+          '@types/bun': 'latest',
           typescript: '^5.0.0',
         },
         dependencies: {
           react: '^18.0.0',
-          'react/jsx-runtime': '^18.0.0',
-          rill: 'latest',
-          'rill/sdk': 'latest',
+          '@rill/let': 'latest',
+          '@rill/cli': 'latest',
         },
       };
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
@@ -167,8 +167,8 @@ program
               verbatimModuleSyntax: true,
               types: ['bun-types'],
               paths: {
-                // Type-only mapping if needed in editor (build-time will inline via vite alias)
-                'rill/sdk': ['node_modules/rill/sdk/index.d.ts'],
+                // Type-only mapping for IDE support
+                '@rill/let': ['node_modules/@rill/let/src/index.ts'],
               },
             },
             include: ['src'],
@@ -179,18 +179,11 @@ program
       );
     }
 
-    // vite.config.ts
-    const viteConfigPath = path.join(targetDir, 'vite.config.ts');
-    if (!fs.existsSync(viteConfigPath)) {
-      const tpl = fs.readFileSync(path.join(__dirname, 'templates', 'vite.config.ts.tpl'), 'utf-8');
-      fs.writeFileSync(viteConfigPath, tpl);
-    }
-
     // src/guest.tsx
     const guestPath = path.join(srcDir, 'guest.tsx');
     if (!fs.existsSync(guestPath)) {
       const guest = `import * as React from 'react';
-import { View, Text } from '@rill/core/sdk';
+import { View, Text } from '@rill/let';
 
 export default function Guest() {
   return (
