@@ -1,102 +1,158 @@
-// rill/packages/sandbox-web/src/index.ts
+/**
+ * @rill/sandbox-web
+ *
+ * Web Worker-based JavaScript sandbox for browser environments.
+ */
 
-// --- Temporary Interface Definitions ---
-// These interfaces should eventually be imported from @rill/core
-interface JSEngineContext {
-  evaluate(script: string): any;
-  evaluateAsync(script: string): Promise<any>;
-  destroy(): void;
+export interface WorkerMessage {
+  type: 'eval' | 'setGlobal' | 'getGlobal' | 'dispose';
+  id?: string;
+  code?: string;
+  name?: string;
+  value?: unknown;
 }
 
-interface JSEngineRuntime {
-  createContext(context?: object): Promise<JSEngineContext>;
-  destroy(): void;
+export interface WorkerResponse {
+  id: string;
+  result?: unknown;
+  error?: { name: string; message: string; stack?: string };
 }
-
-interface JSEngineProvider {
-  createRuntime(options?: object): Promise<JSEngineRuntime>;
-}
-// --- End of Temporary Interface Definitions ---
-
-type PendingRequest = {
-  resolve: (value: any) => void;
-  reject: (reason?: any) => void;
-};
 
 /**
- * Implements a JSI-like runtime using a Web Worker for sandboxing.
+ * JSEngineContext interface - matches @rill/sandbox types
  */
-class WWRuntime implements JSEngineRuntime {
-  private worker: Worker;
-  private nextRequestId = 0;
-  private pendingRequests = new Map<string, PendingRequest>();
+export interface JSEngineContext {
+  eval(code: string): unknown;
+  setGlobal(name: string, value: unknown): void;
+  getGlobal(name: string): unknown;
+  dispose(): void;
+}
 
-  constructor() {
-    // In a bundled environment (Webpack, Vite), this pattern correctly creates a worker.
-    // This assumes a build step will process this file.
-    this.worker = new Worker(new URL('./worker.ts', import.meta.url));
-    this.worker.onmessage = this.handleMessage.bind(this);
+/**
+ * Extended context with async eval support
+ */
+export interface WorkerContext extends JSEngineContext {
+  evalAsync(code: string): Promise<unknown>;
+}
+
+/**
+ * JSEngineRuntime interface
+ */
+export interface JSEngineRuntime {
+  createContext(): WorkerContext;
+  dispose(): void;
+}
+
+/**
+ * JSEngineProvider interface
+ */
+export interface JSEngineProvider {
+  createRuntime(): Promise<JSEngineRuntime>;
+}
+
+/**
+ * WorkerProvider - Web Worker-based sandbox provider
+ *
+ * Uses Web Worker for isolation and new Function() for code execution.
+ * Only supports async evaluation (evalAsync).
+ */
+export class WorkerProvider implements JSEngineProvider {
+  private workerFactory: (() => Worker) | undefined;
+
+  constructor(createWorker?: () => Worker) {
+    this.workerFactory = createWorker;
   }
 
-  private handleMessage(event: MessageEvent<{ id: string; result?: any; error?: any }>): void {
-    const { id, result, error } = event.data;
-    const promise = this.pendingRequests.get(id);
+  async createRuntime(): Promise<JSEngineRuntime> {
+    const worker = this.workerFactory
+      ? this.workerFactory()
+      : new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
-    if (promise) {
-      if (error) {
-        promise.reject(Object.assign(new Error(), error));
-      } else {
-        promise.resolve(result);
+    const pending = new Map<
+      string,
+      { resolve: (v: unknown) => void; reject: (e: unknown) => void }
+    >();
+    let msgId = 0;
+
+    const post = (msg: WorkerMessage) => worker.postMessage(msg);
+
+    worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
+      const { id, result, error } = ev.data;
+      const promise = pending.get(id);
+      if (promise) {
+        if (error) {
+          const err = new Error(error.message);
+          err.name = error.name;
+          if (error.stack) err.stack = error.stack;
+          promise.reject(err);
+        } else {
+          promise.resolve(result);
+        }
+        pending.delete(id);
       }
-      this.pendingRequests.delete(id);
-    }
-  }
+    };
 
-  async createContext(context?: object): Promise<JSEngineContext> {
-    // The Web Worker is itself a single context. We can return `this` cast as a context.
-    // The `context` object is not used in this simple implementation.
-    return this as JSEngineContext;
-  }
+    const call = (msg: Omit<WorkerMessage, 'id'>): Promise<unknown> => {
+      const id = String(++msgId);
+      return new Promise<unknown>((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        post({ ...msg, id });
+      });
+    };
 
-  /**
-   * Synchronous evaluation is not supported in a Web Worker sandbox.
-   * @throws {Error} Always throws an error.
-   */
-  evaluate(script: string): any {
-    throw new Error('WebWorkerSandbox does not support synchronous evaluation. Please use evaluateAsync.');
-  }
+    // Store for globals (Worker stores them internally)
+    const globals = new Map<string, unknown>();
 
-  /**
-   * Asynchronously evaluates a script inside the Web Worker.
-   * @param script The JavaScript code to execute.
-   * @returns A promise that resolves with the result of the script.
-   */
-  evaluateAsync(script: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const id = `req-${this.nextRequestId++}`;
-      this.pendingRequests.set(id, { resolve, reject });
-      this.worker.postMessage({ id, script });
-    });
-  }
+    const context: WorkerContext = {
+      eval: (_code: string) => {
+        throw new Error('[WorkerProvider] Use evalAsync - sync eval not supported in Worker');
+      },
 
-  /**
-   * Terminates the worker thread.
-   */
-  destroy(): void {
-    this.worker.terminate();
-    // Reject any pending promises
-    for (const [id, promise] of this.pendingRequests.entries()) {
-      promise.reject(new Error('Worker was terminated.'));
-      this.pendingRequests.delete(id);
-    }
+      evalAsync: async (code: string) => {
+        return await call({ type: 'eval', code });
+      },
+
+      setGlobal: (name: string, value: unknown) => {
+        // Functions cannot be serialized via postMessage
+        if (typeof value === 'function') {
+          return;
+        }
+        if (value && typeof value === 'object') {
+          // Check if object contains functions (which can't be serialized)
+          try {
+            const serialized = JSON.stringify(value);
+            if (serialized === '{}' && Object.keys(value as object).length > 0) {
+              return;
+            }
+          } catch {
+            return;
+          }
+        }
+        globals.set(name, value);
+        post({ type: 'setGlobal', name, value });
+      },
+
+      getGlobal: (name: string): unknown => {
+        return globals.get(name);
+      },
+
+      dispose: () => {
+        post({ type: 'dispose' });
+        worker.terminate();
+        for (const [, promise] of pending) {
+          promise.reject(new Error('Worker was terminated'));
+        }
+        pending.clear();
+        globals.clear();
+      },
+    };
+
+    return {
+      createContext: () => context,
+      dispose: () => context.dispose(),
+    };
   }
 }
 
-/**
- * Provider for creating Web Worker-based sandboxes.
- */
-export class WWProvider implements JSEngineProvider {
-  async createRuntime(options?: object): Promise<JSEngineRuntime> {
-    return new WWRuntime();
-  }
-}
+// Re-export for convenience
+export default WorkerProvider;

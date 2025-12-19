@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { Engine } from '../packages/core/src/runtime/engine';
+import { Engine } from '../packages/runtime/src/runtime/engine';
 
 // ============================================================================
 // Mock Components
@@ -153,50 +153,6 @@ const EXPECTED_BEHAVIORS: ExpectedBehavior[] = [
       { afterEvent: 'REFRESH', expectRenderCountIncrease: true },
       { afterEvent: 'THEME_CHANGE', expectRenderCountIncrease: false },
     ],
-  },
-  {
-    name: 'host-integration',
-    path: './host-integration/dist/guest.js',
-    bundle: { minSize: 3, maxSize: 10 },
-    load: { shouldSucceed: true, maxLoadTime: 1000 },
-    tree: {
-      rootComponent: 'ScrollView',
-      minDepth: 3,
-      maxDepth: 10,
-      minNodes: 10,
-      maxNodes: 100,
-      requiredComponents: ['ScrollView', 'View', 'Text'],
-    },
-    operations: {
-      minInitialOps: 5,
-      maxInitialOps: 200,
-      expectedTypes: ['CREATE', 'APPEND'],
-    },
-    events: {
-      hostEvents: ['REFRESH', 'THEME_CHANGE'],
-    },
-  },
-  {
-    name: 'advanced-features',
-    path: './advanced-features/dist/guest.js',
-    bundle: { minSize: 5, maxSize: 15 },
-    load: { shouldSucceed: true, maxLoadTime: 1000 },
-    tree: {
-      rootComponent: 'ScrollView',
-      minDepth: 3,
-      maxDepth: 15,
-      minNodes: 20,
-      maxNodes: 200,
-      requiredComponents: ['ScrollView', 'View', 'Text', 'TouchableOpacity'],
-    },
-    operations: {
-      minInitialOps: 10,
-      maxInitialOps: 500,
-      expectedTypes: ['CREATE', 'APPEND'],
-    },
-    events: {
-      hostEvents: [],
-    },
   },
 ];
 

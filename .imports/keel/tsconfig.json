@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/cli" },
+    { "path": "./packages/devtools" },
+    { "path": "./packages/let" },
+    { "path": "./packages/runtime" },
+    { "path": "./packages/sandbox" },
+    { "path": "./packages/sandbox-native" },
+    { "path": "./packages/sandbox-web" },
+    { "path": "./presets/react-native" },
+    { "path": "./presets/react-web" }
+  ]
+}

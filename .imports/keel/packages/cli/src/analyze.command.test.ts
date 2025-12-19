@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 
@@ -6,9 +6,15 @@ import path from 'path';
 describe('CLI analyze command', () => {
   const distDir = path.join(process.cwd(), 'dist');
   const bundle = path.join(distDir, 'cli-analyze.js');
+  let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     fs.mkdirSync(distDir, { recursive: true });
+    logSpy = spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
   });
 
   it('should report violations via CLI', async () => {

@@ -590,232 +590,125 @@ monitor.reset();
 
 ---
 
-## DevTools (@rill/core/devtools)
+## DevTools (@rill/devtools)
 
-调试工具集。
+Rill 应用的开发和调试工具集。提供操作日志、性能分析和错误跟踪功能。
 
-### DevTools (主类)
-
-整合所有调试功能。
-
-```tsx
-import { createDevTools } from '@rill/core/devtools';
-
-const devtools = createDevTools({
-  inspector: { maxDepth: 10, showFunctions: true },
-  maxLogs: 100,
-  maxTimelineEvents: 500,
-});
-
-// 启用/禁用
-devtools.enable();
-devtools.disable();
-
-// 记录事件
-devtools.onBatch(batch, duration);
-devtools.onCallback(fnId, args);
-devtools.onHostEvent(eventName, payload);
-
-// 获取组件树
-const tree = devtools.getComponentTree(nodeMap, rootChildren);
-const treeText = devtools.getComponentTreeText(nodeMap, rootChildren);
-
-// 导出调试数据
-const data = devtools.exportAll();
-
-// 重置
-devtools.reset();
-```
-
-### ComponentInspector
-
-组件树检查器。
-
-```tsx
-import { ComponentInspector } from '@rill/core/devtools';
-
-const inspector = new ComponentInspector({
-  maxDepth: 10,
-  filterProps: ['style'],
-  showFunctions: false,
-  highlightChanges: true,
-});
-
-const tree = inspector.buildTree(nodeMap, rootChildren);
-const text = inspector.toText(tree);
-const json = inspector.toJSON(tree);
-
-inspector.recordChange(nodeId);
-inspector.clearHighlights();
-```
-
-### OperationLogger
-
-操作日志记录器。
-
-```tsx
-import { OperationLogger } from '@rill/core/devtools';
-
-const logger = new OperationLogger(100);
-
-logger.log(batch, duration);
-
-const logs = logger.getLogs();
-const recent = logger.getRecentLogs(10);
-const creates = logger.filterByType('CREATE');
-const nodeOps = logger.filterByNodeId(1);
-const stats = logger.getStats();
-
-logger.clear();
-const exported = logger.export();
-```
-
-### TimelineRecorder
-
-时间线记录器。
-
-```tsx
-import { TimelineRecorder } from '@rill/core/devtools';
-
-const timeline = new TimelineRecorder(500);
-
-timeline.recordMount(nodeId, type);
-timeline.recordUpdate(nodeId, changedProps);
-timeline.recordUnmount(nodeId);
-timeline.recordBatch(batchId, count, duration);
-timeline.recordCallback(fnId, args);
-timeline.recordHostEvent(eventName, payload);
-
-const events = timeline.getEvents();
-const rangeEvents = timeline.getEventsInRange(0, 1000);
-const mounts = timeline.getEventsByType('mount');
-
-timeline.reset();
-const exported = timeline.export();
-```
-
----
-
-## DevTools (@rill/core/devtools)
-
-Rill 应用的开发和调试工具集。
+Guest 端数据自动收集：
+- **DEVTOOLS_SHIM** - 控制台/错误拦截（Engine 开启 `devtools: true` 时注入）
+- **Reconciler** - 渲染时序（集成在 @rill/let）
 
 ### createDevTools
 
-创建 DevTools 实例，提供组件检查、操作日志和时间线记录功能。
+创建 DevTools 实例。
 
 ```tsx
-import { createDevTools } from '@rill/core/devtools';
+import { createDevTools } from '@rill/devtools';
 
 const devtools = createDevTools({
-  inspector: {
-    maxDepth: 10,           // 组件树最大深度
-    filterProps: ['style'], // 隐藏敏感属性
-    showFunctions: false,   // 显示函数属性
-    highlightChanges: true, // 高亮变更节点
+  runtime: {
+    maxLogs: 100,           // 最大操作日志数
+    maxTimelineEvents: 500, // 最大时间线事件数
   },
-  maxLogs: 100,            // 最大操作日志数
-  maxTimelineEvents: 500,  // 最大时间线事件数
 });
 
 // 启用/禁用
 devtools.enable();
 devtools.disable();
 
-// 处理引擎事件
-engine.on('operation', (batch) => {
-  devtools.onBatch(batch);
-});
+// 连接引擎（自动订阅事件）
+devtools.connectEngine(engine);
 
 // 获取组件树
-const tree = devtools.getComponentTree(nodeMap, rootChildren);
-const treeText = devtools.getComponentTreeText(nodeMap, rootChildren);
+const tree = devtools.getHostTree();
+const treeText = devtools.getHostTreeText();
 
 // 导出调试数据
-const data = devtools.exportAll();
+const data = devtools.export();
 
 // 重置所有数据
 devtools.reset();
 ```
 
-### ComponentInspector
+### 事件订阅
 
-检查和可视化组件树结构。
+订阅 DevTools 事件。
 
 ```tsx
-import { ComponentInspector } from '@rill/core/devtools';
-
-const inspector = new ComponentInspector({
-  maxDepth: 10,
-  filterProps: ['style'],
-  showFunctions: false,
-  highlightChanges: true,
+// 可用事件: 'console', 'error', 'render', 'operation'
+devtools.subscribe('error', (event) => {
+  console.log('Guest 错误:', event.data);
 });
 
-// 从节点映射构建树
-const tree = inspector.buildTree(nodeMap, rootChildren);
-
-// 获取文本表示
-const text = inspector.toText(tree);
-console.log(text);
-// └─ <View flex={1}>
-//    ├─ <Text>你好</Text>
-//    └─ <Button title="点击">
-
-// 记录变更
-inspector.recordChange(nodeId);
-inspector.clearHighlights();
+devtools.subscribe('operation', (event) => {
+  console.log('操作:', event.data);
+});
 ```
 
-### OperationLogger
+### 性能分析
 
-记录和分析操作。
+记录和分析性能。
 
 ```tsx
-import { OperationLogger } from '@rill/core/devtools';
+// 开始分析
+devtools.startProfiling();
 
-const logger = new OperationLogger(100); // 保留最近 100 条日志
+// ... 用户交互 ...
 
-// 记录批次
-logger.log(batch, duration);
+// 停止并获取报告
+const report = devtools.stopProfiling();
 
-// 查询日志
-const logs = logger.getLogs();
-const recent = logger.getRecentLogs(10);
-const creates = logger.filterByType('CREATE');
-const nodeOps = logger.filterByNodeId(1);
-const stats = logger.getStats();
-
-// 导出/清除
-const exported = logger.export();
-logger.clear();
+console.log(report.summary);
+// {
+//   totalOperations: 150,
+//   totalRenders: 25,
+//   avgOperationTime: 2.5,
+//   avgRenderTime: 8.3,
+//   slowestNodes: [...],
+//   errorCount: 0,
+// }
 ```
 
-### TimelineRecorder
+### 数据访问
 
-记录时间线事件，用于性能分析。
+访问收集的调试数据。
 
 ```tsx
-import { TimelineRecorder } from '@rill/core/devtools';
+// Host 数据
+const tree = devtools.getHostTree();        // 组件树
+const metrics = devtools.getHostMetrics();  // 性能指标
+const status = devtools.getSandboxStatus(); // 沙箱状态
+const logs = devtools.getOperationLogs();   // 操作历史
 
-const timeline = new TimelineRecorder(500); // 保留最近 500 个事件
+// Guest 数据
+const consoleLogs = devtools.getConsoleLogs(); // 控制台输出
+const errors = devtools.getErrors();           // 错误
+const ready = devtools.isGuestReady();         // Guest 就绪状态
+```
+
+### RuntimeCollector (底层 API)
+
+不通过 Engine 连接的直接集成。
+
+```tsx
+import { createRuntimeCollector } from '@rill/devtools';
+
+const collector = createRuntimeCollector({ maxLogs: 100 });
+collector.enable();
+
+// 记录操作
+collector.logBatch(batch, duration);
 
 // 记录事件
-timeline.recordMount(nodeId, type);
-timeline.recordUpdate(nodeId, changedProps);
-timeline.recordUnmount(nodeId);
-timeline.recordBatch(batchId, count, duration);
-timeline.recordCallback(fnId, args);
-timeline.recordHostEvent(eventName, payload);
+collector.recordCallback(fnId, args);
+collector.recordHostEvent(eventName, payload);
 
-// 查询事件
-const events = timeline.getEvents();
-const rangeEvents = timeline.getEventsInRange(startTime, endTime);
-const mounts = timeline.getEventsByType('mount');
+// 从节点映射构建树
+const tree = collector.buildTree(nodeMap, rootChildren);
 
-// 导出/重置
-const exported = timeline.export();
-timeline.reset();
+// 获取统计
+const stats = collector.getOperationStats();
+const timeline = collector.getTimeline();
 ```
 
 ---

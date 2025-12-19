@@ -13,8 +13,12 @@ import type { BuildOptions } from './build';
 describe('CLI Build', () => {
   let tempDir: string;
   let originalCwd: string;
+  let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
+    // Mock console.log to prevent test output noise
+    logSpy = spyOn(console, 'log').mockImplementation(() => {});
+
     // Create temp directory
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-test-'));
     originalCwd = process.cwd();
@@ -26,7 +30,7 @@ describe('CLI Build', () => {
     fs.writeFileSync(
       path.join(srcDir, 'guest.tsx'),
       `
-      import { View, Text } from '@rill/core/sdk';
+      import { View, Text } from '@rill/let';
       export default function Guest() {
         return <View><Text>Hello</Text></View>;
       }
@@ -42,6 +46,7 @@ describe('CLI Build', () => {
     process.chdir(originalCwd);
     // Cleanup temp directory
     fs.rmSync(tempDir, { recursive: true, force: true });
+    logSpy.mockRestore();
   });
 
   describe('build', () => {
@@ -127,13 +132,13 @@ describe('CLI Build', () => {
       await expect(analyze('non-existent.js')).rejects.toThrow('Bundle not found');
     });
 
-    it('should warn about react-native references', async () => {
+    it('should warn about non-whitelisted module references', async () => {
       const { analyze } = await import('./build');
       const distDir = path.join(tempDir, 'dist');
       fs.writeFileSync(
         path.join(distDir, 'bad-bundle.js'),
         `
-        import { View } from 'react-native';
+        import lodash from 'lodash';
       `
       );
 
@@ -141,7 +146,7 @@ describe('CLI Build', () => {
 
       await analyze('dist/bad-bundle.js');
 
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('react-native'));
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('lodash'));
 
       consoleSpy.mockRestore();
     });

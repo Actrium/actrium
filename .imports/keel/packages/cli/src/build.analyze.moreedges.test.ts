@@ -1,13 +1,19 @@
-import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 
 describe('CLI Analyze - more string/comment edges', () => {
   const distDir = path.join(process.cwd(), 'dist');
   const bundle = (name: string) => path.join(distDir, name);
+  let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     fs.mkdirSync(distDir, { recursive: true });
+    logSpy = spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
   });
 
   it('should not warn for import mentioned in comments', async () => {

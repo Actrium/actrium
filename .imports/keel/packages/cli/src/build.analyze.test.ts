@@ -1,13 +1,19 @@
-import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 
 describe('CLI Analyze - whitelist scan', () => {
   const tmpDir = path.join(process.cwd(), 'dist');
   const bundle = path.join(tmpDir, 'scan-bundle.js');
+  let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     fs.mkdirSync(tmpDir, { recursive: true });
+    logSpy = spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
   });
 
   it('should warn for non-whitelisted modules', async () => {
@@ -24,7 +30,7 @@ describe('CLI Analyze - whitelist scan', () => {
     fs.writeFileSync(bundle, `import x from 'lodash';`);
     await expect(
       analyze('dist/scan-bundle.js', { whitelist: ['react'], failOnViolation: true })
-    ).rejects.toThrow('Analyze failed');
+    ).rejects.toThrow('Found non-whitelisted modules: lodash');
   });
 
   it('should ignore relative imports', async () => {
