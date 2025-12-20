@@ -60,7 +60,27 @@ const customConfig = {
       if (moduleName === 'rill') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(goAskAwayRoot, 'rill', 'packages', 'runtime', 'src', 'index.ts'),
+          filePath: path.resolve(goAskAwayRoot, 'rill', 'src', 'runtime', 'index.ts'),
+        };
+      }
+
+      // Resolve askit to host entry point
+      if (moduleName === 'askit') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(goAskAwayRoot, 'askit', 'src', 'index.host.ts'),
+        };
+      }
+      if (moduleName === 'askit/core') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(goAskAwayRoot, 'askit', 'src', 'core', 'index.ts'),
+        };
+      }
+      if (moduleName === 'askit/contracts') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(goAskAwayRoot, 'askit', 'src', 'contracts', 'index.ts'),
         };
       }
 
