@@ -6,7 +6,7 @@
  */
 
 import { program } from 'commander';
-import { version } from '../package.json';
+import { version } from '../../package.json';
 import type { BuildOptions } from './build';
 import { build } from './build';
 
