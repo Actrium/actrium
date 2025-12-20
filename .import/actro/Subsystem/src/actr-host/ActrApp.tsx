@@ -192,9 +192,29 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       return;
     }
 
+    // 检查 receiver 状态 - 🔧 FIX: 如果节点数为 0，跳过本次提取，等待下次回调
+    const receiverStats = receiver.getStats?.();
+    if (receiverStats) {
+      nlog(`[ActrTabView] receiver stats: nodes=${receiverStats.nodeCount}, rootChildren=${receiverStats.rootChildrenCount}, batches=${receiverStats.totalBatches}, ops=${JSON.stringify(receiverStats.totalOps)}`);
+
+      // 🔧 FIX: 关键修复 - 如果还没有节点，说明 Guest 渲染还未完成，跳过本次提取
+      // receiver 的 onUpdate 回调会在 applyBatch 后自动触发，所以我们只需要等待
+      if (receiverStats.nodeCount === 0) {
+        nlog(`[ActrTabView] handleUpdate: receiver 节点数为 0，等待下一次更新回调...`);
+        return;
+      }
+    } else {
+      nlog(`[ActrTabView] receiver.getStats() 返回空`);
+      return;
+    }
+
     nlog(`[ActrTabView] handleUpdate: 提取面板... tab=${tab.id}`);
+    const debugInfo = receiver.getDebugInfo?.();
+    if (debugInfo) {
+      nlog(`[ActrTabView] debugInfo: nodes=${debugInfo.nodeCount}, rootChildren=[${debugInfo.rootChildren?.join(',')}], appendCalls=${debugInfo.appendCalls}`);
+    }
     const fullTree = receiver.render();
-    nlog(`[ActrTabView] fullTree 类型: ${typeof fullTree}, 是 ReactElement: ${React.isValidElement(fullTree)}`);
+    nlog(`[ActrTabView] fullTree: ${fullTree === null ? 'NULL' : typeof fullTree}, isEl=${React.isValidElement(fullTree)}`);
     if (React.isValidElement(fullTree)) {
       const treeType = fullTree.type;
       nlog(`[ActrTabView] fullTree.type: ${typeof treeType === 'string' ? treeType : (treeType as any)?.displayName || (treeType as any)?.name || 'unknown'}`);
