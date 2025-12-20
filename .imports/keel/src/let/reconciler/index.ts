@@ -376,6 +376,7 @@ type RillReconciler = ReconcilerType<
   VNode, // Instance
   VNode, // TextInstance
   unknown, // SuspenseInstance
+  VNode, // FormInstance
   VNode // PublicInstance
 >;
 
@@ -385,19 +386,20 @@ type RillReconciler = ReconcilerType<
  */
 interface ExtendedHostConfig
   extends HostConfig<
-    string,
-    Record<string, unknown>,
-    RootContainer,
-    VNode,
-    VNode,
-    unknown,
-    unknown,
-    VNode,
-    object,
-    unknown,
-    unknown,
-    number,
-    -1
+    string, // Type
+    Record<string, unknown>, // Props
+    RootContainer, // Container
+    VNode, // Instance
+    VNode, // TextInstance
+    unknown, // SuspenseInstance
+    unknown, // HydratableInstance
+    VNode, // FormInstance
+    VNode, // PublicInstance
+    object, // HostContext
+    unknown, // ChildSet
+    number, // TimeoutHandle
+    -1, // NoTimeout
+    null // TransitionStatus
   > {
   // Priority and scheduling methods
   resolveUpdatePriority: () => number;
@@ -413,7 +415,6 @@ interface ExtendedHostConfig
 
   // Transition context
   NotPendingTransition: null;
-  HostTransitionContext: null;
 
   // Misc methods
   requestPostPaintCallback: () => void;
@@ -660,18 +661,8 @@ export function createReconciler(
       collector.add(op);
     },
 
-    prepareUpdate(
-      _instance: VNode,
-      _type: string,
-      oldProps: Record<string, unknown>,
-      newProps: Record<string, unknown>,
-      _rootContainer: RootContainer,
-      _hostContext: object
-    ): unknown | null {
-      // Return a truthy value to indicate an update is needed
-      // The actual diffing happens in commitUpdate
-      return oldProps !== newProps ? {} : null;
-    },
+    // prepareUpdate removed in react-reconciler 0.33+
+    // Updates are now handled directly in commitUpdate
 
     // React 18/19: commitUpdate signature vs runtime call may differ:
     // - React 18 (common type): commitUpdate(instance, updatePayload, type, prevProps, nextProps, internalHandle)
@@ -812,9 +803,8 @@ export function createReconciler(
     cancelTimeout: clearTimeout as unknown as (id: number) => void,
     noTimeout: -1,
 
-    getCurrentEventPriority(): number {
-      return DefaultEventPriority;
-    },
+    // getCurrentEventPriority removed in react-reconciler 0.33+
+    // Use getCurrentUpdatePriority instead (defined in ExtendedHostConfig)
 
     getInstanceFromNode(): null {
       return null;
@@ -877,7 +867,7 @@ export function createReconciler(
     suspendInstance: () => {},
     waitForCommitToBeReady: () => null,
     NotPendingTransition: null,
-    HostTransitionContext: null,
+    HostTransitionContext: React.createContext(null) as any,
     requestPostPaintCallback: () => {},
     shouldAttemptEagerTransition: () => false,
     resolveEventType: () => null,
@@ -936,7 +926,7 @@ const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
 const globalCallbackRegistry = new CallbackRegistry();
 
 // Cache Host-side React element symbol for cross-engine compatibility
-const REACT_ELEMENT_TYPE = Symbol.for('react.element');
+// const REACT_ELEMENT_TYPE = Symbol.for('react.element'); // Unused
 const REACT_FRAGMENT_TYPE = Symbol.for('react.fragment');
 
 // String markers used by Guest shims (survive JSI serialization)
@@ -1070,12 +1060,15 @@ export function render(element: ReactElement, sendToHost: SendToHost): void {
     const root = reconcilerInstance.reconciler.createContainer(
       container,
       0, // ConcurrentRoot
-      null,
-      false,
-      null,
-      'rill',
-      (error: Error) => console.error('[rill] Error:', error), // onUncaughtError
-      null // formState
+      null, // hydrationCallbacks
+      false, // isStrictMode
+      null, // concurrentUpdatesByDefaultOverride
+      'rill', // identifierPrefix
+      (error: Error) => console.error('[rill] onUncaughtError:', error), // onUncaughtError
+      (error: Error) => console.error('[rill] onCaughtError:', error), // onCaughtError
+      (error: Error) => console.error('[rill] onRecoverableError:', error), // onRecoverableError
+      () => {}, // onDefaultTransitionIndicator
+      null // transitionCallbacks
     );
 
     instance = {

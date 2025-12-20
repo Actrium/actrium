@@ -7,7 +7,9 @@
  * - No fallback - throws error if no provider available
  */
 
+// @ts-expect-error - Native module loaded conditionally
 import { isJSCAvailable } from '../../sandbox-native/src/jsc';
+// @ts-expect-error - Native module loaded conditionally
 import { isQuickJSAvailable } from '../../sandbox-native/src/quickjs';
 import { JSCProvider } from '../providers/JSCProvider';
 import { QuickJSProvider } from '../providers/QuickJSProvider';

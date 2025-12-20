@@ -150,7 +150,7 @@ export function EngineView({
 
   // Listen to engine events
   useEffect(() => {
-    const unsubscribeError = engine.on('error', (err) => {
+    const unsubscribeError = engine.on('error', (err: Error) => {
       if (mountedRef.current) {
         setError(err);
         setLoadingState('error');

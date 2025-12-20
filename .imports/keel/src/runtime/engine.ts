@@ -780,7 +780,7 @@ export class Engine implements IEngine {
           this.emit('error', err);
         }
       }, delay);
-      this.timeoutMap.set(id, handle as ReturnType<typeof setTimeout>);
+      this.timeoutMap.set(id, handle as unknown as ReturnType<typeof setTimeout>);
       return id;
     });
 
@@ -811,7 +811,7 @@ export class Engine implements IEngine {
           this.emit('error', err);
         }
       }, delay);
-      this.intervalMap.set(id, handle as ReturnType<typeof setInterval>);
+      this.intervalMap.set(id, handle as unknown as ReturnType<typeof setInterval>);
       return id;
     });
 

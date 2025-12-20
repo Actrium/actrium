@@ -5,7 +5,7 @@
  * Zero runtime dependencies - all implementations injected by reconciler at runtime
  */
 
-import type { ImageSource, LayoutEvent, ScrollEvent, StyleProp, StyleObject } from './types';
+import type { ImageSource, LayoutEvent, ScrollEvent, StyleProp } from './types';
 
 // ============ Runtime-injected React types ============
 // These types mirror React's types but are defined locally to avoid React dependency
@@ -445,7 +445,7 @@ export class RillErrorBoundary extends (React.Component as unknown as new (
     }
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.hasError) {
       const { fallback } = this.props;
       const { error, errorInfo } = this.state;
