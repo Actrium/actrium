@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import vm from 'node:vm';
-import { VMProvider } from '../../sandbox/index';
+import { VMProvider } from '../sandbox/index';
 import { Engine } from './engine';
 
 // These tests are specific to the VMProvider and should only run in a Node.js/Bun environment.
