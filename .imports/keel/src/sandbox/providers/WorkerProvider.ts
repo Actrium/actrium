@@ -1,7 +1,7 @@
 /**
  * WorkerProvider - Web Worker-based sandbox
  *
- * Re-exports from @rill/sandbox-web for web environments.
+ * Re-exports from sandbox-web for web environments.
  */
 
-export { WorkerProvider } from '@rill/sandbox-web';
+export { WorkerProvider } from '../../sandbox-web';

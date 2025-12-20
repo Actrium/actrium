@@ -1,14 +1,21 @@
 {
-  "files": [],
-  "references": [
-    { "path": "./packages/cli" },
-    { "path": "./packages/devtools" },
-    { "path": "./packages/let" },
-    { "path": "./packages/runtime" },
-    { "path": "./packages/sandbox" },
-    { "path": "./packages/sandbox-native" },
-    { "path": "./packages/sandbox-web" },
-    { "path": "./presets/react-native" },
-    { "path": "./presets/react-web" }
-  ]
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020"],
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "rill": ["./src/runtime/index.ts"],
+      "rill/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "coverage"]
 }

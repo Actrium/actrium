@@ -5,7 +5,7 @@
  * Only available on Apple platforms (iOS, macOS, tvOS, visionOS).
  */
 
-import { isJSCAvailable, getJSCModule, type JSCContextNative } from '../../sandbox-native/src/jsc';
+import { isJSCAvailable, getJSCModule, type JSCContextNative } from '../../sandbox-native/JSCModule';
 import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from '../types/provider';
 
 export interface JSCProviderOptions {

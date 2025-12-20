@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import React from 'react';
-import * as RillReconciler from '@rill/let/reconciler';
+import * as RillReconciler from '../../let/reconciler/index';
 import { Engine } from './engine';
 
 describe('Engine CALL_FUNCTION (host callback registry)', () => {
