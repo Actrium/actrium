@@ -6,6 +6,12 @@
  */
 
 (function () {
+  // Skip test if JSI module is not available (e.g., running in Bun instead of React Native)
+  if (typeof globalThis.__JSCSandboxJSI === 'undefined') {
+    console.log('⊘ Skipping JSC native tests (JSI module not available in this environment)');
+    return;
+  }
+
   var testsRun = 0;
   var testsPassed = 0;
   var testsFailed = 0;
