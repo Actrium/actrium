@@ -11,7 +11,7 @@ declare global {
   var __sendEventToHost: ((eventName: string, payload?: unknown) => void) | undefined;
 }
 
-import * as RillReconciler from '../../let/reconciler/index';
+import * as RillReconciler from '../let/reconciler/index';
 import { ALL_SHIMS, DEVTOOLS_SHIM } from './shims';
 
 import type {
@@ -25,8 +25,8 @@ import type { EngineDiagnostics, EngineEvents, EngineHealth, IEngine } from './I
 import { Receiver } from './receiver';
 import type { ComponentMap } from './registry';
 import { ComponentRegistry } from './registry';
-import type { RuntimeCollectorConfig, RuntimeCollector } from '../../devtools/index';
-import { createRuntimeCollector } from '../../devtools/index';
+import type { RuntimeCollectorConfig, RuntimeCollector } from '../devtools/index';
+import { createRuntimeCollector } from '../devtools/index';
 
 /**
  * Engine configuration options
@@ -146,8 +146,8 @@ export type {
   JSEngineProvider,
   JSEngineRuntime,
   JSEngineRuntimeOptions,
-} from '../../sandbox';
-import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from '../../sandbox';
+} from '../sandbox';
+import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from '../sandbox';
 
 /** Error types for better classification */
 export class RequireError extends Error {
@@ -307,7 +307,7 @@ export class Engine implements IEngine {
     if (!this.options.provider) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { DefaultProvider } = require('../../sandbox/index');
+        const { DefaultProvider } = require('../sandbox/index');
         this.options.provider = DefaultProvider.create({
           timeout: this.options.timeout,
           sandbox: options.sandbox,

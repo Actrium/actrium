@@ -32,7 +32,7 @@ const safeQueueMicrotask =
     ? queueMicrotask
     : (callback: () => void) => Promise.resolve().then(callback);
 
-import { hasCallback, invokeCallback } from '../../let/reconciler/index';
+import { hasCallback, invokeCallback } from '../let/reconciler/index';
 import type {
   HostMessage,
   NodeInstance,
