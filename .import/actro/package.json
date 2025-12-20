@@ -24,15 +24,13 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun run --filter '*' build",
     "test": "bun test",
     "test:e2e": "bun tests/e2e-sandbox-web/run.ts",
-    "lint": "bun run --filter '*' lint",
-    "typecheck": "bun run --filter '*' typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "format:check": "biome format .",
-    "check": "biome check --write .",
-    "check:ci": "biome ci ."
+    "typecheck": "bun tsc --noEmit"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -56,6 +54,7 @@
     "@types/react-reconciler": "^0.32.3",
     "@types/react-test-renderer": "^18.3.0",
     "@vitest/browser-webdriverio": "4.0.16",
+    "commander": "^14.0.2",
     "oxc-parser": "^0.26.0",
     "react": "^19.0.0",
     "react-reconciler": "^0.33.0",
