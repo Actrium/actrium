@@ -19,7 +19,7 @@ const mockModule = {
 };
 
 // Mock the sandbox-native module
-mock.module('@rill/sandbox-native/jsc', () => ({
+mock.module('../../sandbox-native/JSCModule', () => ({
   isJSCAvailable: () => true,
   getJSCModule: () => mockModule,
 }));

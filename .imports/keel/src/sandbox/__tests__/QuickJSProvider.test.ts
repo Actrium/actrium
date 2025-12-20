@@ -19,7 +19,7 @@ const mockModule = {
 };
 
 // Mock the sandbox-native module
-mock.module('@rill/sandbox-native/quickjs', () => ({
+mock.module('../../sandbox-native/QuickJSModule', () => ({
   isQuickJSAvailable: () => true,
   getQuickJSModule: () => mockModule,
 }));
