@@ -428,7 +428,7 @@
 					"$(inherited)",
 					" ",
 				);
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../Artifacts/node_modules/react-native-macos";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -491,7 +491,7 @@
 					"$(inherited)",
 					" ",
 				);
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../Artifacts/node_modules/react-native-macos";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				USE_HERMES = false;

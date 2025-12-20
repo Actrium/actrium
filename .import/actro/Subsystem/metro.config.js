@@ -10,7 +10,6 @@ const goAskAwayRoot = path.resolve(projectRoot, '../..');
 const localPackages = {
   rill: path.resolve(goAskAwayRoot, 'rill'),
   askit: path.resolve(goAskAwayRoot, 'askit'),
-  'react-native-jsc-sandbox': path.resolve(goAskAwayRoot, 'react-native-jsc-sandbox'),
 };
 
 const defaultConfig = getDefaultConfig(projectRoot);
@@ -24,9 +23,9 @@ defaultConfig.resolver.platforms = Array.from(
 // Also block react from local packages' node_modules to ensure single React instance
 defaultConfig.resolver.blockList = [
   /.*node_modules\/react\/cjs\/react\.development\.js.*inline-requires-plugin.*/,
-  // Block react from symlinked local packages (rill, askit, react-native-jsc-sandbox)
-  new RegExp(`${goAskAwayRoot}/(rill|askit|react-native-jsc-sandbox)/node_modules/react/.*`),
-  new RegExp(`${goAskAwayRoot}/(rill|askit|react-native-jsc-sandbox)/node_modules/react-reconciler/.*`),
+  // Block react from symlinked local packages (rill, askit)
+  new RegExp(`${goAskAwayRoot}/(rill|askit)/node_modules/react/.*`),
+  new RegExp(`${goAskAwayRoot}/(rill|askit)/node_modules/react-reconciler/.*`),
 ];
 
 const defaultPolyfills = defaultConfig.serializer?.getPolyfills?.() || [];
@@ -54,6 +53,15 @@ const customConfig = {
       // This ensures platform-specific implementations (Image.macos.js, etc.) are found
       if (platform === 'macos' && moduleName === 'react-native') {
         return resolve(context, 'react-native-macos', platform);
+      }
+
+      // Workaround: rill root package.json exports points to source, but we want to be explicit
+      // Pin to the actual runtime entry to keep Metro + TS consistent.
+      if (moduleName === 'rill') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(goAskAwayRoot, 'rill', 'packages', 'runtime', 'src', 'index.ts'),
+        };
       }
 
       // Ensure single React instance

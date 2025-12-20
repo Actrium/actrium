@@ -5,9 +5,10 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "types": ["react", "react-native"],
+    "types": ["react", "react-native", "node"],
     "noEmit": true,
     "strict": true,
+    "skipLibCheck": true,
     "baseUrl": ".",
     "lib": ["ES2021", "DOM", "DOM.Iterable"],
     "paths": {
@@ -16,8 +17,10 @@
       "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
       "askit": ["../../askit/src/index.host.ts"],
       "askit/core": ["../../askit/src/core/index.ts"],
-      "askit/contracts": ["../../askit/src/contracts/index.ts"]
+      "askit/contracts": ["../../askit/src/contracts/index.ts"],
+      "rill": ["../../rill/src/runtime/index.ts"]
     }
   },
-  "include": ["index.ts", "src"]
+  "include": ["index.ts", "src"],
+  "exclude": ["node_modules", "../../rill/src/let", "../../rill/src/cli", "../../rill/src/presets", "../../rill/src/sandbox", "../../rill/src/devtools"]
 }

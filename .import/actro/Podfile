@@ -1,4 +1,10 @@
-require_relative 'Artifacts/node_modules/react-native-macos/scripts/react_native_pods'
+subsystem_path = File.join(__dir__, 'Subsystem')
+# Keep react-native-macos path RELATIVE. RN CocoaPods helpers assume `path` is relative and will
+# incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
+react_native_macos_path = 'Subsystem/node_modules/react-native-macos'
+
+# Require react_native_pods via a stable absolute path.
+require File.join(subsystem_path, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
 
 prepare_react_native_project!
 
@@ -8,20 +14,23 @@ target 'Canvas' do
   # 根据环境变量决定是否启用新架构 / Fabric
   flags = get_default_flags()
 
-  # JSC sandbox (local development with callback proxy mechanism)
-  pod 'react-native-jsc-sandbox', :path => '../react-native-jsc-sandbox'
+  # NOTE: deprecated - no longer depend on react-native-jsc-sandbox / react-native-quickjs
 
   use_react_native!(
-    path: 'Artifacts/node_modules/react-native-macos',
+    path: react_native_macos_path,
     hermes_enabled: false,
     fabric_enabled: ENV['RCT_NEW_ARCH_ENABLED'] == '1',
     # React Native JS 工程所在目录（包含 package.json）
-    app_path: 'Artifacts'
+    app_path: subsystem_path
   )
+
+  # rill native sandbox (JSI)
+  # NOTE: keep for fallback if RN autolinking fails in monorepo setups.
+  # pod 'RillSandboxNative', :path => 'Subsystem/node_modules/rill/native/platform'
 
   post_install do |installer|
     # 告诉 React Native 正确的源码位置，避免 Codegen 误报
-    react_native_post_install(installer, 'Artifacts/node_modules/react-native-macos')
+    react_native_post_install(installer, react_native_macos_path)
 
     # 抑制所有 Pods 项目的警告
     installer.pods_project.targets.each do |target|

@@ -71,21 +71,10 @@ final class CanvasReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelega
         NativePerfTimer.shared.mark("bundleURL() 调用")
         #if DEBUG
         // 开发时强制走 Metro（支持热重载）；Debug 环境不回退到离线 actr.jsbundle（避免落到过期 bundle 导致"白屏无渲染"）
-        let provider = RCTBundleURLProvider.sharedSettings()
-        provider.enableDev = true
-        provider.enableMinification = false
-        provider.inlineSourceMap = false
-        provider.packagerScheme = "http"
-
-        // 防止 dev menu / 历史运行把 jsLocation 写成 file://.../*.jsbundle 导致 Debug 误走离线 bundle
-        if provider.jsLocation == nil || provider.jsLocation?.hasPrefix("file:") == true || provider.jsLocation?.contains(".jsbundle") == true {
-            provider.jsLocation = "localhost:8081"
-        }
-
-        let packagerHostPort = provider.packagerServerHostPort()
+        // 直接使用 localhost:8081，避免 RCTBundleURLProvider 返回空 hostname 的问题
         let url = RCTBundleURLProvider.jsBundleURL(
             forBundleRoot: "index",
-            packagerHost: packagerHostPort,
+            packagerHost: "localhost:8081",
             enableDev: true,
             enableMinification: false,
             inlineSourceMap: false
