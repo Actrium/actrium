@@ -8,7 +8,7 @@ RillQuickJSNativeTurboModule::RillQuickJSNativeTurboModule()
 
 RillQuickJSNativeTurboModule::~RillQuickJSNativeTurboModule() {}
 
-void RillQuickJSNativeTurboModule::initialize(jsi::Runtime& runtime) {
+void RillQuickJSNativeTurboModule::initialize(jsi::Runtime &runtime) {
   if (initialized_) {
     return;
   }

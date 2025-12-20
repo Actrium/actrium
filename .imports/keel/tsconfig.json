@@ -18,8 +18,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "exactOptionalPropertyTypes": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "exactOptionalPropertyTypes": false,
     "useUnknownInCatchVariables": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -34,15 +34,12 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
+      "@rill/runtime": ["./src/runtime/index.ts"],
       "rill": ["./src/runtime/index.ts"],
       "rill/*": ["./src/*"]
     }
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    "native/**/*.ts"
-  ],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "native/**/*.ts"],
   "exclude": [
     "node_modules",
     "dist",

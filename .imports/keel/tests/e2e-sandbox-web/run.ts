@@ -84,14 +84,18 @@ async function main() {
   console.log(`Bun server started on port ${port}`);
 
   // Run Playwright with the dynamic port
-  const playwright = spawn('npx', ['playwright', 'test', '--config', 'tests/e2e-sandbox-web/playwright.config.ts'], {
-    stdio: 'inherit',
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      TEST_PORT: String(port),
-    },
-  });
+  const playwright = spawn(
+    'npx',
+    ['playwright', 'test', '--config', 'tests/e2e-sandbox-web/playwright.config.ts'],
+    {
+      stdio: 'inherit',
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        TEST_PORT: String(port),
+      },
+    }
+  );
 
   playwright.on('close', async (code) => {
     server.stop();

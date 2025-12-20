@@ -11,16 +11,16 @@ namespace rill::quickjs {
  * Exposes global.__QuickJSSandboxJSI
  */
 class RillQuickJSNativeTurboModule {
- public:
+public:
   RillQuickJSNativeTurboModule();
   ~RillQuickJSNativeTurboModule();
 
   /**
    * Install JSI bindings into runtime
    */
-  void initialize(jsi::Runtime& runtime);
+  void initialize(jsi::Runtime &runtime);
 
- private:
+private:
   bool initialized_;
 };
 
