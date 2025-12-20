@@ -5,24 +5,20 @@
   "homepage": "https://github.com/GoAskAway/rill",
   "repository": "https://github.com/GoAskAway/rill.git",
   "license": "Apache-2.0",
-  "main": "./packages/runtime/src/index.ts",
-  "types": "./packages/runtime/src/index.ts",
+  "main": "./src/runtime/index.ts",
+  "types": "./src/runtime/index.ts",
   "exports": {
-    ".": "./packages/runtime/src/index.ts",
-    "./let": "./packages/let/src/index.ts",
-    "./devtools": "./packages/devtools/src/index.ts",
-    "./sandbox": "./packages/sandbox/src/index.ts",
-    "./sandbox-native": "./packages/sandbox-native/src/index.ts",
-    "./sandbox-web": "./packages/sandbox-web/src/index.ts",
-    "./cli": "./packages/cli/src/index.ts"
+    ".": "./src/runtime/index.ts",
+    "./let": "./src/let/index.ts",
+    "./devtools": "./src/devtools/index.ts",
+    "./sandbox": "./src/sandbox/index.ts",
+    "./sandbox-native": "./src/sandbox-native/index.ts",
+    "./sandbox-web": "./src/sandbox-web/index.ts",
+    "./cli": "./src/cli/index.ts"
   },
-  "workspaces": [
-    "packages/*",
-    "presets/*"
-  ],
   "files": [
-    "packages",
-    "presets",
+    "src",
+    "native",
     "react-native.config.js",
     "README.md",
     "LICENSE"
@@ -30,7 +26,7 @@
   "scripts": {
     "build": "bun run --filter '*' build",
     "test": "bun test",
-    "test:sandbox-web": "vitest run packages/sandbox-web/src",
+    "test:e2e": "bun tests/e2e-sandbox-web/run.ts",
     "lint": "bun run --filter '*' lint",
     "typecheck": "bun run --filter '*' typecheck",
     "format": "biome format --write .",
