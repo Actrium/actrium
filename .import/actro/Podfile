@@ -25,8 +25,8 @@ target 'Canvas' do
   )
 
   # rill native sandbox (JSI)
-  # NOTE: keep for fallback if RN autolinking fails in monorepo setups.
-  # pod 'RillSandboxNative', :path => 'Subsystem/node_modules/rill/native/platform'
+  # NOTE: manual linking required for local file: dependencies in monorepo
+  pod 'RillSandboxNative', :path => 'Subsystem/node_modules/rill/native/platform'
 
   post_install do |installer|
     # 告诉 React Native 正确的源码位置，避免 Codegen 误报
