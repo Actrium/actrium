@@ -1,26 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 describe('CLI Analyze - whitelist scan', () => {
-  const tmpDir = path.join(process.cwd(), 'dist');
-  const bundle = path.join(tmpDir, 'scan-bundle.js');
+  let tmpDir: string;
+  let bundle: string;
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    fs.mkdirSync(tmpDir, { recursive: true });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-cli-test-'));
+    bundle = path.join(tmpDir, 'scan-bundle.js');
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     logSpy.mockRestore();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('should warn for non-whitelisted modules', async () => {
     const { analyze } = await import('./build');
     fs.writeFileSync(bundle, `require('left-pad');`);
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
-    await analyze('dist/scan-bundle.js', { whitelist: ['react'], failOnViolation: false });
+    await analyze(bundle, { whitelist: ['react'], failOnViolation: false });
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('non-whitelisted modules'));
     warnSpy.mockRestore();
   });
@@ -29,7 +32,7 @@ describe('CLI Analyze - whitelist scan', () => {
     const { analyze } = await import('./build');
     fs.writeFileSync(bundle, `import x from 'lodash';`);
     await expect(
-      analyze('dist/scan-bundle.js', { whitelist: ['react'], failOnViolation: true })
+      analyze(bundle, { whitelist: ['react'], failOnViolation: true })
     ).rejects.toThrow('Found non-whitelisted modules: lodash');
   });
 
@@ -37,7 +40,7 @@ describe('CLI Analyze - whitelist scan', () => {
     const { analyze } = await import('./build');
     fs.writeFileSync(bundle, `import x from './local';`);
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
-    await analyze('dist/scan-bundle.js', { whitelist: ['react'], failOnViolation: false });
+    await analyze(bundle, { whitelist: ['react'], failOnViolation: false });
     // no warnings for relative path
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('non-whitelisted modules'));
     warnSpy.mockRestore();

@@ -1,19 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 describe('Strict Guard - violation cases', () => {
-  const distDir = path.join(process.cwd(), 'dist');
-  const file = (name: string) => path.join(distDir, name);
+  let distDir: string;
+  let file: (name: string) => string;
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    fs.mkdirSync(distDir, { recursive: true });
+    distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-cli-test-'));
+    file = (name: string) => path.join(distDir, name);
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     logSpy.mockRestore();
+    fs.rmSync(distDir, { recursive: true, force: true });
   });
 
   it('should fail when bundle contains non-whitelisted module at runtime', async () => {
@@ -21,7 +24,7 @@ describe('Strict Guard - violation cases', () => {
     fs.writeFileSync(file('guard-lodash.js'), "require('lodash');");
 
     await expect(
-      analyze('dist/guard-lodash.js', {
+      analyze(file('guard-lodash.js'), {
         whitelist: ['react', 'react-native', 'react/jsx-runtime', '@rill/let'],
         failOnViolation: true,
         treatEvalAsViolation: true,
@@ -35,7 +38,7 @@ describe('Strict Guard - violation cases', () => {
     fs.writeFileSync(file('guard-ok.js'), "require('react'); require('@rill/let');");
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
-    await analyze('dist/guard-ok.js', {
+    await analyze(file('guard-ok.js'), {
       whitelist: ['react', 'react-native', 'react/jsx-runtime', '@rill/let'],
       failOnViolation: true,
     });
