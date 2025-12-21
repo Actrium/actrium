@@ -42,22 +42,16 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B3E458A22EC731A30014D74C /* Canvas */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = Canvas;
 			sourceTree = "<group>";
 		};
 		B3E458B22EC731A40014D74C /* CanvasTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = CanvasTests;
 			sourceTree = "<group>";
 		};
 		B3E458BC2EC731A40014D74C /* CanvasUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = CanvasUITests;
 			sourceTree = "<group>";
 		};
@@ -298,9 +292,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -320,10 +318,11 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/actr.jsbundle",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\n\n# 生成离线 actr.jsbundle（ActrApp）并写入 .app/Contents/Resources\n# 当 Metro 不可用时，Release 会从 actr.jsbundle 启动。\n# 注意：不要叫 main.jsbundle，避免与 RN 默认 bundling 产物重名导致 Xcode “Multiple commands produce …/main.jsbundle”。\n\nif [ \"${SKIP_ACTR_BUNDLE:-0}\" = \"1\" ]; then\n  echo \"[actr] SKIP_ACTR_BUNDLE=1，跳过 bundling\"\n  exit 0\nfi\n\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  echo \"[actr] Debug build：跳过 bundling（使用 Metro）\"\n  exit 0\nfi\n\nHOST_ROOT=\"${SRCROOT}/actr-host\"\nENTRY_FILE=\"index.ts\"\nOUT_DIR=\"${CONFIGURATION_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nBUNDLE_OUTPUT=\"${OUT_DIR}/actr.jsbundle\"\n\nif [ ! -d \"$HOST_ROOT\" ]; then\n  echo \"error: actr-host not found: $HOST_ROOT\" >&2\n  exit 1\nfi\n\nmkdir -p \"$OUT_DIR\"\n\nDEV_FLAG=false\n\ncd \"$HOST_ROOT\"\n/usr/bin/env node ./node_modules/@react-native-community/cli/build/bin.js bundle \\\n  --platform macos \\\n  --dev $DEV_FLAG \\\n  --entry-file \"$ENTRY_FILE\" \\\n  --bundle-output \"$BUNDLE_OUTPUT\" \\\n  --assets-dest \"$OUT_DIR\"\n\necho \"[actr] Bundled ActrApp -> $BUNDLE_OUTPUT\"\n";
+			shellScript = "set -e\n\n# 生成离线 actr.jsbundle（ActrApp）并写入 .app/Contents/Resources\n# 当 Metro 不可用时，Release 会从 actr.jsbundle 启动。\n# 注意：不要叫 main.jsbundle，避免与 RN 默认 bundling 产物重名导致 Xcode “Multiple commands produce …/main.jsbundle”。\n\nif [ \"${SKIP_ACTR_BUNDLE:-0}\" = \"1\" ]; then\n  echo \"[actr] SKIP_ACTR_BUNDLE=1，跳过 bundling\"\n  exit 0\nfi\n\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  echo \"[actr] Debug build：跳过 bundling（使用 Metro）\"\n  exit 0\nfi\n\nHOST_ROOT=\"${SRCROOT}/Subsystem\"\nENTRY_FILE=\"index.ts\"\nOUT_DIR=\"${CONFIGURATION_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nBUNDLE_OUTPUT=\"${OUT_DIR}/actr.jsbundle\"\n\nif [ ! -d \"$HOST_ROOT\" ]; then\n  echo \"error: actr-host not found: $HOST_ROOT\" >&2\n  exit 1\nfi\n\nmkdir -p \"$OUT_DIR\"\n\nDEV_FLAG=false\n\ncd \"$HOST_ROOT\"\n/usr/bin/env node ./node_modules/@react-native-community/cli/build/bin.js bundle \\\n  --platform macos \\\n  --dev $DEV_FLAG \\\n  --entry-file \"$ENTRY_FILE\" \\\n  --bundle-output \"$BUNDLE_OUTPUT\" \\\n  --assets-dest \"$OUT_DIR\"\n\necho \"[actr] Bundled ActrApp -> $BUNDLE_OUTPUT\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -424,10 +423,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					" ",
-				);
+				OTHER_LDFLAGS = "$(inherited)  ";
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
@@ -487,10 +483,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					" ",
-				);
+				OTHER_LDFLAGS = "$(inherited)  ";
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;

@@ -30,6 +30,11 @@ yarn-error.log*
 *.jsbundle
 *.jsbundle.map
 
+# Subsystem actr example build artifacts
+Subsystem/actr-app-examples/**/dist/
+Subsystem/actr-app-examples/**/*.actr
+Subsystem/actr-app-examples/**/unified-app.js
+
 # Temporary files
 *.tmp
 *.temp

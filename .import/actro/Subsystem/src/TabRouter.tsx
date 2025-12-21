@@ -7,7 +7,8 @@
  * - BookmarksApp: for chrome://bookmarks
  */
 import React from 'react';
-import { View, Text, StyleSheet, NativeModules } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { logger } from './logger';
 import type { TabRouterProps, TabConfig } from './actr-host/types';
 
 // Lazy imports to avoid circular dependencies
@@ -15,33 +16,12 @@ const ActrApp = React.lazy(() => import('./actr-host/ActrApp').then(m => ({ defa
 const HistoryApp = React.lazy(() => import('./system-apps/HistoryApp'));
 const BookmarksApp = React.lazy(() => import('./system-apps/BookmarksApp'));
 
-// Remote logging
-const LOG_SERVER = 'http://localhost:9999/log';
-const sendLog = (level: string, msg: string) => {
-  try {
-    const fetchFn = (globalThis as any).fetch as unknown;
-    if (typeof fetchFn === 'function') {
-      (fetchFn as any)(LOG_SERVER, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level, msg }),
-      })?.catch?.(() => {});
-    }
-  } catch {
-    // ignore
-  }
-  try {
-    NativeModules.NativeLogger?.[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log']?.(msg);
-  } catch {
-    // ignore
-  }
-};
-const nlog = (msg: string) => sendLog('log', msg);
+const log = logger.child('TabRouter');
 
 // Props cache for bridge stability
 let cachedValidProps: TabRouterProps | null = null;
 
-nlog('[TabRouter] Module loaded');
+log.notice('Module loaded');
 
 // Loading fallback
 const LoadingFallback = () => (
@@ -51,13 +31,13 @@ const LoadingFallback = () => (
 );
 
 export const TabRouter: React.FC<TabRouterProps> = (props) => {
-  nlog('[TabRouter] Render, props keys: ' + Object.keys(props || {}).join(', '));
+  log.trace('Render, props keys: ' + Object.keys(props || {}).join(', '));
 
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
     const { isLeftPanelVisible = true, isRightPanelVisible = true } = props;
-    nlog(`[TabRouter] Single tab mode: ${tab.title} (${tab.id?.substring(0, 8)})`);
+    log.debug(`Single tab mode: ${tab.title} (${tab.id?.substring(0, 8)})`);
 
     // System app tab
     if (tab.systemAppType) {
@@ -101,16 +81,16 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
 
   if (hasValidTabs) {
     cachedValidProps = { ...props };
-    nlog('[TabRouter] Cached valid props (tabs: ' + props.tabs.length + ')');
+    log.debug('Cached valid props (tabs: ' + props.tabs.length + ')');
   } else if (cachedValidProps) {
     effectiveProps = cachedValidProps;
-    nlog('[TabRouter] Using cached props (tabs: ' + cachedValidProps.tabs.length + ')');
+    log.debug('Using cached props (tabs: ' + cachedValidProps.tabs.length + ')');
   }
 
   const { tabs = [], currentTabId, isLeftPanelVisible = true } = effectiveProps || {};
 
   if (!tabs.length) {
-    nlog('[TabRouter] No tabs, rendering empty view');
+    log.debug('No tabs, rendering empty view');
     return <View style={styles.empty} />;
   }
 
@@ -120,7 +100,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
   const actrTabs = tabs.filter(t => !t.systemAppType);
   const systemTabs = tabs.filter(t => !!t.systemAppType);
 
-  nlog(`[TabRouter] Routing: ${actrTabs.length} actr tabs, ${systemTabs.length} system tabs, active=${activeTabId}`);
+  log.info(`Routing: ${actrTabs.length} actr tabs, ${systemTabs.length} system tabs, active=${activeTabId}`);
 
   return (
     <View style={styles.container}>

@@ -11,18 +11,15 @@ import {
   StyleSheet,
   NativeModules,
 } from 'react-native';
+import { logger } from '../logger';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
 
 // Native module for history actions
 const HistoryModule = NativeModules.HistoryModule;
-const NativeLogger = NativeModules.NativeLogger;
-
 // 性能日志
 const COMPONENT_LOAD_TIME = Date.now();
-const nlog = (msg: string) => {
-  NativeLogger?.log?.(msg);
-  console.log(msg);
-};
+const log = logger.child('HistoryApp');
+const nlog = (msg: string) => log.debug(msg);
 
 interface HistoryAppProps {
   items: HistoryItemData[];

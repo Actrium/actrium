@@ -1,6 +1,8 @@
 import Foundation
 import React
 
+private let logger = AppLogger.reactNative
+
 /// Native module for bookmark actions from React Native
 @objc(BookmarksModule)
 class BookmarksModule: NSObject {
@@ -8,7 +10,7 @@ class BookmarksModule: NSObject {
     @objc
     func openBookmark(_ bookmarkId: String, _ appURL: String?) {
         guard let urlString = appURL else {
-            print("⚠️ [BookmarksModule] URL is nil")
+            logger.warning("[BookmarksModule] URL is nil")
             return
         }
 
@@ -21,7 +23,7 @@ class BookmarksModule: NSObject {
             url = URL(fileURLWithPath: urlString)
         }
 
-        print("📖 [BookmarksModule] Opening bookmark: \(bookmarkId), url: \(url.absoluteString)")
+        logger.info("[BookmarksModule] Opening bookmark: \(bookmarkId), url: \(url.absoluteString)")
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(
@@ -34,7 +36,7 @@ class BookmarksModule: NSObject {
 
     @objc
     func deleteBookmark(_ bookmarkId: String) {
-        print("🗑️ [BookmarksModule] Delete bookmark: \(bookmarkId)")
+        logger.notice("[BookmarksModule] Delete bookmark: \(bookmarkId)")
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(

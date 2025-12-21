@@ -1,5 +1,7 @@
 import Foundation
 
+private let logger = AppLogger.app
+
 /// System tab types for built-in pages (like Chrome's chrome://history)
 enum SystemTabType: String, Codable {
     case history
@@ -109,7 +111,7 @@ struct Tab: Identifiable {
         let b = Int(rgb.b * 255)
         let hexColor = String(format: "#%02x%02x%02x", r, g, b)
 
-        print("🎨 生成随机背景颜色: \(hexColor) (from HSL(\(Int(hue)), \(Int(saturation * 100))%, \(Int(lightness * 100))%))")
+        logger.debug("Generated random background color: \(hexColor) from HSL(\(Int(hue)), \(Int(saturation * 100))%, \(Int(lightness * 100))%)")
         return hexColor
     }
 

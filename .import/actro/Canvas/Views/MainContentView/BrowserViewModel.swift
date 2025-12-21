@@ -2,6 +2,8 @@ import Foundation
 import AppKit // Import AppKit for NSImage
 import Combine
 
+private let logger = AppLogger.viewModel
+
 /// Canvas display mode - stored in ViewModel to survive view recreation
 enum CanvasMode: Equatable {
     case overview
@@ -48,7 +50,7 @@ class BrowserViewModel: ObservableObject {
         let counterAppDevPath = "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp"
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
-            print("🔄 [BrowserViewModel] 启动时直接加载 counterapp 开发目录 (Focus 模式)")
+            logger.debug("🔄 [BrowserViewModel] 启动时直接加载 counterapp 开发目录 (Focus 模式)")
             // Initialize slot positions
             initializeSlotPositions()
             // 🔴 Focus 模式：启动时直接进入全屏 Focus 模式
@@ -122,7 +124,7 @@ class BrowserViewModel: ObservableObject {
     
     @discardableResult
     func addNewTab() -> Tab {
-        print("🆕 开始创建新标签页...")
+        logger.debug("🆕 开始创建新标签页...")
         let newTab = Tab(
             title: "New Tab \(tabs.count + 1)",
             htmlContent: """
@@ -179,7 +181,7 @@ class BrowserViewModel: ObservableObject {
         // 简化：直接添加到末尾
         tabSlotPositions[newTab.id] = tabs.count - 1
 
-        print("✅ 新标签页已创建: \(newTab.title), 位置: \(tabs.count - 1)")
+        logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
         return newTab
     }
 
@@ -192,7 +194,7 @@ class BrowserViewModel: ObservableObject {
             // Switch to existing tab
             currentTabId = existingTab.id
             canvasMode = .focus(tabId: existingTab.id)
-            print("🔄 切换到已有系统标签: \(type.title)")
+            logger.debug("🔄 切换到已有系统标签: \(type.title)")
             return existingTab
         }
 
@@ -207,13 +209,13 @@ class BrowserViewModel: ObservableObject {
         tabSlotPositions[newTab.id] = tabs.count - 1
         canvasMode = .focus(tabId: newTab.id)
 
-        print("✅ 已创建系统标签: \(type.title), 位置: \(tabs.count - 1)")
+        logger.notice(" 已创建系统标签: \(type.title), 位置: \(self.tabs.count - 1)")
         return newTab
     }
 
     func switchToTab(id: UUID) {
         if let tab = tabs.first(where: { $0.id == id }) {
-            print("🔄 切换到标签页: \(tab.title)")
+            logger.debug("🔄 切换到标签页: \(tab.title)")
         }
         currentTabId = id
         // Ensure canvas is in focus mode when switching tabs
@@ -223,13 +225,13 @@ class BrowserViewModel: ObservableObject {
     func closeTab(id: UUID) {
         // Get the slot position of the tab being closed
         guard let closedPosition = tabSlotPositions[id] else {
-            print("⚠️ Cannot find tab slot position")
+            logger.warning(" Cannot find tab slot position")
             return
         }
 
         // 如果这是最后一个标签页，关闭后退出应用
         if tabs.count == 1 {
-            print("🚪 关闭最后一个标签页，应用即将退出")
+            logger.debug("🚪 关闭最后一个标签页，应用即将退出")
             NSApplication.shared.terminate(nil)
             return
         }
@@ -258,7 +260,7 @@ class BrowserViewModel: ObservableObject {
             }
         }
 
-        print("🗑️ 关闭标签页，位置 \(closedPosition)，剩余 \(tabs.count) 个标签页")
+        logger.debug("🗑️ 关闭标签页，位置 \(closedPosition)，剩余 \(self.tabs.count) 个标签页")
     }
 
     func reorderTab(fromIndex source: Int, toIndex destination: Int) {
@@ -270,7 +272,7 @@ class BrowserViewModel: ObservableObject {
         let insertIndex = destination > source ? destination - 1 : destination
         tabs.insert(movedTab, at: insertIndex)
 
-        print("🔄 标签页重排: 从索引 \(source) 移动到 \(insertIndex)")
+        logger.debug("🔄 标签页重排: 从索引 \(source) 移动到 \(insertIndex)")
     }
 
     // MARK: - Tab Group Management
@@ -280,7 +282,7 @@ class BrowserViewModel: ObservableObject {
     func createGroup(name: String = "", color: TabGroupColor = .gray) -> TabGroup {
         let group = TabGroup(name: name, color: color)
         tabGroups.append(group)
-        print("📁 创建新分组: \(group.id), 名称: \(name.isEmpty ? "(无名称)" : name)")
+        logger.debug("📁 创建新分组: \(group.id), 名称: \(name.isEmpty ? "(无名称)" : name)")
         return group
     }
 
@@ -295,7 +297,7 @@ class BrowserViewModel: ObservableObject {
         let tab = tabs.remove(at: fromIndex)
         let targetIndex = min(max(0, toIndex), tabs.count)
         tabs.insert(tab, at: targetIndex)
-        print("📍 Tab 移动: \(tab.title) 从位置 \(fromIndex) 到 \(targetIndex)")
+        logger.debug("📍 Tab 移动: \(tab.title) 从位置 \(fromIndex) 到 \(targetIndex)")
     }
 
     /// Move a tab to a specific position and optionally change its group
@@ -316,7 +318,7 @@ class BrowserViewModel: ObservableObject {
         let targetIndex = min(max(0, toIndex), tabs.count)
         tabs.insert(tab, at: targetIndex)
 
-        print("📍 Tab 移动: \(tab.title) 到位置 \(targetIndex), 分组: \(groupId?.uuidString ?? "无")")
+        logger.debug("📍 Tab 移动: \(tab.title) 到位置 \(targetIndex), 分组: \(groupId?.uuidString ?? "无")")
 
         // Clean up old empty group if needed
         if let oldId = oldGroupId, oldId != groupId {
@@ -334,7 +336,7 @@ class BrowserViewModel: ObservableObject {
         tabSlotPositions[newTab.id] = tabs.count - 1
         currentTabId = newTab.id
 
-        print("✅ 跨窗口插入 Tab: \(newTab.title) 到位置 \(targetIndex), 分组: \(groupId?.uuidString ?? "无")")
+        logger.notice(" 跨窗口插入 Tab: \(newTab.title) 到位置 \(targetIndex), 分组: \(groupId?.uuidString ?? "无")")
     }
 
     /// Remove a tab by ID (used for cross-window drag source cleanup)
@@ -356,7 +358,7 @@ class BrowserViewModel: ObservableObject {
             cleanupEmptyGroup(oldId)
         }
 
-        print("🗑️ 跨窗口移除 Tab: \(tab.title)")
+        logger.debug("🗑️ 跨窗口移除 Tab: \(tab.title)")
     }
 
     /// Calculate the index for inserting a tab into a group at a specific child position
@@ -401,7 +403,7 @@ class BrowserViewModel: ObservableObject {
     func addTabToGroup(tabId: UUID, groupId: UUID) {
         guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         tabs[tabIndex].groupId = groupId
-        print("📁 Tab \(tabId) 已加入分组 \(groupId)")
+        logger.debug("📁 Tab \(tabId) 已加入分组 \(groupId)")
     }
 
     /// Remove a tab from its group
@@ -409,7 +411,7 @@ class BrowserViewModel: ObservableObject {
         guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         let oldGroupId = tabs[tabIndex].groupId
         tabs[tabIndex].groupId = nil
-        print("📁 Tab \(tabId) 已从分组 \(String(describing: oldGroupId)) 移除")
+        logger.debug("📁 Tab \(tabId) 已从分组 \(String(describing: oldGroupId)) 移除")
 
         // Clean up empty groups
         if let groupId = oldGroupId {
@@ -427,7 +429,7 @@ class BrowserViewModel: ObservableObject {
         }
         // Remove the group
         tabGroups.removeAll { $0.id == groupId }
-        print("🗑️ 分组 \(groupId) 已删除")
+        logger.debug("🗑️ 分组 \(groupId) 已删除")
     }
 
     /// Close all tabs in a group
@@ -448,7 +450,7 @@ class BrowserViewModel: ObservableObject {
         }
         // Remove the group
         tabGroups.removeAll { $0.id == groupId }
-        print("🗑️ 分组 \(groupId) 及其所有 Tab 已关闭")
+        logger.debug("🗑️ 分组 \(groupId) 及其所有 Tab 已关闭")
     }
 
     /// Restore a group from history
@@ -464,14 +466,14 @@ class BrowserViewModel: ObservableObject {
             }
         }
 
-        print("♻️ 已恢复分组: \(historyGroup.name.isEmpty ? "Unnamed" : historyGroup.name) 包含 \(historyGroup.tabs.count) 个 Tab")
+        logger.debug("♻️ 已恢复分组: \(historyGroup.name.isEmpty ? "Unnamed" : historyGroup.name) 包含 \(historyGroup.tabs.count) 个 Tab")
     }
 
     /// Import ACTR package and add to a specific group
     private func importACTRPackageToGroup(from fileURL: URL, groupId: UUID) {
         let resolvedURL = fileURL.standardizedFileURL
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
-            print("❌ 找不到 .actr 文件：\(resolvedURL.path)")
+            logger.error(" 找不到 .actr 文件：\(resolvedURL.path)")
             return
         }
 
@@ -480,7 +482,7 @@ class BrowserViewModel: ObservableObject {
         FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
 
         let rootDir: URL
-        let tempDir: URL?
+        var tempDir: URL? = nil
 
         if isDirectory.boolValue {
             // Directory mode - use directly
@@ -494,12 +496,15 @@ class BrowserViewModel: ObservableObject {
                 try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
                 try unzipACTR(archive: resolvedURL, to: temp)
             } catch {
-                print("❌ [restoreGroup] .actr 装载失败：\(error.localizedDescription)")
+                logger.error(" [restoreGroup] .actr 装载失败：\(error.localizedDescription)")
                 return
             }
             rootDir = temp
             tempDir = temp
         }
+
+        // Mark as read to silence "written to, but never read" warnings.
+        if tempDir != nil { }
 
         do {
             let manifestInfo = try readManifestJSON(fromRoot: rootDir)
@@ -538,10 +543,10 @@ class BrowserViewModel: ObservableObject {
             tabs.append(newTab)
             tabSlotPositions[newTab.id] = tabs.count - 1
             leftPanelVisibility[newTab.id] = newTab.leftPanelDefaultVisible
-            print("✅ [restoreGroup] 已加载 .actr 到分组: \(tabTitle)")
+            logger.notice(" [restoreGroup] 已加载 .actr 到分组: \(tabTitle)")
 
         } catch {
-            print("❌ [restoreGroup] .actr 装载失败：\(error.localizedDescription)")
+            logger.error(" [restoreGroup] .actr 装载失败：\(error.localizedDescription)")
         }
     }
 
@@ -557,14 +562,14 @@ class BrowserViewModel: ObservableObject {
         if let isCollapsed = isCollapsed {
             tabGroups[index].isCollapsed = isCollapsed
         }
-        print("📝 分组 \(groupId) 已更新")
+        logger.debug("📝 分组 \(groupId) 已更新")
     }
 
     /// Toggle group collapsed state
     func toggleGroupCollapsed(groupId: UUID) {
         guard let index = tabGroups.firstIndex(where: { $0.id == groupId }) else { return }
         tabGroups[index].isCollapsed.toggle()
-        print("📁 分组 \(groupId) 折叠状态: \(tabGroups[index].isCollapsed)")
+        logger.debug("📁 分组 \(groupId) 折叠状态: \(self.tabGroups[index].isCollapsed)")
     }
 
     /// Get group for a tab
@@ -623,7 +628,7 @@ class BrowserViewModel: ObservableObject {
         let hasTabsInGroup = tabs.contains { $0.groupId == groupId }
         if !hasTabsInGroup {
             tabGroups.removeAll { $0.id == groupId }
-            print("🧹 空分组 \(groupId) 已自动删除")
+            logger.debug("🧹 空分组 \(groupId) 已自动删除")
         }
     }
 
@@ -642,25 +647,25 @@ class BrowserViewModel: ObservableObject {
         for (index, tab) in tabs.enumerated() {
             tabSlotPositions[tab.id] = index
         }
-        print("📍 Initialized slot positions: \(tabs.count) tabs")
+        logger.debug("📍 Initialized slot positions: \(self.tabs.count) tabs")
     }
 
     /// Swap slot positions between two tabs
     func swapSlotPositions(tabId1: UUID?, tabId2: UUID?) {
         guard let id1 = tabId1, let id2 = tabId2 else {
-            print("⚠️ Cannot swap: need two valid tab IDs")
+            logger.warning(" Cannot swap: need two valid tab IDs")
             return
         }
 
         guard let pos1 = tabSlotPositions[id1],
               let pos2 = tabSlotPositions[id2] else {
-            print("⚠️ Cannot swap: slot position not found")
+            logger.warning(" Cannot swap: slot position not found")
             return
         }
 
         tabSlotPositions[id1] = pos2
         tabSlotPositions[id2] = pos1
-        print("🔄 Swapped slot positions: \(pos1) ↔ \(pos2)")
+        logger.debug("🔄 Swapped slot positions: \(pos1) ↔ \(pos2)")
     }
 
     /// Get tabs sorted by their slot position
@@ -687,16 +692,16 @@ class BrowserViewModel: ObservableObject {
         guard let id = currentTabId,
               let index = tabs.firstIndex(where: { $0.id == id }),
               let sourceURL = tabs[index].url else {
-            print("⚠️ [reloadCurrentTab] 无法刷新：当前 tab 没有源 URL")
+            logger.warning(" [reloadCurrentTab] 无法刷新：当前 tab 没有源 URL")
             return
         }
 
-        print("🔄 [reloadCurrentTab] 开始刷新 tab: \(tabs[index].title)")
+        logger.debug("🔄 [reloadCurrentTab] 开始刷新 tab: \(self.tabs[index].title)")
 
         // Re-read the .actr package
         let resolvedURL = sourceURL.standardizedFileURL
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
-            print("❌ [reloadCurrentTab] 源文件不存在：\(resolvedURL.path)")
+            logger.error(" [reloadCurrentTab] 源文件不存在：\(resolvedURL.path)")
             return
         }
 
@@ -717,7 +722,7 @@ class BrowserViewModel: ObservableObject {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 try unzipACTR(archive: resolvedURL, to: tempDir)
             } catch {
-                print("❌ [reloadCurrentTab] 解压失败：\(error.localizedDescription)")
+                logger.error(" [reloadCurrentTab] 解压失败：\(error.localizedDescription)")
                 return
             }
             rootDir = tempDir
@@ -759,13 +764,13 @@ class BrowserViewModel: ObservableObject {
                 tabs[index].title = name
             }
 
-            print("✅ [reloadCurrentTab] 刷新完成: \(tabs[index].title)")
+            logger.notice(" [reloadCurrentTab] 刷新完成: \(self.tabs[index].title)")
 
             // Force UI update by triggering objectWillChange
             objectWillChange.send()
 
         } catch {
-            print("❌ [reloadCurrentTab] 刷新失败：\(error.localizedDescription)")
+            logger.error(" [reloadCurrentTab] 刷新失败：\(error.localizedDescription)")
         }
     }
 
@@ -774,7 +779,7 @@ class BrowserViewModel: ObservableObject {
     func isLeftPanelVisible(for tabId: UUID?) -> Bool {
         guard let id = tabId else { return true }
         let visible = leftPanelVisibility[id] ?? true
-        print("🔍 [isLeftPanelVisible] Tab \(id.uuidString.prefix(8)): \(visible)")
+        logger.debug("🔍 [isLeftPanelVisible] Tab \(id.uuidString.prefix(8)): \(visible)")
         return visible
     }
 
@@ -786,7 +791,7 @@ class BrowserViewModel: ObservableObject {
         } else if let currentId = currentTabId {
             id = currentId
         } else {
-            print("⚠️ [toggleLeftPanel] 无法确定当前 tab，无法切换")
+            logger.warning(" [toggleLeftPanel] 无法确定当前 tab，无法切换")
             return
         }
 
@@ -794,7 +799,7 @@ class BrowserViewModel: ObservableObject {
         let current = visibility[id] ?? true
         visibility[id] = !current
         leftPanelVisibility = visibility  // 重新赋值整个字典，确保触发 @Published
-        print("🔄 [toggleLeftPanel] Tab \(id.uuidString.prefix(8)) 左侧面板: \(current) -> \(!current)")
+        logger.debug("🔄 [toggleLeftPanel] Tab \(id.uuidString.prefix(8)) 左侧面板: \(current) -> \(!current)")
     }
 
     // MARK: - .actr 应用加载
@@ -803,7 +808,7 @@ class BrowserViewModel: ObservableObject {
     func importACTRPackage(from fileURL: URL) {
         let resolvedURL = fileURL.standardizedFileURL
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
-            print("❌ 找不到 .actr 文件：\(resolvedURL.path)")
+            logger.error(" 找不到 .actr 文件：\(resolvedURL.path)")
             return
         }
 
@@ -824,7 +829,7 @@ class BrowserViewModel: ObservableObject {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 try unzipACTR(archive: resolvedURL, to: tempDir)
             } catch {
-                print("❌ .actr 装载失败：\(error.localizedDescription)")
+                logger.error(" .actr 装载失败：\(error.localizedDescription)")
                 return
             }
             rootDir = tempDir
@@ -841,7 +846,7 @@ class BrowserViewModel: ObservableObject {
             var unifiedScript: String? = nil
             if let unifiedFileName = manifestInfo.unifiedScript {
                 unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
-                print("✅ [BrowserViewModel] 从 manifest.json 读取 unified: \(unifiedFileName), 脚本存在: \(unifiedScript != nil)")
+                logger.notice(" [BrowserViewModel] 从 manifest.json 读取 unified: \(unifiedFileName), 脚本存在: \(unifiedScript != nil)")
             }
 
             // Legacy: 从 manifest.json 读取面板脚本文件名
@@ -850,17 +855,17 @@ class BrowserViewModel: ObservableObject {
 
             if let leftFileName = manifestInfo.leftPanelScript {
                 leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
-                print("🔍 [BrowserViewModel] 从 manifest.json 读取 leftPanel: \(leftFileName), 脚本存在: \(leftPanelScript != nil)")
+                logger.debug("🔍 [BrowserViewModel] 从 manifest.json 读取 leftPanel: \(leftFileName), 脚本存在: \(leftPanelScript != nil)")
             }
 
             if let rightFileName = manifestInfo.rightPanelScript {
                 rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
-                print("🔍 [BrowserViewModel] 从 manifest.json 读取 rightPanel: \(rightFileName), 脚本存在: \(rightPanelScript != nil)")
+                logger.debug("🔍 [BrowserViewModel] 从 manifest.json 读取 rightPanel: \(rightFileName), 脚本存在: \(rightPanelScript != nil)")
             }
 
             // v2.0: 优先使用 Single Engine 架构
             if let unified = unifiedScript {
-                print("🚀 [BrowserViewModel] 使用 Single Engine 架构 (unified bundle)")
+                logger.debug("🚀 [BrowserViewModel] 使用 Single Engine 架构 (unified bundle)")
                 appendACTRTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
@@ -874,7 +879,7 @@ class BrowserViewModel: ObservableObject {
             }
             // Legacy: 双 Engine 架构
             else if leftPanelScript != nil || rightPanelScript != nil {
-                print("🔄 [BrowserViewModel] 使用 Legacy 双 Engine 架构")
+                logger.debug("🔄 [BrowserViewModel] 使用 Legacy 双 Engine 架构")
                 appendACTRTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
@@ -888,7 +893,7 @@ class BrowserViewModel: ObservableObject {
                 )
             } else if let script = guestScript {
                 // 旧架构：兼容单一的 guest.js
-                print("🔄 [BrowserViewModel] 使用兼容模式 (guestScript)")
+                logger.debug("🔄 [BrowserViewModel] 使用兼容模式 (guestScript)")
                 appendACTRTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
@@ -908,7 +913,7 @@ class BrowserViewModel: ObservableObject {
                 appendACTRTab(title: tabTitle, sourceURL: resolvedURL, htmlContent: html)
             }
         } catch {
-            print("❌ .actr 装载失败：\(error.localizedDescription)")
+            logger.error(" .actr 装载失败：\(error.localizedDescription)")
             let fallbackHTML = renderACTRInfoHTML(
                 name: resolvedURL.deletingPathExtension().lastPathComponent,
                 version: "unknown",
@@ -928,7 +933,7 @@ class BrowserViewModel: ObservableObject {
     private func importACTRPackageAsync(from fileURL: URL) {
         let resolvedURL = fileURL.standardizedFileURL
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
-            print("❌ 找不到 .actr 文件：\(resolvedURL.path)")
+            logger.error(" 找不到 .actr 文件：\(resolvedURL.path)")
             return
         }
 
@@ -949,7 +954,7 @@ class BrowserViewModel: ObservableObject {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 try unzipACTR(archive: resolvedURL, to: tempDir)
             } catch {
-                print("❌ .actr 装载失败：\(error.localizedDescription)")
+                logger.error(" .actr 装载失败：\(error.localizedDescription)")
                 return
             }
             rootDir = tempDir
@@ -1020,7 +1025,7 @@ class BrowserViewModel: ObservableObject {
                 }
             }
         } catch {
-            print("❌ .actr 装载失败：\(error.localizedDescription)")
+            logger.error(" .actr 装载失败：\(error.localizedDescription)")
             DispatchQueue.main.async { [weak self] in
                 let fallbackHTML = self?.renderACTRInfoHTML(
                     name: resolvedURL.deletingPathExtension().lastPathComponent,
@@ -1041,32 +1046,32 @@ class BrowserViewModel: ObservableObject {
     /// Used for hot-reload development workflow and bookmark/history loading
     func loadFromDevDirectory(_ directoryURL: URL) {
         guard FileManager.default.fileExists(atPath: directoryURL.path) else {
-            print("❌ 找不到开发目录：\(directoryURL.path)")
+            logger.error(" 找不到开发目录：\(directoryURL.path)")
             return
         }
 
         do {
             let manifestInfo = try readManifestJSON(fromRoot: directoryURL)
             let tabTitle = manifestInfo.name ?? directoryURL.lastPathComponent
-            print("📂 [loadFromDevDirectory] 加载开发目录: \(tabTitle)")
+            logger.debug("📂 [loadFromDevDirectory] 加载开发目录: \(tabTitle)")
 
             let guestScript = readGuestScript(fromRoot: directoryURL)
 
             var unifiedScript: String? = nil
             if let unifiedFileName = manifestInfo.unifiedScript {
                 unifiedScript = readScript(fromRoot: directoryURL, fileName: unifiedFileName)
-                print("✅ [loadFromDevDirectory] 读取 unified: \(unifiedFileName), 长度: \(unifiedScript?.count ?? 0)")
+                logger.notice(" [loadFromDevDirectory] 读取 unified: \(unifiedFileName), 长度: \(unifiedScript?.count ?? 0)")
             }
 
             var leftPanelScript: String? = nil
             var rightPanelScript: String? = nil
             if let leftFileName = manifestInfo.leftPanelScript {
                 leftPanelScript = readScript(fromRoot: directoryURL, fileName: leftFileName)
-                print("✅ [loadFromDevDirectory] 读取 leftPanel: \(leftFileName), 长度: \(leftPanelScript?.count ?? 0)")
+                logger.notice(" [loadFromDevDirectory] 读取 leftPanel: \(leftFileName), 长度: \(leftPanelScript?.count ?? 0)")
             }
             if let rightFileName = manifestInfo.rightPanelScript {
                 rightPanelScript = readScript(fromRoot: directoryURL, fileName: rightFileName)
-                print("✅ [loadFromDevDirectory] 读取 rightPanel: \(rightFileName), 长度: \(rightPanelScript?.count ?? 0)")
+                logger.notice(" [loadFromDevDirectory] 读取 rightPanel: \(rightFileName), 长度: \(rightPanelScript?.count ?? 0)")
             }
 
             // Update UI on main thread
@@ -1104,11 +1109,11 @@ class BrowserViewModel: ObservableObject {
                         permissions: manifestInfo.permissions
                     )
                 } else {
-                    print("⚠️ [loadFromDevDirectory] 没有找到任何脚本文件")
+                    logger.warning(" [loadFromDevDirectory] 没有找到任何脚本文件")
                 }
             }
         } catch {
-            print("❌ 开发目录加载失败：\(error.localizedDescription)")
+            logger.error(" 开发目录加载失败：\(error.localizedDescription)")
         }
     }
 
@@ -1145,17 +1150,17 @@ class BrowserViewModel: ObservableObject {
         tabSlotPositions[newTab.id] = tabs.count - 1
         leftPanelVisibility[newTab.id] = leftPanelDefaultVisible
 
-        print("✅ 已加载 .actr：\(title)")
+        logger.notice(" 已加载 .actr：\(title)")
 
         if let unified = unifiedScript {
-            print("  ├─ 统一脚本 (Single Engine): \(unified.count) 字节")
-            print("  ├─ 左侧面板默认\(leftPanelDefaultVisible ? "显示" : "隐藏")")
-            print("  └─ 右侧面板默认\(rightPanelDefaultVisible ? "显示" : "隐藏")")
+            logger.debug("  ├─ 统一脚本 (Single Engine): \(unified.count) 字节")
+            logger.debug("  ├─ 左侧面板默认\(leftPanelDefaultVisible ? "显示" : "隐藏")")
+            logger.debug("  └─ 右侧面板默认\(rightPanelDefaultVisible ? "显示" : "隐藏")")
         } else if let leftScript = leftPanelScript {
-            print("  ├─ 左侧面板脚本 (Legacy): \(leftScript.count) 字节")
+            logger.debug("  ├─ 左侧面板脚本 (Legacy): \(leftScript.count) 字节")
             if let rightScript = rightPanelScript {
-                print("  ├─ 右侧扩展面板脚本 (Legacy): \(rightScript.count) 字节")
-                print("  └─ 右侧面板默认\(rightPanelDefaultVisible ? "显示" : "隐藏")")
+                logger.debug("  ├─ 右侧扩展面板脚本 (Legacy): \(rightScript.count) 字节")
+                logger.debug("  └─ 右侧面板默认\(rightPanelDefaultVisible ? "显示" : "隐藏")")
             }
         }
     }
@@ -1231,18 +1236,18 @@ class BrowserViewModel: ObservableObject {
                 }
                 contractNameValue = cn
                 contractVersionValue = cv
-                print("✅ [BrowserViewModel] contract: \(cn)@v\(cv)")
+                logger.notice(" [BrowserViewModel] contract: \(cn)@v\(cv)")
             } else {
-                print("⚠️ [BrowserViewModel] manifest.contract 字段不完整，跳过校验")
+                logger.warning(" [BrowserViewModel] manifest.contract 字段不完整，跳过校验")
             }
         } else {
-            print("⚠️ [BrowserViewModel] manifest 缺少 contract（兼容模式继续运行）")
+            logger.warning(" [BrowserViewModel] manifest 缺少 contract（兼容模式继续运行）")
         }
 
         if let permissions = json?["permissions"] as? [String] {
             permissionsValue = permissions
             if !permissions.isEmpty {
-                print("🔐 [BrowserViewModel] permissions: \(permissions.joined(separator: ", "))")
+                logger.debug("🔐 [BrowserViewModel] permissions: \(permissions.joined(separator: ", "))")
             }
         }
 
@@ -1282,7 +1287,7 @@ class BrowserViewModel: ObservableObject {
         // 首先在根目录查找
         if let direct = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first(where: { $0.lastPathComponent == fileName }) {
             if let script = try? String(contentsOf: direct, encoding: .utf8) {
-                print("✅ 找到 \(fileName): \(direct.path)")
+                logger.notice(" 找到 \(fileName): \(direct.path)")
                 return script
             }
         }
@@ -1292,7 +1297,7 @@ class BrowserViewModel: ObservableObject {
             for case let fileURL as URL in enumerator {
                 if fileURL.lastPathComponent == fileName {
                     if let script = try? String(contentsOf: fileURL, encoding: .utf8) {
-                        print("✅ 找到 \(fileName): \(fileURL.path)")
+                        logger.notice(" 找到 \(fileName): \(fileURL.path)")
                         return script
                     }
                 }

@@ -1,9 +1,9 @@
 import SwiftUI
 import AppKit
-
-#if canImport(React)
 import React
-#endif
+import React_RCTAppDelegate
+
+private let logger = AppLogger.reactNative
 
 struct ReactNativeTabHostView: View {
     @ObservedObject var viewModel: BrowserViewModel
@@ -48,20 +48,20 @@ struct ReactNativeRootRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         #if canImport(React)
-        print("🚀🚀🚀 [makeNSView] ========== 开始创建 React Native RootView ==========")
-        print("🔍 [makeNSView] 期望容器尺寸: \(containerSize)")
-        print("🔍 [makeNSView] Tabs 数量: \(tabs.count)")
-        print("🔍 [makeNSView] 当前 TabId: \(currentTabId?.uuidString ?? "nil")")
+        logger.notice("[makeNSView] Creating React Native RootView")
+        logger.debug("[makeNSView] containerSize: \(containerSize)")
+        logger.debug("[makeNSView] tabs.count: \(tabs.count)")
+        logger.debug("[makeNSView] currentTabId: \(currentTabId?.uuidString ?? "nil")")
         let properties = makeProperties()
-        print("🔍 [makeNSView] properties 创建完成，keys: \(properties.keys.joined(separator: ", "))")
-        print("🔍 [makeNSView] 准备调用 CanvasReactNativeHost.shared.createRootView")
+        logger.debug("[makeNSView] properties keys: \(properties.keys.joined(separator: ", "))")
+        logger.debug("[makeNSView] calling CanvasReactNativeHost.shared.createRootView")
 
         let rootView = CanvasReactNativeHost.shared.createRootView(initialProperties: properties)
-        print("🔍 [makeNSView] RootView 创建完成，初始 bounds: \(rootView.bounds.size)")
+        logger.debug("[makeNSView] RootView created, bounds: \(rootView.bounds.size)")
 
         if let rctRootView = rootView as? RCTRootView {
             context.coordinator.rootView = rctRootView
-            print("🔍 [makeNSView] RCTRootView 已保存到 coordinator")
+            logger.debug("[makeNSView] stored RCTRootView on coordinator")
         }
 
         // 交给 SwiftUI 来控制最终尺寸，这里只做一些合理的默认设置
@@ -78,8 +78,7 @@ struct ReactNativeRootRepresentable: NSViewRepresentable {
             rootView.frame = rect
             // 强制设置 bounds
             rootView.bounds = rect
-            print("✅ [makeNSView] 预设 RootView frame 为: \(containerSize)")
-            print("✅ [makeNSView] 预设 RootView bounds 为: \(rootView.bounds.size)")
+            logger.debug("[makeNSView] preset RootView frame/bounds: \(containerSize)")
         }
 
         return rootView
@@ -90,7 +89,7 @@ struct ReactNativeRootRepresentable: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         #if canImport(React)
-        print("🔍 [updateNSView] 被调用，当前 nsView.bounds.size: \(nsView.bounds.size)，期望 containerSize: \(containerSize)")
+        logger.trace("[updateNSView] nsView.bounds: \(nsView.bounds.size), containerSize: \(containerSize)")
 
         // 确保 NSView 使用自动拉伸，以适配 SwiftUI 提供的 frame
         nsView.translatesAutoresizingMaskIntoConstraints = true
@@ -107,18 +106,18 @@ struct ReactNativeRootRepresentable: NSViewRepresentable {
                 context.coordinator.rootView = rootView
             }
 
-            print("🔍 [updateNSView] 直接更新 RCTRootView.appProperties")
+            logger.trace("[updateNSView] updating RCTRootView.appProperties directly")
             rootView.appProperties = properties
 
             // 若 GeometryReader 提供了明确的 containerSize，也同步更新一次 frame，方便调试尺寸问题
             if containerSize.width > 0 && containerSize.height > 0 {
                 if rootView.frame.size != containerSize {
                     rootView.setFrameSize(containerSize)
-                    print("✅ [updateNSView] RootView frame 已更新为: \(containerSize)")
+                    logger.trace("[updateNSView] RootView frame updated: \(containerSize)")
                 }
             }
         } else if let storedRoot = context.coordinator.rootView {
-            print("🔍 [updateNSView] 使用 coordinator 中保存的 RCTRootView 更新属性")
+            logger.trace("[updateNSView] updating props via coordinator.rootView")
             storedRoot.appProperties = properties
         }
         #endif
@@ -131,12 +130,12 @@ struct ReactNativeRootRepresentable: NSViewRepresentable {
                 "title": tab.title,
                 "backgroundColor": tab.backgroundColor
             ]
-            print("🎨 传递给 RN - Tab: \(tab.title), backgroundColor: \(tab.backgroundColor)")
+            logger.debug("[props] Tab: \(tab.title), backgroundColor: \(tab.backgroundColor)")
 
             // System app tabs (like chrome:// pages)
             if let systemType = tab.systemTabType {
                 dict["systemAppType"] = systemType.rawValue
-                print("✅ 系统应用 Tab: \(systemType.rawValue)")
+                logger.debug("[props] System tab: \(systemType.rawValue)")
 
                 // Pass data for system apps
                 switch systemType {
@@ -211,23 +210,23 @@ struct ReactNativeRootRepresentable: NSViewRepresentable {
             if let unifiedScript = tab.unifiedScript {
                 dict["unifiedScript"] = unifiedScript
                 dict["rightPanelDefaultVisible"] = tab.rightPanelDefaultVisible
-                print("✅ 传递 unifiedScript 到 RN (Single Engine)，长度: \(unifiedScript.count), 右侧面板默认\(tab.rightPanelDefaultVisible ? "显示" : "隐藏")")
+                logger.debug("[props] unifiedScript length: \(unifiedScript.count), rightPanelDefaultVisible: \(tab.rightPanelDefaultVisible)")
             }
             // Legacy: 双 Engine 架构 (leftPanel + rightPanel)
             else if let leftScript = tab.leftPanelScript {
                 dict["leftPanelScript"] = leftScript
-                print("✅ 传递 leftPanelScript 到 RN (Legacy)，长度: \(leftScript.count)")
+                logger.debug("[props] leftPanelScript length: \(leftScript.count)")
 
                 if let rightScript = tab.rightPanelScript {
                     dict["rightPanelScript"] = rightScript
                     dict["rightPanelDefaultVisible"] = tab.rightPanelDefaultVisible
-                    print("✅ 传递 rightPanelScript 到 RN (Legacy)，长度: \(rightScript.count), 默认\(tab.rightPanelDefaultVisible ? "显示" : "隐藏")")
+                    logger.debug("[props] rightPanelScript length: \(rightScript.count), rightPanelDefaultVisible: \(tab.rightPanelDefaultVisible)")
                 }
             }
             // 向后兼容旧架构 (单一 guestScript)
             else if let guestScript = tab.guestScript {
                 dict["guestScript"] = guestScript
-                print("✅ 传递 guestScript 到 RN (兼容模式)，长度: \(guestScript.count)")
+                logger.debug("[props] guestScript length: \(guestScript.count)")
             }
 
             return dict

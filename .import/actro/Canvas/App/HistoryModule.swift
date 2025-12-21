@@ -1,6 +1,8 @@
 import Foundation
 import React
 
+private let logger = AppLogger.reactNative
+
 /// Native module for history actions from React Native
 @objc(HistoryModule)
 class HistoryModule: NSObject {
@@ -8,7 +10,7 @@ class HistoryModule: NSObject {
     @objc
     func openHistoryItem(_ itemId: String, _ appURL: String?) {
         guard let urlString = appURL else {
-            print("⚠️ [HistoryModule] URL is nil")
+            logger.warning("[HistoryModule] URL is nil")
             return
         }
 
@@ -21,7 +23,7 @@ class HistoryModule: NSObject {
             url = URL(fileURLWithPath: urlString)
         }
 
-        print("📜 [HistoryModule] Opening history item: \(itemId), url: \(url.absoluteString)")
+        logger.info("[HistoryModule] Opening history item: \(itemId), url: \(url.absoluteString)")
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(
@@ -34,7 +36,7 @@ class HistoryModule: NSObject {
 
     @objc
     func deleteHistoryItem(_ itemId: String) {
-        print("🗑️ [HistoryModule] Delete history item: \(itemId)")
+        logger.notice("[HistoryModule] Delete history item: \(itemId)")
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(
@@ -47,7 +49,7 @@ class HistoryModule: NSObject {
 
     @objc
     func restoreGroup(_ groupId: String) {
-        print("♻️ [HistoryModule] Restore group: \(groupId)")
+        logger.notice("[HistoryModule] Restore group: \(groupId)")
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(
@@ -60,7 +62,7 @@ class HistoryModule: NSObject {
 
     @objc
     func clearHistory() {
-        print("🧹 [HistoryModule] Clear all history")
+        logger.notice("[HistoryModule] Clear all history")
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(

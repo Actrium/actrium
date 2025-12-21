@@ -3,15 +3,46 @@ import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
 
-// 便捷日志函数 - 同时输出到 Xcode 和远程服务器
+private let logger = AppLogger.reactNative
+
+// 便捷日志函数 - 同时输出到 os.Logger（以及可选的远程服务器）
+/// Convenience logging helpers.
+///
+/// - Always logs to `os.Logger`.
+/// - Only forwards to the remote log server in DEBUG (to avoid production noise / PII risk).
 private func nlog(_ message: String) {
-    print(message)
+    logger.debug(message)
+    #if DEBUG
     NativeLogger.nativeLog(message)
+    #endif
+}
+
+private func nnotice(_ message: String) {
+    logger.notice(message)
+    #if DEBUG
+    NativeLogger.nativeLog(message)
+    #endif
+}
+
+private func nwarn(_ message: String) {
+    logger.warning(message)
+    #if DEBUG
+    NativeLogger.nativeWarn(message)
+    #endif
 }
 
 private func nerror(_ message: String) {
-    print(message)
+    logger.error(message)
+    #if DEBUG
     NativeLogger.nativeError(message)
+    #endif
+}
+
+private func nfault(_ message: String) {
+    logger.fault(message)
+    #if DEBUG
+    NativeLogger.nativeError(message)
+    #endif
 }
 
 // 🕐 性能计时器 - 跟踪 RN 启动各阶段耗时
@@ -105,13 +136,13 @@ final class CanvasReactNativeHost {
 
     private init() {
         NativePerfTimer.shared.mark("Host init 开始")
-        nlog("🏗️ [Native] CanvasReactNativeHost 初始化")
+        nnotice("🏗️ [Native] CanvasReactNativeHost 初始化")
 
         #if DEBUG
         // macOS RN：LogBox/RedBox 在部分版本上可能触发 UIBlock 异常（如 NULL CGColor），导致 UI 不渲染
         // 先禁用 RedBox（LogBox.show 也会被 gate），避免影响主界面渲染。
         RCTRedBoxSetEnabled(false)
-        nlog("🧯 [Native] Debug：已禁用 RedBox/LogBox（避免 UIBlock 异常导致白屏）")
+        nwarn("🧪 [Native] Debug：已禁用 RedBox/LogBox（避免 UIBlock 异常导致白屏）")
         #endif
 
         NativePerfTimer.shared.mark("创建 FactoryDelegate")
@@ -119,12 +150,12 @@ final class CanvasReactNativeHost {
         NativePerfTimer.shared.mark("创建 Factory")
         factory = RCTReactNativeFactory(delegate: factoryDelegate)
         NativePerfTimer.shared.mark("Host init 完成")
-        nlog("✅ [Native] Factory 创建完成")
+        nnotice("✅ [Native] Factory 创建完成")
     }
 
     func createRootView(initialProperties: [String: Any]) -> NSView {
         NativePerfTimer.shared.mark("createRootView 开始")
-        nlog("📱 [Native] 创建 RootView，模块名: ActrApp")
+        nnotice("📱 [Native] 创建 RootView，模块名: ActrApp")
         nlog("📱 [Native] initialProperties keys: \(initialProperties.keys.joined(separator: ", "))")
 
         NativePerfTimer.shared.mark("调用 factory.rootViewFactory.view")
@@ -169,8 +200,8 @@ final class CanvasReactNativeHost {
                 }
             }
 
-            nlog("✅ [Native] RCTRootView 创建成功")
-            nlog("📍 [Native] moduleName: \(rctRootView.moduleName ?? "nil")")
+            nnotice("✅ [Native] RCTRootView 创建成功")
+            nlog("📍 [Native] moduleName: \(rctRootView.moduleName)")
 
             // 检查 bridge 状态
             let bridge = rctRootView.bridge
@@ -226,7 +257,7 @@ final class CanvasReactNativeHost {
                 }
             }
         } else {
-            nerror("❌ [Native] RootView 不是 RCTRootView 类型")
+            nfault("❌ [Native] RootView 不是 RCTRootView 类型")
         }
 
         return rootView

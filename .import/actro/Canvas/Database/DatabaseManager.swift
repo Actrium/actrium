@@ -1,6 +1,8 @@
 import Foundation
 import SQLite3
 
+private let logger = AppLogger.database
+
 /// Manages SQLite database connection and schema using native SQLite3 API
 final class DatabaseManager {
     static let shared = DatabaseManager()
@@ -23,7 +25,7 @@ final class DatabaseManager {
         let path = getDatabasePath()
 
         if sqlite3_open(path, &db) != SQLITE_OK {
-            print("❌ [Database] Failed to open database at: \(path)")
+            logger.fault("Failed to open database at: \(path)")
             return
         }
 
@@ -32,7 +34,7 @@ final class DatabaseManager {
 
         createTables()
         insertDefaultTags()
-        print("✅ [Database] Initialized at: \(path)")
+        logger.notice("Initialized at: \(path)")
     }
 
     private func getDatabasePath() -> String {
@@ -128,7 +130,7 @@ final class DatabaseManager {
             )
         }
 
-        print("✅ [Database] Inserted default tags")
+        logger.notice("Inserted default tags")
     }
 
     // MARK: - Query Helpers
@@ -139,7 +141,7 @@ final class DatabaseManager {
 
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            print("❌ [Database] Prepare failed: \(String(cString: sqlite3_errmsg(db)))")
+            logger.error("Prepare failed: \(String(cString: sqlite3_errmsg(db)))")
             return false
         }
 
@@ -163,7 +165,7 @@ final class DatabaseManager {
 
         let result = sqlite3_step(statement)
         if result != SQLITE_DONE && result != SQLITE_ROW {
-            print("❌ [Database] Execute failed: \(String(cString: sqlite3_errmsg(db)))")
+            logger.error("Execute failed: \(String(cString: sqlite3_errmsg(db)))")
             return false
         }
 
@@ -175,7 +177,7 @@ final class DatabaseManager {
 
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            print("❌ [Database] Prepare failed: \(String(cString: sqlite3_errmsg(db)))")
+            logger.error("Prepare failed: \(String(cString: sqlite3_errmsg(db)))")
             return []
         }
 

@@ -13,6 +13,7 @@
  */
 import React, { useCallback, useRef, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, StyleSheet } from 'react-native';
+import { logger } from '../logger';
 import { Engine } from 'rill';
 import { hostComponents } from './BundleView';
 import { EngineMonitorOverlay, extractPanels } from 'askit';
@@ -21,29 +22,11 @@ import { createContractViolationCollector, createHostToGuestSender } from 'askit
 import { createEngineAdapter } from 'askit/core';
 import type { ActrProps, TabConfig } from './types';
 
-// 远程日志
-const LOG_SERVER = 'http://localhost:9999/log';
-const sendLog = (level: string, msg: string) => {
-  try {
-    const fetchFn = (globalThis as any).fetch as unknown;
-    if (typeof fetchFn === 'function') {
-      (fetchFn as any)(LOG_SERVER, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level, msg }),
-      })?.catch?.(() => {});
-    }
-  } catch {
-    // ignore
-  }
-  try {
-    NativeModules.NativeLogger?.[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log']?.(msg);
-  } catch {
-    // ignore
-  }
-};
-const nlog = (msg: string) => sendLog('log', msg);
-const nerror = (msg: string) => sendLog('error', msg);
+const log = logger.child('ActrApp');
+
+const nlog = (msg: string) => log.debug(msg);
+const nerror = (msg: string) => log.error(msg);
+
 
 // 🕐 性能计时工具
 const MODULE_LOAD_TIME = Date.now();
@@ -278,7 +261,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           debug: true,
           logger: {
             log: (...args: unknown[]) => nlog(args.map(a => String(a)).join(' ')),
-            warn: (...args: unknown[]) => sendLog('warn', args.map(a => String(a)).join(' ')),
+            warn: (...args: unknown[]) => log.warning(args.map(a => String(a)).join(' ')),
             error: (...args: unknown[]) => nerror(args.map(a => String(a)).join(' ')),
           },
         });
@@ -726,7 +709,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   }
 };
 
-console.log('✅ [ActrApp-v7] 组件已导出');
+log.notice('✅ 组件已导出');
 
 const styles = StyleSheet.create({
   tabHost: {

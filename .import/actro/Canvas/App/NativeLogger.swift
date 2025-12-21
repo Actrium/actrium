@@ -1,6 +1,8 @@
 import Foundation
 import React
 
+private let logger = AppLogger.reactNative
+
 /// 原生日志模块 - 将 JavaScript 日志输出到 Xcode 控制台 + 远程日志服务器
 @objc(NativeLogger)
 class NativeLogger: NSObject {
@@ -10,6 +12,10 @@ class NativeLogger: NSObject {
 
   // 发送日志到远程服务器 (异步，不阻塞)
   private static func sendToRemote(level: String, message: String) {
+    #if !DEBUG
+    // Avoid remote logging in Release to reduce noise and privacy risk.
+    return
+    #else
     guard let url = URL(string: logServerURL) else { return }
 
     var request = URLRequest(url: url)
@@ -31,42 +37,43 @@ class NativeLogger: NSObject {
     } catch {
       // 静默失败
     }
+    #endif
   }
 
   @objc
   func log(_ message: String) {
-    print("📱 [JS] \(message)")
+    logger.info("[JS] \(message)")
     NativeLogger.sendToRemote(level: "log", message: message)
   }
 
   @objc
   func warn(_ message: String) {
-    print("⚠️ [JS WARN] \(message)")
+    logger.warning("[JS WARN] \(message)")
     NativeLogger.sendToRemote(level: "warn", message: message)
   }
 
   @objc
   func error(_ message: String) {
-    print("❌ [JS ERROR] \(message)")
+    logger.error("[JS ERROR] \(message)")
     NativeLogger.sendToRemote(level: "error", message: message)
   }
 
   // 新增：原生代码直接调用的静态日志方法
   @objc
   static func nativeLog(_ message: String) {
-    print("🍎 [Native] \(message)")
+    logger.info("[Native] \(message)")
     sendToRemote(level: "log", message: "[Native] \(message)")
   }
 
   @objc
   static func nativeWarn(_ message: String) {
-    print("🍎⚠️ [Native WARN] \(message)")
+    logger.warning("[Native WARN] \(message)")
     sendToRemote(level: "warn", message: "[Native] \(message)")
   }
 
   @objc
   static func nativeError(_ message: String) {
-    print("🍎❌ [Native ERROR] \(message)")
+    logger.error("[Native ERROR] \(message)")
     sendToRemote(level: "error", message: "[Native] \(message)")
   }
 

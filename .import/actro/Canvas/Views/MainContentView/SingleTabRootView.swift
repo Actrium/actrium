@@ -1,9 +1,9 @@
 import SwiftUI
 import AppKit
-
-#if canImport(React)
 import React
-#endif
+import React_RCTAppDelegate
+
+private let logger = AppLogger.reactNative
 
 /// Single Tab RootView - 每个 Tab 独立的 React Native RootView
 /// 实现一个 Bridge + 多个 RootView 架构
@@ -38,7 +38,7 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         #if canImport(React)
-        print("🚀 [SingleTabRootView] 创建 RootView for Tab: \(tab.title) (\(tab.id.uuidString.prefix(8)))")
+        logger.notice("[SingleTabRootView] Creating RootView for Tab: \(tab.title) (\(tab.id.uuidString.prefix(8)))")
 
         let properties = makeProperties()
         let rootView = CanvasReactNativeHost.shared.createRootView(initialProperties: properties)
@@ -198,7 +198,7 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
         }
 
         deinit {
-            print("🗑️ [SingleTabRootView] Coordinator deinit for Tab: \(tab.title)")
+            logger.debug("[SingleTabRootView] Coordinator deinit for Tab: \(self.tab.title)")
         }
     }
 }
