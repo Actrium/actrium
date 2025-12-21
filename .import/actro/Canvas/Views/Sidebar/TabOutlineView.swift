@@ -77,7 +77,8 @@ struct TabOutlineView: NSViewRepresentable {
         let outlineView = NSOutlineView()
         outlineView.headerView = nil
         outlineView.style = .sourceList
-        outlineView.selectionHighlightStyle = .sourceList
+        // selectionHighlightStyle.sourceList is deprecated on macOS 12+. Outline style already provides source-list look.
+        // outlineView.selectionHighlightStyle = .sourceList
         outlineView.rowSizeStyle = .default
         outlineView.indentationPerLevel = 16
         outlineView.indentationMarkerFollowsCell = true
@@ -378,7 +379,7 @@ struct TabOutlineView: NSViewRepresentable {
             }
 
             // Case 2: Dropping on/into a group
-            if let outlineItem = item as? TabOutlineItem, case .group(let group) = outlineItem {
+            if let outlineItem = item as? TabOutlineItem, case .group(_) = outlineItem {
                 // index == NSOutlineViewDropOnItemIndex: drop ON the group (add to group)
                 // index >= 0: drop at specific position within group
                 return .move

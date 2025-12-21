@@ -773,7 +773,10 @@ private struct SlotView: View {
                     }
                 }
             )
-            .animation(nil)  // 禁用所有隐式动画
+            .transaction { tx in
+                // 禁用所有隐式动画（替代已废弃的 .animation(nil)）
+                tx.animation = nil
+            }
     }
 }
 

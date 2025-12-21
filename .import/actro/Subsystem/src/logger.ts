@@ -15,8 +15,9 @@ function isDev(): boolean {
   return typeof (globalThis as any).__DEV__ === 'boolean' ? !!(globalThis as any).__DEV__ : true;
 }
 
-function format(category: string, msg: string): string {
-  return `[${category}] ${msg}`;
+function format(level: LogLevel, category: string, msg: string): string {
+  // Keep output aligned with Swift stderr mirroring: [LEVEL] [category] message
+  return `[${level.toUpperCase()}] [${category}] ${msg}`;
 }
 
 function sendToNative(level: LogLevel, line: string): void {
@@ -57,7 +58,7 @@ export class Logger {
   }
 
   private emit(level: LogLevel, msg: string): void {
-    const line = format(this.category, msg);
+    const line = format(level, this.category, msg);
     // Native is the primary sink so Swift can unify & optionally forward.
     sendToNative(level, line);
     sendToConsole(level, line);

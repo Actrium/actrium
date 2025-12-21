@@ -8,8 +8,10 @@ import OSLog
 /// - `trace`/`debug` are compiled out in non-DEBUG builds.
 struct AppLogger {
     let logger: Logger
+    let category: String
 
     init(category: String, subsystem: String = AppLogger.defaultSubsystem) {
+        self.category = category
         self.logger = Logger(subsystem: subsystem, category: category)
     }
 
@@ -19,7 +21,9 @@ struct AppLogger {
     @inline(__always)
     func trace(_ message: @autoclosure @escaping () -> String) {
         #if DEBUG
-        logger.trace("\(message(), privacy: .public)")
+        let msg = message()
+        logger.trace("\(msg, privacy: .public)")
+        AppLogger.mirrorToStderr(level: "TRACE", category: category, message: msg)
         #endif
     }
 
@@ -27,38 +31,60 @@ struct AppLogger {
     @inline(__always)
     func debug(_ message: @autoclosure @escaping () -> String) {
         #if DEBUG
-        logger.debug("\(message(), privacy: .public)")
+        let msg = message()
+        logger.debug("\(msg, privacy: .public)")
+        AppLogger.mirrorToStderr(level: "DEBUG", category: category, message: msg)
         #endif
     }
 
     /// General informational messages.
     @inline(__always)
     func info(_ message: @autoclosure @escaping () -> String) {
-        logger.info("\(message(), privacy: .public)")
+        let msg = message()
+        logger.info("\(msg, privacy: .public)")
+        #if DEBUG
+        AppLogger.mirrorToStderr(level: "INFO", category: category, message: msg)
+        #endif
     }
 
     /// Important informational messages.
     @inline(__always)
     func notice(_ message: @autoclosure @escaping () -> String) {
-        logger.notice("\(message(), privacy: .public)")
+        let msg = message()
+        logger.notice("\(msg, privacy: .public)")
+        #if DEBUG
+        AppLogger.mirrorToStderr(level: "NOTICE", category: category, message: msg)
+        #endif
     }
 
     /// Warnings that might require attention.
     @inline(__always)
     func warning(_ message: @autoclosure @escaping () -> String) {
-        logger.warning("\(message(), privacy: .public)")
+        let msg = message()
+        logger.warning("\(msg, privacy: .public)")
+        #if DEBUG
+        AppLogger.mirrorToStderr(level: "WARNING", category: category, message: msg)
+        #endif
     }
 
     /// Errors that indicate an operation failed.
     @inline(__always)
     func error(_ message: @autoclosure @escaping () -> String) {
-        logger.error("\(message(), privacy: .public)")
+        let msg = message()
+        logger.error("\(msg, privacy: .public)")
+        #if DEBUG
+        AppLogger.mirrorToStderr(level: "ERROR", category: category, message: msg)
+        #endif
     }
 
     /// Severe/system-level failures.
     @inline(__always)
     func fault(_ message: @autoclosure @escaping () -> String) {
-        logger.fault("\(message(), privacy: .public)")
+        let msg = message()
+        logger.fault("\(msg, privacy: .public)")
+        #if DEBUG
+        AppLogger.mirrorToStderr(level: "FAULT", category: category, message: msg)
+        #endif
     }
 
     // MARK: - Defaults
@@ -66,6 +92,14 @@ struct AppLogger {
     static let defaultSubsystem: String = {
         Bundle.main.bundleIdentifier ?? "Canvas"
     }()
+
+    #if DEBUG
+    /// Mirror logs to Xcode Debug Console (stderr), since unified logging is not reliably shown there.
+    private static func mirrorToStderr(level: String, category: String, message: String) {
+        // Keep this extremely lightweight.
+        fputs("[\(level)] [\(category)] \(message)\n", stderr)
+    }
+    #endif
 }
 
 // MARK: - Common categories
