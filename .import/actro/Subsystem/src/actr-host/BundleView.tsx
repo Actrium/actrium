@@ -3,18 +3,18 @@ import {
   ActivityIndicator,
   Button,
   Image,
-  NativeModules,
   Pressable,
   ScrollView,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { logger } from '../logger';
 
 // 导入 rill Engine - 内置 JSC sandbox 自动检测
 import { Engine } from 'rill';
 
-console.log('[BundleView] ✅ rill Engine 导入成功 (内置 JSC sandbox)');
+logger.child('BundleView').notice('✅ rill Engine 导入成功 (内置 JSC sandbox)');
 
 // 简化版 EngineView - 正确使用 rill API
 const LocalEngineView: React.FC<{
@@ -126,29 +126,9 @@ const PatchedScrollView = React.forwardRef<any, any>((props, ref) => {
 PatchedScrollView.displayName = 'PatchedScrollView';
 import { createEngineAdapter } from 'askit/core';
 
-// 远程日志
-const LOG_SERVER = 'http://localhost:9999/log';
-const sendLog = (level: string, msg: string) => {
-  try {
-    const fetchFn = (globalThis as any).fetch as unknown;
-    if (typeof fetchFn === 'function') {
-      (fetchFn as any)(LOG_SERVER, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level, msg }),
-      })?.catch?.(() => {});
-    }
-  } catch {
-    // ignore
-  }
-  try {
-    NativeModules.NativeLogger?.[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log']?.(msg);
-  } catch {
-    // ignore
-  }
-};
-const nlog = (msg: string) => sendLog('log', msg);
-const nerror = (msg: string) => sendLog('error', msg);
+const log = logger.child('BundleView');
+const nlog = (msg: string) => log.debug(msg);
+const nerror = (msg: string) => log.error(msg);
 
 type Props = {
   script: string;
@@ -251,7 +231,7 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
           debug: true,
           logger: {
             log: (...args: unknown[]) => nlog(args.map(a => String(a)).join(' ')),
-            warn: (...args: unknown[]) => sendLog('warn', args.map(a => String(a)).join(' ')),
+            warn: (...args: unknown[]) => log.warning(args.map(a => String(a)).join(' ')),
             error: (...args: unknown[]) => nerror(args.map(a => String(a)).join(' ')),
           },
         });

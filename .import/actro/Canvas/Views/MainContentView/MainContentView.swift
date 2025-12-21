@@ -1,4 +1,6 @@
 import SwiftUI
+
+private let logger = AppLogger.ui
 import WebKit
 import AppKit // Import AppKit for NSImage
 
@@ -37,7 +39,7 @@ struct MainContentView: View {
                 // 在 Overview 模式下，不拦截点击，交给外层处理
                 guard !isTabOverviewVisible else { return }
                 if isAddressBarEditing {
-                    print("⌨️ 取消地址栏编辑")
+                    logger.debug("⌨️ 取消地址栏编辑")
                     isAddressBarEditing = false
                     isAddressBarFirstResponder = false
                 }
@@ -75,7 +77,7 @@ struct MainContentView: View {
                                     let height = toolbarGeometry.size.height
                                     if height > 0 {
                                         viewModel.toolbarHeight = height
-                                        print("📏 Toolbar 高度: \(height)")
+                                        logger.debug("📏 Toolbar 高度: \(height)")
                                     }
                                 }
                             }
@@ -266,7 +268,7 @@ struct TabContentView: View {
                 containerSize: geometry.size,
                 onCoordinatorReady: { coordinator in
                     reactCoordinator = coordinator
-                    print("✅ React Native Coordinator 已就绪")
+                    logger.debug("✅ React Native Coordinator 已就绪")
                 }
             )
         }
@@ -406,7 +408,7 @@ private struct ResizableHandleView: NSViewRepresentable {
         @objc func handlePan(_ gesture: NSPanGestureRecognizer) {
             switch gesture.state {
             case .began:
-                print("🎯 开始拖拽 - isTrailing: \(parent.isTrailing), 初始宽度: \(parent.panelWidth)")
+                logger.debug("🎯 开始拖拽 - isTrailing: \(self.parent.isTrailing), 初始宽度: \(self.parent.panelWidth)")
                 parent.isDragging = true
                 parent.startWidth = parent.panelWidth
                 
@@ -421,11 +423,11 @@ private struct ResizableHandleView: NSViewRepresentable {
                 
                 // 每隔一段时间打印一次调试信息
                 if Int(translation.x) % 10 == 0 {
-                    print("📏 拖拽中 - translation: \(translation.x), delta: \(delta), newWidth: \(clampedWidth)")
+                    logger.debug("📏 拖拽中 - translation: \(translation.x), delta: \(delta), newWidth: \(clampedWidth)")
                 }
                 
             case .ended, .cancelled, .failed:
-                print("✅ 拖拽结束 - 最终宽度: \(parent.panelWidth)")
+                logger.debug("✅ 拖拽结束 - 最终宽度: \(self.parent.panelWidth)")
                 parent.isDragging = false
                 
             default:

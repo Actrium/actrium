@@ -20,9 +20,11 @@ try {
 } catch {}
 
 // 🔴 调试 polyfill 状态
-console.log('🔍 [index.ts] console.assert type (after guard):', typeof console.assert);
-
-console.log('🚀 [index.ts] 开始执行 - ActrApp 版本');
+// Keep a minimal startup marker through unified logger.
+import { logger } from './src/logger';
+const log = logger.child('index');
+log.debug('console.assert type (after guard): ' + typeof console.assert);
+log.notice('🚀 开始执行 - ActrApp 版本');
 
 import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';

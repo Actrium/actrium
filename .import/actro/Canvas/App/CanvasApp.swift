@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let logger = AppLogger.app
+
 // MARK: - Focused Value for Active Window's ViewModel
 
 struct FocusedBrowserViewModelKey: FocusedValueKey {
@@ -159,7 +161,7 @@ struct CanvasApp: App {
         UserDefaults.standard.set(false, forKey: "NSConstraintBasedLayoutLogUnsatisfiable")
 
         #if DEBUG
-        print("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
+        logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
         #endif
     }
 
@@ -287,8 +289,8 @@ struct CanvasApp: App {
             // Help menu
             CommandGroup(replacing: .help) {
                 Button("About App Status") {
-                    print("✅ App running normally")
-                    print("✅ All views loaded")
+                    logger.notice("✅ App running normally")
+                    logger.notice("✅ All views loaded")
                 }
             }
 

@@ -2,7 +2,13 @@
 // 避免在 macOS 上访问不存在的原生组件 RNCSafeAreaProvider。
 
 /* eslint-disable no-console */
-console.log('[shim] Using JS implementation for react-native-safe-area-context');
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { logger } = require('../../logger');
+  logger.child('shim').debug('Using JS implementation for react-native-safe-area-context');
+} catch {
+  console.log('[shim] Using JS implementation for react-native-safe-area-context');
+}
 
 const React = require('react');
 const { View } = require('react-native');

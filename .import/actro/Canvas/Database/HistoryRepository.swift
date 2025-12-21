@@ -1,5 +1,7 @@
 import Foundation
 
+private let logger = AppLogger.database
+
 /// Repository for history records using native SQLite3
 final class HistoryRepository {
     private let db = DatabaseManager.shared
@@ -54,7 +56,7 @@ final class HistoryRepository {
     /// Clear all history
     func clearAll() {
         db.execute("DELETE FROM history")
-        print("✅ [HistoryRepository] Cleared all history")
+        logger.notice("Cleared all history")
     }
 
     // MARK: - Helpers

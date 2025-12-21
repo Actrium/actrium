@@ -33,6 +33,10 @@
       // enforce on existing console
       root.console = currentConsole;
     }
-    try { root.console && root.console.log && root.console.log('[ensure-console-assert] loaded before main'); } catch(_){ }
+    try {
+      // Keep ultra-early log minimal; logger may not be available yet.
+      root.console && root.console.log && root.console.log('[ensure-console-assert] loaded before main');
+    } catch (_) {}
+
   } catch(_){ }
 })();

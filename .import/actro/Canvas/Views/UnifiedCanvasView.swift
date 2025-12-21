@@ -1,4 +1,6 @@
 import SwiftUI
+
+private let logger = AppLogger.ui
 import AppKit
 import UniformTypeIdentifiers
 
@@ -299,7 +301,7 @@ struct UnifiedCanvasView: View {
         .onAppear {
             // 🔴 开发调试：如果设置了启动时进入 Focus 模式，直接切换
             if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
-                print("🚀 [UnifiedCanvasView] 启动时直接进入 Focus 模式")
+                logger.notice("🚀 [UnifiedCanvasView] 启动时直接进入 Focus 模式")
                 DispatchQueue.main.async {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         viewModel.canvasMode = .focus(tabId: tabId)

@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 
+private let logger = AppLogger.viewModel
+
 /// ViewModel for managing history
 @MainActor
 final class HistoryViewModel: ObservableObject {
@@ -114,7 +116,7 @@ final class HistoryViewModel: ObservableObject {
         }
 
         saveClosedGroups()
-        print("📁 [History] Recorded closed group: \(group.name.isEmpty ? "Unnamed" : group.name) with \(tabs.count) tabs")
+        logger.notice("Recorded closed group: \(group.name.isEmpty ? "Unnamed" : group.name) with \(tabs.count) tabs")
     }
 
     /// Remove a group from history
@@ -134,9 +136,9 @@ final class HistoryViewModel: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: groupsKey) else { return }
         do {
             closedGroups = try JSONDecoder().decode([HistoryGroup].self, from: data)
-            print("📁 [History] Loaded \(closedGroups.count) closed groups")
+            logger.info("Loaded \(self.closedGroups.count) closed groups")
         } catch {
-            print("❌ [History] Failed to load closed groups: \(error)")
+            logger.error("Failed to load closed groups: \(error)")
         }
     }
 
@@ -146,7 +148,7 @@ final class HistoryViewModel: ObservableObject {
             let data = try JSONEncoder().encode(closedGroups)
             UserDefaults.standard.set(data, forKey: groupsKey)
         } catch {
-            print("❌ [History] Failed to save closed groups: \(error)")
+            logger.error("Failed to save closed groups: \(error)")
         }
     }
 }
