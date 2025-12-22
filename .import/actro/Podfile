@@ -25,7 +25,6 @@ target 'Canvas' do
   )
 
   # rill native sandbox (JSI)
-  # NOTE: manual linking required for local file: dependencies in monorepo
   pod 'RillSandboxNative', :path => 'Subsystem/node_modules/rill/native/platform'
 
   post_install do |installer|
