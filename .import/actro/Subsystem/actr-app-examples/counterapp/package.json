@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "rill build"
+    "build": "bun ../../../../rill/src/cli/index.ts build src/unified-app.tsx -o unified-app.js"
   },
   "dependencies": {
     "askit": "file:../../../askit",
