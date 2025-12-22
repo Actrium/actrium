@@ -1,6 +1,153 @@
-globalThis.__RillGuest=(function(o,r,l){"use strict";(function(){"use strict";typeof console<"u"&&typeof console.log=="function"&&console.log("[rill:bundle] RUNTIME_INJECT starting, console.log works!"),typeof __console_log=="function"&&__console_log("[rill:bundle] RUNTIME_INJECT: __console_log direct call works!"),globalThis.__callbacks||(globalThis.__callbacks=new Map,globalThis.__callbackId=0);var o=globalThis.__callbacks,r=globalThis.__callbackId;globalThis.__registerCallback=function(e){var t="fn_"+ ++globalThis.__callbackId;return globalThis.__callbacks.set(t,e),t},globalThis.__invokeCallback=function(e,t){var a=globalThis.__callbacks.get(e);if(a)try{return a.apply(null,t||[])}catch(T){console.error("[rill] Callback error:",T)}else console.warn("[rill] Callback not found:",e),console.warn("[rill] Available callbacks:",Array.from(globalThis.__callbacks.keys()).join(", "))},globalThis.__removeCallback=function(e){globalThis.__callbacks.delete(e)};var l=new Map;globalThis.__useHostEvent=function(e,t){l.has(e)||l.set(e,new Set),l.get(e).add(t)},globalThis.__handleHostEvent=function(e,t){var a=l.get(e);a&&a.forEach(function(T){try{T(t)}catch(y){console.error("[rill] Host event listener error:",y)}})},globalThis.__handleHostMessage=function(e){switch(e.type){case"CALL_FUNCTION":__invokeCallback(e.fnId,e.args);break;case"HOST_EVENT":__handleHostEvent(e.eventName,e.payload);break;case"CONFIG_UPDATE":globalThis.__config&&Object.assign(globalThis.__config,e.config);break;case"DESTROY":l.clear();break}},globalThis.__config=globalThis.__getConfig?globalThis.__getConfig():{}})();const e="PanelMarker";function t(n){const s=({children:c})=>o.jsx(e,{panelId:n,children:c});return s.displayName=`Panel.${n==="left"?"Left":"Right"}`,s}const a={Left:t("left"),Right:t("right")};function T(){const[n,s]=r.useState(new Date);r.useEffect(()=>{const g=setInterval(()=>{s(new Date)},1e3);return()=>clearInterval(g)},[]);const c=n.getHours().toString().padStart(2,"0"),d=n.getMinutes().toString().padStart(2,"0"),f=n.getSeconds().toString().padStart(2,"0");return o.jsxs(l.View,{style:{marginTop:20,padding:20,backgroundColor:"#0a0a1a",borderRadius:12,alignItems:"center",borderWidth:2,borderColor:"#333366"},children:[o.jsx(l.Text,{style:{color:"#666688",fontSize:12,marginBottom:8},children:"🕐 实时时钟"}),o.jsxs(l.Text,{style:{color:"#00ff88",fontSize:48,fontWeight:"bold",fontFamily:"monospace",letterSpacing:4},children:[c,":",d,":",f]})]})}function y({onAction:n}){const[s,c]=r.useState(0),[d,f]=r.useState(0),[g,b]=r.useState(0),_=s+d+g;return o.jsxs(l.ScrollView,{style:{flex:1,backgroundColor:"#1a1a2e"},contentContainerStyle:{padding:16},children:[o.jsx(l.Text,{style:{color:"#ffffff",fontSize:20,fontWeight:"bold",marginBottom:20},children:"🎮 计数器测试"}),o.jsxs(l.View,{style:{backgroundColor:"#2a2a4e",padding:16,borderRadius:8,marginBottom:20,alignItems:"center"},children:[o.jsx(l.Text,{style:{color:"#888888",fontSize:12,marginBottom:4},children:"总点击次数"}),o.jsx(l.Text,{style:{color:"#ffaa00",fontSize:36,fontWeight:"bold"},children:_})]}),o.jsxs(l.TouchableOpacity,{onPress:()=>{c(s+1),n?.("红色按钮","🔴","#ff4444")},style:{backgroundColor:"#ff4444",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[o.jsx(l.Text,{style:{color:"#ffffff",fontSize:18,fontWeight:"bold"},children:"🔴 红色 +1"}),o.jsxs(l.Text,{style:{color:"#ffcccc",fontSize:14,marginTop:4},children:["点击: ",s]})]}),o.jsxs(l.TouchableOpacity,{onPress:()=>{f(d+1),n?.("蓝色按钮","🔵","#4444ff")},style:{backgroundColor:"#4444ff",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[o.jsx(l.Text,{style:{color:"#ffffff",fontSize:18,fontWeight:"bold"},children:"🔵 蓝色 +1"}),o.jsxs(l.Text,{style:{color:"#ccccff",fontSize:14,marginTop:4},children:["点击: ",d]})]}),o.jsxs(l.TouchableOpacity,{onPress:()=>{b(g+1),n?.("绿色按钮","🟢","#44ff44")},style:{backgroundColor:"#44ff44",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[o.jsx(l.Text,{style:{color:"#000000",fontSize:18,fontWeight:"bold"},children:"🟢 绿色 +1"}),o.jsxs(l.Text,{style:{color:"#006600",fontSize:14,marginTop:4},children:["点击: ",g]})]}),o.jsx(l.TouchableOpacity,{onPress:()=>{c(0),f(0),b(0)},style:{backgroundColor:"#666666",padding:16,borderRadius:8,marginTop:20,alignItems:"center",borderWidth:1,borderColor:"#888888"},children:o.jsx(l.Text,{style:{color:"#ffffff",fontSize:16,fontWeight:"bold"},children:"🔄 重置所有计数"})}),o.jsx(l.View,{style:{marginTop:30,padding:12,backgroundColor:"#2a2a3a",borderRadius:8,borderLeftWidth:4,borderLeftColor:"#ffaa00"},children:o.jsxs(l.Text,{style:{color:"#cccccc",fontSize:11,lineHeight:16},children:["💡 点击彩色按钮增加对应计数",`
-`,"📊 总计数显示在顶部",`
-`,"🔄 重置按钮清空所有计数",`
-`,"⚡ 左侧点击会同步到右侧面板"]})}),o.jsx(T,{})]})}function i(n){const[s,c]=r.useState([]),[d,f]=r.useState(0),g=n.clickHistory!==void 0,b=g?n.clickHistory:s,_=g?n.sessionClicks??0:d,u=(h,p,k)=>{if(n.onAddRecord)n.onAddRecord(h,p,k);else{const C=new Date,x=`${C.getHours().toString().padStart(2,"0")}:${C.getMinutes().toString().padStart(2,"0")}:${C.getSeconds().toString().padStart(2,"0")}`,H={id:Date.now(),time:x,action:h,emoji:p,color:k};c([H,...s].slice(0,20)),f(d+1)}},S=()=>{n.onClearHistory?n.onClearHistory():(c([]),f(0))};return o.jsxs(l.ScrollView,{style:{flex:1,backgroundColor:"#1a1a2e"},contentContainerStyle:{padding:16},children:[o.jsx(l.Text,{style:{color:"#ffffff",fontSize:20,fontWeight:"bold",marginBottom:20},children:"📊 交互统计"}),o.jsxs(l.View,{style:{backgroundColor:"#2a2a4e",padding:16,borderRadius:8,marginBottom:20},children:[o.jsx(l.Text,{style:{color:"#888888",fontSize:12,marginBottom:8},children:"本次会话点击"}),o.jsx(l.Text,{style:{color:"#00ff88",fontSize:32,fontWeight:"bold"},children:_}),o.jsxs(l.Text,{style:{color:"#666666",fontSize:10,marginTop:4},children:["历史记录: ",b.length," 条"]})]}),o.jsxs(l.View,{style:{marginBottom:20},children:[o.jsx(l.Text,{style:{color:"#888888",fontSize:12,marginBottom:8},children:"快速测试"}),o.jsx(l.TouchableOpacity,{onPress:()=>u("快速点击","⚡","#ffaa00"),style:{backgroundColor:"#ffaa00",padding:12,borderRadius:6,marginBottom:8,alignItems:"center"},children:o.jsx(l.Text,{style:{color:"#000000",fontSize:14,fontWeight:"bold"},children:"⚡ 快速测试"})}),o.jsx(l.TouchableOpacity,{onPress:()=>u("星标动作","⭐","#ff88ff"),style:{backgroundColor:"#ff88ff",padding:12,borderRadius:6,marginBottom:8,alignItems:"center"},children:o.jsx(l.Text,{style:{color:"#000000",fontSize:14,fontWeight:"bold"},children:"⭐ 星标测试"})}),o.jsx(l.TouchableOpacity,{onPress:()=>u("火箭发射","🚀","#00aaff"),style:{backgroundColor:"#00aaff",padding:12,borderRadius:6,alignItems:"center"},children:o.jsx(l.Text,{style:{color:"#ffffff",fontSize:14,fontWeight:"bold"},children:"🚀 火箭测试"})})]}),o.jsxs(l.View,{children:[o.jsxs(l.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:12},children:[o.jsx(l.Text,{style:{color:"#888888",fontSize:12},children:"点击历史"}),b.length>0&&o.jsx(l.TouchableOpacity,{onPress:S,style:{padding:4},children:o.jsx(l.Text,{style:{color:"#ff6666",fontSize:11},children:"清空"})})]}),b.length===0?o.jsxs(l.View,{style:{backgroundColor:"#2a2a3a",padding:20,borderRadius:8,alignItems:"center"},children:[o.jsx(l.Text,{style:{color:"#666666",fontSize:13},children:"暂无记录"}),o.jsx(l.Text,{style:{color:"#555555",fontSize:11,marginTop:4},children:"点击上方按钮开始测试"})]}):b.map(h=>o.jsx(l.View,{style:{backgroundColor:"#2a2a3a",padding:12,borderRadius:6,marginBottom:8,borderLeftWidth:3,borderLeftColor:h.color},children:o.jsxs(l.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},children:[o.jsxs(l.View,{style:{flexDirection:"row",alignItems:"center"},children:[o.jsx(l.Text,{style:{fontSize:16,marginRight:8},children:h.emoji}),o.jsx(l.Text,{style:{color:"#ffffff",fontSize:13},children:h.action})]}),o.jsx(l.Text,{style:{color:"#666666",fontSize:11},children:h.time})]})},h.id))]}),o.jsx(l.View,{style:{marginTop:20,padding:12,backgroundColor:"#2a2a3a",borderRadius:8,borderLeftWidth:4,borderLeftColor:"#00ff88"},children:o.jsxs(l.Text,{style:{color:"#cccccc",fontSize:11,lineHeight:16},children:["📊 实时统计点击次数",`
+/* Rill Guest Bundle - Generated by rill-cli */
+
+// Rill Runtime Inject
+(function() {
+  'use strict';
+
+  // Callback registry - persist across re-executions
+  if (!globalThis.__callbacks) {
+    globalThis.__callbacks = new Map();
+    globalThis.__callbackId = 0;
+  }
+
+  // Register callback
+  globalThis.__registerCallback = function(fn) {
+    var id = 'fn_' + (++globalThis.__callbackId);
+    globalThis.__callbacks.set(id, fn);
+    return id;
+  };
+
+  // Invoke callback
+  globalThis.__invokeCallback = function(fnId, args) {
+    var fn = globalThis.__callbacks.get(fnId);
+    if (fn) {
+      try {
+        return fn.apply(null, args || []);
+      } catch (e) {
+        console.error('[rill] Callback execution error for', fnId);
+        console.error('[rill] Error type:', typeof e);
+        console.error('[rill] Error message:', e && e.message ? e.message : String(e));
+        console.error('[rill] Error stack:', e && e.stack ? e.stack : 'no stack');
+        console.error('[rill] Error name:', e && e.name ? e.name : 'no name');
+        throw e;
+      }
+    } else {
+      console.warn('[rill] Callback not found:', fnId);
+      console.warn('[rill] Available callbacks:', Array.from(globalThis.__callbacks.keys()).join(', '));
+    }
+  };
+
+  // Remove callback
+  globalThis.__removeCallback = function(fnId) {
+    globalThis.__callbacks.delete(fnId);
+  };
+
+  // Host event listeners
+  var __hostEventListeners = new Map();
+
+  // Register host event listener
+  globalThis.__useHostEvent = function(eventName, callback) {
+    if (!__hostEventListeners.has(eventName)) {
+      __hostEventListeners.set(eventName, new Set());
+    }
+    __hostEventListeners.get(eventName).add(callback);
+  };
+
+  // Handle host event
+  globalThis.__handleHostEvent = function(eventName, payload) {
+    var listeners = __hostEventListeners.get(eventName);
+    if (listeners) {
+      listeners.forEach(function(listener) {
+        try {
+          listener(payload);
+        } catch (e) {
+          console.error('[rill] Host event listener error:', e);
+        }
+      });
+    }
+  };
+
+  // Handle host message
+  globalThis.__handleHostMessage = function(message) {
+    switch (message.type) {
+      case 'CALL_FUNCTION':
+        globalThis.__invokeCallback(message.fnId, message.args);
+        break;
+      case 'HOST_EVENT':
+        globalThis.__handleHostEvent(message.eventName, message.payload);
+        break;
+      case 'CONFIG_UPDATE':
+        if (globalThis.__config) {
+          Object.assign(globalThis.__config, message.config);
+        }
+        break;
+      case 'DESTROY':
+        __hostEventListeners.clear();
+        break;
+    }
+  };
+
+  // Config storage
+  globalThis.__config = globalThis.__getConfig ? globalThis.__getConfig() : {};
+
+})();
+
+
+// External alias shim (React/JSX/ReactNative)
+try { if (typeof __React === 'undefined' && typeof React !== 'undefined') { var __React = React; } } catch {}
+try { if (typeof __ReactJSXRuntime === 'undefined' && typeof ReactJSXRuntime !== 'undefined') { var __ReactJSXRuntime = ReactJSXRuntime; } } catch {}
+try { if (typeof __ReactJSXDevRuntime === 'undefined' && typeof ReactJSXDevRuntime !== 'undefined') { var __ReactJSXDevRuntime = ReactJSXDevRuntime; } } catch {}
+try { if (typeof __ReactNative === 'undefined' && typeof ReactNative !== 'undefined') { var __ReactNative = ReactNative; } } catch {}
+
+var{defineProperty:Q,getOwnPropertyNames:y,getOwnPropertyDescriptor:V}=Object,H=Object.prototype.hasOwnProperty;var G=new WeakMap,k=(f)=>{var h=G.get(f),U;if(h)return h;if(h=Q({},"__esModule",{value:!0}),f&&typeof f==="object"||typeof f==="function")y(f).map((I)=>!H.call(h,I)&&Q(h,I,{get:()=>f[I],enumerable:!(U=V(f,I))||U.enumerable}));return G.set(f,h),h};var a=(f,h)=>{for(var U in h)Q(f,U,{get:h[U],enumerable:!0,configurable:!0,set:(I)=>h[U]=()=>I})};var d={};a(d,{default:()=>b});module.exports=k(d);var Z=React,g=ReactNative;var A=ReactJSXRuntime;function L(f){let h=({children:U})=>A.jsx("PanelMarker",{panelId:f,children:U});return h.displayName=`Panel.${f==="left"?"Left":"Right"}`,h}var E={Left:L("left"),Right:L("right")};var q=React,N=ReactNative,F=ReactJSXRuntime;function w(){let[f,h]=q.useState(new Date);q.useEffect(()=>{let $=setInterval(()=>{h(new Date)},1000);return()=>clearInterval($)},[]);let U=f.getHours().toString().padStart(2,"0"),I=f.getMinutes().toString().padStart(2,"0"),R=f.getSeconds().toString().padStart(2,"0");return F.jsxs(N.View,{style:{marginTop:20,padding:20,backgroundColor:"#0a0a1a",borderRadius:12,alignItems:"center",borderWidth:2,borderColor:"#333366"},children:[F.jsx(N.Text,{style:{color:"#666688",fontSize:12,marginBottom:8},children:"\uD83D\uDD50 实时时钟"}),F.jsxs(N.Text,{style:{color:"#00ff88",fontSize:48,fontWeight:"bold",fontFamily:"monospace",letterSpacing:4},children:[U,":",I,":",R]})]})}function W({onAction:f}){let[h,U]=q.useState(0),[I,R]=q.useState(0),[$,p]=q.useState(0),z=h+I+$;return F.jsxs(N.ScrollView,{style:{flex:1,backgroundColor:"#1a1a2e"},contentContainerStyle:{padding:16},children:[F.jsx(N.Text,{style:{color:"#ffffff",fontSize:20,fontWeight:"bold",marginBottom:20},children:"\uD83C\uDFAE 计数器测试"}),F.jsxs(N.View,{style:{backgroundColor:"#2a2a4e",padding:16,borderRadius:8,marginBottom:20,alignItems:"center"},children:[F.jsx(N.Text,{style:{color:"#888888",fontSize:12,marginBottom:4},children:"总点击次数"}),F.jsx(N.Text,{style:{color:"#ffaa00",fontSize:36,fontWeight:"bold"},children:z})]}),F.jsxs(N.TouchableOpacity,{onPress:()=>{U(h+1),f?.("红色按钮","\uD83D\uDD34","#ff4444")},style:{backgroundColor:"#ff4444",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[F.jsx(N.Text,{style:{color:"#ffffff",fontSize:18,fontWeight:"bold"},children:"\uD83D\uDD34 红色 +1"}),F.jsxs(N.Text,{style:{color:"#ffcccc",fontSize:14,marginTop:4},children:["点击: ",h]})]}),F.jsxs(N.TouchableOpacity,{onPress:()=>{R(I+1),f?.("蓝色按钮","\uD83D\uDD35","#4444ff")},style:{backgroundColor:"#4444ff",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[F.jsx(N.Text,{style:{color:"#ffffff",fontSize:18,fontWeight:"bold"},children:"\uD83D\uDD35 蓝色 +1"}),F.jsxs(N.Text,{style:{color:"#ccccff",fontSize:14,marginTop:4},children:["点击: ",I]})]}),F.jsxs(N.TouchableOpacity,{onPress:()=>{p($+1),f?.("绿色按钮","\uD83D\uDFE2","#44ff44")},style:{backgroundColor:"#44ff44",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[F.jsx(N.Text,{style:{color:"#000000",fontSize:18,fontWeight:"bold"},children:"\uD83D\uDFE2 绿色 +1"}),F.jsxs(N.Text,{style:{color:"#006600",fontSize:14,marginTop:4},children:["点击: ",$]})]}),F.jsx(N.TouchableOpacity,{onPress:()=>{U(0),R(0),p(0)},style:{backgroundColor:"#666666",padding:16,borderRadius:8,marginTop:20,alignItems:"center",borderWidth:1,borderColor:"#888888"},children:F.jsx(N.Text,{style:{color:"#ffffff",fontSize:16,fontWeight:"bold"},children:"\uD83D\uDD04 重置所有计数"})}),F.jsx(N.View,{style:{marginTop:30,padding:12,backgroundColor:"#2a2a3a",borderRadius:8,borderLeftWidth:4,borderLeftColor:"#ffaa00"},children:F.jsxs(N.Text,{style:{color:"#cccccc",fontSize:11,lineHeight:16},children:["\uD83D\uDCA1 点击彩色按钮增加对应计数",`
+`,"\uD83D\uDCCA 总计数显示在顶部",`
+`,"\uD83D\uDD04 重置按钮清空所有计数",`
+`,"⚡ 左侧点击会同步到右侧面板"]})}),F.jsx(w,{})]})}var X=React,P=ReactNative,M=ReactJSXRuntime;function Y(f){let[h,U]=X.useState([]),[I,R]=X.useState(0),$=f.clickHistory!==void 0,p=$?f.clickHistory:h,z=$?f.sessionClicks??0:I,B=(m,J,_)=>{if(f.onAddRecord)f.onAddRecord(m,J,_);else{let K=new Date,O=`${K.getHours().toString().padStart(2,"0")}:${K.getMinutes().toString().padStart(2,"0")}:${K.getSeconds().toString().padStart(2,"0")}`,S={id:Date.now(),time:O,action:m,emoji:J,color:_};U([S,...h].slice(0,20)),R(I+1)}},D=()=>{if(f.onClearHistory)f.onClearHistory();else U([]),R(0)};return M.jsxs(P.ScrollView,{style:{flex:1,backgroundColor:"#1a1a2e"},contentContainerStyle:{padding:16},children:[M.jsx(P.Text,{style:{color:"#ffffff",fontSize:20,fontWeight:"bold",marginBottom:20},children:"\uD83D\uDCCA 交互统计"}),M.jsxs(P.View,{style:{backgroundColor:"#2a2a4e",padding:16,borderRadius:8,marginBottom:20},children:[M.jsx(P.Text,{style:{color:"#888888",fontSize:12,marginBottom:8},children:"本次会话点击"}),M.jsx(P.Text,{style:{color:"#00ff88",fontSize:32,fontWeight:"bold"},children:z}),M.jsxs(P.Text,{style:{color:"#666666",fontSize:10,marginTop:4},children:["历史记录: ",p.length," 条"]})]}),M.jsxs(P.View,{style:{marginBottom:20},children:[M.jsx(P.Text,{style:{color:"#888888",fontSize:12,marginBottom:8},children:"快速测试"}),M.jsx(P.TouchableOpacity,{onPress:()=>B("快速点击","⚡","#ffaa00"),style:{backgroundColor:"#ffaa00",padding:12,borderRadius:6,marginBottom:8,alignItems:"center"},children:M.jsx(P.Text,{style:{color:"#000000",fontSize:14,fontWeight:"bold"},children:"⚡ 快速测试"})}),M.jsx(P.TouchableOpacity,{onPress:()=>B("星标动作","⭐","#ff88ff"),style:{backgroundColor:"#ff88ff",padding:12,borderRadius:6,marginBottom:8,alignItems:"center"},children:M.jsx(P.Text,{style:{color:"#000000",fontSize:14,fontWeight:"bold"},children:"⭐ 星标测试"})}),M.jsx(P.TouchableOpacity,{onPress:()=>B("火箭发射","\uD83D\uDE80","#00aaff"),style:{backgroundColor:"#00aaff",padding:12,borderRadius:6,alignItems:"center"},children:M.jsx(P.Text,{style:{color:"#ffffff",fontSize:14,fontWeight:"bold"},children:"\uD83D\uDE80 火箭测试"})})]}),M.jsxs(P.View,{children:[M.jsxs(P.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:12},children:[M.jsx(P.Text,{style:{color:"#888888",fontSize:12},children:"点击历史"}),p.length>0&&M.jsx(P.TouchableOpacity,{onPress:D,style:{padding:4},children:M.jsx(P.Text,{style:{color:"#ff6666",fontSize:11},children:"清空"})})]}),p.length===0?M.jsxs(P.View,{style:{backgroundColor:"#2a2a3a",padding:20,borderRadius:8,alignItems:"center"},children:[M.jsx(P.Text,{style:{color:"#666666",fontSize:13},children:"暂无记录"}),M.jsx(P.Text,{style:{color:"#555555",fontSize:11,marginTop:4},children:"点击上方按钮开始测试"})]}):p.map((m)=>M.jsx(P.View,{style:{backgroundColor:"#2a2a3a",padding:12,borderRadius:6,marginBottom:8,borderLeftWidth:3,borderLeftColor:m.color},children:M.jsxs(P.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},children:[M.jsxs(P.View,{style:{flexDirection:"row",alignItems:"center"},children:[M.jsx(P.Text,{style:{fontSize:16,marginRight:8},children:m.emoji}),M.jsx(P.Text,{style:{color:"#ffffff",fontSize:13},children:m.action})]}),M.jsx(P.Text,{style:{color:"#666666",fontSize:11},children:m.time})]})},m.id))]}),M.jsx(P.View,{style:{marginTop:20,padding:12,backgroundColor:"#2a2a3a",borderRadius:8,borderLeftWidth:4,borderLeftColor:"#00ff88"},children:M.jsxs(P.Text,{style:{color:"#cccccc",fontSize:11,lineHeight:16},children:["\uD83D\uDCCA 实时统计点击次数",`
 `,"⚡ 快速测试按钮验证交互",`
-`,"📜 自动记录最近20次操作"]})})]})}function w(){const[n,s]=r.useState([]),[c,d]=r.useState(0),f=(b,_,u)=>{const S=new Date,h=`${S.getHours().toString().padStart(2,"0")}:${S.getMinutes().toString().padStart(2,"0")}:${S.getSeconds().toString().padStart(2,"0")}`,p={id:Date.now(),time:h,action:b,emoji:_,color:u};s([p,...n].slice(0,20)),d(c+1)},g=()=>{s([]),d(0)};return o.jsxs(l.View,{style:{flex:1},children:[o.jsx(a.Left,{children:o.jsx(y,{onAction:f})}),o.jsx(a.Right,{children:o.jsx(i,{clickHistory:n,sessionClicks:c,onAddRecord:f,onClearHistory:g})})]})}return w})(ReactJSXRuntime,React,ReactNative);(function(){if(console.log("[rill:auto-render] Starting AUTO_RENDER_FOOTER..."),console.log("[rill:auto-render] typeof __sendToHost:",typeof __sendToHost),console.log("[rill:auto-render] typeof globalThis.__RillGuest:",typeof globalThis.__RillGuest),typeof __sendToHost=="function"&&typeof globalThis.__RillGuest<"u"){console.log("[rill:auto-render] Conditions passed, entering try block");try{var o=globalThis.React;if(console.log("[rill:auto-render] React:",o?"found":"NOT found"),console.log("[rill:auto-render] React.createElement:",typeof o.createElement),!o){console.error("[rill] React not found, cannot auto-render");return}var r=typeof require=="function"?require("rill/reconciler"):null;if(console.log("[rill:auto-render] reconciler:",r?"found":"NOT found"),console.log("[rill:auto-render] reconciler.render:",r&&r.render?"found":"NOT found"),!r||!r.render){console.error("[rill] Reconciler not found, cannot auto-render");return}var l=globalThis.__RillGuest,e=typeof l=="function"?l:l.default||l;if(console.log("[rill:auto-render] Component type:",typeof e),!e||typeof e!="function"){console.warn("[rill] No valid component found in guest");return}var t=o.createElement(e);console.log("[rill:auto-render] element:",t?"created":"null"),console.log("[rill] Auto-rendering guest component"),console.log("[rill:auto-render] Calling reconciler.render with sendToHost type:",typeof __sendToHost),r.render(t,__sendToHost),console.log("[rill:auto-render] reconciler.render returned"),setTimeout(function(){console.log("[Guest] === After Commit ==="),console.log("[Guest] Total ops:",typeof globalThis<"u"?globalThis.__TOTAL_OPS:0),console.log("[Guest] Op types:",typeof globalThis<"u"?JSON.stringify(globalThis.__OP_COUNTS):"{}"),console.log("[Guest] TouchableOpacity created:",typeof globalThis<"u"?globalThis.__TOUCHABLE_CREATE_COUNT:0),console.log("[Guest] Last TouchableOpacity fnId:",typeof globalThis<"u"?globalThis.__LAST_TOUCHABLE_FNID:"none")},100)}catch(i){var a=i&&i.message?i.message:String(i),T=i&&i.stack?i.stack:"(no stack)",y=i&&i.name?i.name:"(no name)";console.error("[rill] Auto-render failed:",y,"-",a),console.error("[rill] Error stack:",T)}}})();
+`,"\uD83D\uDCDC 自动记录最近20次操作"]})})]})}var v=ReactJSXRuntime;function b(){let[f,h]=Z.useState([]),[U,I]=Z.useState(0),R=(p,z,B)=>{let D=new Date,m=`${D.getHours().toString().padStart(2,"0")}:${D.getMinutes().toString().padStart(2,"0")}:${D.getSeconds().toString().padStart(2,"0")}`,J={id:Date.now(),time:m,action:p,emoji:z,color:B};h([J,...f].slice(0,20)),I(U+1)},$=()=>{h([]),I(0)};return v.jsxs(g.View,{style:{flex:1},children:[v.jsx(E.Left,{children:v.jsx(W,{onAction:R})}),v.jsx(E.Right,{children:v.jsx(Y,{clickHistory:f,sessionClicks:U,onAddRecord:R,onClearHistory:$})})]})}
+
+
+try {
+  var __rillModuleExports = (typeof module !== 'undefined' && module && module.exports) ? module.exports : (typeof exports !== 'undefined' ? exports : undefined);
+  if (__rillModuleExports) {
+    globalThis.__RillGuest = __rillModuleExports.default || __rillModuleExports;
+  }
+} catch {}
+
+
+/* Auto-render */
+(function() {
+  if (typeof __sendToHost === 'function' && typeof globalThis.__RillGuest !== 'undefined') {
+    try {
+      var React = globalThis.React;
+      if (!React) {
+        console.error('[rill] React not found, cannot auto-render');
+        return;
+      }
+
+      var RillLet = globalThis.RillLet;
+      if (!RillLet || !RillLet.render) {
+        console.error('[rill] RillLet not found, cannot auto-render');
+        return;
+      }
+
+      var GuestExport = globalThis.__RillGuest;
+      var Component = typeof GuestExport === 'function'
+        ? GuestExport
+        : (GuestExport.default || GuestExport);
+
+      if (!Component || typeof Component !== 'function') {
+        console.warn('[rill] No valid component found in guest');
+        return;
+      }
+
+      var element = React.createElement(Component);
+      console.log('[rill] Auto-rendering guest component');
+      RillLet.render(element, __sendToHost);
+    } catch (error) {
+      console.error('[rill] Auto-render failed:', error);
+    }
+  }
+})();
+
+/* End of Rill Guest Bundle */
