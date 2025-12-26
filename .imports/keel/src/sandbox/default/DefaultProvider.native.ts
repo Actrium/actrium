@@ -7,8 +7,8 @@
  * - No fallback - throws error if no provider available
  */
 
-import { isJSCAvailable } from '../../sandbox-native/JSCModule';
-import { isQuickJSAvailable } from '../../sandbox-native/QuickJSModule';
+import { isJSCAvailable } from '../native/JSCModule';
+import { isQuickJSAvailable } from '../native/QuickJSModule';
 import { JSCProvider } from '../providers/JSCProvider';
 import { QuickJSProvider } from '../providers/QuickJSProvider';
 import { SandboxType } from '../types/provider';

@@ -18,8 +18,8 @@ const mockModule = {
   isAvailable: mock(() => true),
 };
 
-// Mock the sandbox-native module
-mock.module('../../sandbox-native/JSCModule', () => ({
+// Mock the native module
+mock.module('../native/JSCModule', () => ({
   isJSCAvailable: () => true,
   getJSCModule: () => mockModule,
 }));

@@ -4,7 +4,7 @@
  * Collects debug data from the Host runtime (operation logs, performance)
  */
 
-import { isSerializedFunction } from '../bridge';
+import { isSerializedFunction } from '../shared';
 import type {
   HostMetrics,
   HostTreeNode,

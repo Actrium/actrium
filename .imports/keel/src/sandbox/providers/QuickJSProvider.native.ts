@@ -9,7 +9,7 @@ import {
   getQuickJSModule,
   isQuickJSAvailable,
   type QuickJSContextNative,
-} from '../../sandbox-native/QuickJSModule';
+} from '../native/QuickJSModule';
 import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from '../types/provider';
 
 export interface QuickJSProviderOptions {

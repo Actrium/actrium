@@ -4,10 +4,10 @@
  * React Native component for rendering Guest UI in sandbox
  */
 
-import type { Engine } from '@rill/runtime';
-import { useEngineView } from '@rill/runtime';
 import type { ReactElement, ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import type { Engine } from '../../host';
+import { useEngineView } from '../../host';
 
 /**
  * EngineView Props
