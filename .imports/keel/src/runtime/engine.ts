@@ -700,19 +700,40 @@ export class Engine implements IEngine {
       }
 
       switch (moduleName) {
-        case 'react':
+        case 'react': {
           // Return Guest's React shim (injected via injectReactShims)
           // This avoids cross-engine serialization of complex Host objects
-          return this.context?.getGlobal('React');
+          const React = this.context?.getGlobal('React');
+          if (!React) {
+            throw new Error(
+              '[rill] React shim not found in Guest. Did injectReactShims fail?'
+            );
+          }
+          return React;
+        }
         case 'react-native':
           // Return a minimal RN shim - real RN module not available in sandbox
           return createReactNativeShim();
-        case 'react/jsx-runtime':
+        case 'react/jsx-runtime': {
           // Return Guest's JSX runtime shim (injected via injectReactShims)
-          return this.context?.getGlobal('ReactJSXRuntime');
-        case 'react/jsx-dev-runtime':
+          const JSXRuntime = this.context?.getGlobal('ReactJSXRuntime');
+          if (!JSXRuntime) {
+            throw new Error(
+              '[rill] ReactJSXRuntime shim not found in Guest. Did injectReactShims fail?'
+            );
+          }
+          return JSXRuntime;
+        }
+        case 'react/jsx-dev-runtime': {
           // Return Guest's JSX dev runtime shim (same as production runtime)
-          return this.context?.getGlobal('ReactJSXDevRuntime');
+          const JSXDevRuntime = this.context?.getGlobal('ReactJSXDevRuntime');
+          if (!JSXDevRuntime) {
+            throw new Error(
+              '[rill] ReactJSXDevRuntime shim not found in Guest. Did injectReactShims fail?'
+            );
+          }
+          return JSXDevRuntime;
+        }
         case 'rill/reconciler': {
           // Return Guest's RillReconciler (injected via injectGuestReconciler)
           // Reconciler now runs entirely in Guest

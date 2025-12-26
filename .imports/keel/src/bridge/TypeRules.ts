@@ -161,12 +161,22 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
           // Async errors propagate naturally as Promise rejections
           return result;
         } catch (err) {
-          // Sync errors are caught to prevent Host crashes
-          // Return undefined to indicate failure gracefully
-          // Use provided logger or fallback to console (silent in tests)
+          // Always log to console for visibility (even if ctx.logger not provided)
+          console.error(`[rill:TypeRules] ❌ Callback ${__fnId} threw sync error:`, err);
+          // Also use provided logger if available
           if (ctx.logger?.error) {
             ctx.logger.error(`[TypeRules] Callback ${__fnId} threw sync error:`, err);
           }
+          // In debug mode, re-throw to help identify the issue quickly
+          // Check for global debug flag (set by Host or tests)
+          if (
+            typeof globalThis !== 'undefined' &&
+            (globalThis as { __RILL_DEBUG__?: boolean }).__RILL_DEBUG__
+          ) {
+            throw err;
+          }
+          // In production, return undefined to prevent Host crashes
+          // but the error is still visible in console
           return undefined;
         }
       };
