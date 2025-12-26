@@ -40,8 +40,8 @@
     // === Paths ===
     "baseUrl": ".",
     "paths": {
-      "@rill/runtime": ["./src/runtime/index.ts"],
-      "rill": ["./src/runtime/index.ts"],
+      "@rill/runtime": ["./src/host/index.ts"],
+      "rill": ["./src/host/index.ts"],
       "rill/*": ["./src/*"],
       "react-native": ["./src/__mocks__/react-native.ts"]
     }

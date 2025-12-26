@@ -5,15 +5,16 @@
   "homepage": "https://github.com/GoAskAway/rill",
   "repository": "https://github.com/GoAskAway/rill.git",
   "license": "Apache-2.0",
-  "main": "./src/runtime/index.ts",
-  "types": "./src/runtime/index.ts",
+  "main": "./src/host/index.ts",
+  "types": "./src/host/index.ts",
   "exports": {
-    ".": "./src/runtime/index.ts",
-    "./let": "./src/let/index.ts",
+    ".": "./src/host/index.ts",
+    "./sdk": "./src/sdk/index.ts",
+    "./let": "./src/sdk/index.ts",
     "./devtools": "./src/devtools/index.ts",
     "./sandbox": "./src/sandbox/index.ts",
-    "./sandbox-native": "./src/sandbox-native/index.ts",
-    "./sandbox-web": "./src/sandbox-web/index.ts",
+    "./sandbox/native": "./src/sandbox/native/index.ts",
+    "./sandbox/web": "./src/sandbox/web/index.ts",
     "./cli": "./src/cli/index.ts"
   },
   "files": [

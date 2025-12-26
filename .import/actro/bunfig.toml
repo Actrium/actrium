@@ -1,7 +1,7 @@
 [test]
 # CRITICAL: Global polyfills must be loaded FIRST
 # These are needed for modules like react-test-renderer that access globals during module load
-preload = ["./src/runtime/__tests__/setup.ts"]
+preload = ["./src/host/__tests__/setup.ts"]
 
 # Exclude native JSI tests (they run in native environment, not Bun)
 # Files named *.native.js are for native runtime testing
