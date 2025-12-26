@@ -6,116 +6,47 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 
 ## Features
 
-- **React-like Development Experience**: Write guests using JSX and Hooks
+- **React Development Experience**: Write guests using JSX and Hooks
 - **Complete Sandbox Isolation**: Pluggable JSEngineProvider (QuickJS, VM, Worker), guest crashes don't affect the host
 - **Lightweight and Efficient**: No WebView overhead, native rendering performance
+- **Unified Bridge Layer**: Type-safe serialization with automatic callback lifecycle management
 - **Flexible Extension**: Supports registering custom business components
 
-## Repository Structure
-
-This is a monorepo containing multiple packages:
+## Package Exports
 
 ```
 rill/
-├── packages/
-│   ├── rill/          # Core runtime library
-│   │   ├── src/
-│   │   │   ├── runtime/    # Engine and renderer
-│   │   │   ├── sdk/        # Guest development SDK
-│   │   │   └── reconciler/ # React reconciler
-│   │   ├── docs/      # Documentation and examples
-│   │   └── package.json
-│   └── cli/           # CLI tools for guest development
-│       ├── src/
-│       └── package.json
-└── package.json       # Workspace root
-```
-
-### Packages
-
-- **@rill/core** - Core runtime library for host applications
-  - Published as `@rill/core` on npm
-  - Exports: `@rill/core` (runtime), `@rill/core/sdk` (guest SDK)
-
-- **@rill/cli** - Command-line tools for guest development
-  - Published as `@rill/cli` on npm
-  - Commands: `rill build`, `rill init`
-
-### Development
-
-Build all packages:
-```bash
-bun run build
-```
-
-Build a specific package:
-```bash
-cd packages/core && bun run build
-cd packages/cli && bun run build
-```
-
-Run tests:
-```bash
-bun test
+├── (default)       # Host runtime (Engine, EngineView, Receiver)
+├── /let            # Guest SDK (components, hooks)
+├── /devtools       # Development tools
+├── /sandbox        # Sandbox providers
+├── /sandbox-native # Native sandbox (JSC/QuickJS)
+├── /sandbox-web    # Web sandbox (Worker)
+└── /cli            # CLI build tools
 ```
 
 ## Quick Start
 
 ### Installation
 
-Compatibility and peer dependencies
-
-- Keep React and react-reconciler in compatible pairs to avoid install/runtime issues.
-- Choose only one platform peer: react-dom (Web) or react-native (RN). react-native-quickjs is optional for RN.
-
-Recommended pairings
-
-- React 18.2.x ↔ react-reconciler 0.29–0.31
-- React 19.0.x ↔ react-reconciler 0.32.x
-- React 19.2.x+ ↔ react-reconciler 0.33.x
-
-Install examples
-
-- React Native (RN 0.82 + React 19.2)
-  ```bash
-  npm i rill react@^19.2.1 react-native@^0.82 react-reconciler@^0.33
-  ```
-- Web (React 19.2)
-  ```bash
-  npm i rill react@^19.2.1 react-dom@^19.2.1 react-reconciler@^0.33
-  ```
-
-Notes
-
-- If you see npm ERESOLVE complaining react-reconciler@0.33 requires react@^19.2: upgrade React to ^19.2.1 (or align reconciler to 0.32 if you must stay on React 19.0).
-- Avoid using --legacy-peer-deps in the long term; fix the pairing instead.
-
-For monorepo workspace development
-
-This is a monorepo project. Add dependencies in `package.json`:
-
-```json
-{
-  "dependencies": {
-    "@rill/core": "workspace:*"
-  },
-  "devDependencies": {
-    "@rill/cli": "workspace:*"
-  }
-}
-```
-
-Or install from GitHub:
-
 ```bash
-bun add github:kookyleo/rill#packages/core
+# Using bun
+bun add rill
+
+# Using npm
+npm install rill
 ```
+
+**Peer Dependencies:**
+- React 18.2+ or 19.x
+- react-reconciler (matching your React version)
+- react-native (for RN apps) or react-dom (for web)
 
 ### Host Integration
 
 ```tsx
 import React, { useMemo, useEffect } from 'react';
-import { Engine, EngineView } from '@rill/core';
+import { Engine, EngineView } from 'rill';
 import { NativeStepList } from './components/NativeStepList';
 
 function App() {
@@ -123,7 +54,6 @@ function App() {
   const engine = useMemo(() => new Engine({
     debug: __DEV__,
     timeout: 5000,
-    sandbox: 'vm', // Options: 'vm' | 'worker' | 'none'
   }), []);
 
   // 2. Register custom components
@@ -137,11 +67,10 @@ function App() {
   return (
     <EngineView
       engine={engine}
-      bundleUrl="https://cdn.example.com/guest.js"
+      source="https://cdn.example.com/guest.js"
       initialProps={{ theme: 'dark' }}
       onLoad={() => console.log('Guest loaded')}
       onError={(err) => console.error('Guest error:', err)}
-      onDestroy={() => console.log('Guest destroyed')}
       renderError={(error) => <Text>Error: {error.message}</Text>}
     />
   );
@@ -151,7 +80,7 @@ function App() {
 ### Guest Development
 
 ```tsx
-import { View, Text, TouchableOpacity, useHostEvent, useConfig } from '@rill/core/sdk';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/let';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -175,17 +104,14 @@ export default function MyGuest() {
 ### Build Guest
 
 ```bash
-# Use workspace CLI
-bun run --filter @rill/cli build src/guest.tsx -o dist/bundle.js
-
-# Or run CLI script directly
-bun packages/cli/src/index.ts build src/guest.tsx -o dist/bundle.js
+# Build bundle
+bun run rill/cli build src/guest.tsx -o dist/bundle.js
 
 # Development mode
-bun packages/cli/src/index.ts build src/guest.tsx --watch --no-minify --sourcemap
+bun run rill/cli build src/guest.tsx --watch --no-minify --sourcemap
 
 # Analyze bundle
-bun packages/cli/src/index.ts analyze dist/bundle.js
+bun run rill/cli analyze dist/bundle.js
 ```
 
 ## Architecture
@@ -194,55 +120,48 @@ bun packages/cli/src/index.ts analyze dist/bundle.js
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Host App (React Native)                    │
 ├─────────────────────────────────────────────────────────────────┤
-│  EngineView → Engine → JSEngineProvider Context                 │
+│  EngineView → Engine → Sandbox Provider                         │
 │                            │                                     │
 │                            ▼                                     │
 │                    ┌───────────────────┐                        │
 │                    │  Guest Bundle.js  │                        │
-│                    │  (React + SDK)     │                        │
+│                    │  (React + SDK)    │                        │
 │                    └───────────────────┘                        │
 │                            │                                     │
 │                            ▼                                     │
-│                    Reconciler (JSON Ops)                        │
+│                    Reconciler (VNode Ops)                       │
 │                            │                                     │
+│                    ┌───────┴───────┐                            │
+│                    │    Bridge     │  ← Unified serialization   │
+│                    └───────┬───────┘                            │
 │                            ▼                                     │
 │                    Receiver → Registry → Native Component Tree  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Module Description
+## Module Overview
 
-| Module | Path | Description |
-|--------|------|-------------|
-| SDK | `@rill/core/sdk` | Guest development kit, virtual components and Hooks |
-| Runtime | `@rill/core` | Host runtime, Engine and EngineView |
-| CLI | `@rill/cli` | Guest bundler tool (Vite-based) |
+| Module | Import Path | Description |
+|--------|-------------|-------------|
+| Runtime | `rill` | Host runtime: Engine, EngineView, Receiver |
+| Guest SDK | `rill/let` | Guest development kit: components, hooks |
+| DevTools | `rill/devtools` | Debug tools: operation logging, tree inspection |
+| CLI | `rill/cli` | Guest bundler (Bun-based) |
 
 ## API
 
 ### Engine
 
 ```typescript
-import { Engine } from '@rill/core';
+import { Engine } from 'rill';
 
-const engine = new Engine(options?: EngineOptions);
-
-interface EngineOptions {
-  provider?: JSEngineProvider;        // Pluggable JS engine
-  sandbox?: 'vm' | 'worker' | 'none'; // Sandbox mode
-  timeout?: number;                   // Execution timeout (default 5000ms)
-  debug?: boolean;                    // Debug mode
-  logger?: Logger;                    // Custom logger
-  requireWhitelist?: string[];        // Allowed require modules
-  onMetric?: MetricCallback;          // Performance metric callback
-  receiverMaxBatchSize?: number;      // Max operations per batch
-}
+const engine = new Engine({
+  timeout: 5000,        // Execution timeout (ms)
+  debug: false,         // Debug mode
+});
 
 // Register components
 engine.register({ ComponentName: ReactComponent });
-
-// Create receiver
-const receiver = engine.createReceiver(() => forceUpdate());
 
 // Load guest
 await engine.loadBundle(bundleUrl, initialProps);
@@ -253,10 +172,7 @@ engine.sendEvent('EVENT_NAME', payload);
 // Listen to guest messages
 engine.on('message', (msg) => console.log(msg.event, msg.payload));
 
-// Update configuration
-engine.updateConfig({ key: value });
-
-// Get health status
+// Health check
 const health = engine.getHealth();
 
 // Destroy
@@ -266,10 +182,10 @@ engine.destroy();
 ### SDK Hooks
 
 ```typescript
+import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'rill/let';
+
 // Subscribe to host events
-useHostEvent('EVENT_NAME', (payload) => {
-  // Handle event
-});
+useHostEvent('EVENT_NAME', (payload) => { /* handle */ });
 
 // Get initial configuration
 const config = useConfig<ConfigType>();
@@ -277,6 +193,10 @@ const config = useConfig<ConfigType>();
 // Send message to host
 const send = useSendToHost();
 send('EVENT_NAME', payload);
+
+// Call host component methods (Remote Ref)
+const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
+await remoteInput?.invoke('focus');
 ```
 
 ### Default Components
@@ -286,57 +206,47 @@ send('EVENT_NAME', payload);
 - `Image` - Image component
 - `ScrollView` - Scroll container
 - `TouchableOpacity` - Touchable component
+- `TextInput` - Text input
+- `FlatList` - Virtualized list
+- `Button` - Button component
+- `Switch` - Toggle switch
+- `ActivityIndicator` - Loading indicator
 
-## Performance Optimization
+## Host ↔ Guest Communication
 
-Rill has built-in performance optimization mechanisms:
+Guest subscribes using SDK hook `useHostEvent(event, callback)`, Host sends via `engine.sendEvent(eventName, payload)`.
 
+**Guest example:**
 ```tsx
-import {
-  ThrottledScheduler,
-  VirtualScrollCalculator,
-  PerformanceMonitor
-} from '@rill/core';
+import { View, Text, useHostEvent, useSendToHost } from 'rill/let';
 
-// Batch update throttling
-const scheduler = new ThrottledScheduler(onBatch, {
-  maxBatchSize: 100,
-  throttleMs: 16,
-  enableMerge: true,
-});
+export default function Guest() {
+  const send = useSendToHost();
 
-// Virtual scrolling
-const calculator = new VirtualScrollCalculator({
-  estimatedItemHeight: 60,
-  overscan: 5,
-});
+  useHostEvent('PING', (payload) => {
+    send('PONG', { received: payload });
+  });
 
-// Performance monitoring
-const monitor = new PerformanceMonitor();
+  return <View><Text>Ready</Text></View>;
+}
 ```
 
-## Debugging Tools
-
+**Host example:**
 ```tsx
-import { createDevTools } from '@rill/core/devtools';
+import { Engine } from 'rill';
 
-const devtools = createDevTools();
-devtools.enable();
-
-// View component tree
-console.log(devtools.getComponentTreeText(nodeMap, rootChildren));
-
-// Export debug data
-const data = devtools.exportAll();
+const engine = new Engine();
+engine.on('message', (m) => console.log(m.event, m.payload));
+engine.sendEvent('PING', { timestamp: Date.now() });
 ```
 
-## Documentation (Deprecated)
+## Documentation
 
-- [API Documentation](./docs/API.md) - Complete API reference
-- [User Guide](./docs/GUIDE.md) - Getting started tutorial and best practices
-- [Architecture Design](./docs/ARCHITECTURE.md) - System architecture details
+- [API Reference](./docs/API.md) - Complete API documentation
+- [User Guide](./docs/GUIDE.md) - Getting started and best practices
+- [Architecture](./docs/ARCHITECTURE.md) - System architecture details
 - [Production Guide](./docs/PRODUCTION_GUIDE.md) - Production deployment checklist
-- [Guest Examples](./examples/) - Working examples with complete source code
+- [Internal Docs](./docs/internals/) - Bridge layer, serialization details
 
 ## Development
 
@@ -344,133 +254,25 @@ const data = devtools.exportAll();
 # Install dependencies
 bun install
 
-# Build
-bun run build
-
-# Development mode
-bun run build:watch
+# Run tests
+bun test
 
 # Type check
 bun run typecheck
 
-# Test
-bun test
-
-# Test coverage
-bun run test:coverage
+# Lint
+bun run lint
 ```
 
 ## Testing
 
-
-## Host ↔ Guest Events
-
-- Guest subscribes using SDK hook `useHostEvent(event, callback)`.
-- Host sends events via `engine.sendEvent(eventName, payload)`.
-- Unsubscribe: `const off = useHostEvent('EVT', cb); off?.();` If you keep the return value from the hook call, call it to remove the listener.
-
-Example (guest):
-
-```tsx
-import * as React from 'react';
-import { View, Text } from '@rill/core/sdk';
-import { useHostEvent, useSendToHost } from '@rill/core/sdk';
-
-export default function Guest() {
-  const send = useSendToHost();
-  React.useEffect(() => {
-    const off = useHostEvent('PING', (payload: { ok: number }) => {
-      // handle host event
-      send('ACK', { got: payload.ok });
-    });
-    return () => { off && off(); };
-  }, []);
-  return <View><Text>Ready</Text></View>;
-}
-```
-
-Example (host):
-
-```ts
-import { Engine } from '@rill/core';
-const engine = new Engine({ sandbox: 'vm' });
-engine.on('message', (m) => { /* m.event, m.payload */ });
-engine.sendEvent('PING', { ok: 1 });
-```
-
-Notes:
-- Engine injects `__useHostEvent`/`__handleHostEvent` at runtime as a safety polyfill, so the hook works even if your bundle doesn’t include the CLI banner.
-- For performance, prefer stable callbacks and unsubscribe on unmount.
-
-## SDK Compile-time Inlining and Strict Guard
-
-Goal: guest bundles must not require/import `rill/sdk` at runtime. The SDK is type-level + compile-time only.
-
-- Build with rill CLI (Vite lib build, IIFE output). The CLI sets a resolve alias so `rill/sdk` can be fully inlined/treeshaken.
-- Post-build, the CLI runs a strict guard that analyzes the bundle and fails if non-whitelisted runtime deps are present (e.g., `rill/sdk`).
-
-CLI:
-
 ```bash
-# Build (strict guard on by default)
-rill build src/guest.tsx -o dist/bundle.js
-
-# Analyze an existing bundle
-rill analyze dist/bundle.js \
-  --fail-on-violation \
-  --treat-eval-as-violation \
-  --treat-dynamic-non-literal-as-violation
-```
-
-Whitelist (runtime): `react`, `react-native`, `react/jsx-runtime`, `rill/reconciler`.
-
-If the bundle still contains `require('@rill/core/sdk')`, analyze fails fast with guidance.
-
-## Host Integration (correct API)
-
-```ts
-import { Engine } from '@rill/core';
-import { View, Text, TouchableOpacity, Image } from 'react-native';
-
-const engine = new Engine({
-  sandbox: 'vm', // or 'worker' | 'none'
-  debug: __DEV__,
-});
-
-// Register components
-engine.register({ View, Text, TouchableOpacity, Image });
-
-// Create Receiver
-const receiver = engine.createReceiver(() => {/* trigger host update */});
-
-// Load guest
-await engine.loadBundle(codeOrUrl, initialProps);
-```
-
-Notes:
-- Use `register(components)` to batch register components.
-- Use `createReceiver(onUpdate)` to create Receiver.
-- Use `loadBundle(source, initialProps)` to load guest.
-- Choose sandbox mode via `sandbox` option, or inject custom JSEngineProvider via `provider`.
-
-## Init Template Defaults
-
-`rill init` generates:
-- vite.config.ts: IIFE lib build, external: react/react-native/react/jsx-runtime/rill-reconciler, alias `rill/sdk` to ESM for inlining.
-- tsconfig.json: Bundler-resolve, isolatedModules, strict, verbatimModuleSyntax, and editor-only path typing for `rill/sdk`.
-- Example guest using `import { View, Text } from '@rill/core/sdk'`.
-
-
-The project includes a complete test suite:
-
-- Unit tests: Module functionality tests
-- Integration tests: End-to-end scenario tests
-- Coverage target: 80%+ code coverage
-
-```bash
-bun test            # Run all tests
-bun test --run  # Single run
-bun test:coverage  # Generate coverage report
+npm run test:all      # Run all tests (unit + native + E2E)
+npm test              # Unit tests only
+npm run test:native   # Native C++/ObjC++ tests (QuickJS/JSC)
+npm run test:e2e      # Web Worker E2E tests
+npm run test:e2e:wasm # WASM sandbox E2E tests
+npm run test:e2e:rn   # React Native macOS E2E tests
 ```
 
 ## License

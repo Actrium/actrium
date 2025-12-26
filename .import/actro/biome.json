@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.3.9/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.3.10/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -8,6 +8,29 @@
   "files": {
     "ignoreUnknown": true
   },
+  "overrides": [
+    {
+      "includes": [
+        "**/__tests__/**",
+        "**/__mocks__/**",
+        "**/__benchmarks__/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.bench.ts",
+        "tests/**",
+        "src/guest-bundle/build/**"
+      ],
+      "linter": {
+        "enabled": false
+      },
+      "formatter": {
+        "enabled": false
+      },
+      "assist": {
+        "enabled": false
+      }
+    }
+  ],
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -19,7 +42,7 @@
     "rules": {
       "recommended": true,
       "suspicious": {
-        "noExplicitAny": "off",
+        "noExplicitAny": "warn",
         "noArrayIndexKey": "off",
         "useIterableCallbackReturn": "off",
         "noAssignInExpressions": "off"
