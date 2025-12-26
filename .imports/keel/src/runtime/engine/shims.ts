@@ -10,6 +10,34 @@ export const ALL_SHIMS = `
 // Mark shims as injected
 globalThis.__REACT_SHIM__ = true;
 
+// ============================================
+// Proxy Debug Helper - 捕获访问不存在属性的问题
+// ============================================
+globalThis.__rillCreateSafeShim = function(shimName, obj) {
+  // 只在开发模式下启用（可通过 __RILL_DEBUG__ 控制）
+  if (typeof Proxy === 'undefined') return obj;
+
+  return new Proxy(obj, {
+    get: function(target, prop) {
+      // 忽略 Symbol 和内部属性
+      if (typeof prop === 'symbol') return target[prop];
+      if (prop === 'then') return undefined; // Promise 检测
+      if (prop === 'toJSON') return undefined;
+      if (prop.startsWith('$$')) return target[prop]; // React 内部
+
+      if (!(prop in target)) {
+        var msg = '[rill:shim] ❌ ' + shimName + '.' + prop + ' 不存在! 请检查 shims.ts 是否需要添加此属性。';
+        console.error(msg);
+        // 在调试模式下抛出错误，帮助快速定位
+        if (globalThis.__RILL_DEBUG__) {
+          throw new Error(msg);
+        }
+      }
+      return target[prop];
+    }
+  });
+};
+
 // Hook state management - implements React hooks system with per-instance support
 // Each component instance has its own hook state, keyed by __rillCurrentInstanceId
 globalThis.__rillHooks = {
@@ -129,7 +157,7 @@ globalThis.__rillScheduleRender = function() {
 };
 
 // Minimal React shim for Guest
-globalThis.React = {
+globalThis.React = globalThis.__rillCreateSafeShim('React', {
   createElement: function(type, props, ...children) {
     const element = {
       __rillTypeMarker: '__rill_react_element__',
@@ -294,19 +322,19 @@ globalThis.React = {
     };
     return context;
   }
-};
+});
 
 // JSX Runtime shim
-globalThis.ReactJSXRuntime = {
+globalThis.ReactJSXRuntime = globalThis.__rillCreateSafeShim('ReactJSXRuntime', {
   jsx: globalThis.React.createElement,
   jsxs: globalThis.React.createElement,
   jsxDEV: globalThis.React.createElement,
   Fragment: globalThis.React.Fragment
-};
+});
 globalThis.ReactJSXDevRuntime = globalThis.ReactJSXRuntime;
 
 // ReactNative shim (component name registry)
-globalThis.ReactNative = {
+globalThis.ReactNative = globalThis.__rillCreateSafeShim('ReactNative', {
   View: 'View',
   Text: 'Text',
   Image: 'Image',
@@ -317,7 +345,7 @@ globalThis.ReactNative = {
   FlatList: 'FlatList',
   TextInput: 'TextInput',
   Switch: 'Switch'
-};
+});
 `;
 
 /**
