@@ -2,7 +2,17 @@
   "name": "counterapp",
   "version": "2.1.0",
   "description": "Interactive Counter Test App",
-  "entry": "unified-app.js",
+  "entry": "dist/unified-app.js",
   "leftPanelDefaultVisible": true,
-  "rightPanelDefaultVisible": true
+  "rightPanelDefaultVisible": true,
+  "contract": {
+    "name": "ask",
+    "version": 1
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "dist/unified-app.js": "d815f3855e057093b5bac64f87e183a5eb0cfb2864df4ea7e6d13af3e8094d2e"
+    }
+  }
 }
