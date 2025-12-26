@@ -2,7 +2,19 @@
 
 ## Overview
 
-askit implements an **isomorphic architecture** that enables the same code to run in different environments with environment-specific implementations.
+**askit** is a UI component library and API layer built on top of [rill](https://github.com/GoAskAway/rill). Through package.json conditional exports, the same `import { StepList, Toast } from 'askit'` delivers real React Native components on the Host side and string identifiers on the Guest side (which rill passes to Host for rendering).
+
+### Relationship with rill
+
+| Layer | Role |
+|-------|------|
+| **rill** | Sandbox-isolated dynamic UI rendering engine — runs React code in isolated JS sandbox (QuickJS/JSC), serializes render operations into instructions, sends them to Host for real React Native rendering |
+| **askit** | UI components and API layer on top of rill — provides business components (StepList, ChatBubble, etc.) and cross-boundary APIs (EventEmitter, Toast, Haptic) |
+
+### Core Mechanism
+
+- **UI Components**: Guest side is string `"StepList"`, Host side is complete RN implementation
+- **APIs**: Guest sends commands via `global.__sendEventToHost('ASKIT_TOAST_SHOW', {...})`, Host bridge routes to real native APIs like ToastAndroid
 
 ## Design Principles
 
@@ -64,7 +76,12 @@ The `package.json` uses conditional exports to serve different TypeScript source
 │  └────────────────┘                                    │         │
 └────────────────────────────────────────────────────────┼─────────┘
                                                          │
-                            Message Protocol (askit:...)
+                            Message Protocol (rill HostEvent model)
+
+- Guest 0 Host: `event: string`, `payload: unknown`
+  - `ASKIT_*` are **reserved internal commands** used by askit modules.
+  - All other events are treated as **app-level events** and are forwarded to Host `EventEmitter`.
+- Host 0 Guest: Host `EventEmitter.emit(event, payload)` is forwarded to `engine.sendEvent(event, payload)`.
                                                          │
 ┌────────────────────────────────────────────────────────┼─────────┐
 │                        GUEST (QuickJS Sandbox)         │         │
@@ -73,13 +90,13 @@ The `package.json` uses conditional exports to serve different TypeScript source
 │  │                    askit (guest)                          │  │
 │  │                                                           │  │
 │  │  EventEmitter.emit('event')                              │  │
-│  │    └──► global.sendToHost('askit:event:event', payload)  │  │
+│  │    └──► global.__sendEventToHost('event', payload)  │  │
 │  │                                                           │  │
 │  │  Toast.show(msg, opts)                                   │  │
-│  │    └──► global.sendToHost('askit:toast:show', [msg,...]) │  │
+│  │    └──► global.__sendEventToHost('ASKIT_TOAST_SHOW', { message: msg, options }) │  │
 │  │                                                           │  │
 │  │  Haptic.trigger(type)                                    │  │
-│  │    └──► global.sendToHost('askit:haptic:trigger', [type])│  │
+│  │    └──► global.__sendEventToHost('ASKIT_HAPTIC_TRIGGER', { type })│  │
 │  │                                                           │  │
 │  │  Component() ──► Returns DSL object                      │  │
 │  └──────────────────────────────────────────────────────────┘  │
@@ -115,8 +132,7 @@ Send messages to Host for execution:
 class RemoteToast implements ToastAPI {
   show(message: string, options?: ToastOptions): void {
     if (typeof global.sendToHost === 'function') {
-      // Send as array to avoid serialization issues
-      global.sendToHost('askit:toast:show', [message, options]);
+      global.__sendEventToHost('ASKIT_TOAST_SHOW', { message, options });
     }
   }
 }
@@ -132,30 +148,19 @@ Routes messages from Guest to appropriate handlers:
 import { NOTIFY_SYMBOL } from '../api/EventEmitter.host';
 
 function handleGuestMessage(message: GuestMessage) {
-  if (message.event.startsWith('askit:')) {
-    const parts = message.event.slice(6).split(':');
-    const [moduleName, methodName] = parts;
-
-    // EventEmitter events (format: askit:event:eventName)
-    if (moduleName === 'event') {
-      const eventName = parts.slice(1).join(':');
-      // Use Symbol to access internal API (hidden from public)
-      (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](eventName, message.payload);
-      return;
-    }
-
-    // Module calls (format: askit:module:method)
-    const module = modules[moduleName];
-    if (module) {
-      const method = module[methodName];
-      if (typeof method === 'function') {
-        const args = Array.isArray(message.payload)
-          ? message.payload
-          : [message.payload];
-        return method.apply(module, args);
-      }
-    }
+  // Reserved internal commands
+  if (message.event === 'ASKIT_TOAST_SHOW') {
+    const { message: text, options } = message.payload as any;
+    return modules.toast.show(text, options);
   }
+
+  if (message.event === 'ASKIT_HAPTIC_TRIGGER') {
+    const { type } = message.payload as any;
+    return modules.haptic.trigger(type);
+  }
+
+  // App-level event: forward to EventEmitter
+  (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](message.event, message.payload);
 }
 ```
 
@@ -167,10 +172,9 @@ Connects Rill Engine with askit EventEmitter:
 import { BROADCASTER_SYMBOL } from '../api/EventEmitter.host';
 
 function createEngineAdapter(engine: EngineInterface) {
-  // Forward EventEmitter events to engine with askit:event: prefix
-  // Use Symbol to access internal API (hidden from public)
+  // Forward Host EventEmitter events to Guest
   (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL]((event, payload) => {
-    engine.sendEvent(`askit:event:${event}`, payload);
+    engine.sendEvent(event, payload);
   });
 
   // Listen for guest messages and route them

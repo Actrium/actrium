@@ -8,7 +8,7 @@ import { Haptic } from './Haptic.guest';
 
 describe('Haptic (Remote)', () => {
   type SandboxGlobal = typeof globalThis & {
-    sendToHost?: (event: string, payload?: unknown) => void;
+    __sendEventToHost?: (eventName: string, payload?: unknown) => void;
   };
 
   const sandboxGlobal = globalThis as SandboxGlobal;
@@ -17,16 +17,16 @@ describe('Haptic (Remote)', () => {
   let originalSendToHost: unknown;
 
   beforeEach(() => {
-    originalSendToHost = sandboxGlobal.sendToHost;
+    originalSendToHost = sandboxGlobal.__sendEventToHost;
     sentMessages = [];
 
-    sandboxGlobal.sendToHost = (event: string, payload?: unknown) => {
-      sentMessages.push({ event, payload });
+    sandboxGlobal.__sendEventToHost = (eventName: string, payload?: unknown) => {
+      sentMessages.push({ event: eventName, payload });
     };
   });
 
   afterEach(() => {
-    sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
+    sandboxGlobal.__sendEventToHost = originalSendToHost as SandboxGlobal['__sendEventToHost'];
   });
 
   describe('trigger', () => {
@@ -35,8 +35,8 @@ describe('Haptic (Remote)', () => {
 
       expect(sentMessages).toEqual([
         {
-          event: 'askit:haptic:trigger',
-          payload: ['light'],
+          event: 'ASKIT_HAPTIC_TRIGGER',
+          payload: { type: 'light' },
         },
       ]);
     });
@@ -44,7 +44,7 @@ describe('Haptic (Remote)', () => {
     it('should use default type "medium" when not specified', () => {
       Haptic.trigger();
 
-      expect(sentMessages[0]?.payload).toEqual(['medium']);
+      expect(sentMessages[0]?.payload).toEqual({ type: 'medium' });
     });
 
     it('should handle all haptic types', () => {
@@ -56,7 +56,7 @@ describe('Haptic (Remote)', () => {
       Haptic.trigger('warning');
       Haptic.trigger('error');
 
-      expect(sentMessages.map((m) => (m.payload as string[])[0])).toEqual([
+      expect(sentMessages.map((m) => (m.payload as { type: string }).type)).toEqual([
         'light',
         'medium',
         'heavy',
@@ -68,9 +68,9 @@ describe('Haptic (Remote)', () => {
     });
   });
 
-  describe('without sendToHost', () => {
-    it('should warn when sendToHost is not available', () => {
-      sandboxGlobal.sendToHost = undefined;
+  describe('without __sendEventToHost', () => {
+    it('should warn when __sendEventToHost is not available', () => {
+      sandboxGlobal.__sendEventToHost = undefined;
 
       const warnings: unknown[] = [];
       const originalWarn = console.warn;
@@ -79,15 +79,15 @@ describe('Haptic (Remote)', () => {
       Haptic.trigger('light');
 
       expect(warnings.length).toBeGreaterThanOrEqual(1);
-      expect(JSON.stringify(warnings)).toContain('sendToHost not available');
+      expect(JSON.stringify(warnings)).toContain('__sendEventToHost not available');
 
       console.warn = originalWarn;
     });
   });
 
   describe('error handling', () => {
-    it('should handle sendToHost throwing exception', () => {
-      sandboxGlobal.sendToHost = () => {
+    it('should handle __sendEventToHost throwing exception', () => {
+      sandboxGlobal.__sendEventToHost = () => {
         throw new Error('Bridge failure');
       };
 

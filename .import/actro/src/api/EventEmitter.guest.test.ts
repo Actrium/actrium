@@ -8,8 +8,8 @@ import { GuestEventEmitter } from './EventEmitter.guest';
 
 describe('EventEmitter (Guest)', () => {
   type SandboxGlobal = typeof globalThis & {
-    sendToHost?: (event: string, payload?: unknown) => void;
-    onHostEvent?: (callback: (event: string, payload: unknown) => void) => void;
+    __sendEventToHost?: (eventName: string, payload?: unknown) => void;
+    __useHostEvent?: (eventName: string, callback: (payload: unknown) => void) => () => void;
   };
 
   const sandboxGlobal = globalThis as SandboxGlobal;
@@ -17,27 +17,35 @@ describe('EventEmitter (Guest)', () => {
   let emitter: GuestEventEmitter;
   let sentMessages: Array<{ event: string; payload: unknown }>;
   let originalSendToHost: unknown;
-  let originalOnHostEvent: unknown;
+  let originalUseHostEvent: unknown;
 
-  let hostEventCallback: ((event: string, payload: unknown) => void) | null = null;
+  // Map of event name -> Set of callbacks (simulating rill's per-event subscription)
+  let hostEventCallbacks: Map<string, Set<(payload: unknown) => void>>;
 
   beforeEach(() => {
     // Save original globals
-    originalSendToHost = sandboxGlobal.sendToHost;
-    originalOnHostEvent = sandboxGlobal.onHostEvent;
+    originalSendToHost = sandboxGlobal.__sendEventToHost;
+    originalUseHostEvent = sandboxGlobal.__useHostEvent;
 
     // Reset test state
     sentMessages = [];
-    hostEventCallback = null;
+    hostEventCallbacks = new Map();
 
     // Setup simulated sandbox globals
-    sandboxGlobal.sendToHost = (event: string, payload?: unknown) => {
-      sentMessages.push({ event, payload });
+    sandboxGlobal.__sendEventToHost = (eventName: string, payload?: unknown) => {
+      sentMessages.push({ event: eventName, payload });
     };
 
-    // Setup onHostEvent to capture the callback
-    sandboxGlobal.onHostEvent = (callback: (event: string, payload: unknown) => void) => {
-      hostEventCallback = callback;
+    // Setup __useHostEvent to simulate rill's per-event subscription model
+    sandboxGlobal.__useHostEvent = (eventName: string, callback: (payload: unknown) => void) => {
+      if (!hostEventCallbacks.has(eventName)) {
+        hostEventCallbacks.set(eventName, new Set());
+      }
+      hostEventCallbacks.get(eventName)!.add(callback);
+      // Return unsubscribe function
+      return () => {
+        hostEventCallbacks.get(eventName)?.delete(callback);
+      };
     };
 
     // Create fresh instance
@@ -51,27 +59,27 @@ describe('EventEmitter (Guest)', () => {
     }
 
     // Restore original globals
-    sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
-    sandboxGlobal.onHostEvent = originalOnHostEvent as SandboxGlobal['onHostEvent'];
+    sandboxGlobal.__sendEventToHost = originalSendToHost as SandboxGlobal['__sendEventToHost'];
+    sandboxGlobal.__useHostEvent = originalUseHostEvent as SandboxGlobal['__useHostEvent'];
   });
 
   describe('emit', () => {
     it('should send events to host through sendToHost', () => {
       emitter.emit('myEvent', { data: 'test' });
 
-      expect(sentMessages).toEqual([{ event: 'askit:event:myEvent', payload: { data: 'test' } }]);
+      expect(sentMessages).toEqual([{ event: 'myEvent', payload: { data: 'test' } }]);
     });
 
-    it('should prefix events with askit:event:', () => {
+    it('should send event name as-is', () => {
       emitter.emit('customEvent', 'payload');
 
-      expect(sentMessages[0]?.event).toBe('askit:event:customEvent');
+      expect(sentMessages[0]?.event).toBe('customEvent');
     });
 
     it('should handle emit without payload', () => {
       emitter.emit('noPayload');
 
-      expect(sentMessages).toEqual([{ event: 'askit:event:noPayload', payload: undefined }]);
+      expect(sentMessages).toEqual([{ event: 'noPayload', payload: undefined }]);
     });
 
     it('should handle complex payloads', () => {
@@ -117,13 +125,13 @@ describe('EventEmitter (Guest)', () => {
       console.error = originalError;
     });
 
-    it('should handle sendToHost throwing exception', () => {
+    it('should handle __sendEventToHost throwing exception', () => {
       const errors: unknown[] = [];
       const originalError = console.error;
       console.error = (...args) => errors.push(args);
 
-      // Mock sendToHost to throw
-      sandboxGlobal.sendToHost = () => {
+      // Mock __sendEventToHost to throw
+      sandboxGlobal.__sendEventToHost = () => {
         throw new Error('Network failure');
       };
 
@@ -168,16 +176,17 @@ describe('EventEmitter (Guest)', () => {
       expect(received).toEqual(['before']); // 'after' should not be received
     });
 
-    it('should receive events through onHostEvent callback', () => {
+    it('should receive events through __useHostEvent callback', () => {
       const received: unknown[] = [];
 
       emitter.on('hostCallback', (payload) => {
         received.push(payload);
       });
 
-      // Simulate host calling back through onHostEvent
-      if (hostEventCallback) {
-        hostEventCallback('hostCallback', { via: 'callback' });
+      // Simulate host calling back through per-event subscription
+      const callbacks = hostEventCallbacks.get('hostCallback');
+      if (callbacks) {
+        callbacks.forEach((cb) => cb({ via: 'callback' }));
       }
 
       expect(received).toEqual([{ via: 'callback' }]);
@@ -323,10 +332,10 @@ describe('EventEmitter (Guest)', () => {
     });
   });
 
-  describe('without sendToHost', () => {
-    it('should warn when sendToHost is not available', () => {
-      // Remove sendToHost
-      sandboxGlobal.sendToHost = undefined;
+  describe('without __sendEventToHost', () => {
+    it('should warn when __sendEventToHost is not available', () => {
+      // Remove __sendEventToHost
+      sandboxGlobal.__sendEventToHost = undefined;
 
       const busWithoutHost = new GuestEventEmitter();
 
@@ -336,7 +345,7 @@ describe('EventEmitter (Guest)', () => {
 
       busWithoutHost.emit('test', 'data');
 
-      expect(JSON.stringify(warnings)).toContain('sendToHost not available');
+      expect(JSON.stringify(warnings)).toContain('__sendEventToHost not available');
 
       // Cleanup
       (busWithoutHost as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
@@ -345,9 +354,9 @@ describe('EventEmitter (Guest)', () => {
   });
 
   describe('retry queue mechanism', () => {
-    it('should warn and queue when sendToHost is unavailable', () => {
-      // Start without sendToHost
-      sandboxGlobal.sendToHost = undefined;
+    it('should warn and queue when __sendEventToHost is unavailable', () => {
+      // Start without __sendEventToHost
+      sandboxGlobal.__sendEventToHost = undefined;
 
       const retryEmitter = new GuestEventEmitter();
       const warnings: string[] = [];
@@ -356,20 +365,20 @@ describe('EventEmitter (Guest)', () => {
       const originalWarn = console.warn;
       console.warn = (...args) => warnings.push(args.join(' '));
 
-      // Emit while sendToHost is unavailable - should warn
+      // Emit while __sendEventToHost is unavailable - should warn
       retryEmitter.emit('queued:event', { data: 'test' });
 
-      // Should have warned about sendToHost not available
-      expect(warnings.some((w) => w.includes('sendToHost not available'))).toBe(true);
+      // Should have warned about __sendEventToHost not available
+      expect(warnings.some((w) => w.includes('__sendEventToHost not available'))).toBe(true);
 
       // Cleanup
       (retryEmitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
       console.warn = originalWarn;
     });
 
-    it('should log error and queue when sendToHost throws', () => {
-      // sendToHost throws error
-      sandboxGlobal.sendToHost = () => {
+    it('should log error and queue when __sendEventToHost throws', () => {
+      // __sendEventToHost throws error
+      sandboxGlobal.__sendEventToHost = () => {
         throw new Error('Send failed');
       };
 
@@ -495,10 +504,10 @@ describe('EventEmitter (Guest)', () => {
   });
 
   describe('retry mechanism', () => {
-    it('should catch and queue messages when sendToHost throws error', () => {
+    it('should catch and queue messages when __sendEventToHost throws error', () => {
       const errors: string[] = [];
 
-      sandboxGlobal.sendToHost = () => {
+      sandboxGlobal.__sendEventToHost = () => {
         throw new Error('Network failure');
       };
 

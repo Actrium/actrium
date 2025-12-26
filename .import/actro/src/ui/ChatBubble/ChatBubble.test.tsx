@@ -125,7 +125,7 @@ describe('ChatBubble (Host)', () => {
         called = true;
       };
       const element = createElement(ChatBubble, { content: 'Message', onPress });
-      element.props.onPress();
+      element.props.onPress?.();
       expect(called).toBe(true);
     });
 
@@ -135,7 +135,7 @@ describe('ChatBubble (Host)', () => {
         called = true;
       };
       const element = createElement(ChatBubble, { content: 'Message', onLongPress });
-      element.props.onLongPress();
+      element.props.onLongPress?.();
       expect(called).toBe(true);
     });
   });

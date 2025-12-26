@@ -5,11 +5,11 @@
  */
 
 import { logger } from '../core/logger';
-// Declare globals injected by Rill runtime
-import type { ToastAPI, ToastOptions, TypedSendToHost } from '../types';
+import type { ToastAPI, ToastOptions } from '../types';
 
+// Declare globals injected by Rill runtime
 declare const global: {
-  sendToHost?: TypedSendToHost;
+  __sendEventToHost?: (eventName: string, payload?: unknown) => void;
 };
 
 class RemoteToast implements ToastAPI {
@@ -23,22 +23,21 @@ class RemoteToast implements ToastAPI {
       return;
     }
 
-    if (typeof global.sendToHost === 'function') {
+    if (typeof global.__sendEventToHost === 'function') {
       try {
-        // Send as array to avoid serialization issues
-        global.sendToHost('askit:toast:show', [message, options]);
+        global.__sendEventToHost('ASKIT_TOAST_SHOW', { message, options });
       } catch (error) {
         logger.error('Toast', 'Failed to send message to host', {
           message,
           options,
           error: error instanceof Error ? error.message : String(error),
-          hasSendToHost: typeof global.sendToHost === 'function',
+          hasSendToHost: typeof global.__sendEventToHost === 'function',
         });
         // Fallback to console
         console.log(`[Toast] ${message}`);
       }
     } else {
-      logger.warn('Toast', 'sendToHost not available in this environment');
+      logger.warn('Toast', '__sendEventToHost not available in this environment');
       console.log(`[Toast] ${message}`);
     }
   }

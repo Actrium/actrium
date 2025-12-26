@@ -5,11 +5,11 @@
  */
 
 import { logger } from '../core/logger';
-// Declare globals injected by Rill runtime
-import type { HapticAPI, HapticType, TypedSendToHost } from '../types';
+import type { HapticAPI, HapticType } from '../types';
 
+// Declare globals injected by Rill runtime
 declare const global: {
-  sendToHost?: TypedSendToHost;
+  __sendEventToHost?: (eventName: string, payload?: unknown) => void;
 };
 
 class RemoteHaptic implements HapticAPI {
@@ -17,19 +17,18 @@ class RemoteHaptic implements HapticAPI {
    * Trigger haptic feedback (sends command to Host)
    */
   trigger(type: HapticType = 'medium'): void {
-    if (typeof global.sendToHost === 'function') {
+    if (typeof global.__sendEventToHost === 'function') {
       try {
-        // Send as array for consistency with Toast
-        global.sendToHost('askit:haptic:trigger', [type]);
+        global.__sendEventToHost('ASKIT_HAPTIC_TRIGGER', { type });
       } catch (error) {
         logger.error('Haptic', 'Failed to send message to host', {
           type,
           error: error instanceof Error ? error.message : String(error),
-          hasSendToHost: typeof global.sendToHost === 'function',
+          hasSendToHost: typeof global.__sendEventToHost === 'function',
         });
       }
     } else {
-      logger.warn('Haptic', 'sendToHost not available in this environment');
+      logger.warn('Haptic', '__sendEventToHost not available in this environment');
     }
   }
 }

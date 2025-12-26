@@ -52,19 +52,30 @@ describe('Core Bridge - contracts', () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 
-  it('should report unknown events as violations', () => {
+  it('should forward unknown events to EventEmitter (no violation)', () => {
     const violations: unknown[] = [];
     const warnings: unknown[][] = [];
     console.warn = (...args) => warnings.push(args);
 
-    handleGuestMessage(
-      { event: 'SOME_RANDOM_EVENT', payload: { a: 1 } },
-      {
-        onContractViolation: (v) => violations.push(v),
+    // Listen using normal EventEmitter API (no monkeypatching)
+    const { EventEmitter } =
+      require('../api/EventEmitter.host') as typeof import('../api/EventEmitter.host');
+
+    const received: Array<{ event: string; payload: unknown }> = [];
+    const unsubscribe = (EventEmitter as typeof import('../api/EventEmitter.host').EventEmitter).on(
+      'SOME_RANDOM_EVENT',
+      (payload: unknown) => {
+        received.push({ event: 'SOME_RANDOM_EVENT', payload });
       }
     );
 
-    expect(violations).toHaveLength(1);
-    expect(warnings.length).toBeGreaterThan(0);
+    handleGuestMessage(
+      { event: 'SOME_RANDOM_EVENT', payload: { a: 1 } },
+      { onContractViolation: (v) => violations.push(v) }
+    );
+
+    unsubscribe();
+    expect(violations).toHaveLength(0);
+    expect(received).toEqual([{ event: 'SOME_RANDOM_EVENT', payload: { a: 1 } }]);
   });
 });

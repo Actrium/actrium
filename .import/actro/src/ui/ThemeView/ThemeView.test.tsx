@@ -4,7 +4,7 @@
  * Tests the ThemeView component props handling and element creation
  */
 
-import { createElement } from 'react';
+import React, { createElement } from 'react';
 import type { ThemeViewProps } from '../../types';
 import { ThemeView, default as ThemeViewDefault } from './ThemeView.host';
 
@@ -135,7 +135,7 @@ describe('ThemeView (Host)', () => {
 
     it('should accept null children', () => {
       const element = createElement(ThemeView, {}, null);
-      expect(element.props.children).toBeNull();
+      expect(element.props.children === null).toBe(true);
     });
 
     it('should accept undefined children', () => {
@@ -147,7 +147,8 @@ describe('ThemeView (Host)', () => {
       const innerThemeView = createElement(ThemeView, { variant: 'surface' });
       const element = createElement(ThemeView, { variant: 'background' }, innerThemeView);
       expect(element.props.children).toBe(innerThemeView);
-      expect(element.props.children.props.variant).toBe('surface');
+      const childElement = element.props.children as React.ReactElement<ThemeViewProps>;
+      expect(childElement.props.variant).toBe('surface');
     });
   });
 

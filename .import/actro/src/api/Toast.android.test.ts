@@ -22,12 +22,7 @@ function makeMock(): MockFn {
   return fn;
 }
 
-import {
-  _injectMocks,
-  _resetReactNative,
-  HostToast,
-  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
-} from './Toast.host';
+import { _injectMocks, _resetReactNative, HostToast, type HostToastInternal } from './Toast.host';
 
 describe('Toast (Android Platform)', () => {
   const mockShowWithGravity = makeMock();
@@ -139,7 +134,7 @@ describe('Toast (Android Platform)', () => {
     const toast = new HostToast();
     const calls: string[] = [];
 
-    toast[SET_HANDLER_SYMBOL]((msg) => calls.push(msg));
+    (toast as HostToastInternal)._setHandler((msg) => calls.push(msg));
     toast.show('Custom Handler');
 
     expect(calls).toEqual(['Custom Handler']);

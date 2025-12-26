@@ -4,17 +4,18 @@ askit 提供一组可在 Host 和 Guest 环境中使用的 UI 组件。
 
 ## 组件工作原理
 
-在 **Guest** (QuickJS) 中：组件返回描述 UI 结构的 DSL（领域特定语言）对象。
+askit 采用与 `rill/let` 一致的模型：**Guest 侧组件是 element 标识（string ElementType）**，由 reconciler 负责序列化 props 并生成操作。
 
-在 **Host** (React Native) 中：组件渲染为实际的 React Native 视图。
+在 **Guest** (QuickJS) 中：直接写 JSX。
 
-```typescript
-// Guest 端 - 生成 DSL
-const avatar = UserAvatar({ uri: 'https://...', size: 48 });
-// 返回: { type: 'UserAvatar', props: { uri: '...', size: 48 } }
+在 **Host** (React Native) 中：同名 element type 会被注册为真实 RN 组件。
 
-// Host 端 - 渲染 React Native 组件
-<UserAvatar uri="https://..." size={48} />
+```tsx
+import { UserAvatar } from 'askit';
+
+export function App() {
+  return <UserAvatar uri="https://..." size={48} />;
+}
 ```
 
 ---
@@ -35,7 +36,7 @@ const avatar = UserAvatar({ uri: 'https://...', size: 48 });
 | `pendingColor` | `string` | 否 | 待处理状态颜色 |
 | `errorColor` | `string` | 否 | 错误状态颜色 |
 | `lineWidth` | `number` | 否 | 连接线宽度 |
-| `style` | `ViewStyle` | 否 | 附加样式 |
+| `style` | `StyleProp` | 否 | 附加样式 |
 
 ### StepItem 对象
 
@@ -53,16 +54,20 @@ type StepStatus = 'pending' | 'active' | 'completed' | 'error';
 
 ### 示例
 
-```typescript
+```tsx
 import { StepList } from 'askit';
 
-const items = [
-  { id: '1', title: '连接钱包', status: 'completed' },
-  { id: '2', title: '验证身份', status: 'active' },
-  { id: '3', title: '完成设置', status: 'pending' }
-];
-
-StepList({ items });
+export function App() {
+  return (
+    <StepList
+      items={[
+        { id: '1', title: '连接钱包', status: 'completed' },
+        { id: '2', title: '验证身份', status: 'active' },
+        { id: '3', title: '完成设置', status: 'pending' },
+      ]}
+    />
+  );
+}
 ```
 
 ---
@@ -78,25 +83,28 @@ StepList({ items });
 | `children` | `ReactNode` | 否 | 子元素 |
 | `variant` | `'primary' \| 'secondary' \| 'surface' \| 'background'` | 否 | 主题变体 |
 | `padding` | `number \| 'none' \| 'small' \| 'medium' \| 'large'` | 否 | 内边距 |
-| `style` | `ViewStyle` | 否 | 附加样式 |
+| `style` | `StyleProp` | 否 | 附加样式 |
 
 ### 示例
 
-```typescript
+```tsx
 import { ThemeView } from 'askit';
 
-ThemeView({
-  variant: 'surface',
-  padding: 'medium',
-  children: [/* ... */]
-});
+export function App() {
+  return (
+    <ThemeView variant="surface" padding="medium">
+      {/* ... */}
+    </ThemeView>
+  );
+}
 
-// 使用数值内边距
-ThemeView({
-  variant: 'primary',
-  padding: 16,
-  children: [/* ... */]
-});
+export function AppNumericPadding() {
+  return (
+    <ThemeView variant="primary" padding={16}>
+      {/* ... */}
+    </ThemeView>
+  );
+}
 ```
 
 ---
@@ -115,30 +123,28 @@ ThemeView({
 | `showOnlineStatus` | `boolean` | 否 | 是否显示在线状态指示器 |
 | `isOnline` | `boolean` | 否 | 在线状态 |
 | `onPress` | `() => void` | 否 | 点击回调 |
-| `style` | `ViewStyle` | 否 | 附加样式 |
+| `style` | `StyleProp` | 否 | 附加样式 |
 
 ### 示例
 
-```typescript
+```tsx
 import { UserAvatar } from 'askit';
 
-// 使用图片
-UserAvatar({ uri: 'https://example.com/avatar.png', size: 48 });
-
-// 使用预设尺寸
-UserAvatar({ uri: 'https://example.com/avatar.png', size: 'large' });
-
-// 使用降级首字母
-UserAvatar({ name: 'John Doe', size: 'medium' });
-// 显示 "JD" 作为降级
-
-// 带在线状态
-UserAvatar({
-  uri: 'https://example.com/avatar.png',
-  showOnlineStatus: true,
-  isOnline: true,
-  onPress: () => console.log('头像被点击')
-});
+export function App() {
+  return (
+    <>
+      <UserAvatar uri="https://example.com/avatar.png" size={48} />
+      <UserAvatar uri="https://example.com/avatar.png" size="large" />
+      <UserAvatar name="John Doe" size="medium" />
+      <UserAvatar
+        uri="https://example.com/avatar.png"
+        showOnlineStatus
+        isOnline
+        onPress={() => console.log('头像被点击')}
+      />
+    </>
+  );
+}
 ```
 
 ---
@@ -160,54 +166,45 @@ UserAvatar({
 | `renderMarkdown` | `boolean` | 否 | 是否渲染 Markdown |
 | `onPress` | `() => void` | 否 | 点击回调 |
 | `onLongPress` | `() => void` | 否 | 长按回调 |
-| `style` | `ViewStyle` | 否 | 附加样式 |
+| `style` | `StyleProp` | 否 | 附加样式 |
 
 ### 示例
 
-```typescript
+```tsx
 import { ChatBubble } from 'askit';
 
-// 收到的消息
-ChatBubble({
-  content: '你好!',
-  isOwn: false,
-  timestamp: '10:30 AM'
-});
-
-// 发送的消息
-ChatBubble({
-  content: '嗨!',
-  isOwn: true,
-  timestamp: Date.now(),
-  status: 'delivered'
-});
-
-// 带交互的消息
-ChatBubble({
-  content: '长按我试试',
-  isOwn: true,
-  showTail: true,
-  onPress: () => console.log('点击'),
-  onLongPress: () => console.log('长按')
-});
+export function App() {
+  return (
+    <>
+      <ChatBubble content="你好!" isOwn={false} timestamp="10:30 AM" />
+      <ChatBubble content="嗨!" isOwn timestamp={Date.now()} status="delivered" />
+      <ChatBubble
+        content="长按我试试"
+        isOwn
+        showTail
+        onPress={() => console.log('点击')}
+        onLongPress={() => console.log('长按')}
+      />
+    </>
+  );
+}
 ```
 
 ---
 
 ## 自定义组件
 
-你可以创建遵循相同模式的自定义组件：
+你可以按照 rill/let 的方式创建自定义组件：在 Guest 侧定义 element 标识，在 Host 侧注册实际实现。
 
-### 在 Guest 中（DSL 生成器）
+### 在 Guest 中（element 标识）
 
-```typescript
-// my-component.remote.tsx
-export function MyComponent(props: MyComponentProps) {
-  return {
-    type: 'MyComponent',
-    props
-  };
-}
+```tsx
+// my-component.guest.tsx
+import type React from 'react';
+
+export type MyComponentProps = { title: string };
+
+export const MyComponent = 'MyComponent' as unknown as React.ElementType<MyComponentProps>;
 ```
 
 ### 在 Host 中（React Native）

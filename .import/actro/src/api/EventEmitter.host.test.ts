@@ -4,12 +4,7 @@
  * 100% real tests - no mocks, no fakes
  */
 
-import {
-  BROADCASTER_SYMBOL,
-  EventEmitter,
-  HostEventEmitter,
-  NOTIFY_SYMBOL,
-} from './EventEmitter.host';
+import { EventEmitter, HostEventEmitter, type HostEventEmitterInternal } from './EventEmitter.host';
 
 describe('EventEmitter (Host)', () => {
   // Use a fresh instance for isolated tests
@@ -228,7 +223,7 @@ describe('EventEmitter (Host)', () => {
     it('should set broadcaster and forward events', () => {
       const broadcasts: Array<{ event: string; payload: unknown }> = [];
 
-      (emitter as HostEventEmitter)[BROADCASTER_SYMBOL]((event, payload) => {
+      (emitter as HostEventEmitterInternal)._setBroadcaster((event, payload) => {
         broadcasts.push({ event, payload });
       });
 
@@ -236,18 +231,18 @@ describe('EventEmitter (Host)', () => {
 
       expect(broadcasts).toEqual([{ event: 'engineEvent', payload: 'data' }]);
 
-      (emitter as HostEventEmitter)[BROADCASTER_SYMBOL](null);
+      (emitter as HostEventEmitterInternal)._setBroadcaster(null);
     });
 
     it('should unset broadcaster', () => {
       const broadcasts: Array<{ event: string; payload: unknown }> = [];
 
-      (emitter as HostEventEmitter)[BROADCASTER_SYMBOL]((event, payload) => {
+      (emitter as HostEventEmitterInternal)._setBroadcaster((event, payload) => {
         broadcasts.push({ event, payload });
       });
 
       emitter.emit('before', '1');
-      (emitter as HostEventEmitter)[BROADCASTER_SYMBOL](null);
+      (emitter as HostEventEmitterInternal)._setBroadcaster(null);
       emitter.emit('after', '2');
 
       expect(broadcasts).toEqual([{ event: 'before', payload: '1' }]);
@@ -260,12 +255,12 @@ describe('EventEmitter (Host)', () => {
         received.push(payload);
       });
 
-      (emitter as HostEventEmitter)[NOTIFY_SYMBOL]('fromEngine', { source: 'guest' });
+      (emitter as HostEventEmitterInternal)._notifyLocal('fromEngine', { source: 'guest' });
 
       expect(received).toEqual([{ source: 'guest' }]);
     });
 
-    it('should catch errors in NOTIFY_SYMBOL listeners', () => {
+    it('should catch errors in _notifyLocal listeners', () => {
       const received: unknown[] = [];
       const consoleError = console.error;
       const errors: unknown[] = [];
@@ -278,7 +273,7 @@ describe('EventEmitter (Host)', () => {
         received.push(payload);
       });
 
-      (emitter as HostEventEmitter)[NOTIFY_SYMBOL]('engineError', 'data');
+      (emitter as HostEventEmitterInternal)._notifyLocal('engineError', 'data');
 
       // Second listener should still receive
       expect(received).toEqual(['data']);
@@ -292,7 +287,7 @@ describe('EventEmitter (Host)', () => {
       const errors: unknown[] = [];
       console.error = (...args) => errors.push(args);
 
-      (emitter as HostEventEmitter)[BROADCASTER_SYMBOL](() => {
+      (emitter as HostEventEmitterInternal)._setBroadcaster(() => {
         throw new Error('Engine broadcast error');
       });
 
@@ -300,7 +295,7 @@ describe('EventEmitter (Host)', () => {
       expect(errors.length).toBeGreaterThanOrEqual(1);
 
       console.error = consoleError;
-      (emitter as HostEventEmitter)[BROADCASTER_SYMBOL](null);
+      (emitter as HostEventEmitterInternal)._setBroadcaster(null);
     });
   });
 

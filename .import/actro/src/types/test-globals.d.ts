@@ -3,8 +3,55 @@
 
 declare function describe(name: string, fn: () => void): void;
 declare function it(name: string, fn: () => void): void;
+declare namespace it {
+  function skip(name: string, fn: () => void | Promise<void>): void;
+  function only(name: string, fn: () => void | Promise<void>): void;
+}
 declare function beforeEach(fn: () => void): void;
 declare function afterEach(fn: () => void): void;
+
+// bun:test module declaration
+declare module 'bun:test' {
+  interface MockFunction {
+    <T>(fn?: T): T;
+    module(name: string, factory: () => unknown): void;
+  }
+  export const mock: MockFunction;
+  export function spyOn<T extends object, K extends keyof T>(
+    obj: T,
+    method: K
+  ): {
+    mockImplementation(fn: (...args: unknown[]) => unknown): void;
+    mockReturnValue(value: unknown): void;
+    mockClear(): void;
+    mockRestore(): void;
+  };
+  export function describe(name: string, fn: () => void): void;
+  export function it(name: string, fn: () => void | Promise<void>): void;
+  export function test(name: string, fn: () => void | Promise<void>): void;
+  export function beforeEach(fn: () => void | Promise<void>): void;
+  export function afterEach(fn: () => void | Promise<void>): void;
+  export function beforeAll(fn: () => void | Promise<void>): void;
+  export function afterAll(fn: () => void | Promise<void>): void;
+  export function expect(actual: unknown): {
+    toBe(expected: unknown): void;
+    toEqual(expected: unknown): void;
+    toBeNull(): void;
+    toBeUndefined(): void;
+    toBeDefined(): void;
+    toBeTruthy(): void;
+    toBeFalsy(): void;
+    toContain(expected: unknown): void;
+    toHaveLength(expected: number): void;
+    toThrow(expected?: unknown): void;
+    not: {
+      toBe(expected: unknown): void;
+      toEqual(expected: unknown): void;
+      toBeNull(): void;
+      toThrow(): void;
+    };
+  };
+}
 
 declare function expect(actual: unknown): {
   toEqual(expected: unknown): void;

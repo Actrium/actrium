@@ -8,8 +8,8 @@ import { GuestEventEmitter } from './EventEmitter.guest';
 
 describe('EventEmitter (Guest) - Edge Cases', () => {
   type SandboxGlobal = typeof globalThis & {
-    sendToHost?: (event: string, payload?: unknown) => void;
-    onHostEvent?: (callback: (event: string, payload: unknown) => void) => void;
+    __sendEventToHost?: (eventName: string, payload?: unknown) => void;
+    __useHostEvent?: (eventName: string, callback: (payload: unknown) => void) => () => void;
   };
 
   const sandboxGlobal = globalThis as SandboxGlobal;
@@ -17,26 +17,26 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
   let emitter: GuestEventEmitter;
   let sentMessages: Array<{ event: string; payload: unknown }>;
   let originalSendToHost: unknown;
-  let originalOnHostEvent: unknown;
+  let originalUseHostEvent: unknown;
 
   beforeEach(() => {
-    originalSendToHost = sandboxGlobal.sendToHost;
-    originalOnHostEvent = sandboxGlobal.onHostEvent;
+    originalSendToHost = sandboxGlobal.__sendEventToHost;
+    originalUseHostEvent = sandboxGlobal.__useHostEvent;
 
     sentMessages = [];
 
-    sandboxGlobal.sendToHost = (event: string, payload?: unknown) => {
-      sentMessages.push({ event, payload });
+    sandboxGlobal.__sendEventToHost = (eventName: string, payload?: unknown) => {
+      sentMessages.push({ event: eventName, payload });
     };
 
-    sandboxGlobal.onHostEvent = () => {};
+    sandboxGlobal.__useHostEvent = () => () => {};
 
     emitter = new GuestEventEmitter();
   });
 
   afterEach(() => {
-    sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
-    sandboxGlobal.onHostEvent = originalOnHostEvent as SandboxGlobal['onHostEvent'];
+    sandboxGlobal.__sendEventToHost = originalSendToHost as SandboxGlobal['__sendEventToHost'];
+    sandboxGlobal.__useHostEvent = originalUseHostEvent as SandboxGlobal['__useHostEvent'];
 
     // Clear any pending timers to prevent tests from hanging
     if (emitter && '_clearRetryTimer' in emitter) {
@@ -109,26 +109,23 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
   });
 
   describe('message queue and retry logic', () => {
-    it('should queue messages when sendToHost throws', async () => {
-      // Suppress expected error logs
+    it('should queue messages when __sendEventToHost throws', () => {
       const originalError = console.error;
-      console.error = () => {}; // Suppress logs for this test
+      console.error = () => {};
 
       let callCount = 0;
-      sandboxGlobal.sendToHost = () => {
+      sandboxGlobal.__sendEventToHost = () => {
         callCount++;
         throw new Error('Network error');
       };
 
-      // Create new emitter with failing sendToHost
       emitter = new GuestEventEmitter();
-
-      // This should queue the message
       emitter.emit('test:event', { data: 'test' });
 
-      expect(callCount).toBe(1); // Initial attempt failed
-
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
       console.error = originalError;
+
+      expect(callCount).toBe(1);
     });
 
     it('should drop oldest message when queue is full', () => {
@@ -137,84 +134,104 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       const originalError = console.error;
 
       console.warn = (...args: unknown[]) => warnings.push(args);
-      console.error = () => {}; // Suppress expected error logs (105 failed sends)
+      console.error = () => {};
 
-      // Make sendToHost always throw
-      sandboxGlobal.sendToHost = () => {
+      sandboxGlobal.__sendEventToHost = () => {
         throw new Error('Always fails');
       };
 
       emitter = new GuestEventEmitter();
 
-      // Fill queue beyond maxQueueSize (default 100)
       for (let i = 0; i < 105; i++) {
         emitter.emit(`event${i}`, { index: i });
       }
 
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
       console.warn = originalWarn;
       console.error = originalError;
 
-      // Should have warned about dropping messages
       expect(warnings.length).toBeGreaterThan(0);
     });
 
-    // SKIPPED: This test causes the test suite to hang when run with all tests
-    // It works fine when run individually but has timing issues in the full suite
-    it.skip('should retry messages when sendToHost becomes available', async () => {
+    it('should retry messages when __sendEventToHost becomes available', () => {
+      // Use manual timer mocking to avoid async timing issues
+      const originalSetTimeout = globalThis.setTimeout;
+      let scheduledFn: (() => void) | null = null;
+
+      globalThis.setTimeout = ((fn: () => void) => {
+        scheduledFn = fn;
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+
       let sendToHostAvailable = false;
       const successfulMessages: string[] = [];
 
-      sandboxGlobal.sendToHost = (event: string) => {
+      sandboxGlobal.__sendEventToHost = (eventName: string) => {
         if (!sendToHostAvailable) {
           throw new Error('Not ready');
         }
-        successfulMessages.push(event);
+        successfulMessages.push(eventName);
       };
 
       emitter = new GuestEventEmitter();
-
-      // Emit while sendToHost is failing
       emitter.emit('queued:event1', null);
       emitter.emit('queued:event2', null);
 
-      // Make sendToHost available immediately
+      // Now make sendToHost available and trigger the scheduled retry
       sendToHostAvailable = true;
+      // TypeScript can't track that scheduledFn was assigned in the setTimeout callback
+      (scheduledFn as (() => void) | null)?.();
 
-      // Wait for retry (retry delay is 1000ms, add small buffer)
-      await new Promise((resolve) => setTimeout(resolve, 1020));
+      globalThis.setTimeout = originalSetTimeout;
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
 
-      // Messages should have been retried
       expect(successfulMessages.length).toBeGreaterThan(0);
     });
 
-    // SKIPPED: This test takes 3+ seconds and may cause timing issues in the full suite
-    it.skip('should drop messages after max retries', async () => {
+    it('should drop messages after max retries', () => {
+      const originalSetTimeout = globalThis.setTimeout;
+      const scheduledFns: Array<() => void> = [];
+
+      globalThis.setTimeout = ((fn: () => void) => {
+        scheduledFns.push(fn);
+        return scheduledFns.length as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+
       const droppedLogs: unknown[] = [];
       const originalError = console.error;
       console.error = (...args: unknown[]) => droppedLogs.push(args);
 
-      sandboxGlobal.sendToHost = () => {
+      sandboxGlobal.__sendEventToHost = () => {
         throw new Error('Permanent failure');
       };
 
       emitter = new GuestEventEmitter();
-
       emitter.emit('will:fail', null);
 
-      // Wait for all retries to exhaust (3 retries with 1s delay each = ~3.1s total)
-      await new Promise((resolve) => setTimeout(resolve, 3100));
+      // Trigger all retries (maxRetries = 3)
+      for (let i = 0; i < 4 && scheduledFns.length > 0; i++) {
+        const fn = scheduledFns.shift();
+        if (fn) fn();
+      }
 
+      globalThis.setTimeout = originalSetTimeout;
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
       console.error = originalError;
 
-      // Should have logged the drop after max retries
       expect(droppedLogs.length).toBeGreaterThan(0);
     });
 
-    // SKIPPED: This test has timing issues when run with the full suite
-    it.skip('should handle missing sendToHost gracefully when processing queue', async () => {
-      // Start with working sendToHost
+    it('should handle missing __sendEventToHost gracefully when processing queue', () => {
+      const originalSetTimeout = globalThis.setTimeout;
+      let scheduledFn: (() => void) | null = null;
+
+      globalThis.setTimeout = ((fn: () => void) => {
+        scheduledFn = fn;
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout;
+
       let callCount = 0;
-      sandboxGlobal.sendToHost = () => {
+      sandboxGlobal.__sendEventToHost = () => {
         callCount++;
         throw new Error('Fail once');
       };
@@ -222,13 +239,14 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       emitter = new GuestEventEmitter();
       emitter.emit('queued', null);
 
-      // Remove sendToHost
-      sandboxGlobal.sendToHost = undefined;
+      // Remove __sendEventToHost before retry
+      sandboxGlobal.__sendEventToHost = undefined;
+      // TypeScript can't track that scheduledFn was assigned in the setTimeout callback
+      (scheduledFn as (() => void) | null)?.();
 
-      // Wait for retry attempt (retry delay is 1000ms)
-      await new Promise((resolve) => setTimeout(resolve, 1020));
+      globalThis.setTimeout = originalSetTimeout;
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
 
-      // Should not crash, should have attempted once
       expect(callCount).toBe(1);
     });
   });
@@ -250,19 +268,19 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
       expect(errorLogs.length).toBeGreaterThan(0);
     });
 
-    it('should handle emit without sendToHost available', () => {
+    it('should handle emit without __sendEventToHost available', () => {
       const warnings: unknown[] = [];
       const originalWarn = console.warn;
       console.warn = (...args: unknown[]) => warnings.push(args);
 
-      sandboxGlobal.sendToHost = undefined;
+      sandboxGlobal.__sendEventToHost = undefined;
 
       emitter = new GuestEventEmitter();
       emitter.emit('test', null);
 
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
       console.warn = originalWarn;
 
-      // Should warn about sendToHost not being available
       expect(warnings.length).toBeGreaterThan(0);
     });
   });
@@ -309,8 +327,7 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
   });
 
   describe('retry scheduling', () => {
-    it('should not schedule multiple retries simultaneously', async () => {
-      // Suppress expected error logs
+    it('should not schedule multiple retries simultaneously', () => {
       const originalError = console.error;
       console.error = () => {};
 
@@ -321,24 +338,22 @@ describe('EventEmitter (Guest) - Edge Cases', () => {
         return originalSetTimeout(fn, delay);
       }) as typeof setTimeout;
 
-      sandboxGlobal.sendToHost = () => {
+      sandboxGlobal.__sendEventToHost = () => {
         throw new Error('Fail');
       };
 
       emitter = new GuestEventEmitter();
 
-      // Emit multiple events quickly
       emitter.emit('event1', null);
       emitter.emit('event2', null);
       emitter.emit('event3', null);
 
+      (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
       globalThis.setTimeout = originalSetTimeout;
       console.error = originalError;
 
-      // Should have scheduled retry only once (not 3 times)
-      // Note: May be 1 or more depending on timing, but definitely not 3
       expect(retryCount).toBeGreaterThanOrEqual(1);
-      expect(retryCount).toBeLessThan(6); // Safety check
+      expect(retryCount).toBeLessThan(6);
     });
   });
 });

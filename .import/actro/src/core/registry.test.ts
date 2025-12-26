@@ -8,18 +8,8 @@
  * imports React Native components which can't be loaded in Node.
  */
 
-import {
-  HAPTIC_CLEAR_HANDLER,
-  HAPTIC_SET_HANDLER,
-  Haptic,
-  type HostHaptic,
-} from '../api/Haptic.host';
-import {
-  TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
-  type HostToast,
-  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
-  Toast,
-} from '../api/Toast.host';
+import { Haptic, type HostHapticInternal } from '../api/Haptic.host';
+import { Toast, type HostToastInternal } from '../api/Toast.host';
 
 // Recreate module registry (same as registry.ts)
 const modules = {
@@ -45,13 +35,13 @@ describe('Core Registry', () => {
 
     beforeEach(() => {
       toastCalls = [];
-      (Toast as HostToast)[SET_HANDLER_SYMBOL]((message, options) => {
+      (Toast as HostToastInternal)._setHandler((message, options) => {
         toastCalls.push({ message, options });
       });
     });
 
     afterEach(() => {
-      (Toast as HostToast)[CLEAR_HANDLER_SYMBOL]();
+      (Toast as HostToastInternal)._clearHandler();
     });
 
     it('should call show method', () => {
@@ -78,13 +68,13 @@ describe('Core Registry', () => {
 
     beforeEach(() => {
       hapticCalls = [];
-      (Haptic as HostHaptic)[HAPTIC_SET_HANDLER]((type) => {
+      (Haptic as HostHapticInternal)._setHandler((type) => {
         hapticCalls.push({ type });
       });
     });
 
     afterEach(() => {
-      (Haptic as HostHaptic)[HAPTIC_CLEAR_HANDLER]();
+      (Haptic as HostHapticInternal)._clearHandler();
     });
 
     it('should call trigger method', () => {
@@ -111,13 +101,13 @@ describe('Core Registry', () => {
 
   describe('configureToast function', () => {
     afterEach(() => {
-      (Toast as HostToast)[CLEAR_HANDLER_SYMBOL]();
+      (Toast as HostToastInternal)._clearHandler();
     });
 
     it('should set custom toast handler', () => {
       const calls: string[] = [];
 
-      (Toast as HostToast)[SET_HANDLER_SYMBOL]((message) => {
+      (Toast as HostToastInternal)._setHandler((message) => {
         calls.push(message);
       });
 
@@ -129,7 +119,7 @@ describe('Core Registry', () => {
     it('should pass options to custom handler', () => {
       const calls: Array<{ message: string; options: unknown }> = [];
 
-      (Toast as HostToast)[SET_HANDLER_SYMBOL]((message, options) => {
+      (Toast as HostToastInternal)._setHandler((message, options) => {
         calls.push({ message, options });
       });
 
@@ -141,13 +131,13 @@ describe('Core Registry', () => {
 
   describe('configureHaptic function', () => {
     afterEach(() => {
-      (Haptic as HostHaptic)[HAPTIC_CLEAR_HANDLER]();
+      (Haptic as HostHapticInternal)._clearHandler();
     });
 
     it('should set custom haptic handler', () => {
       const calls: unknown[] = [];
 
-      (Haptic as HostHaptic)[HAPTIC_SET_HANDLER]((type) => {
+      (Haptic as HostHapticInternal)._setHandler((type) => {
         calls.push(type);
       });
 

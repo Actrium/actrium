@@ -138,10 +138,10 @@ describe('StepList (Host)', () => {
       ];
       const element = createElement(StepList, { items: allStatuses });
       expect(element.props.items.length).toBe(4);
-      expect(element.props.items[0].status).toBe('pending');
-      expect(element.props.items[1].status).toBe('active');
-      expect(element.props.items[2].status).toBe('completed');
-      expect(element.props.items[3].status).toBe('error');
+      expect(element.props.items[0]!.status).toBe('pending');
+      expect(element.props.items[1]!.status).toBe('active');
+      expect(element.props.items[2]!.status).toBe('completed');
+      expect(element.props.items[3]!.status).toBe('error');
     });
 
     it('should handle items with subtitles', () => {
@@ -150,8 +150,8 @@ describe('StepList (Host)', () => {
         { id: '2', title: 'Step 2', subtitle: 'Description 2', status: 'active' },
       ];
       const element = createElement(StepList, { items: itemsWithSubtitles });
-      expect(element.props.items[0].subtitle).toBe('Description 1');
-      expect(element.props.items[1].subtitle).toBe('Description 2');
+      expect(element.props.items[0]!.subtitle).toBe('Description 1');
+      expect(element.props.items[1]!.subtitle).toBe('Description 2');
     });
 
     it('should handle items without subtitles', () => {
@@ -160,8 +160,8 @@ describe('StepList (Host)', () => {
         { id: '2', title: 'Step 2', status: 'pending' },
       ];
       const element = createElement(StepList, { items: itemsWithoutSubtitles });
-      expect(element.props.items[0].subtitle).toBeUndefined();
-      expect(element.props.items[1].subtitle).toBeUndefined();
+      expect(element.props.items[0]!.subtitle).toBeUndefined();
+      expect(element.props.items[1]!.subtitle).toBeUndefined();
     });
 
     it('should handle mixed items (some with subtitle, some without)', () => {
@@ -170,8 +170,8 @@ describe('StepList (Host)', () => {
         { id: '2', title: 'Without subtitle', status: 'active' },
       ];
       const element = createElement(StepList, { items: mixedItems });
-      expect(element.props.items[0].subtitle).toBe('Has description');
-      expect(element.props.items[1].subtitle).toBeUndefined();
+      expect(element.props.items[0]!.subtitle).toBe('Has description');
+      expect(element.props.items[1]!.subtitle).toBeUndefined();
     });
 
     it('should preserve item ids', () => {
@@ -181,9 +181,9 @@ describe('StepList (Host)', () => {
         { id: 'unique-id-3', title: 'Step 3', status: 'pending' },
       ];
       const element = createElement(StepList, { items: itemsWithIds });
-      expect(element.props.items[0].id).toBe('unique-id-1');
-      expect(element.props.items[1].id).toBe('unique-id-2');
-      expect(element.props.items[2].id).toBe('unique-id-3');
+      expect(element.props.items[0]!.id).toBe('unique-id-1');
+      expect(element.props.items[1]!.id).toBe('unique-id-2');
+      expect(element.props.items[2]!.id).toBe('unique-id-3');
     });
   });
 
@@ -200,7 +200,7 @@ describe('StepList (Host)', () => {
       const element = createElement(StepList, { items: mockItems, onStepPress });
 
       // Simulate what the component would do
-      element.props.onStepPress(mockItems[1], 1);
+      element.props.onStepPress?.(mockItems[1]!, 1);
 
       expect(receivedItem).toBe(mockItems[1]);
       expect(receivedIndex).toBe(1);
@@ -214,8 +214,8 @@ describe('StepList (Host)', () => {
 
       const element = createElement(StepList, { items: mockItems, onStepPress });
 
-      element.props.onStepPress(mockItems[0], 0);
-      element.props.onStepPress(mockItems[1], 1);
+      element.props.onStepPress?.(mockItems[0]!, 0);
+      element.props.onStepPress?.(mockItems[1]!, 1);
 
       expect(results).toEqual(['1-0', '2-1']);
     });
@@ -242,13 +242,13 @@ describe('StepList (Host)', () => {
       const longTitle = 'A'.repeat(500);
       const items: StepItem[] = [{ id: '1', title: longTitle, status: 'active' }];
       const element = createElement(StepList, { items });
-      expect(element.props.items[0].title).toBe(longTitle);
+      expect(element.props.items[0]!.title).toBe(longTitle);
     });
 
     it('should handle items with empty title', () => {
       const items: StepItem[] = [{ id: '1', title: '', status: 'pending' }];
       const element = createElement(StepList, { items });
-      expect(element.props.items[0].title).toBe('');
+      expect(element.props.items[0]!.title).toBe('');
     });
 
     it('should handle items with special characters in title', () => {
@@ -258,9 +258,9 @@ describe('StepList (Host)', () => {
         { id: '3', title: 'Step with \'quotes\' and "double"', status: 'pending' },
       ];
       const element = createElement(StepList, { items });
-      expect(element.props.items[0].title).toBe('✓ Step with emoji');
-      expect(element.props.items[1].title).toBe('Step with <html> tags');
-      expect(element.props.items[2].title).toBe('Step with \'quotes\' and "double"');
+      expect(element.props.items[0]!.title).toBe('✓ Step with emoji');
+      expect(element.props.items[1]!.title).toBe('Step with <html> tags');
+      expect(element.props.items[2]!.title).toBe('Step with \'quotes\' and "double"');
     });
   });
 });

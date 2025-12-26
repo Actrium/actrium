@@ -4,17 +4,19 @@ askit provides a set of UI components that work across Host and Guest environmen
 
 ## How Components Work
 
-In **Guest** (QuickJS): Components return DSL (Domain Specific Language) objects that describe the UI structure.
+askit follows the same model as `rill/let`: **Guest components are plain element identifiers** (string ElementType).
+The reconciler serializes props and produces operations.
 
-In **Host** (React Native): Components render as actual React Native views.
+In **Guest** (QuickJS): write JSX.
 
-```typescript
-// Guest side - generates DSL
-const avatar = UserAvatar({ uri: 'https://...', size: 48 });
-// Returns: { type: 'UserAvatar', props: { uri: '...', size: 48 } }
+In **Host** (React Native): the same element types are registered to real React Native components.
 
-// Host side - renders React Native component
-<UserAvatar uri="https://..." size={48} />
+```tsx
+import { UserAvatar } from 'askit';
+
+export function App() {
+  return <UserAvatar uri="https://..." size={48} />;
+}
 ```
 
 ---
@@ -35,7 +37,7 @@ A step-by-step list with status indicators, commonly used for onboarding or prog
 | `pendingColor` | `string` | No | Pending status color |
 | `errorColor` | `string` | No | Error status color |
 | `lineWidth` | `number` | No | Connecting line width |
-| `style` | `ViewStyle` | No | Additional styles |
+| `style` | `StyleProp` | No | Additional styles |
 
 ### StepItem Object
 
@@ -53,16 +55,20 @@ type StepStatus = 'pending' | 'active' | 'completed' | 'error';
 
 ### Example
 
-```typescript
+```tsx
 import { StepList } from 'askit';
 
-const items = [
-  { id: '1', title: 'Connect Wallet', status: 'completed' },
-  { id: '2', title: 'Verify Identity', status: 'active' },
-  { id: '3', title: 'Complete Setup', status: 'pending' }
-];
-
-StepList({ items });
+export function App() {
+  return (
+    <StepList
+      items={[
+        { id: '1', title: 'Connect Wallet', status: 'completed' },
+        { id: '2', title: 'Verify Identity', status: 'active' },
+        { id: '3', title: 'Complete Setup', status: 'pending' },
+      ]}
+    />
+  );
+}
 ```
 
 ---
@@ -78,25 +84,28 @@ A container view that adapts to the current theme with preset theme variants.
 | `children` | `ReactNode` | No | Child elements |
 | `variant` | `'primary' \| 'secondary' \| 'surface' \| 'background'` | No | Theme variant |
 | `padding` | `number \| 'none' \| 'small' \| 'medium' \| 'large'` | No | Padding |
-| `style` | `ViewStyle` | No | Additional styles |
+| `style` | `StyleProp` | No | Additional styles |
 
 ### Example
 
-```typescript
+```tsx
 import { ThemeView } from 'askit';
 
-ThemeView({
-  variant: 'surface',
-  padding: 'medium',
-  children: [/* ... */]
-});
+export function App() {
+  return (
+    <ThemeView variant="surface" padding="medium">
+      {/* ... */}
+    </ThemeView>
+  );
+}
 
-// With numeric padding
-ThemeView({
-  variant: 'primary',
-  padding: 16,
-  children: [/* ... */]
-});
+export function AppNumericPadding() {
+  return (
+    <ThemeView variant="primary" padding={16}>
+      {/* ... */}
+    </ThemeView>
+  );
+}
 ```
 
 ---
@@ -115,30 +124,28 @@ Display user avatar with fallback support.
 | `showOnlineStatus` | `boolean` | No | Whether to show online status indicator |
 | `isOnline` | `boolean` | No | Online status |
 | `onPress` | `() => void` | No | Press callback |
-| `style` | `ViewStyle` | No | Additional styles |
+| `style` | `StyleProp` | No | Additional styles |
 
 ### Example
 
-```typescript
+```tsx
 import { UserAvatar } from 'askit';
 
-// With image
-UserAvatar({ uri: 'https://example.com/avatar.png', size: 48 });
-
-// With preset size
-UserAvatar({ uri: 'https://example.com/avatar.png', size: 'large' });
-
-// With fallback initials
-UserAvatar({ name: 'John Doe', size: 'medium' });
-// Shows "JD" as fallback
-
-// With online status
-UserAvatar({
-  uri: 'https://example.com/avatar.png',
-  showOnlineStatus: true,
-  isOnline: true,
-  onPress: () => console.log('Avatar pressed')
-});
+export function App() {
+  return (
+    <>
+      <UserAvatar uri="https://example.com/avatar.png" size={48} />
+      <UserAvatar uri="https://example.com/avatar.png" size="large" />
+      <UserAvatar name="John Doe" size="medium" />
+      <UserAvatar
+        uri="https://example.com/avatar.png"
+        showOnlineStatus
+        isOnline
+        onPress={() => console.log('Avatar pressed')}
+      />
+    </>
+  );
+}
 ```
 
 ---
@@ -160,54 +167,50 @@ Chat message bubble component.
 | `renderMarkdown` | `boolean` | No | Whether to render Markdown |
 | `onPress` | `() => void` | No | Press callback |
 | `onLongPress` | `() => void` | No | Long press callback |
-| `style` | `ViewStyle` | No | Additional styles |
+| `style` | `StyleProp` | No | Additional styles |
 
 ### Example
 
-```typescript
+```tsx
 import { ChatBubble } from 'askit';
 
-// Received message
-ChatBubble({
-  content: 'Hello!',
-  isOwn: false,
-  timestamp: '10:30 AM'
-});
-
-// Sent message
-ChatBubble({
-  content: 'Hi there!',
-  isOwn: true,
-  timestamp: Date.now(),
-  status: 'delivered'
-});
-
-// With interaction
-ChatBubble({
-  content: 'Long press me',
-  isOwn: true,
-  showTail: true,
-  onPress: () => console.log('pressed'),
-  onLongPress: () => console.log('long pressed')
-});
+export function App() {
+  return (
+    <>
+      <ChatBubble content="Hello!" isOwn={false} timestamp="10:30 AM" />
+      <ChatBubble
+        content="Hi there!"
+        isOwn
+        timestamp={Date.now()}
+        status="delivered"
+      />
+      <ChatBubble
+        content="Long press me"
+        isOwn
+        showTail
+        onPress={() => console.log('pressed')}
+        onLongPress={() => console.log('long pressed')}
+      />
+    </>
+  );
+}
 ```
 
 ---
 
 ## Custom Components
 
-You can create custom components that follow the same pattern:
+You can create custom components in the same way as rill/let: define an element type identifier for Guest, and register a host implementation.
 
-### In Guest (DSL Generator)
+### In Guest (element identifier)
 
-```typescript
-// my-component.remote.tsx
-export function MyComponent(props: MyComponentProps) {
-  return {
-    type: 'MyComponent',
-    props
-  };
-}
+```tsx
+// my-component.guest.tsx
+import type React from 'react';
+
+export type MyComponentProps = { title: string };
+
+export const MyComponent = 'MyComponent' as unknown as React.ElementType<MyComponentProps>;
 ```
 
 ### In Host (React Native)

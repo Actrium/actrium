@@ -5,16 +5,11 @@
  * the appropriate native modules.
  */
 
-import {
-  BROADCASTER_SYMBOL,
-  EventEmitter,
-  type HostEventEmitter,
-  NOTIFY_SYMBOL,
-} from '../api/EventEmitter.host';
+import { EventEmitter, type HostEventEmitterInternal } from '../api/EventEmitter.host';
 import { isGuestToHostEventName, validateGuestToHostPayload } from '../contracts/generated';
 import type { ContractViolation } from '../contracts/runtime';
 import { logger } from './logger';
-import { MODULE_PERMISSIONS, modules } from './registry.modules';
+import { executeModuleHandler, getModuleHandler, isModuleEvent } from './module-handlers';
 
 /**
  * Message types from guests
@@ -41,15 +36,51 @@ export type GuestMessageHandlerOptions = {
 };
 
 /**
+ * Check permission and report violation if needed
+ * @returns true if execution should proceed, false if denied
+ */
+function checkPermission(
+  event: string,
+  permission: string | undefined,
+  payload: unknown,
+  options?: GuestMessageHandlerOptions
+): boolean {
+  if (!permission) return true;
+
+  const mode = options?.permissionMode ?? 'allow';
+  if (mode === 'allow') return true;
+
+  const declared = options?.permissions ?? [];
+  const hasPermission = declared.includes(permission);
+
+  if (hasPermission) return true;
+
+  const violation: ContractViolation = {
+    at: Date.now(),
+    direction: 'guestToHost',
+    kind: 'missing_permission',
+    eventName: event,
+    payload,
+    reason: `missing permission: ${permission}`,
+  };
+
+  options?.onContractViolation?.(violation);
+  logger.warn('Bridge', `Permission not declared: ${permission}`, {
+    permission,
+    event,
+  });
+
+  return mode !== 'deny';
+}
+
+/**
  * Handle incoming message from guest
- *
- * Simplified implementation that inlines validation and parsing for better performance.
  */
 export function handleGuestMessage(
   message: GuestMessage,
   options?: GuestMessageHandlerOptions
 ): unknown {
-  // Inline validation
+  // Validate message format
   if (
     !message ||
     typeof message !== 'object' ||
@@ -64,87 +95,26 @@ export function handleGuestMessage(
 
   const { event, payload } = message;
 
-  // Handle askit protocol messages (format: askit:...)
-  if (event.startsWith('askit:')) {
-    const parts = event.slice(6).split(':');
+  // 1. Check if it's a module event (ASKIT_*)
+  if (isModuleEvent(event)) {
+    const handler = getModuleHandler(event)!;
 
-    if (parts.length < 2) {
-      logger.warn('Bridge', `Invalid askit protocol format: ${event}`, { event });
+    // Permission check
+    if (!checkPermission(event, handler.permission, payload, options)) {
       return undefined;
     }
 
-    // EventEmitter events (format: askit:event:eventName)
-    // Must check this FIRST because eventName can contain colons (e.g., user:login)
-    if (parts[0] === 'event') {
-      const eventName = parts.slice(1).join(':'); // Support nested events like 'user:login'
-      (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](eventName, payload);
-      return undefined;
-    }
-
-    // Module calls (format: askit:module:method) - exactly 2 parts after 'askit:'
-    if (parts.length === 2) {
-      // Validate module and method names (alphanumeric and underscore only)
-      const validName = /^[a-zA-Z0-9_]+$/;
-      const moduleNameStr = parts[0]!;
-      const methodNameStr = parts[1]!;
-      if (validName.test(moduleNameStr) && validName.test(methodNameStr)) {
-        const requiredPermission = MODULE_PERMISSIONS[moduleNameStr];
-        const mode = options?.permissionMode ?? 'allow';
-        if (requiredPermission && mode !== 'allow') {
-          const declared = options?.permissions ?? [];
-          const hasPermission = declared.includes(requiredPermission);
-          if (!hasPermission) {
-            const v: ContractViolation = {
-              at: Date.now(),
-              direction: 'guestToHost',
-              kind: 'missing_permission',
-              eventName: event,
-              payload,
-              reason: `missing permission: ${requiredPermission}`,
-            };
-            options?.onContractViolation?.(v);
-            logger.warn(
-              'Bridge',
-              `Permission not declared: ${requiredPermission} (module ${moduleNameStr}.${methodNameStr})`,
-              { permission: requiredPermission, module: moduleNameStr, method: methodNameStr }
-            );
-            if (mode === 'deny') return undefined;
-          }
-        }
-
-        const module = modules[moduleNameStr as keyof typeof modules];
-        if (module) {
-          const method = module[methodNameStr as keyof typeof module];
-          if (typeof method === 'function') {
-            const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
-            return (method as (...args: unknown[]) => unknown).apply(
-              module as unknown as Record<string, unknown>,
-              args
-            );
-          }
-        }
-
-        logger.warn('Bridge', `Unknown module or method: ${moduleNameStr}.${methodNameStr}`, {
-          module: moduleNameStr,
-          method: methodNameStr,
-          event,
-        });
-      }
-    } else {
-      logger.warn('Bridge', `Invalid askit protocol format: ${event}`, { event });
-    }
-    return undefined;
+    return executeModuleHandler(event, payload, handler);
   }
 
-  // Unknown event
-  // Contract events (Guest -> Host)
+  // 2. Contract events (Guest -> Host)
   if (isGuestToHostEventName(event)) {
     if (validateGuestToHostPayload(event, payload)) {
       options?.onContractEvent?.(event, payload);
       return undefined;
     }
 
-    const v: ContractViolation = {
+    const violation: ContractViolation = {
       at: Date.now(),
       direction: 'guestToHost',
       kind: 'invalid_payload',
@@ -152,20 +122,13 @@ export function handleGuestMessage(
       payload,
       reason: 'payload does not satisfy contracts schema',
     };
-    options?.onContractViolation?.(v);
+    options?.onContractViolation?.(violation);
     logger.error('Bridge', `Invalid contract payload: ${event}`, { event });
     return undefined;
   }
 
-  options?.onContractViolation?.({
-    at: Date.now(),
-    direction: 'guestToHost',
-    kind: 'unknown_event',
-    eventName: event,
-    payload,
-    reason: 'event not declared in ask contracts',
-  });
-  logger.warn('Bridge', `Unknown event: ${event}`, { event });
+  // 3. App-level events - forward to Host EventEmitter
+  (EventEmitter as HostEventEmitterInternal)._notifyLocal(event, payload);
   return undefined;
 }
 
@@ -193,24 +156,20 @@ export type EngineInterface = {
  * engine.register(components);
  * ```
  */
-export function createEngineAdapter(engine: EngineInterface): {
-  dispose: () => void;
-};
+export function createEngineAdapter(engine: EngineInterface): { dispose: () => void };
 export function createEngineAdapter(
   engine: EngineInterface,
   options?: GuestMessageHandlerOptions
-): {
-  dispose: () => void;
-};
+): { dispose: () => void };
 export function createEngineAdapter(
   engine: EngineInterface,
   options?: GuestMessageHandlerOptions
-): {
-  dispose: () => void;
-} {
-  // Forward EventEmitter events to engine with askit:event: prefix
-  (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL]((event: string, payload: unknown) => {
-    engine.sendEvent(`askit:event:${event}`, payload);
+): { dispose: () => void } {
+  const emitter = EventEmitter as HostEventEmitterInternal;
+
+  // Forward Host EventEmitter events to Guest via rill Engine.sendEvent
+  emitter._setBroadcaster((event: string, payload: unknown) => {
+    engine.sendEvent(event, payload);
   });
 
   // Listen for guest messages and route them
@@ -220,9 +179,7 @@ export function createEngineAdapter(
 
   return {
     dispose() {
-      // Disconnect broadcaster
-      (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL](null);
-      // Unsubscribe from engine messages
+      emitter._setBroadcaster(null);
       unsubscribeMessage();
     },
   };

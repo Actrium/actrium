@@ -2,6 +2,8 @@
 
 本指南将帮助你在项目中开始使用 askit。
 
+**askit** 是构建在 [rill](https://github.com/GoAskAway/rill) 之上的 UI 组件库与 API 层。通过 package.json 条件导出，同一份 `import { StepList, Toast } from 'askit'` 在 Host 端获得真实 React Native 组件，在 Guest 端获得字符串标识符（由 rill 传递给 Host 渲染）。
+
 ## 前置要求
 
 - Node.js 18+

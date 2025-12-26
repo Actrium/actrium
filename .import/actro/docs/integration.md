@@ -4,7 +4,14 @@ This guide explains how askit integrates with rill to enable sandboxed Guest exe
 
 ## Overview
 
-askit acts as an **isomorphic UI/API layer** on top of rill's sandboxing engine, providing:
+**askit** is a UI component library and API layer built on top of [rill](https://github.com/GoAskAway/rill):
+
+| Layer | Role |
+|-------|------|
+| **rill** | Sandbox-isolated dynamic UI rendering engine — runs React code in isolated JS sandbox (QuickJS/JSC), serializes render operations into instructions, sends them to Host for real React Native rendering |
+| **askit** | UI components and API layer on top of rill — provides business components (StepList, ChatBubble, etc.) and cross-boundary APIs (EventEmitter, Toast, Haptic) |
+
+askit provides:
 - Unified APIs that work identically in both Host and Guest
 - Pre-built UI components optimized for the AskAway platform
 - Automatic message routing and bridging
@@ -122,8 +129,8 @@ When Guest calls askit APIs, messages are routed through multiple layers:
 │     └─► askit/Guest implementation                              │
 │           │                                                      │
 │           └─► global.sendToHost({                               │
-│                 event: 'askit:toast:show',                       │
-│                 payload: ['Hello', { duration: 'short' }]        │
+                 event: 'ASKIT_TOAST_SHOW',                       
+                 payload: { message: 'Hello', options: { duration: 'short' } } 
 │               })                                                 │
 └────────────────────────────┼────────────────────────────────────┘
                              │
@@ -141,10 +148,10 @@ When Guest calls askit APIs, messages are routed through multiple layers:
 │                                                                  │
 │  handleGuestMessage({ event, payload })                         │
 │     │                                                            │
-│     ├─► Parse event: 'askit:toast:show'                         │
-│     │     → module='toast', method='show'                        │
+│     ├─► Parse event: 'ASKIT_TOAST_SHOW'                         │
+│     │     → reserved command: Toast.show                        │
 │     │                                                            │
-│     └─► Call modules['toast']['show'](payload)                  │
+│     └─► Call Toast module handler with payload                  │
 └────────────────────────────┼────────────────────────────────────┘
                              │
                              │
@@ -211,12 +218,16 @@ askit components return DSL objects in Guest, which rill renders natively in Hos
 │                                                                  │
 │  import { StepList } from 'askit';                              │
 │                                                                  │
-│  const ui = StepList({                                          │
-│    steps: [                                                      │
-│      { id: '1', label: 'Step 1', status: 'completed' },         │
-│      { id: '2', label: 'Step 2', status: 'active' }             │
-│    ]                                                             │
-│  });                                                             │
+export function App() {
+    return (
+      <StepList
+        steps={[
+          { id: '1', label: 'Step 1', status: 'completed' },
+          { id: '2', label: 'Step 2', status: 'active' },
+        ]}
+      />
+    );
+  }
 │                                                                  │
 │  // Returns: 'StepList' (string identifier)                     │
 └────────────────────────────┼────────────────────────────────────┘
@@ -303,12 +314,14 @@ EventEmitter.emit('guest:loaded', { timestamp: Date.now() });
 
 // Render UI
 export default function GuestUI(props) {
-  return StepList({
-    steps: [
-      { id: '1', label: 'Welcome', status: 'completed' },
-      { id: '2', label: 'Get Started', status: 'active' },
-    ],
-  });
+  return (
+    <StepList
+      steps={[
+        { id: '1', label: 'Welcome', status: 'completed' },
+        { id: '2', label: 'Get Started', status: 'active' },
+      ]}
+    />
+  );
 }
 ```
 
@@ -369,7 +382,7 @@ askit uses package.json `exports` to serve different implementations:
 All Guest→Host communication uses the format:
 ```typescript
 {
-  event: 'askit:module:method',  // e.g., 'askit:toast:show'
+  event: 'ASKIT_TOAST_SHOW', // reserved internal command (example)
   payload: any[]                  // Method arguments
 }
 ```
