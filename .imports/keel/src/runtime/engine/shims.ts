@@ -10,24 +10,15 @@ export const ALL_SHIMS = `
 // Mark shims as injected
 globalThis.__REACT_SHIM__ = true;
 
-// Hook state management - implements React hooks system
+// Hook state management - implements React hooks system with per-instance support
+// Each component instance has its own hook state, keyed by __rillCurrentInstanceId
 globalThis.__rillHooks = {
-  // useState storage
-  states: [],
-  // useRef storage
-  refs: [],
-  // useMemo storage: { deps, value }
-  memos: [],
-  // useEffect storage: { effect, deps, cleanup }
-  effects: [],
-  // Pending effects to run after render
+  // Per-instance hook storage: Map<instanceId, { states, refs, memos, effects, ids, index }>
+  instances: new Map(),
+  // Pending effects to run after render: { instanceId, index, effect, prevCleanup }
   pendingEffects: [],
-  // useId storage
-  ids: [],
-  // useId counter
+  // useId counter (global)
   idCounter: 0,
-  // Current hook index (reset before each render)
-  index: 0,
   // Prevent recursive re-renders
   isRendering: false,
   // Context registry: Map<ContextType, value>
@@ -35,6 +26,25 @@ globalThis.__rillHooks = {
   // Root element for re-renders
   rootElement: null,
   sendToHost: null
+};
+
+// Get or create hook state for current instance
+globalThis.__rillGetInstanceHooks = function() {
+  const hooks = globalThis.__rillHooks;
+  const instanceId = globalThis.__rillCurrentInstanceId || '__default__';
+
+  if (!hooks.instances.has(instanceId)) {
+    hooks.instances.set(instanceId, {
+      states: [],
+      refs: [],
+      memos: [],
+      effects: [],
+      ids: [],
+      index: 0
+    });
+  }
+
+  return hooks.instances.get(instanceId);
 };
 
 // Shallow compare two arrays (for deps comparison)
@@ -55,7 +65,7 @@ globalThis.__rillFlushEffects = function() {
   const pending = hooks.pendingEffects;
   hooks.pendingEffects = [];
 
-  for (const { index, effect, prevCleanup } of pending) {
+  for (const { instanceId, index, effect, prevCleanup } of pending) {
     // Run previous cleanup if exists
     if (typeof prevCleanup === 'function') {
       try { prevCleanup(); } catch (e) { console.error('[rill] Effect cleanup error:', e); }
@@ -63,8 +73,9 @@ globalThis.__rillFlushEffects = function() {
     // Run effect and store cleanup
     try {
       const cleanup = effect();
-      if (hooks.effects[index]) {
-        hooks.effects[index].cleanup = cleanup;
+      const instanceHooks = hooks.instances.get(instanceId);
+      if (instanceHooks && instanceHooks.effects[index]) {
+        instanceHooks.effects[index].cleanup = cleanup;
       }
     } catch (e) {
       console.error('[rill] Effect error:', e);
@@ -76,7 +87,8 @@ globalThis.__rillFlushEffects = function() {
 globalThis.__rillWrapRender = function(originalRender) {
   return function(element, sendToHost) {
     const hooks = globalThis.__rillHooks;
-    hooks.index = 0;
+    // Reset all instance indices before render
+    hooks.instances.forEach(function(inst) { inst.index = 0; });
     hooks.rootElement = element;
     hooks.sendToHost = sendToHost;
     const result = originalRender(element, sendToHost);
@@ -94,7 +106,8 @@ globalThis.__rillScheduleRender = function() {
   if (hooks.isRendering) return;
 
   hooks.isRendering = true;
-  hooks.index = 0;
+  // Reset all instance indices before render
+  hooks.instances.forEach(function(inst) { inst.index = 0; });
   try {
     if (typeof globalThis.__rill_schedule_render === 'function') {
       globalThis.__rill_schedule_render();
@@ -132,48 +145,54 @@ globalThis.React = {
 
   // ============ useState ============
   useState: function(initialValue) {
-    const hooks = globalThis.__rillHooks;
-    const currentIndex = hooks.index++;
+    const instanceHooks = globalThis.__rillGetInstanceHooks();
+    const currentIndex = instanceHooks.index++;
 
     // Initialize on first render
-    if (currentIndex >= hooks.states.length) {
+    if (currentIndex >= instanceHooks.states.length) {
       const value = typeof initialValue === 'function' ? initialValue() : initialValue;
-      hooks.states.push(value);
+      instanceHooks.states.push(value);
     }
 
+    // Capture instanceId for the setter closure
+    const instanceId = globalThis.__rillCurrentInstanceId || '__default__';
     const setState = (newValue) => {
+      const hooks = globalThis.__rillHooks;
+      const instHooks = hooks.instances.get(instanceId);
+      if (!instHooks) return;
+
       const idx = currentIndex;
-      const prevValue = hooks.states[idx];
+      const prevValue = instHooks.states[idx];
       const nextValue = typeof newValue === 'function' ? newValue(prevValue) : newValue;
 
       if (!Object.is(nextValue, prevValue)) {
-        hooks.states[idx] = nextValue;
+        instHooks.states[idx] = nextValue;
         globalThis.__rillScheduleRender();
       }
     };
 
-    return [hooks.states[currentIndex], setState];
+    return [instanceHooks.states[currentIndex], setState];
   },
 
   // ============ useRef ============
   useRef: function(initialValue) {
-    const hooks = globalThis.__rillHooks;
-    const currentIndex = hooks.index++;
+    const instanceHooks = globalThis.__rillGetInstanceHooks();
+    const currentIndex = instanceHooks.index++;
 
     // Initialize on first render
-    if (currentIndex >= hooks.refs.length) {
-      hooks.refs.push({ current: initialValue });
+    if (currentIndex >= instanceHooks.refs.length) {
+      instanceHooks.refs.push({ current: initialValue });
     }
 
-    return hooks.refs[currentIndex];
+    return instanceHooks.refs[currentIndex];
   },
 
   // ============ useMemo ============
   useMemo: function(factory, deps) {
-    const hooks = globalThis.__rillHooks;
-    const currentIndex = hooks.index++;
+    const instanceHooks = globalThis.__rillGetInstanceHooks();
+    const currentIndex = instanceHooks.index++;
 
-    const prevMemo = hooks.memos[currentIndex];
+    const prevMemo = instanceHooks.memos[currentIndex];
 
     // Check if deps changed
     if (prevMemo !== undefined && globalThis.__rillDepsEqual(prevMemo.deps, deps)) {
@@ -182,7 +201,7 @@ globalThis.React = {
 
     // Compute new value
     const value = factory();
-    hooks.memos[currentIndex] = { deps: deps, value: value };
+    instanceHooks.memos[currentIndex] = { deps: deps, value: value };
     return value;
   },
 
@@ -209,28 +228,25 @@ globalThis.React = {
 
   // ============ useId ============
   useId: function() {
-    const hooks = globalThis.__rillHooks;
-    const currentIndex = hooks.index++;
+    const instanceHooks = globalThis.__rillGetInstanceHooks();
+    const currentIndex = instanceHooks.index++;
 
     // Initialize on first render
-    if (hooks.ids === undefined) {
-      hooks.ids = [];
-    }
-    if (currentIndex >= hooks.ids.length) {
+    if (currentIndex >= instanceHooks.ids.length) {
       // Generate unique ID: prefix + counter
-      const id = 'rill:r' + (++hooks.idCounter);
-      hooks.ids.push(id);
+      const id = 'rill:r' + (++globalThis.__rillHooks.idCounter);
+      instanceHooks.ids.push(id);
     }
 
-    return hooks.ids[currentIndex];
+    return instanceHooks.ids[currentIndex];
   },
 
   // ============ useEffect ============
   useEffect: function(effect, deps) {
-    const hooks = globalThis.__rillHooks;
-    const currentIndex = hooks.index++;
+    const instanceHooks = globalThis.__rillGetInstanceHooks();
+    const currentIndex = instanceHooks.index++;
 
-    const prevEffect = hooks.effects[currentIndex];
+    const prevEffect = instanceHooks.effects[currentIndex];
 
     // Check if deps changed (undefined deps = always run)
     const shouldRun = prevEffect === undefined ||
@@ -239,9 +255,11 @@ globalThis.React = {
 
     if (shouldRun) {
       // Store effect info
-      hooks.effects[currentIndex] = { effect: effect, deps: deps, cleanup: undefined };
-      // Queue effect to run after render
-      hooks.pendingEffects.push({
+      instanceHooks.effects[currentIndex] = { effect: effect, deps: deps, cleanup: undefined };
+      // Queue effect to run after render (include instanceId for cleanup lookup)
+      const instanceId = globalThis.__rillCurrentInstanceId || '__default__';
+      globalThis.__rillHooks.pendingEffects.push({
+        instanceId: instanceId,
         index: currentIndex,
         effect: effect,
         prevCleanup: prevEffect ? prevEffect.cleanup : undefined

@@ -144,8 +144,19 @@ function getOrCreateWrappedComponent(
           (safeProps as Record<string, unknown>).__rillHookInstanceId = hookIdRef.current;
         }
 
-        const result = originalType(safeProps);
-        return transformGuestElement(result);
+        // Set current instance ID for shims' hooks to use per-instance state
+        // This enables multiple component instances to have separate hook state
+        const globalState = globalThis as Record<string, unknown>;
+        const prevInstanceId = globalState.__rillCurrentInstanceId;
+        globalState.__rillCurrentInstanceId = hookIdRef.current;
+
+        try {
+          const result = originalType(safeProps);
+          return transformGuestElement(result);
+        } finally {
+          // Restore previous instance ID (for nested component calls)
+          globalState.__rillCurrentInstanceId = prevInstanceId;
+        }
       } catch (err) {
         console.error('[rill:reconciler] component render error', err);
         return null;
