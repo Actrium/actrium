@@ -300,6 +300,7 @@ globalThis.React = {
 globalThis.ReactJSXRuntime = {
   jsx: globalThis.React.createElement,
   jsxs: globalThis.React.createElement,
+  jsxDEV: globalThis.React.createElement,
   Fragment: globalThis.React.Fragment
 };
 globalThis.ReactJSXDevRuntime = globalThis.ReactJSXRuntime;
