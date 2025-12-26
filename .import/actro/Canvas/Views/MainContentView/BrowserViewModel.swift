@@ -1284,6 +1284,15 @@ class BrowserViewModel: ObservableObject {
     private func readScript(fromRoot root: URL, fileName: String) -> String? {
         let fm = FileManager.default
 
+        // 如果 fileName 包含路径（如 "dist/unified-app.js"），直接拼接读取
+        if fileName.contains("/") {
+            let fullPath = root.appendingPathComponent(fileName)
+            if let script = try? String(contentsOf: fullPath, encoding: .utf8) {
+                logger.notice(" 找到 \(fileName): \(fullPath.path)")
+                return script
+            }
+        }
+
         // 首先在根目录查找
         if let direct = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first(where: { $0.lastPathComponent == fileName }) {
             if let script = try? String(contentsOf: direct, encoding: .utf8) {
