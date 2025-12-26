@@ -31,32 +31,29 @@ describe('Core Bridge - Additional Coverage', () => {
     });
   });
 
-  describe('handleGuestMessage - invalid askit protocol', () => {
-    it('should handle invalid askit protocol format (too short) without crashing', () => {
-      expect(() => handleGuestMessage({ event: 'askit:only', payload: null })).not.toThrow();
-    });
-
-    it('should handle unknown module without crashing', () => {
+  describe('handleGuestMessage - invalid reserved command payloads', () => {
+    it('should handle invalid payload shape for ASKIT_TOAST_SHOW without crashing', () => {
+      expect(() => handleGuestMessage({ event: 'ASKIT_TOAST_SHOW', payload: null })).not.toThrow();
       expect(() =>
-        handleGuestMessage({ event: 'askit:unknownmodule:method', payload: null })
+        handleGuestMessage({ event: 'ASKIT_TOAST_SHOW', payload: { message: 123 } })
       ).not.toThrow();
     });
 
-    it('should handle unknown method without crashing', () => {
+    it('should handle invalid payload shape for ASKIT_HAPTIC_TRIGGER without crashing', () => {
       expect(() =>
-        handleGuestMessage({ event: 'askit:toast:unknownmethod', payload: null })
+        handleGuestMessage({ event: 'ASKIT_HAPTIC_TRIGGER', payload: null })
+      ).not.toThrow();
+      expect(() =>
+        handleGuestMessage({ event: 'ASKIT_HAPTIC_TRIGGER', payload: { type: 123 } })
       ).not.toThrow();
     });
   });
 
   describe('handleGuestMessage - contract validation errors', () => {
     it('should handle invalid payload types without crashing', () => {
-      // The bridge doesn't validate payload types strictly in production
-      // It relies on TypeScript for compile-time safety
-      // This test verifies the bridge doesn't crash with invalid data
       expect(() =>
         handleGuestMessage({
-          event: 'askit:toast:show',
+          event: 'ASKIT_TOAST_SHOW',
           payload: { message: 123 }, // Invalid type, but won't crash
         })
       ).not.toThrow();

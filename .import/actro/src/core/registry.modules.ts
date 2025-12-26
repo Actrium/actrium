@@ -5,13 +5,8 @@
  * so that core/bridge can be safely imported in non-RN environments (bun test).
  */
 
-import {
-  HAPTIC_CLEAR_HANDLER,
-  HAPTIC_SET_HANDLER,
-  Haptic,
-  type HostHaptic,
-} from '../api/Haptic.host';
-import { type HostToast, TOAST_CLEAR_HANDLER, TOAST_SET_HANDLER, Toast } from '../api/Toast.host';
+import { Haptic, type HostHapticInternal } from '../api/Haptic.host';
+import { Toast, type HostToastInternal } from '../api/Toast.host';
 
 /**
  * Module registry for Bridge routing
@@ -39,14 +34,14 @@ export const MODULE_PERMISSIONS: Record<string, string | undefined> = {
 export function configureToast(
   handler: (message: string, options?: Parameters<typeof Toast.show>[1]) => void
 ): void {
-  (Toast as HostToast)[TOAST_SET_HANDLER](handler);
+  (Toast as HostToastInternal)._setHandler(handler);
 }
 
 /**
  * Clear Toast custom handler
  */
 export function clearToastHandler(): void {
-  (Toast as HostToast)[TOAST_CLEAR_HANDLER]();
+  (Toast as HostToastInternal)._clearHandler();
 }
 
 /**
@@ -55,12 +50,12 @@ export function clearToastHandler(): void {
 export function configureHaptic(
   handler: (type?: Parameters<typeof Haptic.trigger>[0]) => void
 ): void {
-  (Haptic as HostHaptic)[HAPTIC_SET_HANDLER](handler);
+  (Haptic as HostHapticInternal)._setHandler(handler);
 }
 
 /**
  * Clear Haptic custom handler
  */
 export function clearHapticHandler(): void {
-  (Haptic as HostHaptic)[HAPTIC_CLEAR_HANDLER]();
+  (Haptic as HostHapticInternal)._clearHandler();
 }

@@ -3,8 +3,8 @@
  * Tests for the actual createEngineAdapter implementation in bridge.ts
  */
 
-import { EventEmitter, type HostEventEmitter } from '../api/EventEmitter.host';
-import { type HostToast, TOAST_CLEAR_HANDLER, TOAST_SET_HANDLER, Toast } from '../api/Toast.host';
+import { EventEmitter, type HostEventEmitterInternal } from '../api/EventEmitter.host';
+import { Toast, type HostToastInternal } from '../api/Toast.host';
 import {
   createEngineAdapter,
   type EngineInterface,
@@ -30,18 +30,18 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       originalError = console.error;
 
       // Set up toast handler to capture calls
-      (Toast as HostToast)[TOAST_SET_HANDLER]((message, options) => {
+      (Toast as HostToastInternal)._setHandler((message, options) => {
         toastCalls.push({ message, options });
       });
     });
 
     afterEach(() => {
-      (Toast as HostToast)[TOAST_CLEAR_HANDLER]();
+      (Toast as HostToastInternal)._clearHandler();
       console.warn = originalWarn;
       console.error = originalError;
     });
 
-    it('should forward EventEmitter events to engine.sendEvent with askit:event: prefix', () => {
+    it('should forward EventEmitter events to engine.sendEvent with event name as-is', () => {
       const sentEvents: Array<{ event: string; payload: unknown }> = [];
 
       const mockEngine: EngineInterface = {
@@ -54,11 +54,11 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       createEngineAdapter(mockEngine);
 
       // Emit event from host EventEmitter
-      (EventEmitter as HostEventEmitter).emit('test:event', { data: 'hello' });
+      (EventEmitter as HostEventEmitterInternal).emit('test:event', { data: 'hello' });
 
-      // Should be forwarded to engine with askit:event: prefix
+      // Should be forwarded to engine with event name as-is
       expect(sentEvents).toContainEqual({
-        event: 'askit:event:test:event',
+        event: 'test:event',
         payload: { data: 'hello' },
       });
     });
@@ -76,10 +76,12 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       createEngineAdapter(mockEngine);
 
       // Emit nested event
-      (EventEmitter as HostEventEmitter).emit('analytics:user:login:success', { userId: 123 });
+      (EventEmitter as HostEventEmitterInternal).emit('analytics:user:login:success', {
+        userId: 123,
+      });
 
       expect(sentEvents).toContainEqual({
-        event: 'askit:event:analytics:user:login:success',
+        event: 'analytics:user:login:success',
         payload: { userId: 123 },
       });
     });
@@ -101,7 +103,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
       // Simulate engine sending a message
       expect(messageHandler).not.toBeNull();
-      messageHandler!({ event: 'askit:toast:show', payload: ['Hello from engine'] });
+      messageHandler!({ event: 'ASKIT_TOAST_SHOW', payload: { message: 'Hello from engine' } });
 
       // Should route to Toast
       expect(toastCalls).toEqual([{ message: 'Hello from engine', options: undefined }]);
@@ -130,11 +132,8 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       // Send unknown event
       messageHandler!({ event: 'unknown:event:type', payload: null });
 
-      // Should call onContractViolation for unknown events
-      expect(violations.length).toBeGreaterThan(0);
-      const violation = violations[0] as TestContractViolation;
-      expect(violation.kind).toBe('unknown_event');
-      expect(violation.eventName).toBe('unknown:event:type');
+      // Unknown events are forwarded to EventEmitter (no contract violation)
+      expect(violations.length).toBe(0);
     });
 
     it('should call unsubscribe function on dispose', () => {
@@ -156,8 +155,8 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       const adapter = createEngineAdapter(mockEngine);
 
       // Emit event before dispose
-      (EventEmitter as HostEventEmitter).emit('before:dispose', 'data1');
-      expect(sentEvents).toContain('askit:event:before:dispose');
+      (EventEmitter as HostEventEmitterInternal).emit('before:dispose', 'data1');
+      expect(sentEvents).toContain('before:dispose');
 
       // Dispose adapter
       adapter.dispose();
@@ -167,8 +166,8 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       sentEvents.length = 0;
 
       // Emit event after dispose - should not be forwarded
-      (EventEmitter as HostEventEmitter).emit('after:dispose', 'data2');
-      expect(sentEvents).not.toContain('askit:event:after:dispose');
+      (EventEmitter as HostEventEmitterInternal).emit('after:dispose', 'data2');
+      expect(sentEvents).not.toContain('after:dispose');
     });
 
     it('should handle engine message with complex payload', () => {
@@ -188,8 +187,8 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
 
       // Send toast with complex options
       messageHandler!({
-        event: 'askit:toast:show',
-        payload: ['Complex message', { duration: 'long', position: 'top' }],
+        event: 'ASKIT_TOAST_SHOW',
+        payload: { message: 'Complex message', options: { duration: 'long', position: 'top' } },
       });
 
       expect(toastCalls).toEqual([
@@ -198,46 +197,52 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
     });
   });
 
-  describe('handleGuestMessage - EventEmitter NOTIFY_SYMBOL coverage', () => {
-    it('should call NOTIFY_SYMBOL when receiving askit:event: messages', () => {
+  describe('handleGuestMessage - EventEmitter _notifyLocal coverage', () => {
+    it('should call _notifyLocal when receiving app-level messages', () => {
       const receivedEvents: Array<{ event: string; payload: unknown }> = [];
 
       // Listen to an event
-      const unsubscribe = (EventEmitter as HostEventEmitter).on('coverage:test', (payload) => {
-        receivedEvents.push({ event: 'coverage:test', payload });
-      });
+      const unsubscribe = (EventEmitter as HostEventEmitterInternal).on(
+        'coverage:test',
+        (payload) => {
+          receivedEvents.push({ event: 'coverage:test', payload });
+        }
+      );
 
       // Send message through handleGuestMessage
-      handleGuestMessage({ event: 'askit:event:coverage:test', payload: { test: 'data' } });
+      handleGuestMessage({ event: 'coverage:test', payload: { test: 'data' } });
 
-      // Should trigger the listener via NOTIFY_SYMBOL
+      // Should trigger the listener via _notifyLocal
       expect(receivedEvents).toEqual([{ event: 'coverage:test', payload: { test: 'data' } }]);
 
       unsubscribe();
     });
 
-    it('should handle askit:event: with null payload', () => {
+    it('should handle app event with null payload', () => {
       const receivedEvents: unknown[] = [];
 
-      const unsubscribe = (EventEmitter as HostEventEmitter).on('null:test', (payload) => {
+      const unsubscribe = (EventEmitter as HostEventEmitterInternal).on('null:test', (payload) => {
         receivedEvents.push(payload);
       });
 
-      handleGuestMessage({ event: 'askit:event:null:test', payload: null });
+      handleGuestMessage({ event: 'null:test', payload: null });
 
       expect(receivedEvents).toEqual([null]);
 
       unsubscribe();
     });
 
-    it('should handle askit:event: with undefined payload', () => {
+    it('should handle app event with undefined payload', () => {
       const receivedEvents: unknown[] = [];
 
-      const unsubscribe = (EventEmitter as HostEventEmitter).on('undefined:test', (payload) => {
-        receivedEvents.push(payload);
-      });
+      const unsubscribe = (EventEmitter as HostEventEmitterInternal).on(
+        'undefined:test',
+        (payload) => {
+          receivedEvents.push(payload);
+        }
+      );
 
-      handleGuestMessage({ event: 'askit:event:undefined:test' });
+      handleGuestMessage({ event: 'undefined:test' });
 
       expect(receivedEvents).toEqual([undefined]);
 
@@ -256,13 +261,13 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       originalError = console.error;
 
       // Set up toast handler to capture calls
-      (Toast as HostToast)[TOAST_SET_HANDLER]((message, options) => {
+      (Toast as HostToastInternal)._setHandler((message, options) => {
         toastCalls.push({ message, options });
       });
     });
 
     afterEach(() => {
-      (Toast as HostToast)[TOAST_CLEAR_HANDLER]();
+      (Toast as HostToastInternal)._clearHandler();
       console.warn = originalWarn;
       console.error = originalError;
     });
@@ -303,8 +308,17 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       expect(violation.kind).toBe('invalid_payload');
     });
 
-    it('should call onContractViolation for unknown event formats', () => {
+    it('should forward unknown app events (no contract violation)', () => {
       const violations: unknown[] = [];
+
+      // Listen for forwarded app event
+      const received: unknown[] = [];
+      const unsubscribe = (EventEmitter as HostEventEmitterInternal).on(
+        'some:random:event',
+        (payload) => {
+          received.push(payload);
+        }
+      );
 
       handleGuestMessage(
         { event: 'some:random:event', payload: null },
@@ -315,17 +329,16 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
         }
       );
 
-      expect(violations.length).toBeGreaterThan(0);
-      const violation = violations[0] as TestContractViolation;
-      expect(violation.kind).toBe('unknown_event');
-      expect(violation.eventName).toBe('some:random:event');
+      expect(violations.length).toBe(0);
+      expect(received).toEqual([null]);
+      unsubscribe();
     });
 
     it('should handle permission checks when permissionMode is deny', () => {
       const violations: unknown[] = [];
 
       handleGuestMessage(
-        { event: 'askit:toast:show', payload: ['Test'] },
+        { event: 'ASKIT_TOAST_SHOW', payload: { message: 'Test' } },
         {
           permissions: [], // No permissions declared
           permissionMode: 'deny',
@@ -345,7 +358,7 @@ describe('Core Bridge - Engine Adapter (Real Implementation)', () => {
       const callsBefore = toastCalls.length;
 
       handleGuestMessage(
-        { event: 'askit:toast:show', payload: ['Test with permission'] },
+        { event: 'ASKIT_TOAST_SHOW', payload: { message: 'Test with permission' } },
         {
           permissions: ['toast'], // Permission declared
           permissionMode: 'deny',

@@ -4,7 +4,18 @@
 
 [English](./README.md)
 
-**askit** 是 AskAway 平台的同构 UI 工具包，提供统一的 API 和组件，可在 Host App (React Native) 和 Guest 环境 (QuickJS Sandbox) 中无缝运行。
+**askit** 是构建在 [rill](https://github.com/GoAskAway/rill) 之上的 UI 组件库与 API 层。通过 package.json 条件导出，同一份 `import { StepList, Toast } from 'askit'` 在 Host 端获得真实 React Native 组件，在 Guest 端获得字符串标识符（由 rill 传递给 Host 渲染）。
+
+## 与 rill 的关系
+
+| 层级 | 职责 |
+|------|------|
+| **rill** | 沙箱隔离的动态 UI 渲染引擎 — 在独立的 JS 沙箱（QuickJS/JSC）中运行 React 代码，将渲染操作序列化为指令发送给 Host，由 Host 端的真实 React Native 执行渲染 |
+| **askit** | 构建在 rill 之上的 UI 组件与 API 层 — 提供业务组件（StepList、ChatBubble 等）和跨边界 API（EventEmitter、Toast、Haptic） |
+
+**核心机制：**
+- **UI 组件**：Guest 端是字符串 `"StepList"`，Host 端是完整的 RN 实现
+- **API**：Guest 端通过 `global.__sendEventToHost('ASKIT_TOAST_SHOW', {...})` 发命令，Host 端的 bridge 路由到真实的 ToastAndroid 等原生 API
 
 ## 架构
 
@@ -72,8 +83,10 @@ Toast.show('来自插件的问候!', { duration: 'short', position: 'bottom' });
 // 触觉反馈
 Haptic.trigger('light');
 
-// UI 组件 (返回 DSL 供 Host 渲染)
-const avatar = UserAvatar({ uri: 'https://example.com/avatar.png', size: 48 });
+// UI 组件（Guest 侧写 JSX；Host 侧注册同名组件实现）
+export function App() {
+  return <UserAvatar uri="https://example.com/avatar.png" size={48} />;
+}
 ```
 
 ### 在 Host App 中 (React Native)
@@ -93,6 +106,30 @@ engine.register(components);
 // 启动插件（支持 URL 或打包代码字符串）
 await engine.loadBundle('https://example.com/guest.js');
 ```
+
+## askit 是什么？
+
+`askit` 是构建在 `rill` 之上的 **UI 组件库 + Host/Guest 接入层**。
+
+- **Guest（沙箱）侧**：提供组件的 element 标识（string `ElementType`）与少量 API。你直接写标准 React JSX（例如 `<UserAvatar />`、`<StepList />`）。
+- **Host（React Native）侧**：提供同名组件的真实 RN 实现，以及适配器 `createEngineAdapter`，用于把 rill `Engine` 的事件通道与 askit 的模块/事件打通。
+
+### 分工与边界
+
+| 层级 | 负责什么 | 典型代码 | 说明 |
+|---|---|---|---|
+| 业务应用（你的产品） | 业务逻辑、页面、状态、数据请求 | `unified-app.js` / app TSX | 发送/接收业务事件 |
+| `askit` | 组件库 + 少量跨边界 API（Toast/Haptic/EventEmitter） | `askit/src/ui`, `askit/src/api` | 使用 rill HostEvent 模型 |
+| `rill` | 沙箱运行时、reconciler、ops/receiver、devtools | `Engine`, `Receiver`, providers | 框架/运行时，不关心业务 UI |
+
+### 消息模型（对齐 rill）
+
+- **Guest → Host**：`global.__sendEventToHost(eventName, payload)`
+  - `ASKIT_*` 为 askit 模块使用的保留内部命令事件：
+    - `ASKIT_TOAST_SHOW` payload `{ message, options }`
+    - `ASKIT_HAPTIC_TRIGGER` payload `{ type }`
+  - 其他事件名均视为业务事件，会被转发到 Host `EventEmitter`。
+- **Host → Guest**：Host 侧 `EventEmitter.emit(eventName, payload)` 会被转发到 `engine.sendEvent(eventName, payload)`。
 
 ## API 参考
 
@@ -165,7 +202,7 @@ askit/src
 │   ├── bridge.ts     # Host-Guest 消息桥接
 │   ├── registry.ts   # 组件和模块注册
 │   ├── throttle.ts   # 节流限速工具
-│   └── typed-bridge.ts # 类型安全桥接辅助
+│   └── protocol.ts # 保留事件名（ASKIT_*）
 ├── contracts/        # Host-Guest 通信类型契约
 └── types/            # 共享 TypeScript 类型
 ```

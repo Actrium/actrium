@@ -7,22 +7,22 @@ import { GuestEventEmitter } from './EventEmitter.guest';
 
 describe('EventEmitter (Guest) - Additional Coverage', () => {
   type SandboxGlobal = typeof globalThis & {
-    sendToHost?: (event: string, payload?: unknown) => void;
-    onHostEvent?: (callback: (event: string, payload: unknown) => void) => void;
+    __sendEventToHost?: (eventName: string, payload?: unknown) => void;
+    __useHostEvent?: (eventName: string, callback: (payload: unknown) => void) => () => void;
   };
 
   const sandboxGlobal = globalThis as SandboxGlobal;
 
   let emitter: GuestEventEmitter;
   let originalSendToHost: unknown;
-  let originalOnHostEvent: unknown;
+  let originalUseHostEvent: unknown;
 
   beforeEach(() => {
-    originalSendToHost = sandboxGlobal.sendToHost;
-    originalOnHostEvent = sandboxGlobal.onHostEvent;
+    originalSendToHost = sandboxGlobal.__sendEventToHost;
+    originalUseHostEvent = sandboxGlobal.__useHostEvent;
 
-    sandboxGlobal.sendToHost = () => {};
-    sandboxGlobal.onHostEvent = () => {};
+    sandboxGlobal.__sendEventToHost = () => {};
+    sandboxGlobal.__useHostEvent = () => () => {};
 
     emitter = new GuestEventEmitter();
   });
@@ -33,8 +33,8 @@ describe('EventEmitter (Guest) - Additional Coverage', () => {
       (emitter as unknown as { _clearRetryTimer: () => void })._clearRetryTimer();
     }
 
-    sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
-    sandboxGlobal.onHostEvent = originalOnHostEvent as SandboxGlobal['onHostEvent'];
+    sandboxGlobal.__sendEventToHost = originalSendToHost as SandboxGlobal['__sendEventToHost'];
+    sandboxGlobal.__useHostEvent = originalUseHostEvent as SandboxGlobal['__useHostEvent'];
   });
 
   describe('removeAllListeners', () => {

@@ -16,7 +16,7 @@ describe('Core Bridge - permissions', () => {
     configureToast((message) => calls.push(message));
 
     handleGuestMessage(
-      { event: 'askit:toast:show', payload: 'hi' },
+      { event: 'ASKIT_TOAST_SHOW', payload: { message: 'hi' } },
       {
         permissions: [],
         permissionMode: 'deny',
@@ -40,7 +40,7 @@ describe('Core Bridge - permissions', () => {
     configureToast((message) => calls.push(message));
 
     handleGuestMessage(
-      { event: 'askit:toast:show', payload: 'hi' },
+      { event: 'ASKIT_TOAST_SHOW', payload: { message: 'hi' } },
       {
         permissions: [],
         permissionMode: 'warn',
@@ -61,7 +61,7 @@ describe('Core Bridge - permissions', () => {
     configureToast((message) => calls.push(message));
 
     handleGuestMessage(
-      { event: 'askit:toast:show', payload: 'hi' },
+      { event: 'ASKIT_TOAST_SHOW', payload: { message: 'hi' } },
       {
         permissions: [],
         permissionMode: 'allow',

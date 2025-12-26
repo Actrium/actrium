@@ -2,6 +2,8 @@
 
 This guide will help you get started with askit in your project.
 
+**askit** is a UI component library and API layer built on top of [rill](https://github.com/GoAskAway/rill). Through package.json conditional exports, the same `import { StepList, Toast } from 'askit'` delivers real React Native components on the Host side and string identifiers on the Guest side (which rill passes to Host for rendering).
+
 ## Prerequisites
 
 - Node.js 18+

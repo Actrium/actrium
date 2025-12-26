@@ -166,7 +166,7 @@ describe('UserAvatar (Host)', () => {
         called = true;
       };
       const element = createElement(UserAvatar, { onPress });
-      element.props.onPress();
+      element.props.onPress?.();
       expect(called).toBe(true);
     });
 

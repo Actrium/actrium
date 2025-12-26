@@ -5,11 +5,7 @@
  */
 
 import type { HapticType } from '../types';
-import {
-  HAPTIC_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
-  HostHaptic,
-  HAPTIC_SET_HANDLER as SET_HANDLER_SYMBOL,
-} from './Haptic.host';
+import { HostHaptic, type HostHapticInternal } from './Haptic.host';
 
 describe('Haptic (Host)', () => {
   let haptic: HostHaptic;
@@ -22,7 +18,7 @@ describe('Haptic (Host)', () => {
     it('should use custom handler when set', () => {
       const calls: HapticType[] = [];
 
-      haptic[SET_HANDLER_SYMBOL]((type) => {
+      (haptic as HostHapticInternal)._setHandler((type) => {
         calls.push(type!);
       });
 
@@ -34,7 +30,7 @@ describe('Haptic (Host)', () => {
     it('should pass all haptic types correctly', () => {
       const calls: HapticType[] = [];
 
-      haptic[SET_HANDLER_SYMBOL]((type) => {
+      (haptic as HostHapticInternal)._setHandler((type) => {
         calls.push(type!);
       });
 
@@ -57,7 +53,7 @@ describe('Haptic (Host)', () => {
     it('should use default type "medium" when not specified', () => {
       const calls: Array<HapticType | undefined> = [];
 
-      haptic[SET_HANDLER_SYMBOL]((type) => {
+      (haptic as HostHapticInternal)._setHandler((type) => {
         calls.push(type);
       });
 
@@ -72,10 +68,10 @@ describe('Haptic (Host)', () => {
       const originalLog = console.log;
       console.log = (...args) => logs.push(args);
 
-      haptic[SET_HANDLER_SYMBOL]((type) => calls.push(type!));
+      (haptic as HostHapticInternal)._setHandler((type) => calls.push(type!));
       haptic.trigger('light');
 
-      haptic[CLEAR_HANDLER_SYMBOL]();
+      (haptic as HostHapticInternal)._clearHandler();
       haptic.trigger('heavy');
 
       expect(calls).toEqual(['light']);
@@ -137,8 +133,8 @@ describe('Haptic (Host)', () => {
       const calls1: HapticType[] = [];
       const calls2: HapticType[] = [];
 
-      haptic1[SET_HANDLER_SYMBOL]((type) => calls1.push(type!));
-      haptic2[SET_HANDLER_SYMBOL]((type) => calls2.push(type!));
+      (haptic1 as HostHapticInternal)._setHandler((type) => calls1.push(type!));
+      (haptic2 as HostHapticInternal)._setHandler((type) => calls2.push(type!));
 
       haptic1.trigger('light');
       haptic2.trigger('heavy');

@@ -2,7 +2,19 @@
 
 ## 概述
 
-askit 实现了**同构架构**，使相同的代码能够在不同环境中运行，并提供特定于环境的实现。
+**askit** 是构建在 [rill](https://github.com/GoAskAway/rill) 之上的 UI 组件库与 API 层。通过 package.json 条件导出，同一份 `import { StepList, Toast } from 'askit'` 在 Host 端获得真实 React Native 组件，在 Guest 端获得字符串标识符（由 rill 传递给 Host 渲染）。
+
+### 与 rill 的关系
+
+| 层级 | 职责 |
+|------|------|
+| **rill** | 沙箱隔离的动态 UI 渲染引擎 — 在独立的 JS 沙箱（QuickJS/JSC）中运行 React 代码，将渲染操作序列化为指令发送给 Host，由 Host 端的真实 React Native 执行渲染 |
+| **askit** | 构建在 rill 之上的 UI 组件与 API 层 — 提供业务组件（StepList、ChatBubble 等）和跨边界 API（EventEmitter、Toast、Haptic） |
+
+### 核心机制
+
+- **UI 组件**：Guest 端是字符串 `"StepList"`，Host 端是完整的 RN 实现
+- **API**：Guest 端通过 `global.__sendEventToHost('ASKIT_TOAST_SHOW', {...})` 发命令，Host 端的 bridge 路由到真实的 ToastAndroid 等原生 API
 
 ## 设计原则
 
@@ -73,13 +85,13 @@ Toast.show('Hello!');
 │  │                    askit (guest)                          │  │
 │  │                                                           │  │
 │  │  EventEmitter.emit('event')                              │  │
-│  │    └──► global.sendToHost('askit:event:event', payload)  │  │
+│  │    └──► global.__sendEventToHost('event', payload)  │  │
 │  │                                                           │  │
 │  │  Toast.show(msg, opts)                                   │  │
-│  │    └──► global.sendToHost('askit:toast:show', [msg,...]) │  │
+│  │    └──► global.__sendEventToHost('ASKIT_TOAST_SHOW', { message: msg, options }) │  │
 │  │                                                           │  │
 │  │  Haptic.trigger(type)                                    │  │
-│  │    └──► global.sendToHost('askit:haptic:trigger', [type])│  │
+│  │    └──► global.__sendEventToHost('ASKIT_HAPTIC_TRIGGER', { type })│  │
 │  │                                                           │  │
 │  │  Component() ──► 返回 DSL 对象                           │  │
 │  └──────────────────────────────────────────────────────────┘  │
@@ -115,8 +127,7 @@ export const Toast = {
 class RemoteToast implements ToastAPI {
   show(message: string, options?: ToastOptions): void {
     if (typeof global.sendToHost === 'function') {
-      // 发送为数组以避免序列化问题
-      global.sendToHost('askit:toast:show', [message, options]);
+      global.__sendEventToHost('ASKIT_TOAST_SHOW', { message, options });
     }
   }
 }
@@ -132,30 +143,19 @@ export const Toast: ToastAPI = new RemoteToast();
 import { NOTIFY_SYMBOL } from '../api/EventEmitter.host';
 
 function handleGuestMessage(message: GuestMessage) {
-  if (message.event.startsWith('askit:')) {
-    const parts = message.event.slice(6).split(':');
-    const [moduleName, methodName] = parts;
-
-    // EventEmitter 事件（格式：askit:event:eventName）
-    if (moduleName === 'event') {
-      const eventName = parts.slice(1).join(':');
-      // 使用 Symbol 访问内部 API（对公共 API 隐藏）
-      (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](eventName, message.payload);
-      return;
-    }
-
-    // 模块调用（格式：askit:module:method）
-    const module = modules[moduleName];
-    if (module) {
-      const method = module[methodName];
-      if (typeof method === 'function') {
-        const args = Array.isArray(message.payload)
-          ? message.payload
-          : [message.payload];
-        return method.apply(module, args);
-      }
-    }
+  // 保留内部命令
+  if (message.event === 'ASKIT_TOAST_SHOW') {
+    const { message: text, options } = message.payload as any;
+    return modules.toast.show(text, options);
   }
+
+  if (message.event === 'ASKIT_HAPTIC_TRIGGER') {
+    const { type } = message.payload as any;
+    return modules.haptic.trigger(type);
+  }
+
+  // 业务事件：转发到 EventEmitter
+  (EventEmitter as HostEventEmitter)[NOTIFY_SYMBOL](message.event, message.payload);
 }
 ```
 
@@ -167,10 +167,9 @@ function handleGuestMessage(message: GuestMessage) {
 import { BROADCASTER_SYMBOL } from '../api/EventEmitter.host';
 
 function createEngineAdapter(engine: EngineInterface) {
-  // 将 EventEmitter 事件转发到 engine，带有 askit:event: 前缀
-  // 使用 Symbol 访问内部 API（对公共 API 隐藏）
+  // 将 Host EventEmitter 事件转发到 Guest
   (EventEmitter as HostEventEmitter)[BROADCASTER_SYMBOL]((event, payload) => {
-    engine.sendEvent(`askit:event:${event}`, payload);
+    engine.sendEvent(event, payload);
   });
 
   // 监听 Guest 消息并路由它们

@@ -11,7 +11,7 @@ import type { ReactNode } from 'react';
 export type Environment = 'host' | 'guest';
 
 // ============================================================================
-// Style Types (React Native Compatible)
+// Style Types (Aligned with rill StyleObject/StyleProp)
 // ============================================================================
 
 export type FlexDirection = 'row' | 'column' | 'row-reverse' | 'column-reverse';
@@ -24,7 +24,13 @@ export type FlexJustify =
   | 'space-around'
   | 'space-evenly';
 
-export interface ViewStyle {
+/**
+ * Shared style type across the Host/Guest boundary.
+ *
+ * Intentionally aligned with `rill`'s `StyleObject` so that values can be passed
+ * across the engine boundary without type friction.
+ */
+export interface StyleObject {
   // Layout
   flex?: number;
   flexDirection?: FlexDirection;
@@ -34,6 +40,7 @@ export interface ViewStyle {
   flexWrap?: 'wrap' | 'nowrap' | 'wrap-reverse';
   flexGrow?: number;
   flexShrink?: number;
+  flexBasis?: number | string;
 
   // Spacing
   padding?: number;
@@ -50,50 +57,41 @@ export interface ViewStyle {
   marginLeft?: number;
   marginHorizontal?: number;
   marginVertical?: number;
-  gap?: number;
-  rowGap?: number;
-  columnGap?: number;
 
   // Size
   width?: number | string;
   height?: number | string;
   minWidth?: number | string;
-  maxWidth?: number | string;
   minHeight?: number | string;
+  maxWidth?: number | string;
   maxHeight?: number | string;
 
   // Position
   position?: 'relative' | 'absolute';
-  top?: number | string;
-  right?: number | string;
-  bottom?: number | string;
-  left?: number | string;
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
   zIndex?: number;
 
-  // Appearance
+  // Background
   backgroundColor?: string;
+  opacity?: number;
+
+  // Border
+  borderWidth?: number;
+  borderTopWidth?: number;
+  borderRightWidth?: number;
+  borderBottomWidth?: number;
+  borderLeftWidth?: number;
+  borderColor?: string;
   borderRadius?: number;
   borderTopLeftRadius?: number;
   borderTopRightRadius?: number;
   borderBottomLeftRadius?: number;
   borderBottomRightRadius?: number;
-  borderWidth?: number;
-  borderColor?: string;
-  borderStyle?: 'solid' | 'dotted' | 'dashed';
-  opacity?: number;
-  overflow?: 'visible' | 'hidden' | 'scroll';
 
-  // Shadow (iOS)
-  shadowColor?: string;
-  shadowOffset?: { width: number; height: number };
-  shadowOpacity?: number;
-  shadowRadius?: number;
-
-  // Elevation (Android)
-  elevation?: number;
-}
-
-export interface TextStyle extends ViewStyle {
+  // Text
   color?: string;
   fontSize?: number;
   fontWeight?:
@@ -111,22 +109,49 @@ export interface TextStyle extends ViewStyle {
   fontFamily?: string;
   fontStyle?: 'normal' | 'italic';
   textAlign?: 'auto' | 'left' | 'right' | 'center' | 'justify';
-  textDecorationLine?: 'none' | 'underline' | 'line-through' | 'underline line-through';
+  textDecorationLine?: 'none' | 'underline' | 'line-through';
   lineHeight?: number;
   letterSpacing?: number;
+
+  // Shadow (iOS)
+  shadowColor?: string;
+  shadowOffset?: { width: number; height: number };
+  shadowOpacity?: number;
+  shadowRadius?: number;
+
+  // Elevation (Android)
+  elevation?: number;
+
+  // Transform
+  transform?: Array<
+    | { translateX: number }
+    | { translateY: number }
+    | { scale: number }
+    | { scaleX: number }
+    | { scaleY: number }
+    | { rotate: string }
+    | { rotateX: string }
+    | { rotateY: string }
+    | { rotateZ: string }
+    | { skewX: string }
+    | { skewY: string }
+  >;
+
+  // Other
+  overflow?: 'visible' | 'hidden' | 'scroll';
 }
 
-export interface ImageStyle extends ViewStyle {
-  resizeMode?: 'cover' | 'contain' | 'stretch' | 'repeat' | 'center';
-  tintColor?: string;
-}
+/**
+ * Style prop type (aligned with rill)
+ */
+export type StyleProp = StyleObject | StyleObject[] | undefined;
 
 // ============================================================================
 // Common Component Props
 // ============================================================================
 
 export interface BaseProps {
-  style?: ViewStyle;
+  style?: StyleProp;
   testID?: string;
 }
 
@@ -195,41 +220,11 @@ export interface ChatBubbleProps extends BaseProps {
 }
 
 // ============================================================================
-// Message Protocol Types - Type-safe payload mapping
+// Protocol Types (aligned to rill HostEvent model)
 // ============================================================================
 
-/**
- * Type-safe message map for askit protocol
- * Maps event names to their expected payload types
- */
-export interface AskitMessageMap {
-  // Toast module
-  'askit:toast:show': [message: string, options?: ToastOptions];
-
-  // Haptic module
-  'askit:haptic:trigger': [type?: HapticType];
-
-  // EventEmitter events (using event: prefix)
-  // Note: Event emitter events are dynamic, so we use string index signature
-}
-
-/**
- * EventEmitter message map - allows any event with any payload
- */
-export interface EventEmitterMessageMap {
-  [event: string]: unknown;
-}
-
-/**
- * Type-safe sendToHost function signature
- */
-export interface TypedSendToHost {
-  <K extends keyof AskitMessageMap>(event: K, payload: AskitMessageMap[K]): void;
-  // Allow askit:event: prefixed messages with any payload
-  (event: `askit:event:${string}`, payload?: unknown): void;
-  // Fallback for any string event
-  (event: string, payload?: unknown): void;
-}
+/** Reserved event names used by askit for module commands */
+export type AskitReservedEventName = 'ASKIT_TOAST_SHOW' | 'ASKIT_HAPTIC_TRIGGER';
 
 // ============================================================================
 // EventEmitter (Communication) Types

@@ -1,4 +1,9 @@
+/**
+ * Panel - Guest Component
+ */
+
 import type React from 'react';
+import { createGuestComponent } from '../guest-factory';
 
 type PanelSide = 'left' | 'right';
 
@@ -11,7 +16,7 @@ type PanelMarkerProps = {
   children?: React.ReactNode;
 };
 
-const PanelMarker = 'PanelMarker' as unknown as React.ElementType<PanelMarkerProps>;
+const PanelMarker = createGuestComponent<PanelMarkerProps>('PanelMarker');
 
 function createPanel(side: PanelSide): React.FC<PanelProps> {
   const PanelSideComponent: React.FC<PanelProps> = ({ children }) => (

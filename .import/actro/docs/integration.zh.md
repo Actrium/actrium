@@ -4,7 +4,14 @@
 
 ## 概览
 
-askit 作为 rill 沙箱引擎之上的**同构 UI/API 层**，提供：
+**askit** 是构建在 [rill](https://github.com/GoAskAway/rill) 之上的 UI 组件库与 API 层：
+
+| 层级 | 职责 |
+|------|------|
+| **rill** | 沙箱隔离的动态 UI 渲染引擎 — 在独立的 JS 沙箱（QuickJS/JSC）中运行 React 代码，将渲染操作序列化为指令发送给 Host，由 Host 端的真实 React Native 执行渲染 |
+| **askit** | 构建在 rill 之上的 UI 组件与 API 层 — 提供业务组件（StepList、ChatBubble 等）和跨边界 API（EventEmitter、Toast、Haptic） |
+
+askit 提供：
 - 在 Host 和 Guest 中表现一致的统一 API
 - 为 AskAway 平台优化的预构建 UI 组件
 - 自动消息路由和桥接
@@ -121,8 +128,8 @@ Host App 启动
 │     └─► askit/Guest 实现                                        │
 │           │                                                      │
 │           └─► global.sendToHost({                               │
-│                 event: 'askit:toast:show',                       │
-│                 payload: ['你好', { duration: 'short' }]         │
+                 event: 'ASKIT_TOAST_SHOW',                       
+                 payload: { message: '你好', options: { duration: 'short' } } 
 │               })                                                 │
 └────────────────────────────┼────────────────────────────────────┘
                              │
@@ -140,10 +147,10 @@ Host App 启动
 │                                                                  │
 │  handleGuestMessage({ event, payload })                         │
 │     │                                                            │
-│     ├─► 解析事件：'askit:toast:show'                           │
-│     │     → module='toast', method='show'                        │
+│     ├─► 解析事件：'ASKIT_TOAST_SHOW'                           │
+│     │     → 保留命令：Toast.show                        │
 │     │                                                            │
-│     └─► 调用 modules['toast']['show'](payload)                  │
+│     └─► 将 payload 交给 Toast 模块处理                  │
 └────────────────────────────┼────────────────────────────────────┘
                              │
                              │
@@ -210,12 +217,16 @@ askit 组件在 Guest 中返回 DSL 对象，rill 在 Host 中原生渲染：
 │                                                                  │
 │  import { StepList } from 'askit';                              │
 │                                                                  │
-│  const ui = StepList({                                          │
-│    steps: [                                                      │
-│      { id: '1', label: '步骤 1', status: 'completed' },         │
-│      { id: '2', label: '步骤 2', status: 'active' }             │
-│    ]                                                             │
-│  });                                                             │
+  export function App() {                                         
+    return (                                                     
+      <StepList                                                   
+        steps={[                                                  
+          { id: '1', label: '步骤 1', status: 'completed' },      
+          { id: '2', label: '步骤 2', status: 'active' },         
+        ]}                                                        
+      />                                                          
+    );                                                            
+  }                                                               
 │                                                                  │
 │  // 返回：'StepList' (字符串标识符)                             │
 └────────────────────────────┼────────────────────────────────────┘
@@ -302,12 +313,14 @@ EventEmitter.emit('guest:loaded', { timestamp: Date.now() });
 
 // 渲染 UI
 export default function GuestUI(props) {
-  return StepList({
-    steps: [
-      { id: '1', label: '欢迎', status: 'completed' },
-      { id: '2', label: '开始使用', status: 'active' },
-    ],
-  });
+  return (
+    <StepList
+      steps={[
+        { id: '1', label: '欢迎', status: 'completed' },
+        { id: '2', label: '开始使用', status: 'active' },
+      ]}
+    />
+  );
 }
 ```
 
@@ -368,7 +381,7 @@ askit 使用 package.json 的 `exports` 提供不同的实现：
 所有 Guest→Host 通信使用以下格式：
 ```typescript
 {
-  event: 'askit:module:method',  // 例如：'askit:toast:show'
+  event: 'ASKIT_TOAST_SHOW', // 保留内部命令（示例）
   payload: any[]                  // 方法参数
 }
 ```

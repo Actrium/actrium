@@ -10,7 +10,8 @@ export type PanelMarkerProps = {
 
 export const PanelMarker: React.FC<PanelMarkerProps> = ({ panelId, children }) => (
   // Pass panelId to host element for extractPanels to identify left/right panels
-  <View style={{ flex: 1 }} panelId={panelId}>
+  // Use data-panel-id as a custom attribute that will be serialized to the host
+  <View style={{ flex: 1 }} {...{ 'data-panel-id': panelId }}>
     {children}
   </View>
 );

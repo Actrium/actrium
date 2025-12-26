@@ -8,12 +8,16 @@
 import type { HapticAPI, HapticType } from '../types';
 
 /**
- * Internal symbols for accessing private APIs
+ * Extended interface for internal access by core modules
  */
-const SET_HANDLER_SYMBOL = Symbol.for('askit.haptic.setHandler');
-const CLEAR_HANDLER_SYMBOL = Symbol.for('askit.haptic.clearHandler');
+export interface HostHapticInternal extends HapticAPI {
+  /** Set custom trigger handler (for host app to inject haptic library) */
+  _setHandler(handler: (type?: HapticType) => void): void;
+  /** Clear custom handler */
+  _clearHandler(): void;
+}
 
-class HostHaptic implements HapticAPI {
+class HostHaptic implements HostHapticInternal {
   private customTriggerHandler?: (type?: HapticType) => void;
 
   /**
@@ -30,26 +34,23 @@ class HostHaptic implements HapticAPI {
   }
 
   /**
-   * Set custom trigger handler (for host app to inject haptic library)
-   * @internal - Accessed via SET_HANDLER_SYMBOL
+   * Set custom trigger handler
+   * @internal
    */
-  [SET_HANDLER_SYMBOL](handler: (type?: HapticType) => void): void {
+  _setHandler(handler: (type?: HapticType) => void): void {
     this.customTriggerHandler = handler;
   }
 
   /**
    * Clear custom handler
-   * @internal - Accessed via CLEAR_HANDLER_SYMBOL
+   * @internal
    */
-  [CLEAR_HANDLER_SYMBOL](): void {
+  _clearHandler(): void {
     this.customTriggerHandler = undefined;
   }
 }
 
-export const Haptic: HapticAPI = new HostHaptic();
+export const Haptic: HostHapticInternal = new HostHaptic();
 
-// Export class for core module
+// Export class for testing
 export { HostHaptic };
-
-// Export symbols for core module access
-export { SET_HANDLER_SYMBOL as HAPTIC_SET_HANDLER, CLEAR_HANDLER_SYMBOL as HAPTIC_CLEAR_HANDLER };

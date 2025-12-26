@@ -19,12 +19,12 @@ export type {
   // Haptic
   HapticAPI,
   HapticType,
-  ImageStyle,
+  StyleObject,
+  StyleProp,
   StepItem,
   // StepList
   StepListProps,
   StepStatus,
-  TextStyle,
   // ThemeView
   ThemeViewProps,
   // Toast
@@ -34,8 +34,6 @@ export type {
   ToastPosition,
   // UserAvatar
   UserAvatarProps,
-  // Common
-  ViewStyle,
 } from './types';
 // UI Components (DSL identifiers)
 export { ChatBubble, Panel, StepList, ThemeView, UserAvatar } from './ui/index.guest';

@@ -6,8 +6,11 @@
 import { mock, spyOn } from 'bun:test';
 
 // Ensure console.createTask exists (required by React)
-if (!(console as any).createTask) {
-  (console as any).createTask = () => ({ run: (fn: () => void) => fn() });
+const consoleWithTask = console as Console & {
+  createTask?: () => { run: (fn: () => void) => void };
+};
+if (!consoleWithTask.createTask) {
+  consoleWithTask.createTask = () => ({ run: (fn: () => void) => fn() });
 }
 
 // Silence console output during tests
@@ -16,7 +19,7 @@ spyOn(console, 'warn').mockImplementation(() => {});
 spyOn(console, 'error').mockImplementation(() => {});
 
 // Restore createTask after spyOn
-(console as any).createTask = () => ({ run: (fn: () => void) => fn() });
+consoleWithTask.createTask = () => ({ run: (fn: () => void) => fn() });
 
 // Mock react-native module
 mock.module('react-native', () => ({

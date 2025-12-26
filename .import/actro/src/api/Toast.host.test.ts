@@ -6,13 +6,7 @@
  */
 
 import type { ToastOptions } from '../types';
-import {
-  TOAST_CLEAR_HANDLER as CLEAR_HANDLER_SYMBOL,
-  getDurationMs,
-  getGravityValue,
-  HostToast,
-  TOAST_SET_HANDLER as SET_HANDLER_SYMBOL,
-} from './Toast.host';
+import { getDurationMs, getGravityValue, HostToast, type HostToastInternal } from './Toast.host';
 
 describe('Toast (Host)', () => {
   describe('getDurationMs', () => {
@@ -64,7 +58,7 @@ describe('Toast (Host)', () => {
       it('should use custom handler when set', () => {
         const calls: Array<{ message: string; options?: ToastOptions }> = [];
 
-        toast[SET_HANDLER_SYMBOL]((message, options) => {
+        (toast as HostToastInternal)._setHandler((message, options) => {
           calls.push({ message, options });
         });
 
@@ -76,7 +70,7 @@ describe('Toast (Host)', () => {
       it('should pass options to custom handler', () => {
         const calls: Array<{ message: string; options?: ToastOptions }> = [];
 
-        toast[SET_HANDLER_SYMBOL]((message, options) => {
+        (toast as HostToastInternal)._setHandler((message, options) => {
           calls.push({ message, options });
         });
 
@@ -88,7 +82,7 @@ describe('Toast (Host)', () => {
       it('should handle show without options', () => {
         const calls: Array<{ message: string; options?: ToastOptions }> = [];
 
-        toast[SET_HANDLER_SYMBOL]((message, options) => {
+        (toast as HostToastInternal)._setHandler((message, options) => {
           calls.push({ message, options });
         });
 
@@ -103,10 +97,10 @@ describe('Toast (Host)', () => {
         const originalLog = console.log;
         console.log = (...args) => logs.push(args);
 
-        toast[SET_HANDLER_SYMBOL]((msg) => calls.push(msg));
+        (toast as HostToastInternal)._setHandler((msg) => calls.push(msg));
         toast.show('First');
 
-        toast[CLEAR_HANDLER_SYMBOL]();
+        (toast as HostToastInternal)._clearHandler();
         toast.show('Second');
 
         expect(calls).toEqual(['First']);
@@ -157,8 +151,8 @@ describe('Toast (Host)', () => {
         const calls1: string[] = [];
         const calls2: string[] = [];
 
-        toast1[SET_HANDLER_SYMBOL]((msg) => calls1.push(msg));
-        toast2[SET_HANDLER_SYMBOL]((msg) => calls2.push(msg));
+        (toast1 as HostToastInternal)._setHandler((msg) => calls1.push(msg));
+        (toast2 as HostToastInternal)._setHandler((msg) => calls2.push(msg));
 
         toast1.show('msg1');
         toast2.show('msg2');

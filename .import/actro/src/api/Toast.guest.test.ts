@@ -8,7 +8,7 @@ import { Toast } from './Toast.guest';
 
 describe('Toast (Remote)', () => {
   type SandboxGlobal = typeof globalThis & {
-    sendToHost?: (event: string, payload?: unknown) => void;
+    __sendEventToHost?: (eventName: string, payload?: unknown) => void;
   };
 
   const sandboxGlobal = globalThis as SandboxGlobal;
@@ -17,16 +17,16 @@ describe('Toast (Remote)', () => {
   let originalSendToHost: unknown;
 
   beforeEach(() => {
-    originalSendToHost = sandboxGlobal.sendToHost;
+    originalSendToHost = sandboxGlobal.__sendEventToHost;
     sentMessages = [];
 
-    sandboxGlobal.sendToHost = (event: string, payload?: unknown) => {
-      sentMessages.push({ event, payload });
+    sandboxGlobal.__sendEventToHost = (eventName: string, payload?: unknown) => {
+      sentMessages.push({ event: eventName, payload });
     };
   });
 
   afterEach(() => {
-    sandboxGlobal.sendToHost = originalSendToHost as SandboxGlobal['sendToHost'];
+    sandboxGlobal.__sendEventToHost = originalSendToHost as SandboxGlobal['__sendEventToHost'];
   });
 
   describe('show', () => {
@@ -35,8 +35,8 @@ describe('Toast (Remote)', () => {
 
       expect(sentMessages).toEqual([
         {
-          event: 'askit:toast:show',
-          payload: ['Hello', undefined],
+          event: 'ASKIT_TOAST_SHOW',
+          payload: { message: 'Hello', options: undefined },
         },
       ]);
     });
@@ -44,13 +44,16 @@ describe('Toast (Remote)', () => {
     it('should include options in payload', () => {
       Toast.show('Test', { position: 'top', duration: 'long' });
 
-      expect(sentMessages[0]?.payload).toEqual(['Test', { position: 'top', duration: 'long' }]);
+      expect(sentMessages[0]?.payload).toEqual({
+        message: 'Test',
+        options: { position: 'top', duration: 'long' },
+      });
     });
 
     it('should handle numeric duration', () => {
       Toast.show('Numeric', { duration: 5000 });
 
-      expect(sentMessages[0]?.payload).toEqual(['Numeric', { duration: 5000 }]);
+      expect(sentMessages[0]?.payload).toEqual({ message: 'Numeric', options: { duration: 5000 } });
     });
 
     it('should handle position options', () => {
@@ -58,9 +61,15 @@ describe('Toast (Remote)', () => {
       Toast.show('Center', { position: 'center' });
       Toast.show('Bottom', { position: 'bottom' });
 
-      expect(sentMessages[0]?.payload).toEqual(['Top', { position: 'top' }]);
-      expect(sentMessages[1]?.payload).toEqual(['Center', { position: 'center' }]);
-      expect(sentMessages[2]?.payload).toEqual(['Bottom', { position: 'bottom' }]);
+      expect(sentMessages[0]?.payload).toEqual({ message: 'Top', options: { position: 'top' } });
+      expect(sentMessages[1]?.payload).toEqual({
+        message: 'Center',
+        options: { position: 'center' },
+      });
+      expect(sentMessages[2]?.payload).toEqual({
+        message: 'Bottom',
+        options: { position: 'bottom' },
+      });
     });
 
     it('should reject empty message', () => {
@@ -78,9 +87,9 @@ describe('Toast (Remote)', () => {
     });
   });
 
-  describe('without sendToHost', () => {
-    it('should warn and log when sendToHost is not available', () => {
-      sandboxGlobal.sendToHost = undefined;
+  describe('without __sendEventToHost', () => {
+    it('should warn and log when __sendEventToHost is not available', () => {
+      sandboxGlobal.__sendEventToHost = undefined;
 
       const warnings: unknown[] = [];
       const logs: unknown[] = [];
@@ -91,7 +100,7 @@ describe('Toast (Remote)', () => {
 
       Toast.show('Fallback');
 
-      expect(JSON.stringify(warnings)).toContain('sendToHost not available');
+      expect(JSON.stringify(warnings)).toContain('__sendEventToHost not available');
       expect(logs.length).toBeGreaterThanOrEqual(1);
       expect(JSON.stringify(logs)).toContain('[Toast] Fallback');
 
@@ -101,8 +110,8 @@ describe('Toast (Remote)', () => {
   });
 
   describe('error handling', () => {
-    it('should handle sendToHost throwing exception', () => {
-      sandboxGlobal.sendToHost = () => {
+    it('should handle __sendEventToHost throwing exception', () => {
+      sandboxGlobal.__sendEventToHost = () => {
         throw new Error('Bridge failure');
       };
 

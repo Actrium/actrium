@@ -20,6 +20,19 @@
     }
   },
   "guestToHost": {
+    "ASKIT_TOAST_SHOW": {
+      "summary": "Internal: Guest requests host to show toast.",
+      "payload": {
+        "message": "string",
+        "options": "unknown?"
+      }
+    },
+    "ASKIT_HAPTIC_TRIGGER": {
+      "summary": "Internal: Guest requests host to trigger haptic.",
+      "payload": {
+        "type": "string?"
+      }
+    },
     "GUEST_SLEEP_STATE": {
       "summary": "Guest 主动上报 sleep 状态（用于监控与督促）。",
       "payload": {

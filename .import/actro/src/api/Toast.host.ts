@@ -6,12 +6,6 @@
 
 import type { ToastAPI, ToastDuration, ToastOptions, ToastPosition } from '../types';
 
-/**
- * Internal symbols for accessing private APIs
- */
-const SET_HANDLER_SYMBOL = Symbol.for('askit.toast.setHandler');
-const CLEAR_HANDLER_SYMBOL = Symbol.for('askit.toast.clearHandler');
-
 // Types for React Native modules
 type PlatformType = { OS: string };
 type ToastAndroidType = {
@@ -91,11 +85,21 @@ export function getGravityValue(position?: ToastPosition): 'top' | 'center' | 'b
 }
 
 /**
+ * Extended interface for internal access by core modules
+ */
+export interface HostToastInternal extends ToastAPI {
+  /** Set custom show handler (for iOS or custom toast library) */
+  _setHandler(handler: (message: string, options?: ToastOptions) => void): void;
+  /** Clear custom handler */
+  _clearHandler(): void;
+}
+
+/**
  * Host Toast implementation
  * - Android: Uses ToastAndroid
  * - iOS: Falls back to console.log (requires custom implementation in host app)
  */
-class HostToast implements ToastAPI {
+class HostToast implements HostToastInternal {
   private customShowHandler?: (message: string, options?: ToastOptions) => void;
 
   /**
@@ -138,26 +142,23 @@ class HostToast implements ToastAPI {
   }
 
   /**
-   * Set custom show handler (for iOS or custom toast library)
-   * @internal - Accessed via SET_HANDLER_SYMBOL
+   * Set custom show handler
+   * @internal
    */
-  [SET_HANDLER_SYMBOL](handler: (message: string, options?: ToastOptions) => void): void {
+  _setHandler(handler: (message: string, options?: ToastOptions) => void): void {
     this.customShowHandler = handler;
   }
 
   /**
    * Clear custom handler
-   * @internal - Accessed via CLEAR_HANDLER_SYMBOL
+   * @internal
    */
-  [CLEAR_HANDLER_SYMBOL](): void {
+  _clearHandler(): void {
     this.customShowHandler = undefined;
   }
 }
 
-export const Toast: ToastAPI = new HostToast();
+export const Toast: HostToastInternal = new HostToast();
 
-// Export class for core module to extend
+// Export class for testing
 export { HostToast };
-
-// Export symbols for core module access
-export { SET_HANDLER_SYMBOL as TOAST_SET_HANDLER, CLEAR_HANDLER_SYMBOL as TOAST_CLEAR_HANDLER };
