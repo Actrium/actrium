@@ -4,7 +4,7 @@
  * Maps to input element
  */
 
-import React from 'react';
+import type React from 'react';
 
 export interface TextInputProps {
   style?: React.CSSProperties;

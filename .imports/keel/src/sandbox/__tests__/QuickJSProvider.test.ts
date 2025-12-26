@@ -1,4 +1,4 @@
-import { describe, expect, it, mock, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 // Mock the native module
 const mockContext = {
@@ -25,7 +25,7 @@ mock.module('../../sandbox-native/QuickJSModule', () => ({
 }));
 
 // Import after mocking
-import { QuickJSProvider, isQuickJSAvailable } from '../providers/QuickJSProvider.native';
+import { isQuickJSAvailable, QuickJSProvider } from '../providers/QuickJSProvider.native';
 
 describe('QuickJSProvider', () => {
   beforeEach(() => {

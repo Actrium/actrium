@@ -4,10 +4,10 @@
  * React Native component for rendering Guest UI in sandbox
  */
 
-import type { ReactElement, ReactNode } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import type { Engine } from '@rill/runtime';
+import { useEngineView } from '@rill/runtime';
+import type { ReactElement, ReactNode } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 /**
  * EngineView Props
@@ -60,11 +60,6 @@ export interface EngineViewProps {
 }
 
 /**
- * Loading state
- */
-type LoadingState = 'idle' | 'loading' | 'loaded' | 'error';
-
-/**
  * EngineView component
  *
  * @example
@@ -92,91 +87,14 @@ export function EngineView({
   renderError,
   style,
 }: EngineViewProps): ReactElement {
-  const [loadingState, setLoadingState] = useState<LoadingState>('idle');
-  const [error, setError] = useState<Error | null>(null);
-  const [content, setContent] = useState<ReactElement | string | null>(null);
-  const mountedRef = useRef(true);
-
-  // Update callback
-  const handleUpdate = useCallback(() => {
-    if (!mountedRef.current) return;
-
-    const receiver = engine.getReceiver();
-    if (receiver) {
-      setContent(receiver.render());
-    }
-  }, [engine]);
-
-  // Load Guest
-  useEffect(() => {
-    mountedRef.current = true;
-
-    async function loadGuest() {
-      if (engine.isLoaded || engine.isDestroyed) {
-        return;
-      }
-
-      setLoadingState('loading');
-      setError(null);
-
-      try {
-        // Create Receiver
-        engine.createReceiver(handleUpdate);
-
-        // Load and execute Guest
-        await engine.loadBundle(source, initialProps);
-
-        if (mountedRef.current) {
-          setLoadingState('loaded');
-          onLoad?.();
-        }
-      } catch (err) {
-        console.error('[EngineView] loadGuest error:', err);
-        if (mountedRef.current) {
-          const loadError = err instanceof Error ? err : new Error(String(err));
-          setError(loadError);
-          setLoadingState('error');
-          onError?.(loadError);
-        }
-      }
-    }
-
-    loadGuest();
-
-    return () => {
-      mountedRef.current = false;
-    };
-  }, [engine, source, initialProps, handleUpdate, onLoad, onError]);
-
-  // Listen to engine events
-  useEffect(() => {
-    const unsubscribeError = engine.on('error', (err: Error) => {
-      if (mountedRef.current) {
-        setError(err);
-        setLoadingState('error');
-        onError?.(err);
-      }
-    });
-
-    const unsubscribeDestroy = engine.on('destroy', () => {
-      if (mountedRef.current) {
-        setContent(null);
-        onDestroy?.();
-      }
-    });
-
-    return () => {
-      unsubscribeError();
-      unsubscribeDestroy();
-    };
-  }, [engine, onError, onDestroy]);
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const { loadingState, error, content } = useEngineView({
+    engine,
+    source,
+    initialProps,
+    onLoad,
+    onError,
+    onDestroy,
+  });
 
   // Render loading state
   if (loadingState === 'loading' || loadingState === 'idle') {

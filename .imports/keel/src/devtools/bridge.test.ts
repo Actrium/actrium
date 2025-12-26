@@ -1,7 +1,6 @@
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
-import { DevToolsBridge, createBridge } from './bridge';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { createBridge, type DevToolsBridge } from './bridge';
 import { createRuntimeCollector } from './runtime';
-import type { GuestDebugMessage } from './types';
 
 describe('DevToolsBridge', () => {
   let bridge: DevToolsBridge;

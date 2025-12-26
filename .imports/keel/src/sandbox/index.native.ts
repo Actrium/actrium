@@ -7,32 +7,28 @@
  * - DefaultProvider: Auto-selects the best provider for the current platform
  */
 
-// Type and enum exports
-export { SandboxType } from './types/provider';
+export type { DefaultProviderOptions } from './default/DefaultProvider';
+// Default provider (uses .native.ts variant automatically)
+export { DefaultProvider } from './default/DefaultProvider';
+export type { JSCProviderOptions } from './providers/JSCProvider';
+export {
+  isApplePlatform,
+  isJSCAvailable,
+  JSCProvider,
+  resolveJSCSandbox,
+} from './providers/JSCProvider';
+export type { QuickJSProviderOptions } from './providers/QuickJSProvider';
+// Provider exports (native only)
+export {
+  isQuickJSAvailable,
+  QuickJSProvider,
+  resolveQuickJS,
+} from './providers/QuickJSProvider';
 export type {
   JSEngineContext,
   JSEngineProvider,
   JSEngineRuntime,
   JSEngineRuntimeOptions,
 } from './types/provider';
-
-// Provider exports (uses .native.ts variants automatically)
-export { VMProvider } from './providers/VMProvider';
-export { WorkerProvider } from './providers/WorkerProvider';
-export {
-  QuickJSProvider,
-  isQuickJSAvailable,
-  resolveQuickJS,
-} from './providers/QuickJSProvider';
-export type { QuickJSProviderOptions } from './providers/QuickJSProvider';
-export {
-  JSCProvider,
-  isJSCAvailable,
-  isApplePlatform,
-  resolveJSCSandbox,
-} from './providers/JSCProvider';
-export type { JSCProviderOptions } from './providers/JSCProvider';
-
-// Default provider (uses .native.ts variant automatically)
-export { DefaultProvider } from './default/DefaultProvider';
-export type { DefaultProviderOptions } from './default/DefaultProvider';
+// Type and enum exports
+export { SandboxType } from './types/provider';

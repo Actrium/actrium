@@ -16,6 +16,22 @@ export type ScanResult = {
   details: ScanDetail[];
 };
 
+export type PropHint = {
+  location: string;
+  element: string;
+  props: Record<string, string>;
+};
+
+export type JSXAnalysisResult = {
+  propHints: PropHint[];
+  stats: {
+    totalElements: number;
+    jsiSafeProps: number;
+    functionProps: number;
+    unknownProps: number;
+  };
+};
+
 /**
  * Analyze module dependencies using oxc-parser
  *
@@ -26,4 +42,16 @@ export function analyzeModuleIDs(code: string): ScanResult {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const impl = require('./oxcAdapter.js');
   return impl.analyzeModuleIDs(code);
+}
+
+/**
+ * Analyze JSX props and infer types for JSI optimization
+ *
+ * Uses oxc-parser to parse JSX/TSX and infer prop types from literal values.
+ * Returns type hints that can be used at runtime for JSI zero-copy optimization.
+ */
+export function analyzeJSXProps(code: string): JSXAnalysisResult {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxcAdapter.js');
+  return impl.analyzeJSXProps(code);
 }

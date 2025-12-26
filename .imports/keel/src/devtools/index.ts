@@ -33,61 +33,61 @@
 // ============ Types ============
 
 export type {
-  // Common
-  Timestamp,
-  NodeId,
-  // Host
-  HostTreeNode,
-  OperationLogEntry,
-  OperationRecord,
-  HostMetrics,
-  SandboxStatus,
   // Guest
   ConsoleEntry,
-  GuestError,
-  ReconcilerRenderTiming,
-  // Bridge messages
-  GuestDebugMessage,
+  DevToolsEvent,
   // Events
   DevToolsEventType,
-  DevToolsEvent,
   EventHandler,
-  Unsubscribe,
+  // Bridge messages
+  GuestDebugMessage,
+  GuestError,
+  HostMetrics,
+  // Host
+  HostTreeNode,
+  NodeId,
+  OperationLogEntry,
+  OperationRecord,
+  ProfilingReport,
   // Profiling
   ProfilingSession,
-  ProfilingReport,
+  ReconcilerRenderTiming,
+  SandboxStatus,
+  // Common
+  Timestamp,
+  Unsubscribe,
 } from './types';
 
 // ============ Runtime Collector ============
 
 export type {
+  NodeInstance,
   RuntimeCollectorConfig,
   TimelineEvent,
   TimelineEventType,
-  NodeInstance,
 } from './runtime';
-export { RuntimeCollector, createRuntimeCollector } from './runtime';
+export { createRuntimeCollector, RuntimeCollector } from './runtime';
 
 // ============ Bridge ============
 
-export { DevToolsBridge, createBridge } from './bridge';
+export { createBridge, DevToolsBridge } from './bridge';
 
 // ============ Main API ============
 
-import { createRuntimeCollector, type RuntimeCollectorConfig, type NodeInstance } from './runtime';
 import { createBridge } from './bridge';
+import { createRuntimeCollector, type NodeInstance, type RuntimeCollectorConfig } from './runtime';
 import type {
+  ConsoleEntry,
   DevToolsEventType,
   EventHandler,
-  Unsubscribe,
-  ProfilingReport,
   GuestDebugMessage,
-  HostTreeNode,
-  HostMetrics,
-  SandboxStatus,
-  ConsoleEntry,
   GuestError,
+  HostMetrics,
+  HostTreeNode,
   OperationLogEntry,
+  ProfilingReport,
+  SandboxStatus,
+  Unsubscribe,
 } from './types';
 
 export interface DevToolsConfig {
@@ -144,6 +144,7 @@ export class DevTools {
     // Hook into engine events if available
     if (engine.on) {
       engine.on('batch', (...args: unknown[]) => {
+        // Reason: Batch operations array type determined at runtime
         const batch = args[0] as { batchId: number; operations: unknown[] };
         const duration = args[1] as number | undefined;
         this.runtimeCollector.logBatch(

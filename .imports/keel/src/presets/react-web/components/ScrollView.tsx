@@ -4,7 +4,7 @@
  * Maps to div with overflow scroll
  */
 
-import React from 'react';
+import type React from 'react';
 
 export interface ScrollEvent {
   nativeEvent: {

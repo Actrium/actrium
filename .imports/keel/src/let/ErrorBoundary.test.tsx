@@ -1,7 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { RillErrorBoundary } from './index';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
 describe('RillErrorBoundary', () => {
+  let React: typeof import('react');
+  let RillErrorBoundary: typeof import('./sdk').RillErrorBoundary;
+
+  afterAll(() => {
+    // Cleanup globalThis.React
+    delete (globalThis as Record<string, unknown>).React;
+  });
+
+  beforeAll(async () => {
+    React = await import('react');
+    // Set React on globalThis for RillErrorBoundary
+    (globalThis as Record<string, unknown>).React = React;
+    const sdk = await import('./sdk');
+    RillErrorBoundary = sdk.RillErrorBoundary;
+  });
+
   describe('getDerivedStateFromError', () => {
     it('should return state with hasError=true and captured error', () => {
       const error = new Error('Test error');
@@ -183,7 +198,7 @@ describe('RillErrorBoundary', () => {
     });
 
     it('should render static fallback when error occurs', () => {
-      const fallbackNode = <div>Error occurred</div>;
+      const fallbackNode = React.createElement('div', null, 'Error occurred');
       const mockInstance = {
         props: {
           children: 'Test Child',
@@ -207,7 +222,7 @@ describe('RillErrorBoundary', () => {
       const fallbackFn = (err: Error, info: { componentStack: string }) => {
         calledWithError = err;
         calledWithInfo = info;
-        return <div>Error fallback</div>;
+        return React.createElement('div', null, 'Error fallback');
       };
 
       const error = new Error('Function test');
@@ -253,7 +268,7 @@ describe('RillErrorBoundary', () => {
     });
 
     it('should not call function fallback when error is null', () => {
-      const fallbackFn = () => <div>Should not render</div>;
+      const fallbackFn = () => React.createElement('div', null, 'Should not render');
 
       const mockInstance = {
         props: {
@@ -273,7 +288,7 @@ describe('RillErrorBoundary', () => {
     });
 
     it('should not call function fallback when errorInfo is null', () => {
-      const fallbackFn = () => <div>Should not render</div>;
+      const fallbackFn = () => React.createElement('div', null, 'Should not render');
 
       const mockInstance = {
         props: {
@@ -292,7 +307,7 @@ describe('RillErrorBoundary', () => {
     });
 
     it('should render static fallback even if error/errorInfo is null', () => {
-      const fallbackNode = <div>Static error</div>;
+      const fallbackNode = React.createElement('div', null, 'Static error');
 
       const mockInstance = {
         props: {

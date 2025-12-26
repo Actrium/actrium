@@ -95,6 +95,103 @@ describe('CLI Build', () => {
 
       expect(fs.existsSync(customOutDir)).toBe(true);
     });
+
+    it('should handle watch mode gracefully', async () => {
+      const { build } = await import('./build');
+      const consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+
+      await build({
+        entry: 'src/guest.tsx',
+        outfile: 'dist/bundle.js',
+        minify: true,
+        sourcemap: false,
+        watch: true,
+      });
+
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Watch mode'));
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should generate metafile when requested', async () => {
+      const { build } = await import('./build');
+
+      await build({
+        entry: 'src/guest.tsx',
+        outfile: 'dist/bundle.js',
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        metafile: 'dist/meta.json',
+      });
+
+      expect(fs.existsSync(path.join(tempDir, 'dist/meta.json'))).toBe(true);
+
+      const metaContent = JSON.parse(
+        fs.readFileSync(path.join(tempDir, 'dist/meta.json'), 'utf-8')
+      );
+      expect(metaContent).toHaveProperty('inputs');
+      expect(metaContent).toHaveProperty('outputs');
+    });
+
+    it('should handle sourcemap generation', async () => {
+      const { build } = await import('./build');
+
+      await build({
+        entry: 'src/guest.tsx',
+        outfile: 'dist/bundle.js',
+        minify: false,
+        sourcemap: true,
+        watch: false,
+      });
+
+      expect(fs.existsSync(path.join(tempDir, 'dist/bundle.js'))).toBe(true);
+    });
+
+    it('should disable minification when requested', async () => {
+      const { build } = await import('./build');
+
+      await build({
+        entry: 'src/guest.tsx',
+        outfile: 'dist/bundle.js',
+        minify: false,
+        sourcemap: false,
+        watch: false,
+      });
+
+      const bundleContent = fs.readFileSync(path.join(tempDir, 'dist/bundle.js'), 'utf-8');
+      expect(bundleContent).toBeTruthy();
+    });
+
+    it('should handle strict mode (default)', async () => {
+      const { build } = await import('./build');
+
+      await build({
+        entry: 'src/guest.tsx',
+        outfile: 'dist/bundle.js',
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        strict: true,
+      });
+
+      expect(fs.existsSync(path.join(tempDir, 'dist/bundle.js'))).toBe(true);
+    });
+
+    it('should skip strict guard when disabled', async () => {
+      const { build } = await import('./build');
+
+      await build({
+        entry: 'src/guest.tsx',
+        outfile: 'dist/bundle.js',
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        strict: false,
+      });
+
+      expect(fs.existsSync(path.join(tempDir, 'dist/bundle.js'))).toBe(true);
+    });
   });
 
   describe('analyze', () => {

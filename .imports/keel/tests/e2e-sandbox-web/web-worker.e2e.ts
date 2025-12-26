@@ -3,11 +3,13 @@ import { expect, test } from '@playwright/test';
 
 declare global {
   interface Window {
+    // biome-ignore lint/suspicious/noExplicitAny: Playwright Worker provider with dynamic API
     WorkerProvider: any;
   }
 }
 
 test.beforeEach(async ({ page }) => {
+  // biome-ignore lint/suspicious/noExplicitAny: Playwright console message with dynamic structure
   const consolePromise = page.waitForEvent('console', (msg: any) =>
     msg.text().includes('WorkerProvider attached to window.')
   );
@@ -364,6 +366,7 @@ test.describe('Error Handling', () => {
       const ctx = await runtime.createContext();
       try {
         await ctx.evalAsync('throw new Error("test error");');
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
       } catch (e: any) {
         return { name: e.name, message: e.message };
       }
@@ -378,6 +381,7 @@ test.describe('Error Handling', () => {
       const ctx = await runtime.createContext();
       try {
         await ctx.evalAsync('null.foo();');
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
       } catch (e: any) {
         return { name: e.name };
       }
@@ -392,6 +396,7 @@ test.describe('Error Handling', () => {
       const ctx = await runtime.createContext();
       try {
         await ctx.evalAsync('return undefinedVariable;');
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
       } catch (e: any) {
         return { name: e.name };
       }
@@ -406,6 +411,7 @@ test.describe('Error Handling', () => {
       const ctx = await runtime.createContext();
       try {
         await ctx.evalAsync('return {{{;');
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
       } catch (e: any) {
         return { name: e.name };
       }
@@ -420,6 +426,7 @@ test.describe('Error Handling', () => {
       const ctx = await runtime.createContext();
       try {
         await ctx.evalAsync('return Promise.reject(new Error("rejected"));');
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
       } catch (e: any) {
         return { name: e.name, message: e.message };
       }
@@ -437,6 +444,7 @@ test.describe('Error Handling', () => {
           await new Promise(r => setTimeout(r, 10));
           throw new Error("async error");
         `);
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
       } catch (e: any) {
         return { name: e.name, message: e.message };
       }
@@ -451,6 +459,7 @@ test.describe('Error Handling', () => {
       const ctx = await runtime.createContext();
       try {
         await ctx.evalAsync('throw "string error";');
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
       } catch (e: any) {
         return { caught: true, hasMessage: !!e.message };
       }
@@ -541,6 +550,7 @@ test.describe('Resource Management', () => {
       const pendingPromise = ctx
         .evalAsync('return new Promise(r => setTimeout(() => r("should not resolve"), 5000));')
         .then(() => ({ rejected: false }))
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
         .catch((e: any) => ({ rejected: true, message: e.message }));
 
       // Destroy while the promise is pending
@@ -766,6 +776,7 @@ test.describe('Sync Evaluation Not Supported', () => {
       try {
         ctx.eval('return 1;');
         return { threw: false };
+        // biome-ignore lint/suspicious/noExplicitAny: Error object can have any structure
       } catch (e: any) {
         return { threw: true, message: e.message };
       }

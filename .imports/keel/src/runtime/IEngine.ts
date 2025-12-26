@@ -5,15 +5,16 @@
  * Create a new Engine for each isolated execution context needed.
  */
 
-import type { OperationBatch, SerializedValue } from './types';
 import type { Receiver, ReceiverStats } from './receiver';
 import type { ComponentMap, ComponentRegistry } from './registry';
+import type { BridgeValueObject, OperationBatch } from './types';
 
 /**
  * Message from guest to host
  */
 export interface GuestMessage {
   event: string;
+  // Reason: Event payload can be any serializable type
   payload: unknown;
 }
 
@@ -22,6 +23,7 @@ export interface GuestMessage {
  */
 export interface DevToolsConsoleEntry {
   level: 'log' | 'info' | 'warn' | 'error' | 'debug';
+  // Reason: console.log/error/etc accept arbitrary arguments
   args: unknown[];
   timestamp: number;
   stack?: string;
@@ -223,12 +225,13 @@ export interface IEngine {
   /**
    * Send event to sandbox guest
    */
+  // Reason: Event payload can be any serializable type
   sendEvent(eventName: string, payload?: unknown): void;
 
   /**
    * Update configuration
    */
-  updateConfig(config: Record<string, SerializedValue>): void;
+  updateConfig(config: BridgeValueObject): void;
 
   /**
    * Create Receiver for rendering

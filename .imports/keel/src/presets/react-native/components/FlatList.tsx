@@ -4,7 +4,7 @@
  * Default FlatList component implementation, wrapping React Native FlatList
  */
 
-import React from 'react';
+import type React from 'react';
 import { type ListRenderItem, FlatList as RNFlatList, type ViewStyle } from 'react-native';
 
 export interface FlatListProps<T = unknown> {

@@ -31,9 +31,9 @@ describe('CLI Analyze - whitelist scan', () => {
   it('should fail when failOnViolation is true', async () => {
     const { analyze } = await import('./build');
     fs.writeFileSync(bundle, `import x from 'lodash';`);
-    await expect(
-      analyze(bundle, { whitelist: ['react'], failOnViolation: true })
-    ).rejects.toThrow('Found non-whitelisted modules: lodash');
+    await expect(analyze(bundle, { whitelist: ['react'], failOnViolation: true })).rejects.toThrow(
+      'Found non-whitelisted modules: lodash'
+    );
   });
 
   it('should ignore relative imports', async () => {

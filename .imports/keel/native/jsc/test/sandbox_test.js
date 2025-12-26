@@ -5,10 +5,14 @@
  * Both Host and Guest are JavaScript - this is the real usage scenario.
  */
 
-(function () {
+(() => {
   // Skip test if JSI module is not available (e.g., running in Bun instead of React Native)
   if (typeof globalThis.__JSCSandboxJSI === 'undefined') {
-    console.log('⊘ Skipping JSC native tests (JSI module not available in this environment)');
+    console.log('⊘ Skipping JSC native tests');
+    console.log('  Reason: JSI module not available');
+    console.log('  Environment: Non-React Native (Bun/Node.js)');
+    console.log('  Platform: JSC only available on iOS/macOS/tvOS/visionOS');
+    console.log('  To run: Use standalone RN test project at tests/rn-integration/');
     return;
   }
 
@@ -20,10 +24,10 @@
     testsRun++;
     if (condition) {
       testsPassed++;
-      console.log('  ✓ ' + testName);
+      console.log(`  ✓ ${testName}`);
     } else {
       testsFailed++;
-      console.log('  ✗ ' + testName + (message ? ' - ' + message : ''));
+      console.log(`  ✗ ${testName}${message ? ` - ${message}` : ''}`);
     }
   }
 
@@ -32,10 +36,10 @@
     try {
       fn();
       testsFailed++;
-      console.log('  ✗ ' + testName + ' - expected exception');
-    } catch (e) {
+      console.log(`  ✗ ${testName} - expected exception`);
+    } catch (_e) {
       testsPassed++;
-      console.log('  ✓ ' + testName);
+      console.log(`  ✓ ${testName}`);
     }
   }
 
@@ -97,7 +101,7 @@
 
   var callbackInvoked = false;
   var receivedValue = 0;
-  ctx.setGlobal('hostCallback', function (val) {
+  ctx.setGlobal('hostCallback', (val) => {
     callbackInvoked = true;
     receivedValue = val;
     return val * 2;
@@ -109,14 +113,12 @@
     'Host function called from sandbox'
   );
 
-  ctx.setGlobal('multiArg', function (a, b, c, d, e) {
-    return a + b + c + d + e;
-  });
+  ctx.setGlobal('multiArg', (a, b, c, d, e) => a + b + c + d + e);
   assert(ctx.eval('multiArg(1, 2, 3, 4, 5)') === 15, 'Host function with multiple args');
 
-  var receivedObj = null;
-  ctx.setGlobal('objCallback', function (obj) {
-    receivedObj = obj;
+  var _receivedObj = null;
+  ctx.setGlobal('objCallback', (obj) => {
+    _receivedObj = obj;
     return obj.name === 'Alice' && obj.age === 30;
   });
   assert(
@@ -147,10 +149,10 @@
 
   // 8. Error Handling
   console.log('\n8. Error Handling');
-  assertThrows(function () {
+  assertThrows(() => {
     ctx.eval('function { invalid');
   }, 'Syntax error is caught');
-  assertThrows(function () {
+  assertThrows(() => {
     ctx.eval("throw new Error('test error')");
   }, 'Runtime error is caught');
 
@@ -159,7 +161,7 @@
   var tempCtx = runtime.createContext();
   tempCtx.eval('var x = 1');
   tempCtx.dispose();
-  assertThrows(function () {
+  assertThrows(() => {
     tempCtx.eval('x + 1');
   }, 'Disposed context throws error');
 
@@ -208,7 +210,7 @@
       'BigInt large number comparison'
     );
   } catch (e) {
-    console.log('  ⚠ BigInt tests skipped: ' + e.message);
+    console.log(`  ⚠ BigInt tests skipped: ${e.message}`);
   }
 
   // 13. Nested Objects
@@ -249,39 +251,24 @@
 
   ctx.eval('var higherOrder = function(f, x) { return f(x * 2); }');
   var higherOrder = ctx.getGlobal('higherOrder');
-  assert(
-    higherOrder(function (n) {
-      return n + 1;
-    }, 5) === 11,
-    'Higher-order function'
-  );
+  assert(higherOrder((n) => n + 1, 5) === 11, 'Higher-order function');
 
   // 16. Host Callback with Various Return Types
   console.log('\n16. Host Callback Return Types');
-  ctx.setGlobal('returnNull', function () {
-    return null;
-  });
+  ctx.setGlobal('returnNull', () => null);
   assert(ctx.eval('returnNull() === null') === true, 'Host callback returning null');
 
-  ctx.setGlobal('returnUndefined', function () {
-    return undefined;
-  });
+  ctx.setGlobal('returnUndefined', () => undefined);
   assert(ctx.eval('returnUndefined() === undefined') === true, 'Host callback returning undefined');
 
-  ctx.setGlobal('returnBool', function (b) {
-    return !b;
-  });
+  ctx.setGlobal('returnBool', (b) => !b);
   assert(ctx.eval('returnBool(false)') === true, 'Host callback returning boolean');
 
-  ctx.setGlobal('returnArray', function () {
-    return [1, 2, 3];
-  });
+  ctx.setGlobal('returnArray', () => [1, 2, 3]);
   var retArr = ctx.eval('returnArray()');
   assert(Array.isArray(retArr) && retArr.length === 3, 'Host callback returning array');
 
-  ctx.setGlobal('returnObject', function () {
-    return { a: 1, b: 2 };
-  });
+  ctx.setGlobal('returnObject', () => ({ a: 1, b: 2 }));
   assert(ctx.eval('returnObject().a + returnObject().b') === 3, 'Host callback returning object');
 
   // 17. Guest Callback Receiving Various Types
@@ -343,7 +330,7 @@
     assert(ctx.eval('mySet.has(2)') === true, 'Set has');
     assert(ctx.eval('mySet.has(5)') === false, 'Set has (not present)');
   } catch (e) {
-    console.log('  ⚠ Map/Set tests skipped: ' + e.message);
+    console.log(`  ⚠ Map/Set tests skipped: ${e.message}`);
   }
 
   // 22. TypedArrays (if supported)
@@ -364,7 +351,7 @@
       'Float64Array precision'
     );
   } catch (e) {
-    console.log('  ⚠ TypedArray tests skipped: ' + e.message);
+    console.log(`  ⚠ TypedArray tests skipped: ${e.message}`);
   }
 
   // 23. Symbol (if supported)
@@ -377,7 +364,7 @@
     ctx.eval("var symObj = {}; symObj[sym1] = 'symbol value';");
     assert(ctx.eval('symObj[sym1]') === 'symbol value', 'Symbol as object key');
   } catch (e) {
-    console.log('  ⚠ Symbol tests skipped: ' + e.message);
+    console.log(`  ⚠ Symbol tests skipped: ${e.message}`);
   }
 
   // 24. Promise (basic, if supported)
@@ -393,7 +380,7 @@
     assert(ctx.eval('typeof Promise.resolve') === 'function', 'Promise.resolve exists');
     assert(ctx.eval('typeof Promise.reject') === 'function', 'Promise.reject exists');
   } catch (e) {
-    console.log('  ⚠ Promise tests skipped: ' + e.message);
+    console.log(`  ⚠ Promise tests skipped: ${e.message}`);
   }
 
   // 25. JSON serialization
@@ -435,7 +422,7 @@
   assert(ctx.eval('Math.abs(-5)') === 5, 'Math.abs');
   assert(ctx.eval('Math.max(1, 5, 3)') === 5, 'Math.max');
   assert(ctx.eval('Math.min(1, 5, 3)') === 1, 'Math.min');
-  assert(Math.abs(ctx.eval('Math.sqrt(2)') - 1.414) < 0.01, 'Math.sqrt');
+  assert(Math.abs(ctx.eval('Math.sqrt(2)') - Math.SQRT2) < 0.01, 'Math.sqrt');
 
   // 29. Empty and edge cases
   console.log('\n29. Edge Cases');
@@ -454,9 +441,9 @@
 
   // Summary
   console.log('\n=== Test Summary ===');
-  console.log('Total: ' + testsRun);
-  console.log('Passed: ' + testsPassed);
-  console.log('Failed: ' + testsFailed);
+  console.log(`Total: ${testsRun}`);
+  console.log(`Passed: ${testsPassed}`);
+  console.log(`Failed: ${testsFailed}`);
 
   if (testsFailed === 0) {
     console.log('\n✓ ALL TESTS PASSED\n');

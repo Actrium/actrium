@@ -9,11 +9,13 @@ export interface WorkerMessage {
   id?: string;
   code?: string;
   name?: string;
+  // Reason: Worker message value can be any serializable type
   value?: unknown;
 }
 
 export interface WorkerResponse {
   id: string;
+  // Reason: eval() and getGlobal() return arbitrary types
   result?: unknown;
   error?: { name: string; message: string; stack?: string };
 }
@@ -22,8 +24,11 @@ export interface WorkerResponse {
  * JSEngineContext interface - matches @rill/sandbox types
  */
 export interface JSEngineContext {
+  // Reason: eval() returns arbitrary type from dynamic code execution
   eval(code: string): unknown;
+  // Reason: setGlobal accepts any serializable value
   setGlobal(name: string, value: unknown): void;
+  // Reason: getGlobal returns arbitrary type from sandbox globals
   getGlobal(name: string): unknown;
   dispose(): void;
 }
@@ -32,6 +37,7 @@ export interface JSEngineContext {
  * Extended context with async eval support
  */
 export interface WorkerContext extends JSEngineContext {
+  // Reason: evalAsync returns arbitrary type from dynamic code execution
   evalAsync(code: string): Promise<unknown>;
 }
 
@@ -68,6 +74,7 @@ export class WorkerProvider implements JSEngineProvider {
       ? this.workerFactory()
       : new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
+    // Reason: Promise resolves/rejects with arbitrary types from worker
     const pending = new Map<
       string,
       { resolve: (v: unknown) => void; reject: (e: unknown) => void }
@@ -92,6 +99,7 @@ export class WorkerProvider implements JSEngineProvider {
       }
     };
 
+    // Reason: Worker call returns arbitrary type from eval/getGlobal
     const call = (msg: Omit<WorkerMessage, 'id'>): Promise<unknown> => {
       const id = String(++msgId);
       return new Promise<unknown>((resolve, reject) => {
@@ -100,7 +108,7 @@ export class WorkerProvider implements JSEngineProvider {
       });
     };
 
-    // Store for globals (Worker stores them internally)
+    // Reason: Global variables can be any serializable type
     const globals = new Map<string, unknown>();
 
     const context: WorkerContext = {
@@ -112,6 +120,7 @@ export class WorkerProvider implements JSEngineProvider {
         return await call({ type: 'eval', code });
       },
 
+      // Reason: setGlobal accepts any serializable value for sandbox globals
       setGlobal: (name: string, value: unknown) => {
         // Functions cannot be serialized via postMessage
         if (typeof value === 'function') {
@@ -132,6 +141,7 @@ export class WorkerProvider implements JSEngineProvider {
         post({ type: 'setGlobal', name, value });
       },
 
+      // Reason: getGlobal returns arbitrary type from sandbox globals
       getGlobal: (name: string): unknown => {
         return globals.get(name);
       },

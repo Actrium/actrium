@@ -82,10 +82,16 @@ const RUNTIME_INJECT = `
       try {
         return fn.apply(null, args || []);
       } catch (e) {
-        console.error('[rill] Callback error:', e);
+        console.error('[rill] Callback execution error for', fnId);
+        console.error('[rill] Error type:', typeof e);
+        console.error('[rill] Error message:', e && e.message ? e.message : String(e));
+        console.error('[rill] Error stack:', e && e.stack ? e.stack : 'no stack');
+        console.error('[rill] Error name:', e && e.name ? e.name : 'no name');
+        throw e;
       }
     } else {
       console.warn('[rill] Callback not found:', fnId);
+      console.warn('[rill] Available callbacks:', Array.from(globalThis.__callbacks.keys()).join(', '));
     }
   };
 
@@ -198,6 +204,17 @@ const EXTERNALS: Record<string, string> = {
 };
 
 /**
+ * Alias shim for externals that Bun may rename (e.g., __React)
+ */
+const EXTERNAL_ALIAS_SHIM = `
+// External alias shim (React/JSX/ReactNative)
+try { if (typeof __React === 'undefined' && typeof React !== 'undefined') { var __React = React; } } catch {}
+try { if (typeof __ReactJSXRuntime === 'undefined' && typeof ReactJSXRuntime !== 'undefined') { var __ReactJSXRuntime = ReactJSXRuntime; } } catch {}
+try { if (typeof __ReactJSXDevRuntime === 'undefined' && typeof ReactJSXDevRuntime !== 'undefined') { var __ReactJSXDevRuntime = ReactJSXDevRuntime; } } catch {}
+try { if (typeof __ReactNative === 'undefined' && typeof ReactNative !== 'undefined') { var __ReactNative = ReactNative; } } catch {}
+`;
+
+/**
  * Execute build using Bun.build
  */
 export async function build(options: BuildOptions): Promise<void> {
@@ -232,8 +249,8 @@ export async function build(options: BuildOptions): Promise<void> {
     entrypoints: [entryPath],
     outdir: outDir,
     target: 'browser',
-    format: 'iife',
-    naming: outFileName.replace(/\.js$/, '') + '.[ext]',
+    format: 'cjs',
+    naming: `${outFileName.replace(/\.js$/, '')}.[ext]`,
     minify,
     sourcemap: sourcemap ? 'external' : 'none',
     external: Object.keys(EXTERNALS),
@@ -255,6 +272,36 @@ export async function build(options: BuildOptions): Promise<void> {
   const targetPath = path.join(outDir, outFileName);
   let bundleCode = await Bun.file(result.outputs[0]!.path).text();
 
+  // Analyze JSX props for JSI optimization
+  console.log('\nAnalyzing JSX props for JSI optimization...');
+  let jsxAnalysis: import('./oxcAdapter').JSXAnalysisResult = {
+    propHints: [],
+    stats: {
+      totalElements: 0,
+      jsiSafeProps: 0,
+      functionProps: 0,
+      unknownProps: 0,
+    },
+  };
+  try {
+    const { analyzeJSXProps } = await import('./oxcAdapter');
+    jsxAnalysis = analyzeJSXProps(bundleCode);
+
+    if (jsxAnalysis.stats) {
+      console.log(`  ✓ Analyzed ${jsxAnalysis.stats.totalElements} JSX elements`);
+      console.log(`  ✓ Found ${jsxAnalysis.stats.jsiSafeProps} JSI-safe props`);
+      console.log(`  ✓ Found ${jsxAnalysis.stats.functionProps} function props`);
+      if (jsxAnalysis.stats.unknownProps > 0) {
+        console.log(
+          `  ⚠ ${jsxAnalysis.stats.unknownProps} props with unknown types (will use fallback)`
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('  ⚠ JSX analysis failed:', (err as Error).message);
+    console.warn('  ℹ Continuing without type hints');
+  }
+
   // Transform external imports to global variable references
   // Bun marks externals as require() calls, we need to map them to globals
   for (const [mod, globalName] of Object.entries(EXTERNALS)) {
@@ -263,45 +310,24 @@ export async function build(options: BuildOptions): Promise<void> {
     bundleCode = bundleCode.replace(requirePattern, globalName);
   }
 
-  // Bun IIFE format: (()=>{var exports={};...;return exports})();
-  // We need to modify it to capture the default export into globalThis.__RillGuest
-  //
-  // Strategy: Replace the final })(); with code that exports to globalThis
-  // The pattern looks like: var G={};m(G,{default:()=>p});...})();
-  // where G is the exports object
-  //
-  // We inject code before the final })() to set globalThis.__RillGuest
-  // by finding the exports object variable name
-
-  // Find the exports variable pattern: var X={};m(X,{default:
-  const exportsMatch = bundleCode.match(
-    /var\s+([A-Za-z_$][A-Za-z0-9_$]*)={};[a-zA-Z_$]+\(\1,\{default:/
-  );
-  const exportsVar = exportsMatch ? exportsMatch[1] : null;
-
-  let modifiedBundle = bundleCode;
-  if (exportsVar) {
-    // Inject code to capture exports before the IIFE closes
-    // Replace final })(); with our capture code
-    modifiedBundle = bundleCode.replace(
-      /\}\)\(\);?\s*$/,
-      `globalThis.__RillGuest = ${exportsVar}.default || ${exportsVar};\n})();`
-    );
-  } else {
-    // Fallback: wrap the bundle code in a way that captures exports
-    // This handles cases where the exports pattern isn't found
-    modifiedBundle = `
-var __rillExports = {};
-var module = { exports: __rillExports };
-var exports = __rillExports;
-${bundleCode}
-globalThis.__RillGuest = __rillExports.default || __rillExports;
-`;
+  // For CJS output, module.exports carries the default export
+  // After transforming externals, capture default into globalThis.__RillGuest
+  const captureExports = `
+try {
+  var __rillModuleExports = (typeof module !== 'undefined' && module && module.exports) ? module.exports : (typeof exports !== 'undefined' ? exports : undefined);
+  if (__rillModuleExports) {
+    globalThis.__RillGuest = __rillModuleExports.default || __rillModuleExports;
   }
+} catch {}
+`;
+
+  const modifiedBundle = `${bundleCode}\n${captureExports}`;
 
   // Wrap with runtime inject and auto-render footer
+  // JSI optimization is handled directly in createElement (see RUNTIME_INJECT)
   const wrappedCode = `/* Rill Guest Bundle - Generated by rill-cli */
 ${RUNTIME_INJECT}
+${EXTERNAL_ALIAS_SHIM}
 ${modifiedBundle}
 ${AUTO_RENDER_FOOTER}
 /* End of Rill Guest Bundle */`;
@@ -342,7 +368,17 @@ ${AUTO_RENDER_FOOTER}
       RillLet: { View: 'View', Text: 'Text', render: () => {} },
       module: { exports: mockExports },
       exports: mockExports,
+      __React: null,
+      __ReactJSXRuntime: null,
+      __ReactJSXDevRuntime: null,
+      __ReactNative: null,
     };
+    // Alias externals to __React* variants
+    mockGlobals.__React = mockGlobals.React;
+    mockGlobals.__ReactJSXRuntime = mockGlobals.ReactJSXRuntime;
+    mockGlobals.__ReactJSXDevRuntime = mockGlobals.ReactJSXDevRuntime;
+    mockGlobals.__ReactNative = mockGlobals.ReactNative;
+
     // Mock require function that returns mock globals based on module name
     const mockRequire = (name: string) => {
       if (name === 'react') return mockGlobals.React;

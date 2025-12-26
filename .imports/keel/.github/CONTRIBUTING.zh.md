@@ -1,32 +1,32 @@
 # 贡献指南
 
-感谢你对 Rill 的兴趣！本指南将帮助你开始贡献。
+感谢你对 Rill 的兴趣！
 
 [English Version](./CONTRIBUTING.md)
 
 ## 开发环境要求
 
+- **Bun**: >= 1.0.0
 - **Node.js**: >= 18.0.0
-- **npm**: >= 9.0.0
 
 ## 快速开始
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/kookyleo/rill.git
+# 克隆仓库
+git clone https://github.com/GoAskAway/rill.git
 cd rill
 
-# 2. 安装依赖
+# 安装依赖
 bun install
 
-# 3. 构建项目
-bun run build
+# 运行测试
+npm run test:all
 
-# 4. 运行类型检查
+# 类型检查
 bun run typecheck
 
-# 5. 运行测试
-npm test
+# 代码检查
+bun run lint
 ```
 
 ## 开发流程
@@ -48,26 +48,24 @@ git checkout -b fix/your-bug-fix
 ### 3. 测试更改
 
 ```bash
+# 所有测试 (单元 + Native + E2E)
+npm run test:all
+
+# 仅单元测试
+npm test
+
 # 类型检查
 bun run typecheck
 
-# 构建
-bun run build
-
-# 运行测试
-npm test
-
-# 测试 CLI
-node dist/cli/index.js build examples/test.tsx
+# 代码检查
+bun run lint
 ```
 
 ### 4. 提交更改
 
 ```bash
 git add .
-git commit -m "feat: 添加新功能"
-# 或
-git commit -m "fix: 修复某个问题"
+git commit -m "feat: add new feature"
 ```
 
 提交信息格式：
@@ -86,24 +84,36 @@ git push origin feature/your-feature-name
 
 然后在 GitHub 上创建 Pull Request。
 
-## CI/CD
+## 项目结构
 
-项目使用 GitHub Actions 进行持续集成：
-
-- ✅ 类型检查
-- ✅ 构建测试
-- ✅ CLI 功能测试
-- ✅ 多 Node.js 版本测试 (18.x, 20.x, 22.x)
-
-所有 PR 必须通过 CI 检查才能合并。
+```
+rill/
+├── src/
+│   ├── runtime/        # Host 运行时 (Engine, Receiver)
+│   ├── let/            # Guest SDK (组件、Hooks)
+│   ├── bridge/         # 共享序列化层
+│   ├── sandbox/        # 沙箱提供者
+│   ├── cli/            # CLI 构建工具
+│   ├── devtools/       # 开发工具
+│   └── presets/        # 平台预设 (RN, Web)
+├── native/
+│   ├── jsc/            # JavaScriptCore 沙箱 (macOS/iOS)
+│   ├── quickjs/        # QuickJS 沙箱 (跨平台)
+│   └── platform/       # React Native 集成
+├── tests/
+│   ├── e2e-sandbox-web/   # Web Worker E2E 测试
+│   ├── e2e-wasm-sandbox/  # WASM 沙箱 E2E 测试
+│   └── rn-macos-e2e/      # React Native macOS E2E 测试
+└── docs/               # 文档
+```
 
 ## 代码规范
 
 ### TypeScript
 
-- 启用严格模式 (`strict: true`)
-- 禁止隐式 any (`noImplicitAny: true`)
-- 使用索引签名访问属性 (`obj['key']` 而不是 `obj.key`)
+- 启用严格模式
+- 禁止隐式 any
+- 使用 Biome 进行格式化和检查
 
 ### 命名规范
 
@@ -112,49 +122,7 @@ git push origin feature/your-feature-name
 - 函数/变量: `camelCase`
 - 常量: `UPPER_SNAKE_CASE`
 
-### 错误处理
-
-始终提供有用的错误消息：
-
-```typescript
-if (!fs.existsSync(filePath)) {
-  console.error(`❌ 错误: 找不到文件: ${filePath}`);
-  console.error(`\n💡 提示: 请检查路径是否正确`);
-  throw new Error(`File not found: ${filePath}`);
-}
-```
-
-## 项目结构
-
-```
-rill/
-├── src/
-│   ├── sdk/          # SDK - 供guest开发使用
-│   ├── runtime/      # Runtime - 供宿主应用使用
-│   ├── cli/          # CLI - 构建工具
-│   ├── reconciler/   # Reconciler - React 渲染器
-│   └── types/        # 类型定义
-├── dist/             # 构建输出
-├── examples/         # 示例项目
-└── .github/
-    └── workflows/    # CI 配置
-```
-
-## 性能优化
-
-CLI 构建会显示性能指标：
-
-```bash
-✅ Build successful!
-   File: dist/bundle.js
-   Size: 2.95 KB
-   Time: 10ms
-```
-
-保持构建时间和 bundle 大小在合理范围内。
-
 ## 需要帮助？
 
-- 📖 [项目文档](../README.md)
-- 🐛 [报告问题](https://github.com/kookyleo/rill/issues)
-- 💬 [讨论区](https://github.com/kookyleo/rill/discussions)
+- [项目文档](../README.md)
+- [报告问题](https://github.com/GoAskAway/rill/issues)

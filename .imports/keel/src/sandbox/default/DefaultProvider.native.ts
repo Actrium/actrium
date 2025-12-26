@@ -7,10 +7,8 @@
  * - No fallback - throws error if no provider available
  */
 
-// @ts-expect-error - Native module loaded conditionally
-import { isJSCAvailable } from '../../sandbox-native/src/jsc';
-// @ts-expect-error - Native module loaded conditionally
-import { isQuickJSAvailable } from '../../sandbox-native/src/quickjs';
+import { isJSCAvailable } from '../../sandbox-native/JSCModule';
+import { isQuickJSAvailable } from '../../sandbox-native/QuickJSModule';
 import { JSCProvider } from '../providers/JSCProvider';
 import { QuickJSProvider } from '../providers/QuickJSProvider';
 import { SandboxType } from '../types/provider';
@@ -34,13 +32,26 @@ export type DefaultProviderOptions = {
  */
 export class DefaultProvider {
   static create(options?: DefaultProviderOptions) {
+    // Cache availability checks to avoid repeated native calls and add diagnostics
+    const jscAvailable = isJSCAvailable();
+    const quickjsAvailable = isQuickJSAvailable();
+    // One-time availability log to帮助定位沙箱加载问题
+    if (typeof console?.log === 'function') {
+      console.log('[rill][DefaultProvider] availability', {
+        jscAvailable,
+        quickjsAvailable,
+        jscGlobal: typeof globalThis.__JSCSandboxJSI,
+        quickjsGlobal: typeof globalThis.__QuickJSSandboxJSI,
+      });
+    }
+
     // Build provider options only with defined values
     const providerOptions =
       options?.timeout !== undefined ? { timeout: options.timeout } : undefined;
 
     // Explicit JSC provider selection (Apple platforms only)
     if (options?.sandbox === SandboxType.JSC) {
-      if (isJSCAvailable()) {
+      if (jscAvailable) {
         return new JSCProvider(providerOptions);
       }
       throw new Error(
@@ -50,7 +61,7 @@ export class DefaultProvider {
 
     // Explicit QuickJS provider selection
     if (options?.sandbox === SandboxType.QuickJS) {
-      if (isQuickJSAvailable()) {
+      if (quickjsAvailable) {
         return new QuickJSProvider(providerOptions);
       }
       throw new Error(
@@ -61,19 +72,26 @@ export class DefaultProvider {
     // Auto-detect best provider
 
     // On Apple platforms, prefer JSCProvider (zero binary overhead)
-    if (isJSCAvailable()) {
+    if (jscAvailable) {
       return new JSCProvider(providerOptions);
     }
 
     // Try QuickJSProvider (works on all platforms including Android)
-    if (isQuickJSAvailable()) {
+    if (quickjsAvailable) {
       return new QuickJSProvider(providerOptions);
     }
 
     // No suitable provider available
+    const diag = {
+      jscAvailable,
+      quickjsAvailable,
+      jscGlobal: typeof globalThis.__JSCSandboxJSI,
+      quickjsGlobal: typeof globalThis.__QuickJSSandboxJSI,
+    };
     throw new Error(
-      '[DefaultProvider] No suitable JS sandbox provider found. ' +
-        'Ensure @rill/sandbox-native is properly linked.'
+      `[DefaultProvider] No suitable JS sandbox provider found. Ensure @rill/sandbox-native is properly linked. diag=${JSON.stringify(
+        diag
+      )}`
     );
   }
 }

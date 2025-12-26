@@ -5,6 +5,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Native build artifacts
+native/quickjs/build-wasm/
+native/jsc/build/
+
 # IDE
 .idea/
 .vscode/
