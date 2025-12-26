@@ -159,13 +159,29 @@ globalThis.__rillScheduleRender = function() {
 // Minimal React shim for Guest
 globalThis.React = globalThis.__rillCreateSafeShim('React', {
   createElement: function(type, props, ...children) {
+    // Determine final children:
+    // 1. If rest arguments provided (createElement style), use them
+    // 2. Otherwise, use children from props (jsx/jsxs style)
+    var finalChildren;
+    if (children.length > 0) {
+      // React.createElement(type, props, child1, child2, ...)
+      finalChildren = children.length === 1 ? children[0] : children;
+    } else if (props && props.children !== undefined) {
+      // jsx/jsxs(type, {children: [...], ...props})
+      finalChildren = props.children;
+    }
+
+    // Build props without the children property (we set it explicitly)
+    var finalProps = props ? Object.assign({}, props) : {};
+    delete finalProps.children;
+    if (finalChildren !== undefined) {
+      finalProps.children = finalChildren;
+    }
+
     const element = {
       __rillTypeMarker: '__rill_react_element__',
       type: type,
-      props: {
-        ...(props || {}),
-        children: children.length === 1 ? children[0] : (children.length > 1 ? children : undefined)
-      }
+      props: finalProps
     };
     return element;
   },
