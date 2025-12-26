@@ -152,6 +152,14 @@ function getOrCreateWrappedComponent(
 
         try {
           const result = originalType(safeProps);
+          // Debug: log what the sandbox function returned
+          const resultType = typeof result;
+          const resultKeys = result && typeof result === 'object' ? Object.keys(result).slice(0, 10) : null;
+          const resultMarker = result?.__rillTypeMarker;
+          const resultElType = result?.type;
+          console.log(
+            `[rill:wrap] sandbox fn returned | type=${resultType} | marker=${String(resultMarker)} | elType=${String(resultElType)} | keys=${resultKeys?.join(',') ?? 'null'}`
+          );
           return transformGuestElement(result);
         } finally {
           // Restore previous instance ID (for nested component calls)

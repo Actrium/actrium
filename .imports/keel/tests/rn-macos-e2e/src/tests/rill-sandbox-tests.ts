@@ -521,4 +521,138 @@ export function registerRillSandboxTests(target: SandboxTarget) {
       runtime.dispose();
     },
   });
+
+  // ============================================
+  // React Element simulation tests (critical for rill)
+  // ============================================
+
+  registerTest({
+    id: 'react/guest-fn-returns-element',
+    name: 'React: guest function returns element-like object',
+    tags: ['react', 'critical'],
+    run() {
+      const mod = getModule(target);
+      const runtime = mod.createRuntime({ timeout: 5000 });
+      const ctx = runtime.createContext();
+
+      // Simulate a React component that returns an element
+      ctx.eval(`
+        function MyComponent(props) {
+          return {
+            __rillTypeMarker: '__rill_react_element__',
+            type: 'View',
+            props: { style: { flex: 1 }, children: 'Hello' }
+          };
+        }
+      `);
+
+      const MyComponent = ctx.getGlobal('MyComponent') as (props: object) => object;
+      expect(typeof MyComponent).toBe('function');
+
+      // Call the component and check the returned element
+      const element = MyComponent({}) as Record<string, unknown>;
+      expect(element.__rillTypeMarker).toBe('__rill_react_element__');
+      expect(element.type).toBe('View');
+      expect((element.props as Record<string, unknown>).children).toBe('Hello');
+
+      ctx.dispose();
+      runtime.dispose();
+    },
+  });
+
+  registerTest({
+    id: 'react/nested-elements',
+    name: 'React: guest function returns nested elements',
+    tags: ['react', 'critical'],
+    run() {
+      const mod = getModule(target);
+      const runtime = mod.createRuntime({ timeout: 5000 });
+      const ctx = runtime.createContext();
+
+      // Simulate nested React elements (like Panel.Left wrapping LeftPanel)
+      ctx.eval(`
+        function UnifiedApp() {
+          return {
+            __rillTypeMarker: '__rill_react_element__',
+            type: 'View',
+            props: {
+              style: { flex: 1 },
+              children: [
+                {
+                  __rillTypeMarker: '__rill_react_element__',
+                  type: 'PanelMarker',
+                  props: { panelId: 'left', children: { type: 'Text', props: { children: 'Left' } } }
+                },
+                {
+                  __rillTypeMarker: '__rill_react_element__',
+                  type: 'PanelMarker',
+                  props: { panelId: 'right', children: { type: 'Text', props: { children: 'Right' } } }
+                }
+              ]
+            }
+          };
+        }
+      `);
+
+      const UnifiedApp = ctx.getGlobal('UnifiedApp') as () => object;
+      const element = UnifiedApp() as Record<string, unknown>;
+
+      expect(element.__rillTypeMarker).toBe('__rill_react_element__');
+      expect(element.type).toBe('View');
+
+      const children = (element.props as Record<string, unknown>).children as Array<Record<string, unknown>>;
+      expect(children.length).toBe(2);
+      expect(children[0].type).toBe('PanelMarker');
+      expect((children[0].props as Record<string, unknown>).panelId).toBe('left');
+      expect(children[1].type).toBe('PanelMarker');
+      expect((children[1].props as Record<string, unknown>).panelId).toBe('right');
+
+      ctx.dispose();
+      runtime.dispose();
+    },
+  });
+
+  registerTest({
+    id: 'react/fn-type-preserved',
+    name: 'React: element with function type is callable from host',
+    tags: ['react', 'critical'],
+    run() {
+      const mod = getModule(target);
+      const runtime = mod.createRuntime({ timeout: 5000 });
+      const ctx = runtime.createContext();
+
+      // Simulate React.createElement(UnifiedApp) - type is a function
+      ctx.eval(`
+        function UnifiedApp(props) {
+          return {
+            __rillTypeMarker: '__rill_react_element__',
+            type: 'View',
+            props: { message: 'rendered with ' + (props.name || 'default') }
+          };
+        }
+
+        var element = {
+          __rillTypeMarker: '__rill_react_element__',
+          type: UnifiedApp,
+          props: { name: 'test' }
+        };
+      `);
+
+      const element = ctx.getGlobal('element') as Record<string, unknown>;
+      expect(element.__rillTypeMarker).toBe('__rill_react_element__');
+
+      // The type should be a callable function
+      const typeFn = element.type as (props: object) => object;
+      expect(typeof typeFn).toBe('function');
+
+      // Call the function to get the rendered element
+      const rendered = typeFn({ name: 'host-call' }) as Record<string, unknown>;
+      expect(rendered.__rillTypeMarker).toBe('__rill_react_element__');
+      expect(rendered.type).toBe('View');
+      expect((rendered.props as Record<string, unknown>).message).toBe('rendered with host-call');
+
+      ctx.dispose();
+      runtime.dispose();
+    },
+  });
 }
