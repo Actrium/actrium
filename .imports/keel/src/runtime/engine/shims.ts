@@ -178,9 +178,28 @@ globalThis.React = globalThis.__rillCreateSafeShim('React', {
       finalProps.children = finalChildren;
     }
 
+    // Handle function component types: register and convert to reference
+    // This is critical for JSI boundary crossing - raw functions can corrupt
+    var finalType = type;
+    if (typeof type === 'function') {
+      // Register the function component with the Host-side registry
+      var registerId = null;
+      if (typeof globalThis.__rill_register_component_type === 'function') {
+        registerId = globalThis.__rill_register_component_type(type);
+      }
+      if (registerId) {
+        // Replace function with a serializable reference
+        finalType = {
+          __rillComponentId: registerId,
+          displayName: type.displayName || type.name || 'Anonymous'
+        };
+      }
+      // If registration fails, keep the raw function (may work in NoSandbox mode)
+    }
+
     const element = {
       __rillTypeMarker: '__rill_react_element__',
-      type: type,
+      type: finalType,
       props: finalProps
     };
     return element;
