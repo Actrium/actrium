@@ -143,6 +143,7 @@ function getOrCreateWrappedComponent(
         if (safeProps && typeof safeProps === 'object') {
           (safeProps as Record<string, unknown>).__rillHookInstanceId = hookIdRef.current;
         }
+
         const result = originalType(safeProps);
         return transformGuestElement(result);
       } catch (err) {

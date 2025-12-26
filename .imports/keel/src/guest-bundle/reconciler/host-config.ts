@@ -180,6 +180,8 @@ export function createReconciler(
     appendChildToContainer(container: RootContainer, child: VNode): void {
       globalThis.__APPEND_TO_CONTAINER_CALLED = Date.now();
       container.children.push(child);
+      // parentId=0 signals root container on the host side
+      collector.add({ op: 'APPEND', id: child.id, parentId: 0, childId: child.id });
     },
 
     insertBefore(parent: VNode, child: VNode, beforeChild: VNode): void {
@@ -201,6 +203,8 @@ export function createReconciler(
       const index = container.children.indexOf(beforeChild);
       if (index !== -1) {
         container.children.splice(index, 0, child);
+        // parentId=0 signals root container on the host side
+        collector.add({ op: 'INSERT', id: child.id, parentId: 0, childId: child.id, index });
       }
     },
 
@@ -220,6 +224,8 @@ export function createReconciler(
       const index = container.children.indexOf(child);
       if (index !== -1) {
         container.children.splice(index, 1);
+        // parentId=0 signals root container on the host side
+        collector.add({ op: 'REMOVE', id: child.id, parentId: 0, childId: child.id });
 
         // Store deleted root for cleanup after commit
         pendingDeleteRoots.set(child.id, child);
