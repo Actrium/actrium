@@ -18,7 +18,8 @@
         "**/*.test.tsx",
         "**/*.bench.ts",
         "tests/**",
-        "src/guest-bundle/build/**"
+        "src/guest/build/**",
+        "src/host/engine/sandbox-runtime-bundle.ts"
       ],
       "linter": {
         "enabled": false

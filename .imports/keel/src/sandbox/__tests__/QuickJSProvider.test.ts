@@ -18,8 +18,8 @@ const mockModule = {
   isAvailable: mock(() => true),
 };
 
-// Mock the sandbox-native module
-mock.module('../../sandbox-native/QuickJSModule', () => ({
+// Mock the native module
+mock.module('../native/QuickJSModule', () => ({
   isQuickJSAvailable: () => true,
   getQuickJSModule: () => mockModule,
 }));

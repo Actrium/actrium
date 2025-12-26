@@ -12,7 +12,7 @@ async function build() {
 
   // Build main entry
   const mainResult = await Bun.build({
-    entrypoints: [join(ROOT, 'src/sandbox-web/index.ts')],
+    entrypoints: [join(ROOT, 'src/sandbox/web/index.ts')],
     outdir: DIST_DIR,
     target: 'browser',
     format: 'esm',
@@ -26,7 +26,7 @@ async function build() {
 
   // Build worker separately
   const workerResult = await Bun.build({
-    entrypoints: [join(ROOT, 'src/sandbox-web/worker.ts')],
+    entrypoints: [join(ROOT, 'src/sandbox/web/worker.ts')],
     outdir: DIST_DIR,
     target: 'browser',
     format: 'esm',

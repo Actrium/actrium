@@ -11,7 +11,7 @@ export type {
   ComponentType,
   Engine,
   EngineOptions,
-} from '@rill/runtime';
+} from '../../host';
 // Default components for React Native
 // Individual component exports
 export type {
