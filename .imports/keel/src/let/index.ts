@@ -2,51 +2,61 @@
  * @rill/let
  *
  * Guest-side SDK for rill - runs inside sandbox
- * Provides virtual components, hooks, and React reconciler for Guest development
+ * Provides virtual components, hooks for Guest development
  * Named after applet, servlet, pagelet - a small, embeddable unit
+ *
+ * Note: Runtime internals (render, unmount, CallbackRegistry) are in src/guest-bundle/
  */
 
-// Virtual components (string identifiers)
-export {
-  View,
-  Text,
-  Image,
-  ScrollView,
-  TouchableOpacity,
-  FlatList,
-  TextInput,
-  Button,
-  Switch,
-  ActivityIndicator,
-} from './sdk';
-
-// Hooks
-export { useHostEvent, useConfig, useSendToHost } from './sdk';
-
-// Error boundary
-export type { ErrorInfo, RillErrorBoundaryProps } from './sdk';
-export { RillErrorBoundary } from './sdk';
-
-// Component prop types
+// Component prop types and event types
 export type {
-  ReactNode,
-  ComponentType,
-  BaseProps,
-  ViewProps,
-  TextProps,
-  ImageProps,
-  ScrollViewProps,
-  TouchableOpacityProps,
-  FlatListProps,
-  TextInputProps,
-  ButtonProps,
-  SwitchProps,
   ActivityIndicatorProps,
+  BaseProps,
+  ButtonProps,
+  ComponentType,
+  ErrorInfo,
+  FlatListProps,
+  ImageProps,
+  ImageSource,
+  LayoutEvent,
+  ReactNode,
+  RillErrorBoundaryProps,
+  ScrollEvent,
+  ScrollViewProps,
+  StyleObject,
+  StyleProp,
+  SwitchProps,
+  TextInputProps,
+  TextProps,
+  TouchableOpacityProps,
+  ViewProps,
 } from './sdk';
-
-// Event and style types
-export type { ImageSource, LayoutEvent, ScrollEvent, StyleObject, StyleProp } from './sdk';
-
-// Reconciler
-export { render, unmount, unmountAll, invokeCallback, hasCallback } from './reconciler';
-export type { SendToHost, Operation, OperationBatch, VNode } from './reconciler';
+// Virtual components (string identifiers)
+// Hooks
+export {
+  ActivityIndicator,
+  Button,
+  FlatList,
+  Image,
+  RillErrorBoundary,
+  ScrollView,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useConfig,
+  useHostEvent,
+  useRemoteRef,
+  useSendToHost,
+  View,
+} from './sdk';
+// Remote ref types
+export type {
+  FlatListRef,
+  MeasurableRef,
+  MeasureResult,
+  RemoteRef,
+  RemoteRefCallback,
+  ScrollViewRef,
+  TextInputRef,
+} from './types';

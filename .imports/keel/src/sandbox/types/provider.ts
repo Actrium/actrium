@@ -2,7 +2,7 @@
  * @rill/sandbox - JSEngineProvider Interface
  *
  * This file defines the core interfaces for abstracting different JavaScript sandbox
- * implementations (like JSC, QuickJS, VM, and Web Workers).
+ * implementations (JSC, QuickJS, VM).
  *
  * - JSEngineProvider: The top-level factory for creating a runtime.
  * - JSEngineRuntime: A runtime instance that can create one or more isolated contexts.
@@ -12,21 +12,21 @@
 /**
  * Available sandbox types for DefaultProvider.
  *
- * Platform availability:
- * - VM: Node.js / Bun only
- * - Worker: Web browsers only
- * - JSC: Apple platforms only (iOS, macOS, tvOS, visionOS)
- * - QuickJS: Cross-platform native (iOS, Android, macOS, Windows)
+ * Platform availability and communication:
+ * - VM: Node.js / Bun only (native vm module)
+ * - JSC: Apple platforms only via JSI (zero binary overhead)
+ * - QuickJS: Cross-platform native via JSI (iOS, Android, macOS, Windows)
+ * - WasmQuickJS: Web via JS↔WASM, React Native via JSI↔WASM
  */
 export enum SandboxType {
   /** Node.js vm module (Node/Bun only) */
   VM = 'vm',
-  /** Web Worker sandbox (browsers only) */
-  Worker = 'worker',
   /** JavaScriptCore via JSI (Apple platforms only, zero binary overhead) */
   JSC = 'jsc',
   /** QuickJS via JSI (cross-platform native) */
   QuickJS = 'quickjs',
+  /** QuickJS via WASM (Web: JS↔WASM, React Native: JSI↔WASM) */
+  WasmQuickJS = 'wasm-quickjs',
 }
 
 /**
@@ -52,7 +52,11 @@ export interface JSEngineContext {
   evalAsync?: (code: string) => Promise<unknown>;
 
   /**
-   * Sets a global variable in the sandbox's global scope.
+   * Sets a global variable in the sandbox's global scope synchronously.
+   *
+   * CRITICAL: This MUST be synchronous. Bridge architecture requires immediate execution.
+   * Do NOT make this async - it will break Bridge's synchronous flow.
+   *
    * @param name The name of the global variable.
    * @param value The value to set.
    */
@@ -70,6 +74,49 @@ export interface JSEngineContext {
    * Disposes of this context, releasing all associated resources.
    */
   dispose: () => void;
+
+  /**
+   * Binary transfer capabilities (optional).
+   * When available, enables zero-copy transfer of binary data.
+   * Use for large ArrayBuffer/TypedArray transfers to avoid JSON overhead.
+   */
+  binary?: BinaryTransferCapabilities;
+}
+
+/**
+ * Binary transfer capabilities for zero-copy data transfer.
+ * Optional extension for providers that support efficient binary transfer (e.g., WASM).
+ *
+ * Performance characteristics:
+ * - JSON serialization: ~10-20ms overhead for 100KB
+ * - Zero-copy transfer: ~0.5ms for 100KB
+ *
+ * Use for:
+ * - Large ArrayBuffer transfers (images, audio, binary data)
+ * - High-frequency binary data updates
+ * - Performance-critical binary operations
+ */
+export interface BinaryTransferCapabilities {
+  /**
+   * Set a global ArrayBuffer variable using zero-copy transfer.
+   * @param name The name of the global variable
+   * @param buffer The ArrayBuffer to set
+   */
+  setArrayBuffer: (name: string, buffer: ArrayBuffer) => void;
+
+  /**
+   * Get a global ArrayBuffer variable using zero-copy transfer.
+   * @param name The name of the global variable
+   * @returns The ArrayBuffer, or null if not found or not an ArrayBuffer
+   */
+  getArrayBuffer: (name: string) => ArrayBuffer | null;
+
+  /**
+   * Get the size of a global ArrayBuffer without copying data.
+   * @param name The name of the global variable
+   * @returns Size in bytes, or 0 if not found or not an ArrayBuffer
+   */
+  getArrayBufferSize: (name: string) => number;
 }
 
 /**

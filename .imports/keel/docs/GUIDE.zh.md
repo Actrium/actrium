@@ -18,24 +18,24 @@ Rill 是一个轻量级的 React Native 动态 UI 渲染引擎，类似于 Shopi
 
 ### 1. 安装
 
-本项目为 monorepo，使用 workspace 引用。在 `package.json` 中添加依赖：
+```bash
+# 使用 bun
+bun add rill
 
-```json
-{
-  "dependencies": {
-    "@rill/core": "workspace:*"
-  },
-  "devDependencies": {
-    "@rill/cli": "workspace:*"
-  }
-}
+# 使用 npm
+npm install rill
 ```
 
-### 2. 创建guest
+**Peer 依赖：**
+- React 18.2+ 或 19.x
+- react-reconciler（匹配你的 React 版本）
+- react-native（RN 应用）或 react-dom（Web 应用）
+
+### 2. 创建 Guest
 
 ```tsx
 // src/guest.tsx
-import { View, Text, TouchableOpacity, useConfig, useSendToHost } from '@rill/core/sdk';
+import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/let';
 
 interface Config {
   title: string;
@@ -61,45 +61,35 @@ export default function MyGuest() {
 }
 ```
 
-### 3. 构建guest
+### 3. 构建 Guest
 
 ```bash
-bunx rill build src/guest.tsx -o dist/bundle.js
+bun run rill/cli build src/guest.tsx -o dist/bundle.js
 ```
 
 ### 4. 在宿主应用中使用
 
 ```tsx
 // App.tsx
-import React, { useMemo, useEffect } from 'react';
-import { SafeAreaView, Text } from 'react-native';
-import { Engine, EngineView } from '@rill/core';
+import React, { useMemo } from 'react';
+import { SafeAreaView, Text, ActivityIndicator } from 'react-native';
+import { Engine, EngineView } from 'rill';
 
 export default function App() {
-  // 1. 创建 Engine 实例
   const engine = useMemo(() => new Engine({ debug: __DEV__ }), []);
-
-  // 2. (可选) 注册自定义组件
-  useEffect(() => {
-    engine.register({
-      // CustomComponent: MyCustomComponent,
-    });
-  }, [engine]);
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <EngineView
         engine={engine}
-        bundleUrl="https://cdn.example.com/guest.js"
+        source="https://cdn.example.com/guest.js"
         initialProps={{
           title: 'Hello Rill',
           theme: 'light',
         }}
         onLoad={() => console.log('Guest loaded')}
         onError={(error) => console.error('Guest error:', error)}
-        onDestroy={() => console.log('Guest destroyed')}
-        fallback={<Text>Loading guest...</Text>}
-        renderError={(error) => <Text>Error: {error.message}</Text>}
+        fallback={<ActivityIndicator />}
       />
     </SafeAreaView>
   );
@@ -108,16 +98,16 @@ export default function App() {
 
 ---
 
-## guest开发
+## Guest 开发
 
 ### 项目结构
 
 ```
 my-guest/
 ├── src/
-│   └── guest.tsx    # guest入口
+│   └── guest.tsx    # Guest 入口
 ├── dist/
-│   └── bundle.js     # 构建输出
+│   └── bundle.js    # 构建输出
 ├── package.json
 └── tsconfig.json
 ```
@@ -129,13 +119,11 @@ my-guest/
   "name": "my-guest",
   "version": "1.0.0",
   "scripts": {
-    "build": "rill build src/guest.tsx -o dist/bundle.js",
-    "build:watch": "rill build src/guest.tsx -o dist/bundle.js --watch",
-    "analyze": "rill analyze dist/bundle.js"
+    "build": "bun run rill/cli build src/guest.tsx -o dist/bundle.js",
+    "watch": "bun run rill/cli build src/guest.tsx -o dist/bundle.js --watch"
   },
   "devDependencies": {
-    "@rill/core": "^0.1.0",
-    "@rill/cli": "^0.1.0",
+    "rill": "^1.0.0",
     "typescript": "^5.0.0"
   }
 }
@@ -163,7 +151,7 @@ my-guest/
 虚组件是字符串标识符，在构建时被转换为操作指令：
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity } from '@rill/core/sdk';
+import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/let';
 
 function MyComponent() {
   return (
@@ -188,6 +176,8 @@ function MyComponent() {
 #### useConfig - 获取配置
 
 ```tsx
+import { useConfig } from 'rill/let';
+
 interface Config {
   userId: string;
   theme: 'light' | 'dark';
@@ -209,6 +199,9 @@ function Guest() {
 #### useHostEvent - 监听宿主事件
 
 ```tsx
+import { useState } from 'react';
+import { View, Text, useHostEvent } from 'rill/let';
+
 function Guest() {
   const [refreshCount, setRefreshCount] = useState(0);
 
@@ -226,6 +219,8 @@ function Guest() {
 #### useSendToHost - 发送事件到宿主
 
 ```tsx
+import { TouchableOpacity, Text, useSendToHost } from 'rill/let';
+
 function Guest() {
   const sendToHost = useSendToHost();
 
@@ -240,6 +235,43 @@ function Guest() {
   );
 }
 ```
+
+#### useRemoteRef - 调用宿主组件方法
+
+调用宿主组件实例的方法（如 `focus()`、`scrollTo()` 等）：
+
+```tsx
+import { useRemoteRef, View, TextInput, TouchableOpacity, Text, TextInputRef } from 'rill/let';
+
+function Guest() {
+  const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
+
+  const handleFocus = async () => {
+    await remoteInput?.invoke('focus');
+  };
+
+  const handleClear = async () => {
+    await remoteInput?.invoke('clear');
+  };
+
+  return (
+    <View>
+      <TextInput ref={inputRef} placeholder="输入文本" />
+      <TouchableOpacity onPress={handleFocus}>
+        <Text>聚焦</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={handleClear}>
+        <Text>清空</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+```
+
+可用的 Ref 类型：
+- `TextInputRef`: `focus()`, `blur()`, `clear()`
+- `ScrollViewRef`: `scrollTo({ x, y, animated })`, `scrollToEnd()`
+- `FlatListRef`: `scrollToIndex()`, `scrollToOffset()`
 
 ### 样式
 
@@ -278,6 +310,9 @@ function Guest() {
 使用 FlatList 渲染长列表：
 
 ```tsx
+import { useState } from 'react';
+import { View, Text, FlatList } from 'rill/let';
+
 interface Item {
   id: string;
   title: string;
@@ -315,7 +350,7 @@ function Guest() {
 ```tsx
 import React, { useMemo } from 'react';
 import { View } from 'react-native';
-import { Engine, EngineView } from '@rill/core';
+import { Engine, EngineView } from 'rill';
 
 function GuestHost() {
   const engine = useMemo(() => new Engine({ debug: __DEV__ }), []);
@@ -324,7 +359,7 @@ function GuestHost() {
     <View style={{ flex: 1 }}>
       <EngineView
         engine={engine}
-        bundleUrl="https://cdn.example.com/guest.js"
+        source="https://cdn.example.com/guest.js"
         initialProps={{ theme: 'dark' }}
       />
     </View>
@@ -334,18 +369,17 @@ function GuestHost() {
 
 ### 自定义组件
 
-注册宿主端的原生组件供guest使用：
+注册宿主端的原生组件供 Guest 使用：
 
 ```tsx
 import React, { useMemo, useEffect } from 'react';
-import { Engine, EngineView } from '@rill/core';
+import { Engine, EngineView } from 'rill';
 import { NativeStepList } from './components/NativeStepList';
 import { CustomButton } from './components/CustomButton';
 
 function GuestHost() {
   const engine = useMemo(() => new Engine({ debug: __DEV__ }), []);
 
-  // 注册自定义组件
   useEffect(() => {
     engine.register({
       StepList: NativeStepList,
@@ -356,16 +390,16 @@ function GuestHost() {
   return (
     <EngineView
       engine={engine}
-      bundleUrl={bundleUrl}
+      source={bundleUrl}
     />
   );
 }
 ```
 
-guest中使用自定义组件：
+Guest 中使用自定义组件：
 
 ```tsx
-// 在guest中声明自定义组件类型
+// 在 Guest 中声明自定义组件类型
 declare const StepList: string;
 declare const CustomButton: string;
 
@@ -381,12 +415,12 @@ function Guest() {
 
 ### 事件通信
 
-#### 宿主 -> guest
+#### 宿主 -> Guest
 
 ```tsx
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo } from 'react';
 import { Button, View } from 'react-native';
-import { Engine, EngineView } from '@rill/core';
+import { Engine, EngineView } from 'rill';
 
 function GuestHost() {
   const engine = useMemo(() => new Engine({ debug: __DEV__ }), []);
@@ -398,206 +432,89 @@ function GuestHost() {
   return (
     <View>
       <Button title="Refresh" onPress={handleRefresh} />
-      <EngineView
-        engine={engine}
-        bundleUrl={bundleUrl}
-      />
+      <EngineView engine={engine} source={bundleUrl} />
     </View>
   );
 }
 ```
 
-#### guest -> 宿主
+#### Guest -> 宿主
 
 监听 Engine 的 message 事件：
 
 ```tsx
 import React, { useMemo, useEffect } from 'react';
-import { Engine, EngineView } from '@rill/core';
+import { Engine, EngineView } from 'rill';
 
 function GuestHost() {
   const engine = useMemo(() => new Engine({ debug: __DEV__ }), []);
 
   useEffect(() => {
-    // 监听 guest 发送的消息
-    const unsubscribe = engine.on('message', (msg) => {
-      const { event, payload } = msg;
-      switch (event) {
+    const unsubscribe = engine.on('message', (message) => {
+      switch (message.event) {
         case 'TASK_COMPLETE':
-          console.log('Task completed:', payload);
+          console.log('Task completed:', message.payload);
           break;
         case 'NAVIGATION':
-          navigation.navigate((payload as { route: string }).route);
+          navigation.navigate(message.payload.route);
           break;
       }
     });
 
-    return () => unsubscribe();
+    return unsubscribe;
   }, [engine]);
 
-  return (
-    <EngineView
-      engine={engine}
-      bundleUrl={bundleUrl}
-    />
-  );
+  return <EngineView engine={engine} source={bundleUrl} />;
 }
-```
-
-### 使用 Engine API
-
-直接使用 Engine 类获得更多控制：
-
-```tsx
-import { useState, useEffect, useRef } from 'react';
-import { Engine, Receiver } from '@rill/core';
-import { View, Text, TouchableOpacity, Image } from 'react-native';
-
-function useRillEngine(bundleUrl: string, initialProps: object) {
-  const [tree, setTree] = useState<React.ReactElement | null>(null);
-  const engineRef = useRef<Engine | null>(null);
-
-  useEffect(() => {
-    const engine = new Engine({
-      debug: __DEV__,
-      timeout: 5000,
-      onMetric: (name, value) => console.log(`Metric: ${name}=${value}ms`),
-    });
-
-    // 注册组件
-    engine.register({
-      View,
-      Text,
-      TouchableOpacity,
-      Image,
-    });
-
-    // 创建 Receiver
-    const receiver = engine.createReceiver(() => {
-      setTree(receiver.render());
-    });
-
-    engineRef.current = engine;
-
-    // 加载guest
-    engine.loadBundle(bundleUrl, initialProps).catch(console.error);
-
-    return () => {
-      engine.destroy();
-    };
-  }, [bundleUrl, initialProps]);
-
-  return { tree, engine: engineRef.current };
-}
-```
-
----
-
-## 性能优化
-
-### 批量更新
-
-Rill 自动批量处理更新以优化性能：
-
-```tsx
-import { ThrottledScheduler } from '@rill/core';
-
-// 自定义节流配置
-const scheduler = new ThrottledScheduler(
-  (batch) => receiver.applyBatch(batch),
-  {
-    maxBatchSize: 100,    // 最大批次大小
-    throttleMs: 16,       // 约 60fps
-    enableMerge: true,    // 启用操作合并
-  }
-);
-```
-
-### 虚拟滚动
-
-对于长列表，使用虚拟滚动优化：
-
-```tsx
-import { VirtualScrollCalculator } from '@rill/core';
-
-const calculator = new VirtualScrollCalculator({
-  estimatedItemHeight: 60,  // 预估项目高度
-  overscan: 5,              // 可视区外缓冲
-  scrollThrottleMs: 16,     // 滚动节流
-});
-
-// 计算可视范围
-const state = calculator.calculate(scrollTop, viewportHeight);
-// 只渲染 state.visibleItems 中的项目
-```
-
-### 性能监控
-
-```tsx
-import { PerformanceMonitor } from '@rill/core';
-
-const monitor = new PerformanceMonitor();
-
-// 记录批次
-engine.on('operation', (batch) => {
-  monitor.recordBatch(batch);
-});
-
-// 查看指标
-const metrics = monitor.getMetrics();
-console.log(`Total operations: ${metrics.totalOperations}`);
-console.log(`Average batch size: ${metrics.avgBatchSize}`);
-console.log(`Merged operations: ${metrics.mergedOperations}`);
 ```
 
 ---
 
 ## 调试
 
-### 启用 DevTools
+### 基本调试
+
+使用引擎事件监控运行时行为：
 
 ```tsx
-import { createDevTools } from '@rill/core/devtools';
+import { Engine } from 'rill';
 
-const devtools = createDevTools({
-  inspector: { maxDepth: 10 },
-  maxLogs: 100,
-  maxTimelineEvents: 500,
+const engine = new Engine({ debug: true });
+
+// 监控错误
+engine.on('error', (error) => {
+  console.error('[Guest Error]', error);
 });
 
-// 在开发环境启用
+// 监控操作
+engine.on('operation', (batch) => {
+  console.log(`Operations: ${batch.operations.length}`);
+});
+
+// 健康检查
+const health = engine.getHealth();
+console.log('Health:', health);
+```
+
+### DevTools（可选）
+
+高级调试，使用 DevTools 包：
+
+```tsx
+import { createDevTools } from 'rill/devtools';
+
+const devtools = createDevTools();
+
 if (__DEV__) {
   devtools.enable();
+  devtools.connectEngine(engine);
 }
 
-// 记录事件
-engine.on('operation', (batch) => {
-  devtools.onBatch(batch);
-});
-```
+// 获取组件树
+const tree = devtools.getHostTree();
 
-### 查看组件树
-
-```tsx
-const receiver = engine.getReceiver();
-const treeText = devtools.getComponentTreeText(
-  receiver.nodeMap,
-  receiver.rootChildren
-);
-
-console.log(treeText);
-// 输出:
-// └─ <View testID="root">
-//    ├─ <Text numberOfLines={2}>
-//    └─ <TouchableOpacity>
-//       └─ <Text>
-```
-
-### 导出调试数据
-
-```tsx
-const debugData = devtools.exportAll();
-// 保存或发送到服务器
+// 导出调试数据
+const data = devtools.export();
 ```
 
 ---
@@ -606,17 +523,16 @@ const debugData = devtools.exportAll();
 
 ### 沙箱隔离
 
-- guest代码在 JSEngineProvider 沙箱中运行 (支持 QuickJS, VM, Worker 等)
+- Guest 代码在 JSEngineProvider 沙箱中运行（QuickJS, VM, Worker）
 - 无法访问宿主的原生 API
-- 无法执行网络请求 (除非宿主提供)
+- 无法执行网络请求（除非宿主提供）
 - 无法访问文件系统
 
 ### 组件白名单
 
-只有显式注册的组件才能被guest使用：
+只有显式注册的组件才能被 Guest 使用：
 
 ```tsx
-// 只注册安全的组件
 engine.register({
   View: SafeView,
   Text: SafeText,
@@ -637,17 +553,15 @@ const engine = new Engine({
 
 ### 错误隔离
 
-guest错误不会崩溃宿主应用：
+Guest 错误不会崩溃宿主应用：
 
 ```tsx
 <EngineView
   engine={engine}
-  bundleUrl={bundleUrl}
+  source={bundleUrl}
   onError={(error) => {
-    // 记录错误
     reportError(error);
   }}
-  fallback={<LoadingIndicator />}
   renderError={(error) => <ErrorFallback error={error} />}
 />
 ```
@@ -656,7 +570,7 @@ guest错误不会崩溃宿主应用：
 
 ## 常见问题
 
-### 1. guest加载失败
+### 1. Guest 加载失败
 
 **问题**: `Failed to fetch bundle: 404`
 
@@ -688,7 +602,7 @@ style={{ 'background-color': 'red', 'font-size': 16 }}
 
 **问题**: onPress 等事件不响应
 
-**解决**: 检查函数是否正确传递，不要在 JSX 中使用箭头函数包装：
+**解决**: 检查函数是否正确传递：
 ```tsx
 // 推荐
 <TouchableOpacity onPress={handlePress}>
@@ -707,13 +621,3 @@ useEffect(() => {
   return () => engine.destroy();
 }, []);
 ```
-
----
-
-## 示例项目
-
-完整示例请参考 `examples/` 目录：
-
-- `examples/basic-guest/` - 基础guest示例
-- `examples/host-app/` - 宿主应用示例
-- `examples/custom-components/` - 自定义组件示例

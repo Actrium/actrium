@@ -1,32 +1,32 @@
 # Contributing Guide
 
-Thank you for your interest in contributing to Rill! This guide will help you get started.
+Thank you for your interest in contributing to Rill!
 
 [中文版本](./CONTRIBUTING.zh.md)
 
 ## Development Environment
 
+- **Bun**: >= 1.0.0
 - **Node.js**: >= 18.0.0
-- **npm**: >= 9.0.0
 
 ## Quick Start
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/kookyleo/rill.git
+# Clone the repository
+git clone https://github.com/GoAskAway/rill.git
 cd rill
 
-# 2. Install dependencies
+# Install dependencies
 bun install
 
-# 3. Build the project
-bun run build
+# Run tests
+npm run test:all
 
-# 4. Run type checking
+# Type check
 bun run typecheck
 
-# 5. Run tests
-npm test
+# Lint
+bun run lint
 ```
 
 ## Development Workflow
@@ -48,17 +48,17 @@ git checkout -b fix/your-bug-fix
 ### 3. Test Changes
 
 ```bash
+# All tests (unit + native + E2E)
+npm run test:all
+
+# Unit tests only
+npm test
+
 # Type checking
 bun run typecheck
 
-# Build
-bun run build
-
-# Run tests
-npm test
-
-# Test CLI
-node dist/cli/index.js build examples/test.tsx
+# Lint
+bun run lint
 ```
 
 ### 4. Commit Changes
@@ -66,8 +66,6 @@ node dist/cli/index.js build examples/test.tsx
 ```bash
 git add .
 git commit -m "feat: add new feature"
-# or
-git commit -m "fix: fix some issue"
 ```
 
 Commit message format:
@@ -86,24 +84,36 @@ git push origin feature/your-feature-name
 
 Then create a Pull Request on GitHub.
 
-## CI/CD
+## Project Structure
 
-The project uses GitHub Actions for continuous integration:
-
-- ✅ Type checking
-- ✅ Build tests
-- ✅ CLI functionality tests
-- ✅ Multi-Node.js version testing (18.x, 20.x, 22.x)
-
-All PRs must pass CI checks before merging.
+```
+rill/
+├── src/
+│   ├── runtime/        # Host runtime (Engine, Receiver)
+│   ├── let/            # Guest SDK (components, hooks)
+│   ├── bridge/         # Shared serialization layer
+│   ├── sandbox/        # Sandbox providers
+│   ├── cli/            # CLI build tools
+│   ├── devtools/       # Development tools
+│   └── presets/        # Platform presets (RN, Web)
+├── native/
+│   ├── jsc/            # JavaScriptCore sandbox (macOS/iOS)
+│   ├── quickjs/        # QuickJS sandbox (cross-platform)
+│   └── platform/       # React Native integration
+├── tests/
+│   ├── e2e-sandbox-web/   # Web Worker E2E tests
+│   ├── e2e-wasm-sandbox/  # WASM sandbox E2E tests
+│   └── rn-macos-e2e/      # React Native macOS E2E tests
+└── docs/               # Documentation
+```
 
 ## Code Standards
 
 ### TypeScript
 
-- Enable strict mode (`strict: true`)
-- No implicit any (`noImplicitAny: true`)
-- Use bracket notation for index signatures (`obj['key']` instead of `obj.key`)
+- Strict mode enabled
+- No implicit any
+- Use Biome for formatting and linting
 
 ### Naming Conventions
 
@@ -112,49 +122,7 @@ All PRs must pass CI checks before merging.
 - Functions/Variables: `camelCase`
 - Constants: `UPPER_SNAKE_CASE`
 
-### Error Handling
-
-Always provide helpful error messages:
-
-```typescript
-if (!fs.existsSync(filePath)) {
-  console.error(`❌ Error: File not found: ${filePath}`);
-  console.error(`\n💡 Tip: Please check if the path is correct`);
-  throw new Error(`File not found: ${filePath}`);
-}
-```
-
-## Project Structure
-
-```
-rill/
-├── src/
-│   ├── sdk/          # SDK - For guest development
-│   ├── runtime/      # Runtime - For host applications
-│   ├── cli/          # CLI - Build tool
-│   ├── reconciler/   # Reconciler - React renderer
-│   └── types/        # Type definitions
-├── dist/             # Build output
-├── examples/         # Example projects
-└── .github/
-    └── workflows/    # CI configuration
-```
-
-## Performance Optimization
-
-CLI builds display performance metrics:
-
-```bash
-✅ Build successful!
-   File: dist/bundle.js
-   Size: 2.95 KB
-   Time: 10ms
-```
-
-Keep build times and bundle sizes reasonable.
-
 ## Need Help?
 
-- 📖 [Documentation](../README.md)
-- 🐛 [Report Issues](https://github.com/kookyleo/rill/issues)
-- 💬 [Discussions](https://github.com/kookyleo/rill/discussions)
+- [Documentation](../README.md)
+- [Report Issues](https://github.com/GoAskAway/rill/issues)

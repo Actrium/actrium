@@ -1,5 +1,5 @@
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { RuntimeCollector, createRuntimeCollector } from './runtime';
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { createRuntimeCollector, type RuntimeCollector } from './runtime';
 
 describe('RuntimeCollector', () => {
   let collector: RuntimeCollector;
@@ -94,9 +94,9 @@ describe('RuntimeCollector', () => {
       const stats = collector.getOperationStats();
       expect(stats.totalLogs).toBe(2);
       expect(stats.totalOperations).toBe(4);
-      expect(stats.operationCounts['CREATE']).toBe(2);
-      expect(stats.operationCounts['APPEND']).toBe(1);
-      expect(stats.operationCounts['UPDATE']).toBe(1);
+      expect(stats.operationCounts.CREATE).toBe(2);
+      expect(stats.operationCounts.APPEND).toBe(1);
+      expect(stats.operationCounts.UPDATE).toBe(1);
       expect(stats.avgOperationsPerBatch).toBe(2);
     });
   });
@@ -177,8 +177,8 @@ describe('RuntimeCollector', () => {
       ]);
 
       const tree = collector.buildTree(nodeMap, [1]);
-      expect(tree[0].props['onPress']).toBe('[Callback]');
-      expect(tree[0].props['title']).toBe('Click');
+      expect(tree[0].props.onPress).toBe('[Callback]');
+      expect(tree[0].props.title).toBe('Click');
     });
 
     test('should handle missing nodes', () => {
@@ -192,6 +192,7 @@ describe('RuntimeCollector', () => {
       // Create a very deep tree
       const nodeMap = new Map<
         number,
+        // biome-ignore lint/complexity/noBannedTypes: Test mock with empty props object
         { id: number; type: string; props: {}; children: number[] }
       >();
       for (let i = 0; i < 100; i++) {

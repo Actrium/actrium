@@ -4,7 +4,7 @@
  * Maps to img element
  */
 
-import React from 'react';
+import type React from 'react';
 
 export interface ImageSource {
   uri: string;

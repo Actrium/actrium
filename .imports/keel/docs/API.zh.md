@@ -4,32 +4,31 @@
 
 Rill 是一个轻量级的 React Native 动态 UI 渲染引擎，允许在沙箱环境中运行 React 组件并将渲染结果传递到宿主应用。
 
-## 模块结构
+## 包导出
 
 ```
-@rill/core/           # 核心包
-├── (root)            # 宿主端运行时 (Engine, EngineView, Receiver, etc.)
-├── sdk               # guest端 SDK (在沙箱中运行)
-├── types             # 类型定义
-├── reconciler        # React 协调器
-└── devtools          # 调试工具
-
-@rill/cli/            # CLI 包
-└── (bin)             # guest 打包工具 (rill build, rill analyze, rill init)
+rill/
+├── (default)       # 宿主运行时 (Engine, EngineView, Receiver)
+├── /let            # Guest SDK (组件、Hooks)
+├── /devtools       # 开发工具
+├── /sandbox        # 沙箱提供者
+├── /sandbox-native # 原生沙箱 (JSC/QuickJS)
+├── /sandbox-web    # Web 沙箱 (Worker)
+└── /cli            # CLI 构建工具
 ```
 
 ---
 
-## SDK (@rill/core/sdk)
+## Guest SDK (rill/let)
 
-guest开发者使用的 SDK，在 QuickJS 沙箱中运行。
+Guest 开发者使用的 SDK，在沙箱环境中运行。
 
 ### 虚组件
 
 虚组件是字符串标识符，在打包时被 JSX 转换为操作指令。
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, Button, Switch, ActivityIndicator } from '@rill/core/sdk';
+import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, Button, Switch, ActivityIndicator } from 'rill/let';
 ```
 
 #### View
@@ -119,8 +118,6 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 | showsVerticalScrollIndicator | boolean | 显示垂直滚动条 |
 | showsHorizontalScrollIndicator | boolean | 显示水平滚动条 |
 | onScroll | (event: ScrollEvent) => void | 滚动回调 |
-| onScrollBeginDrag | () => void | 开始拖动回调 |
-| onScrollEndDrag | () => void | 结束拖动回调 |
 
 #### FlatList
 
@@ -140,10 +137,6 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 | renderItem | (info: { item: T; index: number }) => ReactElement | 渲染函数 |
 | keyExtractor | (item: T, index: number) => string | 键提取函数 |
 | horizontal | boolean | 是否水平布局 |
-| ItemSeparatorComponent | ComponentType | 分隔组件 |
-| ListHeaderComponent | ReactElement | 头部组件 |
-| ListFooterComponent | ReactElement | 尾部组件 |
-| ListEmptyComponent | ReactElement | 空列表组件 |
 | onEndReached | () => void | 滚动到底部回调 |
 | onEndReachedThreshold | number | 触发阈值 |
 
@@ -165,15 +158,9 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 | value | string | 文本值 |
 | onChangeText | (text: string) => void | 文本变化回调 |
 | placeholder | string | 占位文本 |
-| keyboardType | 'default' \| 'numeric' \| 'email-address' \| 'phone-pad' | 键盘类型 |
 | secureTextEntry | boolean | 密码模式 |
 | multiline | boolean | 多行输入 |
 | maxLength | number | 最大长度 |
-| autoFocus | boolean | 自动聚焦 |
-| editable | boolean | 是否可编辑 |
-| onFocus | () => void | 聚焦回调 |
-| onBlur | () => void | 失焦回调 |
-| onSubmitEditing | () => void | 提交回调 |
 
 #### Button
 
@@ -203,8 +190,6 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 | value | boolean | 当前值 |
 | onValueChange | (value: boolean) => void | 值变化回调 |
 | disabled | boolean | 是否禁用 |
-| trackColor | { false: string; true: string } | 轨道颜色 |
-| thumbColor | string | 滑块颜色 |
 
 #### ActivityIndicator
 
@@ -229,7 +214,7 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 监听宿主事件。
 
 ```tsx
-import { useHostEvent } from '@rill/core/sdk';
+import { useHostEvent } from 'rill/let';
 
 function Guest() {
   useHostEvent<{ force: boolean }>('REFRESH', (payload) => {
@@ -250,7 +235,7 @@ function Guest() {
 获取初始配置。
 
 ```tsx
-import { useConfig } from '@rill/core/sdk';
+import { useConfig } from 'rill/let';
 
 interface Config {
   theme: 'light' | 'dark';
@@ -273,7 +258,7 @@ function Guest() {
 向宿主发送事件。
 
 ```tsx
-import { useSendToHost } from '@rill/core/sdk';
+import { useSendToHost } from 'rill/let';
 
 function Guest() {
   const sendToHost = useSendToHost();
@@ -290,27 +275,95 @@ function Guest() {
 |--------|------|------|
 | sendToHost | (eventName: string, payload?: unknown) => void | 发送函数 |
 
+#### useRemoteRef
+
+创建远程引用，用于调用 Host 组件实例方法。
+
+```tsx
+import { useRemoteRef, TextInput, TextInputRef } from 'rill/let';
+
+function Guest() {
+  const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
+
+  const handleFocus = async () => {
+    await remoteInput?.invoke('focus');
+  };
+
+  return (
+    <View>
+      <TextInput ref={inputRef} placeholder="输入文本" />
+      <TouchableOpacity onPress={handleFocus}>
+        <Text>聚焦输入框</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+```
+
+| 返回值 | 类型 | 说明 |
+|--------|------|------|
+| refCallback | RemoteRefCallback | 传递给组件 ref 属性的回调 |
+| remoteRef | RemoteRef\<T\> \| null | 远程引用对象（挂载后可用） |
+
+**RemoteRef 接口：**
+
+| 属性/方法 | 类型 | 说明 |
+|-----------|------|------|
+| nodeId | number | 节点 ID |
+| invoke | (method: string, ...args: unknown[]) => Promise\<R\> | 调用远程方法 |
+| call | Proxy | 类型安全的方法代理 |
+
+**预定义 Ref 类型：**
+
+- `TextInputRef`: `focus()`, `blur()`, `clear()`
+- `ScrollViewRef`: `scrollTo()`, `scrollToEnd()`
+- `FlatListRef`: `scrollToIndex()`, `scrollToOffset()`
+
 ---
 
-## Runtime (@rill/core)
+### RillErrorBoundary
+
+Guest 端错误边界组件，捕获渲染错误。
+
+```tsx
+import { RillErrorBoundary, View, Text } from 'rill/let';
+
+function App() {
+  return (
+    <RillErrorBoundary
+      fallback={<Text>发生错误</Text>}
+      onError={(error, info) => {
+        console.error('渲染错误:', error, info.componentStack);
+      }}
+    >
+      <MyComponent />
+    </RillErrorBoundary>
+  );
+}
+```
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| children | ReactNode | 子组件 |
+| fallback | ReactNode \| ((error, info) => ReactNode) | 错误时显示的内容 |
+| onError | (error: Error, info: ErrorInfo) => void | 错误回调 |
+
+---
+
+## 宿主运行时 (rill)
 
 宿主端运行时，负责执行沙箱和渲染 UI。
 
 ### Engine
 
-沙箱引擎，管理 JS 执行环境。支持多种沙箱模式。
+沙箱引擎，管理 JS 执行环境。
 
 ```tsx
-import { Engine } from '@rill/core';
+import { Engine } from 'rill';
 
 const engine = new Engine({
   timeout: 5000,
   debug: true,
-  logger: customLogger,
-  sandbox: 'vm', // 可选: 'vm' | 'worker' | 'none'
-  requireWhitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
-  onMetric: (name, value, extra) => console.log(`Metric: ${name}=${value}ms`, extra),
-  receiverMaxBatchSize: 5000,
 });
 
 // 注册自定义组件
@@ -319,13 +372,7 @@ engine.register({
   CustomButton: MyButton,
 });
 
-// 创建 Receiver (必须在 loadBundle 前调用)
-const receiver = engine.createReceiver(() => {
-  // 更新回调，在这里触发 UI 刷新
-  forceUpdate();
-});
-
-// 加载并执行guest
+// 加载并执行 Guest
 await engine.loadBundle('https://cdn.example.com/guest.js', {
   theme: 'dark',
   userId: '12345',
@@ -334,30 +381,16 @@ await engine.loadBundle('https://cdn.example.com/guest.js', {
 // 监听事件
 engine.on('load', () => console.log('Guest loaded'));
 engine.on('error', (error) => console.error('Guest error:', error));
-engine.on('operation', (batch) => console.log('Operations:', batch));
+engine.on('message', (msg) => console.log('Guest message:', msg));
 engine.on('destroy', () => console.log('Guest destroyed'));
-engine.on('fatalError', (error) => console.error('Fatal error:', error));
-engine.on('message', (msg) => console.log('Guest message:', msg.event, msg.payload));
 
 // 发送事件到沙箱
 engine.sendEvent('REFRESH', { force: true });
 
-// 更新配置
-engine.updateConfig({ theme: 'light' });
-
-// 获取健康状态
+// 健康检查
 const health = engine.getHealth();
-// { loaded, destroyed, errorCount, lastErrorAt, receiverNodes, batching }
 
-// 获取资源使用统计
-const stats = engine.getResourceStats();
-console.log(`定时器: ${stats.timers}, 节点: ${stats.nodes}, 回调: ${stats.callbacks}`);
-
-// 监听器内存泄漏检测
-engine.setMaxListeners(20);  // 提高阈值
-const limit = engine.getMaxListeners();
-
-// 销毁引擎(释放所有资源: 定时器、节点、回调、运行时)
+// 销毁引擎
 engine.destroy();
 ```
 
@@ -366,28 +399,23 @@ engine.destroy();
 | 选项 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | provider | JSEngineProvider | auto | JS 引擎 Provider |
-| sandbox | 'vm' \| 'worker' \| 'none' | auto | 沙箱模式 |
 | timeout | number | 5000 | 执行超时 (ms) |
 | debug | boolean | false | 调试模式 |
 | logger | { log, warn, error } | console | 自定义日志处理器 |
 | requireWhitelist | string[] | ['react', ...] | 允许 require 的模块白名单 |
 | onMetric | (name, value, extra?) => void | - | 性能指标回调 |
-| receiverMaxBatchSize | number | 5000 | 每批次最大操作数 (保护宿主 UI 响应性) |
+| receiverMaxBatchSize | number | 5000 | 每批次最大操作数 |
 
 #### 方法
 
 | 方法 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
 | register | components: ComponentMap | void | 注册自定义组件 |
-| loadBundle | source: string, props?: object | Promise\<void\> | 加载并执行 guest bundle |
-| sendEvent | eventName: string, payload?: unknown | void | 发送事件到 guest |
-| updateConfig | config: object | void | 更新 guest 配置 |
-| on | event: keyof EngineEvents, handler: Function | () => void | 订阅引擎事件，返回取消订阅函数 |
-| getResourceStats | - | ResourceStats | 获取资源使用统计 |
+| loadBundle | source: string, props?: object | Promise\<void\> | 加载并执行 Guest Bundle |
+| sendEvent | eventName: string, payload?: unknown | void | 发送事件到 Guest |
+| updateConfig | config: object | void | 更新 Guest 配置 |
+| on | event: keyof EngineEvents, handler: Function | () => void | 订阅引擎事件 |
 | getHealth | - | EngineHealth | 获取引擎健康状态 |
-| setMaxListeners | n: number | void | 设置最大事件监听器数量阈值 |
-| getMaxListeners | - | number | 获取最大事件监听器数量阈值 |
-| createReceiver | onUpdate: () => void | Receiver | 创建操作接收器 |
 | getReceiver | - | Receiver \| null | 获取当前接收器 |
 | getRegistry | - | ComponentRegistry | 获取组件注册表 |
 | destroy | - | void | 销毁引擎并释放所有资源 |
@@ -405,26 +433,23 @@ engine.destroy();
 渲染引擎输出的 React Native 组件。
 
 ```tsx
-import { Engine, EngineView } from '@rill/core';
+import { Engine, EngineView } from 'rill';
 
 function GuestContainer() {
-  // 1. 创建 Engine 实例
   const engine = useMemo(() => new Engine({ debug: __DEV__ }), []);
 
-  // 2. 注册自定义组件
   useEffect(() => {
-    engine.register({ CustomButton: MyButton });
+    engine.register({ StepList: NativeStepList });
   }, [engine]);
 
   return (
     <EngineView
       engine={engine}
-      bundleUrl="https://cdn.example.com/guest.js"
+      source="https://cdn.example.com/bundle.js"
       initialProps={{ theme: 'dark' }}
       onLoad={() => console.log('Loaded')}
       onError={(error) => console.error(error)}
-      onDestroy={() => console.log('Destroyed')}
-      fallback={<Text>Loading...</Text>}
+      fallback={<ActivityIndicator />}
       renderError={(error) => <Text>Error: {error.message}</Text>}
       style={{ flex: 1 }}
     />
@@ -437,7 +462,7 @@ function GuestContainer() {
 | 属性 | 类型 | 必须 | 说明 |
 |------|------|------|------|
 | engine | Engine | 是 | Engine 实例 |
-| bundleUrl | string | 是 | Bundle URL 或代码 |
+| source | string | 是 | Bundle URL 或代码 |
 | initialProps | object | 否 | 初始属性 |
 | onLoad | () => void | 否 | 加载完成回调 |
 | onError | (error: Error) => void | 否 | 错误回调 |
@@ -451,33 +476,15 @@ function GuestContainer() {
 组件注册表，管理组件白名单。
 
 ```tsx
-import { ComponentRegistry, createRegistry } from '@rill/core';
+import { ComponentRegistry } from 'rill';
 
-// 使用工厂函数创建空注册表
-const registry = createRegistry();
-
-// 或使用类
 const registry = new ComponentRegistry();
-
-// 注册单个组件
 registry.register('CustomCard', MyCard);
-
-// 批量注册组件
-registry.registerAll({ Header, Footer, View: RNView });
+registry.registerAll({ Header, Footer });
 
 // 查询组件
 const Component = registry.get('View');
 const hasComponent = registry.has('CustomCard');
-const allNames = registry.getRegisteredNames(); // 返回 string[]
-
-// 注销组件
-registry.unregister('CustomCard');
-
-// 清空注册表
-registry.clear();
-
-// 获取已注册组件数量
-console.log(registry.size);
 ```
 
 ### Receiver
@@ -485,17 +492,12 @@ console.log(registry.size);
 指令接收器，解析操作并构建组件树。
 
 ```tsx
-import { Receiver } from '@rill/core';
+import { Receiver } from 'rill';
 
 const receiver = new Receiver(
   registry,
   (message) => engine.sendToSandbox(message),
-  () => forceUpdate(),
-  {
-    onMetric: (name, value, extra) => console.log(name, value, extra),
-    maxBatchSize: 5000,
-    debug: false,
-  }
+  () => forceUpdate()
 );
 
 // 应用操作批次
@@ -503,112 +505,25 @@ receiver.applyBatch(batch);
 
 // 渲染组件树
 const tree = receiver.render();
-
-// 获取节点数量
-console.log(receiver.nodeCount);
-
-// 清空所有节点
-receiver.clear();
-
-// 获取调试信息
-const debugInfo = receiver.getDebugInfo();
-// { nodeCount, rootChildren, nodes: Array<{ id, type, childCount }> }
 ```
 
 ---
 
-## Performance (@rill/core)
+## DevTools (rill/devtools)
 
-性能优化工具。
-
-### ThrottledScheduler
-
-节流调度器，控制更新频率。
-
-```tsx
-import { ThrottledScheduler } from '@rill/core';
-
-const scheduler = new ThrottledScheduler(
-  (batch) => receiver.applyBatch(batch),
-  {
-    maxBatchSize: 100,
-    throttleMs: 16,
-    enableMerge: true,
-  }
-);
-
-// 添加操作
-scheduler.enqueue(operation);
-scheduler.enqueueAll(operations);
-
-// 立即刷新
-scheduler.flush();
-
-// 清理
-scheduler.dispose();
-```
-
-### VirtualScrollCalculator
-
-虚拟滚动计算器，优化长列表渲染。
-
-```tsx
-import { VirtualScrollCalculator } from '@rill/core';
-
-const calculator = new VirtualScrollCalculator({
-  estimatedItemHeight: 50,
-  overscan: 5,
-  scrollThrottleMs: 16,
-});
-
-calculator.setTotalItems(1000);
-calculator.setItemHeight(0, 100); // 记录实际高度
-
-const state = calculator.calculate(scrollTop, viewportHeight);
-// state: { startIndex, endIndex, offsetTop, offsetBottom, visibleItems }
-```
-
-### PerformanceMonitor
-
-性能监控器。
-
-```tsx
-import { PerformanceMonitor } from '@rill/core';
-
-const monitor = new PerformanceMonitor();
-
-monitor.recordBatch(batch, originalCount);
-
-const metrics = monitor.getMetrics();
-// metrics: {
-//   totalOperations, totalBatches, avgBatchSize,
-//   mergedOperations, createCount, updateCount, deleteCount
-// }
-
-monitor.reset();
-```
-
----
-
-## DevTools (@rill/devtools)
-
-Rill 应用的开发和调试工具集。提供操作日志、性能分析和错误跟踪功能。
-
-Guest 端数据自动收集：
-- **DEVTOOLS_SHIM** - 控制台/错误拦截（Engine 开启 `devtools: true` 时注入）
-- **Reconciler** - 渲染时序（集成在 @rill/let）
+Rill 应用的开发和调试工具集。
 
 ### createDevTools
 
 创建 DevTools 实例。
 
 ```tsx
-import { createDevTools } from '@rill/devtools';
+import { createDevTools } from 'rill/devtools';
 
 const devtools = createDevTools({
   runtime: {
-    maxLogs: 100,           // 最大操作日志数
-    maxTimelineEvents: 500, // 最大时间线事件数
+    maxLogs: 100,
+    maxTimelineEvents: 500,
   },
 });
 
@@ -616,12 +531,11 @@ const devtools = createDevTools({
 devtools.enable();
 devtools.disable();
 
-// 连接引擎（自动订阅事件）
+// 连接引擎
 devtools.connectEngine(engine);
 
 // 获取组件树
 const tree = devtools.getHostTree();
-const treeText = devtools.getHostTreeText();
 
 // 导出调试数据
 const data = devtools.export();
@@ -630,123 +544,29 @@ const data = devtools.export();
 devtools.reset();
 ```
 
-### 事件订阅
-
-订阅 DevTools 事件。
-
-```tsx
-// 可用事件: 'console', 'error', 'render', 'operation'
-devtools.subscribe('error', (event) => {
-  console.log('Guest 错误:', event.data);
-});
-
-devtools.subscribe('operation', (event) => {
-  console.log('操作:', event.data);
-});
-```
-
-### 性能分析
-
-记录和分析性能。
-
-```tsx
-// 开始分析
-devtools.startProfiling();
-
-// ... 用户交互 ...
-
-// 停止并获取报告
-const report = devtools.stopProfiling();
-
-console.log(report.summary);
-// {
-//   totalOperations: 150,
-//   totalRenders: 25,
-//   avgOperationTime: 2.5,
-//   avgRenderTime: 8.3,
-//   slowestNodes: [...],
-//   errorCount: 0,
-// }
-```
-
-### 数据访问
-
-访问收集的调试数据。
-
-```tsx
-// Host 数据
-const tree = devtools.getHostTree();        // 组件树
-const metrics = devtools.getHostMetrics();  // 性能指标
-const status = devtools.getSandboxStatus(); // 沙箱状态
-const logs = devtools.getOperationLogs();   // 操作历史
-
-// Guest 数据
-const consoleLogs = devtools.getConsoleLogs(); // 控制台输出
-const errors = devtools.getErrors();           // 错误
-const ready = devtools.isGuestReady();         // Guest 就绪状态
-```
-
-### RuntimeCollector (底层 API)
-
-不通过 Engine 连接的直接集成。
-
-```tsx
-import { createRuntimeCollector } from '@rill/devtools';
-
-const collector = createRuntimeCollector({ maxLogs: 100 });
-collector.enable();
-
-// 记录操作
-collector.logBatch(batch, duration);
-
-// 记录事件
-collector.recordCallback(fnId, args);
-collector.recordHostEvent(eventName, payload);
-
-// 从节点映射构建树
-const tree = collector.buildTree(nodeMap, rootChildren);
-
-// 获取统计
-const stats = collector.getOperationStats();
-const timeline = collector.getTimeline();
-```
-
 ---
 
-## CLI (@rill/cli)
+## CLI (rill/cli)
 
-命令行工具，用于构建 guest bundle。
+命令行工具，用于构建 Guest Bundle。
 
 ### 构建命令
 
 ```bash
-# 构建guest
-bunx rill build src/guest.tsx -o dist/bundle.js
+# 构建 Guest Bundle
+bun run rill/cli build src/guest.tsx -o dist/bundle.js
 
 # 监听模式
-bunx rill build src/guest.tsx -o dist/bundle.js --watch
+bun run rill/cli build src/guest.tsx --watch --no-minify --sourcemap
 
-# 生成 sourcemap
-bunx rill build src/guest.tsx -o dist/bundle.js --sourcemap
-
-# 不压缩
-bunx rill build src/guest.tsx -o dist/bundle.js --no-minify
-
-# 生成 metafile
-bunx rill build src/guest.tsx -o dist/bundle.js --metafile dist/meta.json
-```
-
-### 分析命令
-
-```bash
-# 分析 bundle
-bunx rill analyze dist/bundle.js
+# 分析 Bundle
+bun run rill/cli analyze dist/bundle.js
 ```
 
 ### 编程接口
 
 ```tsx
-import { build, analyze } from '@rill/cli';
+import { build, analyze } from 'rill/cli';
 
 await build({
   entry: 'src/guest.tsx',
@@ -754,16 +574,12 @@ await build({
   minify: true,
   sourcemap: false,
   watch: false,
-  metafile: 'dist/meta.json',
-  strict: true, // 启用严格依赖检查 (默认 true)
-  strictPeerVersions: false, // 严格检查 React/reconciler 版本匹配
+  strict: true,  // 启用严格依赖检查（默认）
 });
 
 await analyze('dist/bundle.js', {
-  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/reconciler'],
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', '@rill/let'],
   failOnViolation: true,
-  treatEvalAsViolation: true,
-  treatDynamicNonLiteralAsViolation: true,
 });
 ```
 
@@ -771,27 +587,79 @@ await analyze('dist/bundle.js', {
 
 ## 类型定义
 
-### Operation
+### EngineOptions
 
-操作指令类型。
+```typescript
+interface EngineOptions {
+  provider?: JSEngineProvider;          // 自定义 Provider
+  timeout?: number;                     // 执行超时（默认 5000ms）
+  debug?: boolean;                      // 调试模式
+  logger?: {
+    log: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+  };
+  onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
+  requireWhitelist?: string[];          // 允许的 require() 模块
+  receiverMaxBatchSize?: number;        // 每批次最大操作数（默认 5000）
+}
+```
+
+### EngineEvents
+
+```typescript
+interface EngineEvents {
+  load: () => void;                      // Bundle 成功加载
+  error: (error: Error) => void;         // Guest 运行时错误
+  fatalError: (error: Error) => void;    // 致命错误 - 引擎自动销毁
+  destroy: () => void;                   // 引擎已销毁
+  operation: (batch: OperationBatch) => void;  // 收到操作批次
+  message: (message: GuestMessage) => void;    // 收到 Guest 消息
+}
+```
+
+### EngineHealth
+
+```typescript
+interface EngineHealth {
+  loaded: boolean;         // Bundle 是否已加载
+  destroyed: boolean;      // 引擎是否已销毁
+  errorCount: number;      // 总错误数
+  lastErrorAt: number | null;  // 上次错误时间戳
+  receiverNodes: number;   // Receiver 中的节点数
+  batching: boolean;       // 批处理是否激活
+}
+```
+
+### OperationBatch
+
+```typescript
+interface OperationBatch {
+  version: number;          // 协议版本
+  batchId: number;          // 批次标识符
+  operations: Operation[];  // 操作数组
+}
+```
+
+### Operation 类型
 
 ```typescript
 type OperationType =
-  | 'CREATE'
-  | 'UPDATE'
-  | 'DELETE'
-  | 'APPEND'
-  | 'INSERT'
-  | 'REMOVE'
-  | 'REORDER'
-  | 'TEXT';
+  | 'CREATE'    // 创建新节点
+  | 'UPDATE'    // 更新节点属性
+  | 'DELETE'    // 删除节点
+  | 'APPEND'    // 添加子节点
+  | 'INSERT'    // 在索引处插入子节点
+  | 'REMOVE'    // 移除子节点
+  | 'REORDER'   // 重排子节点
+  | 'TEXT'      // 更新文本内容
+  | 'REF_CALL'; // 远程方法调用（Remote Ref）
 
 interface CreateOperation {
   op: 'CREATE';
   id: number;
   type: string;
   props: SerializedProps;
-  timestamp?: number;
 }
 
 interface UpdateOperation {
@@ -799,96 +667,39 @@ interface UpdateOperation {
   id: number;
   props: SerializedProps;
   removedProps?: string[];
-  timestamp?: number;
 }
 
-interface DeleteOperation {
-  op: 'DELETE';
-  id: number;
-  timestamp?: number;
-}
-
-// ... 更多操作类型
+// ... 其他操作类型
 ```
 
-### OperationBatch
-
-操作批次。
-
-```typescript
-interface OperationBatch {
-  version: number;
-  batchId: number;
-  operations: Operation[];
-}
-```
-
-### HostMessage
-
-宿主消息类型。
+### HostMessage 类型
 
 ```typescript
 type HostMessageType =
-  | 'CALL_FUNCTION'
-  | 'HOST_EVENT'
-  | 'CONFIG_UPDATE'
-  | 'DESTROY';
-
-interface CallFunctionMessage {
-  type: 'CALL_FUNCTION';
-  fnId: string;
-  args: unknown[];
-}
-
-interface HostEventMessage {
-  type: 'HOST_EVENT';
-  eventName: string;
-  payload: unknown;
-}
-
-// ... 更多消息类型
+  | 'CALL_FUNCTION'      // 调用回调函数
+  | 'HOST_EVENT'         // 宿主事件广播
+  | 'CONFIG_UPDATE'      // 配置更新
+  | 'DESTROY'            // 销毁信号
+  | 'REF_METHOD_RESULT'; // Remote Ref 方法调用结果
 ```
 
-### StyleProp
-
-样式类型。
+### JSEngineProvider
 
 ```typescript
-interface StyleObject {
-  // 布局
-  flex?: number;
-  flexDirection?: 'row' | 'column' | 'row-reverse' | 'column-reverse';
-  justifyContent?: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'space-evenly';
-  alignItems?: 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline';
-
-  // 尺寸
-  width?: number | string;
-  height?: number | string;
-  minWidth?: number | string;
-  maxWidth?: number | string;
-
-  // 边距
-  margin?: number;
-  padding?: number;
-
-  // 边框
-  borderWidth?: number;
-  borderColor?: string;
-  borderRadius?: number;
-
-  // 背景
-  backgroundColor?: string;
-
-  // 文字
-  color?: string;
-  fontSize?: number;
-  fontWeight?: 'normal' | 'bold' | '100' | '200' | ... | '900';
-  textAlign?: 'auto' | 'left' | 'right' | 'center' | 'justify';
-
-  // ... 更多样式属性
+interface JSEngineProvider {
+  createRuntime(): Promise<JSEngineRuntime>;
 }
 
-type StyleProp = StyleObject | StyleObject[] | null | undefined;
+interface JSEngineRuntime {
+  createContext(): Promise<JSEngineContext>;
+}
+
+interface JSEngineContext {
+  eval(code: string): Promise<unknown>;
+  set(name: string, value: unknown): void;
+  get(name: string): unknown;
+  dispose(): void;
+}
 ```
 
 ---
@@ -897,10 +708,10 @@ type StyleProp = StyleObject | StyleObject[] | null | undefined;
 
 ### 沙箱错误隔离
 
-guest中的错误不会影响宿主应用：
+Guest 中的错误不会影响宿主应用：
 
 ```tsx
-// guest代码中的错误会被捕获
+// Guest 代码中的错误会被捕获
 function BuggyGuest() {
   throw new Error('Guest crashed!');
 }
@@ -930,33 +741,14 @@ const engine = new Engine({ timeout: 5000 });
 
 ```tsx
 engine.register({
-  // 只注册需要的组件
   Card: MyCard,
   Badge: MyBadge,
 });
 ```
 
-### 2. 性能优化
+### 2. 调试
 
 ```tsx
-// 使用节流调度器
-const scheduler = new ThrottledScheduler(onBatch, {
-  maxBatchSize: 50,
-  throttleMs: 16,
-  enableMerge: true,
-});
-
-// 长列表使用虚拟滚动
-const calculator = new VirtualScrollCalculator({
-  estimatedItemHeight: 60,
-  overscan: 3,
-});
-```
-
-### 3. 调试
-
-```tsx
-// 监控引擎事件
 engine.on('error', (error) => {
   console.error('[Guest 错误]', error);
   reportError(error);
@@ -965,161 +757,17 @@ engine.on('error', (error) => {
 engine.on('operation', (batch) => {
   console.log(`操作数量: ${batch.operations.length}`);
 });
-
-// 检查资源使用情况
-const stats = engine.getResourceStats();
-if (stats.callbacks > 1000) {
-  console.warn('检测到高回调数量:', stats);
-}
 ```
 
-### 4. 错误边界
+### 3. 错误边界
 
 ```tsx
 <EngineView
   engine={engine}
-  bundleUrl={bundleUrl}
+  source={bundleUrl}
   onError={(error) => {
     reportError(error);
   }}
-  fallback={<LoadingIndicator />}
   renderError={(error) => <ErrorFallback error={error} />}
 />
-```
-
----
-
-## 类型定义
-
-### EngineOptions
-
-```typescript
-interface EngineOptions {
-  sandbox?: 'vm' | 'worker' | 'none';  // 沙箱模式(未设置则自动检测)
-  provider?: JSEngineProvider;          // 自定义 Provider
-  timeout?: number;                     // 执行超时(默认 5000ms)
-  debug?: boolean;                      // 调试模式
-  logger?: {                            // 自定义日志器
-    log: (...args: unknown[]) => void;
-    warn: (...args: unknown[]) => void;
-    error: (...args: unknown[]) => void;
-  };
-  onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
-  requireWhitelist?: string[];          // 允许的 require() 模块
-  receiverMaxBatchSize?: number;        // 每批次最大操作数(默认 5000)
-}
-```
-
-### EngineEvents
-
-```typescript
-interface EngineEvents {
-  load: () => void;                      // Bundle 成功加载
-  error: (error: Error) => void;         // Guest 运行时错误
-  fatalError: (error: Error) => void;    // 致命错误 - 引擎自动销毁
-  destroy: () => void;                   // 引擎已销毁
-  operation: (batch: OperationBatch) => void;  // 收到操作批次
-  message: (message: GuestMessage) => void;    // 收到 Guest 消息
-}
-```
-
-### ResourceStats
-
-```typescript
-interface ResourceStats {
-  timers: number;     // 活动的 setTimeout/setInterval 数量
-  nodes: number;      // 组件树中的 VNode 数量
-  callbacks: number;  // 注册的回调函数数量
-}
-```
-
-### EngineHealth
-
-```typescript
-interface EngineHealth {
-  loaded: boolean;         // Bundle 是否已加载
-  destroyed: boolean;      // 引擎是否已销毁
-  errorCount: number;      // 总错误数
-  lastErrorAt: number | null;  // 上次错误时间戳
-  receiverNodes: number;   // Receiver 中的节点数
-  batching: boolean;       // 批处理是否激活
-}
-```
-
-### GuestMessage
-
-```typescript
-interface GuestMessage {
-  event: string;    // 事件名称
-  payload: unknown; // 事件载荷
-}
-```
-
-### OperationBatch
-
-```typescript
-interface OperationBatch {
-  version: number;          // 协议版本
-  batchId: number;          // 批次标识符
-  operations: Operation[];  // 操作数组
-}
-```
-
-### Operation 类型
-
-```typescript
-type OperationType =
-  | 'CREATE'   // 创建新节点
-  | 'UPDATE'   // 更新节点属性
-  | 'DELETE'   // 删除节点
-  | 'APPEND'   // 添加子节点
-  | 'INSERT'   // 在索引处插入子节点
-  | 'REMOVE'   // 移除子节点
-  | 'REORDER'  // 重排子节点
-  | 'TEXT';    // 更新文本内容
-
-interface CreateOperation {
-  op: 'CREATE';
-  id: number;
-  type: string;
-  props: SerializedProps;
-}
-
-interface UpdateOperation {
-  op: 'UPDATE';
-  id: number;
-  props: SerializedProps;
-  removedProps?: string[];
-}
-
-interface AppendOperation {
-  op: 'APPEND';
-  id: number;
-  parentId: number;
-  childId: number;
-}
-
-// ... 其他操作类型
-```
-
-### ComponentMap
-
-```typescript
-type ComponentMap = Record<string, React.ComponentType<any>>;
-```
-
-### JSEngineProvider
-
-```typescript
-interface JSEngineProvider {
-  createEngine(): JSEngine;
-  supportsWorker?: boolean;
-}
-
-interface JSEngine {
-  evaluate(code: string): unknown;
-  set(name: string, value: unknown): void;
-  get(name: string): unknown;
-  dispose(): void;
-}
 ```

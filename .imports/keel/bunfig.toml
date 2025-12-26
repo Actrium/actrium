@@ -6,9 +6,13 @@ preload = ["./src/runtime/__tests__/setup.ts"]
 # Exclude native JSI tests (they run in native environment, not Bun)
 # Files named *.native.js are for native runtime testing
 # Also exclude sandbox_test.js in native directories (these test JSI bindings)
+# Exclude *.rn.test.ts files (React Native specific tests, run in RN environment)
+# Exclude entire tests/rn-integration directory (standalone RN test project)
 exclude = [
   "**/*.native.js",
-  "**/native/**/sandbox_test.js"
+  "**/native/**/sandbox_test.js",
+  "**/*.rn.test.ts",
+  "tests/rn-integration/**"
 ]
 
 # Coverage settings

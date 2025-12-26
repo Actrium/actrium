@@ -1,4 +1,4 @@
-import { describe, expect, it, mock, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 // Mock the native module
 const mockContext = {
@@ -25,7 +25,7 @@ mock.module('../../sandbox-native/JSCModule', () => ({
 }));
 
 // Import after mocking
-import { JSCProvider, isJSCAvailable } from '../providers/JSCProvider.native';
+import { isJSCAvailable, JSCProvider } from '../providers/JSCProvider.native';
 
 describe('JSCProvider', () => {
   beforeEach(() => {

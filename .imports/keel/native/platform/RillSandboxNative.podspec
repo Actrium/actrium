@@ -15,45 +15,32 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => "13.0", :osx => "10.15", :tvos => "13.0", :visionos => "1.0" }
   s.source       = { :git => package['repository'] || "https://github.com/GoAskAway/rill.git", :tag => "v#{s.version}" }
 
-  # Paths relative to podspec location (platform/)
-  # Use .. to go up one level to native/
-  s.source_files = "../jsi/**/*.{h,cpp}"
-  s.header_mappings_dir = "../jsi"
+  # Copy symlinked source files to a local directory for CocoaPods
+  # CocoaPods requires relative paths and doesn't always follow symlinks
+  s.prepare_command = <<-CMD
+    mkdir -p Sources/jsi Sources/jsc
+    cp -RL jsi/* Sources/jsi/ 2>/dev/null || true
+    cp -RL jsc/src/* Sources/jsc/ 2>/dev/null || true
+  CMD
 
-  # QuickJS subspec - available on all platforms
-  s.subspec 'QuickJS' do |quickjs|
-    quickjs.source_files = [
-      "../quickjs/src/**/*.{h,cpp}",
-      "../quickjs/vendor/**/*.{h,c}"
-    ]
-    quickjs.private_header_files = "../quickjs/vendor/**/*.h"
-    quickjs.compiler_flags = '-DCONFIG_VERSION="2024-01-01" -DCONFIG_BIGNUM=1'
-    quickjs.pod_target_xcconfig = {
-      'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
-      'GCC_WARN_INHIBIT_ALL_WARNINGS' => 'YES'
-    }
-  end
+  # Reference copied files with relative paths
+  s.source_files = [
+    "Sources/jsi/**/*.{h,cpp}",
+    "Sources/jsc/**/*.{h,mm}"
+  ]
+  s.public_header_files = [
+    "Sources/jsi/**/*.h",
+    "Sources/jsc/**/*.h"
+  ]
 
-  # JSC subspec - Apple platforms only (uses system JavaScriptCore)
-  s.subspec 'JSC' do |jsc|
-    jsc.source_files = [
-      "../jsc/src/**/*.{h,mm}",
-      "../jsc/src/RillSandboxNativeTurboModule.mm"
-    ]
-    jsc.frameworks = "JavaScriptCore"
-    jsc.pod_target_xcconfig = {
-      'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17'
-    }
-  end
-
-  # Default includes both
-  s.default_subspecs = ['JSC']
+  s.header_mappings_dir = "Sources/jsi"
+  s.static_framework = true
+  s.requires_arc = true
 
   # React Native dependencies for JSI and bridging
   s.dependency "React-jsi"
-  s.dependency "React-RCTFoundation"
   s.dependency "React-Core"
 
-  # Optional: React-bridging for new architecture TurboModule support
-  # s.dependency "React-bridging"
+  # Note: TurboModule bridging is optional and only available in new arch (RN 0.83+)
+  # For old arch (RN 0.79 macOS), JSI is installed via RCTJavaScriptWillStartExecutingNotification
 end

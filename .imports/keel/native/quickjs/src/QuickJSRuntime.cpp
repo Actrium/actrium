@@ -830,12 +830,34 @@ size_t QuickJSRuntime::size(const jsi::Array &array) {
   return JS_VALUE_GET_INT(lengthValue);
 }
 
-size_t QuickJSRuntime::size(const jsi::ArrayBuffer &) {
-  throw std::logic_error("Not implemented");
+size_t QuickJSRuntime::size(const jsi::ArrayBuffer &arrayBuffer) {
+  // TRACE_SCOPE("QuickJSRuntime", "arraybuffer");
+  auto jsValue = JSIValueConverter::ToJSObject(*this, arrayBuffer);
+  ScopedJSValue scopeValue(context_, &jsValue);
+
+  size_t size = 0;
+  uint8_t *ptr = JS_GetArrayBuffer(context_, &size, jsValue);
+
+  if (!ptr) {
+    throw jsi::JSError(*this, "Failed to get ArrayBuffer size");
+  }
+
+  return size;
 }
 
-uint8_t *QuickJSRuntime::data(const jsi::ArrayBuffer &) {
-  throw std::logic_error("Not implemented");
+uint8_t *QuickJSRuntime::data(const jsi::ArrayBuffer &arrayBuffer) {
+  // TRACE_SCOPE("QuickJSRuntime", "arraybuffer");
+  auto jsValue = JSIValueConverter::ToJSObject(*this, arrayBuffer);
+  ScopedJSValue scopeValue(context_, &jsValue);
+
+  size_t size = 0;
+  uint8_t *ptr = JS_GetArrayBuffer(context_, &size, jsValue);
+
+  if (!ptr) {
+    throw jsi::JSError(*this, "Failed to get ArrayBuffer data");
+  }
+
+  return ptr;
 }
 
 jsi::Value QuickJSRuntime::getValueAtIndex(const jsi::Array &array, size_t i) {
@@ -1031,8 +1053,46 @@ QuickJSRuntime::createPropNameIDFromSymbol(const jsi::Symbol &sym) {
 }
 
 jsi::ArrayBuffer
-QuickJSRuntime::createArrayBuffer(std::shared_ptr<jsi::MutableBuffer>) {
-  throw std::logic_error("Not implemented");
+QuickJSRuntime::createArrayBuffer(std::shared_ptr<jsi::MutableBuffer> buffer) {
+  // TRACE_SCOPE("QuickJSRuntime", "arraybuffer");
+
+  if (!buffer) {
+    throw jsi::JSError(*this, "Cannot create ArrayBuffer from null buffer");
+  }
+
+  // Get buffer data and size
+  uint8_t *data = buffer->data();
+  size_t size = buffer->size();
+
+  // Create a shared_ptr copy to extend buffer lifetime
+  // The buffer will be freed when QuickJS calls the free function
+  auto *bufferPtr = new std::shared_ptr<jsi::MutableBuffer>(buffer);
+
+  // Free function called by QuickJS when ArrayBuffer is garbage collected
+  auto freeFunc = [](JSRuntime *rt, void *opaque, void *ptr) {
+    (void)rt;
+    (void)ptr;
+    // Delete the shared_ptr, which will decrement ref count
+    delete static_cast<std::shared_ptr<jsi::MutableBuffer> *>(opaque);
+  };
+
+  // Create ArrayBuffer with ownership transfer
+  JSValue arrayBuffer = JS_NewArrayBuffer(
+      context_,
+      data,
+      size,
+      freeFunc,
+      bufferPtr,
+      false // not shared
+  );
+
+  if (JS_IsException(arrayBuffer)) {
+    delete bufferPtr; // Clean up on failure
+    checkAndThrowException(context_);
+  }
+
+  return make<jsi::ArrayBuffer>(
+      new QuickJSPointerValue(runtime_, context_, arrayBuffer));
 }
 
 bool QuickJSRuntime::strictEquals(const jsi::BigInt &a,

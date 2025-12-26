@@ -96,10 +96,8 @@ describe('Engine Benchmarks', () => {
 
   afterEach(() => {
     engine.destroy();
-  });
 
-  // Print results after all tests
-  afterEach(() => {
+    // Print results after all tests
     if (results.length > 0) {
       console.log(`\n${'='.repeat(80)}`);
       console.log('ENGINE BENCHMARK RESULTS');

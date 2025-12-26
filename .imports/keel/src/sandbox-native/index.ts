@@ -9,18 +9,17 @@
  */
 
 export {
-  isQuickJSAvailable,
-  getQuickJSModule,
-  type QuickJSContextNative,
-  type QuickJSRuntimeNative,
-} from './QuickJSModule';
-
-export {
-  isJSCAvailable,
   getJSCModule,
+  isJSCAvailable,
   type JSCContextNative,
   type JSCRuntimeNative,
 } from './JSCModule';
+export {
+  getQuickJSModule,
+  isQuickJSAvailable,
+  type QuickJSContextNative,
+  type QuickJSRuntimeNative,
+} from './QuickJSModule';
 
 /**
  * Common context interface

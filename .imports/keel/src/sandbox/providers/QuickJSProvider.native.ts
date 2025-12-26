@@ -6,8 +6,8 @@
  */
 
 import {
-  isQuickJSAvailable,
   getQuickJSModule,
+  isQuickJSAvailable,
   type QuickJSContextNative,
 } from '../../sandbox-native/QuickJSModule';
 import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from '../types/provider';

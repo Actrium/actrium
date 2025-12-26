@@ -11,11 +11,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import React from 'react';
-import { CallbackRegistry, OperationCollector } from '../../../let/reconciler';
+import { CallbackRegistry, OperationCollector } from '../../../guest-bundle/reconciler';
 import { Engine } from '../../engine';
 import { Receiver } from '../../receiver';
 import { ComponentRegistry } from '../../registry';
-import { createMockJSEngineProvider } from '../../test-utils';
+import { createMockJSEngineProvider } from '../test-utils';
 
 // TS type imports
 interface OperationBatch {
@@ -57,7 +57,13 @@ describe('E2E Integration Tests', () => {
     let _sentMessages: HostMessage[];
 
     beforeEach(() => {
-      engine = new Engine({ quickjs: createMockJSEngineProvider(), debug: false });
+      // Silent logger to prevent expected error logs from cluttering output
+      const silentLogger = { log: () => {}, warn: () => {}, error: () => {} };
+      engine = new Engine({
+        quickjs: createMockJSEngineProvider(),
+        debug: false,
+        logger: silentLogger,
+      });
       engine.register({
         View: MockView,
         Text: MockText,
@@ -383,7 +389,13 @@ describe('E2E Integration Tests', () => {
     let engine: Engine;
 
     beforeEach(() => {
-      engine = new Engine({ quickjs: createMockJSEngineProvider(), debug: false });
+      // Silent logger to prevent expected error logs from cluttering output
+      const silentLogger = { log: () => {}, warn: () => {}, error: () => {} };
+      engine = new Engine({
+        quickjs: createMockJSEngineProvider(),
+        debug: false,
+        logger: silentLogger,
+      });
       engine.register({
         View: MockView,
         Text: MockText,
@@ -477,7 +489,13 @@ describe('E2E Integration Tests', () => {
     let engine: Engine;
 
     beforeEach(() => {
-      engine = new Engine({ quickjs: createMockJSEngineProvider(), debug: false });
+      // Silent logger to prevent expected error logs from cluttering output
+      const silentLogger = { log: () => {}, warn: () => {}, error: () => {} };
+      engine = new Engine({
+        quickjs: createMockJSEngineProvider(),
+        debug: false,
+        logger: silentLogger,
+      });
     });
 
     afterEach(() => {

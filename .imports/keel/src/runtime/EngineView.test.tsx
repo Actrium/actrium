@@ -2,36 +2,22 @@
  * EngineView Tests
  *
  * Uses react-test-renderer for React Native compatible testing
- * NOTE: This test only runs in React Native environment (not in bun/node)
+ * react-native imports are mocked via tsconfig paths -> src/__mocks__/react-native.ts
  */
 
 import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-// Detect if we're in a React Native compatible environment
-// Bun cannot parse react-native's Flow syntax
-const isReactNativeEnv = (() => {
-  try {
-    // This will fail in bun due to Flow syntax in react-native
-    require.resolve('react-native');
-    return typeof process !== 'undefined' && !('Bun' in globalThis);
-  } catch {
-    return false;
-  }
-})();
-
-// Skip entire test suite if not in RN environment
-describe.skipIf(!isReactNativeEnv)('EngineView', () => {
-  // Dynamic imports to avoid parsing react-native in non-RN environments
+describe('EngineView', () => {
+  // Dynamic imports for test isolation
   let React: typeof import('react');
-  let EngineView: typeof import('./EngineView').EngineView;
+  let EngineView: typeof import('../presets/react-native/EngineView').EngineView;
   let Engine: typeof import('./engine').Engine;
   let TestRenderer: typeof import('react-test-renderer');
   let act: typeof import('react-test-renderer').act;
 
   beforeAll(async () => {
-    // Only import these in RN environment
     React = await import('react');
-    const engineViewModule = await import('./EngineView');
+    const engineViewModule = await import('../presets/react-native/EngineView');
     EngineView = engineViewModule.EngineView;
     const engineModule = await import('./engine');
     Engine = engineModule.Engine;
@@ -61,7 +47,11 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
     }));
 
     // Create a mock Engine instance for testing
-    const storedListeners = new Map<string, Set<(arg?: any) => void>>();
+    const storedListeners = new Map<
+      string,
+      // biome-ignore lint/suspicious/noExplicitAny: Mock listener with dynamic args
+      Set<(arg?: any) => void>
+    >();
 
     mockEngine = {
       isLoaded: false,
@@ -69,6 +59,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
       loadBundle: loadBundleMock,
       createReceiver: createReceiverMock,
       getReceiver: getReceiverMock,
+      // biome-ignore lint/suspicious/noExplicitAny: Mock event listener with dynamic args
       on: mock((event: string, listener: (arg?: any) => void) => {
         if (!storedListeners.has(event)) {
           storedListeners.set(event, new Set());
@@ -78,6 +69,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
           storedListeners.get(event)?.delete(listener);
         });
       }),
+      // biome-ignore lint/suspicious/noExplicitAny: Mock emit with dynamic args
       emit: mock((event: string, arg?: any) => {
         storedListeners.get(event)?.forEach((listener) => listener(arg));
       }),
@@ -192,6 +184,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
     it('should call onError callback when loadBundle fails', async () => {
       const error = new Error('Bundle load failed');
       loadBundleMock = mock(() => Promise.reject(error));
+      // biome-ignore lint/suspicious/noExplicitAny: Mock engine requires runtime property override
       (mockEngine as any).loadBundle = loadBundleMock;
 
       const onError = mock();
@@ -212,6 +205,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
     it('should convert non-Error exceptions to Error objects', async () => {
       loadBundleMock = mock(() => Promise.reject('String error'));
+      // biome-ignore lint/suspicious/noExplicitAny: Mock engine requires runtime property override
       (mockEngine as any).loadBundle = loadBundleMock;
 
       const onError = mock();
@@ -252,6 +246,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
       // Emit error event
       const runtimeError = new Error('Runtime error');
       await act(async () => {
+        // biome-ignore lint/suspicious/noExplicitAny: Mock engine requires runtime method call
         (mockEngine as any).emit('error', runtimeError);
       });
 
@@ -274,6 +269,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
       // Emit destroy event
       await act(async () => {
+        // biome-ignore lint/suspicious/noExplicitAny: Mock engine requires runtime method call
         (mockEngine as any).emit('destroy');
       });
 
@@ -356,6 +352,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
       getReceiverMock = mock(() => ({
         render: () => null,
       }));
+      // biome-ignore lint/suspicious/noExplicitAny: Mock engine requires runtime property override
       (mockEngine as any).getReceiver = getReceiverMock;
 
       let renderer: import('react-test-renderer').ReactTestRenderer;
@@ -376,6 +373,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
     it('should handle getReceiver returning null', async () => {
       getReceiverMock = mock(() => null);
+      // biome-ignore lint/suspicious/noExplicitAny: Mock engine requires runtime property override
       (mockEngine as any).getReceiver = getReceiverMock;
 
       let renderer: import('react-test-renderer').ReactTestRenderer;
@@ -418,6 +416,7 @@ describe.skipIf(!isReactNativeEnv)('EngineView', () => {
 
     it('should render custom error UI', async () => {
       loadBundleMock = mock(() => Promise.reject(new Error('Failed')));
+      // biome-ignore lint/suspicious/noExplicitAny: Mock engine requires runtime property override
       (mockEngine as any).loadBundle = loadBundleMock;
 
       const renderError = (err: Error) =>

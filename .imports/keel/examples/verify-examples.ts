@@ -15,12 +15,15 @@ import { Engine } from '../packages/runtime/src/runtime/engine';
 // ============================================================================
 
 const createMockComponent = (name: string) => {
+  // biome-ignore lint/suspicious/noExplicitAny: Mock component accepts any props for testing
   const component = (props: any) => React.createElement(name, props);
   Object.defineProperty(component, 'name', { value: `Mock${name}` });
+  // biome-ignore lint/suspicious/noExplicitAny: Adding custom property to component for testing
   (component as any).__rillComponentName = name;
   return component;
 };
 
+// biome-ignore lint/suspicious/noExplicitAny: Mock components registry for testing
 const MOCK_COMPONENTS: Record<string, any> = {
   ScrollView: createMockComponent('ScrollView'),
   View: createMockComponent('View'),
@@ -41,6 +44,7 @@ interface OperationRecord {
   op: string; // Operation type: CREATE, APPEND, UPDATE, REMOVE, etc.
   id?: number; // Node ID
   type?: string; // Component type: Text, View, etc.
+  // biome-ignore lint/suspicious/noExplicitAny: Props can be any serializable value
   props?: Record<string, any>;
   parentId?: number; // For APPEND operations
   childId?: number; // For APPEND operations
@@ -56,6 +60,7 @@ interface StateChange {
 
 interface GuestMessage {
   type: string;
+  // biome-ignore lint/suspicious/noExplicitAny: Message payload can be any serializable value
   payload?: any;
 }
 
@@ -161,6 +166,7 @@ const EXPECTED_BEHAVIORS: ExpectedBehavior[] = [
 // ============================================================================
 
 function analyzeTree(
+  // biome-ignore lint/suspicious/noExplicitAny: React element can have various types
   element: any,
   depth = 0
 ): { depth: number; nodeCount: number; componentTypes: Set<string> } {
@@ -306,6 +312,7 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
   });
 
   let renderCount = 0;
+  // biome-ignore lint/suspicious/noExplicitAny: Rendered output can be any React element
   let lastRendered: any = null;
 
   engine.createReceiver(() => {
@@ -332,6 +339,7 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
   try {
     await engine.loadBundle(code, { title: 'Test', theme: 'light' });
     loadSucceeded = true;
+    // biome-ignore lint/suspicious/noExplicitAny: Catch-all for any error type
   } catch (_err: any) {
     loadSucceeded = false;
   }
@@ -361,12 +369,15 @@ async function verifyBundle(expected: ExpectedBehavior): Promise<VerificationRes
   const nodeCount = createOps.filter((o) => !o.type!.startsWith('__')).length;
 
   // Find root component - it's the one appended to parentId=0
+  // biome-ignore lint/suspicious/noExplicitAny: Operations have dynamic fields based on op type
   const appendOps = operations.filter((o: any) => o.op === 'APPEND');
+  // biome-ignore lint/suspicious/noExplicitAny: Operations have dynamic fields based on op type
   const rootAppend = appendOps.find((o: any) => o.parentId === 0) as any;
   let rootType = 'N/A';
   if (rootAppend) {
     // Use id or childId (both should work, id=37 and childId=37)
     const rootId = rootAppend.childId || rootAppend.id;
+    // biome-ignore lint/suspicious/noExplicitAny: Operations have dynamic fields based on op type
     const rootCreate = createOps.find((o: any) => o.id === rootId);
     rootType = rootCreate?.type || 'N/A';
   }

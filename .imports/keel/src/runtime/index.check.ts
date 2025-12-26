@@ -12,6 +12,24 @@ export { Engine } from './engine';
 // export { EngineView } from './EngineView';
 // export type { EngineViewProps } from './EngineView';
 
+export type {
+  BatchConfig,
+  PerformanceMetrics,
+  VirtualScrollConfig,
+  VirtualScrollState,
+} from './performance';
+// Performance optimizations
+export {
+  OperationMerger,
+  PerformanceMonitor,
+  ScrollThrottler,
+  ThrottledScheduler,
+  VirtualScrollCalculator,
+} from './performance';
+export type { SendToSandbox } from './receiver';
+export { Receiver } from './receiver';
+export type { ComponentMap, ComponentType } from './registry';
+export { ComponentRegistry, createRegistry } from './registry';
 // Type exports
 export type {
   AppendOperation,
@@ -38,21 +56,3 @@ export type {
   TextOperation,
   UpdateOperation,
 } from './types';
-export type {
-  BatchConfig,
-  PerformanceMetrics,
-  VirtualScrollConfig,
-  VirtualScrollState,
-} from './performance';
-// Performance optimizations
-export {
-  OperationMerger,
-  PerformanceMonitor,
-  ScrollThrottler,
-  ThrottledScheduler,
-  VirtualScrollCalculator,
-} from './performance';
-export type { SendToSandbox } from './receiver';
-export { Receiver } from './receiver';
-export type { ComponentMap, ComponentType } from './registry';
-export { ComponentRegistry, createRegistry } from './registry';

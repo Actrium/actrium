@@ -1,0 +1,139 @@
+# QuickJS Sandbox - WebAssembly Build Configuration
+#
+# Build with Emscripten:
+#   emcmake cmake -B build-wasm -DBUILD_WASM=ON
+#   cmake --build build-wasm
+#
+# Memory options:
+#   emcmake cmake -B build-wasm -DBUILD_WASM=ON -DWASM_INITIAL_MEMORY=16 -DWASM_MAX_MEMORY=64
+#
+# Output:
+#   build-wasm/quickjs_sandbox.{js,wasm}
+
+cmake_minimum_required(VERSION 3.10)
+project(QuickJSSandboxWASM VERSION 1.0.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
+
+# Option to enable WASM build
+option(BUILD_WASM "Build WebAssembly version" OFF)
+
+# Memory configuration (in MB for memory, KB for stack)
+# Initial memory: 8MB is enough for QuickJS + ~300KB bundled code
+# Stack: 512KB needed for react-reconciler's deep call stacks during init
+# Max memory: 32MB should handle most use cases with ALLOW_MEMORY_GROWTH
+set(WASM_INITIAL_MEMORY "8" CACHE STRING "Initial WASM memory in MB (default: 8)")
+set(WASM_MAX_MEMORY "32" CACHE STRING "Maximum WASM memory in MB (default: 32)")
+set(WASM_STACK_SIZE "512" CACHE STRING "WASM stack size in KB (default: 512)")
+
+# Source directories (same as native)
+set(VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
+set(JSI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/jsi)
+set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+# QuickJS Engine sources (C)
+set(QUICKJS_SOURCES
+    ${VENDOR_DIR}/quickjs.c
+    ${VENDOR_DIR}/libregexp.c
+    ${VENDOR_DIR}/libunicode.c
+    ${VENDOR_DIR}/cutils.c
+    ${VENDOR_DIR}/libbf.c
+)
+
+# WASM bindings (C API for JavaScript)
+set(WASM_BINDINGS_SOURCES
+    ${SRC_DIR}/wasm_bindings.c
+)
+
+# QuickJS compile definitions
+set(QUICKJS_DEFINITIONS
+    CONFIG_VERSION="2024-01-13"
+    CONFIG_BIGNUM
+    _GNU_SOURCE
+)
+
+if(BUILD_WASM)
+    message(STATUS "Building WebAssembly version with Emscripten")
+
+    # Create WASM library (QuickJS + WASM bindings only, no JSI/C++)
+    add_executable(quickjs_sandbox_wasm
+        ${QUICKJS_SOURCES}
+        ${WASM_BINDINGS_SOURCES}
+    )
+
+    target_compile_definitions(quickjs_sandbox_wasm PRIVATE ${QUICKJS_DEFINITIONS})
+
+    target_include_directories(quickjs_sandbox_wasm PRIVATE
+        ${SRC_DIR}
+        ${VENDOR_DIR}
+    )
+
+    # Convert MB/KB to bytes
+    math(EXPR INITIAL_BYTES "${WASM_INITIAL_MEMORY} * 1048576")
+    math(EXPR MAX_BYTES "${WASM_MAX_MEMORY} * 1048576")
+    math(EXPR STACK_BYTES "${WASM_STACK_SIZE} * 1024")
+
+    # ⭐ Emscripten-specific settings
+    target_link_options(quickjs_sandbox_wasm PRIVATE
+        -sALLOW_MEMORY_GROWTH=1
+        -sINITIAL_MEMORY=${INITIAL_BYTES}
+        -sMAXIMUM_MEMORY=${MAX_BYTES}
+        -sSTACK_SIZE=${STACK_BYTES}
+        -sALLOW_TABLE_GROWTH=1
+        -sMODULARIZE=1
+        -sEXPORT_NAME=createQuickJSSandbox
+        -sENVIRONMENT=web,worker,node
+        -sEXPORT_ES6=1
+        -O3
+    )
+
+    # Exported functions for WASM bindings
+    set(EXPORTED_FUNCS
+        "_malloc"
+        "_free"
+        "_qjs_init"
+        "_qjs_destroy"
+        "_qjs_eval"
+        "_qjs_eval_void"
+        "_qjs_set_global_json"
+        "_qjs_get_global_json"
+        "_qjs_set_host_callback"
+        "_qjs_install_host_functions"
+        "_qjs_set_timer_callback"
+        "_qjs_install_timer_functions"
+        "_qjs_fire_timer"
+        "_qjs_install_console"
+        "_qjs_execute_pending_jobs"
+        "_qjs_free_string"
+        "_qjs_get_memory_usage"
+    )
+    list(JOIN EXPORTED_FUNCS "," EXPORTED_FUNCS_STR)
+
+    set_target_properties(quickjs_sandbox_wasm PROPERTIES
+        LINK_FLAGS "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,stringToUTF8,addFunction,removeFunction -sEXPORTED_FUNCTIONS=${EXPORTED_FUNCS_STR}"
+    )
+
+    # Output name
+    set_target_properties(quickjs_sandbox_wasm PROPERTIES
+        OUTPUT_NAME "quickjs_sandbox"
+        SUFFIX ".js"
+    )
+
+else()
+    # Native build (existing configuration)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
+endif()
+
+# Print summary
+message(STATUS "")
+message(STATUS "QuickJS Sandbox WASM Configuration:")
+message(STATUS "  Build WASM:     ${BUILD_WASM}")
+if(BUILD_WASM)
+message(STATUS "  Initial Memory: ${WASM_INITIAL_MEMORY} MB")
+message(STATUS "  Max Memory:     ${WASM_MAX_MEMORY} MB")
+message(STATUS "  Stack Size:     ${WASM_STACK_SIZE} KB")
+endif()
+message(STATUS "  Compiler:       ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "")

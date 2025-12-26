@@ -6,8 +6,8 @@
  */
 
 import {
-  isJSCAvailable,
   getJSCModule,
+  isJSCAvailable,
   type JSCContextNative,
 } from '../../sandbox-native/JSCModule';
 import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from '../types/provider';

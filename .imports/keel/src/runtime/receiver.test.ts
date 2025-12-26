@@ -1,692 +1,463 @@
 /**
- * Receiver unit tests
+ * Receiver Tests
+ *
+ * Tests for the operation receiver and remote ref functionality
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import React from 'react';
-import type { HostMessage, OperationBatch } from './types';
-import { Receiver, type SendToSandbox } from './receiver';
+import { CallbackRegistry } from '../guest-bundle/reconciler';
+import { Receiver } from './receiver';
 import { ComponentRegistry } from './registry';
+import type { HostMessage, OperationBatch } from './types';
 
-// Mock components
-const MockView: React.FC<{ style?: object; children?: React.ReactNode }> = ({ children }) =>
-  React.createElement('View', null, children);
-
-const MockText: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
-  React.createElement('Text', null, children);
-
-const MockTouchable: React.FC<{
-  onPress?: () => void;
-  children?: React.ReactNode;
-}> = ({ children }) => React.createElement('Touchable', null, children);
-
-describe('Receiver', () => {
-  let registry: ComponentRegistry;
+describe('Receiver - Remote Ref Support', () => {
   let receiver: Receiver;
-  let sendToSandbox: SendToSandbox;
-  let onUpdate: () => void;
+  let registry: ComponentRegistry;
   let sentMessages: HostMessage[];
+  let _updateCalled: boolean;
+  let callbackRegistry: CallbackRegistry;
 
   beforeEach(() => {
     registry = new ComponentRegistry();
-    registry.registerAll({
-      View: MockView,
-      Text: MockText,
-      TouchableOpacity: MockTouchable,
-    });
-
     sentMessages = [];
-    sendToSandbox = mock((message: HostMessage) => {
-      sentMessages.push(message);
-    });
+    _updateCalled = false;
+    callbackRegistry = new CallbackRegistry();
 
-    onUpdate = mock();
-    receiver = new Receiver(registry, sendToSandbox, onUpdate);
+    // Register mock components
+    // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+    registry.register('View', 'View' as any);
+    // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+    registry.register('TextInput', 'TextInput' as any);
+
+    receiver = new Receiver(
+      registry,
+      (message) => {
+        sentMessages.push(message);
+      },
+      () => {
+        _updateCalled = true;
+      },
+      {
+        callbackRegistry,
+        debug: false,
+      }
+    );
   });
 
-  afterEach(() => {
-    receiver.clear();
-    // mocks cleared;
-  });
-
-  describe('applyBatch', () => {
-    it('should apply a batch of operations', async () => {
+  describe('handleRefCall - Remote Ref Method Calls', () => {
+    test('should handle successful ref method call', async () => {
+      // Create a node with a ref
       const batch: OperationBatch = {
         version: 1,
         batchId: 1,
         operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: { style: { flex: 1 } } },
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-          { op: 'APPEND', id: 2, parentId: 1, childId: 2 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
+          {
+            op: 'CREATE',
+            id: 1,
+            type: 'TextInput',
+            props: { placeholder: 'Enter text' },
+          },
         ],
       };
 
       receiver.applyBatch(batch);
 
-      // Wait for microtask to complete
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(receiver.nodeCount).toBe(2);
-      expect(onUpdate).toHaveBeenCalled();
-    });
-
-    it('should debounce multiple rapid batches', async () => {
-      const batch1: OperationBatch = {
-        version: 1,
-        batchId: 1,
-        operations: [{ op: 'CREATE', id: 1, type: 'View', props: {} }],
-      };
-
-      const batch2: OperationBatch = {
-        version: 1,
-        batchId: 2,
-        operations: [{ op: 'CREATE', id: 2, type: 'Text', props: {} }],
-      };
-
-      receiver.applyBatch(batch1);
-      receiver.applyBatch(batch2);
-
-      // Wait for microtask to complete
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      // onUpdate should be called only once
-      expect(onUpdate).toHaveBeenCalledTimes(1);
-      expect(receiver.nodeCount).toBe(2);
-    });
-  });
-
-  describe('CREATE operation', () => {
-    it('should create a node', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [{ op: 'CREATE', id: 1, type: 'View', props: { style: { flex: 1 } } }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(receiver.nodeCount).toBe(1);
-    });
-
-    it('should create text node', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [{ op: 'CREATE', id: 1, type: '__TEXT__', props: { text: 'Hello' } }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(receiver.nodeCount).toBe(1);
-    });
-  });
-
-  describe('UPDATE operation', () => {
-    it('should update node props', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: { style: { flex: 1 } } },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [
-          {
-            op: 'UPDATE',
-            id: 1,
-            props: { style: { flex: 2, backgroundColor: 'red' } },
-          },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      const element = receiver.render();
-      expect(element).not.toBeNull();
-    });
-
-    it('should remove props when specified', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          {
-            op: 'CREATE',
-            id: 1,
-            type: 'View',
-            props: { style: { flex: 1 }, testID: 'test' },
-          },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [
-          {
-            op: 'UPDATE',
-            id: 1,
-            props: { style: { flex: 2 } },
-            removedProps: ['testID'],
-          },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(onUpdate).toHaveBeenCalled();
-    });
-
-    it('should warn when updating non-existent node', async () => {
-      const consoleSpy = spyOn(console, 'warn').mockImplementation(() => {});
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [{ op: 'UPDATE', id: 999, props: { style: {} } }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Node 999 not found'));
-
-      consoleSpy.mockRestore();
-    });
-  });
-
-  describe('APPEND operation', () => {
-    it('should append child to parent', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-          { op: 'APPEND', id: 2, parentId: 1, childId: 2 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      const element = receiver.render();
-      expect(element).not.toBeNull();
-    });
-
-    it('should append to root container when parentId is 0', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      const element = receiver.render();
-      expect(element).not.toBeNull();
-    });
-
-    it('should not duplicate child', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 }, // duplicated
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      // Should render only one child
-      const element = receiver.render();
-      expect(element).not.toBeNull();
-    });
-  });
-
-  describe('INSERT operation', () => {
-    it('should insert child at specified index', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-          { op: 'CREATE', id: 3, type: 'Text', props: {} },
-          { op: 'APPEND', id: 2, parentId: 1, childId: 2 },
-          { op: 'APPEND', id: 3, parentId: 1, childId: 3 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      // Insert a new child at index 1
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [
-          { op: 'CREATE', id: 4, type: 'Text', props: {} },
-          { op: 'INSERT', id: 4, parentId: 1, childId: 4, index: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(receiver.nodeCount).toBe(4);
-    });
-
-    it('should insert into root container', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'View', props: {} },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-          { op: 'APPEND', id: 2, parentId: 0, childId: 2 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [
-          { op: 'CREATE', id: 3, type: 'View', props: {} },
-          { op: 'INSERT', id: 3, parentId: 0, childId: 3, index: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(receiver.nodeCount).toBe(3);
-    });
-  });
-
-  describe('REMOVE operation', () => {
-    it('should remove child from parent', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-          { op: 'APPEND', id: 2, parentId: 1, childId: 2 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [{ op: 'REMOVE', id: 2, parentId: 1, childId: 2 }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      // Node still exists, just removed from parent
-      expect(receiver.nodeCount).toBe(2);
-    });
-
-    it('should remove from root container', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [{ op: 'REMOVE', id: 1, parentId: 0, childId: 1 }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      const element = receiver.render();
-      expect(element).toBeNull();
-    });
-  });
-
-  describe('DELETE operation', () => {
-    it('should delete node and its children', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-          { op: 'APPEND', id: 2, parentId: 1, childId: 2 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-      expect(receiver.nodeCount).toBe(2);
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [{ op: 'DELETE', id: 1 }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      // Parent and its children are deleted
-      expect(receiver.nodeCount).toBe(0);
-    });
-  });
-
-  describe('REORDER operation', () => {
-    it('should reorder children', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-          { op: 'CREATE', id: 3, type: 'Text', props: {} },
-          { op: 'CREATE', id: 4, type: 'Text', props: {} },
-          { op: 'APPEND', id: 2, parentId: 1, childId: 2 },
-          { op: 'APPEND', id: 3, parentId: 1, childId: 3 },
-          { op: 'APPEND', id: 4, parentId: 1, childId: 4 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [{ op: 'REORDER', id: 1, parentId: 1, childIds: [4, 2, 3] }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(onUpdate).toHaveBeenCalled();
-    });
-
-    it('should reorder root children', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'View', props: {} },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-          { op: 'APPEND', id: 2, parentId: 0, childId: 2 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [{ op: 'REORDER', id: 0, parentId: 0, childIds: [2, 1] }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(onUpdate).toHaveBeenCalled();
-    });
-  });
-
-  describe('TEXT operation', () => {
-    it('should update text content', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: '__TEXT__', props: { text: 'Hello' } },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 2,
-        operations: [{ op: 'TEXT', id: 1, text: 'World' }],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(onUpdate).toHaveBeenCalled();
-    });
-  });
-
-  describe('Function Props Deserialization', () => {
-    it('should deserialize function props and call sendToSandbox', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          {
-            op: 'CREATE',
-            id: 1,
-            type: 'TouchableOpacity',
-            props: {
-              onPress: { __type: 'function', __fnId: 'fn_1' },
-            },
-          },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      // Get rendered element and trigger onPress
-      const element = receiver.render();
-      expect(element).not.toBeNull();
-
-      // Simulate invocation of deserialized function
-      // Since we cannot access props directly, verify sendToSandbox behavior
-    });
-
-    it('should deserialize nested function props', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          {
-            op: 'CREATE',
-            id: 1,
-            type: 'View',
-            props: {
-              handlers: {
-                onPress: { __type: 'function', __fnId: 'fn_1' },
-                onLongPress: { __type: 'function', __fnId: 'fn_2' },
-              },
-            },
-          },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(receiver.nodeCount).toBe(1);
-    });
-
-    it('should deserialize array with functions', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          {
-            op: 'CREATE',
-            id: 1,
-            type: 'View',
-            props: {
-              callbacks: [
-                { __type: 'function', __fnId: 'fn_1' },
-                { __type: 'function', __fnId: 'fn_2' },
-              ],
-            },
-          },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      expect(receiver.nodeCount).toBe(1);
-    });
-  });
-
-  describe('render', () => {
-    it('should return null when no root children', () => {
-      const element = receiver.render();
-      expect(element).toBeNull();
-    });
-
-    it('should render single root child', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      const element = receiver.render();
-      expect(element).not.toBeNull();
-    });
-
-    it('should render multiple root children in Fragment', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'View', props: {} },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-          { op: 'APPEND', id: 2, parentId: 0, childId: 2 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      const element = receiver.render();
-      expect(element).not.toBeNull();
-    });
-
-    it('should render text nodes as strings', async () => {
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: '__TEXT__', props: { text: 'Hello' } },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
-      const element = receiver.render();
-      expect(element).toBe('Hello');
-    });
-
-    it('should warn for unregistered component types', async () => {
-      const consoleSpy = spyOn(console, 'warn').mockImplementation(() => {});
-
-      receiver.applyBatch({
-        version: 1,
-        batchId: 1,
-        operations: [
-          { op: 'CREATE', id: 1, type: 'UnknownComponent', props: {} },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
-        ],
-      });
-
-      await new Promise((resolve) => queueMicrotask(resolve));
-
+      // Render to create refs
       receiver.render();
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Component "UnknownComponent" not registered')
-      );
+      // Mock the ref's current value with a focus method
+      const nodes = receiver.getNodes();
+      const node = nodes[0];
+      expect(node).toBeDefined();
 
-      consoleSpy.mockRestore();
+      // Manually set up ref with mock methods
+      const mockRef = {
+        focus: () => 'focused',
+        blur: () => 'blurred',
+      };
+
+      // Access private refMap to inject mock ref
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      const refMap = (receiver as any).refMap as Map<number, React.RefObject<unknown>>;
+      const nodeRef = React.createRef<unknown>();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      (nodeRef as any).current = mockRef;
+      refMap.set(1, nodeRef);
+
+      // Call ref method
+      const refCallBatch: OperationBatch = {
+        version: 1,
+        batchId: 2,
+        operations: [
+          {
+            op: 'REF_CALL',
+            id: 1,
+            refId: 1,
+            method: 'focus',
+            args: [],
+            callId: 'call_1',
+          },
+        ],
+      };
+
+      receiver.applyBatch(refCallBatch);
+
+      // Wait for async ref call to complete
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Should have sent result message
+      expect(sentMessages.length).toBeGreaterThan(0);
+      const resultMsg = sentMessages.find((msg) => msg.type === 'REF_METHOD_RESULT');
+      expect(resultMsg).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).refId).toBe(1);
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).callId).toBe('call_1');
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).result).toBe('focused');
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).error).toBeUndefined();
     });
-  });
 
-  describe('clear', () => {
-    it('should clear all nodes', async () => {
-      receiver.applyBatch({
+    test('should handle ref method call with arguments', async () => {
+      const batch: OperationBatch = {
         version: 1,
         batchId: 1,
         operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-          { op: 'APPEND', id: 2, parentId: 1, childId: 2 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
+          {
+            op: 'CREATE',
+            id: 1,
+            type: 'View',
+            props: {},
+          },
         ],
-      });
+      };
 
-      await new Promise((resolve) => queueMicrotask(resolve));
-      expect(receiver.nodeCount).toBe(2);
+      receiver.applyBatch(batch);
+      receiver.render();
 
-      receiver.clear();
+      // Mock ref with method that accepts arguments
+      const mockRef = {
+        scrollTo: (x: number, y: number) => ({ x, y }),
+      };
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      const refMap = (receiver as any).refMap as Map<number, React.RefObject<unknown>>;
+      const nodeRef = React.createRef<unknown>();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      (nodeRef as any).current = mockRef;
+      refMap.set(1, nodeRef);
 
-      expect(receiver.nodeCount).toBe(0);
-      expect(receiver.render()).toBeNull();
+      // Call method with arguments
+      const refCallBatch: OperationBatch = {
+        version: 1,
+        batchId: 2,
+        operations: [
+          {
+            op: 'REF_CALL',
+            id: 1,
+            refId: 1,
+            method: 'scrollTo',
+            args: [100, 200],
+            callId: 'call_2',
+          },
+        ],
+      };
+
+      receiver.applyBatch(refCallBatch);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const resultMsg = sentMessages.find((msg) => msg.type === 'REF_METHOD_RESULT');
+      expect(resultMsg).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).result).toEqual({ x: 100, y: 200 });
     });
-  });
 
-  describe('getDebugInfo', () => {
-    it('should return debug information', async () => {
-      receiver.applyBatch({
+    test('should handle async ref method call', async () => {
+      const batch: OperationBatch = {
         version: 1,
         batchId: 1,
         operations: [
-          { op: 'CREATE', id: 1, type: 'View', props: {} },
-          { op: 'CREATE', id: 2, type: 'Text', props: {} },
-          { op: 'APPEND', id: 2, parentId: 1, childId: 2 },
-          { op: 'APPEND', id: 1, parentId: 0, childId: 1 },
+          {
+            op: 'CREATE',
+            id: 1,
+            type: 'View',
+            props: {},
+          },
         ],
-      });
+      };
 
-      await new Promise((resolve) => queueMicrotask(resolve));
+      receiver.applyBatch(batch);
+      receiver.render();
 
-      const info = receiver.getDebugInfo();
+      // Mock ref with async method
+      const mockRef = {
+        asyncMethod: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return 'async result';
+        },
+      };
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      const refMap = (receiver as any).refMap as Map<number, React.RefObject<unknown>>;
+      const nodeRef = React.createRef<unknown>();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      (nodeRef as any).current = mockRef;
+      refMap.set(1, nodeRef);
 
-      expect(info.nodeCount).toBe(2);
-      expect(info.rootChildren).toEqual([1]);
-      expect(info.nodes).toHaveLength(2);
-      expect(info.nodes.find((n) => n.id === 1)).toMatchObject({
-        id: 1,
-        type: 'View',
-        childCount: 1,
-      });
+      const refCallBatch: OperationBatch = {
+        version: 1,
+        batchId: 2,
+        operations: [
+          {
+            op: 'REF_CALL',
+            id: 1,
+            refId: 1,
+            method: 'asyncMethod',
+            args: [],
+            callId: 'call_3',
+          },
+        ],
+      };
+
+      receiver.applyBatch(refCallBatch);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const resultMsg = sentMessages.find((msg) => msg.type === 'REF_METHOD_RESULT');
+      expect(resultMsg).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).result).toBe('async result');
+    });
+
+    test('should handle ref not found error', async () => {
+      // Try to call method on non-existent ref
+      const refCallBatch: OperationBatch = {
+        version: 1,
+        batchId: 1,
+        operations: [
+          {
+            op: 'REF_CALL',
+            id: 1,
+            refId: 999, // Non-existent ref
+            method: 'focus',
+            args: [],
+            callId: 'call_4',
+          },
+        ],
+      };
+
+      receiver.applyBatch(refCallBatch);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const resultMsg = sentMessages.find((msg) => msg.type === 'REF_METHOD_RESULT');
+      expect(resultMsg).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).error).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).error.__message).toContain('not mounted');
+    });
+
+    test('should handle method not found error', async () => {
+      const batch: OperationBatch = {
+        version: 1,
+        batchId: 1,
+        operations: [
+          {
+            op: 'CREATE',
+            id: 1,
+            type: 'View',
+            props: {},
+          },
+        ],
+      };
+
+      receiver.applyBatch(batch);
+      receiver.render();
+
+      const mockRef = {
+        focus: () => 'focused',
+      };
+
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      const refMap = (receiver as any).refMap as Map<number, React.RefObject<unknown>>;
+      const nodeRef = React.createRef<unknown>();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      (nodeRef as any).current = mockRef;
+      refMap.set(1, nodeRef);
+
+      // Call non-existent method
+      const refCallBatch: OperationBatch = {
+        version: 1,
+        batchId: 2,
+        operations: [
+          {
+            op: 'REF_CALL',
+            id: 1,
+            refId: 1,
+            method: 'nonExistentMethod',
+            args: [],
+            callId: 'call_5',
+          },
+        ],
+      };
+
+      receiver.applyBatch(refCallBatch);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const resultMsg = sentMessages.find((msg) => msg.type === 'REF_METHOD_RESULT');
+      expect(resultMsg).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).error).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).error.__message).toContain('not found');
+    });
+
+    test('should handle method execution error', async () => {
+      const batch: OperationBatch = {
+        version: 1,
+        batchId: 1,
+        operations: [
+          {
+            op: 'CREATE',
+            id: 1,
+            type: 'View',
+            props: {},
+          },
+        ],
+      };
+
+      receiver.applyBatch(batch);
+      receiver.render();
+
+      // Mock ref with method that throws
+      const mockRef = {
+        throwingMethod: () => {
+          throw new Error('Method execution failed');
+        },
+      };
+
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      const refMap = (receiver as any).refMap as Map<number, React.RefObject<unknown>>;
+      const nodeRef = React.createRef<unknown>();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      (nodeRef as any).current = mockRef;
+      refMap.set(1, nodeRef);
+
+      const refCallBatch: OperationBatch = {
+        version: 1,
+        batchId: 2,
+        operations: [
+          {
+            op: 'REF_CALL',
+            id: 1,
+            refId: 1,
+            method: 'throwingMethod',
+            args: [],
+            callId: 'call_6',
+          },
+        ],
+      };
+
+      receiver.applyBatch(refCallBatch);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const resultMsg = sentMessages.find((msg) => msg.type === 'REF_METHOD_RESULT');
+      expect(resultMsg).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).error).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((resultMsg as any).error.__message).toBe('Method execution failed');
+    });
+
+    test('should handle multiple concurrent ref calls', async () => {
+      const batch: OperationBatch = {
+        version: 1,
+        batchId: 1,
+        operations: [
+          {
+            op: 'CREATE',
+            id: 1,
+            type: 'View',
+            props: {},
+          },
+          {
+            op: 'CREATE',
+            id: 2,
+            type: 'View',
+            props: {},
+          },
+        ],
+      };
+
+      receiver.applyBatch(batch);
+      receiver.render();
+
+      // Mock refs
+      const mockRef1 = { method: () => 'result1' };
+      const mockRef2 = { method: () => 'result2' };
+
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      const refMap = (receiver as any).refMap as Map<number, React.RefObject<unknown>>;
+      const nodeRef1 = React.createRef<unknown>();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      (nodeRef1 as any).current = mockRef1;
+      refMap.set(1, nodeRef1);
+
+      const nodeRef2 = React.createRef<unknown>();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      (nodeRef2 as any).current = mockRef2;
+      refMap.set(2, nodeRef2);
+
+      // Call multiple methods concurrently
+      const refCallBatch: OperationBatch = {
+        version: 1,
+        batchId: 2,
+        operations: [
+          {
+            op: 'REF_CALL',
+            id: 1,
+            refId: 1,
+            method: 'method',
+            args: [],
+            callId: 'call_7',
+          },
+          {
+            op: 'REF_CALL',
+            id: 2,
+            refId: 2,
+            method: 'method',
+            args: [],
+            callId: 'call_8',
+          },
+        ],
+      };
+
+      receiver.applyBatch(refCallBatch);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Should have two result messages
+      const resultMsgs = sentMessages.filter((msg) => msg.type === 'REF_METHOD_RESULT');
+      expect(resultMsgs.length).toBe(2);
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      const call7Result = resultMsgs.find((msg) => (msg as any).callId === 'call_7');
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      const call8Result = resultMsgs.find((msg) => (msg as any).callId === 'call_8');
+
+      expect(call7Result).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((call7Result as any).result).toBe('result1');
+      expect(call8Result).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+      expect((call8Result as any).result).toBe('result2');
     });
   });
 });

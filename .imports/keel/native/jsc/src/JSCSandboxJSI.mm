@@ -17,9 +17,47 @@ JSCSandboxContext::JSCSandboxContext(jsi::Runtime &hostRuntime, double timeout)
     }
 
     // Set up exception handler - must store exception for later checking
+    // NOTE: JSValue's default description can be empty for some thrown values.
+    // Log name/message/stack when available to make sandbox crashes debuggable.
     ctx.exceptionHandler = ^(JSContext *context, JSValue *exception) {
-      NSLog(@"[JSCSandbox] Exception: %@", exception);
-      context.exception = exception; // Preserve for checking after eval
+      @autoreleasepool {
+        NSString *exceptionStr = nil;
+        @try {
+          exceptionStr = [exception toString];
+        } @catch (NSException *e) {
+          exceptionStr = [NSString stringWithFormat:@"(toString failed: %@)", e.reason];
+        }
+        if (!exceptionStr) {
+          exceptionStr = @"(null)";
+        }
+
+        NSString *name = nil;
+        NSString *message = nil;
+        NSString *stack = nil;
+        @try {
+          JSValue *nameVal = exception[@"name"];
+          if (nameVal && !nameVal.isUndefined) name = [nameVal toString];
+          JSValue *msgVal = exception[@"message"];
+          if (msgVal && !msgVal.isUndefined) message = [msgVal toString];
+          JSValue *stackVal = exception[@"stack"];
+          if (stackVal && !stackVal.isUndefined) stack = [stackVal toString];
+        } @catch (NSException *e) {
+          // ignore
+          (void)e;
+        }
+
+        if (name || message || stack) {
+          NSLog(@"[JSCSandbox] Exception: %@ | name=%@ | message=%@\n%@",
+                exceptionStr,
+                name ? name : @"(null)",
+                message ? message : @"(null)",
+                stack ? stack : @"");
+        } else {
+          NSLog(@"[JSCSandbox] Exception: %@", exceptionStr);
+        }
+
+        context.exception = exception; // Preserve for checking after eval
+      }
     };
 
     // Inject console shim

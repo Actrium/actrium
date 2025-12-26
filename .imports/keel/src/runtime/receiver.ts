@@ -5,203 +5,54 @@
  */
 
 import React from 'react';
-
-// Augment globalThis for debug tracking properties
-declare global {
-  // eslint-disable-next-line no-var
-  var __RECEIVER_APPEND_CALLS: number | undefined;
-  // eslint-disable-next-line no-var
-  var __APPEND_PARENT_IDS: number[] | undefined;
-  // eslint-disable-next-line no-var
-  var __APPEND_DETAILS:
-    | Array<{ parentId: number; childId: number; parentExists: boolean }>
-    | undefined;
-  // eslint-disable-next-line no-var
-  var __TOUCHABLE_RENDER_COUNT: number | undefined;
-  // eslint-disable-next-line no-var
-  var __LAST_TOUCHABLE_HAS_ONPRESS: boolean | undefined;
-  // eslint-disable-next-line no-var
-  var __RECEIVER_FUNCTION_COUNT: number | undefined;
-  // eslint-disable-next-line no-var
-  var __LAST_FUNCTION_FNID: string | undefined;
-}
-
-// Polyfill queueMicrotask if not available
-const safeQueueMicrotask =
-  typeof queueMicrotask !== 'undefined'
-    ? queueMicrotask
-    : (callback: () => void) => Promise.resolve().then(callback);
-
-import { hasCallback, invokeCallback } from '../let/reconciler/index';
+import { AttributionTracker } from './receiver/stats';
+import {
+  type ReceiverApplyStats,
+  type ReceiverCallbackRegistry,
+  type ReceiverOptions,
+  type ReceiverStats,
+  type SendToSandbox,
+  safeQueueMicrotask,
+} from './receiver/types';
+import type { ComponentRegistry } from './registry';
 import type {
-  HostMessage,
+  BridgeValue,
   NodeInstance,
   Operation,
   OperationBatch,
-  SerializedFunction,
-  SerializedProps,
+  OperationType,
+  RefCallOperation,
+  SerializedError,
 } from './types';
-import type { ComponentRegistry } from './registry';
+
+// Re-export types for backward compatibility
+export type {
+  ReceiverApplyStats,
+  ReceiverAttributionWindow,
+  ReceiverAttributionWorstBatch,
+  ReceiverAttributionWorstKind,
+  ReceiverOptions,
+  ReceiverStats,
+  SendToSandbox,
+} from './receiver/types';
 
 /**
- * Message send function type
+ * Receiver
+ *
+ * Note: With the new Bridge architecture, props are already decoded
+ * when received via applyBatch(). No additional deserialization needed.
  */
-export type SendToSandbox = (message: HostMessage) => void | Promise<void>;
-
-/**
- * Check if value is serialized function
- */
-function isSerializedFunction(value: unknown): value is SerializedFunction {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    '__type' in value &&
-    (value as SerializedFunction).__type === 'function'
-  );
-}
-
-/**
- * Instruction Receiver
- */
-export interface ReceiverOptions {
-  onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
-  maxBatchSize?: number;
-  debug?: boolean;
-  /**
-   * Attribution window (aggregate recent N seconds) for trend attribution ("who/why consuming").
-   * @default 5000
-   */
-  attributionWindowMs?: number;
-  /**
-   * Attribution history retention (ms), older entries are discarded.
-   * @default 60000
-   */
-  attributionHistoryMs?: number;
-  /**
-   * Maximum attribution history samples (batch count), for memory limit fallback.
-   * @default 200
-   */
-  attributionMaxSamples?: number;
-}
-
-export interface ReceiverApplyStats {
-  batchId?: number;
-  total: number;
-  applied: number;
-  skipped: number;
-  failed: number;
-  at: number;
-  durationMs: number;
-
-  /**
-   * Node count change before/after batch (for "who is growing")
-   */
-  nodesBefore: number;
-  nodesAfter: number;
-  nodeDelta: number;
-
-  /**
-   * Operation distribution for this batch (applied only)
-   */
-  opCounts: Record<string, number>;
-
-  /**
-   * Skipped operation distribution (only when backpressure/limit triggered)
-   */
-  skippedOpCounts: Record<string, number>;
-
-  /**
-   * Top N node types touched in this batch (for attribution)
-   */
-  topNodeTypes: Array<{ type: string; ops: number }>;
-  topNodeTypesSkipped: Array<{ type: string; ops: number }>;
-}
-
-export interface ReceiverStats {
-  nodeCount: number;
-  rootChildrenCount: number;
-  renderCount: number;
-  lastRenderAt: number | null;
-  lastRenderDurationMs: number | null;
-  totalBatches: number;
-  totalOps: {
-    received: number;
-    applied: number;
-    skipped: number;
-    failed: number;
-  };
-  lastApply: ReceiverApplyStats | null;
-  attribution: ReceiverAttributionWindow | null;
-}
-
-export type ReceiverAttributionWorstKind = 'largest' | 'slowest' | 'mostSkipped' | 'mostGrowth';
-
-export interface ReceiverAttributionWorstBatch {
-  kind: ReceiverAttributionWorstKind;
-  batchId?: number;
-  at: number;
-  total: number;
-  applied: number;
-  skipped: number;
-  failed: number;
-  durationMs: number;
-  nodeDelta: number;
-}
-
-export interface ReceiverAttributionWindow {
-  /**
-   * Time window covered by this aggregation (ms)
-   */
-  windowMs: number;
-  /**
-   * Number of batch samples within the window
-   */
-  sampleCount: number;
-  /**
-   * Total ops in window (received)
-   */
-  total: number;
-  applied: number;
-  skipped: number;
-  failed: number;
-  /**
-   * Sum of applyBatch duration within window (ms)
-   */
-  durationMs: number;
-  /**
-   * Sum of node delta within window (rough indicator of tree growing/shrinking)
-   */
-  nodeDelta: number;
-  /**
-   * Operation distribution within window (applied aggregation)
-   */
-  opCounts: Record<string, number>;
-  /**
-   * Skipped operation distribution within window (skipped aggregation)
-   */
-  skippedOpCounts: Record<string, number>;
-  /**
-   * Top N node types touched within window (applied aggregation)
-   */
-  topNodeTypes: Array<{ type: string; ops: number }>;
-  /**
-   * Top N node types touched within window (skipped aggregation)
-   */
-  topNodeTypesSkipped: Array<{ type: string; ops: number }>;
-  /**
-   * Worst batch samples within window (for quick identification of "large/slow/skip surge/node growth")
-   */
-  worstBatches: ReceiverAttributionWorstBatch[];
-}
-
 export class Receiver {
-  private attributionWindowMs: number;
-  private attributionHistoryMs: number;
-  private attributionMaxSamples: number;
-  private applyHistory: ReceiverApplySample[] = [];
+  private attributionTracker: AttributionTracker;
   private nodeMap = new Map<number, NodeInstance>();
   private rootChildren: number[] = [];
+  // Reverse index: childId -> parentId (0 means root). Keeps DELETE/REMOVE O(1).
+  private parentByChildId = new Map<number, number>();
+  // Remote Ref 支持：节点 ID → React ref 映射
+  private refMap = new Map<number, React.RefObject<unknown>>();
   private registry: ComponentRegistry;
+  private callbackRegistry?: ReceiverCallbackRegistry;
+  private releaseCallback?: (fnId: string) => void;
   private sendToSandbox: SendToSandbox;
   private onUpdate: () => void;
   private updateScheduled = false;
@@ -220,20 +71,34 @@ export class Receiver {
     debug: boolean;
   };
 
+  // Debug tracking (bounded, per-receiver to avoid polluting host globals)
+  private debugAppendCalls = 0;
+  private debugAppendParentIds: number[] = [];
+  private debugAppendDetails: Array<{ parentId: number; childId: number; parentExists: boolean }> =
+    [];
+  private static readonly DEBUG_APPEND_TRACK_LIMIT = 1000;
+
+  // 操作处理器映射表 - 类型驱动自动分发
+  private readonly operationHandlers: Record<
+    OperationType,
+    (op: Extract<Operation, { op: OperationType }>) => void
+  >;
+
   constructor(
     registry: ComponentRegistry,
     sendToSandbox: SendToSandbox,
     onUpdate: () => void,
     options?: ReceiverOptions
   ) {
-    this.attributionWindowMs = options?.attributionWindowMs ?? 5000;
-    this.attributionHistoryMs = options?.attributionHistoryMs ?? 60_000;
-    this.attributionMaxSamples = options?.attributionMaxSamples ?? 200;
-    if (this.attributionHistoryMs < this.attributionWindowMs) {
-      this.attributionHistoryMs = this.attributionWindowMs;
-    }
+    this.attributionTracker = new AttributionTracker(
+      options?.attributionWindowMs ?? 5000,
+      options?.attributionHistoryMs ?? 60_000,
+      options?.attributionMaxSamples ?? 200
+    );
 
     this.registry = registry;
+    this.callbackRegistry = options?.callbackRegistry;
+    this.releaseCallback = options?.releaseCallback;
     this.sendToSandbox = sendToSandbox;
     this.onUpdate = onUpdate;
     this.opts = {
@@ -241,11 +106,37 @@ export class Receiver {
       maxBatchSize: options?.maxBatchSize ?? 5000,
       debug: options?.debug ?? false,
     };
+
+    // 初始化操作处理器映射表
+    // 使用 satisfies 确保包含所有 OperationType
+    this.operationHandlers = {
+      CREATE: (op) => this.handleCreate(op as Extract<Operation, { op: 'CREATE' }>),
+      UPDATE: (op) => this.handleUpdate(op as Extract<Operation, { op: 'UPDATE' }>),
+      APPEND: (op) => this.handleAppend(op as Extract<Operation, { op: 'APPEND' }>),
+      INSERT: (op) => this.handleInsert(op as Extract<Operation, { op: 'INSERT' }>),
+      REMOVE: (op) => this.handleRemove(op as Extract<Operation, { op: 'REMOVE' }>),
+      DELETE: (op) => this.handleDelete(op as Extract<Operation, { op: 'DELETE' }>),
+      REORDER: (op) => this.handleReorder(op as Extract<Operation, { op: 'REORDER' }>),
+      TEXT: (op) => this.handleText(op as Extract<Operation, { op: 'TEXT' }>),
+      REF_CALL: (op) => this.handleRefCall(op as RefCallOperation),
+    } satisfies Record<OperationType, (op: Operation) => void>;
   }
 
+  // Reason: Debug logger accepts arbitrary arguments
   private log(...args: unknown[]): void {
     if (this.opts.debug) {
       console.log('[rill:Receiver]', ...args);
+    }
+  }
+
+  /**
+   * Release a callback - routes to releaseCallback or falls back to callbackRegistry
+   */
+  private doReleaseCallback(fnId: string): void {
+    if (this.releaseCallback) {
+      this.releaseCallback(fnId);
+    } else if (this.callbackRegistry) {
+      this.callbackRegistry.release(fnId);
     }
   }
 
@@ -365,11 +256,7 @@ export class Receiver {
       topNodeTypesSkipped: topN(skippedNodeTypeCounts, 6),
     };
     this.lastApply = applyStats;
-    this.recordApplySample(
-      applyStats,
-      Object.fromEntries(nodeTypeCounts.entries()),
-      Object.fromEntries(skippedNodeTypeCounts.entries())
-    );
+    this.attributionTracker.recordSample(applyStats);
 
     if (skipped > 0) {
       // Inform guest about backpressure/skip to allow adaptive throttling upstream
@@ -386,162 +273,6 @@ export class Receiver {
 
     this.scheduleUpdate();
     return applyStats;
-  }
-
-  private recordApplySample(
-    stats: ReceiverApplyStats,
-    nodeTypeCountsAll: Record<string, number>,
-    skippedNodeTypeCountsAll: Record<string, number>
-  ): void {
-    this.applyHistory.push({ ...stats, nodeTypeCountsAll, skippedNodeTypeCountsAll });
-    this.trimApplyHistory(stats.at);
-  }
-
-  private trimApplyHistory(now: number): void {
-    const cutoff = now - this.attributionHistoryMs;
-    while (this.applyHistory.length > 0 && this.applyHistory[0]!.at < cutoff) {
-      this.applyHistory.shift();
-    }
-    if (this.applyHistory.length > this.attributionMaxSamples) {
-      this.applyHistory.splice(0, this.applyHistory.length - this.attributionMaxSamples);
-    }
-  }
-
-  private computeAttributionWindow(now: number): ReceiverAttributionWindow | null {
-    if (this.applyHistory.length === 0) return null;
-    const cutoff = now - this.attributionWindowMs;
-    const samples = this.applyHistory.filter((s) => s.at >= cutoff);
-    if (samples.length === 0) return null;
-
-    const incRecord = (rec: Record<string, number>, key: string, n = 1) => {
-      rec[key] = (rec[key] ?? 0) + n;
-    };
-    const incMap = (m: Map<string, number>, key: string, n = 1) => {
-      m.set(key, (m.get(key) ?? 0) + n);
-    };
-    const topN = (m: Map<string, number>, n: number) =>
-      Array.from(m.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, n)
-        .map(([type, ops]) => ({ type, ops }));
-
-    let total = 0;
-    let applied = 0;
-    let skipped = 0;
-    let failed = 0;
-    let durationMs = 0;
-    let nodeDelta = 0;
-
-    const opCounts: Record<string, number> = {};
-    const skippedOpCounts: Record<string, number> = {};
-    const nodeTypeCounts = new Map<string, number>();
-    const skippedNodeTypeCounts = new Map<string, number>();
-
-    for (const s of samples) {
-      total += s.total;
-      applied += s.applied;
-      skipped += s.skipped;
-      failed += s.failed;
-      durationMs += s.durationMs;
-      nodeDelta += s.nodeDelta;
-
-      for (const [k, v] of Object.entries(s.opCounts)) incRecord(opCounts, k, v);
-      for (const [k, v] of Object.entries(s.skippedOpCounts)) incRecord(skippedOpCounts, k, v);
-
-      for (const [t, v] of Object.entries(s.nodeTypeCountsAll)) incMap(nodeTypeCounts, t, v);
-      for (const [t, v] of Object.entries(s.skippedNodeTypeCountsAll))
-        incMap(skippedNodeTypeCounts, t, v);
-    }
-
-    const pickMax = (metric: (s: ReceiverApplyStats) => number): ReceiverApplyStats | null => {
-      let best: ReceiverApplyStats | null = null;
-      let bestV = -Infinity;
-      for (const s of samples) {
-        const v = metric(s);
-        if (v > bestV) {
-          bestV = v;
-          best = s;
-        }
-      }
-      return best;
-    };
-
-    const worstBatches: ReceiverAttributionWorstBatch[] = [];
-    const largest = pickMax((s) => s.total);
-    if (largest) {
-      worstBatches.push({
-        kind: 'largest',
-        batchId: largest.batchId,
-        at: largest.at,
-        total: largest.total,
-        applied: largest.applied,
-        skipped: largest.skipped,
-        failed: largest.failed,
-        durationMs: largest.durationMs,
-        nodeDelta: largest.nodeDelta,
-      });
-    }
-
-    const slowest = pickMax((s) => s.durationMs);
-    if (slowest && slowest.durationMs > 0) {
-      worstBatches.push({
-        kind: 'slowest',
-        batchId: slowest.batchId,
-        at: slowest.at,
-        total: slowest.total,
-        applied: slowest.applied,
-        skipped: slowest.skipped,
-        failed: slowest.failed,
-        durationMs: slowest.durationMs,
-        nodeDelta: slowest.nodeDelta,
-      });
-    }
-
-    const mostSkipped = pickMax((s) => s.skipped);
-    if (mostSkipped && mostSkipped.skipped > 0) {
-      worstBatches.push({
-        kind: 'mostSkipped',
-        batchId: mostSkipped.batchId,
-        at: mostSkipped.at,
-        total: mostSkipped.total,
-        applied: mostSkipped.applied,
-        skipped: mostSkipped.skipped,
-        failed: mostSkipped.failed,
-        durationMs: mostSkipped.durationMs,
-        nodeDelta: mostSkipped.nodeDelta,
-      });
-    }
-
-    const mostGrowth = pickMax((s) => s.nodeDelta);
-    if (mostGrowth && mostGrowth.nodeDelta !== 0) {
-      worstBatches.push({
-        kind: 'mostGrowth',
-        batchId: mostGrowth.batchId,
-        at: mostGrowth.at,
-        total: mostGrowth.total,
-        applied: mostGrowth.applied,
-        skipped: mostGrowth.skipped,
-        failed: mostGrowth.failed,
-        durationMs: mostGrowth.durationMs,
-        nodeDelta: mostGrowth.nodeDelta,
-      });
-    }
-
-    return {
-      windowMs: this.attributionWindowMs,
-      sampleCount: samples.length,
-      total,
-      applied,
-      skipped,
-      failed,
-      durationMs,
-      nodeDelta,
-      opCounts,
-      skippedOpCounts,
-      topNodeTypes: topN(nodeTypeCounts, 6),
-      topNodeTypesSkipped: topN(skippedNodeTypeCounts, 6),
-      worstBatches,
-    };
   }
 
   /**
@@ -578,45 +309,25 @@ export class Receiver {
       this.log(`Applying CREATE: id=${op.id}, type=${op.type}`);
     }
 
-    switch (op.op) {
-      case 'CREATE':
-        this.handleCreate(op);
-        break;
-      case 'UPDATE':
-        this.handleUpdate(op);
-        break;
-      case 'APPEND':
-        this.handleAppend(op);
-        break;
-      case 'INSERT':
-        this.handleInsert(op);
-        break;
-      case 'REMOVE':
-        this.handleRemove(op);
-        break;
-      case 'DELETE':
-        this.handleDelete(op);
-        break;
-      case 'REORDER':
-        this.handleReorder(op);
-        break;
-      case 'TEXT':
-        this.handleText(op);
-        break;
-      default:
-        console.warn('[rill] Unknown operation:', (op as Operation).op);
-    }
+    // 使用操作处理器映射表自动分发
+    // satisfies 确保初始化时包含所有 OperationType，这里可以安全调用
+    const handler = this.operationHandlers[op.op];
+    handler(op);
   }
 
   /**
    * Handle create operation
    */
   private handleCreate(op: Extract<Operation, { op: 'CREATE' }>): void {
+    // Extract fnIds from operation metadata (attached by Bridge)
+    const fnIds = (op as Operation & { _fnIds?: Set<string> })._fnIds;
+
     const node: NodeInstance = {
       id: op.id,
       type: op.type,
-      props: this.deserializeProps(op.props),
+      props: op.props,
       children: [],
+      registeredFnIds: fnIds ? new Set(fnIds) : undefined,
     };
     this.nodeMap.set(op.id, node);
   }
@@ -627,12 +338,21 @@ export class Receiver {
   private handleUpdate(op: Extract<Operation, { op: 'UPDATE' }>): void {
     const node = this.nodeMap.get(op.id);
     if (!node) {
-      console.warn(`[rill] Node ${op.id} not found for update`);
-      return;
+      console.warn(`[rill] Protocol violation: Node ${op.id} not found for update`);
+      // Throw to increment failed operation count in applyBatch
+      throw new Error(`Node ${op.id} not found for update`);
+    }
+
+    // Release old function references
+    if (node.registeredFnIds) {
+      for (const fnId of node.registeredFnIds) {
+        this.doReleaseCallback(fnId);
+      }
+      node.registeredFnIds = undefined;
     }
 
     // Merge new properties
-    const newProps = this.deserializeProps(op.props);
+    const newProps = op.props;
     node.props = { ...node.props, ...newProps };
 
     // Remove deleted properties
@@ -641,28 +361,40 @@ export class Receiver {
         delete node.props[key];
       }
     }
+
+    // Track new function references
+    const fnIds = (op as Operation & { _fnIds?: Set<string> })._fnIds;
+    if (fnIds && fnIds.size > 0) {
+      node.registeredFnIds = new Set(fnIds);
+    }
   }
 
   /**
    * Handle append operation
    */
   private handleAppend(op: Extract<Operation, { op: 'APPEND' }>): void {
-    // 🔴 TRACK: Log APPEND operation details
-    if (typeof globalThis !== 'undefined') {
-      globalThis.__RECEIVER_APPEND_CALLS = (globalThis.__RECEIVER_APPEND_CALLS || 0) + 1;
-      if (!globalThis.__APPEND_PARENT_IDS) {
-        globalThis.__APPEND_PARENT_IDS = [];
-      }
-      globalThis.__APPEND_PARENT_IDS.push(op.parentId);
+    if (this.opts.debug) {
+      this.debugAppendCalls++;
 
-      if (!globalThis.__APPEND_DETAILS) {
-        globalThis.__APPEND_DETAILS = [];
+      this.debugAppendParentIds.push(op.parentId);
+      if (this.debugAppendParentIds.length > Receiver.DEBUG_APPEND_TRACK_LIMIT) {
+        this.debugAppendParentIds.splice(
+          0,
+          this.debugAppendParentIds.length - Receiver.DEBUG_APPEND_TRACK_LIMIT
+        );
       }
-      globalThis.__APPEND_DETAILS.push({
+
+      this.debugAppendDetails.push({
         parentId: op.parentId,
         childId: op.childId,
         parentExists: this.nodeMap.has(op.parentId),
       });
+      if (this.debugAppendDetails.length > Receiver.DEBUG_APPEND_TRACK_LIMIT) {
+        this.debugAppendDetails.splice(
+          0,
+          this.debugAppendDetails.length - Receiver.DEBUG_APPEND_TRACK_LIMIT
+        );
+      }
     }
 
     if (op.parentId === 0) {
@@ -676,6 +408,9 @@ export class Receiver {
         parent.children.push(op.childId);
       }
     }
+
+    // Update reverse parent index (tree assumption: single parent)
+    this.parentByChildId.set(op.childId, op.parentId);
   }
 
   /**
@@ -699,6 +434,8 @@ export class Receiver {
         parent.children.splice(op.index, 0, op.childId);
       }
     }
+
+    this.parentByChildId.set(op.childId, op.parentId);
   }
 
   /**
@@ -719,6 +456,11 @@ export class Receiver {
         }
       }
     }
+
+    // Only clear if it points to this parent (avoid stomping if moved concurrently)
+    if (this.parentByChildId.get(op.childId) === op.parentId) {
+      this.parentByChildId.delete(op.childId);
+    }
   }
 
   /**
@@ -727,14 +469,30 @@ export class Receiver {
   private handleDelete(op: Extract<Operation, { op: 'DELETE' }>): void {
     // Best-effort: detach from root/parents to avoid stale references.
     // Protocol-wise, callers SHOULD send REMOVE before DELETE, but we keep Receiver resilient.
-    const rootIndex = this.rootChildren.indexOf(op.id);
-    if (rootIndex !== -1) {
-      this.rootChildren.splice(rootIndex, 1);
-    }
 
-    for (const node of this.nodeMap.values()) {
-      const idx = node.children.indexOf(op.id);
-      if (idx !== -1) node.children.splice(idx, 1);
+    const parentId = this.parentByChildId.get(op.id);
+    if (parentId === 0) {
+      const rootIndex = this.rootChildren.indexOf(op.id);
+      if (rootIndex !== -1) this.rootChildren.splice(rootIndex, 1);
+      this.parentByChildId.delete(op.id);
+    } else if (typeof parentId === 'number') {
+      const parent = this.nodeMap.get(parentId);
+      if (parent) {
+        const idx = parent.children.indexOf(op.id);
+        if (idx !== -1) parent.children.splice(idx, 1);
+      }
+      this.parentByChildId.delete(op.id);
+    } else {
+      // Fallback (protocol violation): scan all parents.
+      const rootIndex = this.rootChildren.indexOf(op.id);
+      if (rootIndex !== -1) {
+        this.rootChildren.splice(rootIndex, 1);
+      }
+      for (const node of this.nodeMap.values()) {
+        const idx = node.children.indexOf(op.id);
+        if (idx !== -1) node.children.splice(idx, 1);
+      }
+      this.parentByChildId.delete(op.id);
     }
 
     this.deleteNodeRecursive(op.id);
@@ -749,8 +507,22 @@ export class Receiver {
 
     // Recursively delete children
     for (const childId of node.children) {
+      // Keep reverse index consistent
+      if (this.parentByChildId.get(childId) === id) {
+        this.parentByChildId.delete(childId);
+      }
       this.deleteNodeRecursive(childId);
     }
+
+    // Release function references for this node
+    if (node.registeredFnIds) {
+      for (const fnId of node.registeredFnIds) {
+        this.doReleaseCallback(fnId);
+      }
+    }
+
+    // 清理 Remote Ref
+    this.refMap.delete(id);
 
     this.nodeMap.delete(id);
   }
@@ -760,11 +532,34 @@ export class Receiver {
    */
   private handleReorder(op: Extract<Operation, { op: 'REORDER' }>): void {
     if (op.parentId === 0) {
+      const prev = this.rootChildren;
       this.rootChildren = op.childIds;
+
+      // Update reverse index for root children; clear entries that used to belong to root
+      const nextSet = new Set(op.childIds);
+      for (const childId of prev) {
+        if (!nextSet.has(childId) && this.parentByChildId.get(childId) === 0) {
+          this.parentByChildId.delete(childId);
+        }
+      }
+      for (const childId of op.childIds) {
+        this.parentByChildId.set(childId, 0);
+      }
     } else {
       const parent = this.nodeMap.get(op.parentId);
       if (parent) {
+        const prev = parent.children;
         parent.children = op.childIds;
+
+        const nextSet = new Set(op.childIds);
+        for (const childId of prev) {
+          if (!nextSet.has(childId) && this.parentByChildId.get(childId) === op.parentId) {
+            this.parentByChildId.delete(childId);
+          }
+        }
+        for (const childId of op.childIds) {
+          this.parentByChildId.set(childId, op.parentId);
+        }
       }
     }
   }
@@ -780,64 +575,56 @@ export class Receiver {
   }
 
   /**
-   * Deserialize props
+   * Handle remote ref method call
+   * Guest 调用 Host 组件实例方法（如 focus, blur, scrollTo）
    */
-  private deserializeProps(props: SerializedProps): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
+  private handleRefCall(op: RefCallOperation): void {
+    const { refId, method, args, callId } = op;
 
-    for (const [key, value] of Object.entries(props)) {
-      result[key] = this.deserializeValue(value);
-    }
-
-    return result;
-  }
-
-  /**
-   * Deserialize value
-   */
-  private deserializeValue(value: unknown, depth = 0): unknown {
-    const MAX_DEPTH = 50;
-
-    if (depth > MAX_DEPTH) {
-      console.warn('[rill:Receiver] Maximum deserialization depth exceeded');
-      return undefined;
-    }
-
-    if (isSerializedFunction(value)) {
-      // 🔴 TRACK: Log function creation
-      // Create proxy function
-      return (...args: unknown[]) => {
-        // Try to invoke locally first (if React is running in Host)
-        if (hasCallback(value.__fnId)) {
-          try {
-            invokeCallback(value.__fnId, args);
-            return;
-          } catch (e) {
-            console.error('[rill:Receiver] Local callback execution failed:', e);
-          }
+    // 异步执行方法调用，避免阻塞操作处理
+    (async () => {
+      try {
+        // 获取组件 ref
+        const ref = this.refMap.get(refId);
+        if (!ref?.current) {
+          throw new Error(`Node ${refId} not mounted or has no ref`);
         }
 
-        this.sendToSandbox({
-          type: 'CALL_FUNCTION',
-          fnId: value.__fnId,
-          args: args as [],
+        const instance = ref.current as Record<string, unknown>;
+
+        // 检查方法是否存在
+        if (typeof instance[method] !== 'function') {
+          throw new Error(`Method "${method}" not found on node ${refId}`);
+        }
+
+        // 调用方法（可能返回 Promise）
+        const result = await (instance[method] as (...a: unknown[]) => unknown)(...args);
+
+        // 发送成功结果
+        // Cast result to BridgeValue - method return types are serializable values
+        await this.sendToSandbox({
+          type: 'REF_METHOD_RESULT',
+          refId,
+          callId,
+          result: result as BridgeValue,
         });
-      };
-    }
-
-    if (Array.isArray(value)) {
-      return value.map((item) => this.deserializeValue(item, depth + 1));
-    }
-
-    if (typeof value === 'object' && value !== null) {
-      const result: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(value)) {
-        result[k] = this.deserializeValue(v, depth + 1);
+      } catch (error) {
+        // 发送错误结果
+        const err = error instanceof Error ? error : new Error(String(error));
+        const serializedError: SerializedError = {
+          __type: 'error',
+          __name: err.name,
+          __message: err.message,
+          __stack: err.stack,
+        };
+        await this.sendToSandbox({
+          type: 'REF_METHOD_RESULT',
+          refId,
+          callId,
+          error: serializedError,
+        });
       }
-      return result;
-    }
-
-    return value;
+    })();
   }
 
   /**
@@ -869,6 +656,7 @@ export class Receiver {
       if (el && typeof el === 'object' && 'type' in el) {
         const elTypeProp = el.type as unknown;
         if (elTypeProp && typeof elTypeProp === 'object' && 'name' in elTypeProp) {
+          // Reason: Component name field type unknown until runtime check
           const nameVal = (elTypeProp as { name: unknown }).name;
           if (typeof nameVal === 'string') {
             elType = nameVal;
@@ -899,6 +687,9 @@ export class Receiver {
 
   /**
    * Render single node
+   *
+   * Note: With the new Bridge architecture, props are already decoded.
+   * No deserialization needed - functions are already callable proxies.
    */
   private renderNode(id: number): React.ReactElement | string | null {
     const node = this.nodeMap.get(id);
@@ -909,7 +700,19 @@ export class Receiver {
 
     // Handle text node
     if (node.type === '__TEXT__') {
-      return node.props.text as string;
+      // React Native 需要实际的 Text 组件实例，而不是字符串标签
+      // Reason: React module structure unknown, Text component may or may not exist
+      const TextComponent =
+        this.registry.get('Text') ?? (React as unknown as { Text?: unknown }).Text;
+      if (!TextComponent) {
+        console.error('[rill] Text component not registered; cannot render text node');
+        return null;
+      }
+      return React.createElement(
+        TextComponent as React.ComponentType,
+        { key: `rill-text-${id}` },
+        node.props.text as string
+      );
     }
 
     // Get component implementation
@@ -924,18 +727,24 @@ export class Receiver {
       .map((childId) => this.renderNode(childId))
       .filter((child): child is React.ReactElement | string => child !== null);
 
-    // Build props
+    // 创建或获取 ref（用于 Remote Ref 支持）
+    let nodeRef = this.refMap.get(id);
+    if (!nodeRef) {
+      nodeRef = React.createRef<unknown>();
+      this.refMap.set(id, nodeRef);
+    }
+
+    // Props are already decoded by Bridge - use directly
     const props: Record<string, unknown> = {
       ...node.props,
       key: `rill-${id}`,
+      ref: nodeRef, // 注入 ref 用于 Remote Ref 方法调用
     };
 
-    // 🔴 TRACK: Log TouchableOpacity props
+    // Debug tracking for TouchableOpacity props
     if (node.type === 'TouchableOpacity') {
-      if (typeof globalThis !== 'undefined') {
-        globalThis.__TOUCHABLE_RENDER_COUNT = (globalThis.__TOUCHABLE_RENDER_COUNT || 0) + 1;
-        globalThis.__LAST_TOUCHABLE_HAS_ONPRESS = typeof props.onPress === 'function';
-      }
+      globalThis.__TOUCHABLE_RENDER_COUNT = (globalThis.__TOUCHABLE_RENDER_COUNT || 0) + 1;
+      globalThis.__LAST_TOUCHABLE_HAS_ONPRESS = typeof props.onPress === 'function';
     }
 
     return React.createElement(Component, props, ...children);
@@ -954,6 +763,8 @@ export class Receiver {
   clear(): void {
     this.nodeMap.clear();
     this.rootChildren = [];
+    this.parentByChildId.clear();
+    this.refMap.clear();
   }
 
   getStats(): ReceiverStats {
@@ -971,7 +782,7 @@ export class Receiver {
         failed: this.totalOpsFailed,
       },
       lastApply: this.lastApply,
-      attribution: this.computeAttributionWindow(Date.now()),
+      attribution: this.attributionTracker.computeWindow(Date.now()),
     };
   }
 
@@ -998,28 +809,37 @@ export class Receiver {
         type: node.type,
         childCount: node.children.length,
       })),
-      // 🔴 TRACK: Include APPEND tracking data
-      appendCalls:
-        typeof globalThis !== 'undefined' ? globalThis.__RECEIVER_APPEND_CALLS : undefined,
-      appendParentIds:
-        typeof globalThis !== 'undefined' ? globalThis.__APPEND_PARENT_IDS : undefined,
-      appendSample:
-        typeof globalThis !== 'undefined' ? globalThis.__APPEND_DETAILS?.slice(0, 10) : undefined,
-      // 🔴 TRACK: Include TouchableOpacity tracking
-      touchableRenderCount:
-        typeof globalThis !== 'undefined' ? globalThis.__TOUCHABLE_RENDER_COUNT : undefined,
-      touchableHasOnPress:
-        typeof globalThis !== 'undefined' ? globalThis.__LAST_TOUCHABLE_HAS_ONPRESS : undefined,
-      // 🔴 TRACK: Include function deserialization tracking
-      functionCount:
-        typeof globalThis !== 'undefined' ? globalThis.__RECEIVER_FUNCTION_COUNT : undefined,
-      lastFunctionFnId:
-        typeof globalThis !== 'undefined' ? globalThis.__LAST_FUNCTION_FNID : undefined,
+      // Include APPEND tracking data (debug-only)
+      appendCalls: this.opts.debug ? this.debugAppendCalls : undefined,
+      appendParentIds: this.opts.debug ? [...this.debugAppendParentIds] : undefined,
+      appendSample: this.opts.debug ? this.debugAppendDetails.slice(0, 10) : undefined,
+      // Include TouchableOpacity tracking
+      touchableRenderCount: globalThis.__TOUCHABLE_RENDER_COUNT,
+      touchableHasOnPress: globalThis.__LAST_TOUCHABLE_HAS_ONPRESS,
+      // Include function deserialization tracking
+      functionCount: globalThis.__RECEIVER_FUNCTION_COUNT,
+      lastFunctionFnId: globalThis.__LAST_FUNCTION_FNID,
     };
   }
-}
 
-interface ReceiverApplySample extends ReceiverApplyStats {
-  nodeTypeCountsAll: Record<string, number>;
-  skippedNodeTypeCountsAll: Record<string, number>;
+  /**
+   * Get all nodes (for testing)
+   */
+  getNodes(): NodeInstance[] {
+    return Array.from(this.nodeMap.values());
+  }
+
+  /**
+   * Find nodes by type (for testing)
+   */
+  findNodesByType(type: string): NodeInstance[] {
+    return this.getNodes().filter((node) => node.type === type);
+  }
+
+  /**
+   * Find node by testID (for testing)
+   */
+  findByTestId(testID: string): NodeInstance | undefined {
+    return this.getNodes().find((node) => node.props.testID === testID);
+  }
 }

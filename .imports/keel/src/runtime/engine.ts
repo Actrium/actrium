@@ -1,129 +1,68 @@
 /**
+ * @workaround - bust cache
  * Rill Engine
  *
  * Sandbox engine core, responsible for managing QuickJS execution environment and lifecycle.
  * Uses react-native-quickjs for sandboxed JavaScript execution.
  */
 
-// Augment globalThis for DevTools integration
+// Augment globalThis for DevTools integration and Guest runtime
 declare global {
   // eslint-disable-next-line no-var
+  // Reason: DevTools event payload can be any serializable type
   var __sendEventToHost: ((eventName: string, payload?: unknown) => void) | undefined;
+  // eslint-disable-next-line no-var
+  var __invokeCallback: ((fnId: string, args: unknown[]) => unknown) | undefined;
+  // eslint-disable-next-line no-var
+  var __handleHostEvent: ((eventName: string, payload: unknown) => void) | undefined;
 }
 
-import * as RillReconciler from '../let/reconciler/index';
-import { ALL_SHIMS, DEVTOOLS_SHIM } from './shims';
-
 import type {
-  CallFunctionMessage,
-  HostEventMessage,
-  HostMessage,
-  OperationBatch,
-  SerializedValue,
-} from './types';
+  HostMessage as BridgeHostMessage,
+  OperationBatch as BridgeOperationBatch,
+  BridgeValue,
+  BridgeValueObject,
+  SendToHost,
+  SerializedOperationBatch,
+} from '../bridge';
+import { CallbackRegistryImpl as CallbackRegistry } from '../bridge';
+import type { RuntimeCollector } from '../devtools/index';
+import { createRuntimeCollector } from '../devtools/index';
+import { GUEST_BUNDLE_CODE } from '../guest-bundle/build/bundle';
+import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from '../sandbox';
+import type { RillHooksState, RillReconcilerGlobal } from '../sandbox/globals';
+import { Bridge } from './bridge/Bridge';
+import { DiagnosticsCollector } from './engine/DiagnosticsCollector';
+import {
+  CONSOLE_SETUP_CODE,
+  createCommonJSGlobals,
+  createReactNativeShim,
+  createRillSDKModule,
+  formatConsoleArgs,
+  RUNTIME_HELPERS_CODE,
+} from './engine/SandboxHelpers';
+import { ALL_SHIMS, DEVTOOLS_SHIM } from './engine/shims';
+import { TimerManager } from './engine/TimerManager';
+// Import from engine/types.ts (single source of truth)
+import type { EngineOptions, EventListener } from './engine/types';
+import { ExecutionError, RequireError, TimeoutError } from './engine/types';
 import type { EngineDiagnostics, EngineEvents, EngineHealth, IEngine } from './IEngine';
 import { Receiver } from './receiver';
 import type { ComponentMap } from './registry';
 import { ComponentRegistry } from './registry';
-import type { RuntimeCollectorConfig, RuntimeCollector } from '../devtools/index';
-import { createRuntimeCollector } from '../devtools/index';
+import type { HostMessage, OperationBatch } from './types';
 
-/**
- * Engine configuration options
- */
-export interface EngineOptions {
-  /**
-   * JS Engine provider for creating sandbox runtime.
-   * Optional - if not provided, a default will be selected based on the environment.
-   */
-  provider?: JSEngineProvider;
-
-  /**
-   * Legacy parameter: `quickjs` (equivalent to `provider`)
-   * @deprecated Use `provider` instead
-   */
-  quickjs?: JSEngineProvider;
-
-  /**
-   * Explicitly select a sandbox mode.
-   * - `vm`: (Default on Node/Bun) Uses Node's `vm` module for a secure, native sandbox.
-   * - `worker`: Uses `@sebastianwessel/quickjs` in a Web Worker.
-   * - `none`: Runs code directly in the host context via `eval`. Insecure, but fast and easy to debug.
-   * If not set, the best available provider for the environment is chosen automatically.
-   */
-  sandbox?: 'vm' | 'worker' | 'none';
-
-  /**
-   * Execution timeout (milliseconds)
-   * @default 5000
-   */
-  timeout?: number;
-
-  /**
-   * Enable debug mode
-   * @default false
-   */
-  debug?: boolean;
-
-  /**
-   * Custom logger
-   */
-  logger?: {
-    log: (...args: unknown[]) => void;
-    warn: (...args: unknown[]) => void;
-    error: (...args: unknown[]) => void;
-  };
-
-  /**
-   * Allowed modules for sandbox require()
-   * If not provided, a safe default whitelist will be used
-   */
-  requireWhitelist?: readonly string[];
-
-  /**
-   * Performance metrics reporter hook
-   * Called with metric name and duration in ms
-   */
-  onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
-
-  /**
-   * Maximum operations per batch applied by Receiver
-   * Excess operations are skipped to protect host performance
-   * @default 5000
-   */
-  receiverMaxBatchSize?: number;
-
-  /**
-   * Diagnostics parameters (for Host-side Task Manager/Resource Monitor)
-   */
-  diagnostics?: {
-    /**
-     * Stats window (ms) for calculating ops/s and batch/s
-     * @default 5000
-     */
-    activityWindowMs?: number;
-    /**
-     * Activity sample retention duration (ms), for timeline aggregation
-     * @default 60000
-     */
-    activityHistoryMs?: number;
-    /**
-     * Timeline bucket width (ms)
-     * @default 2000
-     */
-    activityBucketMs?: number;
-  };
-
-  /**
-   * DevTools configuration
-   * - true: Enable with default settings
-   * - false/undefined: Disable (default)
-   * - RuntimeCollectorConfig: Enable with custom settings
-   */
-  devtools?: boolean | RuntimeCollectorConfig;
-}
-
-// Re-export types for convenience
+// Re-export sandbox provider types
+export type {
+  JSEngineContext,
+  JSEngineProvider,
+  JSEngineRuntime,
+  JSEngineRuntimeOptions,
+} from '../sandbox';
+// Re-export types for external API
+export type { EngineOptions } from './engine/types';
+export { ExecutionError, RequireError, TimeoutError } from './engine/types';
+// Re-export IEngine types for convenience
 export type {
   EngineActivityStats,
   EngineActivityTimeline,
@@ -134,40 +73,6 @@ export type {
   GuestMessage,
   IEngine,
 } from './IEngine';
-
-/**
- * Event listener
- */
-type EventListener<T> = (data: T) => void;
-
-// Re-export sandbox provider types
-export type {
-  JSEngineContext,
-  JSEngineProvider,
-  JSEngineRuntime,
-  JSEngineRuntimeOptions,
-} from '../sandbox';
-import type { JSEngineContext, JSEngineProvider, JSEngineRuntime } from '../sandbox';
-
-/** Error types for better classification */
-export class RequireError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RequireError';
-  }
-}
-export class ExecutionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ExecutionError';
-  }
-}
-export class TimeoutError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'TimeoutError';
-  }
-}
 
 /**
  * Rill Engine - JS sandbox engine with dedicated runtime
@@ -191,7 +96,15 @@ export class Engine implements IEngine {
   private runtime: JSEngineRuntime | null = null;
   private context: JSEngineContext | null = null;
   private registry: ComponentRegistry;
+  /**
+   * Callback Registry - owned by this Engine instance
+   *
+   * Single ownership principle: Each Engine owns its CallbackRegistry.
+   * This ensures complete isolation between multiple Engine instances.
+   */
+  private callbackRegistry: CallbackRegistry;
   private receiver: Receiver | null = null;
+  private bridge: Bridge | null = null;
   private config: Record<string, unknown> = {};
   private options: {
     provider?: JSEngineProvider;
@@ -211,17 +124,8 @@ export class Engine implements IEngine {
   // Unique engine ID (UUID-like format)
   public readonly id: string;
 
-  // Timer tracking for resource cleanup
-  private timeoutMap = new Map<number, ReturnType<typeof setTimeout>>();
-  private intervalMap = new Map<number, ReturnType<typeof setInterval>>();
-  private timeoutIdCounter = 0;
-  private intervalIdCounter = 0;
-
-  // Native timer references (captured during polyfill injection)
-  private nativeClearTimeout?: (handle: ReturnType<typeof setTimeout>) => void;
-  private nativeClearInterval?: (handle: ReturnType<typeof setInterval>) => void;
-
   // Event listeners
+  // Reason: Event listeners accept arbitrary event payload types
   private listeners: Map<keyof EngineEvents, Set<EventListener<unknown>>> = new Map();
 
   // Memory leak detection for Engine events
@@ -229,46 +133,30 @@ export class Engine implements IEngine {
   private warnedEvents = new Set<keyof EngineEvents>();
 
   // sendToHost reference for callback registry access
-  private sendToHostFn: ((batch: OperationBatch) => void) | null = null;
+  private sendToHostFn: SendToHost | null = null;
 
-  // Host-side activity tracking (for Task Manager/Resource Monitor)
-  private activityWindowMs = 5000;
-  private activityHistoryMs = 60_000;
-  private activityBucketMs = 2000;
-  private activitySamples: Array<{
-    at: number;
-    ops: number;
-    appliedOps: number;
-    skippedOps: number;
-    failedOps: number;
-    applyDurationMs: number | null;
-  }> = [];
-  private totalBatches = 0;
-  private totalOps = 0;
-  private lastBatch: {
-    batchId: number;
-    at: number;
-    totalOps: number;
-    applyDurationMs: number | null;
-  } | null = null;
-
-  // Guest proactive event reporting observability (for Host-side monitoring)
-  private lastGuestEventName: string | null = null;
-  private lastGuestEventAt: number | null = null;
-  private lastGuestPayloadBytes: number | null = null;
-  private guestSleeping: boolean | null = null;
-  private guestSleepingAt: number | null = null;
-
-  // Host → Guest event observability (for Host-side Task Manager/Resource Monitor)
-  private lastHostEventName: string | null = null;
-  private lastHostEventAt: number | null = null;
-  private lastHostPayloadBytes: number | null = null;
+  // Guest-triggered rerender support (useState/useEffect in sandbox)
+  // We record the last root element rendered via require('rill/reconciler').render
+  // so Guest hooks can request an update without needing to rehydrate root props.
+  // Reason: Last rendered element can be any React element type from guest
+  private lastRenderedElement: unknown | null = null;
+  private lastRenderedSendToHost: SendToHost | null = null;
 
   // DevTools collector (optional)
   private _devtools: RuntimeCollector | null = null;
 
+  // Refactored modules
+  private timerManager!: TimerManager;
+  private diagnostics!: DiagnosticsCollector;
+
   constructor(options: EngineOptions = {}) {
-    const defaultWhitelist = new Set(['react', 'react-native', 'react/jsx-runtime', '@rill/let']);
+    const defaultWhitelist = new Set([
+      'react',
+      'react-native',
+      'react/jsx-runtime',
+      '@rill/let',
+      'rill/reconciler',
+    ]);
     // Provide a safe fallback logger if console is not available
     const defaultLogger =
       typeof console !== 'undefined'
@@ -290,21 +178,31 @@ export class Engine implements IEngine {
       receiverMaxBatchSize: options.receiverMaxBatchSize ?? 5000,
     };
 
-    this.activityWindowMs = options.diagnostics?.activityWindowMs ?? this.activityWindowMs;
-    this.activityHistoryMs = options.diagnostics?.activityHistoryMs ?? this.activityHistoryMs;
-    this.activityBucketMs = options.diagnostics?.activityBucketMs ?? this.activityBucketMs;
-    if (this.activityHistoryMs < this.activityWindowMs) {
-      this.activityHistoryMs = this.activityWindowMs;
-    }
-    if (!Number.isFinite(this.activityBucketMs) || this.activityBucketMs <= 0) {
-      this.activityBucketMs = 2000;
-    }
-
     this.registry = new ComponentRegistry();
+
+    // Create CallbackRegistry - owned by this Engine instance
+    // CallbackRegistry is Bridge layer infrastructure, not reconciler specific
+    this.callbackRegistry = new CallbackRegistry();
 
     // Initialize JS engine provider
     // Priority: explicit provider > DefaultProvider auto-detect
     if (!this.options.provider) {
+      // JS-side可视化全局可用性，便于在 Metro/Console 看到（仅 debug 输出，避免误判为错误）
+      if (this.options.debug) {
+        const jscGlobalType =
+          typeof (globalThis as Record<string, unknown>).__JSCSandboxJSI !== 'undefined'
+            ? typeof (globalThis as Record<string, unknown>).__JSCSandboxJSI
+            : 'undefined';
+        const quickjsGlobalType =
+          typeof (globalThis as Record<string, unknown>).__QuickJSSandboxJSI !== 'undefined'
+            ? typeof (globalThis as Record<string, unknown>).__QuickJSSandboxJSI
+            : 'undefined';
+        this.options.logger.log('[rill] Sandbox globals', {
+          __JSCSandboxJSI: jscGlobalType,
+          __QuickJSSandboxJSI: quickjsGlobalType,
+        });
+      }
+
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { DefaultProvider } = require('../sandbox/index');
@@ -320,25 +218,8 @@ export class Engine implements IEngine {
         }
       } catch (e) {
         this.options.logger.error('[rill] Failed to initialize DefaultJSEngineProvider:', e);
-        // Provide a minimal fallback for tests - use isolated scope instead of globalThis
-        const isolatedScope: Record<string, unknown> = {};
-        this.options.provider = {
-          createRuntime: () => ({
-            createContext: () => ({
-              eval: (code: string) => {
-                // Create a function with the isolated scope
-                const fn = new Function(...Object.keys(isolatedScope), code);
-                return fn(...Object.values(isolatedScope));
-              },
-              setGlobal: (name: string, value: unknown) => {
-                isolatedScope[name] = value;
-              },
-              getGlobal: (name: string) => isolatedScope[name],
-              dispose: () => {},
-            }),
-            dispose: () => {},
-          }),
-        };
+        // No fallback: surface error to caller
+        throw e;
       }
     }
 
@@ -347,6 +228,27 @@ export class Engine implements IEngine {
     const timestamp = Date.now().toString(36);
     const random = Math.random().toString(36).substring(2, 6);
     this.id = `engine-${counter}-${timestamp}-${random}`;
+
+    // Initialize refactored modules (after this.id is set)
+    this.timerManager = new TimerManager({
+      debug: this.options.debug,
+      logger: this.options.logger,
+      engineId: this.id,
+      onError: (error: Error) => {
+        this.errorCount++;
+        this.lastErrorAt = Date.now();
+        // diagnostics is initialized right after TimerManager in constructor
+        this.diagnostics?.recordError?.();
+        this.emit('error', error);
+      },
+    });
+
+    this.diagnostics = new DiagnosticsCollector({
+      engineId: this.id,
+      activityWindowMs: options.diagnostics?.activityWindowMs ?? 5000,
+      activityHistoryMs: options.diagnostics?.activityHistoryMs ?? 60_000,
+      activityBucketMs: options.diagnostics?.activityBucketMs ?? 2000,
+    });
 
     if (this.options.debug) {
       this.options.logger.log(`[rill:${this.id}] Engine created`);
@@ -462,6 +364,7 @@ export class Engine implements IEngine {
       }
 
       this.loaded = true;
+      this.diagnostics.setLoaded(true);
       this._devtools?.updateSandboxStatus({ state: 'ready' });
       this.emit('load');
 
@@ -472,6 +375,7 @@ export class Engine implements IEngine {
       const err = error instanceof Error ? error : new Error(String(error));
       this.errorCount += 1;
       this.lastErrorAt = Date.now();
+      this.diagnostics.recordError();
       this._devtools?.recordSandboxError();
       this._devtools?.updateSandboxStatus({ state: 'error' });
       this.emit('error', err);
@@ -519,7 +423,83 @@ export class Engine implements IEngine {
     if (debug) logger.log(`[rill:${this.id}] initializeRuntime: runtime created`);
     this.context = this.runtime.createContext();
     if (debug) {
-      logger.log(`[rill:${this.id}] initializeRuntime: context created, injecting polyfills...`);
+      logger.log(`[rill:${this.id}] initializeRuntime: context created, creating BridgeV2...`);
+    }
+
+    // Create Bridge for Host ↔ Sandbox communication
+    // Bridge encapsulates all serialization - uses this Engine's callback registry
+    this.bridge = new Bridge({
+      debug: this.options.debug,
+      logger: this.options.logger, // Pass logger to Bridge for error reporting
+      callbackRegistry: this.callbackRegistry,
+      // Guest callback invoker - routes Guest callbacks to sandbox
+      // Handles both fn_N (__registerCallback) and fn_xxx_N (Guest globalCallbackRegistry)
+      guestInvoker: (fnId, args) => {
+        // fn_N pattern: sandbox __registerCallback (simple counter)
+        if (/^fn_\d+$/.test(fnId)) {
+          const invokeCallback = this.context?.getGlobal('__invokeCallback') as
+            | ((fnId: string, args: unknown[]) => unknown)
+            | undefined;
+          if (invokeCallback) {
+            return invokeCallback(fnId, args);
+          }
+        }
+        // fn_xxx_N pattern: Guest's globalCallbackRegistry (via RillReconciler)
+        const reconciler = this.context?.getGlobal('RillReconciler') as
+          | { invokeCallback?: (fnId: string, args: unknown[]) => unknown }
+          | undefined;
+        if (reconciler?.invokeCallback) {
+          return reconciler.invokeCallback(fnId, args);
+        }
+        logger.warn(`[rill:${this.id}] No invoker found for ${fnId}`);
+        return undefined;
+      },
+      // Guest callback releaser - routes release calls to Guest's registry
+      guestReleaseCallback: (fnId) => {
+        // fn_xxx_N pattern: Guest's globalCallbackRegistry (via RillReconciler)
+        const reconciler = this.context?.getGlobal('RillReconciler') as
+          | { releaseCallback?: (fnId: string) => void }
+          | undefined;
+        if (reconciler?.releaseCallback) {
+          reconciler.releaseCallback(fnId);
+        }
+        // Note: fn_N pattern (sandbox __registerCallback) doesn't need explicit release
+        // as those callbacks are managed by the sandbox's own lifecycle
+      },
+      hostReceiver: (batch: BridgeOperationBatch) => {
+        // Props are already decoded by Bridge
+        if (this.receiver) {
+          const stats = this.receiver.applyBatch(batch as OperationBatch);
+
+          // Record activity for diagnostics via DiagnosticsCollector
+          this.diagnostics.recordBatch(stats);
+        } else {
+          logger.warn(`[rill:${this.id}] No receiver to apply batch!`);
+        }
+      },
+      guestReceiver: async (message: BridgeHostMessage) => {
+        // Message is already decoded by Bridge
+        if (this.context) {
+          // REF_METHOD_RESULT needs special handling - dispatch directly in sandbox context
+          // because __handleHostEvent is defined in sandbox, not accessible from native function
+          if (message.type === 'REF_METHOD_RESULT') {
+            this.context.setGlobal('__refResultMessage', message);
+            await this.evalCode(
+              "globalThis.__handleHostEvent('__REF_RESULT__', __refResultMessage)"
+            );
+            this.context.setGlobal('__refResultMessage', undefined);
+            return;
+          }
+
+          this.context.setGlobal('__hostMessage', message);
+          await this.evalCode('globalThis.__handleHostMessage(__hostMessage)');
+          this.context.setGlobal('__hostMessage', undefined);
+        }
+      },
+    });
+
+    if (debug) {
+      logger.log(`[rill:${this.id}] initializeRuntime: BridgeV2 created, injecting polyfills...`);
     }
 
     await this.injectPolyfills();
@@ -542,12 +522,13 @@ export class Engine implements IEngine {
     const logger = this.options.logger;
     const debug = this.options.debug;
 
-    // Helper to await and log setGlobal calls for debugging
-    const setGlobalWithLog = async (name: string, value: unknown): Promise<void> => {
+    // Helper to log setGlobal calls for debugging (synchronous)
+    // Reason: setGlobal can accept any serializable value
+    const setGlobalWithLog = (name: string, value: unknown): void => {
       if (debug) logger.log(`[rill:${this.id}] setGlobal: ${name} starting...`);
       const start = Date.now();
       try {
-        await this.context!.setGlobal(name, value);
+        this.context!.setGlobal(name, value);
         if (debug)
           logger.log(`[rill:${this.id}] setGlobal: ${name} done (${Date.now() - start}ms)`);
       } catch (e) {
@@ -556,26 +537,7 @@ export class Engine implements IEngine {
       }
     };
 
-    // Save native timer functions to avoid recursion issues (with fallbacks for test environments)
-    const nativeSetTimeout =
-      typeof globalThis.setTimeout === 'function'
-        ? globalThis.setTimeout.bind(globalThis)
-        : (fn: () => void, _ms?: number) => {
-            Promise.resolve().then(fn);
-            return 0;
-          };
-    const nativeClearTimeout =
-      typeof globalThis.clearTimeout === 'function'
-        ? globalThis.clearTimeout.bind(globalThis)
-        : () => {};
-    const nativeSetInterval =
-      typeof globalThis.setInterval === 'function'
-        ? globalThis.setInterval.bind(globalThis)
-        : () => 0;
-    const nativeClearInterval =
-      typeof globalThis.clearInterval === 'function'
-        ? globalThis.clearInterval.bind(globalThis)
-        : () => {};
+    // Save native queueMicrotask to avoid recursion issues (with fallback for test environments)
     const nativeQueueMicrotask =
       typeof globalThis.queueMicrotask === 'function'
         ? globalThis.queueMicrotask.bind(globalThis)
@@ -604,97 +566,133 @@ export class Engine implements IEngine {
 
     // Inject RillSDK as global variable for IIFE bundles
     // Bundle format: (function(ReactJSXRuntime, React, RillSDK) { ... })(ReactJSXRuntime, React, RillSDK)
-    // Note: This object only contains strings and nulls, so it should serialize fine
-    const RillSDKModule = {
-      // React Native components (as string names)
-      View: 'View',
-      Text: 'Text',
-      Image: 'Image',
-      ScrollView: 'ScrollView',
-      TouchableOpacity: 'TouchableOpacity',
-      Button: 'Button',
-      ActivityIndicator: 'ActivityIndicator',
-      FlatList: 'FlatList',
-      TextInput: 'TextInput',
-      Switch: 'Switch',
-      // Host communication hooks will be added later in injectRuntimeAPI
-      useHostEvent: null,
-      useConfig: null,
-      useSendToHost: null,
-    };
-    await setGlobalWithLog('RillSDK', RillSDKModule);
+    const RillSDKModule = createRillSDKModule();
+    setGlobalWithLog('RillSDK', RillSDKModule);
 
-    // Helper to format objects for logging (handles circular references)
-    const formatArg = (arg: unknown, seen = new WeakSet()): unknown => {
-      if (arg === null || arg === undefined) return arg;
-      if (typeof arg !== 'object') return arg;
+    // Provide minimal CommonJS globals for bundles built as CJS
+    const cjsGlobals = createCommonJSGlobals();
+    setGlobalWithLog('module', cjsGlobals.module);
+    setGlobalWithLog('exports', cjsGlobals.exports);
 
-      // Handle circular references
-      if (seen.has(arg as object)) return '[Circular]';
-      seen.add(arg as object);
+    // Provide @rill/let global for bundles built as external (CLI)
+    // IMPORTANT: render/unmount/unmountAll must use sandbox's RillReconciler instance
+    // to ensure reconcilerMap state is shared with Guest code
+    const getSandboxReconciler = (): RillReconcilerGlobal | undefined =>
+      this.context?.getGlobal('RillReconciler') as RillReconcilerGlobal | undefined;
 
-      // Handle arrays
-      if (Array.isArray(arg)) {
-        return arg.map((item) => formatArg(item, seen));
-      }
-
-      // Handle plain objects
+    const wrapRender = (...args: unknown[]) => {
       try {
-        const formatted: Record<string, unknown> = {};
-        for (const key of Object.keys(arg as object)) {
-          formatted[key] = formatArg((arg as Record<string, unknown>)[key], seen);
-        }
-        return formatted;
+        const el = args[0] as {
+          type?: unknown;
+          __rillTypeMarker?: string;
+          __rillFragmentType?: string;
+          props?: Record<string, unknown>;
+        };
+        const info = [
+          `elementType=${typeof el}`,
+          `type=${String(el?.type)}`,
+          `marker=${String(el?.__rillTypeMarker)}`,
+          `fragment=${String(el?.__rillFragmentType)}`,
+          `propsKeys=${el?.props ? Object.keys(el.props).join(',') : 'null'}`,
+          `sendToHostType=${typeof args[1]}`,
+        ].join(' | ');
+        if (debug) logger.log(`[rill:${this.id}] RillLet.render called | ${info}`);
       } catch {
-        return String(arg);
+        if (debug) logger.log(`[rill:${this.id}] RillLet.render called (log format failed)`);
+      }
+      try {
+        const reconciler = getSandboxReconciler();
+        if (!reconciler?.render) {
+          throw new Error('[rill] RillReconciler not found in sandbox');
+        }
+        const ret = reconciler.render(args[0], args[1]);
+        if (debug) logger.log(`[rill:${this.id}] RillReconciler.render returned`);
+        return ret;
+      } catch (e) {
+        logger.error(`[rill:${this.id}] RillLet.render error`, e);
+        throw e;
       }
     };
 
-    const formatArgs = (args: unknown[]): unknown[] => {
-      return args.map((arg) => {
-        if (typeof arg === 'object' && arg !== null) {
-          try {
-            // Format objects nicely with JSON.stringify for readability
-            return JSON.stringify(formatArg(arg), null, 2);
-          } catch {
-            return formatArg(arg);
-          }
-        }
-        return arg;
-      });
+    const wrapUnmount = (sendToHost?: unknown) => {
+      if (debug) logger.log(`[rill:${this.id}] RillLet.unmount called`);
+      const reconciler = getSandboxReconciler();
+      return reconciler?.unmount?.(sendToHost);
     };
+
+    const wrapUnmountAll = () => {
+      if (debug) logger.log(`[rill:${this.id}] RillLet.unmountAll called`);
+      const reconciler = getSandboxReconciler();
+      return reconciler?.unmountAll?.();
+    };
+
+    // invokeCallback/hasCallback use Engine's callbackRegistry (not reconciler's)
+    const invokeCallback = (fnId: string, args: unknown[]) => {
+      return this.callbackRegistry.invoke(fnId, args);
+    };
+    const hasCallback = (fnId: string) => {
+      return this.callbackRegistry.has(fnId);
+    };
+
+    const RillLetModule =
+      this.context.getGlobal?.('RillLet') ||
+      ({
+        ...RillSDKModule,
+        render: wrapRender,
+        unmount: wrapUnmount,
+        unmountAll: wrapUnmountAll,
+        invokeCallback,
+        hasCallback,
+      } as unknown);
+    setGlobalWithLog('RillLet', RillLetModule);
 
     const engineId = this.id;
 
     // console - Register each method separately for JSC sandbox compatibility
     // JSC sandbox can't handle objects with function properties via RN bridge
-    await setGlobalWithLog('__console_log', (...args: unknown[]) => {
-      if (debug) logger.log(`[rill:${engineId}][Guest]`, ...formatArgs(args));
+    setGlobalWithLog('__console_log', (...args: unknown[]) => {
+      if (debug) logger.log(`[rill:${engineId}][Guest]`, ...formatConsoleArgs(args));
     });
-    await setGlobalWithLog('__console_warn', (...args: unknown[]) => {
-      logger.warn(`[rill:${engineId}][Guest]`, ...formatArgs(args));
+    setGlobalWithLog('__console_warn', (...args: unknown[]) => {
+      logger.warn(`[rill:${engineId}][Guest]`, ...formatConsoleArgs(args));
     });
-    await setGlobalWithLog('__console_error', (...args: unknown[]) => {
-      logger.error(`[rill:${engineId}][Guest]`, ...formatArgs(args));
+    setGlobalWithLog('__console_error', (...args: unknown[]) => {
+      logger.error(`[rill:${engineId}][Guest]`, ...formatConsoleArgs(args));
     });
-    await setGlobalWithLog('__console_debug', (...args: unknown[]) => {
-      if (debug) logger.log(`[rill:${engineId}][Guest:debug]`, ...formatArgs(args));
+    setGlobalWithLog('__console_debug', (...args: unknown[]) => {
+      if (debug) logger.log(`[rill:${engineId}][Guest:debug]`, ...formatConsoleArgs(args));
     });
-    await setGlobalWithLog('__console_info', (...args: unknown[]) => {
-      if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatArgs(args));
+    setGlobalWithLog('__console_info', (...args: unknown[]) => {
+      if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatConsoleArgs(args));
     });
 
     // Inject React/JSX shims BEFORE require is set up
     // This allows require('react') to return the Guest's shim
     await injectReactShims();
 
+    // Inject Guest Reconciler code
+    // Reconciler now runs entirely in Guest, not Host
+    const injectGuestReconciler = async () => {
+      try {
+        const alreadyInjected = this.context?.getGlobal('RillReconciler');
+        if (alreadyInjected) {
+          if (debug) logger.log(`[rill:${this.id}] Guest Reconciler already injected, skipping`);
+          return;
+        }
+        await this.evalCode(GUEST_BUNDLE_CODE);
+        if (debug) logger.log(`[rill:${this.id}] Guest Bundle injected`);
+      } catch (e) {
+        logger.error(`[rill:${this.id}] Failed to inject Guest Reconciler:`, e);
+        throw e;
+      }
+    };
+    await injectGuestReconciler();
+
     // require: module loader for Guest code
     // Note: Globals like __useHostEvent, __getConfig, __sendEventToHost are defined AFTER require.
     // They are accessed lazily when require('rill/sdk') is called (after injectPolyfills completes).
-    await setGlobalWithLog('require', (moduleName: string) => {
-      if (debug) {
-        logger.log('[rill:require]', moduleName);
-      }
+    setGlobalWithLog('require', (moduleName: string) => {
+      if (debug) logger.log(`[rill:${this.id}] require("${moduleName}")`);
 
       if (!this.options.requireWhitelist.has(moduleName)) {
         throw new RequireError(`[rill] Unsupported require("${moduleName}")`);
@@ -707,22 +705,62 @@ export class Engine implements IEngine {
           return this.context?.getGlobal('React');
         case 'react-native':
           // Return a minimal RN shim - real RN module not available in sandbox
-          // Guest code should use string component names via rill/sdk, not RN directly
-          return {
-            Platform: {
-              OS: 'web',
-              select: (o: Record<string, unknown>) => o['default'] ?? o['web'],
-            },
-            StyleSheet: { create: (s: unknown) => s },
-            View: 'View',
-            Text: 'Text',
-            Image: 'Image',
-          };
+          return createReactNativeShim();
         case 'react/jsx-runtime':
           // Return Guest's JSX runtime shim (injected via injectReactShims)
           return this.context?.getGlobal('ReactJSXRuntime');
-        case 'rill/reconciler':
-          return RillReconciler;
+        case 'rill/reconciler': {
+          // Return Guest's RillReconciler (injected via injectGuestReconciler)
+          // Reconciler now runs entirely in Guest
+          const GuestReconciler = this.context?.getGlobal('RillReconciler') as
+            | RillReconcilerGlobal
+            | undefined;
+          if (!GuestReconciler) {
+            throw new Error(
+              '[rill] RillReconciler not found in Guest. Did injectGuestReconciler fail?'
+            );
+          }
+
+          // Engine-bound wrapper:
+          // - 记录最近一次 render(root, sendToHost) 的参数
+          // - 提供 scheduleRender() 供 Guest hooks 触发 rerender
+          // - 重置 hook index 以支持 useState
+          const engine = this;
+          const render = (element: unknown, sendToHost?: unknown) => {
+            engine.lastRenderedElement = element;
+            if (typeof sendToHost === 'function') {
+              engine.lastRenderedSendToHost = sendToHost as SendToHost;
+            }
+            // Reset hook index before each render
+            try {
+              const hooks = this.context?.getGlobal('__rillHooks') as RillHooksState | undefined;
+              if (hooks) {
+                hooks.index = 0;
+                hooks.rootElement = element;
+                hooks.sendToHost = sendToHost;
+              }
+            } catch (e) {
+              if (debug) logger.warn('[rill] Failed to access hooks for render:', e);
+            }
+            return GuestReconciler.render(element, sendToHost);
+          };
+          const scheduleRender = () => {
+            if (!engine.lastRenderedElement) return;
+            const sendFn = engine.lastRenderedSendToHost ?? engine.sendToHostFn;
+            if (typeof sendFn !== 'function') return;
+            // Reset hook index before re-render
+            try {
+              const hooks = this.context?.getGlobal('__rillHooks') as RillHooksState | undefined;
+              if (hooks) {
+                hooks.index = 0;
+              }
+            } catch (e) {
+              if (debug) logger.warn('[rill] Failed to access hooks for scheduleRender:', e);
+            }
+            return GuestReconciler.render(engine.lastRenderedElement, sendFn);
+          };
+          return { ...GuestReconciler, render, scheduleRender };
+        }
         case '@rill/let':
           // Guest SDK module - provides component names (strings), host hooks, and reconciler
           // Component names are used by rill reconciler to look up registered components
@@ -743,10 +781,26 @@ export class Engine implements IEngine {
             useHostEvent: this.context?.getGlobal('__useHostEvent'),
             useConfig: this.context?.getGlobal('__getConfig'),
             useSendToHost: () => this.context?.getGlobal('__sendEventToHost'),
-            // Reconciler functions (for auto-render)
-            render: RillReconciler.render,
-            unmount: RillReconciler.unmount,
-            unmountAll: RillReconciler.unmountAll,
+            // Reconciler functions - use sandbox's RillReconciler instance
+            // This ensures reconcilerMap state is shared with Guest code
+            render: (element: unknown, sendToHost: unknown) => {
+              const reconciler = this.context?.getGlobal('RillReconciler') as
+                | RillReconcilerGlobal
+                | undefined;
+              return reconciler?.render?.(element, sendToHost);
+            },
+            unmount: (sendToHost: unknown) => {
+              const reconciler = this.context?.getGlobal('RillReconciler') as
+                | RillReconcilerGlobal
+                | undefined;
+              return reconciler?.unmount?.(sendToHost);
+            },
+            unmountAll: () => {
+              const reconciler = this.context?.getGlobal('RillReconciler') as
+                | RillReconcilerGlobal
+                | undefined;
+              return reconciler?.unmountAll?.();
+            },
           };
         default:
           throw new Error(`[rill] Unsupported require("${moduleName}")`);
@@ -756,75 +810,14 @@ export class Engine implements IEngine {
     // React/JSX shims are already injected before require was set up
     // No need for lazy getters - Guest has its own React implementation
 
-    // Store native clear functions for cleanup
-    this.nativeClearTimeout = nativeClearTimeout;
-    this.nativeClearInterval = nativeClearInterval;
-
-    // setTimeout / clearTimeout - use instance maps for cleanup
-    await setGlobalWithLog('setTimeout', (fn: () => void, delay: number) => {
-      const id = ++this.timeoutIdCounter;
-      const handle = nativeSetTimeout(() => {
-        this.timeoutMap.delete(id);
-        try {
-          fn();
-        } catch (error) {
-          // Enhanced error handling for timer callbacks
-          const err = error instanceof Error ? error : new Error(String(error));
-          logger.error(`[rill:${this.id}][Guest] setTimeout error:`, err);
-
-          // Track error for monitoring
-          this.errorCount++;
-          this.lastErrorAt = Date.now();
-
-          // Emit error event so Host can handle it
-          this.emit('error', err);
-        }
-      }, delay);
-      this.timeoutMap.set(id, handle as unknown as ReturnType<typeof setTimeout>);
-      return id;
-    });
-
-    await setGlobalWithLog('clearTimeout', (id: number) => {
-      const handle = this.timeoutMap.get(id);
-      if (handle !== undefined) {
-        nativeClearTimeout(handle);
-        this.timeoutMap.delete(id);
-      }
-    });
-
-    // setInterval / clearInterval - use instance maps for cleanup
-    await setGlobalWithLog('setInterval', (fn: () => void, delay: number) => {
-      const id = ++this.intervalIdCounter;
-      const handle = nativeSetInterval(() => {
-        try {
-          fn();
-        } catch (error) {
-          // Enhanced error handling for interval callbacks
-          const err = error instanceof Error ? error : new Error(String(error));
-          logger.error(`[rill:${this.id}][Guest] setInterval error:`, err);
-
-          // Track error for monitoring
-          this.errorCount++;
-          this.lastErrorAt = Date.now();
-
-          // Emit error event so Host can handle it
-          this.emit('error', err);
-        }
-      }, delay);
-      this.intervalMap.set(id, handle as unknown as ReturnType<typeof setInterval>);
-      return id;
-    });
-
-    await setGlobalWithLog('clearInterval', (id: number) => {
-      const handle = this.intervalMap.get(id);
-      if (handle !== undefined) {
-        nativeClearInterval(handle);
-        this.intervalMap.delete(id);
-      }
-    });
+    // Inject timer polyfills using TimerManager
+    setGlobalWithLog('setTimeout', this.timerManager.createSetTimeoutPolyfill());
+    setGlobalWithLog('clearTimeout', this.timerManager.createClearTimeoutPolyfill());
+    setGlobalWithLog('setInterval', this.timerManager.createSetIntervalPolyfill());
+    setGlobalWithLog('clearInterval', this.timerManager.createClearIntervalPolyfill());
 
     // queueMicrotask
-    await setGlobalWithLog('queueMicrotask', (fn: () => void) => {
+    setGlobalWithLog('queueMicrotask', (fn: () => void) => {
       nativeQueueMicrotask(() => {
         try {
           fn();
@@ -838,6 +831,7 @@ export class Engine implements IEngine {
     // This catches Promise rejections that are not handled with .catch()
     // Note: Support varies by sandbox environment (vm/worker/none)
     try {
+      // Reason: Promise rejection reason and promise value can be any type
       const unhandledRejectionHandler = (event: {
         reason?: unknown;
         promise?: Promise<unknown>;
@@ -862,17 +856,15 @@ export class Engine implements IEngine {
 
       // Try to set unhandledrejection handler
       // Different sandbox environments have different support
-      if (typeof globalThis !== 'undefined') {
-        // Modern browsers and Node.js support
-        if ('addEventListener' in globalThis) {
-          globalThis.addEventListener('unhandledrejection', unhandledRejectionHandler);
-        } else if ('onunhandledrejection' in globalThis) {
-          globalThis.onunhandledrejection = unhandledRejectionHandler;
-        }
+      // Modern browsers and Node.js support
+      if ('addEventListener' in globalThis) {
+        globalThis.addEventListener('unhandledrejection', unhandledRejectionHandler);
+      } else if ('onunhandledrejection' in globalThis) {
+        globalThis.onunhandledrejection = unhandledRejectionHandler;
       }
 
       // Inject into sandbox context
-      await setGlobalWithLog('onunhandledrejection', unhandledRejectionHandler);
+      setGlobalWithLog('onunhandledrejection', unhandledRejectionHandler);
     } catch (_err) {
       // Silently fail if unhandledrejection is not supported
       if (debug) {
@@ -881,21 +873,8 @@ export class Engine implements IEngine {
     }
 
     // Construct console object in sandbox using the registered callbacks
-    // This is necessary because JSC sandbox can't handle objects with function properties
-    const CONSOLE_SETUP = `
-(function(){
-  if (typeof globalThis.console === 'undefined') {
-    globalThis.console = {
-      log: function() { __console_log.apply(null, arguments); },
-      warn: function() { __console_warn.apply(null, arguments); },
-      error: function() { __console_error.apply(null, arguments); },
-      debug: function() { __console_debug.apply(null, arguments); },
-      info: function() { __console_info.apply(null, arguments); }
-    };
-  }
-})();`;
     try {
-      await this.evalCode(CONSOLE_SETUP);
+      await this.evalCode(CONSOLE_SETUP_CODE);
       if (debug) {
         logger.log(`[rill:${this.id}] injectPolyfills: console object constructed in sandbox`);
       }
@@ -913,171 +892,198 @@ export class Engine implements IEngine {
     const debug = this.options.debug;
     const logger = this.options.logger;
 
-    // Collect all setGlobal promises (may be sync or async depending on provider)
-    const setGlobalPromises: (void | Promise<void>)[] = [];
-
     // Inject runtime helpers for host-guest event communication
-    const RUNTIME_HELPERS = `
-(function(){
-  if (typeof globalThis.__hostEventListeners === 'undefined') {
-    var __hostEventListeners = new Map();
-    globalThis.__useHostEvent = function(eventName, callback){
-      if (!__hostEventListeners.has(eventName)) __hostEventListeners.set(eventName, new Set());
-      var set = __hostEventListeners.get(eventName);
-      set.add(callback);
-      return function(){ try { set.delete(callback); } catch(_){} };
-    };
-    globalThis.__handleHostEvent = function(eventName, payload){
-      var set = __hostEventListeners.get(eventName);
-      if (set) {
-        set.forEach(function(cb){ try { cb(payload); } catch(e) { console.error('[rill] Host event listener error:', e); } });
-      }
-    };
-  }
-})();`;
+    // IMPORTANT: must await for async-only providers (Worker/WASM) to avoid race conditions.
     try {
-      await this.evalCode(RUNTIME_HELPERS);
+      await this.evalCode(RUNTIME_HELPERS_CODE);
     } catch (e) {
       logger.warn('[rill] Failed to inject runtime helpers:', e);
     }
 
-    // __sendToHost: Send operations to host
-    const sendToHost = (batch: OperationBatch) => {
-      if (debug) {
-        logger.log(`[rill:${this.id}] __sendToHost called, operations:`, batch.operations.length);
+    // __rill_register_component_type: register Guest function components on Host so they survive JSI
+    const engineId = this.id;
+    const registerComponentType = (fn: unknown) => {
+      try {
+        // Use sandbox's RillReconciler for component type registration
+        const reconciler = this.context?.getGlobal('RillReconciler') as
+          | RillReconcilerGlobal
+          | undefined;
+        return reconciler?.registerComponentType?.(fn, engineId) ?? null;
+      } catch {
+        // ignore
       }
+      return null;
+    };
+    this.context.setGlobal('__rill_register_component_type', registerComponentType);
 
-      // Send to DevTools
-      if (typeof globalThis.__sendEventToHost === 'function') {
-        globalThis.__sendEventToHost('DEVTOOLS_OPERATIONS', batch);
-      }
-
-      // Record batch activity (regardless of receiver presence)
-      const at = Date.now();
-      const totalOps = batch.operations.length;
-      this.totalBatches += 1;
-      this.totalOps += totalOps;
-      this.lastBatch = {
-        batchId: batch.batchId,
-        at,
-        totalOps,
-        applyDurationMs: null,
-      };
-      const sample: (typeof this.activitySamples)[number] = {
-        at,
-        ops: totalOps,
-        appliedOps: 0,
-        skippedOps: 0,
-        failedOps: 0,
-        applyDurationMs: null,
-      };
-      this.activitySamples.push(sample);
-      // Trim samples outside window to prevent unbounded growth
-      const cutoff = at - this.activityHistoryMs;
-      while (this.activitySamples.length > 0 && this.activitySamples[0]!.at < cutoff) {
-        this.activitySamples.shift();
-      }
-      // Fallback limit (for extreme cases)
-      if (this.activitySamples.length > 2000) {
-        this.activitySamples = this.activitySamples.slice(-1000);
-      }
-
-      this.emit('operation', batch);
-      if (this.receiver) {
-        if (debug) {
-          logger.log(`[rill:${this.id}] Applying batch to receiver`);
-        }
-        const applyStats = this.receiver.applyBatch(batch);
-        sample.appliedOps = applyStats.applied;
-        sample.skippedOps = applyStats.skipped;
-        sample.failedOps = applyStats.failed;
-        sample.applyDurationMs = applyStats.durationMs;
-        if (this.lastBatch && this.lastBatch.batchId === batch.batchId) {
-          this.lastBatch.applyDurationMs = applyStats.durationMs;
-        }
-
-        // Record to DevTools collector
-        this._devtools?.logBatch(
-          { batchId: batch.batchId, operations: batch.operations },
-          applyStats.durationMs
-        );
-      } else {
-        logger.warn(`[rill:${this.id}] No receiver to apply batch!`);
+    // __sendToHost: Receives batch from Guest, delegates to Bridge
+    // Bridge handles all serialization via TypeRules and routes fn_N calls via guestInvoker
+    const sendToHost = (batch: OperationBatch | SerializedOperationBatch) => {
+      if (this.bridge) {
+        this.bridge.sendToHost(batch);
       }
     };
 
     // Save reference for callback registry access
     this.sendToHostFn = sendToHost;
-    setGlobalPromises.push(this.context.setGlobal('__sendToHost', sendToHost));
+
+    // Inject __sendToHost for Guest code
+    // Bridge.sendToHost handles all serialization via TypeRules
+    this.context.setGlobal('__sendToHost', sendToHost);
+
+    // __sendOperation: Send a single operation directly to Host (bypasses batching)
+    // Used by Remote Ref for immediate REF_CALL delivery
+    this.context.setGlobal('__sendOperation', (op: unknown) => {
+      if (!this.bridge || !op || typeof op !== 'object') return;
+
+      // Wrap single operation in a minimal batch for Bridge compatibility
+      // Note: op contains raw BridgeValue (not yet serialized), Bridge.sendToHost will encode it
+      const batch: BridgeOperationBatch = {
+        version: 1,
+        batchId: Date.now(), // Use timestamp as unique batch ID
+        operations: [op as BridgeOperationBatch['operations'][0]],
+      };
+
+      if (debug) {
+        logger.log(`[rill:${this.id}] __sendOperation:`, (op as { op?: string }).op);
+      }
+
+      this.bridge.sendToHost(batch);
+    });
+
+    // __rill_schedule_render: allow Guest hooks (useState/useEffect) to request a rerender.
+    // Implementation uses the last root element recorded via require('rill/reconciler').render.
+    //
+    // IMPORTANT: Must use the SAME RillReconciler module instance that Guest code uses.
+    // - Guest code calls: require('rill/reconciler').render(element, sendToHost)
+    // - This stores the reconciler instance in that module's reconcilerMap
+    // - Re-render must use the same module instance to find the existing reconciler
+    //
+    // Engine imports RillReconciler at top-level, but that's a DIFFERENT module instance
+    // than the one injected into sandbox (via injectGuestReconciler / getGlobal('RillReconciler')).
+    // Using the wrong instance would create a new reconciler each time, breaking diff.
+    this.context.setGlobal('__rill_schedule_render', () => {
+      if (!this.lastRenderedElement) return;
+      const sendFn = this.lastRenderedSendToHost ?? this.sendToHostFn;
+      if (typeof sendFn !== 'function') return;
+      try {
+        // Use the RillReconciler instance injected into sandbox (same as Guest code uses)
+        const SandboxReconciler = this.context?.getGlobal('RillReconciler') as
+          | RillReconcilerGlobal
+          | undefined;
+        if (SandboxReconciler?.render) {
+          SandboxReconciler.render(this.lastRenderedElement, sendFn);
+        } else {
+          logger.warn(
+            `[rill:${this.id}] __rill_schedule_render: RillReconciler not found in sandbox`
+          );
+        }
+      } catch (e) {
+        logger.error(`[rill:${this.id}] __rill_schedule_render error:`, e);
+      }
+    });
 
     // __getConfig: Get initial configuration
-    setGlobalPromises.push(this.context.setGlobal('__getConfig', () => this.config));
+    this.context.setGlobal('__getConfig', () => this.config);
 
     // __sendEventToHost: Send event to host
-    setGlobalPromises.push(
-      this.context.setGlobal('__sendEventToHost', (eventName: string, payload?: unknown) => {
-        if (debug) {
-          logger.log('[rill] Guest event:', eventName, payload);
-        }
+    // Reason: Event payload can be any serializable type
+    this.context.setGlobal('__sendEventToHost', (eventName: string, payload?: unknown) => {
+      if (debug) {
+        logger.log('[rill] Guest event:', eventName, payload);
+      }
 
-        // Handle DevTools messages from Guest
-        if (eventName.startsWith('__DEVTOOLS_') && this._devtools) {
-          const p = payload as Record<string, unknown> | undefined;
-          switch (eventName) {
-            case '__DEVTOOLS_CONSOLE__':
-              // Console logs are forwarded via emit for external processing
-              if (p?.entry) {
-                this.emit(
-                  'devtoolsConsole',
-                  p.entry as Parameters<EngineEvents['devtoolsConsole']>[0]
-                );
+      // Handle DevTools messages from Guest
+      if (eventName.startsWith('__DEVTOOLS_') && this._devtools) {
+        const p = payload as Record<string, unknown> | undefined;
+        switch (eventName) {
+          case '__DEVTOOLS_CONSOLE__':
+            // Console logs are forwarded via emit for external processing
+            if (p?.entry) {
+              this.emit(
+                'devtoolsConsole',
+                p.entry as Parameters<EngineEvents['devtoolsConsole']>[0]
+              );
+            }
+            break;
+          case '__DEVTOOLS_ERROR__':
+            // Errors are recorded in devtools and emitted
+            this._devtools.recordSandboxError();
+            if (p?.error) {
+              this.emit('devtoolsError', p.error as Parameters<EngineEvents['devtoolsError']>[0]);
+            }
+            break;
+          case '__DEVTOOLS_READY__':
+            // Guest devtools is ready
+            this.emit('devtoolsReady', {});
+            break;
+        }
+        return; // Don't process as regular message
+      }
+
+      // Record guest event via DiagnosticsCollector
+      const payloadBytes =
+        payload === undefined
+          ? 0
+          : (() => {
+              try {
+                return JSON.stringify(payload).length;
+              } catch {
+                return undefined;
               }
-              break;
-            case '__DEVTOOLS_ERROR__':
-              // Errors are recorded in devtools and emitted
-              this._devtools.recordSandboxError();
-              if (p?.error) {
-                this.emit('devtoolsError', p.error as Parameters<EngineEvents['devtoolsError']>[0]);
-              }
-              break;
-            case '__DEVTOOLS_READY__':
-              // Guest devtools is ready
-              this.emit('devtoolsReady', {});
-              break;
-          }
-          return; // Don't process as regular message
-        }
+            })();
+      this.diagnostics.recordGuestEvent(eventName, payloadBytes);
 
-        this.lastGuestEventName = eventName;
-        this.lastGuestEventAt = Date.now();
-        if (payload === undefined) {
-          this.lastGuestPayloadBytes = 0;
-        } else {
-          try {
-            this.lastGuestPayloadBytes = JSON.stringify(payload).length;
-          } catch {
-            this.lastGuestPayloadBytes = null;
-          }
+      // Special convention: Guest reports its sleep state (used with HOST_VISIBILITY)
+      if (eventName === 'GUEST_SLEEP_STATE' && payload && typeof payload === 'object') {
+        // Reason: Payload field type unknown until runtime validation
+        const sleeping = (payload as { sleeping?: unknown }).sleeping;
+        if (typeof sleeping === 'boolean') {
+          this.diagnostics.setGuestSleeping(sleeping);
         }
-
-        // Special convention: Guest reports its sleep state (used with HOST_VISIBILITY)
-        if (eventName === 'GUEST_SLEEP_STATE' && payload && typeof payload === 'object') {
-          const sleeping = (payload as { sleeping?: unknown }).sleeping;
-          if (typeof sleeping === 'boolean') {
-            this.guestSleeping = sleeping;
-            this.guestSleepingAt = Date.now();
-          }
-        }
-        this.emit('message', { event: eventName, payload });
-      })
-    );
+      }
+      this.emit('message', { event: eventName, payload });
+    });
 
     // __handleHostMessage: Handle messages from host
-    setGlobalPromises.push(
-      this.context.setGlobal('__handleHostMessage', (message: HostMessage) => {
-        this.handleHostMessage(message);
-      })
-    );
+    // Capture context for closure - native functions can't access sandbox's globalThis directly
+    const sandboxContext = this.context;
+    this.context.setGlobal('__handleHostMessage', (message: HostMessage) => {
+      try {
+        switch (message.type) {
+          case 'CALL_FUNCTION': {
+            // Invoke registered callback (must get from sandbox context, not Host's globalThis)
+            const invokeCallback = sandboxContext.getGlobal('__invokeCallback') as
+              | ((fnId: string, args: unknown[]) => unknown)
+              | undefined;
+            if (typeof invokeCallback === 'function') {
+              invokeCallback(message.fnId, message.args);
+            }
+            break;
+          }
+          case 'HOST_EVENT': {
+            // Trigger host event listeners (must get from sandbox context)
+            const handleHostEvent = sandboxContext.getGlobal('__handleHostEvent') as
+              | ((eventName: string, payload: unknown) => void)
+              | undefined;
+            if (typeof handleHostEvent === 'function') {
+              handleHostEvent(message.eventName, message.payload);
+            }
+            break;
+          }
+          case 'CONFIG_UPDATE':
+            // Update config (handled by engine, no action needed in guest)
+            break;
+          case 'DESTROY':
+            // Cleanup (handled by engine, no action needed in guest)
+            break;
+          // Note: REF_METHOD_RESULT is handled directly in guestReceiver
+          // because it needs async Promise handling
+        }
+      } catch (e) {
+        logger.error(`[rill:${this.id}] __handleHostMessage error:`, e);
+      }
+    });
 
     // Skip RillSDK/ReactNative hooks update for JSC sandbox
     // The hooks (__useHostEvent, __getConfig, __sendEventToHost) are already available as global functions
@@ -1089,8 +1095,7 @@ export class Engine implements IEngine {
       );
     }
 
-    // Wait for all setGlobal operations to complete (important for async providers like JSC)
-    await Promise.all(setGlobalPromises);
+    // All setGlobal operations are now synchronous - no need to wait
     if (debug) {
       logger.log(`[rill:${this.id}] injectRuntimeAPI: all setGlobal operations done`);
     }
@@ -1116,6 +1121,7 @@ export class Engine implements IEngine {
   private async evalCode(code: string): Promise<void> {
     if (!this.context) return;
     // Check for non-standard evalAsync (Worker providers)
+    // Reason: evalAsync returns arbitrary type from dynamic code execution
     const ctx = this.context as JSEngineContext & {
       evalAsync?: (code: string) => Promise<unknown>;
     };
@@ -1147,98 +1153,23 @@ export class Engine implements IEngine {
   }
 
   /**
-   * Handle messages from host
-   */
-  private async handleHostMessage(message: HostMessage): Promise<void> {
-    switch (message.type) {
-      case 'CALL_FUNCTION':
-        await this.handleCallFunction(message);
-        break;
-      case 'HOST_EVENT':
-        await this.handleHostEvent(message);
-        break;
-      case 'CONFIG_UPDATE':
-        this.config = { ...this.config, ...message.config };
-        break;
-      case 'DESTROY':
-        this.destroy();
-        break;
-    }
-  }
-
-  /**
-   * Handle callback function invocation
-   */
-  private async handleCallFunction(message: CallFunctionMessage): Promise<void> {
-    if (!this.context) return;
-
-    if (this.options.debug) {
-      this.options.logger.log(
-        `[rill:${this.id}] handleCallFunction called, fnId:`,
-        message.fnId,
-        'args:',
-        message.args
-      );
-    }
-    try {
-      // Record to DevTools
-      this._devtools?.recordCallback(message.fnId, message.args);
-
-      // ✅ Prefer Host-side CallbackRegistry:
-      // - In RNQuickJS / VMProvider scenarios, reconciler runs on Host (Hermes/Node) side,
-      //   serializePropsWithTracking() registers function handles from Guest into CallbackRegistry.
-      // - When Receiver triggers events, it only carries fnId; we can invoke directly via registry.
-      // - Fallback: if fnId not found in registry, fall back to Guest runtime's __invokeCallback (legacy path).
-      if (
-        typeof RillReconciler.hasCallback === 'function' &&
-        RillReconciler.hasCallback(message.fnId)
-      ) {
-        RillReconciler.invokeCallback(message.fnId, message.args);
-        if (this.options.debug) {
-          this.options.logger.log(
-            `[rill:${this.id}] Successfully invoked callback (host registry)`
-          );
-        }
-        return;
-      }
-
-      await this.evalCode(`__invokeCallback("${message.fnId}", ${JSON.stringify(message.args)})`);
-      if (this.options.debug) {
-        this.options.logger.log(`[rill:${this.id}] Successfully invoked callback (sandbox eval)`);
-      }
-    } catch (error) {
-      this.options.logger.error(
-        `[rill:${this.id}] Failed to invoke callback ${message.fnId}:`,
-        error
-      );
-    }
-  }
-
-  /**
-   * Handle host event
-   */
-  private async handleHostEvent(message: HostEventMessage): Promise<void> {
-    if (!this.context) return;
-
-    try {
-      await this.evalCode(
-        `__handleHostEvent("${message.eventName}", ${JSON.stringify(message.payload)})`
-      );
-    } catch (error) {
-      this.options.logger.error(`[rill] Failed to handle host event ${message.eventName}:`, error);
-    }
-  }
-
-  /**
    * Send message to sandbox
+   *
+   * Delegates to Bridge for unified communication handling
    */
   async sendToSandbox(message: HostMessage): Promise<void> {
-    if (this.destroyed || !this.context) return;
+    if (this.destroyed || !this.bridge) return;
+
     const start = Date.now();
-    await this.evalCode(`__handleHostMessage(${JSON.stringify(message)})`);
-    this.options.onMetric?.('engine.sendToSandbox', Date.now() - start, {
-      size: JSON.stringify(message).length,
-    });
+    await this.bridge.sendToGuest(message);
+    const duration = Date.now() - start;
+
+    this.options.onMetric?.('bridge.sendToSandbox', duration, { type: message.type });
+
+    // Handle DESTROY message - cleanup Engine state
+    if (message.type === 'DESTROY') {
+      this.destroy();
+    }
   }
 
   /**
@@ -1302,18 +1233,20 @@ export class Engine implements IEngine {
   /**
    * Send event to sandbox guest
    */
+  // Reason: Event payload can be any serializable type
   sendEvent(eventName: string, payload?: unknown): void {
-    this.lastHostEventName = eventName;
-    this.lastHostEventAt = Date.now();
-    if (payload === undefined) {
-      this.lastHostPayloadBytes = 0;
-    } else {
-      try {
-        this.lastHostPayloadBytes = JSON.stringify(payload).length;
-      } catch {
-        this.lastHostPayloadBytes = null;
-      }
-    }
+    // Record host event via DiagnosticsCollector
+    const payloadBytes =
+      payload === undefined
+        ? 0
+        : (() => {
+            try {
+              return JSON.stringify(payload).length;
+            } catch {
+              return undefined;
+            }
+          })();
+    this.diagnostics.recordHostEvent(eventName, payloadBytes);
 
     // Record to DevTools
     this._devtools?.recordHostEvent(eventName, payload);
@@ -1321,14 +1254,14 @@ export class Engine implements IEngine {
     void this.sendToSandbox({
       type: 'HOST_EVENT',
       eventName,
-      payload: (payload ?? null) as SerializedValue,
+      payload: (payload ?? null) as BridgeValue,
     });
   }
 
   /**
    * Update configuration
    */
-  updateConfig(config: Record<string, SerializedValue>): void {
+  updateConfig(config: BridgeValueObject): void {
     this.config = { ...this.config, ...config };
     void this.sendToSandbox({
       type: 'CONFIG_UPDATE',
@@ -1347,8 +1280,16 @@ export class Engine implements IEngine {
       this.registry,
       (message) => this.sendToSandbox(message),
       onUpdate,
-      { onMetric: this.options.onMetric, maxBatchSize: this.options.receiverMaxBatchSize }
+      {
+        onMetric: this.options.onMetric,
+        maxBatchSize: this.options.receiverMaxBatchSize,
+        // Use Bridge's releaseCallback for proper Host/Guest routing
+        releaseCallback: (fnId) => this.bridge?.releaseCallback(fnId),
+      }
     );
+
+    // BridgeV2 is now connected via the hostReceiver in the constructor, so setBridge is obsolete.
+
     if (this.options.debug) {
       this.options.logger.log(`[rill:${this.id}] Receiver created`);
     }
@@ -1419,6 +1360,39 @@ export class Engine implements IEngine {
   }
 
   /**
+   * Get timer statistics (for testing/debugging)
+   */
+  getTimerStats(): { timeouts: number; intervals: number } {
+    return this.timerManager.getStats();
+  }
+
+  /**
+   * Get Guest callback registry size (for testing/debugging)
+   *
+   * Returns callbacks registered in Guest's globalCallbackRegistry (reconciler usage)
+   * plus callbacks registered in Host's callbackRegistry (manual operations).
+   *
+   * Two sources of callbacks:
+   * 1. Guest reconciler: serializes functions → Guest's globalCallbackRegistry
+   * 2. Manual operations: raw functions → Host's callbackRegistry via Bridge
+   */
+  get guestCallbackCount(): number {
+    // Host's callbackRegistry (for manual operations via __sendToHost)
+    const hostCount = this.callbackRegistry.size;
+
+    // Guest's globalCallbackRegistry (for reconciler usage)
+    let guestCount = 0;
+    if (this.context) {
+      const reconciler = this.context.getGlobal('RillReconciler') as
+        | RillReconcilerGlobal
+        | undefined;
+      guestCount = reconciler?.getCallbackCount?.() ?? 0;
+    }
+
+    return hostCount + guestCount;
+  }
+
+  /**
    * Destroy engine and release all resources
    */
   destroy(): void {
@@ -1426,6 +1400,8 @@ export class Engine implements IEngine {
 
     this.destroyed = true;
     this.loaded = false;
+    this.diagnostics.setLoaded(false);
+    this.diagnostics.setDestroyed(true);
 
     if (this.options.debug) {
       this.options.logger.log(`[rill:${this.id}] Destroying engine`);
@@ -1433,11 +1409,29 @@ export class Engine implements IEngine {
 
     this.emit('destroy');
 
+    // Clean up component type registry for this engine (JSI-safe function component transport)
+    // Must be done before context disposal
+    try {
+      const reconciler = this.context?.getGlobal('RillReconciler') as
+        | RillReconcilerGlobal
+        | undefined;
+      reconciler?.unregisterComponentTypes?.(this.id);
+    } catch {
+      // ignore
+    }
+
     // Clear all pending timers
     this.clearAllTimers();
 
     this.receiver?.clear();
     this.receiver = null;
+
+    // Clear callback registry - this Engine's callbacks are no longer valid
+    this.callbackRegistry.clear();
+
+    // Clean up Bridge (clears pending promises to prevent timeout errors)
+    this.bridge?.destroy();
+    this.bridge = null;
 
     this.context?.dispose();
     this.context = null;
@@ -1462,21 +1456,8 @@ export class Engine implements IEngine {
    * Clear all pending timers (timeouts and intervals)
    */
   private clearAllTimers(): void {
-    // Clear all timeouts
-    for (const handle of this.timeoutMap.values()) {
-      this.nativeClearTimeout?.(handle);
-    }
-    this.timeoutMap.clear();
-
-    // Clear all intervals
-    for (const handle of this.intervalMap.values()) {
-      this.nativeClearInterval?.(handle);
-    }
-    this.intervalMap.clear();
-
-    if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Cleared all timers`);
-    }
+    // Delegate to TimerManager
+    this.timerManager.clearAllTimers();
   }
 
   /**
@@ -1490,14 +1471,37 @@ export class Engine implements IEngine {
 
     this.destroyed = true;
     this.loaded = false;
+    this.diagnostics.setLoaded(false);
+    this.diagnostics.setDestroyed(true);
 
     // Don't emit 'destroy' event during force destroy to avoid callbacks
+
+    // Best-effort cleanup for component type registry (before context disposal)
+    try {
+      const reconciler = this.context?.getGlobal('RillReconciler') as
+        | RillReconcilerGlobal
+        | undefined;
+      reconciler?.unregisterComponentTypes?.(this.id);
+    } catch {
+      // ignore
+    }
 
     // Clear all pending timers first
     this.clearAllTimers();
 
     this.receiver?.clear();
     this.receiver = null;
+
+    // Clear callback registry
+    this.callbackRegistry.clear();
+
+    // Clean up Bridge (clears pending promises to prevent timeout errors)
+    try {
+      this.bridge?.destroy();
+    } catch {
+      // Ignore errors during force destroy
+    }
+    this.bridge = null;
 
     try {
       this.context?.dispose();
@@ -1535,108 +1539,17 @@ export class Engine implements IEngine {
    * Get resource statistics for monitoring
    */
   getResourceStats(): { timers: number; nodes: number; callbacks: number } {
-    // Get callback count from reconciler
-    const callbackRegistry = this.sendToHostFn
-      ? RillReconciler.getCallbackRegistry(this.sendToHostFn)
-      : null;
-
+    const timerStats = this.timerManager.getStats();
     return {
-      timers: this.timeoutMap.size + this.intervalMap.size,
+      timers: timerStats.timeouts + timerStats.intervals,
       nodes: this.receiver?.nodeCount ?? 0,
-      callbacks: callbackRegistry?.size ?? 0,
+      // Use Engine's own callbackRegistry
+      callbacks: this.callbackRegistry.size,
     };
   }
 
   getDiagnostics(): EngineDiagnostics {
-    const now = Date.now();
-    const cutoff = now - this.activityWindowMs;
-
-    // Calculate ops and batches within stats window
-    let windowOps = 0;
-    let windowBatches = 0;
-    for (let i = this.activitySamples.length - 1; i >= 0; i--) {
-      const s = this.activitySamples[i]!;
-      if (s.at < cutoff) break;
-      windowOps += s.ops;
-      windowBatches += 1;
-    }
-
-    const seconds = this.activityWindowMs / 1000;
-    const opsPerSecond = seconds > 0 ? windowOps / seconds : 0;
-    const batchesPerSecond = seconds > 0 ? windowBatches / seconds : 0;
-
-    // Timeline (for trends/attribution): aggregate recent activityHistoryMs into fixed buckets
-    const bucketMs = this.activityBucketMs;
-    const bucketCount = Math.max(1, Math.ceil(this.activityHistoryMs / bucketMs));
-    const timelineWindowMs = bucketCount * bucketMs;
-    const timelineStart = now - timelineWindowMs;
-    const timelineEnd = timelineStart + timelineWindowMs;
-
-    const buckets = Array.from({ length: bucketCount }, () => ({
-      ops: 0,
-      batches: 0,
-      skippedOps: 0,
-      applyMsSum: 0,
-      applyMsCount: 0,
-      applyMsMax: 0,
-    }));
-
-    for (const s of this.activitySamples) {
-      if (s.at < timelineStart) continue;
-      const atForBucket = Math.min(s.at, timelineEnd - 1);
-      if (atForBucket < timelineStart) continue;
-      const idx = Math.floor((atForBucket - timelineStart) / bucketMs);
-      if (idx < 0 || idx >= buckets.length) continue;
-      const b = buckets[idx]!;
-      b.ops += s.ops;
-      b.batches += 1;
-      b.skippedOps += s.skippedOps;
-      if (s.applyDurationMs != null) {
-        b.applyMsSum += s.applyDurationMs;
-        b.applyMsCount += 1;
-        b.applyMsMax = Math.max(b.applyMsMax, s.applyDurationMs);
-      }
-    }
-
-    const timeline = {
-      windowMs: timelineWindowMs,
-      bucketMs,
-      points: buckets.map((b, i) => ({
-        at: timelineStart + (i + 1) * bucketMs,
-        ops: b.ops,
-        batches: b.batches,
-        skippedOps: b.skippedOps,
-        applyDurationMsAvg: b.applyMsCount > 0 ? b.applyMsSum / b.applyMsCount : null,
-        applyDurationMsMax: b.applyMsCount > 0 ? b.applyMsMax : null,
-      })),
-    };
-
-    return {
-      id: this.id,
-      health: this.getHealth(),
-      resources: this.getResourceStats(),
-      activity: {
-        windowMs: this.activityWindowMs,
-        opsPerSecond,
-        batchesPerSecond,
-        totalBatches: this.totalBatches,
-        totalOps: this.totalOps,
-        lastBatch: this.lastBatch,
-        timeline,
-      },
-      receiver: this.receiver ? this.receiver.getStats() : null,
-      host: {
-        lastEventName: this.lastHostEventName,
-        lastEventAt: this.lastHostEventAt,
-        lastPayloadBytes: this.lastHostPayloadBytes,
-      },
-      guest: {
-        lastEventName: this.lastGuestEventName,
-        lastEventAt: this.lastGuestEventAt,
-        lastPayloadBytes: this.lastGuestPayloadBytes,
-        sleeping: this.guestSleeping,
-        sleepingAt: this.guestSleepingAt,
-      },
-    };
+    // Delegate to DiagnosticsCollector
+    return this.diagnostics.getDiagnostics(this.receiver, () => this.getResourceStats());
   }
 }

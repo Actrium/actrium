@@ -4,14 +4,15 @@
  * Collects debug data from the Host runtime (operation logs, performance)
  */
 
+import { isSerializedFunction } from '../bridge';
 import type {
+  HostMetrics,
   HostTreeNode,
+  NodeId,
   OperationLogEntry,
   OperationRecord,
-  HostMetrics,
   SandboxStatus,
   Timestamp,
-  NodeId,
 } from './types';
 
 // ============ Configuration ============
@@ -217,12 +218,9 @@ export class RuntimeCollector {
         continue; // Skip functions
       }
 
-      if (
-        typeof value === 'object' &&
-        value !== null &&
-        '__type' in value &&
-        (value as { __type: string }).__type === 'function'
-      ) {
+      // Use shared type guard to detect serialized functions
+      // biome-ignore lint/suspicious/noExplicitAny: Type guard accepts any value for checking
+      if (isSerializedFunction(value as any)) {
         result[key] = '[Callback]';
         continue;
       }

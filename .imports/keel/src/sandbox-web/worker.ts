@@ -10,16 +10,18 @@ interface WorkerMessage {
   id: string;
   code?: string;
   name?: string;
+  // Reason: Worker message value can be any serializable type
   value?: unknown;
 }
 
 interface WorkerResponse {
   id: string;
+  // Reason: eval() and getGlobal() return arbitrary types
   result?: unknown;
   error?: { name: string; message: string; stack?: string };
 }
 
-// Global scope for sandboxed code
+// Reason: Sandbox global variables can be any serializable type
 const sandbox: Record<string, unknown> = {};
 
 const postResponse = (response: WorkerResponse) => {

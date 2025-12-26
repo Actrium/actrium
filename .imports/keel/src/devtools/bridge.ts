@@ -4,7 +4,9 @@
  * Connects Host RuntimeCollector with Guest debug messages
  */
 
+import type { NodeInstance, RuntimeCollector } from './runtime';
 import type {
+  ConsoleEntry,
   DevToolsEvent,
   DevToolsEventType,
   EventHandler,
@@ -12,14 +14,12 @@ import type {
   GuestError,
   HostMetrics,
   HostTreeNode,
+  OperationLogEntry,
   ProfilingReport,
   ProfilingSession,
   SandboxStatus,
   Unsubscribe,
-  ConsoleEntry,
-  OperationLogEntry,
 } from './types';
-import type { RuntimeCollector, NodeInstance } from './runtime';
 
 // ============ Bridge ============
 

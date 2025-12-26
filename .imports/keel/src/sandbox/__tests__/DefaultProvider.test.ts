@@ -37,18 +37,4 @@ describe('DefaultProvider', () => {
       runtime.dispose();
     });
   });
-
-  describe('Worker environment', () => {
-    it('should throw when worker requested but not available', () => {
-      // In Node.js, Worker is not available by default
-      // This test verifies the error handling
-      const hasWorker = typeof Worker !== 'undefined';
-
-      if (!hasWorker) {
-        expect(() => DefaultProvider.create({ sandbox: SandboxType.Worker })).toThrow(
-          'WorkerProvider requested but Worker not available'
-        );
-      }
-    });
-  });
 });
