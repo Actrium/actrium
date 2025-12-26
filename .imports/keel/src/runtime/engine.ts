@@ -154,6 +154,7 @@ export class Engine implements IEngine {
       'react',
       'react-native',
       'react/jsx-runtime',
+      'react/jsx-dev-runtime',
       '@rill/let',
       'rill/reconciler',
     ]);
@@ -709,6 +710,9 @@ export class Engine implements IEngine {
         case 'react/jsx-runtime':
           // Return Guest's JSX runtime shim (injected via injectReactShims)
           return this.context?.getGlobal('ReactJSXRuntime');
+        case 'react/jsx-dev-runtime':
+          // Return Guest's JSX dev runtime shim (same as production runtime)
+          return this.context?.getGlobal('ReactJSXDevRuntime');
         case 'rill/reconciler': {
           // Return Guest's RillReconciler (injected via injectGuestReconciler)
           // Reconciler now runs entirely in Guest
