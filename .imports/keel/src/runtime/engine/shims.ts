@@ -321,8 +321,119 @@ globalThis.React = globalThis.__rillCreateSafeShim('React', {
       }
     };
     return context;
+  },
+
+  // ============ Component (class component support) ============
+  Component: (function() {
+    function Component(props) {
+      this.props = props || {};
+      this.state = {};
+      this._pendingState = null;
+    }
+
+    Component.prototype.setState = function(partialState, callback) {
+      var _this = this;
+      // Merge state
+      if (typeof partialState === 'function') {
+        partialState = partialState(this.state, this.props);
+      }
+      this.state = Object.assign({}, this.state, partialState);
+      // Trigger re-render
+      globalThis.__rillScheduleRender();
+      // Callback after state update
+      if (typeof callback === 'function') {
+        Promise.resolve().then(callback);
+      }
+    };
+
+    Component.prototype.forceUpdate = function(callback) {
+      globalThis.__rillScheduleRender();
+      if (typeof callback === 'function') {
+        Promise.resolve().then(callback);
+      }
+    };
+
+    Component.prototype.render = function() {
+      return null;
+    };
+
+    // Static method for getDerivedStateFromError
+    Component.getDerivedStateFromError = null;
+
+    return Component;
+  })(),
+
+  // ============ PureComponent (defined after React is fully created) ============
+  PureComponent: null, // Will be set after React is assigned to globalThis
+
+  // ============ Children utilities ============
+  Children: {
+    map: function(children, fn) {
+      if (children == null) return [];
+      if (!Array.isArray(children)) children = [children];
+      return children.map(fn);
+    },
+    forEach: function(children, fn) {
+      if (children == null) return;
+      if (!Array.isArray(children)) children = [children];
+      children.forEach(fn);
+    },
+    count: function(children) {
+      if (children == null) return 0;
+      if (!Array.isArray(children)) return 1;
+      return children.length;
+    },
+    only: function(children) {
+      if (Array.isArray(children) && children.length !== 1) {
+        throw new Error('React.Children.only expected one child');
+      }
+      return Array.isArray(children) ? children[0] : children;
+    },
+    toArray: function(children) {
+      if (children == null) return [];
+      if (!Array.isArray(children)) return [children];
+      return children;
+    }
+  },
+
+  // ============ isValidElement ============
+  isValidElement: function(object) {
+    return (
+      typeof object === 'object' &&
+      object !== null &&
+      object.__rillTypeMarker === '__rill_react_element__'
+    );
+  },
+
+  // ============ cloneElement ============
+  cloneElement: function(element, props) {
+    if (!globalThis.React.isValidElement(element)) {
+      return element;
+    }
+    var newProps = Object.assign({}, element.props, props);
+    // Handle children passed as additional arguments (ES5 compatible)
+    if (arguments.length > 2) {
+      var children = Array.prototype.slice.call(arguments, 2);
+      newProps.children = children.length === 1 ? children[0] : children;
+    }
+    return {
+      __rillTypeMarker: '__rill_react_element__',
+      type: element.type,
+      props: newProps
+    };
   }
 });
+
+// Define PureComponent after React is fully created
+(function() {
+  function PureComponent(props) {
+    globalThis.React.Component.call(this, props);
+  }
+  PureComponent.prototype = Object.create(globalThis.React.Component.prototype);
+  PureComponent.prototype.constructor = PureComponent;
+  PureComponent.prototype.isPureReactComponent = true;
+  globalThis.React.PureComponent = PureComponent;
+})();
 
 // JSX Runtime shim
 globalThis.ReactJSXRuntime = globalThis.__rillCreateSafeShim('ReactJSXRuntime', {
