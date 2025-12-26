@@ -6,8 +6,13 @@ dist/
 *.tsbuildinfo
 
 # Native build artifacts
+native/quickjs/build/
 native/quickjs/build-wasm/
 native/jsc/build/
+
+# Test project artifacts
+tests/*/macos/build/
+tests/*/package-lock.json
 
 # IDE
 .idea/
