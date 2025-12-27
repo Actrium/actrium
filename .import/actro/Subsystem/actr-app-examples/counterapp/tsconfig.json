@@ -7,7 +7,13 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "moduleResolution": "bundler"
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "rill/let": ["../../../../rill/src/sdk/index.ts"],
+      "rill/sdk": ["../../../../rill/src/sdk/index.ts"],
+      "askit": ["../../../askit/src/index.ts"]
+    }
   },
   "include": ["src/**/*"]
 }
