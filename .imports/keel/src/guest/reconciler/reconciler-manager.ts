@@ -5,7 +5,9 @@
  * Each sendToHost function gets its own isolated reconciler instance.
  */
 
-import type { ReactElement } from 'react';
+// Use internal type alias - avoid external @types/react dependency
+// biome-ignore lint/suspicious/noExplicitAny: Internal type alias for flexibility
+type ReactElement = any;
 import type { GuestElement } from '../../sdk/types';
 import { type CallbackRegistry, CallbackRegistryImpl, type SendToHost } from '../../shared';
 import { transformGuestElement } from './element-transform';
