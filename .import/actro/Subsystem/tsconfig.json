@@ -18,7 +18,7 @@
       "askit": ["../../askit/src/index.host.ts"],
       "askit/core": ["../../askit/src/core/index.ts"],
       "askit/contracts": ["../../askit/src/contracts/index.ts"],
-      "rill": ["../../rill/src/runtime/index.ts"]
+      "rill": ["../../rill/src/host/index.ts"]
     }
   },
   "include": ["index.ts", "src"],

@@ -2,7 +2,7 @@
   "name": "counterapp",
   "version": "2.1.0",
   "description": "Interactive Counter Test App",
-  "entry": "dist/unified-app.js",
+  "entry": "dist/bundle.js",
   "leftPanelDefaultVisible": true,
   "rightPanelDefaultVisible": true,
   "contract": {
@@ -12,7 +12,7 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "dist/unified-app.js": "d815f3855e057093b5bac64f87e183a5eb0cfb2864df4ea7e6d13af3e8094d2e"
+      "dist/bundle.js": "1968fb7dd3dcd0150f6b94327dfac5ba47b941acca86b17bea2cdd49c781e7e5"
     }
   }
 }
