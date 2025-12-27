@@ -16,14 +16,16 @@
 
 ```
 rill/
-├── (default)       # Host 运行时 (Engine, EngineView, Receiver)
-├── /let            # Guest SDK (组件、Hooks)
-├── /devtools       # 开发工具
-├── /sandbox        # 沙箱提供者
-├── /sandbox-native # 原生沙箱 (JSC/QuickJS)
-├── /sandbox-web    # Web 沙箱 (Worker)
-└── /cli            # CLI 构建工具
+├── (default)        # Host 运行时 (Engine, EngineView, Receiver)
+├── /sdk             # Guest SDK (组件、Hooks)
+├── /devtools        # 开发工具
+├── /sandbox         # 沙箱提供者 (自动检测)
+├── /sandbox/native  # 原生沙箱 (JSC/QuickJS)
+├── /sandbox/web     # Web 沙箱 (Worker)
+└── /cli             # CLI 构建工具
 ```
+
+> 注意：`rill/let` 是 `rill/sdk` 的已弃用别名。
 
 ## 快速开始
 
@@ -80,7 +82,7 @@ function App() {
 ### Guest 开发
 
 ```tsx
-import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/let';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/sdk';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -144,7 +146,7 @@ bun run rill/cli analyze dist/bundle.js
 | 模块 | 导入路径 | 描述 |
 |------|----------|------|
 | Runtime | `rill` | Host 运行时：Engine、EngineView、Receiver |
-| Guest SDK | `rill/let` | Guest 开发套件：组件、Hooks |
+| Guest SDK | `rill/sdk` | Guest 开发套件：组件、Hooks |
 | DevTools | `rill/devtools` | 调试工具：操作日志、树形检查 |
 | CLI | `rill/cli` | Guest 打包器（基于 Bun） |
 
@@ -182,7 +184,7 @@ engine.destroy();
 ### SDK Hooks
 
 ```typescript
-import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'rill/let';
+import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'rill/sdk';
 
 // 订阅 Host 事件
 useHostEvent('EVENT_NAME', (payload) => { /* 处理 */ });
@@ -218,7 +220,7 @@ Guest 使用 SDK hook `useHostEvent(event, callback)` 订阅，Host 通过 `engi
 
 **Guest 示例：**
 ```tsx
-import { View, Text, useHostEvent, useSendToHost } from 'rill/let';
+import { View, Text, useHostEvent, useSendToHost } from 'rill/sdk';
 
 export default function Guest() {
   const send = useSendToHost();
