@@ -10,7 +10,7 @@
  * @version 2.1.0 - Add: Cross-panel interaction
  */
 import React, { useState } from 'react';
-import { View } from 'react-native';
+import { View } from 'rill/let';
 import { Panel } from 'askit';
 import LeftPanel from './left-panel';
 import RightPanel from './right-panel';

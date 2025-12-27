@@ -102,10 +102,11 @@ final class CanvasReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelega
         NativePerfTimer.shared.mark("bundleURL() 调用")
         #if DEBUG
         // 开发时强制走 Metro（支持热重载）；Debug 环境不回退到离线 actr.jsbundle（避免落到过期 bundle 导致"白屏无渲染"）
-        // 直接使用 localhost:8081，避免 RCTBundleURLProvider 返回空 hostname 的问题
+        // 直接使用 localhost:8082，避免 RCTBundleURLProvider 返回空 hostname 的问题
+        // 端口 8082 与 Canvas/Subsystem 的 dev.ts 默认配置保持一致
         let url = RCTBundleURLProvider.jsBundleURL(
             forBundleRoot: "index",
-            packagerHost: "localhost:8081",
+            packagerHost: "localhost:8082",
             enableDev: true,
             enableMinification: false,
             inlineSourceMap: false
