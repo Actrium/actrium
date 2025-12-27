@@ -12,8 +12,6 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "react": ["../../../../rill/src/guest/shims/react.ts"],
-      "react/jsx-runtime": ["../../../../rill/src/guest/shims/jsx-runtime.ts"],
       "rill/let": ["../../../../rill/src/sdk/index.ts"],
       "rill/sdk": ["../../../../rill/src/sdk/index.ts"],
       "askit": ["../../../askit/src/index.ts"]
