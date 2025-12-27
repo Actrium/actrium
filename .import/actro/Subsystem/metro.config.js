@@ -56,11 +56,11 @@ const customConfig = {
       }
 
       // Workaround: rill root package.json exports points to source, but we want to be explicit
-      // Pin to the actual runtime entry to keep Metro + TS consistent.
+      // Pin to the actual host entry to keep Metro + TS consistent.
       if (moduleName === 'rill') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(goAskAwayRoot, 'rill', 'src', 'runtime', 'index.ts'),
+          filePath: path.resolve(goAskAwayRoot, 'rill', 'src', 'host', 'index.ts'),
         };
       }
 
