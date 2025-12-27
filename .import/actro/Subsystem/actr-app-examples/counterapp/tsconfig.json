@@ -1,19 +1,24 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "ESNext",
-    "lib": ["ES2020"],
+    "lib": ["ES2022"],
     "jsx": "react-jsx",
-    "strict": true,
+    "jsxImportSource": "react",
+    "strict": false,
+    "noImplicitAny": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "react": ["../../../../rill/src/guest/shims/react.ts"],
+      "react/jsx-runtime": ["../../../../rill/src/guest/shims/jsx-runtime.ts"],
       "rill/let": ["../../../../rill/src/sdk/index.ts"],
       "rill/sdk": ["../../../../rill/src/sdk/index.ts"],
       "askit": ["../../../askit/src/index.ts"]
     }
   },
-  "include": ["src/**/*"]
+  "include": ["entry.ts", "src/**/*"],
+  "exclude": ["**/node_modules/**", "**/rill/src/guest/reconciler/**"]
 }

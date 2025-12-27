@@ -195,6 +195,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     const debugInfo = receiver.getDebugInfo?.();
     if (debugInfo) {
       nlog(`[ActrTabView] debugInfo: nodes=${debugInfo.nodeCount}, rootChildren=[${debugInfo.rootChildren?.join(',')}], appendCalls=${debugInfo.appendCalls}`);
+      // Print all node types
+      if (debugInfo.nodes && debugInfo.nodes.length > 0) {
+        const nodeTypes = debugInfo.nodes.map(n => `${n.id}:${n.type}(${n.childCount})`).join(', ');
+        nlog(`[ActrTabView] nodeTypes: ${nodeTypes}`);
+      }
     }
     const fullTree = receiver.render();
     nlog(`[ActrTabView] fullTree: ${fullTree === null ? 'NULL' : typeof fullTree}, isEl=${React.isValidElement(fullTree)}`);
