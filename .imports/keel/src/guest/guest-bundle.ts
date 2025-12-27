@@ -32,17 +32,19 @@ import './init';
 import './globals-setup';
 
 // ============================================
-// 3. React/JSX Shims
+// 3. Real React (not shim)
 // ============================================
-import { React, ReactJSXDevRuntime, ReactJSXRuntime } from './shims/react';
+import * as React from 'react';
+import * as ReactJSXRuntime from 'react/jsx-runtime';
 
-// Mark shims as loaded
-(globalThis as Record<string, unknown>).__REACT_SHIM__ = true;
+// Mark React as loaded (using real React, not shim)
+(globalThis as Record<string, unknown>).__REACT_SHIM__ = false;
+(globalThis as Record<string, unknown>).__REACT_REAL__ = true;
 
 // Export React to globalThis
 (globalThis as Record<string, unknown>).React = React;
 (globalThis as Record<string, unknown>).ReactJSXRuntime = ReactJSXRuntime;
-(globalThis as Record<string, unknown>).ReactJSXDevRuntime = ReactJSXDevRuntime;
+(globalThis as Record<string, unknown>).ReactJSXDevRuntime = ReactJSXRuntime; // Same as JSXRuntime in React 19
 
 // ============================================
 // 4. Reconciler
