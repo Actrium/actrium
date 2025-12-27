@@ -17,15 +17,15 @@ declare const __console_error: (...args: unknown[]) => void;
 declare const __console_debug: (...args: unknown[]) => void;
 declare const __console_info: (...args: unknown[]) => void;
 
-if (typeof globalThis.console === 'undefined') {
-  (globalThis as Record<string, unknown>).console = {
-    log: (...args: unknown[]) => __console_log(...args),
-    warn: (...args: unknown[]) => __console_warn(...args),
-    error: (...args: unknown[]) => __console_error(...args),
-    debug: (...args: unknown[]) => __console_debug(...args),
-    info: (...args: unknown[]) => __console_info(...args),
-  };
-}
+// ALWAYS override console to route to Host's __console_* functions
+// JSC sandbox may have a pre-defined console that doesn't route to Host
+(globalThis as Record<string, unknown>).console = {
+  log: (...args: unknown[]) => __console_log(...args),
+  warn: (...args: unknown[]) => __console_warn(...args),
+  error: (...args: unknown[]) => __console_error(...args),
+  debug: (...args: unknown[]) => __console_debug(...args),
+  info: (...args: unknown[]) => __console_info(...args),
+};
 
 // ============================================
 // Host Event System

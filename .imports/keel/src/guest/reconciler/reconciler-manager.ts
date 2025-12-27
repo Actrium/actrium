@@ -32,8 +32,16 @@ interface ReconcilerInstance {
 /**
  * Map of sendToHost functions to their reconciler instances
  * This allows multiple guests to each have their own isolated reconciler
+ *
+ * Stored on globalThis for idempotent initialization:
+ * - Engine may inject GUEST_BUNDLE_CODE first
+ * - Then bundle.js (containing guest-bundle) executes
+ * - Both should share the same reconcilerMap instance
  */
-const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
+const globals = globalThis as Record<string, unknown>;
+const reconcilerMap: Map<SendToHost, ReconcilerInstance> =
+  (globals.__rillReconcilerMap as Map<SendToHost, ReconcilerInstance>) ??
+  (globals.__rillReconcilerMap = new Map<SendToHost, ReconcilerInstance>());
 
 /**
  * Global callback registry for Guest environment (sandbox internal use)
@@ -48,8 +56,12 @@ const reconcilerMap = new Map<SendToHost, ReconcilerInstance>();
  * - Legacy compatibility within sandbox context
  *
  * For new code, prefer using Engine's callbackRegistry via Bridge.
+ *
+ * Stored on globalThis for idempotent initialization.
  */
-export const globalCallbackRegistry = new CallbackRegistryImpl();
+export const globalCallbackRegistry: CallbackRegistry =
+  (globals.__rillGlobalCallbackRegistry as CallbackRegistry) ??
+  (globals.__rillGlobalCallbackRegistry = new CallbackRegistryImpl());
 
 // ============================================
 // Public API
@@ -109,9 +121,12 @@ export function render(element: ReactElement, sendToHost: SendToHost): void {
       false, // isStrictMode
       null, // concurrentUpdatesByDefaultOverride
       'rill', // identifierPrefix
-      (error: Error) => console.error('[rill] onUncaughtError:', error), // onUncaughtError
-      (error: Error) => console.error('[rill] onCaughtError:', error), // onCaughtError
-      (error: Error) => console.error('[rill] onRecoverableError:', error), // onRecoverableError
+      // biome-ignore lint/suspicious/noExplicitAny: Error could be non-standard
+      (error: any) => console.error('[rill] onUncaughtError:', error?.message ?? error, error?.stack ?? ''), // onUncaughtError
+      // biome-ignore lint/suspicious/noExplicitAny: Error could be non-standard
+      (error: any) => console.error('[rill] onCaughtError:', error?.message ?? error, error?.stack ?? ''), // onCaughtError
+      // biome-ignore lint/suspicious/noExplicitAny: Error could be non-standard
+      (error: any) => console.error('[rill] onRecoverableError:', error?.message ?? error, error?.stack ?? ''), // onRecoverableError
       () => {}, // onDefaultTransitionIndicator
       null // transitionCallbacks
     );
