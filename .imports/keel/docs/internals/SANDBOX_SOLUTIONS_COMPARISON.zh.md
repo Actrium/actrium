@@ -33,7 +33,7 @@ Rill 只提供 **4 种经过验证的沙箱方案**，全部支持**方案 B**�
 
 **使用**：
 ```typescript
-import { JSCProvider } from 'rill/sandbox-native';
+import { JSCProvider } from 'rill/sandbox/native';
 
 const engine = new Engine({
   provider: new JSCProvider({ timeout: 5000 })
@@ -56,7 +56,7 @@ const engine = new Engine({
 
 **使用**：
 ```typescript
-import { QuickJSProvider } from 'rill/sandbox-native';
+import { QuickJSProvider } from 'rill/sandbox/native';
 
 const engine = new Engine({
   provider: new QuickJSProvider({ timeout: 5000 })
@@ -80,7 +80,7 @@ const engine = new Engine({
 
 **使用**：
 ```typescript
-import { QuickJSNativeWASMProvider } from 'rill/sandbox-web';
+import { QuickJSNativeWASMProvider } from 'rill/sandbox/web';
 
 const engine = new Engine({
   provider: new QuickJSNativeWASMProvider({
@@ -131,18 +131,18 @@ const engine = new Engine({
 
 ```typescript
 // iOS/macOS
-import { JSCProvider } from 'rill/sandbox-native';
+import { JSCProvider } from 'rill/sandbox/native';
 const provider = new JSCProvider();
 
 // Android/跨平台
-import { QuickJSProvider } from 'rill/sandbox-native';
+import { QuickJSProvider } from 'rill/sandbox/native';
 const provider = new QuickJSProvider();
 ```
 
 ### Web 端小程序平台
 
 ```typescript
-import { QuickJSNativeWASMProvider } from 'rill/sandbox-web';
+import { QuickJSNativeWASMProvider } from 'rill/sandbox/web';
 
 const provider = new QuickJSNativeWASMProvider({
   wasmPath: '/assets/quickjs_sandbox.wasm'

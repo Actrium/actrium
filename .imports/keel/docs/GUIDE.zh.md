@@ -35,7 +35,7 @@ npm install rill
 
 ```tsx
 // src/guest.tsx
-import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/let';
+import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/sdk';
 
 interface Config {
   title: string;
@@ -151,7 +151,7 @@ my-guest/
 虚组件是字符串标识符，在构建时被转换为操作指令：
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/let';
+import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/sdk';
 
 function MyComponent() {
   return (
@@ -176,7 +176,7 @@ function MyComponent() {
 #### useConfig - 获取配置
 
 ```tsx
-import { useConfig } from 'rill/let';
+import { useConfig } from 'rill/sdk';
 
 interface Config {
   userId: string;
@@ -200,7 +200,7 @@ function Guest() {
 
 ```tsx
 import { useState } from 'react';
-import { View, Text, useHostEvent } from 'rill/let';
+import { View, Text, useHostEvent } from 'rill/sdk';
 
 function Guest() {
   const [refreshCount, setRefreshCount] = useState(0);
@@ -219,7 +219,7 @@ function Guest() {
 #### useSendToHost - 发送事件到宿主
 
 ```tsx
-import { TouchableOpacity, Text, useSendToHost } from 'rill/let';
+import { TouchableOpacity, Text, useSendToHost } from 'rill/sdk';
 
 function Guest() {
   const sendToHost = useSendToHost();
@@ -241,7 +241,7 @@ function Guest() {
 调用宿主组件实例的方法（如 `focus()`、`scrollTo()` 等）：
 
 ```tsx
-import { useRemoteRef, View, TextInput, TouchableOpacity, Text, TextInputRef } from 'rill/let';
+import { useRemoteRef, View, TextInput, TouchableOpacity, Text, TextInputRef } from 'rill/sdk';
 
 function Guest() {
   const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
@@ -311,7 +311,7 @@ function Guest() {
 
 ```tsx
 import { useState } from 'react';
-import { View, Text, FlatList } from 'rill/let';
+import { View, Text, FlatList } from 'rill/sdk';
 
 interface Item {
   id: string;

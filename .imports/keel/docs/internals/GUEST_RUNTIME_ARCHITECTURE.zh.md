@@ -47,21 +47,21 @@ src/
 │   └── build/
 │       └── bundle.ts          # 自动生成的构建产物（勿手动编辑）
 │
-├── let/                       # 用户 API (rill/let)
+├── sdk/                       # 用户 API (rill/sdk)
 │   ├── index.ts               # 公共导出 (View, Text, hooks)
 │   ├── sdk.ts                 # 组件和 Hooks 实现
 │   └── types.ts               # 用户类型
 │
-├── bridge/                    # 共享协议层
+├── shared/                    # 共享协议层
 │   ├── index.ts               # 协议导出
 │   ├── types.ts               # 操作和消息类型
 │   ├── TypeRules.ts           # 序列化规则
 │   ├── serialization.ts       # 编解码工具
 │   └── CallbackRegistry.ts    # 跨边界函数管理
 │
-└── runtime/                   # Host 运行时
-    ├── engine.ts              # Engine（加载和执行 Guest）
-    ├── receiver.ts            # 接收操作，渲染 UI
+└── host/                      # Host 运行时
+    ├── Engine.ts              # Engine（加载和执行 Guest）
+    ├── receiver/              # 接收操作，渲染 UI
     └── bridge/Bridge.ts       # Host 端序列化
 ```
 
@@ -227,23 +227,23 @@ CallbackRegistry.invoke(fnId, args)
 2. **版本一致性**：React 和 Reconciler 版本锁定
 3. **体积优化**：构建时 tree-shaking 和压缩
 
-### 为什么分离 `src/let/` 和 `src/guest-bundle/`？
+### 为什么分离 `src/sdk/` 和 `src/guest/`？
 
-- **`src/let/`**：用户 API —— 开发者在 Guest 代码中导入的内容
-- **`src/guest-bundle/`**：运行时内部 —— 由 Engine 打包并注入
+- **`src/sdk/`**：用户 API —— 开发者在 Guest 代码中导入的内容
+- **`src/guest/`**：运行时内部 —— 由 Engine 打包并注入
 
-用户从 `rill/let` 导入：
+用户从 `rill/sdk` 导入：
 ```tsx
-import { View, Text, useHostEvent } from 'rill/let';
+import { View, Text, useHostEvent } from 'rill/sdk';
 ```
 
 他们不会直接使用 `render()`、`CallbackRegistry` 等 —— 那些是运行时内部实现。
 
 ### 共享 Bridge 协议
 
-`src/bridge/` 包含双方共享的序列化协议：
+`src/shared/` 包含双方共享的序列化协议：
 - **Guest 端**：打包进 `GUEST_BUNDLE_CODE`
-- **Host 端**：由 `src/runtime/bridge/Bridge.ts` 直接导入
+- **Host 端**：由 `src/host/bridge/Bridge.ts` 直接导入
 
 这确保双方使用相同的序列化逻辑。
 
@@ -257,16 +257,16 @@ import { View, Text, useHostEvent } from 'rill/let';
 | `guest-bundle/reconciler/host-config.ts` | react-reconciler 配置 |
 | `guest-bundle/reconciler/reconciler-manager.ts` | 管理 Reconciler 实例，公共 API |
 | `guest-bundle/reconciler/operation-collector.ts` | 发送前批量收集操作 |
-| `runtime/engine.ts` | 加载 bundle，注入代码，管理沙箱生命周期 |
-| `runtime/engine/shims.ts` | React hooks 和 JSX 运行时 shims |
-| `runtime/engine/SandboxHelpers.ts` | Console 和运行时助手注入代码 |
+| `host/Engine.ts` | 加载 bundle，注入代码，管理沙箱生命周期 |
+| `guest/shims/*.ts` | React hooks 和 JSX 运行时 shims |
+| `guest/globals-setup.ts` | Console 和运行时助手设置 |
 
 ## 重新生成 Guest Bundle
 
-修改 `src/guest-bundle/` 或 `src/bridge/` 中的任何文件后：
+修改 `src/guest/` 或 `src/shared/` 中的任何文件后：
 
 ```bash
-bun scripts/build-guest-bundle.ts
+bun src/scripts/build-guest.ts
 ```
 
-这将重新生成 `src/guest-bundle/build/bundle.ts`。该文件应提交到版本控制。
+这将重新生成 `src/guest/build/bundle.ts`。该文件应提交到版本控制。

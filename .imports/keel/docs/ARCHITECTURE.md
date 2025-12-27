@@ -65,28 +65,34 @@
 ```
 rill/
 ├── src/
-│   ├── runtime/           # Host runtime
-│   │   ├── engine.ts      # Engine main class
-│   │   ├── receiver.ts    # Operation receiver
+│   ├── host/              # Host runtime
+│   │   ├── Engine.ts      # Engine main class
+│   │   ├── receiver/      # Operation receiver
 │   │   ├── registry.ts    # Component registry
 │   │   ├── bridge/        # Runtime bridge layer
 │   │   └── engine/        # Engine internal modules
 │   │
-│   ├── let/               # Guest SDK
+│   ├── sdk/               # Guest SDK
 │   │   ├── index.ts       # SDK exports
 │   │   ├── sdk.ts         # Hooks implementation
-│   │   ├── types.ts       # Type definitions
-│   │   └── reconciler/    # Custom reconciler
+│   │   └── types.ts       # Type definitions
 │   │
-│   ├── bridge/            # Shared bridge utilities
-│   │   ├── index.ts       # Bridge exports
+│   ├── guest/             # Guest runtime (sandbox code)
+│   │   ├── reconciler/    # Custom reconciler
+│   │   ├── shims/         # React/JSX shims
+│   │   └── build/         # Built bundle output
+│   │
+│   ├── shared/            # Shared utilities
+│   │   ├── index.ts       # Exports
 │   │   ├── types.ts       # Type definitions
 │   │   ├── TypeRules.ts   # Serialization rules
 │   │   └── CallbackRegistry.ts
 │   │
 │   ├── sandbox/           # Sandbox providers
 │   │   ├── types/         # Provider interfaces
-│   │   └── providers/     # VM, JSC, QuickJS providers
+│   │   ├── providers/     # VM, JSC, QuickJS providers
+│   │   ├── native/        # Native JSI bindings
+│   │   └── web/           # Web Worker sandbox
 │   │
 │   ├── cli/               # CLI build tools
 │   │   ├── build.ts       # Bun-based bundler
@@ -262,8 +268,8 @@ engine.destroy();
 ### 6.2 Guest SDK
 
 ```typescript
-// src/let/index.ts - Guest SDK exports
-import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/let';
+// src/sdk/index.ts - Guest SDK exports
+import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/sdk';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -324,7 +330,7 @@ export async function build(options: BuildOptions): Promise<void> {
     target: 'browser',
     format: 'cjs',
     minify,
-    external: ['react', 'react/jsx-runtime', 'react-native', '@rill/let'],
+    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/sdk'],
     define: {
       'process.env.NODE_ENV': '"production"',
       __DEV__: 'false',

@@ -6,7 +6,7 @@
 
 - 模块白名单（requireWhitelist）
   - 在创建 Engine 时传入 `requireWhitelist`。仅允许guest bundle `require()` 这些模块。
-  - 默认白名单：`react`、`react-native`、`react/jsx-runtime`、`@rill/let`、`rill/reconciler`。
+  - 默认白名单：`react`、`react-native`、`react/jsx-runtime`、`rill/sdk`。
 - 执行超时
   - 使用 `timeout` 选项（默认 5000ms）。QuickJS `eval` 为同步执行，无法被强制中断，该超时保护为“尽力而为”。若需严格 CPU 时间切片，请考虑 worker/线程隔离。
 - 错误分类
@@ -107,7 +107,7 @@ bun run rill/cli analyze dist/bundle.js # 默认只警告
 ```ts
 import { analyze } from 'rill/cli';
 await analyze('dist/bundle.js', {
-  whitelist: ['react', 'react-native', 'react/jsx-runtime', '@rill/let'],
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/sdk'],
   failOnViolation: true,
   treatEvalAsViolation: true,
   treatDynamicNonLiteralAsViolation: true,

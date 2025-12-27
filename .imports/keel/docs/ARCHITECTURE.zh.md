@@ -65,28 +65,34 @@
 ```
 rill/
 ├── src/
-│   ├── runtime/           # 宿主运行时
-│   │   ├── engine.ts      # Engine 主类
-│   │   ├── receiver.ts    # 指令接收器
+│   ├── host/              # 宿主运行时
+│   │   ├── Engine.ts      # Engine 主类
+│   │   ├── receiver/      # 指令接收器
 │   │   ├── registry.ts    # 组件注册表
 │   │   ├── bridge/        # 运行时桥接层
 │   │   └── engine/        # Engine 内部模块
 │   │
-│   ├── let/               # Guest SDK
+│   ├── sdk/               # Guest SDK
 │   │   ├── index.ts       # SDK 导出
 │   │   ├── sdk.ts         # Hooks 实现
-│   │   ├── types.ts       # 类型定义
-│   │   └── reconciler/    # 自定义渲染器
+│   │   └── types.ts       # 类型定义
 │   │
-│   ├── bridge/            # 共享桥接工具
-│   │   ├── index.ts       # Bridge 导出
+│   ├── guest/             # Guest 运行时（沙箱代码）
+│   │   ├── reconciler/    # 自定义渲染器
+│   │   ├── shims/         # React/JSX shims
+│   │   └── build/         # 构建输出
+│   │
+│   ├── shared/            # 共享工具
+│   │   ├── index.ts       # 导出
 │   │   ├── types.ts       # 类型定义
 │   │   ├── TypeRules.ts   # 序列化规则
 │   │   └── CallbackRegistry.ts
 │   │
 │   ├── sandbox/           # 沙箱提供者
 │   │   ├── types/         # Provider 接口
-│   │   └── providers/     # VM, JSC, QuickJS 提供者
+│   │   ├── providers/     # VM, JSC, QuickJS 提供者
+│   │   ├── native/        # 原生 JSI 绑定
+│   │   └── web/           # Web Worker 沙箱
 │   │
 │   ├── cli/               # CLI 构建工具
 │   │   ├── build.ts       # Bun 打包器
@@ -262,8 +268,8 @@ engine.destroy();
 ### 6.2 Guest SDK
 
 ```typescript
-// src/let/index.ts - Guest SDK 导出
-import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/let';
+// src/sdk/index.ts - Guest SDK 导出
+import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/sdk';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -324,7 +330,7 @@ export async function build(options: BuildOptions): Promise<void> {
     target: 'browser',
     format: 'cjs',
     minify,
-    external: ['react', 'react/jsx-runtime', 'react-native', '@rill/let'],
+    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/sdk'],
     define: {
       'process.env.NODE_ENV': '"production"',
       __DEV__: 'false',
