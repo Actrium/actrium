@@ -12,7 +12,7 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "dist/bundle.js": "14cff7b27c497201850e783c7c27669601be31ccf1e9e299e9865c781661afe1"
+      "dist/bundle.js": "1b3256d31a3acafa270395b1d4821073f4d89732ac250c9a28876082c010f0d2"
     }
   }
 }
