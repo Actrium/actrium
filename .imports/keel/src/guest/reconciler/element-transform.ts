@@ -7,7 +7,9 @@
  * - Function prop serialization for sandbox components
  */
 
-import type { ReactElement } from 'react';
+// Use internal React shim - avoid external @types/react dependency
+// biome-ignore lint/suspicious/noExplicitAny: Internal type alias for flexibility
+type ReactElement = any;
 import React from 'react';
 import type { GuestElement } from '../../sdk/types';
 import { isGuestReactElement } from '../../sdk/types';
