@@ -433,34 +433,56 @@ export class Engine implements IEngine {
       callbackRegistry: this.callbackRegistry,
       // Guest callback invoker - routes Guest callbacks to sandbox
       // Handles both fn_N (__registerCallback) and fn_xxx_N (Guest globalCallbackRegistry)
+      // IMPORTANT: Must use eval() instead of direct function calls because
+      // getGlobal() returns references that cannot be called directly across JSC contexts
       guestInvoker: (fnId, args) => {
-        // fn_N pattern: sandbox __registerCallback (simple counter)
-        if (/^fn_\d+$/.test(fnId)) {
-          const invokeCallback = this.context?.getGlobal('__invokeCallback') as
-            | ((fnId: string, args: unknown[]) => unknown)
-            | undefined;
-          if (invokeCallback) {
-            return invokeCallback(fnId, args);
+        if (!this.context) {
+          logger.warn(`[rill:${this.id}] No context for invoking ${fnId}`);
+          return undefined;
+        }
+
+        // Set args as globals for the call (JSON serialize for cross-context safety)
+        this.context.setGlobal('__guestInvokerFnId', fnId);
+        this.context.setGlobal('__guestInvokerArgs', args || []);
+
+        try {
+          // fn_N pattern: sandbox __registerCallback (simple counter)
+          if (/^fn_\d+$/.test(fnId)) {
+            const result = this.context.eval(
+              'globalThis.__invokeCallback(__guestInvokerFnId, __guestInvokerArgs)'
+            );
+            return result;
           }
+
+          // fn_xxx_N pattern: Guest's globalCallbackRegistry (via RillReconciler)
+          const result = this.context.eval(
+            'globalThis.RillReconciler?.invokeCallback?.(__guestInvokerFnId, __guestInvokerArgs)'
+          );
+          if (result !== undefined) {
+            return result;
+          }
+
+          logger.warn(`[rill:${this.id}] No invoker found for ${fnId}`);
+          return undefined;
+        } finally {
+          // Clean up globals
+          this.context.setGlobal('__guestInvokerFnId', undefined);
+          this.context.setGlobal('__guestInvokerArgs', undefined);
         }
-        // fn_xxx_N pattern: Guest's globalCallbackRegistry (via RillReconciler)
-        const reconciler = this.context?.getGlobal('RillReconciler') as
-          | { invokeCallback?: (fnId: string, args: unknown[]) => unknown }
-          | undefined;
-        if (reconciler?.invokeCallback) {
-          return reconciler.invokeCallback(fnId, args);
-        }
-        logger.warn(`[rill:${this.id}] No invoker found for ${fnId}`);
-        return undefined;
       },
       // Guest callback releaser - routes release calls to Guest's registry
+      // IMPORTANT: Must use eval() instead of direct function calls (same as guestInvoker)
       guestReleaseCallback: (fnId) => {
+        if (!this.context) return;
+
         // fn_xxx_N pattern: Guest's globalCallbackRegistry (via RillReconciler)
-        const reconciler = this.context?.getGlobal('RillReconciler') as
-          | { releaseCallback?: (fnId: string) => void }
-          | undefined;
-        if (reconciler?.releaseCallback) {
-          reconciler.releaseCallback(fnId);
+        this.context.setGlobal('__guestReleaseFnId', fnId);
+        try {
+          this.context.eval(
+            'globalThis.RillReconciler?.releaseCallback?.(__guestReleaseFnId)'
+          );
+        } finally {
+          this.context.setGlobal('__guestReleaseFnId', undefined);
         }
         // Note: fn_N pattern (sandbox __registerCallback) doesn't need explicit release
         // as those callbacks are managed by the sandbox's own lifecycle
