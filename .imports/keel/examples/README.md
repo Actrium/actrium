@@ -51,7 +51,7 @@ import {
   useHostEvent,      // Listen to host events
   useSendToHost,     // Send messages to host
   useConfig,         // Get configuration from host
-} from '@rill/let';
+} from 'rill/sdk';
 ```
 
 ### useHostEvent
@@ -100,14 +100,14 @@ bun run verify-examples.ts
 
 For host-side integration (Engine, EngineView), see:
 
-- `@rill/preset-react-native` - React Native preset
-- `@rill/preset-react-web` - Web preset
+- `rill/presets/react-native` - React Native preset
+- `rill/presets/react-web` - Web preset
 
 Host integration example:
 
 ```tsx
-import { Engine } from '@rill/runtime';
-import { EngineView, DefaultComponents } from '@rill/preset-react-native';
+import { Engine, EngineView } from 'rill';
+import { DefaultComponents } from 'rill/presets/react-native';
 
 const engine = new Engine({
   sandbox: createSandboxProvider(),

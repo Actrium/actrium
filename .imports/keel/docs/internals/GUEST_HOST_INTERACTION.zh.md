@@ -27,10 +27,10 @@
 | 角色 | 所在侧 | 责任 | 典型实现位置 |
 |---|---|---|---|
 | Host App | RN/宿主 JS | 创建 Engine、注册组件、展示 UI、把点击等事件转回 Guest | `Canvas/Subsystem/src/actr-host/*`（项目集成） |
-| Engine | Host | 管理 sandbox runtime、注入全局函数、执行 bundle、收发消息 | `rill/src/runtime/engine.ts` |
-| Receiver | Host | 接收 ops、维护 nodeMap、render 成 RN ReactElement、事件回调桥接 | `rill/src/runtime/receiver.ts` |
-| Reconciler |（逻辑上）桥接层 | 把 element 树 → ops（CREATE/UPDATE/APPEND…） | `rill/src/let/reconciler/index.ts` |
-| Guest runtime | Sandbox | 执行 Guest bundle、保存 hooks 状态、运行回调 | `rill/src/runtime/engine/shims.ts`（注入）+ `unified-app.js` |
+| Engine | Host | 管理 sandbox runtime、注入全局函数、执行 bundle、收发消息 | `rill/src/host/Engine.ts` |
+| Receiver | Host | 接收 ops、维护 nodeMap、render 成 RN ReactElement、事件回调桥接 | `rill/src/host/receiver/` |
+| Reconciler |（逻辑上）桥接层 | 把 element 树 → ops（CREATE/UPDATE/APPEND…） | `rill/src/guest/reconciler/index.ts` |
+| Guest runtime | Sandbox | 执行 Guest bundle、保存 hooks 状态、运行回调 | `rill/src/guest/shims/`（注入）+ `unified-app.js` |
 
 ---
 
@@ -47,7 +47,7 @@
 当前实现核心是"setGlobal + 按需 eval"：
 
 ```ts
-// rill/src/runtime/engine.ts（简化示意）
+// rill/src/host/Engine.ts（简化示意）
 // CALL_FUNCTION: 优先使用 Host CallbackRegistry 直接调用，找不到时回退到 Guest
 // HOST_EVENT: setGlobal 传递 payload，然后 eval 调用 Guest __handleHostEvent
 const sanitizedArgs = sanitizeArgsForSetGlobal(message.args);
@@ -75,15 +75,15 @@ await evalCode(`__handleHostEvent("${eventName}", __payload)`);
 ```mermaid
 flowchart LR
   subgraph Sandbox["Guest Sandbox Runtime"]
-    Shims["React/JSX Shims + Hooks<br/>(rill/src/runtime/engine/shims.ts)"]
+    Shims["React/JSX Shims + Hooks<br/>(rill/src/guest/shims/)"]
     Guest["Guest Bundle<br/>(unified-app.js)"]
     CB["Callback Map<br/>__registerCallback/__invokeCallback"]
   end
 
   subgraph Host["Host (React Native / JS)"]
-    Engine["Engine<br/>(rill/src/runtime/engine.ts)"]
-    Rec["Reconciler<br/>(rill/src/let/reconciler/index.ts)"]
-    Rcv["Receiver<br/>(rill/src/runtime/receiver.ts)"]
+    Engine["Engine<br/>(rill/src/host/Engine.ts)"]
+    Rec["Reconciler<br/>(rill/src/guest/reconciler/index.ts)"]
+    Rcv["Receiver<br/>(rill/src/host/receiver/)"]
     Reg["ComponentRegistry<br/>(Host 组件映射)"]
     RNTree["RN 真实组件树"]
   end
@@ -109,7 +109,7 @@ flowchart LR
 
 ### 4.1 渲染指令：`OperationBatch`（Sandbox → Host）
 
-位置：`rill/src/runtime/types.ts`
+位置：`rill/src/shared/types.ts`
 
 - `OperationBatch = { version, batchId, operations: Operation[] }`
 - 常见 `Operation.op`：
@@ -135,7 +135,7 @@ flowchart LR
 
 ### 4.2 函数序列化：`SerializedFunction`
 
-位置：`rill/src/runtime/types.ts`、`rill/src/runtime/engine/shims.ts`
+位置：`rill/src/shared/types.ts`、`rill/src/guest/shims/`
 
 当 Guest 给“Host 组件”（例如 `TouchableOpacity`）传函数 prop 时，会在 sandbox 内把函数注册到回调表：
 
@@ -147,11 +147,11 @@ flowchart TB
   SF --> Props["props.onPress = SerializedFunction"]
 ```
 
-> 这一步发生在 Guest 侧 `jsx()/createElement()` shim 中（见 `rill/src/runtime/engine/shims.ts`）。
+> 这一步发生在 Guest 侧 `jsx()/createElement()` shim 中（见 `rill/src/guest/shims/`）。
 
 ### 4.3 Host 消息：`HostMessage`（Host → Sandbox）
 
-位置：`rill/src/runtime/types.ts`
+位置：`rill/src/shared/types.ts`
 
 | type | 含义 | 典型触发 |
 |---|---|---|
@@ -229,7 +229,7 @@ sequenceDiagram
 
 ## 6. 更新：Guest 的 `useState/useEffect` 如何触发重新渲染
 
-位置：`rill/src/runtime/engine/shims.ts`
+位置：`rill/src/guest/shims/`
 
 Guest hooks runtime 的核心思路：
 - hooks 状态全部保存在 sandbox 内，避免跨引擎传递 `Date/Map/Function` 等对象
@@ -334,8 +334,8 @@ JSI 边界上 **Symbol 无法可靠传递**，因此 shims 给 element 加了字
 Host 在 `transformGuestElement()` 里用这些 marker 把 Guest element“重建”为 Host 可识别的 ReactElement。
 
 入口：
-- `rill/src/runtime/engine/shims.ts`（创建 element）
-- `rill/src/let/reconciler/index.ts`（`transformGuestElement`）
+- `rill/src/guest/shims/`（创建 element）
+- `rill/src/guest/reconciler/index.ts`（`transformGuestElement`）
 
 ### 8.3 Fragment 只能有 `key/children`
 
@@ -373,25 +373,25 @@ globalThis.__RILL_RECONCILER_DEBUG__ = true;
 - `globalThis.__RECEIVER_FUNCTION_COUNT / __LAST_FUNCTION_FNID`（Receiver 反序列化函数次数）
 
 对应文件：
-- `rill/src/let/reconciler/index.ts`
-- `rill/src/runtime/receiver.ts`
+- `rill/src/guest/reconciler/index.ts`
+- `rill/src/host/receiver/`
 
 ---
 
 ## 10. 代码入口速查（读源码从这里开始）
 
-- Engine：`rill/src/runtime/engine.ts`
+- Engine：`rill/src/host/Engine.ts`
   - `loadBundle()` / `initializeRuntime()` / `sendToSandbox()`
   - 注入：`require`、`__sendToHost`、`__rill_schedule_render`
-- Guest shims：`rill/src/runtime/engine/shims.ts`
-  - `REACT_SHIM` / `JSX_RUNTIME_SHIM`
+- Guest shims：`rill/src/guest/shims/`
+  - React/JSX shims
   - hooks runtime + `__registerCallback` 的使用点
-- Reconciler：`rill/src/let/reconciler/index.ts`
+- Reconciler：`rill/src/guest/reconciler/index.ts`
   - `transformGuestElement()`（marker/Fragment/组件类型桥接）
   - `OperationCollector.flush()`（产出 OperationBatch）
-- Receiver：`rill/src/runtime/receiver.ts`
+- Receiver：`rill/src/host/receiver/`
   - `applyBatch()` / `render()` / `deserializeValue()`（回调 proxy）
-- 协议类型：`rill/src/runtime/types.ts`
+- 协议类型：`rill/src/shared/types.ts`
 
 ---
 
@@ -401,7 +401,7 @@ globalThis.__RILL_RECONCILER_DEBUG__ = true;
 
 ### 11.1 Guest → Host 方向（`__sendToHost`）
 
-**位置：** `src/let/reconciler/index.ts` - `serializePropsWithTracking()`
+**位置：** `src/guest/reconciler/index.ts` - `serializePropsWithTracking()`
 
 **职责：**
 - 将 React elements 的 props 转换为 OperationBatch 中的序列化 props
@@ -416,7 +416,7 @@ globalThis.__RILL_RECONCILER_DEBUG__ = true;
 
 ### 11.2 Host → Guest 方向（`sendToSandbox`）
 
-**位置：** `src/runtime/engine.ts` - `sanitizeArgsForSetGlobal()`
+**位置：** `src/host/Engine.ts` - `sanitizeArgsForSetGlobal()`
 
 **职责：**
 - 清洗 Host 侧参数，避免 HostObjects 导致原生崩溃
@@ -430,7 +430,7 @@ globalThis.__RILL_RECONCILER_DEBUG__ = true;
 
 ### 11.3 Host 内部（Receiver 反序列化）
 
-**位置：** `src/runtime/receiver.ts` - `deserializeValue()`
+**位置：** `src/host/receiver/Receiver.ts` - `deserializeValue()`
 
 **职责：**
 - 将 ops 中的序列化值转换为 React Native 可用的值
@@ -444,7 +444,7 @@ globalThis.__RILL_RECONCILER_DEBUG__ = true;
 
 ### 11.4 Bridge/Serializer（通用序列化层）
 
-**位置：** `src/runtime/bridge/serializer.ts` - `ValueSerializer`
+**位置：** `src/shared/serializer.ts` - `ValueSerializer`
 
 **职责：**
 - 提供完整的序列化/反序列化 API

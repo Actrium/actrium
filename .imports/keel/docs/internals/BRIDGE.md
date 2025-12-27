@@ -5,7 +5,7 @@ The Bridge layer provides unified serialization and communication between Guest 
 ## Directory Structure
 
 ```
-src/runtime/bridge/
+src/shared/
 ├── types.ts          # Authoritative type definitions
 ├── serializer.ts     # Shared serialization utilities
 ├── TypeRules.ts      # Type validation rules
@@ -17,13 +17,13 @@ src/runtime/bridge/
 ## Type Flow
 
 ```
-bridge/types.ts (authoritative source)
+shared/types.ts (authoritative source)
        ↓
-runtime/types.ts (re-export)
+host/types.ts (re-export)
        ↓
-let/types.ts (re-export)
+sdk/types.ts (re-export)
        ↓
-reconciler/index.ts (consumer)
+guest/reconciler/index.ts (consumer)
 ```
 
 ## Key Components
@@ -109,7 +109,7 @@ Guest (invoke)              Host (Receiver)
 
 ## Design Principles
 
-1. **Single Source of Truth**: All serialization logic in `bridge/`
+1. **Single Source of Truth**: All serialization logic in `shared/`
 2. **Type Safety**: Shared type guards prevent format mismatches
 3. **Symmetric Design**: Same utilities work on both sides
 4. **JSI Optimized**: Minimal overhead for React Native bridge

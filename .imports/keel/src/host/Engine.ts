@@ -34,14 +34,12 @@ import { CallbackRegistryImpl as CallbackRegistry } from '../shared';
 import { Bridge } from './bridge/Bridge';
 import { DiagnosticsCollector } from './engine/DiagnosticsCollector';
 import {
-  CONSOLE_SETUP_CODE,
   createCommonJSGlobals,
   createReactNativeShim,
   createRillSDKModule,
   formatConsoleArgs,
-  RUNTIME_HELPERS_CODE,
 } from './engine/SandboxHelpers';
-import { ALL_SHIMS, DEVTOOLS_SHIM } from './engine/shims';
+import { DEVTOOLS_SHIM } from './engine/shims';
 import { TimerManager } from './engine/TimerManager';
 // Import from engine/types.ts (single source of truth)
 import type { EngineOptions, EventListener } from './engine/types';
@@ -544,24 +542,24 @@ export class Engine implements IEngine {
         ? globalThis.queueMicrotask.bind(globalThis)
         : (fn: () => void) => Promise.resolve().then(fn);
 
-    // Inject React/JSX shims into Guest sandbox
-    // React runs entirely within Guest - no cross-engine serialization needed
-    // This is the correct architecture: Guest has its own lightweight React implementation
-    const injectReactShims = async () => {
+    // Guest Bundle injection function
+    // The bundle includes: init, console setup, runtime helpers, React shims, and Reconciler
+    const injectGuestBundle = async () => {
       try {
-        // Check if shims are already injected (e.g., from previous load)
+        // Check if already injected (e.g., from previous load)
         const alreadyInjected = this.context?.getGlobal('__REACT_SHIM__');
         if (alreadyInjected === true) {
-          if (debug) logger.log(`[rill:${this.id}] React shims already injected, skipping`);
+          if (debug) logger.log(`[rill:${this.id}] Guest bundle already injected, skipping`);
           return;
         }
 
-        // Inject all shims (console, React, JSX runtime)
-        await this.evalCode(ALL_SHIMS);
+        // Single eval for entire Guest bundle
+        await this.evalCode(GUEST_BUNDLE_CODE);
 
-        if (debug) logger.log(`[rill:${this.id}] React/JSX shims injected into Guest sandbox`);
+        if (debug) logger.log(`[rill:${this.id}] Guest bundle injected (shims + reconciler)`);
       } catch (e) {
-        logger.warn(`[rill:${this.id}] Failed to inject React shims:`, e);
+        logger.error(`[rill:${this.id}] Failed to inject Guest bundle:`, e);
+        throw e;
       }
     };
 
@@ -667,27 +665,9 @@ export class Engine implements IEngine {
       if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatConsoleArgs(args));
     });
 
-    // Inject React/JSX shims BEFORE require is set up
-    // This allows require('react') to return the Guest's shim
-    await injectReactShims();
-
-    // Inject Guest Reconciler code
-    // Reconciler now runs entirely in Guest, not Host
-    const injectGuestReconciler = async () => {
-      try {
-        const alreadyInjected = this.context?.getGlobal('RillReconciler');
-        if (alreadyInjected) {
-          if (debug) logger.log(`[rill:${this.id}] Guest Reconciler already injected, skipping`);
-          return;
-        }
-        await this.evalCode(GUEST_BUNDLE_CODE);
-        if (debug) logger.log(`[rill:${this.id}] Guest Bundle injected`);
-      } catch (e) {
-        logger.error(`[rill:${this.id}] Failed to inject Guest Reconciler:`, e);
-        throw e;
-      }
-    };
-    await injectGuestReconciler();
+    // Inject Guest Bundle (includes shims, console, runtime helpers, reconciler)
+    // Single eval for entire Guest runtime
+    await injectGuestBundle();
 
     // require: module loader for Guest code
     // Note: Globals like __useHostEvent, __getConfig, __sendEventToHost are defined AFTER require.
@@ -701,7 +681,7 @@ export class Engine implements IEngine {
 
       switch (moduleName) {
         case 'react': {
-          // Return Guest's React shim (injected via injectReactShims)
+          // Return Guest's React shim (injected via Guest bundle)
           // This avoids cross-engine serialization of complex Host objects
           const React = this.context?.getGlobal('React');
           if (!React) {
@@ -895,14 +875,9 @@ export class Engine implements IEngine {
       }
     }
 
-    // Construct console object in sandbox using the registered callbacks
-    try {
-      await this.evalCode(CONSOLE_SETUP_CODE);
-      if (debug) {
-        logger.log(`[rill:${this.id}] injectPolyfills: console object constructed in sandbox`);
-      }
-    } catch (e) {
-      logger.warn(`[rill:${this.id}] Failed to construct console in sandbox:`, e);
+    // Note: console object is now constructed in Guest bundle (globals-setup.ts)
+    if (debug) {
+      logger.log(`[rill:${this.id}] injectPolyfills: console setup done via Guest bundle`);
     }
   }
 
@@ -915,13 +890,7 @@ export class Engine implements IEngine {
     const debug = this.options.debug;
     const logger = this.options.logger;
 
-    // Inject runtime helpers for host-guest event communication
-    // IMPORTANT: must await for async-only providers (Worker/WASM) to avoid race conditions.
-    try {
-      await this.evalCode(RUNTIME_HELPERS_CODE);
-    } catch (e) {
-      logger.warn('[rill] Failed to inject runtime helpers:', e);
-    }
+    // Note: Runtime helpers (__useHostEvent, __handleHostEvent) are now in Guest bundle
 
     // __rill_register_component_type: register Guest function components on Host so they survive JSI
     const engineId = this.id;

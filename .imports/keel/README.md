@@ -16,14 +16,16 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 
 ```
 rill/
-├── (default)       # Host runtime (Engine, EngineView, Receiver)
-├── /let            # Guest SDK (components, hooks)
-├── /devtools       # Development tools
-├── /sandbox        # Sandbox providers
-├── /sandbox-native # Native sandbox (JSC/QuickJS)
-├── /sandbox-web    # Web sandbox (Worker)
-└── /cli            # CLI build tools
+├── (default)        # Host runtime (Engine, EngineView, Receiver)
+├── /sdk             # Guest SDK (components, hooks)
+├── /devtools        # Development tools
+├── /sandbox         # Sandbox providers (auto-detect)
+├── /sandbox/native  # Native sandbox (JSC/QuickJS)
+├── /sandbox/web     # Web sandbox (Worker)
+└── /cli             # CLI build tools
 ```
+
+> Note: `rill/let` is a deprecated alias for `rill/sdk`.
 
 ## Quick Start
 
@@ -80,7 +82,7 @@ function App() {
 ### Guest Development
 
 ```tsx
-import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/let';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/sdk';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -144,7 +146,7 @@ bun run rill/cli analyze dist/bundle.js
 | Module | Import Path | Description |
 |--------|-------------|-------------|
 | Runtime | `rill` | Host runtime: Engine, EngineView, Receiver |
-| Guest SDK | `rill/let` | Guest development kit: components, hooks |
+| Guest SDK | `rill/sdk` | Guest development kit: components, hooks |
 | DevTools | `rill/devtools` | Debug tools: operation logging, tree inspection |
 | CLI | `rill/cli` | Guest bundler (Bun-based) |
 
@@ -182,7 +184,7 @@ engine.destroy();
 ### SDK Hooks
 
 ```typescript
-import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'rill/let';
+import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'rill/sdk';
 
 // Subscribe to host events
 useHostEvent('EVENT_NAME', (payload) => { /* handle */ });
@@ -218,7 +220,7 @@ Guest subscribes using SDK hook `useHostEvent(event, callback)`, Host sends via 
 
 **Guest example:**
 ```tsx
-import { View, Text, useHostEvent, useSendToHost } from 'rill/let';
+import { View, Text, useHostEvent, useSendToHost } from 'rill/sdk';
 
 export default function Guest() {
   const send = useSendToHost();

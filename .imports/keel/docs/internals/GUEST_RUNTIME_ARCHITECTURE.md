@@ -47,21 +47,21 @@ src/
 │   └── build/
 │       └── bundle.ts          # Auto-generated build output (DO NOT EDIT)
 │
-├── let/                       # User-facing SDK (rill/let)
+├── sdk/                       # User-facing SDK (rill/sdk)
 │   ├── index.ts               # Public exports (View, Text, hooks)
 │   ├── sdk.ts                 # Components and hooks implementation
 │   └── types.ts               # User-facing types
 │
-├── bridge/                    # Shared protocol layer
+├── shared/                    # Shared protocol layer
 │   ├── index.ts               # Protocol exports
 │   ├── types.ts               # Operation and message types
 │   ├── TypeRules.ts           # Serialization rules
 │   ├── serialization.ts       # Encoder/decoder utilities
 │   └── CallbackRegistry.ts    # Cross-boundary function management
 │
-└── runtime/                   # Host runtime
-    ├── engine.ts              # Engine (loads and executes guest)
-    ├── receiver.ts            # Receives operations, renders UI
+└── host/                      # Host runtime
+    ├── Engine.ts              # Engine (loads and executes guest)
+    ├── receiver/              # Receives operations, renders UI
     └── bridge/Bridge.ts       # Host-side serialization
 ```
 
@@ -227,23 +227,23 @@ Original function in user component
 2. **Version Consistency**: React and reconciler versions are locked together
 3. **Size Optimization**: Tree-shaking and minification at build time
 
-### Why Separate `src/let/` and `src/guest-bundle/`?
+### Why Separate `src/sdk/` and `src/guest/`?
 
-- **`src/let/`**: User-facing API - what developers import in their guest code
-- **`src/guest-bundle/`**: Runtime internals - bundled and injected by the engine
+- **`src/sdk/`**: User-facing API - what developers import in their guest code
+- **`src/guest/`**: Runtime internals - bundled and injected by the engine
 
-Users import from `rill/let`:
+Users import from `rill/sdk`:
 ```tsx
-import { View, Text, useHostEvent } from 'rill/let';
+import { View, Text, useHostEvent } from 'rill/sdk';
 ```
 
 They never directly use `render()`, `CallbackRegistry`, etc. - those are runtime internals.
 
 ### Shared Bridge Protocol
 
-`src/bridge/` contains the serialization protocol shared by both sides:
+`src/shared/` contains the serialization protocol shared by both sides:
 - **Guest side**: Bundled into `GUEST_BUNDLE_CODE`
-- **Host side**: Imported directly by `src/runtime/bridge/Bridge.ts`
+- **Host side**: Imported directly by `src/host/bridge/Bridge.ts`
 
 This ensures both sides use identical serialization logic.
 
@@ -257,16 +257,16 @@ This ensures both sides use identical serialization logic.
 | `guest-bundle/reconciler/host-config.ts` | react-reconciler configuration |
 | `guest-bundle/reconciler/reconciler-manager.ts` | Manages reconciler instances, public API |
 | `guest-bundle/reconciler/operation-collector.ts` | Batches operations before sending |
-| `runtime/engine.ts` | Loads bundle, injects code, manages sandbox lifecycle |
-| `runtime/engine/shims.ts` | React hooks and JSX runtime shims |
-| `runtime/engine/SandboxHelpers.ts` | Console and runtime helper injection code |
+| `host/Engine.ts` | Loads bundle, injects code, manages sandbox lifecycle |
+| `guest/shims/*.ts` | React hooks and JSX runtime shims |
+| `guest/globals-setup.ts` | Console and runtime helper setup |
 
 ## Regenerating the Guest Bundle
 
-After modifying any file in `src/guest-bundle/` or `src/bridge/`:
+After modifying any file in `src/guest/` or `src/shared/`:
 
 ```bash
-bun scripts/build-guest-bundle.ts
+bun src/scripts/build-guest.ts
 ```
 
-This regenerates `src/guest-bundle/build/bundle.ts`. The file should be committed to version control.
+This regenerates `src/guest/build/bundle.ts`. The file should be committed to version control.
