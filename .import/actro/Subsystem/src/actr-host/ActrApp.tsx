@@ -667,9 +667,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                 position: 'absolute',
                 left: 0,
                 top: 0,
-                right: 0,
-                bottom: 0,
                 width: containerWidth,
+                height: '100%',
               },
               { display: isActive ? 'flex' : 'none' },
             ]}
