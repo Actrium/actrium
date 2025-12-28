@@ -70,6 +70,7 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
         // Update frame if size actually changed
         if containerSize.width > 0 && containerSize.height > 0 {
             if rootView.frame.size != containerSize {
+                logger.debug("[ResizeFlow] Native frame changed: \(Int(rootView.frame.size.width))x\(Int(rootView.frame.size.height)) -> \(Int(containerSize.width))x\(Int(containerSize.height))")
                 rootView.setFrameSize(containerSize)
                 rootView.bounds = CGRect(origin: .zero, size: containerSize)
                 // 强制触发布局更新，确保 RN 检测到尺寸变化（解决缩小窗口时不同步问题）
@@ -80,6 +81,11 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
 
         // Only update properties if they actually changed (avoid triggering RN re-renders during animations)
         let newProperties = makeProperties()
+        let oldWidth = (rootView.appProperties?["containerWidth"] as? CGFloat) ?? 0
+        let newWidth = containerSize.width
+        if oldWidth != newWidth {
+            logger.debug("[ResizeFlow] Native appProperties.containerWidth: \(Int(oldWidth)) -> \(Int(newWidth))")
+        }
         if !NSDictionary(dictionary: newProperties).isEqual(to: rootView.appProperties ?? [:]) {
             rootView.appProperties = newProperties
         }

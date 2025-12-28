@@ -129,6 +129,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // 这解决了窗口缩小时 onLayout 可能不触发的问题
   React.useEffect(() => {
     if (propsContainerWidth != null && propsContainerWidth > 0) {
+      log.debug(`[ResizeFlow] ActrTabView propsContainerWidth changed: ${layoutWidth} -> ${propsContainerWidth}`);
       setLayoutWidth(propsContainerWidth);
     }
   }, [propsContainerWidth]);
@@ -197,10 +198,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       finalSides = scaledLeft + scaledRight;
     }
 
-    return {
+    const result = {
       leftWidth: isLeftPanelVisible ? scaledLeft : 0,
       rightWidth: showRightPanel ? scaledRight : 0,
     };
+    log.debug(`[ResizeFlow] Panel widths calculated: layoutWidth=${Math.round(width)}, left=${Math.round(result.leftWidth)}, right=${Math.round(result.rightWidth)}`);
+    return result;
   }, [layoutWidth, isLeftPanelVisible, showRightPanel]);
 
   // 更新回调：提取面板
@@ -436,6 +439,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       onLayout={(e) => {
         const next = Math.max(e.nativeEvent.layout.width, 0);
         if (next !== layoutWidth) {
+          log.debug(`[ResizeFlow] ActrTabView onLayout fired: ${layoutWidth} -> ${next}`);
           setLayoutWidth(next);
         }
       }}
@@ -563,6 +567,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   );
 };
 
+// Track previous containerWidth for logging
+let prevActrAppContainerWidth: number | undefined;
+
 export const ActrApp: React.FC<ActrProps> = (props) => {
   // Props 稳定化
   const hasValidTabs = props?.tabs && props.tabs.length > 0;
@@ -575,6 +582,12 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   }
 
   const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth } = effectiveProps || {};
+
+  // Log containerWidth changes
+  if (containerWidth !== prevActrAppContainerWidth) {
+    log.debug(`[ResizeFlow] ActrApp received containerWidth: ${prevActrAppContainerWidth} -> ${containerWidth}`);
+    prevActrAppContainerWidth = containerWidth;
+  }
 
   if (!tabs.length) {
     return <View style={{ flex: 1, backgroundColor: '#111' }} />;
