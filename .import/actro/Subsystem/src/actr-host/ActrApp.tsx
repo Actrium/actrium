@@ -398,6 +398,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ padding: 20 }}
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
         >
           <Text style={{ color: '#fff', fontSize: 24, marginBottom: 20, fontWeight: 'bold' }}>
             Canvas ActrApp v8

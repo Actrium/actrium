@@ -113,7 +113,7 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
       <View style={styles.divider} />
 
       {/* Content */}
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsHorizontalScrollIndicator={false}>
         {/* Closed Groups Section */}
         {groups.length > 0 && (
           <View style={styles.section}>

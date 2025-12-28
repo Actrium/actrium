@@ -65,16 +65,19 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         #if canImport(React)
-        let properties = makeProperties()
+        guard let rootView = nsView as? RCTRootView else { return }
 
-        if let rootView = nsView as? RCTRootView {
-            rootView.appProperties = properties
-
-            if containerSize.width > 0 && containerSize.height > 0 {
-                if rootView.frame.size != containerSize {
-                    rootView.setFrameSize(containerSize)
-                }
+        // Only update frame if size actually changed
+        if containerSize.width > 0 && containerSize.height > 0 {
+            if rootView.frame.size != containerSize {
+                rootView.setFrameSize(containerSize)
             }
+        }
+
+        // Only update properties if they actually changed (avoid triggering RN re-renders during animations)
+        let newProperties = makeProperties()
+        if !NSDictionary(dictionary: newProperties).isEqual(to: rootView.appProperties ?? [:]) {
+            rootView.appProperties = newProperties
         }
         #endif
     }
