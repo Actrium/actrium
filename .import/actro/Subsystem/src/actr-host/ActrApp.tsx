@@ -27,13 +27,9 @@ import type { ActrProps, TabConfig } from './types';
  * Searches for nodes with __panelId="left" and __panelId="right"
  */
 function extractPanelsByPanelId(
-  element: React.ReactNode,
-  log?: (msg: string) => void
+  element: React.ReactNode
 ): { left: React.ReactElement | null; right: React.ReactElement | null } {
-  const nlog = log || (() => {});
-
   if (!element || !React.isValidElement(element)) {
-    nlog('[extractPanelsByPanelId] element is null or not valid');
     return { left: null, right: null };
   }
 
@@ -43,27 +39,20 @@ function extractPanelsByPanelId(
   };
 
   function traverse(node: React.ReactNode): void {
-    if (!React.isValidElement(node)) {
-      return;
-    }
+    if (!React.isValidElement(node)) return;
 
     const props = node.props as Record<string, unknown>;
     const panelId = props.__panelId;
 
     if (panelId === 'left') {
-      nlog('[extractPanelsByPanelId] Found left panel');
-      // Return the children of the panel wrapper
       result.left = props.children as React.ReactElement;
       return;
     }
-
     if (panelId === 'right') {
-      nlog('[extractPanelsByPanelId] Found right panel');
       result.right = props.children as React.ReactElement;
       return;
     }
 
-    // Recursively search children
     const children = props.children;
     if (Array.isArray(children)) {
       children.forEach(traverse);
@@ -73,65 +62,13 @@ function extractPanelsByPanelId(
   }
 
   traverse(element);
-
-  nlog(`[extractPanelsByPanelId] Result: left=${!!result.left}, right=${!!result.right}`);
   return result;
 }
 
 const log = logger.child('ActrApp');
-
-const nlog = (msg: string) => log.debug(msg);
 const nerror = (msg: string) => log.error(msg);
 
-
-// 🕐 性能计时工具
-const MODULE_LOAD_TIME = Date.now();
-class PerfTimer {
-  private startTime: number;
-  private lastMark: number;
-  private marks: Map<string, number> = new Map();
-  private tabId: string;
-
-  constructor(tabId: string) {
-    this.tabId = tabId;
-    this.startTime = Date.now();
-    this.lastMark = this.startTime;
-  }
-
-  mark(name: string): number {
-    const now = Date.now();
-    const elapsed = now - this.lastMark;
-    const total = now - this.startTime;
-    this.marks.set(name, now);
-    this.lastMark = now;
-    nlog(`⏱️ [Perf:${this.tabId}] ${name}: +${elapsed}ms (total: ${total}ms)`);
-    return elapsed;
-  }
-
-  since(markName: string): number {
-    const markTime = this.marks.get(markName);
-    if (!markTime) return 0;
-    return Date.now() - markTime;
-  }
-
-  total(): number {
-    return Date.now() - this.startTime;
-  }
-
-  summary() {
-    nlog(`⏱️ [Perf:${this.tabId}] === 总耗时: ${this.total()}ms ===`);
-  }
-}
-
-// 全局计时器 Map（按 tabId 隔离）
-const perfTimers = new Map<string, PerfTimer>();
-
-nlog(`✅ [ActrApp-v8] 文件已加载 - Single Engine + usePanels Hook 版本 (module load at T+${Date.now() - MODULE_LOAD_TIME}ms)`);
-nlog(
-  `🔎 [ActrApp-v8] askit(host) exports: EngineMonitorOverlay=${typeof EngineMonitorOverlay}`,
-);
-
-// 🔴 模块级别的 props 缓存
+// 模块级别的 props 缓存
 let cachedValidProps: ActrProps | null = null;
 
 // 布局常量
@@ -179,8 +116,6 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   onContractViolation,
   onEngineChange,
 }) => {
-  nlog('🔵 [ActrTabView] 渲染开始, tab=' + tab.id + ', isActive=' + isActive);
-
   const gate = evaluateTabGate(tab);
 
   // 右侧面板可见性（按 tab 维度保存）
@@ -204,69 +139,27 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     isActiveRef.current = isActive;
   }, [isActive]);
 
-  // 更新回调：提取面板（使用 ref，避免依赖引起的重建）
+  // 更新回调：提取面板
   const handleUpdate = useCallback(() => {
-    nlog(`[ActrTabView] handleUpdate 被调用, isActive=${isActiveRef.current}, tab=${tab.id}`);
     if (!isActiveRef.current) {
       pendingUpdateRef.current = true;
-      nlog(`[ActrTabView] handleUpdate: 非活动状态，跳过`);
       return;
     }
     const eng = engineRef.current;
-    if (!eng) {
-      nlog(`[ActrTabView] handleUpdate: engineRef.current 为空`);
-      return;
-    }
+    if (!eng) return;
     const receiver = eng.getReceiver();
-    if (!receiver) {
-      nlog(`[ActrTabView] handleUpdate: receiver 为空`);
-      return;
-    }
+    if (!receiver) return;
 
-
-    // 检查 receiver 状态 - 🔧 FIX: 如果节点数为 0，跳过本次提取，等待下次回调
     const receiverStats = receiver.getStats?.();
-    if (!receiverStats) {
-      nlog(`[ActrTabView] receiver.getStats() 返回空`);
-      return;
-    }
+    if (!receiverStats || receiverStats.nodeCount === 0) return;
 
-    nlog(`[ActrTabView] receiver stats: nodes=${receiverStats.nodeCount}, rootChildren=${receiverStats.rootChildrenCount}, batches=${receiverStats.totalBatches}, ops=${JSON.stringify(receiverStats.totalOps)}`);
-
-    // 🔧 FIX: 关键修复 - 如果还没有节点，说明 Guest 渲染还未完成，跳过本次提取
-    if (receiverStats.nodeCount === 0) {
-      nlog(`[ActrTabView] handleUpdate: receiver 节点数为 0，等待下一次更新回调...`);
-      return;
-    }
-
-    // 🔧 FIX: 只有当 batches 变化时才更新面板，避免无限循环
+    // 只有当 batches 变化时才更新面板
     const currentBatches = receiverStats.totalBatches;
-    if (currentBatches === lastBatchesRef.current) {
-      nlog(`[ActrTabView] handleUpdate: batches 未变化 (${currentBatches})，跳过更新`);
-      return;
-    }
+    if (currentBatches === lastBatchesRef.current) return;
     lastBatchesRef.current = currentBatches;
 
-    nlog(`[ActrTabView] handleUpdate: 提取面板 (usePanels hook 模式)... tab=${tab.id}`);
-    const debugInfo = receiver.getDebugInfo?.();
-    if (debugInfo) {
-      nlog(`[ActrTabView] debugInfo: nodes=${debugInfo.nodeCount}, rootChildren=[${debugInfo.rootChildren?.join(',')}], appendCalls=${debugInfo.appendCalls}`);
-      // Print all node types
-      if (debugInfo.nodes && debugInfo.nodes.length > 0) {
-        const nodeTypes = debugInfo.nodes.map(n => `${n.id}:${n.type}(${n.childCount})`).join(', ');
-        nlog(`[ActrTabView] nodeTypes: ${nodeTypes}`);
-      }
-    }
     const fullTree = receiver.render();
-    nlog(`[ActrTabView] fullTree: ${fullTree === null ? 'NULL' : typeof fullTree}, isEl=${React.isValidElement(fullTree)}`);
-    if (React.isValidElement(fullTree)) {
-      const treeType = fullTree.type;
-      nlog(`[ActrTabView] fullTree.type: ${typeof treeType === 'string' ? treeType : (treeType as any)?.displayName || (treeType as any)?.name || 'unknown'}`);
-    }
-    // Use __panelId extraction (usePanels hook pattern)
-    const panels = extractPanelsByPanelId(fullTree, nlog);
-
-    nlog(`[ActrTabView] 提取结果 (usePanels): left=${!!panels.left}, right=${!!panels.right}, tab=${tab.id}`);
+    const panels = extractPanelsByPanelId(fullTree);
     setLeftPanel(panels.left);
     setRightPanel(panels.right);
   }, [tab.id]);
@@ -309,35 +202,24 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     let currentAdapter: { dispose: () => void } | null = null;
 
     async function init() {
-      // 创建性能计时器
-      const perf = new PerfTimer(tab.id.substring(0, 8));
-      perfTimers.set(tab.id, perf);
-
       try {
         setIsLoading(true);
         setLoadError(null);
-        perf.mark('init_start');
 
-        // rill auto-detects JSC sandbox on Apple platforms
         currentEngine = new Engine({
-          debug: true,
+          debug: false,
           logger: {
-            log: (...args: unknown[]) => nlog(args.map(a => String(a)).join(' ')),
+            log: () => {},
             warn: (...args: unknown[]) => log.warning(args.map(a => String(a)).join(' ')),
             error: (...args: unknown[]) => nerror(args.map(a => String(a)).join(' ')),
           },
         });
-        perf.mark('engine_created');
-
         currentEngine.register(hostComponents);
-        perf.mark('host_components_registered');
-
         currentAdapter = createEngineAdapter(currentEngine, {
           onContractViolation: (v) => onContractViolation?.(tab.id, v),
           permissions: tab.permissions ?? [],
           permissionMode: PERMISSION_MODE,
         });
-        perf.mark('adapter_created');
 
         if (cancelled) {
           currentAdapter?.dispose();
@@ -350,11 +232,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         setEngine(currentEngine);
         onEngineChange?.(tab.id, currentEngine);
         setIsLoading(false);
-        perf.mark('engine_init_done');
-        nlog(`⏱️ [Perf:${tab.id.substring(0, 8)}] === Engine 初始化完成，总耗时: ${perf.total()}ms ===`);
       } catch (e: any) {
         if (cancelled) return;
-        nerror(`[ActrTabView] Engine 初始化失败 tab=${tab.id}: ${e?.message}`);
+        nerror(`[ActrTabView] init failed: ${e?.message}`);
         setLoadError(e instanceof Error ? e : new Error(String(e)));
         setIsLoading(false);
       }
@@ -395,9 +275,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     const script = unifiedScript;
 
-    // 如果同一个 tab 的脚本发生变化，重建 Engine 以确保隔离且避免残留状态
+    // 如果脚本变化，重建 Engine
     if (loadedUnifiedScriptRef.current && loadedUnifiedScriptRef.current !== script) {
-      nlog(`[ActrTabView] unifiedScript 变更，重建 Engine tab=${tab.id}`);
       adapterRef.current?.dispose();
       adapterRef.current = null;
       eng.destroy();
@@ -415,50 +294,27 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     if (eng.isLoaded) return;
 
     async function loadUnifiedBundle() {
-      const perf = perfTimers.get(tab.id) || new PerfTimer(tab.id.substring(0, 8));
-        nlog(`🔄 [ActrTabView] loadUnifiedBundle 开始 tab=${tab.id}, script长度=${script.length}`);
-
       try {
-        perf.mark('bundle_load_start');
         loadedUnifiedScriptRef.current = script;
-
-        nlog(`🔄 [ActrTabView] 创建 receiver...`);
         eng.createReceiver(handleUpdate);
-        perf.mark('receiver_created');
-
-        // loadBundle 内部会调用 initializeRuntime，无需单独调用
-        const scriptSize = script.length;
-        nlog(`🔄 [ActrTabView] 加载 bundle (${Math.round(scriptSize / 1024)}KB)...`);
         await eng.loadBundle(script, {
           containerHeight: 977,
           containerWidth: 1400,
         });
-        perf.mark(`bundle_executed (${Math.round(scriptSize / 1024)}KB)`);
-        nlog(`🔄 [ActrTabView] bundle 加载完成`);
 
-        // 有时 receiver 的更新回调可能不会立刻触发，手动提取一次确保面板可见
-        nlog(`🔄 [ActrTabView] 手动调用 handleUpdate...`);
+        // 确保面板提取
         handleUpdate();
-        // 容错：有些情况下首帧回调不会立刻触发，补打一轮以确保面板提取
         setTimeout(handleUpdate, 0);
         setTimeout(handleUpdate, 50);
-        perf.mark('first_render');
 
-        nlog(`⏱️ [Perf:${tab.id.substring(0, 8)}] === Bundle 加载完成，总耗时: ${perf.total()}ms ===`);
-
-        // Phase 2: 通知 Native 内容已加载完成，可以捕获快照
+        // 通知 Native 内容已加载完成
         try {
           NativeModules.SnapshotModule?.onContentReady?.(tab.id);
-          nlog(`📸 [ActrApp] 已通知 Native 内容加载完成: ${tab.id}`);
-        } catch (err: any) {
-          nlog(`📸 [ActrApp] 通知 SnapshotModule 失败: ${err?.message}`);
-        }
+        } catch {}
       } catch (err: any) {
-        nerror(`[ActrTabView] 加载 unified bundle 失败 tab=${tab.id}: ${err?.message}`);
-        nerror(`[ActrTabView] 错误堆栈: ${err?.stack?.substring(0, 500)}`);
+        nerror(`[ActrTabView] bundle load failed: ${err?.message}`);
         setLoadError(err instanceof Error ? err : new Error(String(err)));
         if (eng.isDestroyed) {
-          nerror(`[ActrTabView] Engine 已销毁，准备重建 tab=${tab.id}`);
           adapterRef.current?.dispose();
           adapterRef.current = null;
           engineRef.current = null;
@@ -645,30 +501,23 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 };
 
 export const ActrApp: React.FC<ActrProps> = (props) => {
-  // 🔴 Props 稳定化
-  nlog('📊 [ActrApp-v7] 收到 props, keys: ' + Object.keys(props || {}).join(', '));
-
+  // Props 稳定化
   const hasValidTabs = props?.tabs && props.tabs.length > 0;
   let effectiveProps = props;
 
   if (hasValidTabs) {
     cachedValidProps = { ...props };
-    nlog('📊 [ActrApp-v7] ✅ 保存有效 props 到缓存 (tabs: ' + props.tabs.length + ')');
   } else if (cachedValidProps) {
     effectiveProps = cachedValidProps;
-    nlog('📊 [ActrApp-v7] ⚠️ 使用缓存的 props (tabs: ' + cachedValidProps.tabs.length + ')');
   }
 
   const { tabs = [], currentTabId, isLeftPanelVisible = true } = effectiveProps || {};
-  nlog('📊 [ActrApp-v7] tabs.length=' + tabs.length + ', currentTabId=' + currentTabId + ', isLeftPanelVisible=' + isLeftPanelVisible);
 
   if (!tabs.length) {
-    nlog('📊 [ActrApp-v7] ⚠️ 没有 tabs，返回空 View');
     return <View style={{ flex: 1, backgroundColor: '#111' }} />;
   }
 
   const activeTabId = currentTabId ?? tabs[0]!.id;
-  nlog('📊 [ActrApp-v7] activeTabId=' + activeTabId);
 
   const monitorTabs = React.useMemo(
     () =>
@@ -729,49 +578,35 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     };
   }, []);
 
-  nlog('📊 [ActrApp] 🎨 准备渲染 JSX, tabs.length=' + tabs.length);
+  return (
+    <View style={styles.tabHost}>
+      {tabs.map((tab) => {
+        const isActive = tab.id === activeTabId;
+        return (
+          <View
+            key={tab.id}
+            style={[
+              StyleSheet.absoluteFill,
+              { display: isActive ? 'flex' : 'none' },
+            ]}
+          >
+            <ActrTabView
+              tab={tab}
+              isActive={isActive}
+              isLeftPanelVisible={isLeftPanelVisible}
+              onContractViolation={recordContractViolation}
+              onEngineChange={handleEngineChange}
+            />
+          </View>
+        );
+      })}
 
-  try {
-    const result = (
-      <View style={styles.tabHost}>
-        {tabs.map((tab) => {
-          const isActive = tab.id === activeTabId;
-          nlog('📊 [ActrApp] 🎨 渲染 tab: ' + tab.id + ', isActive=' + isActive);
-
-          return (
-            <View
-              key={tab.id}
-              style={[
-                StyleSheet.absoluteFill,
-                { display: isActive ? 'flex' : 'none' },
-              ]}
-            >
-              <ActrTabView
-                tab={tab}
-                isActive={isActive}
-                isLeftPanelVisible={isLeftPanelVisible}
-                onContractViolation={recordContractViolation}
-                onEngineChange={handleEngineChange}
-              />
-            </View>
-          );
-        })}
-
-        {typeof EngineMonitorOverlay === 'function' ? (
-          <EngineMonitorOverlay tabs={monitorTabs} activeTabId={activeTabId} getEngine={getEngine} />
-        ) : null}
-      </View>
-    );
-    nlog('📊 [ActrApp] ✅ JSX 创建成功');
-    return result;
-  } catch (err: any) {
-    nerror('📊 [ActrApp] ❌ JSX 创建失败: ' + err?.message);
-    nerror('📊 [ActrApp] Stack: ' + err?.stack?.substring(0, 500));
-    return <View style={{ flex: 1, backgroundColor: '#ff0000' }}><Text style={{ color: '#fff' }}>Render Error: {err?.message}</Text></View>;
-  }
+      {typeof EngineMonitorOverlay === 'function' ? (
+        <EngineMonitorOverlay tabs={monitorTabs} activeTabId={activeTabId} getEngine={getEngine} />
+      ) : null}
+    </View>
+  );
 };
-
-log.notice('✅ 组件已导出');
 
 const styles = StyleSheet.create({
   tabHost: {

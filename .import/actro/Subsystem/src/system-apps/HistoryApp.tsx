@@ -1,7 +1,7 @@
 /**
  * History System App - Built-in app similar to chrome://history
  */
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,15 +11,10 @@ import {
   StyleSheet,
   NativeModules,
 } from 'react-native';
-import { logger } from '../logger';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
 
 // Native module for history actions
 const HistoryModule = NativeModules.HistoryModule;
-// 性能日志
-const COMPONENT_LOAD_TIME = Date.now();
-const log = logger.child('HistoryApp');
-const nlog = (msg: string) => log.debug(msg);
 
 interface HistoryAppProps {
   items: HistoryItemData[];
@@ -67,21 +62,7 @@ function formatTime(timestamp: number): string {
   });
 }
 
-nlog(`⏱️ [HistoryApp] Module loaded at T+${Date.now() - COMPONENT_LOAD_TIME}ms`);
-
 export default function HistoryApp({ items, groups }: HistoryAppProps) {
-  const renderStartTime = useRef(Date.now());
-  const firstRenderDone = useRef(false);
-
-  // 性能计时
-  useEffect(() => {
-    if (!firstRenderDone.current) {
-      firstRenderDone.current = true;
-      const elapsed = Date.now() - renderStartTime.current;
-      nlog(`⏱️ [HistoryApp] First render: ${elapsed}ms (items: ${items.length}, groups: ${groups.length})`);
-    }
-  });
-
   const [searchQuery, setSearchQuery] = useState('');
 
   // Filter items based on search
