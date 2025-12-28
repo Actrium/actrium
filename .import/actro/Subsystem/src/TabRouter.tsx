@@ -108,17 +108,12 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
       {/* Actr tabs - rendered by ActrApp */}
       {actrTabs.length > 0 && (
         <React.Suspense fallback={<LoadingFallback />}>
-          <View style={[
-            // 使用显式尺寸而非 absoluteFill，确保缩小时能正确响应
-            {
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              width: containerWidth,
-              height: containerHeight,
-            },
-            { display: actrTabs.some(t => t.id === activeTabId) ? 'flex' : 'none' }
-          ]}>
+          <View
+            key={`actr-container-${containerWidth}-${containerHeight}`}
+            style={[
+              StyleSheet.absoluteFill,
+              { display: actrTabs.some(t => t.id === activeTabId) ? 'flex' : 'none' }
+            ]}>
             <ActrApp
               tabs={actrTabs}
               currentTabId={activeTabId}
