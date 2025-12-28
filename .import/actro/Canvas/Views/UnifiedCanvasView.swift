@@ -155,7 +155,7 @@ struct UnifiedCanvasView: View {
                 .frame(width: canvasSize.width, height: canvasSize.height)
                 .scaleEffect(transform.scale, anchor: .topLeading)
                 .offset(x: transform.offset.x, y: transform.offset.y)
-                .animation(.easeInOut(duration: 0.3), value: viewModel.canvasMode)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0), value: viewModel.canvasMode)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     // Focus 模式下点击内容区域取消地址栏编辑
@@ -270,7 +270,7 @@ struct UnifiedCanvasView: View {
                     .help("分享")
 
                     Button(action: {
-                        withAnimation(.easeInOut(duration: 0.3)) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0)) {
                             _ = viewModel.addNewTab()
                         }
                     }) {
@@ -303,7 +303,7 @@ struct UnifiedCanvasView: View {
             if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
                 logger.notice("🚀 [UnifiedCanvasView] 启动时直接进入 Focus 模式")
                 DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.3)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0)) {
                         viewModel.canvasMode = .focus(tabId: tabId)
                     }
                     viewModel.shouldStartInFocusMode = false  // 重置标志
@@ -363,7 +363,7 @@ struct UnifiedCanvasView: View {
     private func switchToOverview() {
         guard case .focus = viewModel.canvasMode else { return }
 
-        withAnimation(.easeInOut(duration: 0.3)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0)) {
             viewModel.canvasMode = .overview
         }
     }
@@ -371,7 +371,7 @@ struct UnifiedCanvasView: View {
     private func switchToFocus(tabId: UUID) {
         guard viewModel.canvasMode != .focus(tabId: tabId) else { return }
 
-        withAnimation(.easeInOut(duration: 0.3)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0)) {
             viewModel.canvasMode = .focus(tabId: tabId)
         }
     }
@@ -677,7 +677,7 @@ private struct CanvasView: View {
                             swappingTabId = tabId2
 
                             // 使用动画执行交换（B 从 b 移动到 a，300ms + 从 0.5 淡入到 1.0）
-                            withAnimation(.easeInOut(duration: 0.3)) {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0)) {
                                 onSwapPositions(tabId1, tabId2)
                                 // 清除 hovering 状态，让 B 卡片开始淡入
                                 hoveringOverTabId = nil
@@ -1312,17 +1312,18 @@ private struct TabCardView: View {
         CGSize(width: cardWidth, height: cardHeight * (1 - titleBarRatio))
     }
 
-    // RN 渲染尺寸（使用视口尺寸，确保布局正确）
+    // RN 渲染尺寸（使用视口尺寸，宽高比与 cardContentSize 匹配）
+    // 高度使用 viewportSize.height（不减 toolbarHeight），因为 cardContentSize 的宽高比
+    // 是 viewportSize.width / viewportSize.height，需要保持一致才能避免缩放后的空隙
     private var rnRenderSize: CGSize {
-        CGSize(width: viewportSize.width, height: viewportSize.height - toolbarHeight)
+        CGSize(width: viewportSize.width, height: viewportSize.height)
     }
 
     // RN 视图需要缩放的比例（从视口尺寸缩放到卡片内容尺寸）
+    // 由于宽高比匹配，scaleX == scaleY，直接使用 scaleX
     private var rnScaleFactor: CGFloat {
-        guard rnRenderSize.width > 0, rnRenderSize.height > 0 else { return 1 }
-        let scaleX = cardContentSize.width / rnRenderSize.width
-        let scaleY = cardContentSize.height / rnRenderSize.height
-        return min(scaleX, scaleY)
+        guard rnRenderSize.width > 0 else { return 1 }
+        return cardContentSize.width / rnRenderSize.width
     }
 
     // 判断 Tab 是否有 RN 内容需要渲染
