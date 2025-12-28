@@ -735,8 +735,11 @@ export class Receiver {
     }
 
     // Props are already decoded by Bridge - use directly
+    // Filter out 'key' and 'ref' from node.props - these are React internals
+    // that should not be passed to the underlying component
+    const { key: _key, ref: _ref, ...filteredProps } = node.props;
     const props: Record<string, unknown> = {
-      ...node.props,
+      ...filteredProps,
       key: `rill-${id}`,
       ref: nodeRef, // 注入 ref 用于 Remote Ref 方法调用
     };
