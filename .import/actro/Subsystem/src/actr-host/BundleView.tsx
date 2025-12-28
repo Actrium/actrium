@@ -1,18 +1,28 @@
 import React from 'react';
 import {
-  ActivityIndicator,
-  Button,
-  Image,
+  ActivityIndicator as RNActivityIndicator,
   Pressable,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
+  ScrollView as RNScrollView,
+  Text as RNText,
+  View as RNView,
 } from 'react-native';
 import { logger } from '../logger';
 
-// 导入 rill Engine - 内置 JSC sandbox 自动检测
+// 导入 rill Engine 和 preset 组件 - 内置 JSC sandbox 自动检测
 import { Engine } from 'rill';
+// 使用 rill preset 组件 - 这些组件已正确处理事件序列化
+import {
+  ActivityIndicator,
+  Button,
+  Image,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  FlatList,
+  Switch,
+} from 'rill/host/preset';
 
 logger.child('BundleView').notice('✅ rill Engine 导入成功 (内置 JSC sandbox)');
 
@@ -89,19 +99,19 @@ const LocalEngineView: React.FC<{
     };
   }, [engine, bundleUrl, containerHeight, containerWidth, handleUpdate, onLoad, onError]);
 
-  // 渲染
+  // 渲染 - 使用 RN 原生组件用于内部 UI
   if (state === 'loading') {
-    return <View style={[{ flex: 1 }, style]}>{fallback}</View>;
+    return <RNView style={[{ flex: 1 }, style]}>{fallback}</RNView>;
   }
 
   if (state === 'error' && error) {
-    return <View style={[{ flex: 1 }, style]}>{renderError?.(error)}</View>;
+    return <RNView style={[{ flex: 1 }, style]}>{renderError?.(error)}</RNView>;
   }
 
   return content || (
-    <View style={[{ flex: 1, backgroundColor: '#1a1a2a' }, style]}>
-      <Text style={{ color: '#888' }}>Loading...</Text>
-    </View>
+    <RNView style={[{ flex: 1, backgroundColor: '#1a1a2a' }, style]}>
+      <RNText style={{ color: '#888' }}>Loading...</RNText>
+    </RNView>
   );
 };
 
@@ -112,6 +122,7 @@ import type { ComponentMap } from 'rill';
 import { ThemeView, StepList, UserAvatar, ChatBubble, PanelMarker } from 'askit';
 
 // Patch ScrollView to add debugging - DO NOT force flexGrow:1
+// 使用 rill preset 的 ScrollView 以正确处理事件序列化
 const PatchedScrollView = React.forwardRef<any, any>((props, ref) => {
   const { contentContainerStyle, onContentSizeChange, ...rest } = props || {};
   // 🔴 移除强制 flexGrow:1 - 让内容使用自己的样式
@@ -121,6 +132,7 @@ const PatchedScrollView = React.forwardRef<any, any>((props, ref) => {
     onContentSizeChange?.(w, h);
   };
   nlog(`[PatchedScrollView-v2-NO-FLEXGROW] render, contentContainerStyle: ${JSON.stringify(patched)}`);
+  // 使用 rill preset ScrollView 来正确处理 scroll 事件序列化
   return <ScrollView ref={ref} contentContainerStyle={patched} onContentSizeChange={handleContentSizeChange} {...rest} />;
 });
 PatchedScrollView.displayName = 'PatchedScrollView';
@@ -137,7 +149,7 @@ type Props = {
 };
 
 // 🔴 调试包装的 Pressable
-const DebugPressable = React.forwardRef<View, any>((props, ref) => {
+const DebugPressable = React.forwardRef<RNView, any>((props, ref) => {
   nlog('[DebugPressable] 🔧 Rendered with onPress: ' + typeof props.onPress);
   nlog('[DebugPressable] 🔧 Props keys: ' + Object.keys(props).join(', '));
 
@@ -156,17 +168,20 @@ const DebugPressable = React.forwardRef<View, any>((props, ref) => {
   );
 });
 
-// Host 组件映射：Rill 插件使用字符串名称，映射到真实 React Native 组件
+// Host 组件映射：使用 rill preset 组件，这些组件已正确处理事件序列化
+// 防止 GestureResponderEvent 等复杂事件对象导致 JSI 边界序列化 OOM
 export const hostComponents: ComponentMap = {
-  // 基础 React Native 组件
+  // rill preset 组件 - 已处理事件序列化
   View: View as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as unknown as React.ComponentType<Record<string, unknown>>,
   Image: Image as unknown as React.ComponentType<Record<string, unknown>>,
   ScrollView: PatchedScrollView as unknown as React.ComponentType<Record<string, unknown>>,
-  // Use native TouchableOpacity mapping to preserve adapter behavior
   TouchableOpacity: TouchableOpacity as unknown as React.ComponentType<Record<string, unknown>>,
   Button: Button as unknown as React.ComponentType<Record<string, unknown>>,
   ActivityIndicator: ActivityIndicator as unknown as React.ComponentType<Record<string, unknown>>,
+  TextInput: TextInput as unknown as React.ComponentType<Record<string, unknown>>,
+  FlatList: FlatList as unknown as React.ComponentType<Record<string, unknown>>,
+  Switch: Switch as unknown as React.ComponentType<Record<string, unknown>>,
   // Askit 组件
   ThemeView: ThemeView as unknown as React.ComponentType<Record<string, unknown>>,
   StepList: StepList as unknown as React.ComponentType<Record<string, unknown>>,
@@ -189,22 +204,22 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
   if (useSimpleMode) {
     nlog('[GuestAppView-v3] 🟢 使用简单模式 (静态内容)');
     return (
-      <View style={{ flex: 1, backgroundColor: '#1a1a2e', padding: 20 }}>
-        <Text style={{ color: '#00ff00', fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>
+      <RNView style={{ flex: 1, backgroundColor: '#1a1a2e', padding: 20 }}>
+        <RNText style={{ color: '#00ff00', fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>
           ✅ GuestAppView 简单模式
-        </Text>
-        <Text style={{ color: '#ffffff', fontSize: 16, marginBottom: 10 }}>
+        </RNText>
+        <RNText style={{ color: '#ffffff', fontSize: 16, marginBottom: 10 }}>
           React Native 渲染正常工作！
-        </Text>
-        <Text style={{ color: '#888888', fontSize: 12 }}>
+        </RNText>
+        <RNText style={{ color: '#888888', fontSize: 12 }}>
           Script 长度: {script.length} 字符
-        </Text>
-        <View style={{ marginTop: 20, padding: 10, backgroundColor: '#2a2a4e', borderRadius: 8 }}>
-          <Text style={{ color: '#aaaaff', fontSize: 11 }}>
+        </RNText>
+        <RNView style={{ marginTop: 20, padding: 10, backgroundColor: '#2a2a4e', borderRadius: 8 }}>
+          <RNText style={{ color: '#aaaaff', fontSize: 11 }}>
             {script.substring(0, 200)}...
-          </Text>
-        </View>
-      </View>
+          </RNText>
+        </RNView>
+      </RNView>
     );
   }
 
@@ -274,36 +289,36 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
 
   // 简化日志：只在状态变化时记录
 
-  // 加载中
+  // 加载中 - 使用 RN 原生组件用于内部 UI
   if (isLoading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={{ color: '#888', fontSize: 14, marginTop: 16 }}>初始化 Engine...</Text>
-      </View>
+      <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
+        <RNActivityIndicator size="large" color="#007AFF" />
+        <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>初始化 Engine...</RNText>
+      </RNView>
     );
   }
 
   // 加载错误
   if (loadError) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
-        <Text style={{ color: '#ff6b6b', fontSize: 18, fontWeight: '600', marginBottom: 12 }}>
+      <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
+        <RNText style={{ color: '#ff6b6b', fontSize: 18, fontWeight: '600', marginBottom: 12 }}>
           Engine 初始化失败
-        </Text>
-        <Text style={{ color: '#ccc', fontSize: 14, textAlign: 'center', marginBottom: 8 }}>{loadError.message}</Text>
-        <Text style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>{loadError.stack?.substring(0, 200)}</Text>
-      </View>
+        </RNText>
+        <RNText style={{ color: '#ccc', fontSize: 14, textAlign: 'center', marginBottom: 8 }}>{loadError.message}</RNText>
+        <RNText style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>{loadError.stack?.substring(0, 200)}</RNText>
+      </RNView>
     );
   }
 
   // Engine 未就绪
   if (!engine) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={{ color: '#888', fontSize: 14, marginTop: 16 }}>准备 Engine...</Text>
-      </View>
+      <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
+        <RNActivityIndicator size="large" color="#007AFF" />
+        <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>准备 Engine...</RNText>
+      </RNView>
     );
   }
 
@@ -321,19 +336,19 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
         nerror('错误堆栈: ' + error.stack?.substring(0, 500));
       }}
       fallback={
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={{ color: '#888', fontSize: 14, marginTop: 16 }}>加载插件中...</Text>
-        </View>
+        <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
+          <RNActivityIndicator size="large" color="#007AFF" />
+          <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>加载插件中...</RNText>
+        </RNView>
       }
       renderError={error => (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
-          <Text style={{ color: '#ff6b6b', fontSize: 18, fontWeight: '600', marginBottom: 12 }}>
+        <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
+          <RNText style={{ color: '#ff6b6b', fontSize: 18, fontWeight: '600', marginBottom: 12 }}>
             插件运行异常
-          </Text>
-          <Text style={{ color: '#ccc', fontSize: 14, textAlign: 'center', marginBottom: 8 }}>{error.message}</Text>
-          <Text style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>{error.stack?.substring(0, 200)}</Text>
-        </View>
+          </RNText>
+          <RNText style={{ color: '#ccc', fontSize: 14, textAlign: 'center', marginBottom: 8 }}>{error.message}</RNText>
+          <RNText style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>{error.stack?.substring(0, 200)}</RNText>
+        </RNView>
       )}
     />
   );
