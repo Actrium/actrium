@@ -1,0 +1,63 @@
+/**
+ * View Component
+ *
+ * Default View component implementation, wrapping React Native View
+ */
+
+import type React from 'react';
+import { type LayoutChangeEvent, View as RNView, type ViewStyle } from 'react-native';
+
+export interface ViewProps {
+  style?: ViewStyle;
+  children?: React.ReactNode;
+  testID?: string;
+  pointerEvents?: 'auto' | 'none' | 'box-none' | 'box-only';
+  accessible?: boolean;
+  accessibilityLabel?: string;
+  onLayout?: (event: {
+    nativeEvent: {
+      layout: { x: number; y: number; width: number; height: number };
+    };
+  }) => void;
+}
+
+export function View({
+  style,
+  children,
+  testID,
+  pointerEvents,
+  accessible,
+  accessibilityLabel,
+  onLayout,
+}: ViewProps): React.ReactElement {
+  // Sanitize layout event to only pass serializable data
+  const handleLayout = onLayout
+    ? (event: LayoutChangeEvent) => {
+        onLayout({
+          nativeEvent: {
+            layout: {
+              x: event.nativeEvent.layout.x,
+              y: event.nativeEvent.layout.y,
+              width: event.nativeEvent.layout.width,
+              height: event.nativeEvent.layout.height,
+            },
+          },
+        });
+      }
+    : undefined;
+
+  return (
+    <RNView
+      style={style}
+      testID={testID}
+      pointerEvents={pointerEvents}
+      accessible={accessible}
+      accessibilityLabel={accessibilityLabel}
+      onLayout={handleLayout}
+    >
+      {children}
+    </RNView>
+  );
+}
+
+export default View;
