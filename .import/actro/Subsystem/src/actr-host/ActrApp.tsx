@@ -433,9 +433,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   }
 
   // 渲染三栏布局
+  // 使用 containerWidth 作为 maxWidth，强制 View 在窗口缩小时收缩
+  const effectiveMaxWidth = propsContainerWidth && propsContainerWidth > 0 ? propsContainerWidth : undefined;
+
   return (
     <View
-      style={styles.threeColumn}
+      style={[styles.threeColumn, effectiveMaxWidth ? { maxWidth: effectiveMaxWidth, width: effectiveMaxWidth } : null]}
       onLayout={(e) => {
         const next = Math.max(e.nativeEvent.layout.width, 0);
         if (next !== layoutWidth) {
@@ -660,7 +663,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         const isActive = tab.id === activeTabId;
         return (
           <View
-            key={`${tab.id}-${tab.reloadKey ?? 0}-${containerWidth}`}
+            key={`${tab.id}-${tab.reloadKey ?? 0}`}
             style={[
               StyleSheet.absoluteFill,
               { display: isActive ? 'flex' : 'none' },
