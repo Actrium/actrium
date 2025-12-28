@@ -8,7 +8,6 @@
  */
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { logger } from './logger';
 import type { TabRouterProps, TabConfig } from './actr-host/types';
 
 // Lazy imports to avoid circular dependencies
@@ -16,12 +15,8 @@ const ActrApp = React.lazy(() => import('./actr-host/ActrApp').then(m => ({ defa
 const HistoryApp = React.lazy(() => import('./system-apps/HistoryApp'));
 const BookmarksApp = React.lazy(() => import('./system-apps/BookmarksApp'));
 
-const log = logger.child('TabRouter');
-
 // Props cache for bridge stability
 let cachedValidProps: TabRouterProps | null = null;
-
-log.notice('Module loaded');
 
 // Loading fallback
 const LoadingFallback = () => (
@@ -31,13 +26,10 @@ const LoadingFallback = () => (
 );
 
 export const TabRouter: React.FC<TabRouterProps> = (props) => {
-  log.trace('Render, props keys: ' + Object.keys(props || {}).join(', '));
-
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
     const { isLeftPanelVisible = true, isRightPanelVisible = true } = props;
-    log.debug(`Single tab mode: ${tab.title} (${tab.id?.substring(0, 8)})`);
 
     // System app tab
     if (tab.systemAppType) {
@@ -81,16 +73,13 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
 
   if (hasValidTabs) {
     cachedValidProps = { ...props };
-    log.debug('Cached valid props (tabs: ' + props.tabs.length + ')');
   } else if (cachedValidProps) {
     effectiveProps = cachedValidProps;
-    log.debug('Using cached props (tabs: ' + cachedValidProps.tabs.length + ')');
   }
 
   const { tabs = [], currentTabId, isLeftPanelVisible = true } = effectiveProps || {};
 
   if (!tabs.length) {
-    log.debug('No tabs, rendering empty view');
     return <View style={styles.empty} />;
   }
 
@@ -99,8 +88,6 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
   // Separate tabs by type
   const actrTabs = tabs.filter(t => !t.systemAppType);
   const systemTabs = tabs.filter(t => !!t.systemAppType);
-
-  log.info(`Routing: ${actrTabs.length} actr tabs, ${systemTabs.length} system tabs, active=${activeTabId}`);
 
   return (
     <View style={styles.container}>

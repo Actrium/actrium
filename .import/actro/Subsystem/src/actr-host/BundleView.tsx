@@ -1,8 +1,6 @@
 import React from 'react';
 import {
   ActivityIndicator as RNActivityIndicator,
-  Pressable,
-  ScrollView as RNScrollView,
   Text as RNText,
   View as RNView,
 } from 'react-native';
@@ -24,7 +22,7 @@ import {
   Switch,
 } from 'rill/host/preset';
 
-logger.child('BundleView').notice('✅ rill Engine 导入成功 (内置 JSC sandbox)');
+// Module loaded - minimal logging
 
 // 简化版 EngineView - 正确使用 rill API
 const LocalEngineView: React.FC<{
@@ -73,9 +71,7 @@ const LocalEngineView: React.FC<{
         engine.createReceiver(handleUpdate);
 
         // loadBundle 内部会自动初始化运行时
-        nlog('[LocalEngineView] 调用 loadBundle...');
         await engine.loadBundle(bundleUrl, { containerHeight, containerWidth });
-        nlog('[LocalEngineView] ✅ loadBundle 完成');
 
         if (mountedRef.current) {
           setState('loaded');
@@ -120,26 +116,9 @@ const EngineView = LocalEngineView;
 
 import type { ComponentMap } from 'rill';
 import { ThemeView, StepList, UserAvatar, ChatBubble, PanelMarker } from 'askit';
-
-// Patch ScrollView to add debugging - DO NOT force flexGrow:1
-// 使用 rill preset 的 ScrollView 以正确处理事件序列化
-const PatchedScrollView = React.forwardRef<any, any>((props, ref) => {
-  const { contentContainerStyle, onContentSizeChange, ...rest } = props || {};
-  // 🔴 移除强制 flexGrow:1 - 让内容使用自己的样式
-  const patched = contentContainerStyle;
-  const handleContentSizeChange = (w: number, h: number) => {
-    try { nlog(`[PatchedScrollView] content size: ${w}x${h}`); } catch {}
-    onContentSizeChange?.(w, h);
-  };
-  nlog(`[PatchedScrollView-v2-NO-FLEXGROW] render, contentContainerStyle: ${JSON.stringify(patched)}`);
-  // 使用 rill preset ScrollView 来正确处理 scroll 事件序列化
-  return <ScrollView ref={ref} contentContainerStyle={patched} onContentSizeChange={handleContentSizeChange} {...rest} />;
-});
-PatchedScrollView.displayName = 'PatchedScrollView';
 import { createEngineAdapter } from 'askit/core';
 
 const log = logger.child('BundleView');
-const nlog = (msg: string) => log.debug(msg);
 const nerror = (msg: string) => log.error(msg);
 
 type Props = {
@@ -148,26 +127,6 @@ type Props = {
   containerWidth?: number;
 };
 
-// 🔴 调试包装的 Pressable
-const DebugPressable = React.forwardRef<RNView, any>((props, ref) => {
-  nlog('[DebugPressable] 🔧 Rendered with onPress: ' + typeof props.onPress);
-  nlog('[DebugPressable] 🔧 Props keys: ' + Object.keys(props).join(', '));
-
-  const handlePress = () => {
-    nlog('[DebugPressable] 🖱️ onPress called!');
-    if (props.onPress) {
-      nlog('[DebugPressable] 🖱️ Calling props.onPress');
-      props.onPress();
-    }
-  };
-
-  return (
-    <Pressable {...props} onPress={handlePress} ref={ref}>
-      {props.children}
-    </Pressable>
-  );
-});
-
 // Host 组件映射：使用 rill preset 组件，这些组件已正确处理事件序列化
 // 防止 GestureResponderEvent 等复杂事件对象导致 JSI 边界序列化 OOM
 export const hostComponents: ComponentMap = {
@@ -175,7 +134,7 @@ export const hostComponents: ComponentMap = {
   View: View as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as unknown as React.ComponentType<Record<string, unknown>>,
   Image: Image as unknown as React.ComponentType<Record<string, unknown>>,
-  ScrollView: PatchedScrollView as unknown as React.ComponentType<Record<string, unknown>>,
+  ScrollView: ScrollView as unknown as React.ComponentType<Record<string, unknown>>,
   TouchableOpacity: TouchableOpacity as unknown as React.ComponentType<Record<string, unknown>>,
   Button: Button as unknown as React.ComponentType<Record<string, unknown>>,
   ActivityIndicator: ActivityIndicator as unknown as React.ComponentType<Record<string, unknown>>,
@@ -192,37 +151,6 @@ export const hostComponents: ComponentMap = {
 };
 
 export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, containerWidth = 240 }) => {
-  // 只在首次加载时记录
-  const isFirstLoad = !script.includes('__RillPlugin');
-  if (isFirstLoad) {
-    nlog(`[BundleView] 开始加载脚本 (${script.length} 字节)`);
-  }
-
-  // 🔴 临时测试：直接返回静态内容，跳过 EngineView
-  const [useSimpleMode] = React.useState(false); // 🟢 使用真正的 EngineView
-
-  if (useSimpleMode) {
-    nlog('[GuestAppView-v3] 🟢 使用简单模式 (静态内容)');
-    return (
-      <RNView style={{ flex: 1, backgroundColor: '#1a1a2e', padding: 20 }}>
-        <RNText style={{ color: '#00ff00', fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>
-          ✅ GuestAppView 简单模式
-        </RNText>
-        <RNText style={{ color: '#ffffff', fontSize: 16, marginBottom: 10 }}>
-          React Native 渲染正常工作！
-        </RNText>
-        <RNText style={{ color: '#888888', fontSize: 12 }}>
-          Script 长度: {script.length} 字符
-        </RNText>
-        <RNView style={{ marginTop: 20, padding: 10, backgroundColor: '#2a2a4e', borderRadius: 8 }}>
-          <RNText style={{ color: '#aaaaff', fontSize: 11 }}>
-            {script.substring(0, 200)}...
-          </RNText>
-        </RNView>
-      </RNView>
-    );
-  }
-
   // Engine 和 adapter 状态
   const [engine, setEngine] = React.useState<Engine | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -236,23 +164,18 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
 
     function init() {
       try {
-        nlog('[BundleView] 开始初始化...');
-
         if (cancelled) return;
 
-        nlog('[BundleView] 创建 Engine 实例 (rill 内置 JSC 自动检测)');
         currentEngine = new Engine({
           timeout: 10000,
-          debug: true,
+          debug: false,
           logger: {
-            log: (...args: unknown[]) => nlog(args.map(a => String(a)).join(' ')),
+            log: () => {},
             warn: (...args: unknown[]) => log.warning(args.map(a => String(a)).join(' ')),
             error: (...args: unknown[]) => nerror(args.map(a => String(a)).join(' ')),
           },
         });
         currentEngine.register(hostComponents);
-
-        nlog('[BundleView] 创建 askit/core adapter');
         currentAdapter = createEngineAdapter(currentEngine);
 
         if (cancelled) {
@@ -263,10 +186,9 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
 
         setEngine(currentEngine);
         setIsLoading(false);
-        nlog('[BundleView] ✅ Engine 初始化完成 (rill 内置 JSC sandbox)');
       } catch (e: any) {
         if (cancelled) return;
-        nerror('[BundleView] 初始化失败: ' + e?.message);
+        nerror('[BundleView] init failed: ' + e?.message);
         setLoadError(e instanceof Error ? e : new Error(String(e)));
         setIsLoading(false);
       }
@@ -276,18 +198,10 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
 
     return () => {
       cancelled = true;
-      if (currentAdapter) {
-        nlog('[BundleView] cleanup: 销毁 adapter');
-        currentAdapter.dispose();
-      }
-      if (currentEngine) {
-        nlog('[BundleView] cleanup: 销毁 Engine');
-        currentEngine.destroy();
-      }
+      currentAdapter?.dispose();
+      currentEngine?.destroy();
     };
   }, [script]);
-
-  // 简化日志：只在状态变化时记录
 
   // 加载中 - 使用 RN 原生组件用于内部 UI
   if (isLoading) {
@@ -328,12 +242,9 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
       engine={engine}
       bundleUrl={script}
       style={{ flex: 1 }}
-      onLoad={() => {
-        nlog('✅ [BundleView] EngineView 加载成功');
-      }}
+      onLoad={() => {}}
       onError={error => {
-        nerror('❌ [BundleView] 加载失败: ' + error.message);
-        nerror('错误堆栈: ' + error.stack?.substring(0, 500));
+        nerror('[BundleView] load failed: ' + error.message);
       }}
       fallback={
         <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
