@@ -12,11 +12,10 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "rill/let": ["../../../../rill/src/sdk/index.ts"],
-      "rill/sdk": ["../../../../rill/src/sdk/index.ts"],
-      "askit": ["../../../askit/src/index.ts"]
+      "rill/let": ["../../../../rill/src/guest/let/index.ts"],
+      "askit": ["../../../../askit/src/index.guest.ts"]
     }
   },
-  "include": ["entry.ts", "src/**/*"],
-  "exclude": ["**/node_modules/**", "**/rill/src/guest/reconciler/**"]
+  "include": ["src/**/*"],
+  "exclude": ["**/node_modules/**"]
 }

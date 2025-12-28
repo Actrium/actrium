@@ -1,18 +1,12 @@
 {
   "name": "counterapp",
-  "version": "2.1.0",
-  "description": "Interactive Counter Test App",
-  "entry": "dist/bundle.js",
+  "version": "3.0.0",
+  "description": "Interactive Counter Test App - usePanels Hook Mode",
+  "entry": "unified-app.js",
   "leftPanelDefaultVisible": true,
   "rightPanelDefaultVisible": true,
   "contract": {
     "name": "ask",
     "version": 1
-  },
-  "integrity": {
-    "algorithm": "sha256",
-    "files": {
-      "dist/bundle.js": "d4a1b41448e81ed22e50ceda1a0f07feee1cdfc258f2417aa0c09a3c28f0b46e"
-    }
   }
 }

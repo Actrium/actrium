@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "bun ../../../../rill/src/cli/index.ts build src/unified-app.tsx -o unified-app.js"
+    "build": "bun ../../../../rill/src/cli/index.ts build src/unified-app.tsx -o unified-app.js --footer ../../../../askit/src/cli/actr-footer.js"
   },
   "dependencies": {
-    "askit": "file:../../../askit",
+    "rill": "file:../../../../rill",
+    "askit": "file:../../../../askit",
     "react": "^19.0.0"
   },
   "devDependencies": {

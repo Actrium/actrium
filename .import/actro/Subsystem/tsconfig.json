@@ -22,5 +22,5 @@
     }
   },
   "include": ["index.ts", "src"],
-  "exclude": ["node_modules", "../../rill/src/let", "../../rill/src/cli", "../../rill/src/presets", "../../rill/src/sandbox", "../../rill/src/devtools"]
+  "exclude": ["node_modules", "../../rill/src/guest", "../../rill/src/cli", "../../rill/src/sandbox", "../../rill/src/devtools"]
 }
