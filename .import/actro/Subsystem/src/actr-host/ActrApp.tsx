@@ -1,26 +1,82 @@
 /**
- * ActrApp v7 - Single Engine Architecture with Panel Extraction
- * 单 Engine 架构 + 面板提取
+ * ActrApp v8 - Single Engine Architecture with usePanels Hook Pattern
+ * 单 Engine 架构 + usePanels hook 模式
  *
  * 改进：
  * - ✅ 单个 Engine 加载统一 bundle
- * - ✅ 通过 extractPanels() 分离左右面板
+ * - ✅ Guest 导出 usePanels hook，AUTO_RENDER_FOOTER 调用并渲染
+ * - ✅ Host 通过 __panelId 属性识别面板
  * - ✅ Host 控制布局（三栏固定-flex-固定）
- * - ✅ 无需修改 rill 核心代码
- * - ✅ 使用 PanelMarker 组件标记面板边界
+ * - ✅ 与 CounterMacOS 模式一致
  *
- * @version 7.0.0 - Single Engine + PanelMarker
+ * @version 8.0.0 - Single Engine + usePanels Hook Pattern
  */
 import React, { useCallback, useRef, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, StyleSheet } from 'react-native';
 import { logger } from '../logger';
 import { Engine } from 'rill';
 import { hostComponents } from './BundleView';
-import { EngineMonitorOverlay, extractPanels } from 'askit';
+import { EngineMonitorOverlay } from 'askit';
 import type { ContractViolation } from 'askit/contracts';
 import { createContractViolationCollector, createHostToGuestSender } from 'askit/contracts';
 import { createEngineAdapter } from 'askit/core';
 import type { ActrProps, TabConfig } from './types';
+
+/**
+ * Extract panels from React element tree by __panelId attribute
+ * Searches for nodes with __panelId="left" and __panelId="right"
+ */
+function extractPanelsByPanelId(
+  element: React.ReactNode,
+  log?: (msg: string) => void
+): { left: React.ReactElement | null; right: React.ReactElement | null } {
+  const nlog = log || (() => {});
+
+  if (!element || !React.isValidElement(element)) {
+    nlog('[extractPanelsByPanelId] element is null or not valid');
+    return { left: null, right: null };
+  }
+
+  const result: { left: React.ReactElement | null; right: React.ReactElement | null } = {
+    left: null,
+    right: null,
+  };
+
+  function traverse(node: React.ReactNode): void {
+    if (!React.isValidElement(node)) {
+      return;
+    }
+
+    const props = node.props as Record<string, unknown>;
+    const panelId = props.__panelId;
+
+    if (panelId === 'left') {
+      nlog('[extractPanelsByPanelId] Found left panel');
+      // Return the children of the panel wrapper
+      result.left = props.children as React.ReactElement;
+      return;
+    }
+
+    if (panelId === 'right') {
+      nlog('[extractPanelsByPanelId] Found right panel');
+      result.right = props.children as React.ReactElement;
+      return;
+    }
+
+    // Recursively search children
+    const children = props.children;
+    if (Array.isArray(children)) {
+      children.forEach(traverse);
+    } else if (children) {
+      traverse(children as React.ReactNode);
+    }
+  }
+
+  traverse(element);
+
+  nlog(`[extractPanelsByPanelId] Result: left=${!!result.left}, right=${!!result.right}`);
+  return result;
+}
 
 const log = logger.child('ActrApp');
 
@@ -70,14 +126,13 @@ class PerfTimer {
 // 全局计时器 Map（按 tabId 隔离）
 const perfTimers = new Map<string, PerfTimer>();
 
-nlog(`✅ [ActrApp-v7] 文件已加载 - Single Engine + PanelMarker 版本 (module load at T+${Date.now() - MODULE_LOAD_TIME}ms)`);
+nlog(`✅ [ActrApp-v8] 文件已加载 - Single Engine + usePanels Hook 版本 (module load at T+${Date.now() - MODULE_LOAD_TIME}ms)`);
 nlog(
-  `🔎 [ActrApp-v7] askit(host) exports: EngineMonitorOverlay=${typeof EngineMonitorOverlay}, extractPanels=${typeof extractPanels}`,
+  `🔎 [ActrApp-v8] askit(host) exports: EngineMonitorOverlay=${typeof EngineMonitorOverlay}`,
 );
 
 // 🔴 模块级别的 props 缓存
 let cachedValidProps: ActrProps | null = null;
-let warnedAskItHostExportsMissing = false;
 
 // 布局常量
 const LAYOUT = {
@@ -143,6 +198,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const loadedUnifiedScriptRef = useRef<string | null>(null);
   const isActiveRef = useRef(isActive);
   const pendingUpdateRef = useRef(false);
+  const lastBatchesRef = useRef<number>(0);
 
   React.useEffect(() => {
     isActiveRef.current = isActive;
@@ -167,31 +223,31 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       return;
     }
 
-    if (typeof extractPanels !== 'function') {
-      if (!warnedAskItHostExportsMissing) {
-        warnedAskItHostExportsMissing = true;
-        nerror('[ActrTabView] extractPanels 不可用：请检查 askit 是否正确解析到 host 入口（react-native 条件导出）');
-      }
-      return;
-    }
 
     // 检查 receiver 状态 - 🔧 FIX: 如果节点数为 0，跳过本次提取，等待下次回调
     const receiverStats = receiver.getStats?.();
-    if (receiverStats) {
-      nlog(`[ActrTabView] receiver stats: nodes=${receiverStats.nodeCount}, rootChildren=${receiverStats.rootChildrenCount}, batches=${receiverStats.totalBatches}, ops=${JSON.stringify(receiverStats.totalOps)}`);
-
-      // 🔧 FIX: 关键修复 - 如果还没有节点，说明 Guest 渲染还未完成，跳过本次提取
-      // receiver 的 onUpdate 回调会在 applyBatch 后自动触发，所以我们只需要等待
-      if (receiverStats.nodeCount === 0) {
-        nlog(`[ActrTabView] handleUpdate: receiver 节点数为 0，等待下一次更新回调...`);
-        return;
-      }
-    } else {
+    if (!receiverStats) {
       nlog(`[ActrTabView] receiver.getStats() 返回空`);
       return;
     }
 
-    nlog(`[ActrTabView] handleUpdate: 提取面板... tab=${tab.id}`);
+    nlog(`[ActrTabView] receiver stats: nodes=${receiverStats.nodeCount}, rootChildren=${receiverStats.rootChildrenCount}, batches=${receiverStats.totalBatches}, ops=${JSON.stringify(receiverStats.totalOps)}`);
+
+    // 🔧 FIX: 关键修复 - 如果还没有节点，说明 Guest 渲染还未完成，跳过本次提取
+    if (receiverStats.nodeCount === 0) {
+      nlog(`[ActrTabView] handleUpdate: receiver 节点数为 0，等待下一次更新回调...`);
+      return;
+    }
+
+    // 🔧 FIX: 只有当 batches 变化时才更新面板，避免无限循环
+    const currentBatches = receiverStats.totalBatches;
+    if (currentBatches === lastBatchesRef.current) {
+      nlog(`[ActrTabView] handleUpdate: batches 未变化 (${currentBatches})，跳过更新`);
+      return;
+    }
+    lastBatchesRef.current = currentBatches;
+
+    nlog(`[ActrTabView] handleUpdate: 提取面板 (usePanels hook 模式)... tab=${tab.id}`);
     const debugInfo = receiver.getDebugInfo?.();
     if (debugInfo) {
       nlog(`[ActrTabView] debugInfo: nodes=${debugInfo.nodeCount}, rootChildren=[${debugInfo.rootChildren?.join(',')}], appendCalls=${debugInfo.appendCalls}`);
@@ -207,9 +263,10 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       const treeType = fullTree.type;
       nlog(`[ActrTabView] fullTree.type: ${typeof treeType === 'string' ? treeType : (treeType as any)?.displayName || (treeType as any)?.name || 'unknown'}`);
     }
-    const panels = extractPanels(fullTree);
+    // Use __panelId extraction (usePanels hook pattern)
+    const panels = extractPanelsByPanelId(fullTree, nlog);
 
-    nlog(`[ActrTabView] 提取结果: left=${!!panels.left}, right=${!!panels.right}, tab=${tab.id}`);
+    nlog(`[ActrTabView] 提取结果 (usePanels): left=${!!panels.left}, right=${!!panels.right}, tab=${tab.id}`);
     setLeftPanel(panels.left);
     setRightPanel(panels.right);
   }, [tab.id]);
@@ -435,7 +492,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={{ color: '#888', fontSize: 14, marginTop: 16 }}>初始化 Single Engine...</Text>
+        <Text style={{ color: '#888', fontSize: 14, marginTop: 16 }}>初始化 Single Engine (usePanels mode)...</Text>
       </View>
     );
   }
@@ -487,7 +544,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           contentContainerStyle={{ padding: 20 }}
         >
           <Text style={{ color: '#fff', fontSize: 24, marginBottom: 20, fontWeight: 'bold' }}>
-            Canvas ActrApp v7
+            Canvas ActrApp v8
           </Text>
 
           {/* 右侧面板控制按钮 */}
@@ -542,7 +599,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             )}
           </View>
 
-          {/* v7 架构说明 */}
+          {/* v8 架构说明 */}
           <View style={{
             marginTop: 20,
             padding: 12,
@@ -552,19 +609,19 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             borderLeftColor: '#00aaff'
           }}>
             <Text style={{ color: '#88ddff', fontSize: 12, fontWeight: 'bold', marginBottom: 8 }}>
-              🚀 v7 Single Engine + PanelMarker 架构
+              🚀 v8 Single Engine + usePanels Hook 架构
             </Text>
             <Text style={{ color: '#cccccc', fontSize: 11, marginBottom: 4 }}>
               ✅ 单 Engine 加载统一 bundle
             </Text>
             <Text style={{ color: '#cccccc', fontSize: 11, marginBottom: 4 }}>
-              ✅ PanelMarker 标记面板边界
+              ✅ Guest 导出 usePanels hook
             </Text>
             <Text style={{ color: '#cccccc', fontSize: 11, marginBottom: 4 }}>
-              ✅ extractPanels() 提取左右面板
+              ✅ __panelId 属性识别面板
             </Text>
             <Text style={{ color: '#cccccc', fontSize: 11 }}>
-              ✅ 内存占用减半（vs 双 Engine）
+              ✅ 与 CounterMacOS 模式一致
             </Text>
           </View>
         </ScrollView>
