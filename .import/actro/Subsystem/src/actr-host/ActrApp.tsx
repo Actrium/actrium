@@ -75,6 +75,9 @@ let cachedValidProps: ActrProps | null = null;
 const LAYOUT = {
   LEFT_PANEL_WIDTH: 240,
   RIGHT_PANEL_WIDTH: 400,
+  LEFT_PANEL_MIN_WIDTH: 140,
+  RIGHT_PANEL_MIN_WIDTH: 180,
+  CENTER_MIN_WIDTH: 200,
   BORDER_COLOR: '#333',
 } as const;
 
@@ -82,6 +85,7 @@ type ActrTabViewProps = {
   tab: TabConfig;
   isActive: boolean;
   isLeftPanelVisible: boolean;
+  containerWidth?: number;
   onEngineChange?: (tabId: string, engine: Engine | null) => void;
   onContractViolation?: (tabId: string, violation: ContractViolation) => void;
 };
@@ -113,10 +117,21 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   tab,
   isActive,
   isLeftPanelVisible,
+  containerWidth: propsContainerWidth,
   onContractViolation,
   onEngineChange,
 }) => {
   const gate = evaluateTabGate(tab);
+  // 使用 Native 传递的 containerWidth 作为初始值，确保窗口缩小时也能同步
+  const [layoutWidth, setLayoutWidth] = React.useState<number>(propsContainerWidth ?? 0);
+
+  // 当 Native 传递的 containerWidth 变化时，强制更新 layoutWidth
+  // 这解决了窗口缩小时 onLayout 可能不触发的问题
+  React.useEffect(() => {
+    if (propsContainerWidth != null && propsContainerWidth > 0) {
+      setLayoutWidth(propsContainerWidth);
+    }
+  }, [propsContainerWidth]);
 
   // 右侧面板可见性（按 tab 维度保存）
   const [isRightPanelVisible, setIsRightPanelVisible] = useState(tab.rightPanelDefaultVisible ?? false);
@@ -138,6 +153,55 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   React.useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
+
+  const showRightPanel = isRightPanelVisible && rightPanel;
+
+  // 根据可用宽度动态压缩左右面板，确保窗口变小时三栏仍能自适应
+  const { leftWidth, rightWidth } = React.useMemo(() => {
+    const width = Math.max(layoutWidth, 0);
+    if (width === 0) {
+      return { leftWidth: isLeftPanelVisible ? LAYOUT.LEFT_PANEL_WIDTH : 0, rightWidth: showRightPanel ? LAYOUT.RIGHT_PANEL_WIDTH : 0 };
+    }
+
+    const budgetForSides = Math.max(width - LAYOUT.CENTER_MIN_WIDTH, 0);
+    const baseLeft = isLeftPanelVisible ? LAYOUT.LEFT_PANEL_WIDTH : 0;
+    const baseRight = showRightPanel ? LAYOUT.RIGHT_PANEL_WIDTH : 0;
+    const desiredSides = baseLeft + baseRight;
+
+    if (desiredSides === 0 || budgetForSides <= 0) {
+      return { leftWidth: baseLeft, rightWidth: baseRight };
+    }
+
+    // 如果可用宽度不足，按比例压缩左右面板并应用最小宽度
+    let scaledLeft = baseLeft;
+    let scaledRight = baseRight;
+    if (budgetForSides < desiredSides) {
+      const scale = budgetForSides / desiredSides;
+      scaledLeft = baseLeft * scale;
+      scaledRight = baseRight * scale;
+    }
+
+    // 应用最小宽度，再次按比例压缩以不超过预算
+    if (isLeftPanelVisible) {
+      scaledLeft = Math.max(scaledLeft, LAYOUT.LEFT_PANEL_MIN_WIDTH);
+    }
+    if (showRightPanel) {
+      scaledRight = Math.max(scaledRight, LAYOUT.RIGHT_PANEL_MIN_WIDTH);
+    }
+
+    let finalSides = scaledLeft + scaledRight;
+    if (finalSides > budgetForSides && finalSides > 0) {
+      const rescale = budgetForSides / finalSides;
+      scaledLeft *= rescale;
+      scaledRight *= rescale;
+      finalSides = scaledLeft + scaledRight;
+    }
+
+    return {
+      leftWidth: isLeftPanelVisible ? scaledLeft : 0,
+      rightWidth: showRightPanel ? scaledRight : 0,
+    };
+  }, [layoutWidth, isLeftPanelVisible, showRightPanel]);
 
   // 更新回调：提取面板
   const handleUpdate = useCallback(() => {
@@ -368,33 +432,30 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // 渲染三栏布局
   return (
     <View
-      style={{
-        flex: 1,
-        flexDirection: 'row',
-        backgroundColor: '#0a0a0a',
+      style={styles.threeColumn}
+      onLayout={(e) => {
+        const next = Math.max(e.nativeEvent.layout.width, 0);
+        if (next !== layoutWidth) {
+          setLayoutWidth(next);
+        }
       }}
     >
-      {/* 左侧面板 */}
+      {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
       {isLeftPanelVisible && leftPanel && (
         <View
-          style={{
-            width: LAYOUT.LEFT_PANEL_WIDTH,
-            flex: 1,
-            borderRightWidth: 1,
-            borderRightColor: LAYOUT.BORDER_COLOR,
-          }}
+          style={[
+            styles.leftPanel,
+            {
+              width: leftWidth,
+            },
+          ]}
         >
           {leftPanel}
         </View>
       )}
 
       {/* 中间对话窗口 - flex 自适应 */}
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: '#0a0a0a',
-        }}
-      >
+      <View style={styles.centerColumn}>
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ padding: 20 }}
@@ -485,15 +546,15 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         </ScrollView>
       </View>
 
-      {/* 右侧扩展面板 */}
-      {isRightPanelVisible && rightPanel && (
+      {/* 右侧扩展面板 - 基准宽度，窗口变小时允许收缩 */}
+      {showRightPanel && (
         <View
-          style={{
-            width: LAYOUT.RIGHT_PANEL_WIDTH,
-            flex: 1,
-            borderLeftWidth: 1,
-            borderLeftColor: LAYOUT.BORDER_COLOR,
-          }}
+          style={[
+            styles.rightPanel,
+            {
+              width: rightWidth,
+            },
+          ]}
         >
           {rightPanel}
         </View>
@@ -513,7 +574,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     effectiveProps = cachedValidProps;
   }
 
-  const { tabs = [], currentTabId, isLeftPanelVisible = true } = effectiveProps || {};
+  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth } = effectiveProps || {};
 
   if (!tabs.length) {
     return <View style={{ flex: 1, backgroundColor: '#111' }} />;
@@ -586,7 +647,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         const isActive = tab.id === activeTabId;
         return (
           <View
-            key={tab.id}
+            key={`${tab.id}-${tab.reloadKey ?? 0}`}
             style={[
               StyleSheet.absoluteFill,
               { display: isActive ? 'flex' : 'none' },
@@ -596,6 +657,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
               tab={tab}
               isActive={isActive}
               isLeftPanelVisible={isLeftPanelVisible}
+              containerWidth={containerWidth}
               onContractViolation={recordContractViolation}
               onEngineChange={handleEngineChange}
             />
@@ -611,6 +673,45 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 };
 
 const styles = StyleSheet.create({
+  threeColumn: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#0a0a0a',
+    minWidth: 0, // 允许内部列在窗口缩小时收缩
+  },
+  leftPanel: {
+    borderRightWidth: 1,
+    borderRightColor: LAYOUT.BORDER_COLOR,
+    flexShrink: 1,
+  },
+  centerColumn: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+    minWidth: 0,
+  },
+  rightPanel: {
+    borderLeftWidth: 1,
+    borderLeftColor: LAYOUT.BORDER_COLOR,
+    flexShrink: 1,
+  },
+  container: {
+    flex: 1,
+    position: 'relative',
+  },
+  empty: {
+    flex: 1,
+    backgroundColor: '#111',
+  },
+  loading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a2a',
+  },
+  loadingText: {
+    color: '#888',
+    fontSize: 14,
+  },
   tabHost: {
     flex: 1,
     position: 'relative',

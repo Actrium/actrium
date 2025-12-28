@@ -766,6 +766,9 @@ class BrowserViewModel: ObservableObject {
 
             logger.notice(" [reloadCurrentTab] 刷新完成: \(self.tabs[index].title)")
 
+            // 增加刷新 nonce，提醒 RN 侧 remount
+            tabs[index].reloadNonce &+= 1
+
             // Force UI update by triggering objectWillChange
             objectWillChange.send()
 

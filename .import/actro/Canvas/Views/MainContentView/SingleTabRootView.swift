@@ -67,10 +67,14 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
         #if canImport(React)
         guard let rootView = nsView as? RCTRootView else { return }
 
-        // Only update frame if size actually changed
+        // Update frame if size actually changed
         if containerSize.width > 0 && containerSize.height > 0 {
             if rootView.frame.size != containerSize {
                 rootView.setFrameSize(containerSize)
+                rootView.bounds = CGRect(origin: .zero, size: containerSize)
+                // 强制触发布局更新，确保 RN 检测到尺寸变化（解决缩小窗口时不同步问题）
+                rootView.needsLayout = true
+                rootView.layoutSubtreeIfNeeded()
             }
         }
 
@@ -86,7 +90,8 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
         var tabDict: [String: Any] = [
             "id": tab.id.uuidString,
             "title": tab.title,
-            "backgroundColor": tab.backgroundColor
+            "backgroundColor": tab.backgroundColor,
+            "reloadKey": tab.reloadNonce
         ]
 
         // System app tabs (History/Bookmarks)
@@ -184,7 +189,10 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
             "tab": tabDict,
             "currentTabId": tab.id.uuidString,
             "isLeftPanelVisible": viewModel.isLeftPanelVisible(for: tab.id),
-            "isRightPanelVisible": tab.systemTabType == nil
+            "isRightPanelVisible": tab.systemTabType == nil,
+            // 显式传递容器尺寸，确保 RN 能感知窗口缩小（onLayout 可能不触发）
+            "containerWidth": containerSize.width,
+            "containerHeight": containerSize.height
         ]
     }
 
