@@ -34,14 +34,6 @@ struct UnifiedCanvasView: View {
     @State private var searchTabsText: String = ""
     @FocusState private var isSearchTabsFocused: Bool
 
-    // 标题栏高度增强系数：小卡片的标题栏比主窗口 toolbar 更高，以提供更好的可读性
-    private let titleBarHeightMultiplier: CGFloat = 1.4
-
-    // 卡片标题栏高度比例（使用增强系数，使标题栏更高）
-    private func cardTitleBarRatio(toolbarHeight: CGFloat, effectiveViewportHeight: CGFloat) -> CGFloat {
-        return titleBarHeightMultiplier * toolbarHeight / effectiveViewportHeight
-    }
-
     // 根据搜索文本过滤 tabs
     private var filteredTabs: [Tab] {
         guard !searchTabsText.isEmpty else {
@@ -67,6 +59,11 @@ struct UnifiedCanvasView: View {
     var body: some View {
         GeometryReader { geometry in
             let viewportSize = geometry.size
+            // 极窄/极矮窗口时避免 0 尺寸导致矩阵奇异
+            let safeViewportSize = CGSize(
+                width: max(viewportSize.width, 1),
+                height: max(viewportSize.height, 1)
+            )
 
             // 通过 NSWindow 计算真实的 toolbar 高度
             let measuredToolbarHeight: CGFloat = {
@@ -82,14 +79,10 @@ struct UnifiedCanvasView: View {
 
             // 使用测量的 toolbar 高度
             let toolbarHeight = measuredToolbarHeight
-            let contentSize = viewportSize
-            // 计算有效视口高度（用于卡片比例计算）
-            // 使用增强系数，使卡片标题栏更高，但保持主体部分的宽高比与主窗口一致
-            let effectiveViewportHeight = viewportSize.height + titleBarHeightMultiplier * toolbarHeight
-
-            // 计算标题栏比例和网格布局
-            let titleBarRatio = cardTitleBarRatio(toolbarHeight: toolbarHeight, effectiveViewportHeight: effectiveViewportHeight)
-            let cardAspectRatio = effectiveViewportHeight > 0 ? viewportSize.width / effectiveViewportHeight : 16.0 / 9.0
+            let contentSize = safeViewportSize
+            // 标题栏已移除，卡片比例 = 视口比例
+            let titleBarRatio: CGFloat = 0
+            let cardAspectRatio = safeViewportSize.width / safeViewportSize.height
             let gridResult = gridLayout(
                 for: contentSize,
                 cardAspectRatio: cardAspectRatio,
@@ -133,10 +126,10 @@ struct UnifiedCanvasView: View {
                     currentScale: transform.scale,
                     mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
-                    viewportSize: viewportSize,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
+                        viewportSize: safeViewportSize,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM,
                     onSelectTab: { tabId in
                         switchToFocus(tabId: tabId)
                     },
@@ -153,7 +146,8 @@ struct UnifiedCanvasView: View {
                     }
                 )
                 .frame(width: canvasSize.width, height: canvasSize.height)
-                .scaleEffect(transform.scale, anchor: .topLeading)
+                // 防止 scale 为 0 导致奇异矩阵
+                .scaleEffect(max(transform.scale, 0.001), anchor: .topLeading)
                 .offset(x: transform.offset.x, y: transform.offset.y)
                 .animation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0), value: viewModel.canvasMode)
                 .contentShape(Rectangle())
@@ -390,7 +384,7 @@ struct UnifiedCanvasView: View {
         // 缩放：让 Canvas 适应视口（不放大，只缩小）
         let scaleX = viewportSize.width / canvasSize.width
         let scaleY = viewportSize.height / canvasSize.height
-        let scale = min(scaleX, scaleY, 1.0)
+        let scale = max(min(scaleX, scaleY, 1.0), 0.001)
 
         // 居中
         let scaledWidth = canvasSize.width * scale
@@ -440,7 +434,7 @@ struct UnifiedCanvasView: View {
         }
 
         // 缩放：让卡片内容区域宽度 = 视口宽度
-        let scale = viewportSize.width / cardContentRect.width
+        let scale = max(viewportSize.width / cardContentRect.width, 0.001)
 
         // 偏移：对齐左上角
         let offsetX = -cardContentRect.origin.x * scale
@@ -455,13 +449,19 @@ struct UnifiedCanvasView: View {
 
     // MARK: - Grid Layout Calculations
 
+    /// 悬浮标题栏高度（Overview 模式下显示在卡片上方）
+    private let floatingTitleBarHeight: CGFloat = 24
+
     /// 计算间距（卡片之间）和垂直边距
     /// - 间距 = windowWidth / (卡片数 × 7)，下限 16px
-    /// - 垂直边距 = 间距 × 1.25
-    private func calculateSpacing(windowWidth: CGFloat, totalCards: Int) -> (spacing: CGFloat, verticalMargin: CGFloat) {
+    /// - 垂直间距 = 水平间距 + 悬浮标题栏高度（为标题栏留出空间）
+    /// - 垂直边距 = 间距 × 1.25 + 悬浮标题栏高度
+    private func calculateSpacing(windowWidth: CGFloat, totalCards: Int) -> (hSpacing: CGFloat, vSpacing: CGFloat, verticalMargin: CGFloat) {
         let effectiveCards = max(totalCards, 4)
-        let spacing = max(16, windowWidth / (CGFloat(effectiveCards) * 7))
-        return (spacing, spacing * 1.25)
+        let baseSpacing = max(16, windowWidth / (CGFloat(effectiveCards) * 7))
+        let vSpacing = baseSpacing + floatingTitleBarHeight  // 纵向间距包含标题栏高度
+        let verticalMargin = baseSpacing * 1.25 + floatingTitleBarHeight  // 顶部边距也要留空间给第一行标题栏
+        return (baseSpacing, vSpacing, verticalMargin)
     }
 
     /// 网格布局计算
@@ -473,6 +473,7 @@ struct UnifiedCanvasView: View {
         cardCount: Int
     ) -> (positions: [CGPoint], cardWidth: CGFloat, cardHeight: CGFloat, canvasSize: CGSize) {
         let totalCards = cardCount + 1  // 包含 [+] 按钮
+        let minCardWidth: CGFloat = 120  // 防止窗口极窄时卡片宽度为 0 导致变换矩阵退化
 
         guard cardAspectRatio.isFinite && cardAspectRatio > 0 else {
             return gridLayout(for: size, cardAspectRatio: 16.0 / 9.0, cardCount: cardCount)
@@ -483,7 +484,7 @@ struct UnifiedCanvasView: View {
 
         let initialCapacity = 4
         let isForced2x2 = totalCards <= initialCapacity
-        let (spacing, verticalMargin) = calculateSpacing(windowWidth: size.width, totalCards: max(totalCards, initialCapacity))
+        let (hSpacing, vSpacing, verticalMargin) = calculateSpacing(windowWidth: size.width, totalCards: max(totalCards, initialCapacity))
 
         // 计算最佳布局
         func calculateOptimalLayout() -> (columns: Int, rows: Int, cardWidth: CGFloat, cardHeight: CGFloat) {
@@ -497,13 +498,13 @@ struct UnifiedCanvasView: View {
             for columns in minColumns...maxColumns {
                 let rows = isForced2x2 ? 2 : Int(ceil(Double(totalCards) / Double(columns)))
 
-                // 水平约束：边距 = 1.25 × spacing
-                // cardWidth = (width - (columns + 1.5) × spacing) / columns
-                let cardWidthFromH = (size.width - CGFloat(columns + 1) * spacing - 0.5 * spacing) / CGFloat(columns)
+                // 水平约束：边距 = 1.25 × hSpacing
+                // cardWidth = (width - (columns + 1.5) × hSpacing) / columns
+                let cardWidthFromH = (size.width - CGFloat(columns + 1) * hSpacing - 0.5 * hSpacing) / CGFloat(columns)
 
-                // 垂直约束
+                // 垂直约束（使用 vSpacing，包含悬浮标题栏空间）
                 let availableHeight = size.height - verticalMargin * 2
-                let cardHeightFromV = (availableHeight - CGFloat(rows - 1) * spacing) / CGFloat(rows)
+                let cardHeightFromV = (availableHeight - CGFloat(rows - 1) * vSpacing) / CGFloat(rows)
                 let cardWidthFromV = cardHeightFromV * cardAspectRatio
 
                 let cardWidth = min(cardWidthFromH, cardWidthFromV)
@@ -523,29 +524,30 @@ struct UnifiedCanvasView: View {
         let layout = calculateOptimalLayout()
         let columns = layout.columns
         let rows = layout.rows
-        let cardWidth = layout.cardWidth
-        let cardHeight = layout.cardHeight
+        // 窗口极窄时 cardWidth 可能趋近于 0，导致 scale 矩阵奇异；加下限兜底
+        let cardWidth = max(layout.cardWidth, minCardWidth)
+        let cardHeight = cardWidth / cardAspectRatio
 
         // 2×2 强制布局时预留 4 个位置
         let positionCount = isForced2x2 ? initialCapacity : totalCards
 
         // 水平边距：填满视口宽度，消除居中偏移
-        let horizontalMargin = (size.width - CGFloat(columns) * cardWidth - CGFloat(columns - 1) * spacing) / 2
+        let horizontalMargin = max((size.width - CGFloat(columns) * cardWidth - CGFloat(columns - 1) * hSpacing) / 2, 0)
 
-        // 计算卡片位置
+        // 计算卡片位置（使用 vSpacing 作为行间距）
         var positions: [CGPoint] = []
         for index in 0..<positionCount {
             let col = index % columns
             let row = index / columns
-            let x = horizontalMargin + CGFloat(col) * (cardWidth + spacing)
-            let y = verticalMargin + CGFloat(row) * (cardHeight + spacing)
+            let x = horizontalMargin + CGFloat(col) * (cardWidth + hSpacing)
+            let y = verticalMargin + CGFloat(row) * (cardHeight + vSpacing)
             positions.append(CGPoint(x: x, y: y))
         }
 
         // Canvas 宽度 = viewport 宽度
         let canvasSize = CGSize(
             width: size.width,
-            height: verticalMargin * 2 + CGFloat(rows) * cardHeight + CGFloat(rows - 1) * spacing
+            height: verticalMargin * 2 + CGFloat(rows) * cardHeight + CGFloat(rows - 1) * vSpacing
         )
 
         return (positions, cardWidth, cardHeight, canvasSize)
@@ -1127,53 +1129,37 @@ private struct TabCardView: View {
     let onDragStart: () -> NSItemProvider
     let onClose: () -> Void
 
-    // 计算实际显示尺寸（考虑缩放）
-    private var effectiveWidth: CGFloat {
-        cardWidth * currentScale
-    }
-
-    // 根据缩放级别决定是否显示文字和图标
-    private var shouldShowText: Bool {
-        effectiveWidth > 120  // 实际宽度大于 120px 时显示文字
-    }
-
-    private var shouldShowIcons: Bool {
-        effectiveWidth > 60   // 实际宽度大于 60px 时显示图标
-    }
-
-    // 精确的标题栏高度（严格按比例计算）
-    private var titleBarHeight: CGFloat {
-        cardHeight * titleBarRatio
-    }
+    // 悬浮标题栏高度（固定值，Overview 模式下显示在卡片上方）
+    private let floatingTitleBarHeight: CGFloat = 24
 
     var body: some View {
-        // 卡片层（纯内容，无边框）
-        // 边框只在槽位层显示，卡片本身不应该有任何边框
-        VStack(spacing: 0) {
-                // 标题栏 - Focus 模式时会被缩放到视口外，不需要手动隐藏
-                titleBarView
-                    .frame(height: titleBarHeight)
+        // 使用 ZStack 允许标题栏悬浮在卡片上方
+        ZStack(alignment: .top) {
+            // 卡片主体（纯内容）
+            contentView
+                .frame(width: cardWidth, height: cardHeight)
+                .cornerRadius(10)
+                .shadow(color: Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
 
-                // 内容区域
-                contentView
+            // 悬浮标题栏 - 仅 Overview 模式显示（Focus 模式隐藏）
+            if !isFocused {
+                floatingTitleBarView
+                    .frame(width: cardWidth, height: floatingTitleBarHeight)
+                    .offset(y: -floatingTitleBarHeight - 4)  // 悬浮在卡片上方，留 4px 间隙
             }
-            .frame(width: cardWidth, height: cardHeight)
-            .cornerRadius(10)
-            // 被拖动的卡片：隐藏（由拖拽预览显示）
-            .opacity(isBeingDragged ? 0.001 : 1.0)
-            // hover 时半透明，交换过程中淡入到完全不透明
-            .opacity({
-                if isSwapping {
-                    return 1.0  // 交换中：淡入到完全不透明
-                } else if isHovering && !isBeingDragged && !isFocused {
-                    return 0.5  // hover 时半透明
-                } else {
-                    return 1.0  // 默认完全不透明
-                }
-            }())
-            .shadow(color: Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
-            // 平滑 opacity 变化，避免 mode 切换时的跳跃
-            .animation(.easeInOut(duration: 0.15), value: isFocused)
+        }
+        // 被拖动的卡片：隐藏（由拖拽预览显示）
+        .opacity(isBeingDragged ? 0.001 : 1.0)
+        // hover 时半透明，交换过程中淡入到完全不透明
+        .opacity({
+            if isSwapping {
+                return 1.0  // 交换中：淡入到完全不透明
+            } else if isHovering && !isBeingDragged && !isFocused {
+                return 0.5  // hover 时半透明
+            } else {
+                return 1.0  // 默认完全不透明
+            }
+        }())
         // 整个卡片作为拖动源
         .onDrag {
             if isFocused {
@@ -1186,132 +1172,68 @@ private struct TabCardView: View {
         }
     }
 
-    // 拖动预览视图 - 显示完整卡片（bug2 修复）
-    private var dragPreviewView: some View {
-        VStack(spacing: 0) {
-            // 标题栏（与 titleBarView 保持一致的居中布局）
-            HStack(spacing: 0) {
-                // 左侧：关闭按钮图标（预览中不可交互，仅显示）
-                Image(systemName: "xmark")
-                    .font(.system(size: dynamicIconSize, weight: .medium))
+    // 悬浮标题栏视图（简化版，仅包含标题和关闭按钮）
+    private var floatingTitleBarView: some View {
+        HStack(spacing: 8) {
+            // 关闭按钮
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
                     .foregroundColor(.white.opacity(0.6))
-                    .frame(width: dynamicPaddingHorizontal * 2 + dynamicIconSize)
-
-                Spacer(minLength: 0)
-
-                // 中间：图标 + 标题（居中）
-                HStack(spacing: 8 * titleBarScaleFactor) {
-                    Image(systemName: "globe")
-                        .font(.system(size: dynamicIconSize * 1.2))
-                        .foregroundColor(.white.opacity(0.6))
-
-                    Text(tab.title.isEmpty ? "New Tab" : tab.title)
-                        .font(.system(size: dynamicFontSize))
-                        .foregroundColor(.white.opacity(0.9))
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-
-                // 右侧：占位，保持对称
-                Color.clear
-                    .frame(width: dynamicPaddingHorizontal * 2 + dynamicIconSize)
             }
-            .padding(.horizontal, dynamicPaddingHorizontal)
-            .padding(.vertical, dynamicPaddingVertical)
-            .frame(height: titleBarHeight)
-            .background(Color(nsColor: NSColor(white: 0.12, alpha: 1.0)))
+            .buttonStyle(.plain)
 
-            // 内容区域
+            // 标题
+            Text(tab.title.isEmpty ? "New Tab" : tab.title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(1)
+
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+    }
+
+    // 拖动预览视图 - 显示卡片 + 悬浮标题栏
+    private var dragPreviewView: some View {
+        ZStack(alignment: .top) {
+            // 卡片主体
             ZStack {
-                // 底层背景 - 使用 Tab 的随机背景颜色
                 Color(hslString: tab.backgroundColor)
-
                 Image(systemName: "globe")
                     .font(.system(size: 32))
                     .foregroundColor(.white.opacity(0.3))
             }
-            .frame(maxHeight: .infinity)
-        }
-        .frame(width: cardWidth, height: cardHeight)
-        .cornerRadius(10)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.white.opacity(0.3), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
-    }
-
-    // 根据 titleBarHeight 动态计算的尺寸参数
-    private var titleBarScaleFactor: CGFloat {
-        // 使用实际的 toolbar 高度作为基准
-        guard toolbarHeight > 0 else { return 1.0 }
-        return titleBarHeight / toolbarHeight
-    }
-
-    private var dynamicPaddingVertical: CGFloat {
-        // 基准 padding：8，根据 titleBarHeight 按比例缩放
-        max(2, 8 * titleBarScaleFactor)
-    }
-
-    private var dynamicPaddingHorizontal: CGFloat {
-        max(4, 10 * titleBarScaleFactor)
-    }
-
-    private var dynamicIconSize: CGFloat {
-        max(6, 10 * titleBarScaleFactor)
-    }
-
-    private var dynamicFontSize: CGFloat {
-        max(8, 12 * titleBarScaleFactor)
-    }
-
-    // 标题栏视图
-    private var titleBarView: some View {
-        HStack(spacing: 0) {
-            // 左侧：关闭按钮（增强尺寸和视觉反馈）
-            CloseButtonView(
-                iconSize: dynamicIconSize * 1.8,  // 增大图标尺寸
-                containerWidth: dynamicPaddingHorizontal * 2 + dynamicIconSize,
-                onClose: onClose
+            .frame(width: cardWidth, height: cardHeight)
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
             )
+            .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
 
-            Spacer(minLength: 0)
+            // 悬浮标题栏
+            HStack(spacing: 8) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.6))
 
-            // 中间：图标 + 标题（居中）
-            HStack(spacing: shouldShowText ? 8 * titleBarScaleFactor : 4 * titleBarScaleFactor) {
-                if shouldShowIcons {
-                    // 网站图标
-                    Image(systemName: "globe")
-                        .font(.system(size: dynamicIconSize * 1.2))
-                        .foregroundColor(.white.opacity(0.6))
-                }
+                Text(tab.title.isEmpty ? "New Tab" : tab.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineLimit(1)
 
-                if shouldShowText {
-                    // 标题文字 - 只在足够大时显示
-                    Text(tab.title.isEmpty ? "New Tab" : tab.title)
-                        .font(.system(size: dynamicFontSize))
-                        .foregroundColor(.white.opacity(0.9))
-                        .lineLimit(1)
-                }
+                Spacer()
             }
-
-            Spacer(minLength: 0)
-
-            // 右侧：占位，保持对称
-            Color.clear
-                .frame(width: dynamicPaddingHorizontal * 2 + dynamicIconSize)
+            .padding(.horizontal, 8)
+            .frame(width: cardWidth, height: floatingTitleBarHeight)
+            .offset(y: -floatingTitleBarHeight - 4)
         }
-        .padding(.horizontal, dynamicPaddingHorizontal)
-        .padding(.vertical, dynamicPaddingVertical)
-        .frame(maxHeight: .infinity)  // 确保填满整个标题栏高度
-        .background(Color(nsColor: NSColor(white: 0.12, alpha: 1.0)))
-        .contentShape(Rectangle())
     }
 
-    // 卡片内容区域尺寸（不含标题栏）
+    // 卡片内容区域尺寸（现在等于完整卡片尺寸，因为标题栏悬浮在外部）
     private var cardContentSize: CGSize {
-        CGSize(width: cardWidth, height: cardHeight * (1 - titleBarRatio))
+        CGSize(width: cardWidth, height: cardHeight)
     }
 
     // RN 渲染尺寸（使用视口尺寸，宽高比与 cardContentSize 匹配）
@@ -1330,7 +1252,7 @@ private struct TabCardView: View {
         // 在 Focus 模式下这应该等于 1.0
         // 直接计算：rnScaleFactor = cardContentSize.width / viewportSize.width
         // 简化后不变，但关键是确保计算一致性
-        let baseScale = cardContentSize.width / viewportSize.width
+        let baseScale = cardContentSize.width / max(viewportSize.width, 1)
         return baseScale
     }
 
@@ -1356,9 +1278,15 @@ private struct TabCardView: View {
                     viewModel: viewModel,
                     historyVM: historyVM,
                     bookmarkVM: bookmarkVM,
-                    containerSize: rnRenderSize
+                    containerSize: CGSize(
+                        width: max(rnRenderSize.width, 1),
+                        height: max(rnRenderSize.height, 1)
+                    )
                 )
-                .frame(width: rnRenderSize.width, height: rnRenderSize.height)
+                .frame(
+                    width: max(rnRenderSize.width, 1),
+                    height: max(rnRenderSize.height, 1)
+                )
                 .scaleEffect(rnScaleFactor, anchor: .topLeading)
                 .frame(width: cardContentSize.width, height: cardContentSize.height, alignment: .topLeading)
                 .clipped()

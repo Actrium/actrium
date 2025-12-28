@@ -53,6 +53,9 @@ struct Tab: Identifiable {
     /// permissions（Phase 1）：用于宿主提示（后续可用于 gating）
     var permissions: [String]
 
+    /// 刷新计数：每次 reload 增加，传递给 RN 侧作为 remount key
+    var reloadNonce: Int
+
     /// 左侧面板默认是否可见
     var leftPanelDefaultVisible: Bool
 
@@ -75,6 +78,7 @@ struct Tab: Identifiable {
         contractName: String? = nil,
         contractVersion: Int? = nil,
         permissions: [String] = [],
+        reloadNonce: Int = 0,
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
         backgroundColor: String? = nil
@@ -91,6 +95,7 @@ struct Tab: Identifiable {
         self.contractName = contractName
         self.contractVersion = contractVersion
         self.permissions = permissions
+        self.reloadNonce = reloadNonce
         self.leftPanelDefaultVisible = leftPanelDefaultVisible
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
         self.backgroundColor = backgroundColor ?? Self.generateRandomColor()

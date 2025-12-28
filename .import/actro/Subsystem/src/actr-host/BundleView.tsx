@@ -127,6 +127,14 @@ type Props = {
   containerWidth?: number;
 };
 
+// 包装 ScrollView 强制隐藏横向滚动条（防止缩放时闪烁）
+const WrappedScrollView: React.FC<Record<string, unknown>> = (props) => {
+  return React.createElement(ScrollView, {
+    ...props,
+    showsHorizontalScrollIndicator: false,
+  });
+};
+
 // Host 组件映射：使用 rill preset 组件，这些组件已正确处理事件序列化
 // 防止 GestureResponderEvent 等复杂事件对象导致 JSI 边界序列化 OOM
 export const hostComponents: ComponentMap = {
@@ -134,7 +142,7 @@ export const hostComponents: ComponentMap = {
   View: View as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as unknown as React.ComponentType<Record<string, unknown>>,
   Image: Image as unknown as React.ComponentType<Record<string, unknown>>,
-  ScrollView: ScrollView as unknown as React.ComponentType<Record<string, unknown>>,
+  ScrollView: WrappedScrollView as unknown as React.ComponentType<Record<string, unknown>>,
   TouchableOpacity: TouchableOpacity as unknown as React.ComponentType<Record<string, unknown>>,
   Button: Button as unknown as React.ComponentType<Record<string, unknown>>,
   ActivityIndicator: ActivityIndicator as unknown as React.ComponentType<Record<string, unknown>>,

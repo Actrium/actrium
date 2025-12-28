@@ -29,12 +29,12 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
-    const { isLeftPanelVisible = true, isRightPanelVisible = true } = props;
+    const { isLeftPanelVisible = true, isRightPanelVisible = true, containerWidth, containerHeight } = props;
 
     // System app tab
     if (tab.systemAppType) {
       return (
-        <View style={styles.container}>
+        <View style={styles.container} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
           <React.Suspense fallback={<LoadingFallback />}>
             {tab.systemAppType === 'history' && (
               <HistoryApp
@@ -54,13 +54,15 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
 
     // ACTR tab - render single tab
     return (
-      <View style={styles.container}>
+      <View style={styles.container} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
         <React.Suspense fallback={<LoadingFallback />}>
           <ActrApp
             tabs={[tab]}
             currentTabId={tab.id}
             isLeftPanelVisible={isLeftPanelVisible}
             isRightPanelVisible={isRightPanelVisible}
+            containerWidth={containerWidth}
+            containerHeight={containerHeight}
           />
         </React.Suspense>
       </View>
@@ -77,7 +79,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
     effectiveProps = cachedValidProps;
   }
 
-  const { tabs = [], currentTabId, isLeftPanelVisible = true } = effectiveProps || {};
+  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth, containerHeight } = effectiveProps || {};
 
   if (!tabs.length) {
     return <View style={styles.empty} />;
@@ -102,6 +104,8 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
               tabs={actrTabs}
               currentTabId={activeTabId}
               isLeftPanelVisible={isLeftPanelVisible}
+              containerWidth={containerWidth}
+              containerHeight={containerHeight}
             />
           </View>
         </React.Suspense>
@@ -112,7 +116,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
         const isActive = tab.id === activeTabId;
         return (
           <View
-            key={tab.id}
+            key={`${tab.id}-${tab.reloadKey ?? 0}`}
             style={[
               StyleSheet.absoluteFill,
               { display: isActive ? 'flex' : 'none' }

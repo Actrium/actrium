@@ -32,6 +32,7 @@ export type TabConfig = {
   title: string;
   url?: string;
   htmlContent?: string;
+  reloadKey?: number;
   contract?: {
     name: string;
     version: number;
@@ -58,6 +59,9 @@ export type ActrProps = {
   currentTabId?: string;
   isLeftPanelVisible: boolean;
   isRightPanelVisible?: boolean;
+  // Native 传递的容器尺寸（确保窗口缩小时 RN 能感知）
+  containerWidth?: number;
+  containerHeight?: number;
 };
 
 // TabRouter receives all tabs (both actr and system apps)
@@ -65,4 +69,7 @@ export type TabRouterProps = ActrProps & {
   // Single tab mode - each RootView renders one tab
   singleTabMode?: boolean;
   tab?: TabConfig;  // Single tab when singleTabMode is true
+  // Native 传递的容器尺寸（确保窗口缩小时 RN 能感知）
+  containerWidth?: number;
+  containerHeight?: number;
 };
