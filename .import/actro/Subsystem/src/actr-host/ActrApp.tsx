@@ -662,7 +662,15 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
           <View
             key={`${tab.id}-${tab.reloadKey ?? 0}`}
             style={[
-              StyleSheet.absoluteFill,
+              // 不使用 absoluteFill，改用显式尺寸以确保缩小时能正确响应
+              {
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+                width: containerWidth,
+              },
               { display: isActive ? 'flex' : 'none' },
             ]}
           >
