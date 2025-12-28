@@ -109,7 +109,6 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
       {actrTabs.length > 0 && (
         <React.Suspense fallback={<LoadingFallback />}>
           <View
-            key={`actr-container-${containerWidth}-${containerHeight}`}
             style={[
               StyleSheet.absoluteFill,
               { display: actrTabs.some(t => t.id === activeTabId) ? 'flex' : 'none' }
