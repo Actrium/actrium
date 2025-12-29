@@ -887,14 +887,20 @@ export class Receiver {
     const serializableProps: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(node.props)) {
       if (typeof value === 'function') {
-        // Show function info with name and source if available
-        const fnMeta = value as { __name?: string; __source?: string };
-        const fnName = fnMeta.__name || 'anonymous';
-        const fnSource = fnMeta.__source;
+        // Show function info with name, source location, or fallback source code
+        const fnMeta = value as {
+          __name?: string;
+          __source?: string;
+          __sourceFile?: string;
+          __sourceLine?: number;
+        };
+        const fnName = fnMeta.__name || (value as { name?: string }).name || 'anonymous';
         serializableProps[key] = {
           __type: 'function',
           name: fnName,
-          source: fnSource,
+          source: fnMeta.__source,
+          sourceFile: fnMeta.__sourceFile,
+          sourceLine: fnMeta.__sourceLine,
         };
       } else if (value instanceof Date) {
         serializableProps[key] = value.toISOString();

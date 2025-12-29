@@ -207,17 +207,39 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       // biome-ignore lint/complexity/noBannedTypes: fn is verified as function by match()
       const func = fn as Function;
       const fnId = ctx.registerFunction(func);
+
+      // Check for pre-attached source location metadata (from Babel plugin or manual annotation)
+      const fnWithMeta = func as {
+        __sourceFile?: string;
+        __sourceLine?: number;
+        __name?: string;
+      };
+
       // Capture function name and source for DevTools
-      const fnName = func.name || undefined;
+      const fnName = fnWithMeta.__name || func.name || undefined;
+      const sourceFile = fnWithMeta.__sourceFile;
+      const sourceLine = fnWithMeta.__sourceLine;
+
+      // Only capture source code if no source location available (fallback)
       let source: string | undefined;
-      try {
-        const fullSource = func.toString();
-        // Truncate long sources to avoid performance issues
-        source = fullSource.length > 500 ? fullSource.slice(0, 500) + '...' : fullSource;
-      } catch {
-        // Some functions may not support toString()
+      if (!sourceFile) {
+        try {
+          const fullSource = func.toString();
+          // Truncate long sources to avoid performance issues
+          source = fullSource.length > 500 ? fullSource.slice(0, 500) + '...' : fullSource;
+        } catch {
+          // Some functions may not support toString()
+        }
       }
-      return { __type: 'function', __fnId: fnId, __name: fnName, __source: source } as SerializedFunction;
+
+      return {
+        __type: 'function',
+        __fnId: fnId,
+        __name: fnName,
+        __source: source,
+        __sourceFile: sourceFile,
+        __sourceLine: sourceLine,
+      } as SerializedFunction;
     },
     strategy: 'proxy',
   },
