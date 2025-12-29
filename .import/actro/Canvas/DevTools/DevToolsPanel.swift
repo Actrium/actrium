@@ -274,11 +274,11 @@ struct DevToolsElementsView: View {
                         .focused($isTreeFocused)
                         .focusEffectDisabled()  // Remove blue border on focus
                         .onKeyPress(.upArrow) {
-                            navigateTree(direction: -1, proxy: proxy)
+                            navigateTree(direction: -1)
                             return .handled
                         }
                         .onKeyPress(.downArrow) {
-                            navigateTree(direction: 1, proxy: proxy)
+                            navigateTree(direction: 1)
                             return .handled
                         }
                         .onKeyPress(.leftArrow) {
@@ -293,6 +293,23 @@ struct DevToolsElementsView: View {
                             // Auto-expand all nodes on first load
                             if devTools.expandedNodeIds.isEmpty {
                                 devTools.expandAllNodes()
+                            }
+                        }
+                        // Ensure selected item stays visible after any change
+                        .onChange(of: devTools.selectedNodeId) { _, newId in
+                            if let nodeId = newId {
+                                // Small delay to let layout settle after expand/collapse
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    proxy.scrollTo(nodeId)
+                                }
+                            }
+                        }
+                        // Also handle expand/collapse state changes
+                        .onChange(of: devTools.expandedNodeIds) { _, _ in
+                            if let nodeId = devTools.selectedNodeId {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    proxy.scrollTo(nodeId)
+                                }
                             }
                         }
                     }
@@ -390,31 +407,19 @@ struct DevToolsElementsView: View {
     // MARK: - Keyboard Navigation
 
     /// Navigate up or down in the tree
-    private func navigateTree(direction: Int, proxy: ScrollViewProxy? = nil) {
+    private func navigateTree(direction: Int) {
         let nodes = visibleNodes
         guard !nodes.isEmpty else { return }
-
-        var newNodeId: String?
 
         if let currentId = devTools.selectedNodeId,
            let currentIndex = nodes.firstIndex(where: { $0.id == currentId }) {
             let newIndex = max(0, min(nodes.count - 1, currentIndex + direction))
-            newNodeId = nodes[newIndex].id
+            devTools.selectNode(nodes[newIndex].id)
         } else {
             // No selection, select first or last
-            newNodeId = direction > 0 ? nodes.first?.id : nodes.last?.id
+            devTools.selectNode(direction > 0 ? nodes.first?.id : nodes.last?.id)
         }
-
-        if let nodeId = newNodeId {
-            devTools.selectNode(nodeId)
-
-            // Smart scroll: don't specify anchor - SwiftUI will:
-            // - Not scroll if item is already fully visible
-            // - Scroll minimum amount needed to make item visible if it's off-screen
-            if let proxy = proxy {
-                proxy.scrollTo(nodeId)
-            }
-        }
+        // Scrolling is handled by .onChange(of: selectedNodeId)
     }
 
     /// Left arrow: collapse current node, or move to parent
