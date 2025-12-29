@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AppKit
 import Highlightr
 
 /// Source viewer panel for browsing and viewing source files
@@ -225,6 +226,8 @@ struct CodeViewerView: View {
     private static let highlightr: Highlightr? = {
         let h = Highlightr()
         h?.setTheme(to: "atom-one-dark")
+        // Use Menlo 12px to match Chrome DevTools
+        h?.theme.codeFont = NSFont(name: "Menlo", size: 12) ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         return h
     }()
 
@@ -276,19 +279,23 @@ struct CodeViewerView: View {
         }
     }
 
+    // Code font matching Chrome DevTools (Menlo 12px)
+    private static let codeFont = NSFont(name: "Menlo", size: 12) ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    private static let lineHeight: CGFloat = 18 // ~1.5x line height for readability
+
     @ViewBuilder
     private func highlightedCode(_ code: String, language: String) -> some View {
         let lines = code.components(separatedBy: "\n")
-        let lineNumberWidth = CGFloat(String(lines.count).count) * 8 + 16
+        let lineNumberWidth = CGFloat(String(lines.count).count) * 9 + 20
 
         HStack(alignment: .top, spacing: 0) {
             // Line numbers
             VStack(alignment: .trailing, spacing: 0) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { index, _ in
                     Text("\(index + 1)")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(Font(Self.codeFont))
                         .foregroundColor(.secondary.opacity(0.5))
-                        .frame(height: 16)
+                        .frame(height: Self.lineHeight)
                 }
             }
             .frame(width: lineNumberWidth)
@@ -302,11 +309,10 @@ struct CodeViewerView: View {
                 if let highlightr = Self.highlightr,
                    let highlighted = highlightr.highlight(code, as: language) {
                     Text(AttributedString(highlighted))
-                        .font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled)
                 } else {
                     Text(code)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(Font(Self.codeFont))
                         .foregroundColor(.green.opacity(0.9))
                         .textSelection(.enabled)
                 }
