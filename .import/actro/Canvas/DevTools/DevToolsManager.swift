@@ -39,8 +39,8 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
 
 /// Direction of Host-Guest message
 enum MessageDirection: String {
-    case guestToHost = "guestToHost"  // Guest → Host (↗)
-    case hostToGuest = "hostToGuest"  // Host → Guest (↙)
+    case guestToHost = "guestToHost"  // Guest → Host (↓ down to host)
+    case hostToGuest = "hostToGuest"  // Host → Guest (↑ up to guest)
 }
 
 /// Category of Host-Guest message
@@ -77,7 +77,7 @@ struct DevToolsMessage: Identifiable {
 
     /// Arrow indicator based on direction
     var directionArrow: String {
-        direction == .guestToHost ? "↗" : "↙"
+        direction == .guestToHost ? "↓" : "↑"
     }
 
     /// Color based on direction

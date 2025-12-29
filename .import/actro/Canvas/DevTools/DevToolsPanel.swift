@@ -595,8 +595,8 @@ struct DevToolsMessagesView: View {
                 // Direction filter
                 Picker("", selection: $devTools.messageDirectionFilter) {
                     Text("All").tag(nil as MessageDirection?)
-                    Text("↗ G→H").tag(MessageDirection.guestToHost as MessageDirection?)
-                    Text("↙ H→G").tag(MessageDirection.hostToGuest as MessageDirection?)
+                    Text("↓ G→H").tag(MessageDirection.guestToHost as MessageDirection?)
+                    Text("↑ H→G").tag(MessageDirection.hostToGuest as MessageDirection?)
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 160)
