@@ -16,6 +16,7 @@ enum DevToolsDockPosition: String, CaseIterable {
 
 /// DevTools tab/panel type
 enum DevToolsTab: String, CaseIterable, Identifiable {
+    case messages = "Messages"       // Host-Guest message inspector
     case elements = "Elements"       // Component tree inspector
     case console = "Console"         // Console logs
     case operations = "Operations"   // Render operations log
@@ -26,12 +27,39 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .messages: return "arrow.left.arrow.right"
         case .elements: return "square.stack.3d.up"
         case .console: return "terminal"
         case .operations: return "list.bullet.rectangle"
         case .network: return "network"
         case .performance: return "gauge.with.dots.needle.bottom.50percent"
         }
+    }
+}
+
+/// Direction of Host-Guest message
+enum MessageDirection: String {
+    case guestToHost = "guestToHost"  // Guest → Host (↗)
+    case hostToGuest = "hostToGuest"  // Host → Guest (↙)
+}
+
+/// Host-Guest message entry for Messages inspector
+struct DevToolsMessage: Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let direction: MessageDirection
+    let event: String
+    let payload: String?  // JSON string representation
+    let tabId: String?
+
+    /// Arrow indicator based on direction
+    var directionArrow: String {
+        direction == .guestToHost ? "↗" : "↙"
+    }
+
+    /// Color based on direction
+    var directionColor: String {
+        direction == .guestToHost ? "blue" : "green"
     }
 }
 
@@ -94,7 +122,7 @@ class DevToolsManager: ObservableObject {
     @Published var dockedWidth: CGFloat = 400
 
     /// Currently active tab
-    @Published var activeTab: DevToolsTab = .elements
+    @Published var activeTab: DevToolsTab = .messages
 
     // MARK: - Inspector State
 
@@ -109,6 +137,9 @@ class DevToolsManager: ObservableObject {
 
     // MARK: - Logs
 
+    /// Host-Guest message entries
+    @Published private(set) var messages: [DevToolsMessage] = []
+
     /// Console log entries
     @Published private(set) var consoleLogs: [DevToolsLogEntry] = []
 
@@ -117,6 +148,12 @@ class DevToolsManager: ObservableObject {
 
     /// Maximum log entries to keep
     private let maxLogEntries = 1000
+
+    /// Message filter (event name pattern)
+    @Published var messageFilter: String = ""
+
+    /// Direction filter for messages
+    @Published var messageDirectionFilter: MessageDirection? = nil
 
     // MARK: - Window Management
 
@@ -179,6 +216,62 @@ class DevToolsManager: ObservableObject {
     /// Toggle dock position (bottom <-> right)
     func toggleDockPosition() {
         dockPosition = dockPosition == .bottom ? .right : .bottom
+    }
+
+    // MARK: - Messages
+
+    /// Add a Host-Guest message entry
+    func logMessage(
+        direction: MessageDirection,
+        event: String,
+        payload: Any? = nil,
+        tabId: String? = nil
+    ) {
+        let payloadString: String?
+        if let payload = payload {
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+               let str = String(data: data, encoding: .utf8) {
+                payloadString = str
+            } else {
+                payloadString = String(describing: payload)
+            }
+        } else {
+            payloadString = nil
+        }
+
+        let message = DevToolsMessage(
+            timestamp: Date(),
+            direction: direction,
+            event: event,
+            payload: payloadString,
+            tabId: tabId
+        )
+        messages.append(message)
+
+        // Trim if exceeds max
+        if messages.count > maxLogEntries {
+            messages.removeFirst(messages.count - maxLogEntries)
+        }
+    }
+
+    /// Get filtered messages
+    var filteredMessages: [DevToolsMessage] {
+        messages.filter { msg in
+            // Direction filter
+            if let dirFilter = messageDirectionFilter, msg.direction != dirFilter {
+                return false
+            }
+            // Event name filter
+            if !messageFilter.isEmpty {
+                return msg.event.localizedCaseInsensitiveContains(messageFilter)
+            }
+            return true
+        }
+    }
+
+    /// Clear all messages
+    func clearMessages() {
+        messages.removeAll()
     }
 
     // MARK: - Logging

@@ -124,6 +124,8 @@ struct DevToolsToolbar: View {
 
     private func clearCurrentTab() {
         switch devTools.activeTab {
+        case .messages:
+            devTools.clearMessages()
         case .console:
             devTools.clearConsoleLogs()
         case .operations:
@@ -168,6 +170,8 @@ struct DevToolsContent: View {
     var body: some View {
         Group {
             switch devTools.activeTab {
+            case .messages:
+                DevToolsMessagesView(devTools: devTools)
             case .elements:
                 DevToolsElementsView(devTools: devTools, viewModel: viewModel)
             case .console:
@@ -560,6 +564,209 @@ struct DevToolsOperationEntryView: View {
         case "mount": return .purple
         default: return .gray
         }
+    }
+}
+
+// MARK: - Messages Tab
+
+struct DevToolsMessagesView: View {
+    @ObservedObject var devTools: DevToolsManager
+    @State private var selectedMessageId: UUID?
+    @State private var showPayload: Bool = true
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Filter bar
+            HStack(spacing: 8) {
+                // Search filter
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    TextField("Filter by event name...", text: $devTools.messageFilter)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                        .frame(maxWidth: 200)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color(nsColor: .textBackgroundColor))
+                .cornerRadius(4)
+
+                // Direction filter
+                Picker("", selection: $devTools.messageDirectionFilter) {
+                    Text("All").tag(nil as MessageDirection?)
+                    Text("↗ Guest→Host").tag(MessageDirection.guestToHost as MessageDirection?)
+                    Text("↙ Host→Guest").tag(MessageDirection.hostToGuest as MessageDirection?)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+
+                Spacer()
+
+                Text("\(devTools.filteredMessages.count) / \(devTools.messages.count)")
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            // Messages list
+            if devTools.messages.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary)
+                    Text("No Host-Guest messages")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Text("Messages will appear when Guest and Host communicate")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if devTools.filteredMessages.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary)
+                    Text("No messages match filter")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HSplitView {
+                    // Message list (left)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(devTools.filteredMessages) { msg in
+                                    DevToolsMessageRowView(
+                                        message: msg,
+                                        isSelected: selectedMessageId == msg.id
+                                    )
+                                    .onTapGesture {
+                                        selectedMessageId = msg.id
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(minWidth: 400)
+
+                    // Payload detail (right)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text("Payload")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Color(nsColor: .controlBackgroundColor))
+
+                        Divider()
+
+                        if let msgId = selectedMessageId,
+                           let msg = devTools.messages.first(where: { $0.id == msgId }) {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    // Event info
+                                    HStack(spacing: 4) {
+                                        Text(msg.directionArrow)
+                                            .foregroundColor(msg.direction == .guestToHost ? .blue : .green)
+                                        Text(msg.event)
+                                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    }
+
+                                    if let tabId = msg.tabId {
+                                        Text("Tab: \(tabId)")
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Divider()
+
+                                    // Payload JSON
+                                    if let payload = msg.payload {
+                                        Text(payload)
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.primary)
+                                            .textSelection(.enabled)
+                                    } else {
+                                        Text("(no payload)")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                            .italic()
+                                    }
+                                }
+                                .padding(8)
+                            }
+                        } else {
+                            VStack {
+                                Text("Select a message")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(minWidth: 250)
+                }
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+/// Single message row view
+struct DevToolsMessageRowView: View {
+    let message: DevToolsMessage
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            // Timestamp
+            Text(message.timestamp, format: .dateTime.hour().minute().second().secondFraction(.fractional(3)))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                .frame(width: 85, alignment: .leading)
+
+            // Direction arrow
+            Text(message.directionArrow)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(message.direction == .guestToHost ? .blue : .green)
+                .frame(width: 16)
+
+            // Event name
+            Text(message.event)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(isSelected ? .white : .primary)
+                .lineLimit(1)
+
+            Spacer()
+
+            // Payload preview
+            if let payload = message.payload {
+                Text(payload.prefix(50).replacingOccurrences(of: "\n", with: " "))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(isSelected ? .white.opacity(0.7) : .secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: 200, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 2)
+                .fill(isSelected ? Color.accentColor : Color.clear)
+        )
+        .contentShape(Rectangle())
     }
 }
 
