@@ -66,6 +66,10 @@ struct FileTreeView: View {
     @Binding var selectedFile: SourceFile?
     let isLoading: Bool
 
+    @State private var expandedPaths: Set<String> = []
+    @State private var focusedPath: String?
+    @FocusState private var isTreeFocused: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -99,98 +103,222 @@ struct FileTreeView: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(nodes) { node in
-                            FileTreeNodeView(
-                                node: node,
-                                selectedFile: $selectedFile,
-                                depth: 0
-                            )
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(flattenedNodes) { item in
+                                FileTreeRowView(
+                                    node: item.node,
+                                    depth: item.depth,
+                                    isExpanded: expandedPaths.contains(item.node.path),
+                                    isSelected: selectedFile?.fullPath == item.node.file?.fullPath,
+                                    isFocused: focusedPath == item.node.path,
+                                    onTap: { handleTap(item.node) },
+                                    onToggle: { toggleExpanded(item.node.path) }
+                                )
+                                .id(item.node.path)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .focused($isTreeFocused)
+                    .onKeyPress(.upArrow) { navigateUp(); return .handled }
+                    .onKeyPress(.downArrow) { navigateDown(); return .handled }
+                    .onKeyPress(.leftArrow) { navigateLeft(); return .handled }
+                    .onKeyPress(.rightArrow) { navigateRight(); return .handled }
+                    .onKeyPress(.return) { handleReturn(); return .handled }
+                    .onChange(of: focusedPath) { _, newPath in
+                        if let path = newPath {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                proxy.scrollTo(path, anchor: .center)
+                            }
                         }
                     }
-                    .padding(.vertical, 4)
                 }
             }
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .onAppear {
+            // Auto-expand first level
+            for node in nodes where node.isDirectory {
+                expandedPaths.insert(node.path)
+            }
+        }
     }
-}
 
-// MARK: - File Tree Node View
-
-struct FileTreeNodeView: View {
-    let node: FileTreeNode
-    @Binding var selectedFile: SourceFile?
-    let depth: Int
-    @State private var isExpanded = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Node row
-            HStack(spacing: 4) {
-                // Indentation
-                if depth > 0 {
-                    Spacer()
-                        .frame(width: CGFloat(depth) * 12)
-                }
-
-                // Expand/collapse for directories
-                if node.isDirectory {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 12)
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                isExpanded.toggle()
-                            }
-                        }
-                } else {
-                    Spacer().frame(width: 12)
-                }
-
-                // Icon
-                Image(systemName: node.isDirectory ? "folder.fill" : fileIcon(for: node.name))
-                    .font(.system(size: 11))
-                    .foregroundColor(node.isDirectory ? .orange : iconColor(for: node.name))
-
-                // Name
-                Text(node.name)
-                    .font(.system(size: 11))
-                    .foregroundColor(selectedFile?.fullPath == node.file?.fullPath ? .white : .primary)
-                    .lineLimit(1)
-
-                Spacer()
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(selectedFile?.fullPath == node.file?.fullPath ? Color.accentColor : Color.clear)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if let file = node.file {
-                    selectedFile = file
-                } else if node.isDirectory {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        isExpanded.toggle()
-                    }
-                }
-            }
-
-            // Children (already sorted during tree build)
-            if node.isDirectory && isExpanded {
-                ForEach(node.children) { child in
-                    FileTreeNodeView(
-                        node: child,
-                        selectedFile: $selectedFile,
-                        depth: depth + 1
-                    )
+    // Flattened visible nodes for navigation
+    private var flattenedNodes: [FlattenedNode] {
+        var result: [FlattenedNode] = []
+        func flatten(_ nodes: [FileTreeNode], depth: Int) {
+            for node in nodes {
+                result.append(FlattenedNode(node: node, depth: depth))
+                if node.isDirectory && expandedPaths.contains(node.path) {
+                    flatten(node.children, depth: depth + 1)
                 }
             }
         }
+        flatten(nodes, depth: 0)
+        return result
+    }
+
+    private func handleTap(_ node: FileTreeNode) {
+        focusedPath = node.path
+        isTreeFocused = true
+        if let file = node.file {
+            selectedFile = file
+        } else if node.isDirectory {
+            toggleExpanded(node.path)
+        }
+    }
+
+    private func toggleExpanded(_ path: String) {
+        if expandedPaths.contains(path) {
+            expandedPaths.remove(path)
+        } else {
+            expandedPaths.insert(path)
+        }
+    }
+
+    private func navigateUp() {
+        let items = flattenedNodes
+        guard !items.isEmpty else { return }
+
+        if let current = focusedPath,
+           let idx = items.firstIndex(where: { $0.node.path == current }),
+           idx > 0 {
+            focusedPath = items[idx - 1].node.path
+        } else {
+            focusedPath = items.first?.node.path
+        }
+    }
+
+    private func navigateDown() {
+        let items = flattenedNodes
+        guard !items.isEmpty else { return }
+
+        if let current = focusedPath,
+           let idx = items.firstIndex(where: { $0.node.path == current }),
+           idx < items.count - 1 {
+            focusedPath = items[idx + 1].node.path
+        } else {
+            focusedPath = items.first?.node.path
+        }
+    }
+
+    private func navigateLeft() {
+        guard let current = focusedPath,
+              let item = flattenedNodes.first(where: { $0.node.path == current }) else { return }
+
+        if item.node.isDirectory && expandedPaths.contains(current) {
+            // Collapse current directory
+            expandedPaths.remove(current)
+        } else {
+            // Go to parent directory
+            let components = current.components(separatedBy: "/")
+            if components.count > 1 {
+                let parentPath = components.dropLast().joined(separator: "/")
+                focusedPath = parentPath
+            }
+        }
+    }
+
+    private func navigateRight() {
+        guard let current = focusedPath,
+              let item = flattenedNodes.first(where: { $0.node.path == current }) else { return }
+
+        if item.node.isDirectory {
+            if !expandedPaths.contains(current) {
+                // Expand directory
+                expandedPaths.insert(current)
+            } else if !item.node.children.isEmpty {
+                // Move to first child
+                focusedPath = item.node.children.first?.path
+            }
+        }
+    }
+
+    private func handleReturn() {
+        guard let current = focusedPath,
+              let item = flattenedNodes.first(where: { $0.node.path == current }) else { return }
+
+        if let file = item.node.file {
+            selectedFile = file
+        } else if item.node.isDirectory {
+            toggleExpanded(current)
+        }
+    }
+}
+
+private struct FlattenedNode: Identifiable {
+    let node: FileTreeNode
+    let depth: Int
+    var id: String { node.path }
+}
+
+// MARK: - File Tree Row View (non-recursive, state managed by parent)
+
+struct FileTreeRowView: View {
+    let node: FileTreeNode
+    let depth: Int
+    let isExpanded: Bool
+    let isSelected: Bool
+    let isFocused: Bool
+    let onTap: () -> Void
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            // Indentation
+            if depth > 0 {
+                Spacer()
+                    .frame(width: CGFloat(depth) * 12)
+            }
+
+            // Expand/collapse for directories
+            if node.isDirectory {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 12)
+                    .onTapGesture { onToggle() }
+            } else {
+                Spacer().frame(width: 12)
+            }
+
+            // Icon
+            Image(systemName: node.isDirectory ? "folder.fill" : fileIcon(for: node.name))
+                .font(.system(size: 11))
+                .foregroundColor(node.isDirectory ? .orange : iconColor(for: node.name))
+
+            // Name
+            Text(node.name)
+                .font(.system(size: 11))
+                .foregroundColor(isSelected ? .white : .primary)
+                .lineLimit(1)
+
+            Spacer()
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(isFocused && !isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+    }
+
+    private var backgroundColor: Color {
+        if isSelected {
+            return Color.accentColor
+        } else if isFocused {
+            return Color.accentColor.opacity(0.15)
+        }
+        return Color.clear
     }
 
     private func fileIcon(for name: String) -> String {
