@@ -904,7 +904,11 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   }, []);
 
   // Measure single node frame and highlight it
-  const measureAndHighlightNode = useCallback((nodeId: string, engine: Engine | null) => {
+  const measureAndHighlightNode = useCallback((
+    nodeId: string,
+    engine: Engine | null,
+    onMeasured?: (frame: { x: number; y: number; width: number; height: number }) => void
+  ) => {
     console.log('[DevTools] measureAndHighlightNode called with nodeId:', nodeId);
     if (!engine) {
       console.log('[DevTools] No engine available');
@@ -925,20 +929,29 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       return;
     }
 
+    const handleMeasureResult = (x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+      if (width > 0 && height > 0) {
+        const frame = { x: pageX, y: pageY, width, height };
+        setHighlightedFrame({ ...frame, nodeId });
+        DevToolsBridge?.highlightNode?.(nodeId, frame);
+        // Store in nodeFramesRef for future use
+        nodeFramesRef.current.set(nodeId, frame);
+        // Call callback with measured frame
+        onMeasured?.(frame);
+      } else {
+        console.log('[DevTools] Invalid dimensions, clearing highlight');
+        setHighlightedFrame(null);
+        DevToolsBridge?.clearHighlight?.();
+      }
+    };
+
     // Try using component's measure method directly (more reliable on macOS)
     const component = ref.current as { measure?: (callback: (x: number, y: number, width: number, height: number, pageX: number, pageY: number) => void) => void };
     if (typeof component.measure === 'function') {
       console.log('[DevTools] Using component.measure directly');
       component.measure((x, y, width, height, pageX, pageY) => {
         console.log('[DevTools] component.measure result:', { x, y, width, height, pageX, pageY });
-        if (width > 0 && height > 0) {
-          setHighlightedFrame({ x: pageX, y: pageY, width, height, nodeId });
-          DevToolsBridge?.highlightNode?.(nodeId, { x: pageX, y: pageY, width, height });
-        } else {
-          console.log('[DevTools] Invalid dimensions, clearing highlight');
-          setHighlightedFrame(null);
-          DevToolsBridge?.clearHighlight?.();
-        }
+        handleMeasureResult(x, y, width, height, pageX, pageY);
       });
       return;
     }
@@ -955,14 +968,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
     UIManager.measure(handle, (x, y, width, height, pageX, pageY) => {
       console.log('[DevTools] UIManager.measure result:', { x, y, width, height, pageX, pageY });
-      if (width > 0 && height > 0) {
-        setHighlightedFrame({ x: pageX, y: pageY, width, height, nodeId });
-        DevToolsBridge?.highlightNode?.(nodeId, { x: pageX, y: pageY, width, height });
-      } else {
-        console.log('[DevTools] Invalid dimensions, clearing highlight');
-        setHighlightedFrame(null);
-        DevToolsBridge?.clearHighlight?.();
-      }
+      handleMeasureResult(x, y, width, height, pageX, pageY);
     });
   }, []);
 
@@ -1075,14 +1081,13 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       console.log('[DevTools] onSelectNode event received:', data);
       const activeEngine = engineMapRef.current.get(activeTabId);
       console.log('[DevTools] Active engine:', activeEngine ? 'exists' : 'null', 'tabId:', activeTabId);
-      measureAndHighlightNode(data.nodeId, activeEngine ?? null);
 
-      // Also update box model from the component tree node props
+      // Get node props first (for style extraction)
+      let nodeProps: Record<string, unknown> | null = null;
       if (activeEngine) {
         const receiver = activeEngine.getReceiver();
         const tree = receiver?.getComponentTree?.();
         if (tree) {
-          // Find the node in the tree
           const findNode = (node: { id: string; props?: Record<string, unknown>; children: unknown[] }): Record<string, unknown> | null => {
             if (String(node.id) === data.nodeId) {
               return node.props ?? null;
@@ -1093,20 +1098,22 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             }
             return null;
           };
-          const nodeProps = findNode(tree as { id: string; props?: Record<string, unknown>; children: unknown[] });
-          const nodeFrame = nodeFramesRef.current.get(data.nodeId);
-          if (nodeFrame) {
-            const style = nodeProps?.style as Record<string, unknown> | undefined;
-            const boxModelData = extractBoxModelFromStyle(style, {
-              left: nodeFrame.x,
-              top: nodeFrame.y,
-              width: nodeFrame.width,
-              height: nodeFrame.height,
-            });
-            DevToolsBridge?.updateBoxModel?.(boxModelData);
-          }
+          nodeProps = findNode(tree as { id: string; props?: Record<string, unknown>; children: unknown[] });
         }
       }
+
+      // Measure and highlight, then update box model with measured frame
+      measureAndHighlightNode(data.nodeId, activeEngine ?? null, (frame) => {
+        // Update box model with the freshly measured frame
+        const style = nodeProps?.style as Record<string, unknown> | undefined;
+        const boxModelData = extractBoxModelFromStyle(style, {
+          left: frame.x,
+          top: frame.y,
+          width: frame.width,
+          height: frame.height,
+        });
+        DevToolsBridge?.updateBoxModel?.(boxModelData);
+      });
     });
 
     // Set up event listener to toggle RN's built-in Element Inspector
