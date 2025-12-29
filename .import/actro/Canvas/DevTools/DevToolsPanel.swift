@@ -1,4 +1,5 @@
 import SwiftUI
+import Highlightr
 
 /// Main DevTools panel view - used both for docked mode and detached window
 struct DevToolsPanel: View {
@@ -1634,17 +1635,29 @@ struct StyleRow: View {
 
 // MARK: - JavaScript Source View
 
-/// View that displays JavaScript source code
-/// TODO: Add Highlightr for proper syntax highlighting
-/// Xcode → File → Add Package Dependencies → https://github.com/raspu/Highlightr
+/// View that displays JavaScript source code with syntax highlighting
 struct JavaScriptSourceView: View {
     let source: String
 
+    private static let highlightr: Highlightr? = {
+        let h = Highlightr()
+        h?.setTheme(to: "atom-one-dark")
+        return h
+    }()
+
     var body: some View {
-        Text(source)
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundColor(.green.opacity(0.9))
-            .textSelection(.enabled)
+        if let highlightr = Self.highlightr,
+           let highlighted = highlightr.highlight(source, as: "javascript") {
+            Text(AttributedString(highlighted))
+                .font(.system(size: 10, design: .monospaced))
+                .textSelection(.enabled)
+        } else {
+            // Fallback if highlighting fails
+            Text(source)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.green.opacity(0.9))
+                .textSelection(.enabled)
+        }
     }
 }
 
