@@ -612,7 +612,15 @@ struct DevToolsPropRowView: View {
 
         switch value {
         case let str as String:
-            if str == "[Function]" {
+            // Check for function marker: [Function] or [Function: name]
+            if str.hasPrefix("[Function") {
+                // Extract name from [Function: name] format
+                if str.hasPrefix("[Function: "), str.hasSuffix("]") {
+                    let startIndex = str.index(str.startIndex, offsetBy: 11) // "[Function: ".count
+                    let endIndex = str.index(before: str.endIndex) // before "]"
+                    let name = String(str[startIndex..<endIndex])
+                    return "ƒ \(name)()"
+                }
                 return "ƒ()"
             }
             return "\"\(str)\""
@@ -648,7 +656,7 @@ struct DevToolsPropRowView: View {
 
         switch value {
         case let str as String:
-            if str == "[Function]" {
+            if str.hasPrefix("[Function") {
                 return .blue
             }
             return .orange
