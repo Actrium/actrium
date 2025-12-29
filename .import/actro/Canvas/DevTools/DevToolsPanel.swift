@@ -408,13 +408,11 @@ struct DevToolsElementsView: View {
         if let nodeId = newNodeId {
             devTools.selectNode(nodeId)
 
-            // Smart scroll: only scroll when item is near edge
-            // Using nil anchor lets SwiftUI decide the minimal scroll needed
-            // to make the item visible (won't scroll if already visible)
+            // Smart scroll: don't specify anchor - SwiftUI will:
+            // - Not scroll if item is already fully visible
+            // - Scroll minimum amount needed to make item visible if it's off-screen
             if let proxy = proxy {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    proxy.scrollTo(nodeId, anchor: direction > 0 ? .bottom : .top)
-                }
+                proxy.scrollTo(nodeId)
             }
         }
     }
