@@ -214,11 +214,22 @@ struct DevToolsElementsView: View {
     }
 
     private func collectVisibleNodes(_ node: DevToolsComponentNode, into result: inout [DevToolsComponentNode]) {
+        // Skip __TEXT__ nodes - they are displayed inline in parent
+        guard node.type != "__TEXT__" else { return }
+
         result.append(node)
-        if devTools.isNodeExpanded(node.id) || (devTools.expandedNodeIds.isEmpty && !node.children.isEmpty) {
-            // Default: expand all if no explicit state set
-            for child in node.children {
-                collectVisibleNodes(child, into: &result)
+
+        // Check if all children are __TEXT__ (inline text mode)
+        let hasOnlyTextChildren = !node.children.isEmpty &&
+            node.children.allSatisfy { $0.type == "__TEXT__" }
+
+        // Don't traverse into children if they're all __TEXT__ (shown inline)
+        if !hasOnlyTextChildren {
+            if devTools.isNodeExpanded(node.id) || (devTools.expandedNodeIds.isEmpty && !node.children.isEmpty) {
+                // Default: expand all if no explicit state set
+                for child in node.children {
+                    collectVisibleNodes(child, into: &result)
+                }
             }
         }
     }
@@ -499,8 +510,10 @@ struct DevToolsElementsView: View {
         return nil
     }
 
-    /// Count total nodes in tree
+    /// Count total nodes in tree (excluding __TEXT__ nodes)
     private func countNodes(_ node: DevToolsComponentNode) -> Int {
+        // Skip __TEXT__ nodes in count
+        guard node.type != "__TEXT__" else { return 0 }
         return 1 + node.children.reduce(0) { $0 + countNodes($1) }
     }
 
@@ -609,51 +622,126 @@ struct DevToolsTreeNodeView: View {
         devTools.expandedNodeIds.isEmpty || devTools.isNodeExpanded(node.id)
     }
 
+    /// Check if this node has only __TEXT__ children (inline text display)
+    private var inlineTextContent: String? {
+        // If all children are __TEXT__ nodes, combine their text content
+        guard !node.children.isEmpty else { return nil }
+        let textChildren = node.children.filter { $0.type == "__TEXT__" }
+        guard textChildren.count == node.children.count else { return nil }
+
+        // Extract text from each __TEXT__ child's props
+        let texts = textChildren.compactMap { child -> String? in
+            if let text = child.props["text"] as? String {
+                return text
+            }
+            return nil
+        }
+        guard texts.count == textChildren.count else { return nil }
+        return texts.joined()
+    }
+
+    /// Check if this is a __TEXT__ node (should be hidden, parent shows its content)
+    private var isTextNode: Bool {
+        node.type == "__TEXT__"
+    }
+
+    /// Whether this node has displayable children (non-__TEXT__ or mixed)
+    private var hasDisplayableChildren: Bool {
+        !node.children.isEmpty && inlineTextContent == nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Node row
-            HStack(spacing: 4) {
-                // Expand/collapse button
-                if !node.children.isEmpty {
-                    Button(action: { devTools.toggleNodeExpanded(node.id) }) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 12)
-                } else {
-                    Spacer()
+        // Skip rendering __TEXT__ nodes - their content is shown inline in parent
+        if isTextNode {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                // Opening tag row
+                HStack(spacing: 4) {
+                    // Expand/collapse button (only for nodes with displayable children)
+                    if hasDisplayableChildren {
+                        Button(action: { devTools.toggleNodeExpanded(node.id) }) {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
                         .frame(width: 12)
+                    } else {
+                        Spacer()
+                            .frame(width: 12)
+                    }
+
+                    // Tag content
+                    if let text = inlineTextContent {
+                        // Inline text: <Text>content</Text>
+                        HStack(spacing: 0) {
+                            Text("<\(node.type)>")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(devTools.selectedNodeId == node.id ? .white : .accentColor)
+                            Text(truncateText(text, maxLength: 30))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(devTools.selectedNodeId == node.id ? .white.opacity(0.9) : .primary)
+                            Text("</\(node.type)>")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(devTools.selectedNodeId == node.id ? .white : .accentColor)
+                        }
+                    } else if node.children.isEmpty {
+                        // Self-closing tag: <View />
+                        Text("<\(node.type) />")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(devTools.selectedNodeId == node.id ? .white : .accentColor)
+                    } else {
+                        // Opening tag only: <View>
+                        Text("<\(node.type)>")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(devTools.selectedNodeId == node.id ? .white : .accentColor)
+                    }
+
+                    Spacer()
                 }
+                .padding(.leading, CGFloat(depth) * 16)
+                .padding(.vertical, 2)
+                .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(devTools.selectedNodeId == node.id ? Color.accentColor : Color.clear)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    devTools.selectNode(node.id)
+                }
+                .id(node.id)  // For ScrollViewReader scrollTo
 
-                // Component type
-                Text("<\(node.type)>")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(devTools.selectedNodeId == node.id ? .white : .accentColor)
+                // Children (only if expanded and has displayable children)
+                if isExpanded && hasDisplayableChildren {
+                    ForEach(node.children) { child in
+                        DevToolsTreeNodeView(node: child, depth: depth + 1, devTools: devTools)
+                    }
 
-                Spacer()
-            }
-            .padding(.leading, CGFloat(depth) * 16)
-            .padding(.vertical, 2)
-            .padding(.horizontal, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(devTools.selectedNodeId == node.id ? Color.accentColor : Color.clear)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                devTools.selectNode(node.id)
-            }
-            .id(node.id)  // For ScrollViewReader scrollTo
-
-            // Children
-            if isExpanded {
-                ForEach(node.children) { child in
-                    DevToolsTreeNodeView(node: child, depth: depth + 1, devTools: devTools)
+                    // Closing tag
+                    HStack(spacing: 4) {
+                        Spacer()
+                            .frame(width: 12)
+                        Text("</\(node.type)>")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.accentColor.opacity(0.7))
+                        Spacer()
+                    }
+                    .padding(.leading, CGFloat(depth) * 16)
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 4)
                 }
             }
         }
+    }
+
+    /// Truncate text for display
+    private func truncateText(_ text: String, maxLength: Int) -> String {
+        if text.count <= maxLength {
+            return text
+        }
+        return String(text.prefix(maxLength)) + "..."
     }
 }
 
