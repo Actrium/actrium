@@ -236,6 +236,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             url: string;
             options?: RequestInit;
           };
+          log.info(`[Fetch] Received request: ${requestId} ${url}`);
           try {
             const response = await fetch(url, options);
             const contentType = response.headers.get('content-type') || '';
@@ -245,18 +246,21 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             } else {
               data = await response.text();
             }
-            currentEngine.sendEvent('APP_FETCH_RESPONSE', {
+            log.info(`[Fetch] Response: ${requestId} ok=${response.ok} status=${response.status}`);
+            currentEngine!.sendEvent('APP_FETCH_RESPONSE', {
               requestId,
               ok: response.ok,
               status: response.status,
               data,
             });
           } catch (error: unknown) {
-            currentEngine.sendEvent('APP_FETCH_RESPONSE', {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            log.error(`[Fetch] Error: ${requestId} ${errorMsg}`);
+            currentEngine!.sendEvent('APP_FETCH_RESPONSE', {
               requestId,
               ok: false,
               status: 0,
-              error: error instanceof Error ? error.message : String(error),
+              error: errorMsg,
             });
           }
         });
