@@ -226,17 +226,18 @@ struct CodeViewerView: View {
     private static let highlightr: Highlightr? = {
         let h = Highlightr()
         h?.setTheme(to: "atom-one-dark")
-        // Use Menlo 12px to match Chrome DevTools
-        h?.theme.codeFont = NSFont(name: "Menlo", size: 12) ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        // Use 11px to match Chrome DevTools, monospacedSystemFont for better CJK support
+        h?.theme.codeFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         return h
     }()
 
-    // Cache highlighted results for performance
+    // Cache highlighted results for performance (keyed by font size too)
     private static var highlightCache: [String: AttributedString] = [:]
     private static let cacheLock = NSLock()
+    private static let cacheVersion = 2 // Increment when font changes
 
     private func getCachedHighlight(code: String, language: String) -> AttributedString? {
-        let key = "\(language):\(code.hashValue)"
+        let key = "v\(Self.cacheVersion):\(language):\(code.hashValue)"
         Self.cacheLock.lock()
         defer { Self.cacheLock.unlock() }
 
@@ -282,11 +283,12 @@ struct CodeViewerView: View {
 
             Divider()
 
-            // Content
+            // Content - left aligned
             if let content = content, let file = file {
                 ScrollView([.horizontal, .vertical]) {
                     highlightedCode(content, language: file.language)
                         .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 .background(Color(red: 0.1, green: 0.1, blue: 0.12))
             } else {
@@ -306,8 +308,8 @@ struct CodeViewerView: View {
         }
     }
 
-    // Code font matching Chrome DevTools (Menlo 12px)
-    private static let codeFont = NSFont(name: "Menlo", size: 12) ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    // Code font matching Chrome DevTools (11px monospace)
+    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
 
     @ViewBuilder
     private func highlightedCode(_ code: String, language: String) -> some View {
