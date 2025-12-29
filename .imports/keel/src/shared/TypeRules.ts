@@ -215,12 +215,50 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       // Capture function name for DevTools (source location lookup done on native side)
       const fnName = fnWithMeta.__name || func.name || undefined;
 
+      // Capture bundle location from stack trace for source map mapping
+      let bundleLine: number | undefined;
+      let bundleColumn: number | undefined;
+      try {
+        const stack = new Error().stack;
+        if (stack) {
+          // Parse stack to find first user code frame (skip rill internal frames)
+          // Stack format: "Error\n    at funcName (file:line:col)\n    at ..."
+          // or in Hermes: "Error\n    at funcName (file:line:col)\n..."
+          const lines = stack.split('\n');
+          for (let i = 1; i < lines.length; i++) {
+            const stackLine = lines[i];
+            if (!stackLine) continue;
+            // Skip frames containing 'TypeRules', 'Bridge', 'serialization' (internal rill code)
+            if (
+              stackLine.includes('TypeRules') ||
+              stackLine.includes('Bridge') ||
+              stackLine.includes('serialization') ||
+              stackLine.includes('createEncoder')
+            ) {
+              continue;
+            }
+            // Extract line:column from frame
+            // Format: "    at funcName (path:line:col)" or "    at path:line:col"
+            const match = stackLine.match(/:(\d+):(\d+)\)?$/);
+            if (match && match[1] && match[2]) {
+              bundleLine = parseInt(match[1], 10);
+              bundleColumn = parseInt(match[2], 10);
+              break;
+            }
+          }
+        }
+      } catch {
+        // Stack parsing failed, continue without bundle location
+      }
+
       return {
         __type: 'function',
         __fnId: fnId,
         __name: fnName,
         __sourceFile: fnWithMeta.__sourceFile,
         __sourceLine: fnWithMeta.__sourceLine,
+        __bundleLine: bundleLine,
+        __bundleColumn: bundleColumn,
       } as SerializedFunction;
     },
     strategy: 'proxy',
