@@ -623,7 +623,8 @@ struct DevToolsTreeNodeView: View {
     }
 
     /// Check if this node has only __TEXT__ children (inline text display)
-    private var inlineTextContent: String? {
+    /// Returns (text, shouldInline) - shouldInline is true only for short single-line text
+    private var textContentInfo: (text: String, shouldInline: Bool)? {
         // If all children are __TEXT__ nodes, combine their text content
         guard !node.children.isEmpty else { return nil }
         let textChildren = node.children.filter { $0.type == "__TEXT__" }
@@ -637,7 +638,26 @@ struct DevToolsTreeNodeView: View {
             return nil
         }
         guard texts.count == textChildren.count else { return nil }
-        return texts.joined()
+
+        let combinedText = texts.joined()
+        // Inline only if: single text child, short text, no newlines
+        let shouldInline = textChildren.count == 1 &&
+                          combinedText.count <= 40 &&
+                          !combinedText.contains("\n")
+        return (combinedText, shouldInline)
+    }
+
+    /// For inline display (short single text)
+    private var inlineTextContent: String? {
+        guard let info = textContentInfo, info.shouldInline else { return nil }
+        return info.text
+    }
+
+    /// For expanded display (multiple texts or long/multiline text)
+    private var expandedTextLines: [String]? {
+        guard let info = textContentInfo, !info.shouldInline else { return nil }
+        // Split by newlines and filter empty lines
+        return info.text.components(separatedBy: "\n").filter { !$0.isEmpty }
     }
 
     /// Check if this is a __TEXT__ node (should be hidden, parent shows its content)
@@ -647,7 +667,12 @@ struct DevToolsTreeNodeView: View {
 
     /// Whether this node has displayable children (non-__TEXT__ or mixed)
     private var hasDisplayableChildren: Bool {
-        !node.children.isEmpty && inlineTextContent == nil
+        !node.children.isEmpty && textContentInfo == nil
+    }
+
+    /// Whether this node has expanded text content (multiline or long)
+    private var hasExpandedTextContent: Bool {
+        expandedTextLines != nil
     }
 
     var body: some View {
@@ -658,8 +683,8 @@ struct DevToolsTreeNodeView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Opening tag row
                 HStack(spacing: 4) {
-                    // Expand/collapse button (only for nodes with displayable children)
-                    if hasDisplayableChildren {
+                    // Expand/collapse button (only for nodes with expandable content)
+                    if hasDisplayableChildren || hasExpandedTextContent {
                         Button(action: { devTools.toggleNodeExpanded(node.id) }) {
                             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                                 .font(.system(size: 8, weight: .bold))
@@ -674,7 +699,7 @@ struct DevToolsTreeNodeView: View {
 
                     // Tag content
                     if let text = inlineTextContent {
-                        // Inline text: <Text>content</Text>
+                        // Inline text (short): <Text>content</Text>
                         HStack(spacing: 0) {
                             Text("<\(node.type)>")
                                 .font(.system(size: 11, design: .monospaced))
@@ -692,7 +717,7 @@ struct DevToolsTreeNodeView: View {
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(devTools.selectedNodeId == node.id ? .white : .accentColor)
                     } else {
-                        // Opening tag only: <View>
+                        // Opening tag only: <View> or <Text> (for expanded text)
                         Text("<\(node.type)>")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(devTools.selectedNodeId == node.id ? .white : .accentColor)
@@ -713,7 +738,37 @@ struct DevToolsTreeNodeView: View {
                 }
                 .id(node.id)  // For ScrollViewReader scrollTo
 
-                // Children (only if expanded and has displayable children)
+                // Expanded text content (multiline or long text)
+                if isExpanded, let textLines = expandedTextLines {
+                    ForEach(Array(textLines.enumerated()), id: \.offset) { _, line in
+                        HStack(spacing: 4) {
+                            Spacer()
+                                .frame(width: 12)
+                            Text(truncateText(line, maxLength: 50))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.primary.opacity(0.8))
+                            Spacer()
+                        }
+                        .padding(.leading, CGFloat(depth + 1) * 16)
+                        .padding(.vertical, 1)
+                        .padding(.horizontal, 4)
+                    }
+
+                    // Closing tag for expanded text
+                    HStack(spacing: 4) {
+                        Spacer()
+                            .frame(width: 12)
+                        Text("</\(node.type)>")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.accentColor.opacity(0.7))
+                        Spacer()
+                    }
+                    .padding(.leading, CGFloat(depth) * 16)
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 4)
+                }
+
+                // Regular children (only if expanded and has displayable children)
                 if isExpanded && hasDisplayableChildren {
                     ForEach(node.children) { child in
                         DevToolsTreeNodeView(node: child, depth: depth + 1, devTools: devTools)
