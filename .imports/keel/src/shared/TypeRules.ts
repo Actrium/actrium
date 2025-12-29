@@ -153,7 +153,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       (v as SerializedFunction).__type === 'function' &&
       '__fnId' in v,
     decode: (v, ctx) => {
-      const { __fnId, __name } = v as SerializedFunction;
+      const { __fnId, __name, __sourceFile, __sourceLine } = v as SerializedFunction;
       // Reason: Deserialized function proxy accepts arbitrary arguments
       const proxy = (...args: unknown[]) => {
         try {
@@ -187,9 +187,20 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
           return undefined;
         }
       };
-      // Attach name for DevTools inspection
+      // Attach metadata for DevTools inspection
+      const proxyWithMeta = proxy as {
+        __name?: string;
+        __sourceFile?: string;
+        __sourceLine?: number;
+      };
       if (__name) {
-        (proxy as { __name?: string }).__name = __name;
+        proxyWithMeta.__name = __name;
+      }
+      if (__sourceFile) {
+        proxyWithMeta.__sourceFile = __sourceFile;
+      }
+      if (__sourceLine !== undefined) {
+        proxyWithMeta.__sourceLine = __sourceLine;
       }
       return proxy;
     },
