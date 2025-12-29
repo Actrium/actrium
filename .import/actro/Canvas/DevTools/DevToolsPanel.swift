@@ -373,21 +373,39 @@ struct DevToolsElementsView: View {
 
                             Divider()
 
-                            // Props list
-                            if node.props.isEmpty {
-                                Text("No props")
-                                    .font(.system(size: 11))
+                            // Box Model visualization (if available)
+                            if let boxModel = devTools.boxModel {
+                                DevToolsBoxModelView(boxModel: boxModel)
+                            }
+
+                            // Computed Styles (if available)
+                            if let styles = devTools.computedStyles {
+                                DevToolsComputedStylesView(styles: styles)
+                            }
+
+                            // Props section
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Props")
+                                    .font(.system(size: 10, weight: .semibold))
                                     .foregroundColor(.secondary)
-                                    .italic()
-                            } else {
-                                ForEach(Array(node.props.keys.sorted()), id: \.self) { key in
-                                    DevToolsPropRowView(key: key, value: node.props[key])
+
+                                if node.props.isEmpty {
+                                    Text("No props")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                        .italic()
+                                } else {
+                                    ForEach(Array(node.props.keys.sorted()), id: \.self) { key in
+                                        DevToolsPropRowView(key: key, value: node.props[key])
+                                    }
                                 }
                             }
+                            .padding(8)
+                            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+                            .cornerRadius(6)
 
                             // Children count
                             if !node.children.isEmpty {
-                                Divider()
                                 HStack {
                                     Text("Children:")
                                         .font(.system(size: 11))
@@ -1110,6 +1128,260 @@ struct DevToolsMessageRowView: View {
     }
 }
 
+// MARK: - Box Model View
+
+/// Visual box model diagram showing margin, border, padding, and content
+struct DevToolsBoxModelView: View {
+    let boxModel: DevToolsBoxModel
+
+    // Colors matching Chrome DevTools
+    private let marginColor = Color.orange.opacity(0.3)
+    private let borderColor = Color.yellow.opacity(0.4)
+    private let paddingColor = Color.green.opacity(0.3)
+    private let contentColor = Color.blue.opacity(0.3)
+
+    var body: some View {
+        VStack(spacing: 8) {
+            // Position info
+            HStack(spacing: 12) {
+                Text("position")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text("(\(Int(boxModel.x)), \(Int(boxModel.y)))")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.primary)
+            }
+
+            // Box model diagram
+            ZStack {
+                // Margin box (outermost)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(marginColor)
+
+                VStack(spacing: 0) {
+                    // Top margin label
+                    Text(formatValue(boxModel.margin.top))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.orange)
+                        .frame(height: 16)
+
+                    HStack(spacing: 0) {
+                        // Left margin label
+                        Text(formatValue(boxModel.margin.left))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.orange)
+                            .frame(width: 24)
+
+                        // Border box
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(borderColor)
+
+                            VStack(spacing: 0) {
+                                // Top border label
+                                Text(formatValue(boxModel.border.top))
+                                    .font(.system(size: 8, design: .monospaced))
+                                    .foregroundColor(.yellow)
+                                    .frame(height: 12)
+
+                                HStack(spacing: 0) {
+                                    // Left border label
+                                    Text(formatValue(boxModel.border.left))
+                                        .font(.system(size: 8, design: .monospaced))
+                                        .foregroundColor(.yellow)
+                                        .frame(width: 16)
+
+                                    // Padding box
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(paddingColor)
+
+                                        VStack(spacing: 0) {
+                                            // Top padding label
+                                            Text(formatValue(boxModel.padding.top))
+                                                .font(.system(size: 9, design: .monospaced))
+                                                .foregroundColor(.green)
+                                                .frame(height: 14)
+
+                                            HStack(spacing: 0) {
+                                                // Left padding label
+                                                Text(formatValue(boxModel.padding.left))
+                                                    .font(.system(size: 9, design: .monospaced))
+                                                    .foregroundColor(.green)
+                                                    .frame(width: 20)
+
+                                                // Content box (innermost)
+                                                ZStack {
+                                                    RoundedRectangle(cornerRadius: 1)
+                                                        .fill(contentColor)
+
+                                                    Text("\(Int(boxModel.width)) × \(Int(boxModel.height))")
+                                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                                        .foregroundColor(.blue)
+                                                }
+                                                .frame(minWidth: 60, minHeight: 30)
+
+                                                // Right padding label
+                                                Text(formatValue(boxModel.padding.right))
+                                                    .font(.system(size: 9, design: .monospaced))
+                                                    .foregroundColor(.green)
+                                                    .frame(width: 20)
+                                            }
+
+                                            // Bottom padding label
+                                            Text(formatValue(boxModel.padding.bottom))
+                                                .font(.system(size: 9, design: .monospaced))
+                                                .foregroundColor(.green)
+                                                .frame(height: 14)
+                                        }
+                                    }
+
+                                    // Right border label
+                                    Text(formatValue(boxModel.border.right))
+                                        .font(.system(size: 8, design: .monospaced))
+                                        .foregroundColor(.yellow)
+                                        .frame(width: 16)
+                                }
+
+                                // Bottom border label
+                                Text(formatValue(boxModel.border.bottom))
+                                    .font(.system(size: 8, design: .monospaced))
+                                    .foregroundColor(.yellow)
+                                    .frame(height: 12)
+                            }
+                        }
+
+                        // Right margin label
+                        Text(formatValue(boxModel.margin.right))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.orange)
+                            .frame(width: 24)
+                    }
+
+                    // Bottom margin label
+                    Text(formatValue(boxModel.margin.bottom))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.orange)
+                        .frame(height: 16)
+                }
+            }
+            .frame(height: 140)
+
+            // Legend
+            HStack(spacing: 12) {
+                LegendItem(color: marginColor, label: "margin")
+                LegendItem(color: borderColor, label: "border")
+                LegendItem(color: paddingColor, label: "padding")
+                LegendItem(color: contentColor, label: "content")
+            }
+            .padding(.top, 4)
+        }
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .cornerRadius(6)
+    }
+
+    private func formatValue(_ value: CGFloat) -> String {
+        value == 0 ? "-" : "\(Int(value))"
+    }
+}
+
+/// Legend item for box model colors
+struct LegendItem: View {
+    let color: Color
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color)
+                .frame(width: 10, height: 10)
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+/// Computed styles section view
+struct DevToolsComputedStylesView: View {
+    let styles: DevToolsComputedStyles
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Computed Styles")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                if let position = styles.position {
+                    StyleRow(name: "position", value: position)
+                }
+                if let backgroundColor = styles.backgroundColor {
+                    StyleRow(name: "backgroundColor", value: backgroundColor)
+                }
+                if let display = styles.display {
+                    StyleRow(name: "display", value: display)
+                }
+                if let flexDirection = styles.flexDirection {
+                    StyleRow(name: "flexDirection", value: flexDirection)
+                }
+                if let alignItems = styles.alignItems {
+                    StyleRow(name: "alignItems", value: alignItems)
+                }
+                if let justifyContent = styles.justifyContent {
+                    StyleRow(name: "justifyContent", value: justifyContent)
+                }
+                if let flex = styles.flex {
+                    StyleRow(name: "flex", value: "\(flex)")
+                }
+                if let opacity = styles.opacity {
+                    StyleRow(name: "opacity", value: String(format: "%.2f", opacity))
+                }
+                if let overflow = styles.overflow {
+                    StyleRow(name: "overflow", value: overflow)
+                }
+                if let top = styles.top {
+                    StyleRow(name: "top", value: "\(Int(top))")
+                }
+                if let left = styles.left {
+                    StyleRow(name: "left", value: "\(Int(left))")
+                }
+                if let right = styles.right {
+                    StyleRow(name: "right", value: "\(Int(right))")
+                }
+                if let bottom = styles.bottom {
+                    StyleRow(name: "bottom", value: "\(Int(bottom))")
+                }
+            }
+        }
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .cornerRadius(6)
+    }
+}
+
+/// Single style row
+struct StyleRow: View {
+    let name: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(name)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.purple)
+            Text(":")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.primary)
+            Spacer()
+        }
+    }
+}
+
 // MARK: - Preview
 
 #Preview("DevTools Panel") {
@@ -1118,4 +1390,18 @@ struct DevToolsMessageRowView: View {
         viewModel: BrowserViewModel()
     )
     .frame(width: 800, height: 300)
+}
+
+#Preview("Box Model") {
+    DevToolsBoxModelView(boxModel: DevToolsBoxModel(
+        margin: .init(top: 8, right: 16, bottom: 8, left: 16),
+        border: .init(top: 1, right: 1, bottom: 1, left: 1),
+        padding: .init(top: 12, right: 20, bottom: 12, left: 20),
+        width: 200,
+        height: 100,
+        x: 50,
+        y: 120
+    ))
+    .frame(width: 300)
+    .padding()
 }
