@@ -887,9 +887,14 @@ export class Receiver {
     const serializableProps: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(node.props)) {
       if (typeof value === 'function') {
-        // Show function marker with name if available
+        // Show function info with name and source if available
         const fnName = value.name || 'anonymous';
-        serializableProps[key] = `[Function: ${fnName}]`;
+        const fnSource = (value as { __source?: string }).__source;
+        serializableProps[key] = {
+          __type: 'function',
+          name: fnName,
+          source: fnSource,
+        };
       } else if (value instanceof Date) {
         serializableProps[key] = value.toISOString();
       } else if (value instanceof RegExp) {
