@@ -1168,10 +1168,31 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     }
   }, [activeTabId, findNodeAtPosition, measureAndHighlightNode]);
 
+  // Handle touch for inspect mode (like RN's InspectorOverlay)
+  const findViewForTouchEvent = useCallback((e: { nativeEvent: { locationX: number; locationY: number } }) => {
+    const { locationX, locationY } = e.nativeEvent;
+    handleInspectHover(locationX, locationY);
+  }, [handleInspectHover]);
+
+  const handleStartShouldSetResponder = useCallback((e: { nativeEvent: { locationX: number; locationY: number } }) => {
+    findViewForTouchEvent(e);
+    return true;
+  }, [findViewForTouchEvent]);
+
+  const handleResponderRelease = useCallback((e: { nativeEvent: { locationX: number; locationY: number } }) => {
+    const { locationX, locationY } = e.nativeEvent;
+    handleInspectClick(locationX, locationY);
+  }, [handleInspectClick]);
+
   return (
-    <View style={tabHostStyle}>
-      {/* Content container - ref used for Inspector API (excludes overlays) */}
-      <View style={StyleSheet.absoluteFill} ref={inspectedViewRef} pointerEvents={isInspectMode ? 'none' : 'auto'}>
+    <View style={tabHostStyle} pointerEvents="box-none">
+      {/* Content container - ref used for Inspector API */}
+      <View
+        style={styles.contentContainer}
+        ref={inspectedViewRef}
+        pointerEvents="box-none"
+        collapsable={false}
+      >
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           // 重要：显式尺寸模式下不使用 flex:1，完全依赖父容器的宽高
@@ -1201,8 +1222,40 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         ) : null}
       </View>
 
-      {/* Highlight overlay for selected node (always visible when frame is set) */}
-      {highlightedFrame && (
+      {/* Inspect mode overlay - like RN's InspectorOverlay */}
+      {isInspectMode && (
+        <View
+          style={styles.inspectOverlay}
+          onStartShouldSetResponder={handleStartShouldSetResponder}
+          onResponderMove={findViewForTouchEvent}
+          onResponderRelease={handleResponderRelease}
+        >
+          {/* Highlight box for selected element */}
+          {highlightedFrame && (
+            <View
+              style={[
+                styles.highlightOverlay,
+                {
+                  left: highlightedFrame.x,
+                  top: highlightedFrame.y,
+                  width: highlightedFrame.width,
+                  height: highlightedFrame.height,
+                },
+              ]}
+              pointerEvents="none"
+            >
+              <View style={styles.highlightLabel}>
+                <Text style={styles.highlightLabelText}>
+                  {highlightedFrame.componentName || `#${highlightedFrame.nodeId}`}
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Highlight when not in inspect mode (from tree selection) */}
+      {!isInspectMode && highlightedFrame && (
         <View
           style={[
             styles.highlightOverlay,
@@ -1221,27 +1274,6 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             </Text>
           </View>
         </View>
-      )}
-
-      {/* Inspect mode touch capture layer - blocks all interactions */}
-      {isInspectMode && (
-        <View
-          style={styles.inspectTouchLayer}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderGrant={(event) => {
-            const { locationX, locationY } = event.nativeEvent;
-            handleInspectHover(locationX, locationY);
-          }}
-          onResponderMove={(event) => {
-            const { locationX, locationY } = event.nativeEvent;
-            handleInspectHover(locationX, locationY);
-          }}
-          onResponderRelease={(event) => {
-            const { locationX, locationY } = event.nativeEvent;
-            handleInspectClick(locationX, locationY);
-          }}
-        />
       )}
     </View>
   );
@@ -1293,10 +1325,16 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
   },
-  inspectTouchLayer: {
-    ...StyleSheet.absoluteFillObject,
+  contentContainer: {
+    flex: 1,
+  },
+  inspectOverlay: {
+    position: 'absolute',
     backgroundColor: 'transparent',
-    zIndex: 9997, // Below highlight overlay but above content
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   highlightOverlay: {
     position: 'absolute',
