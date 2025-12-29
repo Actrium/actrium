@@ -11,7 +11,8 @@ class DevToolsBridge: NSObject {
         let msgDirection = parseDirection(direction)
         let payloadDict = parsePayload(payload)
 
-        DispatchQueue.main.async {
+        // Use asyncAfter to avoid "Publishing changes from within view updates" warning
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
             DevToolsManager.shared.logMessage(
                 direction: msgDirection,
                 event: event,
@@ -26,7 +27,8 @@ class DevToolsBridge: NSObject {
     func logRenderOp(_ operationType: String, _ componentType: String?, _ nodeId: String?, _ payload: String?, _ tabId: String?) {
         let payloadDict = parsePayload(payload) as? [String: Any]
 
-        DispatchQueue.main.async {
+        // Use asyncAfter to avoid "Publishing changes from within view updates" warning
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
             DevToolsManager.shared.logRenderOperation(
                 direction: .guestToHost,
                 operationType: operationType,
