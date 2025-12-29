@@ -6,7 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { CallbackRegistry } from '../guest/reconciler';
+import { CallbackRegistry } from '../guest/runtime/reconciler';
 import { createDecoder, createEncoder, DEFAULT_TYPE_RULES } from './TypeRules';
 
 describe('TypeRules - Complex Types', () => {

@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import React from 'react';
-import { CallbackRegistry } from '../guest/reconciler';
+import { CallbackRegistry } from '../guest/runtime/reconciler';
 import { Receiver } from './receiver';
 import { ComponentRegistry } from './registry';
 import type { HostMessage, OperationBatch } from './types';

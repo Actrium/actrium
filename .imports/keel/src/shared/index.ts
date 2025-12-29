@@ -1,12 +1,22 @@
 /**
- * @rill/bridge - Protocol Layer
+ * @rill/shared - Protocol Layer
  *
  * Host ↔ Guest 共享的协议层
+ * - Bridge（通信层）
  * - 类型定义
  * - 序列化规则
  * - CallbackRegistry（跨边界函数引用管理）
  */
 
+// Bridge（Host ↔ Guest 通信层）
+export {
+  Bridge,
+  type BridgeOptions,
+  type EncodeBatchResult,
+  PromiseManager,
+  type PromiseManagerOptions,
+  type PromiseSettleResult,
+} from './bridge';
 // CallbackRegistry 实现（跨边界函数引用管理）
 export {
   CallbackRegistry as CallbackRegistryImpl,

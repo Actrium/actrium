@@ -164,6 +164,136 @@ describe('Cross-Boundary: Function Serialization', () => {
       length: 11,
     });
   });
+
+  it('should handle complex event object arguments (like GestureResponderEvent)', async () => {
+    const guestCode = `
+      globalThis.__sendToHost({
+        version: 1,
+        batchId: 1,
+        operations: [
+          {
+            op: 'CREATE',
+            id: 1,
+            type: 'TouchableOpacity',
+            props: {
+              testID: 'button',
+              onPress: (event) => {
+                // Guest receives the event and extracts useful data
+                globalThis.__sendEventToHost('PRESS_WITH_EVENT', {
+                  hasEvent: !!event,
+                  locationX: event?.nativeEvent?.locationX,
+                  locationY: event?.nativeEvent?.locationY,
+                  timestamp: event?.nativeEvent?.timestamp,
+                });
+              }
+            }
+          },
+          { op: 'APPEND', parentId: 0, childId: 1 }
+        ]
+      });
+    `;
+
+    const receiver = engine.createReceiver(() => {});
+    await engine.loadBundle(guestCode);
+    await wait(100);
+
+    const node = receiver.findByTestId('button');
+
+    // Simulate a GestureResponderEvent-like object from React Native
+    const mockEvent = {
+      nativeEvent: {
+        locationX: 100,
+        locationY: 50,
+        pageX: 200,
+        pageY: 150,
+        timestamp: 1234567890,
+        identifier: 0,
+        touches: [],
+        changedTouches: [],
+        target: 123, // native node ID
+      },
+      // These are typically native object references that can't be serialized
+      target: { _nativeTag: 123 },
+      currentTarget: { _nativeTag: 456 },
+      bubbles: true,
+      cancelable: true,
+      defaultPrevented: false,
+      eventPhase: 2,
+      isTrusted: true,
+      timeStamp: 1234567890,
+      type: 'press',
+      // Methods - should be filtered or converted
+      preventDefault: () => {},
+      stopPropagation: () => {},
+    };
+
+    // Host calls function with complex event object
+    await node?.props.onPress(mockEvent);
+    await wait(100);
+
+    expect(events.length).toBe(1);
+    expect(events[0]?.event).toBe('PRESS_WITH_EVENT');
+    expect(events[0]?.payload).toMatchObject({
+      hasEvent: true,
+      locationX: 100,
+      locationY: 50,
+      timestamp: 1234567890,
+    });
+  });
+
+  it('should handle event with circular references gracefully', async () => {
+    const guestCode = `
+      globalThis.__sendToHost({
+        version: 1,
+        batchId: 1,
+        operations: [
+          {
+            op: 'CREATE',
+            id: 1,
+            type: 'TouchableOpacity',
+            props: {
+              testID: 'button',
+              onPress: (event) => {
+                globalThis.__sendEventToHost('PRESS_CIRCULAR', {
+                  received: true,
+                  hasNativeEvent: !!event?.nativeEvent,
+                });
+              }
+            }
+          },
+          { op: 'APPEND', parentId: 0, childId: 1 }
+        ]
+      });
+    `;
+
+    const receiver = engine.createReceiver(() => {});
+    await engine.loadBundle(guestCode);
+    await wait(100);
+
+    const node = receiver.findByTestId('button');
+
+    // Create an object with circular reference
+    const mockEvent: Record<string, unknown> = {
+      nativeEvent: {
+        locationX: 50,
+        locationY: 25,
+      },
+      type: 'press',
+    };
+    // Add circular reference
+    mockEvent.self = mockEvent;
+    mockEvent.nativeEvent = { ...mockEvent.nativeEvent as object, parent: mockEvent };
+
+    // Should not crash, circular refs should be handled
+    await node?.props.onPress(mockEvent);
+    await wait(100);
+
+    expect(events.length).toBe(1);
+    expect(events[0]?.event).toBe('PRESS_CIRCULAR');
+    expect(events[0]?.payload).toMatchObject({
+      received: true,
+    });
+  });
 });
 
 describe('Cross-Boundary: Complex Data Types', () => {

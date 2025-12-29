@@ -2,9 +2,10 @@
  * FlatList Component
  *
  * Default FlatList component implementation, wrapping React Native FlatList
+ * Uses forwardRef to allow parent components to get native view reference
  */
 
-import type React from 'react';
+import React from 'react';
 import { type ListRenderItem, FlatList as RNFlatList, type ViewStyle } from 'react-native';
 
 export interface FlatListProps<T = unknown> {
@@ -34,36 +35,42 @@ export interface FlatListProps<T = unknown> {
   accessibilityLabel?: string;
 }
 
-export function FlatList<T = unknown>({
-  data,
-  renderItem,
-  keyExtractor,
-  style,
-  contentContainerStyle,
-  horizontal,
-  numColumns,
-  initialNumToRender,
-  maxToRenderPerBatch,
-  windowSize,
-  removeClippedSubviews,
-  showsVerticalScrollIndicator,
-  showsHorizontalScrollIndicator,
-  onEndReached,
-  onEndReachedThreshold,
-  onRefresh,
-  refreshing,
-  ListHeaderComponent,
-  ListFooterComponent,
-  ListEmptyComponent,
-  ItemSeparatorComponent,
-  testID,
-  accessible,
-  accessibilityLabel,
-}: FlatListProps<T>): React.ReactElement {
+// FlatList with forwardRef - generic component requires inner function
+function FlatListInner<T = unknown>(
+  {
+    data,
+    renderItem,
+    keyExtractor,
+    style,
+    contentContainerStyle,
+    horizontal,
+    numColumns,
+    initialNumToRender,
+    maxToRenderPerBatch,
+    windowSize,
+    removeClippedSubviews,
+    showsVerticalScrollIndicator,
+    showsHorizontalScrollIndicator,
+    onEndReached,
+    onEndReachedThreshold,
+    onRefresh,
+    refreshing,
+    ListHeaderComponent,
+    ListFooterComponent,
+    ListEmptyComponent,
+    ItemSeparatorComponent,
+    testID,
+    accessible,
+    accessibilityLabel,
+  }: FlatListProps<T>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ref: React.ForwardedRef<any>
+): React.ReactElement {
   // Wrap callbacks to not pass event info to Guest
   // RN's onEndReached passes { distanceFromEnd }, onRefresh passes no args
   return (
     <RNFlatList
+      ref={ref}
       data={data}
       renderItem={renderItem}
       keyExtractor={keyExtractor}
@@ -93,5 +100,13 @@ export function FlatList<T = unknown>({
     />
   );
 }
+
+// Use type assertion to maintain generic signature while supporting forwardRef
+export const FlatList = React.forwardRef(FlatListInner) as <T = unknown>(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  props: FlatListProps<T> & { ref?: React.ForwardedRef<any> }
+) => React.ReactElement;
+
+(FlatList as { displayName?: string }).displayName = 'FlatList';
 
 export default FlatList;

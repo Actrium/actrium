@@ -2,16 +2,11 @@
  * Image Component
  *
  * Default Image component implementation, wrapping React Native Image
+ * Uses forwardRef to allow parent components to get native view reference
  */
 
-import type React from 'react';
-import {
-  type ImageErrorEventData,
-  type ImageSourcePropType,
-  type ImageStyle,
-  Image as RNImage,
-  type NativeSyntheticEvent,
-} from 'react-native';
+import React from 'react';
+import { type ImageSourcePropType, type ImageStyle, Image as RNImage } from 'react-native';
 
 export interface ImageSource {
   uri: string;
@@ -35,53 +30,61 @@ export interface ImageProps {
   onError?: (error: { nativeEvent: { error: string } }) => void;
 }
 
-export function Image({
-  source,
-  style,
-  resizeMode = 'cover',
-  testID,
-  accessible,
-  accessibilityLabel,
-  fadeDuration,
-  blurRadius,
-  onLoad,
-  onLoadStart,
-  onLoadEnd,
-  onError,
-}: ImageProps): React.ReactElement {
-  // Handle source format
-  const imageSource: ImageSourcePropType =
-    typeof source === 'object' && 'uri' in source
-      ? { uri: source.uri, headers: source.headers }
-      : source;
+export const Image = React.forwardRef<React.ComponentRef<typeof RNImage>, ImageProps>(
+  (
+    {
+      source,
+      style,
+      resizeMode = 'cover',
+      testID,
+      accessible,
+      accessibilityLabel,
+      fadeDuration,
+      blurRadius,
+      onLoad,
+      onLoadStart,
+      onLoadEnd,
+      onError,
+    },
+    ref
+  ) => {
+    // Handle source format
+    const imageSource: ImageSourcePropType =
+      typeof source === 'object' && 'uri' in source
+        ? { uri: source.uri, headers: source.headers }
+        : source;
 
-  // Sanitize error event to only pass serializable data
-  const handleError = onError
-    ? (event: NativeSyntheticEvent<ImageErrorEventData>) => {
-        onError({
-          nativeEvent: {
-            error: event.nativeEvent.error,
-          },
-        });
-      }
-    : undefined;
+    // Sanitize error event to only pass serializable data
+    const handleError = onError
+      ? (event: { nativeEvent: { error: string } }) => {
+          onError({
+            nativeEvent: {
+              error: event.nativeEvent.error,
+            },
+          });
+        }
+      : undefined;
 
-  return (
-    <RNImage
-      source={imageSource}
-      style={style}
-      resizeMode={resizeMode}
-      testID={testID}
-      accessible={accessible}
-      accessibilityLabel={accessibilityLabel}
-      fadeDuration={fadeDuration}
-      blurRadius={blurRadius}
-      onLoad={onLoad ? () => onLoad() : undefined}
-      onLoadStart={onLoadStart ? () => onLoadStart() : undefined}
-      onLoadEnd={onLoadEnd ? () => onLoadEnd() : undefined}
-      onError={handleError}
-    />
-  );
-}
+    return (
+      <RNImage
+        ref={ref}
+        source={imageSource}
+        style={style}
+        resizeMode={resizeMode}
+        testID={testID}
+        accessible={accessible}
+        accessibilityLabel={accessibilityLabel}
+        fadeDuration={fadeDuration}
+        blurRadius={blurRadius}
+        onLoad={onLoad ? () => onLoad() : undefined}
+        onLoadStart={onLoadStart ? () => onLoadStart() : undefined}
+        onLoadEnd={onLoadEnd ? () => onLoadEnd() : undefined}
+        onError={handleError}
+      />
+    );
+  }
+);
+
+Image.displayName = 'Image';
 
 export default Image;

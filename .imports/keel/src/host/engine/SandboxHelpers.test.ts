@@ -408,13 +408,21 @@ describe('SandboxHelpers', () => {
     });
 
     test('should be idempotent', () => {
+      // First, run once and capture the value
+      const setupCode = `
+        ${RUNTIME_HELPERS_CODE}
+        return globalThis.__callbackId;
+      `;
+      const valueBefore = new Function(setupCode)();
+
+      // Now run twice more and verify the value doesn't change
       const code = `
         ${RUNTIME_HELPERS_CODE}
         ${RUNTIME_HELPERS_CODE}
         return globalThis.__callbackId;
       `;
       const fn = new Function(code);
-      expect(fn()).toBe(0);
+      expect(fn()).toBe(valueBefore);
     });
   });
 });

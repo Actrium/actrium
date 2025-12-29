@@ -888,8 +888,9 @@ export class Receiver {
     for (const [key, value] of Object.entries(node.props)) {
       if (typeof value === 'function') {
         // Show function info with name and source if available
-        const fnName = value.name || 'anonymous';
-        const fnSource = (value as { __source?: string }).__source;
+        const fnMeta = value as { __name?: string; __source?: string };
+        const fnName = fnMeta.__name || 'anonymous';
+        const fnSource = fnMeta.__source;
         serializableProps[key] = {
           __type: 'function',
           name: fnName,
