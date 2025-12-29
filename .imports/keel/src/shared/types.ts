@@ -77,7 +77,9 @@ export interface SerializedFunction {
   __type: 'function';
   __fnId: string;
   __name?: string; // Original function name for DevTools
-  __source?: string; // Function source code for DevTools
+  __source?: string; // Function source code for DevTools (minified, fallback)
+  __sourceFile?: string; // Original source file path for DevTools
+  __sourceLine?: number; // Original source line number for DevTools
 }
 
 /**
