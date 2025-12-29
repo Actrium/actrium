@@ -280,10 +280,6 @@ struct CanvasApp: App {
                     devTools.clearConsoleLogs()
                 }
                 .keyboardShortcut("k", modifiers: [.command, .option])
-
-                Button("Clear Operations") {
-                    devTools.clearOperations()
-                }
             }
 
             // Help menu

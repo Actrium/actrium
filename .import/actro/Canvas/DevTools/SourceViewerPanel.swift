@@ -29,14 +29,31 @@ struct SourceViewerPanel: View {
         .task {
             await viewModel.loadSourceMap()
         }
-        .onChange(of: devTools.pendingSourceNavigation) { navigation in
+        .onChange(of: devTools.pendingSourceNavigation) { _, navigation in
             if let nav = navigation {
-                viewModel.navigateToSource(
-                    functionName: nav.searchText,
-                    sourceFile: nav.fileName,
-                    sourceLine: nav.lineNumber,
-                    files: viewModel.files
-                )
+                print("🔍 [SourceViewerPanel] Navigation triggered: \(nav.searchText)")
+                print("   - files loaded: \(viewModel.files.count)")
+
+                // If files not loaded yet, load them first
+                if viewModel.files.isEmpty {
+                    print("⚠️ [SourceViewerPanel] Files not loaded, loading now...")
+                    Task {
+                        await viewModel.loadSourceMap()
+                        viewModel.navigateToSource(
+                            functionName: nav.searchText,
+                            sourceFile: nav.fileName,
+                            sourceLine: nav.lineNumber,
+                            files: viewModel.files
+                        )
+                    }
+                } else {
+                    viewModel.navigateToSource(
+                        functionName: nav.searchText,
+                        sourceFile: nav.fileName,
+                        sourceLine: nav.lineNumber,
+                        files: viewModel.files
+                    )
+                }
                 devTools.clearPendingSourceNavigation()
             }
         }

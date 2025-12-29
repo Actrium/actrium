@@ -23,7 +23,6 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
     case elements = "Elements"       // Component tree inspector
     case sources = "Sources"         // Source code viewer
     case console = "Console"         // Console logs
-    case operations = "Operations"   // Render operations log
     case network = "Network"         // Network requests (future)
     case performance = "Performance" // Performance metrics (future)
 
@@ -35,7 +34,6 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
         case .elements: return "square.stack.3d.up"
         case .sources: return "doc.text"
         case .console: return "terminal"
-        case .operations: return "list.bullet.rectangle"
         case .network: return "network"
         case .performance: return "gauge.with.dots.needle.bottom.50percent"
         }
@@ -106,18 +104,6 @@ struct DevToolsLogEntry: Identifiable {
         case warn = "warn"
         case error = "error"
     }
-}
-
-/// Operation entry for render operations log
-struct DevToolsOperation: Identifiable {
-    let id = UUID()
-    let timestamp: Date
-    let tabId: UUID
-    let operationType: String
-    let componentType: String?
-    let nodeId: String?
-    let props: [String: Any]?
-    let duration: TimeInterval?
 }
 
 /// Component tree node for Elements inspector
@@ -296,9 +282,6 @@ class DevToolsManager: ObservableObject {
 
     /// Console log entries
     @Published private(set) var consoleLogs: [DevToolsLogEntry] = []
-
-    /// Render operation entries
-    @Published private(set) var operations: [DevToolsOperation] = []
 
     /// Maximum log entries to keep
     private let maxLogEntries = 1000
@@ -540,40 +523,9 @@ class DevToolsManager: ObservableObject {
         }
     }
 
-    /// Add a render operation entry
-    func logOperation(
-        tabId: UUID,
-        operationType: String,
-        componentType: String? = nil,
-        nodeId: String? = nil,
-        props: [String: Any]? = nil,
-        duration: TimeInterval? = nil
-    ) {
-        let operation = DevToolsOperation(
-            timestamp: Date(),
-            tabId: tabId,
-            operationType: operationType,
-            componentType: componentType,
-            nodeId: nodeId,
-            props: props,
-            duration: duration
-        )
-        operations.append(operation)
-
-        // Trim if exceeds max
-        if operations.count > maxLogEntries {
-            operations.removeFirst(operations.count - maxLogEntries)
-        }
-    }
-
     /// Clear console logs
     func clearConsoleLogs() {
         consoleLogs.removeAll()
-    }
-
-    /// Clear operation logs
-    func clearOperations() {
-        operations.removeAll()
     }
 
     // MARK: - Component Tree
