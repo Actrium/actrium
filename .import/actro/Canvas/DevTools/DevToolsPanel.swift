@@ -168,8 +168,6 @@ struct DevToolsContent: View {
                 SourceViewerPanel()
             case .console:
                 DevToolsConsoleView(devTools: devTools)
-            case .operations:
-                DevToolsOperationsView(devTools: devTools, viewModel: viewModel)
             case .network:
                 DevToolsPlaceholderView(title: "Network", message: "Network inspector coming soon")
             case .performance:
@@ -380,9 +378,11 @@ struct DevToolsElementsView: View {
                                 Text("<\(node.type)>")
                                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                                     .foregroundColor(.accentColor)
+                                    .textSelection(.enabled)
                                 Text("#\(node.id)")
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundColor(.secondary)
+                                    .textSelection(.enabled)
                             }
 
                             Divider()
@@ -603,6 +603,7 @@ struct DevToolsPropRowView: View {
                 Text(key)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.purple)
+                    .textSelection(.enabled)
 
                 Text("=")
                     .font(.system(size: 11))
@@ -814,6 +815,7 @@ struct DevToolsTreeNodeView: View {
                             Text(truncateText(text, maxLength: 30))
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(devTools.selectedNodeId == node.id ? .white.opacity(0.9) : .primary)
+                                .textSelection(.enabled)
                             Text("</\(node.type)>")
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(devTools.selectedNodeId == node.id ? .white : .accentColor)
@@ -855,6 +857,7 @@ struct DevToolsTreeNodeView: View {
                             Text(truncateText(line, maxLength: 50))
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(isSelected ? .white.opacity(0.9) : .primary.opacity(0.8))
+                                .textSelection(.enabled)
                             Spacer()
                         }
                         .padding(.leading, CGFloat(depth + 1) * 16)
@@ -1019,115 +1022,6 @@ struct DevToolsLogEntryView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(entry.level == .error ? Color.red.opacity(0.1) : Color.clear)
-    }
-}
-
-// MARK: - Operations Tab
-
-struct DevToolsOperationsView: View {
-    @ObservedObject var devTools: DevToolsManager
-    @ObservedObject var viewModel: BrowserViewModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Filter bar
-            HStack {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Text("All Operations")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text("\(devTools.operations.count) ops")
-                    .font(.system(size: 10))
-                    .foregroundColor(Color(nsColor: .tertiaryLabelColor))
-
-                // Clear button
-                Button(action: { devTools.clearOperations() }) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.borderless)
-                .help("Clear operations")
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color(nsColor: .controlBackgroundColor))
-
-            Divider()
-
-            // Operations list
-            if devTools.operations.isEmpty {
-                VStack {
-                    Text("No render operations recorded")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(devTools.operations) { op in
-                            DevToolsOperationEntryView(operation: op)
-                        }
-                    }
-                }
-            }
-        }
-        .background(Color(nsColor: .textBackgroundColor))
-    }
-}
-
-/// Single operation entry view
-struct DevToolsOperationEntryView: View {
-    let operation: DevToolsOperation
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            // Timestamp
-            Text(operation.timestamp, format: .dateTime.hour().minute().second())
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(Color(nsColor: .tertiaryLabelColor))
-                .frame(width: 60, alignment: .leading)
-
-            // Operation type badge
-            Text(operation.operationType)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(operationColor)
-                .cornerRadius(3)
-
-            // Component type
-            if let componentType = operation.componentType {
-                Text("<\(componentType)>")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.accentColor)
-            }
-
-            // Duration
-            if let duration = operation.duration {
-                Text(String(format: "%.2fms", duration * 1000))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-    }
-
-    private var operationColor: Color {
-        switch operation.operationType.lowercased() {
-        case "create": return .green
-        case "update": return .blue
-        case "delete": return .red
-        case "mount": return .purple
-        default: return .gray
-        }
     }
 }
 
