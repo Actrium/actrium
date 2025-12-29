@@ -227,11 +227,52 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           },
         });
         currentEngine.register(hostComponents);
+
+        // Generic fetch handler: Guest sends APP_FETCH_REQUEST, Host responds with APP_FETCH_RESPONSE
+        const unsubscribeFetch = currentEngine.on('message', async (msg: { event: string; payload?: unknown }) => {
+          if (msg.event !== 'APP_FETCH_REQUEST') return;
+          const { requestId, url, options } = msg.payload as {
+            requestId: string;
+            url: string;
+            options?: RequestInit;
+          };
+          try {
+            const response = await fetch(url, options);
+            const contentType = response.headers.get('content-type') || '';
+            let data: unknown;
+            if (contentType.includes('application/json')) {
+              data = await response.json();
+            } else {
+              data = await response.text();
+            }
+            currentEngine.sendEvent('APP_FETCH_RESPONSE', {
+              requestId,
+              ok: response.ok,
+              status: response.status,
+              data,
+            });
+          } catch (error: unknown) {
+            currentEngine.sendEvent('APP_FETCH_RESPONSE', {
+              requestId,
+              ok: false,
+              status: 0,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        });
+
         currentAdapter = createEngineAdapter(currentEngine, {
           onContractViolation: (v) => onContractViolation?.(tab.id, v),
           permissions: tab.permissions ?? [],
           permissionMode: PERMISSION_MODE,
         });
+
+        // Store unsubscribe for cleanup
+        const originalDispose = currentAdapter.dispose;
+        currentAdapter.dispose = () => {
+          unsubscribeFetch();
+          originalDispose();
+        };
 
         if (cancelled) {
           currentAdapter?.dispose();
@@ -384,7 +425,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   return (
     <View style={threeColumnStyle}>
       {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
-      {isLeftPanelVisible && leftPanel && (
+      {isLeftPanelVisible && (
         <View
           style={[
             styles.leftPanel,
