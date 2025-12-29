@@ -172,7 +172,7 @@ struct DevToolsContent: View {
             case .network:
                 DevToolsNetworkView(devTools: devTools, viewModel: viewModel)
             case .performance:
-                DevToolsPlaceholderView(title: "Performance", message: "Performance profiler coming soon")
+                DevToolsPerformanceView(devTools: devTools)
             }
         }
     }
@@ -1070,6 +1070,492 @@ struct DevToolsLogEntryView: View {
     }
 }
 
+// MARK: - Network Tab
+
+private enum DevToolsNetworkFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case pending = "Pending"
+    case failed = "Failed"
+
+    var id: String { rawValue }
+}
+
+struct DevToolsNetworkView: View {
+    @ObservedObject var devTools: DevToolsManager
+    @ObservedObject var viewModel: BrowserViewModel
+
+    @State private var filter: DevToolsNetworkFilter = .all
+    @State private var searchText: String = ""
+    @State private var selectedRequestId: UUID?
+
+    private var currentTabIdString: String? {
+        viewModel.currentTabId?.uuidString
+    }
+
+    private var filteredRequests: [DevToolsNetworkRequest] {
+        guard let currentTabIdString else { return [] }
+
+        return devTools.networkRequests
+            .filter { req in
+                if req.tabId != currentTabIdString { return false }
+                switch filter {
+                case .all:
+                    break
+                case .pending:
+                    if req.state != .pending { return false }
+                case .failed:
+                    if req.state != .failed { return false }
+                }
+
+                if !searchText.isEmpty {
+                    let q = searchText.lowercased()
+                    let matchesUrl = req.url.lowercased().contains(q)
+                    let matchesMethod = req.method.lowercased().contains(q)
+                    let matchesStatus = req.statusText.lowercased().contains(q)
+                    if !(matchesUrl || matchesMethod || matchesStatus) { return false }
+                }
+
+                return true
+            }
+            .sorted { $0.startTime > $1.startTime }
+    }
+
+    private var selectedRequest: DevToolsNetworkRequest? {
+        guard let selectedRequestId else { return nil }
+        return devTools.networkRequests.first(where: { $0.id == selectedRequestId })
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Filter bar
+            HStack(spacing: 8) {
+                Picker("", selection: $filter) {
+                    ForEach(DevToolsNetworkFilter.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    TextField("Filter", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color(nsColor: .textBackgroundColor))
+                .cornerRadius(4)
+                .frame(maxWidth: 180)
+
+                Spacer()
+
+                Text("\(filteredRequests.count) requests")
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+
+                Button(action: { devTools.clearNetwork() }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .help("Clear network")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            // Content
+            if devTools.networkRequests.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "network")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary)
+                    Text("No network requests")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Text("Requests will appear when Guest triggers APP_FETCH_*")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .textBackgroundColor))
+            } else if filteredRequests.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary)
+                    Text("No requests for current tab")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .textBackgroundColor))
+            } else {
+                HSplitView {
+                    // Request list
+                    List(filteredRequests, selection: $selectedRequestId) { req in
+                        DevToolsNetworkRowView(request: req)
+                        .tag(req.id)
+                    }
+                    .listStyle(.plain)
+                    .frame(minWidth: 420)
+
+                    // Details
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let req = selectedRequest {
+                            DevToolsNetworkDetailView(request: req)
+                        } else {
+                            VStack {
+                                Text("Select a request")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(minWidth: 280)
+                }
+                .background(Color(nsColor: .textBackgroundColor))
+            }
+        }
+    }
+}
+
+private struct DevToolsNetworkRowView: View {
+    let request: DevToolsNetworkRequest
+
+    private var sizeText: String {
+        guard let bytes = request.responseSizeBytes else { return "-" }
+        if bytes < 1024 { return "\(bytes)B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1fKB", Double(bytes) / 1024.0) }
+        return String(format: "%.1fMB", Double(bytes) / (1024.0 * 1024.0))
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(request.method)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 45, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(request.displayPathWithQuery)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                HStack(spacing: 6) {
+                    if !request.displayHost.isEmpty {
+                        Text(request.displayHost)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                            .lineLimit(1)
+                    }
+                }
+            }
+
+            Spacer()
+
+            Text(request.statusText)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(request.statusColor)
+                .frame(width: 55, alignment: .trailing)
+
+            Text(sizeText)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 60, alignment: .trailing)
+
+            if let duration = request.duration {
+                Text(String(format: "%.0fms", duration * 1000))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+            } else {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .frame(width: 60, alignment: .trailing)
+            }
+        }
+        .contextMenu {
+            Button("Copy URL") {
+                DevToolsClipboard.copy(request.url)
+            }
+            Button("Copy as cURL") {
+                DevToolsClipboard.copy(DevToolsCurlBuilder.build(from: request))
+            }
+            Button("Open in Browser") {
+                if let url = URL(string: request.url) {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct DevToolsNetworkDetailView: View {
+    let request: DevToolsNetworkRequest
+
+    private var queryItems: [(String, String)] {
+        guard let components = URLComponents(string: request.url),
+              let items = components.queryItems, !items.isEmpty else { return [] }
+        return items.map { ($0.name, $0.value ?? "") }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(request.url)
+                        .font(.system(size: 12, weight: .medium))
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+
+                    Spacer()
+
+                    HStack(spacing: 6) {
+                        Button {
+                            DevToolsClipboard.copy(request.url)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy URL")
+
+                        Button {
+                            DevToolsClipboard.copy(DevToolsCurlBuilder.build(from: request))
+                        } label: {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy as cURL")
+
+                        Button {
+                            if let url = URL(string: request.url) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        } label: {
+                            Image(systemName: "safari")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Open in Browser")
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Text(request.method)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.1))
+                        .cornerRadius(3)
+
+                    Text(request.statusText)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(request.statusColor)
+
+                    if let duration = request.duration {
+                        Text(String(format: "%.0fms", duration * 1000))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    DevToolsSectionView(title: "General") {
+                        DevToolsKeyValueView(items: [
+                            ("Request ID", request.requestId),
+                            ("URL", request.url),
+                            ("Method", request.method),
+                            ("Status", request.status.map(String.init) ?? "Pending"),
+                            ("Start", request.startTime.formatted(.dateTime.hour().minute().second())),
+                            ("Duration", request.duration.map { String(format: "%.0fms", $0 * 1000) } ?? "-"),
+                        ])
+                    }
+
+                    if !queryItems.isEmpty {
+                        DevToolsSectionView(title: "Query String") {
+                            DevToolsKeyValueView(items: queryItems)
+                        }
+                    }
+
+                    if let headers = request.requestHeaders, !headers.isEmpty {
+                        DevToolsSectionView(title: "Request Headers") {
+                            DevToolsHeadersView(headers: headers)
+                        }
+                    }
+
+                    if let body = request.requestBody, !body.isEmpty {
+                        DevToolsSectionView(title: "Request Body") {
+                            DevToolsCodeBlockView(text: body)
+                        }
+                    }
+
+                    if let headers = request.responseHeaders, !headers.isEmpty {
+                        DevToolsSectionView(title: "Response Headers") {
+                            DevToolsHeadersView(headers: headers)
+                        }
+                    }
+
+                    if let body = request.responseBody, !body.isEmpty {
+                        DevToolsSectionView(title: "Response Body") {
+                            DevToolsCodeBlockView(text: body)
+                        }
+                    }
+
+                    if let error = request.error, !error.isEmpty {
+                        DevToolsSectionView(title: "Error") {
+                            Text(error)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.red)
+                                .textSelection(.enabled)
+                                .padding(8)
+                                .background(Color.red.opacity(0.08))
+                                .cornerRadius(4)
+                        }
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+}
+
+private struct DevToolsSectionView<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.secondary)
+            content
+        }
+    }
+}
+
+private struct DevToolsHeadersView: View {
+    let headers: [String: String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(headers.keys.sorted(), id: \.self) { key in
+                HStack(alignment: .top, spacing: 6) {
+                    Text("\(key):")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 140, alignment: .trailing)
+                    Text(headers[key] ?? "")
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .cornerRadius(4)
+    }
+}
+
+private struct DevToolsKeyValueView: View {
+    let items: [(String, String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .top, spacing: 6) {
+                    Text(item.0 + ":")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 140, alignment: .trailing)
+                    Text(item.1)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .cornerRadius(4)
+    }
+}
+
+private struct DevToolsCodeBlockView: View {
+    let text: String
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.primary)
+                .textSelection(.enabled)
+                .padding(8)
+        }
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .cornerRadius(4)
+    }
+}
+
+private enum DevToolsClipboard {
+    static func copy(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+    }
+}
+
+private enum DevToolsCurlBuilder {
+    static func build(from request: DevToolsNetworkRequest) -> String {
+        var parts: [String] = ["curl"]
+        parts.append("-X")
+        parts.append(shellQuote(request.method))
+
+        if let headers = request.requestHeaders {
+            for key in headers.keys.sorted() {
+                let value = headers[key] ?? ""
+                parts.append("-H")
+                parts.append(shellQuote("\(key): \(value)"))
+            }
+        }
+
+        if let body = request.requestBody, !body.isEmpty, request.method.uppercased() != "GET" {
+            parts.append("--data-raw")
+            parts.append(shellQuote(body))
+        }
+
+        parts.append(shellQuote(request.url))
+        return parts.joined(separator: " ")
+    }
+
+    private static func shellQuote(_ string: String) -> String {
+        if string.isEmpty { return "''" }
+        // POSIX shell single-quote escaping: ' -> '"'"'
+        return "'" + string.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+}
+
 // MARK: - Messages Tab
 
 struct DevToolsMessagesView: View {
@@ -1574,7 +2060,7 @@ struct StyleRow: View {
 
 // MARK: - Function Link Button
 
-/// Button that displays function as clickable link with hover underline
+/// View that displays function - clickable link only when source location is available
 struct FunctionLinkButton: View {
     let displayText: String
     let functionName: String
@@ -1583,27 +2069,40 @@ struct FunctionLinkButton: View {
 
     @State private var isHovered = false
 
+    /// Check if this function has source location (only then make it clickable)
+    private var hasSourceLocation: Bool {
+        sourceFile != nil
+    }
+
     var body: some View {
-        Button(action: {
-            print("🔍 [FunctionLinkButton] Clicked: \(functionName)")
-            print("   - sourceFile (from Babel): \(sourceFile ?? "nil")")
-            print("   - sourceLine (from Babel): \(sourceLine ?? 0)")
-            DevToolsManager.shared.navigateToSource(
-                functionName: functionName,
-                fileName: sourceFile,
-                lineNumber: sourceLine
-            )
-        }) {
+        if hasSourceLocation {
+            // Clickable link with hover underline
+            Button(action: {
+                print("🔍 [FunctionLinkButton] Clicked: \(functionName)")
+                print("   - sourceFile (from Babel): \(sourceFile ?? "nil")")
+                print("   - sourceLine (from Babel): \(sourceLine ?? 0)")
+                DevToolsManager.shared.navigateToSource(
+                    functionName: functionName,
+                    fileName: sourceFile,
+                    lineNumber: sourceLine
+                )
+            }) {
+                Text(displayText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .underline(isHovered)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                isHovered = hovering
+            }
+            .help("Click to open \(sourceFile!):\(sourceLine ?? 0)")
+        } else {
+            // Plain text when no source location available
             Text(displayText)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.blue)
-                .underline(isHovered)
         }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            isHovered = hovering
-        }
-        .help(sourceFile != nil ? "Click to open \(sourceFile!):\(sourceLine ?? 0)" : "Click to search in Sources panel")
     }
 }
 
@@ -1662,4 +2161,273 @@ struct JavaScriptSourceView: View {
     ))
     .frame(width: 300)
     .padding()
+}
+
+// MARK: - Performance Tab
+
+struct DevToolsPerformanceView: View {
+    @ObservedObject var devTools: DevToolsManager
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Toolbar
+            HStack {
+                // Record Button
+                Button(action: {
+                    if devTools.isProfiling {
+                        devTools.stopProfiling()
+                    } else {
+                        devTools.startProfiling()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(devTools.isProfiling ? Color.red : Color.gray)
+                            .frame(width: 8, height: 8)
+                        Text(devTools.isProfiling ? "Stop" : "Record")
+                            .font(.system(size: 11))
+                    }
+                }
+                .buttonStyle(.bordered)
+                
+                Divider().frame(height: 16)
+                
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Text("All Events")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button(action: { devTools.clearPerformance() }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .help("Clear")
+                
+                Text("\(devTools.performanceEvents.count) events")
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            if let report = devTools.profilingReport {
+                DevToolsProfilingReportView(report: report)
+            } else if devTools.performanceEvents.isEmpty {
+                VStack {
+                    Text(devTools.isProfiling ? "Recording..." : "No performance events recorded")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    if !devTools.isProfiling {
+                        Button("Start Recording") {
+                            devTools.startProfiling()
+                        }
+                        .padding(.top, 8)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(devTools.performanceEvents) { event in
+                            DevToolsPerformanceEventView(event: event)
+                        }
+                    }
+                }
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+struct DevToolsPerformanceEventView: View {
+    let event: DevToolsPerformanceEvent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            // Timestamp
+            Text(event.timestamp, format: .dateTime.hour().minute().second())
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                .frame(width: 80, alignment: .leading)
+
+            // Category badge
+            Text(event.category)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(categoryColor)
+                .cornerRadius(3)
+                .frame(width: 70, alignment: .leading)
+
+            // Name
+            Text(event.name)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.primary)
+
+            Spacer()
+
+            // Duration
+            if let duration = event.duration {
+                Text(String(format: "%.2fms", duration * 1000))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(durationColor(duration))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.1))
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(Color(nsColor: .separatorColor).opacity(0.2)),
+            alignment: .bottom
+        )
+    }
+
+    private var categoryColor: Color {
+        switch event.category.lowercased() {
+        case "native": return .purple
+        case "actrapp": return .blue
+        case "network": return .green
+        case "render": return .orange
+        default: return .gray
+        }
+    }
+    
+    private func durationColor(_ duration: TimeInterval) -> Color {
+        if duration > 0.1 { return .red } // > 100ms
+        if duration > 0.016 { return .orange } // > 16ms
+        return .secondary
+    }
+}
+
+// MARK: - Profiling Views
+
+struct DevToolsProfilingReportView: View {
+    let report: DevToolsProfilingReport
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Summary Header
+            HStack(spacing: 20) {
+                SummaryItem(label: "Duration", value: String(format: "%.0fms", report.duration))
+                SummaryItem(label: "Ops", value: "\(report.summary.totalOperations)")
+                SummaryItem(label: "Renders", value: "\(report.summary.totalRenders)")
+                SummaryItem(label: "Avg Render", value: String(format: "%.2fms", report.summary.avgRenderTime))
+            }
+            .padding(8)
+            .background(Color(nsColor: .controlBackgroundColor))
+            
+            Divider()
+            
+            HSplitView {
+                // Timeline
+                VStack(alignment: .leading) {
+                    Text("Timeline")
+                        .font(.headline)
+                        .padding(4)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            ForEach(report.timeline) { event in
+                                TimelineEventRow(event: event, totalDuration: report.duration, startTime: report.timeline.first?.timestamp ?? 0)
+                            }
+                        }
+                    }
+                }
+                .frame(minWidth: 200)
+                
+                // Slowest Nodes
+                VStack(alignment: .leading) {
+                    Text("Slowest Nodes")
+                        .font(.headline)
+                        .padding(4)
+                    List(report.summary.slowestNodes) { node in
+                        HStack {
+                            Text(node.type)
+                                .font(.system(size: 11, weight: .bold))
+                            Spacer()
+                            Text(String(format: "%.2fms", node.avgTime))
+                                .font(.system(size: 11, design: .monospaced))
+                            Text("x\(node.count)")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .frame(minWidth: 200)
+            }
+        }
+    }
+}
+
+struct SummaryItem: View {
+    let label: String
+    let value: String
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+        }
+    }
+}
+
+struct TimelineEventRow: View {
+    let event: ProfilingTimelineEvent
+    let totalDuration: Double
+    let startTime: Double
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(String(format: "+%.0fms", (event.timestamp - startTime)))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 50, alignment: .trailing)
+            
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color(for: event.type))
+                .frame(width: 4, height: 12)
+            
+            Text(event.type)
+                .font(.system(size: 10, weight: .medium))
+            
+            if let duration = event.duration {
+                Text(String(format: "%.2fms", duration))
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                
+                // Bar representation
+                GeometryReader { geometry in
+                    Rectangle()
+                        .fill(color(for: event.type).opacity(0.3))
+                        .frame(width: max(1, CGFloat(duration / totalDuration) * geometry.size.width * 10)) // Scale up for visibility
+                }
+                .frame(height: 8)
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.1))
+    }
+    
+    func color(for type: String) -> Color {
+        switch type {
+        case "render": return .orange
+        case "operation": return .blue
+        case "error": return .red
+        default: return .gray
+        }
+    }
 }

@@ -99,13 +99,1018 @@ try { if (typeof __ReactJSXRuntime === 'undefined' && typeof ReactJSXRuntime !==
 try { if (typeof __ReactJSXDevRuntime === 'undefined' && typeof ReactJSXDevRuntime !== 'undefined') { var __ReactJSXDevRuntime = ReactJSXDevRuntime; } } catch {}
 try { if (typeof __ReactNative === 'undefined' && typeof ReactNative !== 'undefined') { var __ReactNative = ReactNative; } } catch {}
 
-var{defineProperty:I,getOwnPropertyNames:d,getOwnPropertyDescriptor:r}=Object,c=Object.prototype.hasOwnProperty;var T=new WeakMap,n=(y)=>{var P=T.get(y),K;if(P)return P;if(P=I({},"__esModule",{value:!0}),y&&typeof y==="object"||typeof y==="function")d(y).map((G)=>!c.call(P,G)&&I(P,G,{get:()=>y[G],enumerable:!(K=r(y,G))||K.enumerable}));return T.set(y,P),P};var o=(y,P)=>{for(var K in P)I(y,K,{get:P[K],enumerable:!0,configurable:!0,set:(G)=>P[K]=()=>G})};var mP={};o(mP,{usePanels:()=>p});module.exports=n(mP);var S=React;function a(){let y=globalThis;if(y.React&&typeof y.React.useEffect==="function")return y.React;try{let K=React;if(K&&typeof K.useEffect==="function")return K}catch{}let P=(K)=>()=>{throw Error(`[rill/sdk] ${K} not available. Ensure running in rill sandbox.`)};return{useEffect:P("useEffect"),useRef:P("useRef"),useState:P("useState"),useMemo:P("useMemo"),useCallback:P("useCallback")}}function f(){return globalThis.__RILL_GUEST_ENV__===!0}var k=["View","Text","Image","ImageBackground","ScrollView","FlatList","SectionList","VirtualizedList","RefreshControl","TextInput","Button","Switch","Pressable","TouchableOpacity","TouchableHighlight","TouchableWithoutFeedback","ActivityIndicator","Modal","StatusBar","SafeAreaView","KeyboardAvoidingView"];function t(){if(f()){let y={};for(let P of k)y[P]=P;return y}try{let y=ReactNative,P={};for(let K of k)P[K]=y[K];return P}catch{let y={};for(let P of k)y[P]=P;return y}}function s(){let y={StyleSheet:{create:(P)=>P,flatten:(P)=>P},Easing:{linear:(P)=>P,ease:(P)=>P,quad:(P)=>P*P,cubic:(P)=>P*P*P,bezier:()=>(P)=>P,in:(P)=>P,out:(P)=>P,inOut:(P)=>P},Platform:{OS:"unknown",Version:0,select:(P)=>P.default},Dimensions:{get:()=>({width:0,height:0,scale:1,fontScale:1}),addEventListener:()=>({remove:()=>{}})},PixelRatio:{get:()=>1,getFontScale:()=>1,getPixelSizeForLayoutSize:(P)=>P,roundToNearestPixel:(P)=>P},Appearance:{getColorScheme:()=>"light",addChangeListener:()=>({remove:()=>{}})},I18nManager:{isRTL:!1,allowRTL:()=>{},forceRTL:()=>{}},AppState:{currentState:"active",addEventListener:()=>({remove:()=>{}})},Keyboard:{dismiss:()=>{},addListener:()=>({remove:()=>{}})},Alert:{alert:()=>{},prompt:()=>{}},Linking:{openURL:async()=>{},canOpenURL:async()=>!1,getInitialURL:async()=>null,addEventListener:()=>({remove:()=>{}})},Share:{share:async()=>({action:"dismissedAction"})},Vibration:{vibrate:()=>{},cancel:()=>{}},Animated:{}};if(f())return y;try{let P=ReactNative;return{StyleSheet:P.StyleSheet??y.StyleSheet,Easing:P.Easing??y.Easing,Platform:P.Platform??y.Platform,Dimensions:P.Dimensions??y.Dimensions,PixelRatio:P.PixelRatio??y.PixelRatio,Appearance:P.Appearance??y.Appearance,I18nManager:P.I18nManager??y.I18nManager,AppState:P.AppState??y.AppState,Keyboard:P.Keyboard??y.Keyboard,Alert:P.Alert??y.Alert,Linking:P.Linking??y.Linking,Share:P.Share??y.Share,Vibration:P.Vibration??y.Vibration,Animated:P.Animated??y.Animated}}catch{return y}}function e(){let y={useColorScheme:()=>"light",useWindowDimensions:()=>({width:0,height:0,scale:1,fontScale:1})};if(f())return y;try{let P=ReactNative;return{useColorScheme:P.useColorScheme??y.useColorScheme,useWindowDimensions:P.useWindowDimensions??y.useWindowDimensions}}catch{return y}}var L=t(),Y=s(),R=e(),X=L.View,F=L.Text,PP=L.Image,yP=L.ImageBackground,E=L.ScrollView,BP=L.FlatList,FP=L.SectionList,KP=L.VirtualizedList,LP=L.RefreshControl,SP=L.TextInput,GP=L.Button,JP=L.Switch,QP=L.Pressable,$=L.TouchableOpacity,XP=L.TouchableHighlight,YP=L.TouchableWithoutFeedback,N=L.ActivityIndicator,ZP=L.Modal,$P=L.StatusBar,zP=L.SafeAreaView,AP=L.KeyboardAvoidingView,vP=Y.StyleSheet,MP=Y.Easing,WP=Y.Platform,UP=Y.Dimensions,VP=Y.PixelRatio,HP=Y.Appearance,qP=Y.I18nManager,DP=Y.AppState,EP=Y.Keyboard,OP=Y.Alert,IP=Y.Linking,kP=Y.Share,fP=Y.Vibration,NP=Y.Animated,CP=R.useColorScheme,hP=R.useWindowDimensions;function C(y,P){let{useEffect:K,useRef:G}=a(),Q=G(P);K(()=>{Q.current=P;return}),K(()=>{let v=globalThis;if("__useHostEvent"in globalThis){let M=(V)=>Q.current(V);return v.__useHostEvent(y,M)}return},[y])}function h(){let y=globalThis;if("__sendEventToHost"in globalThis)return y.__sendEventToHost;return()=>{console.warn("[rill] sendToHost is not available outside sandbox")}}var bP=globalThis.React&&typeof globalThis.React.Component==="function"?globalThis.React:{Component:class{}};class u extends bP.Component{constructor(y){super(y);this.state={hasError:!1,error:null,errorInfo:null}}static getDerivedStateFromError(y){return{hasError:!0,error:y}}componentDidCatch(y,P){let K={componentStack:P.componentStack};if(this.setState({errorInfo:K}),this.props.onError)this.props.onError(y,K);let G=globalThis;if("__sendEventToHost"in G){let Q=G.__sendEventToHost;Q("RENDER_ERROR",{message:y.message,stack:y.stack,componentStack:K.componentStack})}}render(){if(this.state.hasError){let{fallback:y}=this.props,{error:P,errorInfo:K}=this.state;if(typeof y==="function"&&P&&K)return y(P,K);if(y&&typeof y!=="function")return y;return null}return this.props.children}}var B=ReactJSXRuntime;function wP({onChange:y}){let[P,K]=S.useState(0),[G,Q]=S.useState(0),[v,M]=S.useState(0),[D,V]=S.useState(()=>{let J=new Date;return`${J.getHours().toString().padStart(2,"0")}:${J.getMinutes().toString().padStart(2,"0")}:${J.getSeconds().toString().padStart(2,"0")}`}),[Z,O]=S.useState(null),[z,H]=S.useState(!1),[W,b]=S.useState(!1),w=h(),q=S.useRef(null);S.useEffect(()=>{let A=setInterval(()=>{let U=new Date;V(`${U.getHours().toString().padStart(2,"0")}:${U.getMinutes().toString().padStart(2,"0")}:${U.getSeconds().toString().padStart(2,"0")}`)},1000);return()=>clearInterval(A)},[]),C("APP_FETCH_RESPONSE",(J)=>{if(J.requestId!==q.current)return;if(q.current=null,H(!1),!J.ok||!J.data)return;let A=J.data;if(A.current_weather){let U=new Date,_=A.current_weather.temperature??0,i=A.current_weather.windspeed??0,j=A.hourly?.relativehumidity_2m?.[0]??0,m=A.current_weather.weathercode??0,x={0:"Clear",1:"Mainly Clear",2:"Partly Cloudy",3:"Overcast",45:"Fog",48:"Fog",51:"Light Drizzle",53:"Drizzle",55:"Heavy Drizzle",61:"Light Rain",63:"Rain",65:"Heavy Rain",71:"Light Snow",73:"Snow",75:"Heavy Snow",95:"Thunderstorm"};O({city:"Shanghai",temperature:Math.round(_),description:x[m]||"Unknown",humidity:j,windSpeed:Math.round(i),feelsLike:Math.round(_),icon:m<=3?"01d":"03d",updatedAt:`${U.getHours().toString().padStart(2,"0")}:${U.getMinutes().toString().padStart(2,"0")}`}),b(!0)}});let l=S.useCallback(()=>{if(z)return;H(!0);let J=`weather-${Date.now()}`;q.current=J,w("APP_FETCH_REQUEST",{requestId:J,url:"https://api.open-meteo.com/v1/forecast?latitude=31.23&longitude=121.47&current_weather=true&hourly=relativehumidity_2m",options:{method:"GET"}}),setTimeout(()=>{if(q.current===J)q.current=null,H(!1)},1e4)},[z,w]),g=P+G+v;return B.jsxs(E,{style:{flex:1,backgroundColor:"#1a1a2e"},contentContainerStyle:{padding:16,paddingBottom:80},children:[B.jsx(F,{style:{color:"#ffffff",fontSize:20,fontWeight:"bold",marginBottom:20},children:"\uD83C\uDFAE 计数器测试"}),B.jsxs(X,{style:{backgroundColor:"#2a2a4e",padding:16,borderRadius:8,marginBottom:20,alignItems:"center"},children:[B.jsx(F,{style:{color:"#888888",fontSize:12,marginBottom:4},children:"总点击次数"}),B.jsx(F,{style:{color:"#ffaa00",fontSize:36,fontWeight:"bold"},children:g})]}),B.jsxs($,{onPress:()=>{K((J)=>J+1),y?.("红色按钮","\uD83D\uDD34","#ff4444")},style:{backgroundColor:"#ff4444",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[B.jsx(F,{style:{color:"#ffffff",fontSize:18,fontWeight:"bold"},children:"\uD83D\uDD34 红色 +1"}),B.jsxs(F,{style:{color:"#ffcccc",fontSize:14,marginTop:4},children:["点击: ",P]})]}),B.jsxs($,{onPress:()=>{Q((J)=>J+1),y?.("蓝色按钮","\uD83D\uDD35","#4444ff")},style:{backgroundColor:"#4444ff",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[B.jsx(F,{style:{color:"#ffffff",fontSize:18,fontWeight:"bold"},children:"\uD83D\uDD35 蓝色 +1"}),B.jsxs(F,{style:{color:"#ccccff",fontSize:14,marginTop:4},children:["点击: ",G]})]}),B.jsxs($,{onPress:()=>{M((J)=>J+1),y?.("绿色按钮","\uD83D\uDFE2","#44ff44")},style:{backgroundColor:"#44ff44",padding:20,borderRadius:8,marginBottom:12,alignItems:"center"},children:[B.jsx(F,{style:{color:"#000000",fontSize:18,fontWeight:"bold"},children:"\uD83D\uDFE2 绿色 +1"}),B.jsxs(F,{style:{color:"#006600",fontSize:14,marginTop:4},children:["点击: ",v]})]}),B.jsx($,{onPress:()=>{K(0),Q(0),M(0)},style:{backgroundColor:"#666666",padding:16,borderRadius:8,marginTop:20,alignItems:"center",borderWidth:1,borderColor:"#888888"},children:B.jsx(F,{style:{color:"#ffffff",fontSize:16,fontWeight:"bold"},children:"\uD83D\uDD04 重置所有计数"})}),B.jsx(X,{style:{marginTop:30,padding:12,backgroundColor:"#2a2a3a",borderRadius:8,borderLeftWidth:4,borderLeftColor:"#ffaa00"},children:B.jsxs(F,{style:{color:"#cccccc",fontSize:11,lineHeight:16},children:["\uD83D\uDCA1 点击彩色按钮增加对应计数",`
-`,"\uD83D\uDCCA 总计数显示在顶部",`
-`,"\uD83D\uDD04 重置按钮清空所有计数",`
-`,"⚡ 左侧点击会同步到右侧面板"]})}),B.jsxs(X,{style:{marginTop:20,padding:12,backgroundColor:"#2a2a4e",borderRadius:8,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},children:[B.jsx(F,{style:{color:"#888888",fontSize:14,fontVariant:["tabular-nums"]},children:D}),B.jsx($,{onPress:l,disabled:z,style:{padding:8,backgroundColor:W?"#1a365d":"#3a3a5e",borderRadius:6,flexDirection:"row",alignItems:"center"},children:z?B.jsx(N,{size:"small",color:"#88b8e8"}):B.jsx(F,{style:{color:"#88b8e8",fontSize:14},children:Z?`${Z.temperature}°C`:"\uD83C\uDF24️"})})]}),W&&Z&&B.jsxs(X,{style:{marginTop:12,padding:16,backgroundColor:"#1a365d",borderRadius:12,borderWidth:1,borderColor:"#2d4a77"},children:[B.jsxs(X,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:12},children:[B.jsx(F,{style:{color:"#ffffff",fontSize:16,fontWeight:"bold"},children:Z.city}),B.jsx($,{onPress:()=>b(!1),children:B.jsx(F,{style:{color:"#88b8e8",fontSize:12},children:"收起 ▲"})})]}),B.jsxs(X,{style:{flexDirection:"row",alignItems:"baseline",marginBottom:12},children:[B.jsxs(F,{style:{color:"#ffffff",fontSize:36,fontWeight:"300",marginRight:12},children:[Z.temperature,"°C"]}),B.jsx(F,{style:{color:"#a0c4e8",fontSize:16},children:Z.description})]}),B.jsxs(X,{style:{flexDirection:"row",flexWrap:"wrap",marginBottom:8},children:[B.jsxs(F,{style:{color:"#c0d8f0",fontSize:12,marginRight:16},children:["体感 ",Z.feelsLike,"°C"]}),B.jsxs(F,{style:{color:"#c0d8f0",fontSize:12,marginRight:16},children:["湿度 ",Z.humidity,"%"]}),B.jsxs(F,{style:{color:"#c0d8f0",fontSize:12},children:["风速 ",Z.windSpeed,"km/h"]})]}),B.jsxs(F,{style:{color:"#88b8e8",fontSize:11,fontStyle:"italic"},children:["更新于 ",Z.updatedAt]})]})]})}function _P({records:y,sessionClicks:P,onAddRecord:K,onClear:G}){return B.jsxs(E,{style:{flex:1,backgroundColor:"#1a1a2e"},contentContainerStyle:{padding:16},children:[B.jsx(F,{style:{color:"#ffffff",fontSize:20,fontWeight:"bold",marginBottom:20},children:"\uD83D\uDCCA 交互统计"}),B.jsxs(X,{style:{backgroundColor:"#2a2a4e",padding:16,borderRadius:8,marginBottom:20},children:[B.jsx(F,{style:{color:"#888888",fontSize:12,marginBottom:8},children:"本次会话点击"}),B.jsx(F,{style:{color:"#00ff88",fontSize:32,fontWeight:"bold"},children:P}),B.jsxs(F,{style:{color:"#666666",fontSize:10,marginTop:4},children:["历史记录: ",y.length," 条"]})]}),B.jsxs(X,{style:{marginBottom:20},children:[B.jsx(F,{style:{color:"#888888",fontSize:12,marginBottom:8},children:"快速测试"}),B.jsx($,{onPress:()=>K("快速点击","⚡","#ffaa00"),style:{backgroundColor:"#ffaa00",padding:12,borderRadius:6,marginBottom:8,alignItems:"center"},children:B.jsx(F,{style:{color:"#000000",fontSize:14,fontWeight:"bold"},children:"⚡ 快速测试"})}),B.jsx($,{onPress:()=>K("星标动作","⭐","#ff88ff"),style:{backgroundColor:"#ff88ff",padding:12,borderRadius:6,marginBottom:8,alignItems:"center"},children:B.jsx(F,{style:{color:"#000000",fontSize:14,fontWeight:"bold"},children:"⭐ 星标测试"})}),B.jsx($,{onPress:()=>K("火箭发射","\uD83D\uDE80","#00aaff"),style:{backgroundColor:"#00aaff",padding:12,borderRadius:6,alignItems:"center"},children:B.jsx(F,{style:{color:"#ffffff",fontSize:14,fontWeight:"bold"},children:"\uD83D\uDE80 火箭测试"})})]}),B.jsxs(X,{children:[B.jsxs(X,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:12},children:[B.jsx(F,{style:{color:"#888888",fontSize:12},children:"点击历史"}),y.length>0&&B.jsx($,{onPress:G,style:{padding:4},children:B.jsx(F,{style:{color:"#ff6666",fontSize:11},children:"清空"})})]}),y.length===0?B.jsxs(X,{style:{backgroundColor:"#2a2a3a",padding:20,borderRadius:8,alignItems:"center"},children:[B.jsx(F,{style:{color:"#666666",fontSize:13},children:"暂无记录"}),B.jsx(F,{style:{color:"#555555",fontSize:11,marginTop:4},children:"点击上方按钮开始测试"})]}):y.map((Q)=>B.jsx(X,{style:{backgroundColor:"#2a2a3a",padding:12,borderRadius:6,marginBottom:8,borderLeftWidth:3,borderLeftColor:Q.color},children:B.jsxs(X,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},children:[B.jsxs(X,{style:{flexDirection:"row",alignItems:"center"},children:[B.jsx(F,{style:{fontSize:16,marginRight:8},children:Q.emoji}),B.jsx(F,{style:{color:"#ffffff",fontSize:13},children:Q.action})]}),B.jsx(F,{style:{color:"#666666",fontSize:11},children:Q.time})]})},Q.id))]}),B.jsx(X,{style:{marginTop:20,padding:12,backgroundColor:"#2a2a3a",borderRadius:8,borderLeftWidth:4,borderLeftColor:"#00ff88"},children:B.jsxs(F,{style:{color:"#cccccc",fontSize:11,lineHeight:16},children:["\uD83D\uDCCA 实时统计点击次数",`
-`,"⚡ 快速测试按钮验证交互",`
-`,"\uD83D\uDCDC 自动记录最近20次操作"]})})]})}function p(){let[y,P]=S.useState([]),[K,G]=S.useState(0),Q=S.useCallback((V,Z,O)=>{let z=new Date,H=`${z.getHours().toString().padStart(2,"0")}:${z.getMinutes().toString().padStart(2,"0")}:${z.getSeconds().toString().padStart(2,"0")}`;P((W)=>[{id:Date.now(),time:H,action:V,emoji:Z,color:O},...W].slice(0,20)),G((W)=>W+1)},[]),v=S.useCallback(()=>{P([]),G(0)},[]),M=S.useMemo(()=>B.jsx(wP,{onChange:Q}),[Q]),D=S.useMemo(()=>B.jsx(_P,{records:y,sessionClicks:K,onAddRecord:Q,onClear:v}),[y,K,Q,v]);return{left:M,right:D}}
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __moduleCache = /* @__PURE__ */new WeakMap();
+var __toCommonJS = from => {
+  var entry = __moduleCache.get(from),
+    desc;
+  if (entry) return entry;
+  entry = __defProp({}, "__esModule", {
+    value: true
+  });
+  if (from && typeof from === "object" || typeof from === "function") __getOwnPropNames(from).map(key => !__hasOwnProp.call(entry, key) && __defProp(entry, key, {
+    get: () => from[key],
+    enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
+  }));
+  __moduleCache.set(from, entry);
+  return entry;
+};
+var __export = (target, all) => {
+  for (var name in all) __defProp(target, name, {
+    get: all[name],
+    enumerable: true,
+    configurable: true,
+    set: newValue => all[name] = () => newValue
+  });
+};
 
+// src/unified-app.tsx
+var exports_unified_app = {};
+__export(exports_unified_app, {
+  usePanels: () => usePanels
+});
+module.exports = __toCommonJS(exports_unified_app);
+
+// src/panels.tsx
+var import_react = React;
+
+// ../../../../rill/src/guest/let/sdk.ts
+function getReactHooks() {
+  const g = globalThis;
+  if (g.React && typeof g.React.useEffect === "function") {
+    return g.React;
+  }
+  try {
+    const React = React;
+    if (React && typeof React.useEffect === "function") {
+      return React;
+    }
+  } catch {}
+  const throwUnavailable = hook => () => {
+    throw new Error(`[rill/sdk] ${hook} not available. Ensure running in rill sandbox.`);
+  };
+  return {
+    useEffect: throwUnavailable("useEffect"),
+    useRef: throwUnavailable("useRef"),
+    useState: throwUnavailable("useState"),
+    useMemo: throwUnavailable("useMemo"),
+    useCallback: throwUnavailable("useCallback")
+  };
+}
+function isInSandbox() {
+  return globalThis.__RILL_GUEST_ENV__ === true;
+}
+var COMPONENT_NAMES = ["View", "Text", "Image", "ImageBackground", "ScrollView", "FlatList", "SectionList", "VirtualizedList", "RefreshControl", "TextInput", "Button", "Switch", "Pressable", "TouchableOpacity", "TouchableHighlight", "TouchableWithoutFeedback", "ActivityIndicator", "Modal", "StatusBar", "SafeAreaView", "KeyboardAvoidingView"];
+function getComponents() {
+  if (isInSandbox()) {
+    const result = {};
+    for (const name of COMPONENT_NAMES) {
+      result[name] = name;
+    }
+    return result;
+  }
+  try {
+    const RN = ReactNative;
+    const result = {};
+    for (const name of COMPONENT_NAMES) {
+      result[name] = RN[name];
+    }
+    return result;
+  } catch {
+    const result = {};
+    for (const name of COMPONENT_NAMES) {
+      result[name] = name;
+    }
+    return result;
+  }
+}
+function getAPIs() {
+  const stubs = {
+    StyleSheet: {
+      create: styles => styles,
+      flatten: s => s
+    },
+    Easing: {
+      linear: t => t,
+      ease: t => t,
+      quad: t => t * t,
+      cubic: t => t * t * t,
+      bezier: () => t => t,
+      in: e => e,
+      out: e => e,
+      inOut: e => e
+    },
+    Platform: {
+      OS: "unknown",
+      Version: 0,
+      select: spec => spec.default
+    },
+    Dimensions: {
+      get: () => ({
+        width: 0,
+        height: 0,
+        scale: 1,
+        fontScale: 1
+      }),
+      addEventListener: () => ({
+        remove: () => {}
+      })
+    },
+    PixelRatio: {
+      get: () => 1,
+      getFontScale: () => 1,
+      getPixelSizeForLayoutSize: size => size,
+      roundToNearestPixel: size => size
+    },
+    Appearance: {
+      getColorScheme: () => "light",
+      addChangeListener: () => ({
+        remove: () => {}
+      })
+    },
+    I18nManager: {
+      isRTL: false,
+      allowRTL: () => {},
+      forceRTL: () => {}
+    },
+    AppState: {
+      currentState: "active",
+      addEventListener: () => ({
+        remove: () => {}
+      })
+    },
+    Keyboard: {
+      dismiss: () => {},
+      addListener: () => ({
+        remove: () => {}
+      })
+    },
+    Alert: {
+      alert: () => {},
+      prompt: () => {}
+    },
+    Linking: {
+      openURL: async () => {},
+      canOpenURL: async () => false,
+      getInitialURL: async () => null,
+      addEventListener: () => ({
+        remove: () => {}
+      })
+    },
+    Share: {
+      share: async () => ({
+        action: "dismissedAction"
+      })
+    },
+    Vibration: {
+      vibrate: () => {},
+      cancel: () => {}
+    },
+    Animated: {}
+  };
+  if (isInSandbox()) {
+    return stubs;
+  }
+  try {
+    const RN = ReactNative;
+    return {
+      StyleSheet: RN.StyleSheet ?? stubs.StyleSheet,
+      Easing: RN.Easing ?? stubs.Easing,
+      Platform: RN.Platform ?? stubs.Platform,
+      Dimensions: RN.Dimensions ?? stubs.Dimensions,
+      PixelRatio: RN.PixelRatio ?? stubs.PixelRatio,
+      Appearance: RN.Appearance ?? stubs.Appearance,
+      I18nManager: RN.I18nManager ?? stubs.I18nManager,
+      AppState: RN.AppState ?? stubs.AppState,
+      Keyboard: RN.Keyboard ?? stubs.Keyboard,
+      Alert: RN.Alert ?? stubs.Alert,
+      Linking: RN.Linking ?? stubs.Linking,
+      Share: RN.Share ?? stubs.Share,
+      Vibration: RN.Vibration ?? stubs.Vibration,
+      Animated: RN.Animated ?? stubs.Animated
+    };
+  } catch {
+    return stubs;
+  }
+}
+function getRNHooks() {
+  const stubs = {
+    useColorScheme: () => "light",
+    useWindowDimensions: () => ({
+      width: 0,
+      height: 0,
+      scale: 1,
+      fontScale: 1
+    })
+  };
+  if (isInSandbox()) {
+    return stubs;
+  }
+  try {
+    const RN = ReactNative;
+    return {
+      useColorScheme: RN.useColorScheme ?? stubs.useColorScheme,
+      useWindowDimensions: RN.useWindowDimensions ?? stubs.useWindowDimensions
+    };
+  } catch {
+    return stubs;
+  }
+}
+var _components = getComponents();
+var _apis = getAPIs();
+var _rnHooks = getRNHooks();
+var View = _components.View;
+var Text = _components.Text;
+var Image = _components.Image;
+var ImageBackground = _components.ImageBackground;
+var ScrollView = _components.ScrollView;
+var FlatList = _components.FlatList;
+var SectionList = _components.SectionList;
+var VirtualizedList = _components.VirtualizedList;
+var RefreshControl = _components.RefreshControl;
+var TextInput = _components.TextInput;
+var Button = _components.Button;
+var Switch = _components.Switch;
+var Pressable = _components.Pressable;
+var TouchableOpacity = _components.TouchableOpacity;
+var TouchableHighlight = _components.TouchableHighlight;
+var TouchableWithoutFeedback = _components.TouchableWithoutFeedback;
+var ActivityIndicator = _components.ActivityIndicator;
+var Modal = _components.Modal;
+var StatusBar = _components.StatusBar;
+var SafeAreaView = _components.SafeAreaView;
+var KeyboardAvoidingView = _components.KeyboardAvoidingView;
+var StyleSheet = _apis.StyleSheet;
+var Easing = _apis.Easing;
+var Platform = _apis.Platform;
+var Dimensions = _apis.Dimensions;
+var PixelRatio = _apis.PixelRatio;
+var Appearance = _apis.Appearance;
+var I18nManager = _apis.I18nManager;
+var AppState = _apis.AppState;
+var Keyboard = _apis.Keyboard;
+var Alert = _apis.Alert;
+var Linking = _apis.Linking;
+var Share = _apis.Share;
+var Vibration = _apis.Vibration;
+var Animated = _apis.Animated;
+var useColorScheme = _rnHooks.useColorScheme;
+var useWindowDimensions = _rnHooks.useWindowDimensions;
+function useHostEvent(eventName, callback) {
+  const {
+    useEffect,
+    useRef
+  } = getReactHooks();
+  const callbackRef = useRef(callback);
+  useEffect(() => {
+    callbackRef.current = callback;
+    return;
+  });
+  useEffect(() => {
+    const g = globalThis;
+    if ("__useHostEvent" in globalThis) {
+      const stableCallback = payload => callbackRef.current(payload);
+      const unsubscribe = g.__useHostEvent(eventName, stableCallback);
+      return unsubscribe;
+    }
+    return;
+  }, [eventName]);
+}
+function useSendToHost() {
+  const g = globalThis;
+  if ("__sendEventToHost" in globalThis) {
+    return g.__sendEventToHost;
+  }
+  return () => {
+    console.warn("[rill] sendToHost is not available outside sandbox");
+  };
+}
+var React = globalThis.React && typeof globalThis.React.Component === "function" ? globalThis.React : {
+  Component: class {}
+};
+class RillErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+      errorInfo: null
+    };
+  }
+  static getDerivedStateFromError(error) {
+    return {
+      hasError: true,
+      error
+    };
+  }
+  componentDidCatch(error, errorInfo) {
+    const info = {
+      componentStack: errorInfo.componentStack
+    };
+    this.setState({
+      errorInfo: info
+    });
+    if (this.props.onError) {
+      this.props.onError(error, info);
+    }
+    const g = globalThis;
+    if ("__sendEventToHost" in g) {
+      const sendToHost = g.__sendEventToHost;
+      sendToHost("RENDER_ERROR", {
+        message: error.message,
+        stack: error.stack,
+        componentStack: info.componentStack
+      });
+    }
+  }
+  render() {
+    if (this.state.hasError) {
+      const {
+        fallback
+      } = this.props;
+      const {
+        error,
+        errorInfo
+      } = this.state;
+      if (typeof fallback === "function" && error && errorInfo) {
+        return fallback(error, errorInfo);
+      }
+      if (fallback && typeof fallback !== "function") {
+        return fallback;
+      }
+      return null;
+    }
+    return this.props.children;
+  }
+}
+// src/panels.tsx
+var jsx_runtime = ReactJSXRuntime;
+function Counter({
+  onChange
+}) {
+  const [redCount, setRedCount] = import_react.useState(0);
+  const [blueCount, setBlueCount] = import_react.useState(0);
+  const [greenCount, setGreenCount] = import_react.useState(0);
+  const [currentTime, setCurrentTime] = import_react.useState(() => {
+    const now = new Date();
+    return `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+  });
+  const [weatherData, setWeatherData] = import_react.useState(null);
+  const [weatherLoading, setWeatherLoading] = import_react.useState(false);
+  const [weatherExpanded, setWeatherExpanded] = import_react.useState(false);
+  const sendToHost = useSendToHost();
+  const pendingRequestRef = import_react.useRef(null);
+  import_react.useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(`${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`);
+    };
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+  useHostEvent("APP_FETCH_RESPONSE", response => {
+    if (response.requestId !== pendingRequestRef.current) return;
+    pendingRequestRef.current = null;
+    setWeatherLoading(false);
+    if (!response.ok || !response.data) return;
+    const data = response.data;
+    if (data.current_weather) {
+      const now = new Date();
+      const temp = data.current_weather.temperature ?? 0;
+      const windSpeed = data.current_weather.windspeed ?? 0;
+      const humidity = data.hourly?.relativehumidity_2m?.[0] ?? 0;
+      const weatherCode = data.current_weather.weathercode ?? 0;
+      const weatherDescriptions = {
+        0: "Clear",
+        1: "Mainly Clear",
+        2: "Partly Cloudy",
+        3: "Overcast",
+        45: "Fog",
+        48: "Fog",
+        51: "Light Drizzle",
+        53: "Drizzle",
+        55: "Heavy Drizzle",
+        61: "Light Rain",
+        63: "Rain",
+        65: "Heavy Rain",
+        71: "Light Snow",
+        73: "Snow",
+        75: "Heavy Snow",
+        95: "Thunderstorm"
+      };
+      setWeatherData({
+        city: "Shanghai",
+        temperature: Math.round(temp),
+        description: weatherDescriptions[weatherCode] || "Unknown",
+        humidity,
+        windSpeed: Math.round(windSpeed),
+        feelsLike: Math.round(temp),
+        icon: weatherCode <= 3 ? "01d" : "03d",
+        updatedAt: `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`
+      });
+      setWeatherExpanded(true);
+    }
+  });
+  const fetchWeather = import_react.useCallback(() => {
+    if (weatherLoading) return;
+    setWeatherLoading(true);
+    const requestId = `weather-${Date.now()}`;
+    pendingRequestRef.current = requestId;
+    const url = "https://api.open-meteo.com/v1/forecast?latitude=31.23&longitude=121.47&current_weather=true&hourly=relativehumidity_2m";
+    sendToHost("APP_FETCH_REQUEST", {
+      requestId,
+      url,
+      options: {
+        method: "GET"
+      }
+    });
+    setTimeout(() => {
+      if (pendingRequestRef.current === requestId) {
+        pendingRequestRef.current = null;
+        setWeatherLoading(false);
+      }
+    }, 1e4);
+  }, [weatherLoading, sendToHost]);
+  const totalCount = redCount + blueCount + greenCount;
+  return /* @__PURE__ */jsx_runtime.jsxs(ScrollView, {
+    style: {
+      flex: 1,
+      backgroundColor: "#1a1a2e"
+    },
+    contentContainerStyle: {
+      padding: 16,
+      paddingBottom: 80
+    },
+    children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+      style: {
+        color: "#ffffff",
+        fontSize: 20,
+        fontWeight: "bold",
+        marginBottom: 20
+      },
+      children: "\uD83C\uDFAE 计数器测试"
+    }), /* @__PURE__ */jsx_runtime.jsxs(View, {
+      style: {
+        backgroundColor: "#2a2a4e",
+        padding: 16,
+        borderRadius: 8,
+        marginBottom: 20,
+        alignItems: "center"
+      },
+      children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#888888",
+          fontSize: 12,
+          marginBottom: 4
+        },
+        children: "总点击次数"
+      }), /* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#ffaa00",
+          fontSize: 36,
+          fontWeight: "bold"
+        },
+        children: totalCount
+      })]
+    }), /* @__PURE__ */jsx_runtime.jsxs(TouchableOpacity, {
+      onPress: Object.assign(() => {
+        setRedCount(c => c + 1);
+        onChange?.("红色按钮", "\uD83D\uDD34", "#ff4444");
+      }, {
+        __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/unified-app.js",
+        __sourceLine: 433
+      }),
+      style: {
+        backgroundColor: "#ff4444",
+        padding: 20,
+        borderRadius: 8,
+        marginBottom: 12,
+        alignItems: "center"
+      },
+      children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#ffffff",
+          fontSize: 18,
+          fontWeight: "bold"
+        },
+        children: "\uD83D\uDD34 红色 +1"
+      }), /* @__PURE__ */jsx_runtime.jsxs(Text, {
+        style: {
+          color: "#ffcccc",
+          fontSize: 14,
+          marginTop: 4
+        },
+        children: ["点击: ", redCount]
+      })]
+    }), /* @__PURE__ */jsx_runtime.jsxs(TouchableOpacity, {
+      onPress: Object.assign(() => {
+        setBlueCount(c => c + 1);
+        onChange?.("蓝色按钮", "\uD83D\uDD35", "#4444ff");
+      }, {
+        __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/unified-app.js",
+        __sourceLine: 459
+      }),
+      style: {
+        backgroundColor: "#4444ff",
+        padding: 20,
+        borderRadius: 8,
+        marginBottom: 12,
+        alignItems: "center"
+      },
+      children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#ffffff",
+          fontSize: 18,
+          fontWeight: "bold"
+        },
+        children: "\uD83D\uDD35 蓝色 +1"
+      }), /* @__PURE__ */jsx_runtime.jsxs(Text, {
+        style: {
+          color: "#ccccff",
+          fontSize: 14,
+          marginTop: 4
+        },
+        children: ["点击: ", blueCount]
+      })]
+    }), /* @__PURE__ */jsx_runtime.jsxs(TouchableOpacity, {
+      onPress: Object.assign(() => {
+        setGreenCount(c => c + 1);
+        onChange?.("绿色按钮", "\uD83D\uDFE2", "#44ff44");
+      }, {
+        __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/unified-app.js",
+        __sourceLine: 485
+      }),
+      style: {
+        backgroundColor: "#44ff44",
+        padding: 20,
+        borderRadius: 8,
+        marginBottom: 12,
+        alignItems: "center"
+      },
+      children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#000000",
+          fontSize: 18,
+          fontWeight: "bold"
+        },
+        children: "\uD83D\uDFE2 绿色 +1"
+      }), /* @__PURE__ */jsx_runtime.jsxs(Text, {
+        style: {
+          color: "#006600",
+          fontSize: 14,
+          marginTop: 4
+        },
+        children: ["点击: ", greenCount]
+      })]
+    }), /* @__PURE__ */jsx_runtime.jsx(TouchableOpacity, {
+      onPress: Object.assign(() => {
+        setRedCount(0);
+        setBlueCount(0);
+        setGreenCount(0);
+      }, {
+        __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/unified-app.js",
+        __sourceLine: 511
+      }),
+      style: {
+        backgroundColor: "#666666",
+        padding: 16,
+        borderRadius: 8,
+        marginTop: 20,
+        alignItems: "center",
+        borderWidth: 1,
+        borderColor: "#888888"
+      },
+      children: /* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#ffffff",
+          fontSize: 16,
+          fontWeight: "bold"
+        },
+        children: "\uD83D\uDD04 重置所有计数"
+      })
+    }), /* @__PURE__ */jsx_runtime.jsx(View, {
+      style: {
+        marginTop: 30,
+        padding: 12,
+        backgroundColor: "#2a2a3a",
+        borderRadius: 8,
+        borderLeftWidth: 4,
+        borderLeftColor: "#ffaa00"
+      },
+      children: /* @__PURE__ */jsx_runtime.jsxs(Text, {
+        style: {
+          color: "#cccccc",
+          fontSize: 11,
+          lineHeight: 16
+        },
+        children: ["\uD83D\uDCA1 点击彩色按钮增加对应计数", `
+`, "\uD83D\uDCCA 总计数显示在顶部", `
+`, "\uD83D\uDD04 重置按钮清空所有计数", `
+`, "⚡ 左侧点击会同步到右侧面板"]
+      })
+    }), /* @__PURE__ */jsx_runtime.jsxs(View, {
+      style: {
+        marginTop: 20,
+        padding: 12,
+        backgroundColor: "#2a2a4e",
+        borderRadius: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between"
+      },
+      children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#888888",
+          fontSize: 14,
+          fontVariant: ["tabular-nums"]
+        },
+        children: currentTime
+      }), /* @__PURE__ */jsx_runtime.jsx(TouchableOpacity, {
+        onPress: fetchWeather,
+        disabled: weatherLoading,
+        style: {
+          padding: 8,
+          backgroundColor: weatherExpanded ? "#1a365d" : "#3a3a5e",
+          borderRadius: 6,
+          flexDirection: "row",
+          alignItems: "center"
+        },
+        children: weatherLoading ? /* @__PURE__ */jsx_runtime.jsx(ActivityIndicator, {
+          size: "small",
+          color: "#88b8e8"
+        }) : /* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#88b8e8",
+            fontSize: 14
+          },
+          children: weatherData ? `${weatherData.temperature}°C` : "\uD83C\uDF24️"
+        })
+      })]
+    }), weatherExpanded && weatherData && /* @__PURE__ */jsx_runtime.jsxs(View, {
+      style: {
+        marginTop: 12,
+        padding: 16,
+        backgroundColor: "#1a365d",
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "#2d4a77"
+      },
+      children: [/* @__PURE__ */jsx_runtime.jsxs(View, {
+        style: {
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 12
+        },
+        children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#ffffff",
+            fontSize: 16,
+            fontWeight: "bold"
+          },
+          children: weatherData.city
+        }), /* @__PURE__ */jsx_runtime.jsx(TouchableOpacity, {
+          onPress: Object.assign(() => setWeatherExpanded(false), {
+            __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/unified-app.js",
+            __sourceLine: 613
+          }),
+          children: /* @__PURE__ */jsx_runtime.jsx(Text, {
+            style: {
+              color: "#88b8e8",
+              fontSize: 12
+            },
+            children: "收起 ▲"
+          })
+        })]
+      }), /* @__PURE__ */jsx_runtime.jsxs(View, {
+        style: {
+          flexDirection: "row",
+          alignItems: "baseline",
+          marginBottom: 12
+        },
+        children: [/* @__PURE__ */jsx_runtime.jsxs(Text, {
+          style: {
+            color: "#ffffff",
+            fontSize: 36,
+            fontWeight: "300",
+            marginRight: 12
+          },
+          children: [weatherData.temperature, "°C"]
+        }), /* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#a0c4e8",
+            fontSize: 16
+          },
+          children: weatherData.description
+        })]
+      }), /* @__PURE__ */jsx_runtime.jsxs(View, {
+        style: {
+          flexDirection: "row",
+          flexWrap: "wrap",
+          marginBottom: 8
+        },
+        children: [/* @__PURE__ */jsx_runtime.jsxs(Text, {
+          style: {
+            color: "#c0d8f0",
+            fontSize: 12,
+            marginRight: 16
+          },
+          children: ["体感 ", weatherData.feelsLike, "°C"]
+        }), /* @__PURE__ */jsx_runtime.jsxs(Text, {
+          style: {
+            color: "#c0d8f0",
+            fontSize: 12,
+            marginRight: 16
+          },
+          children: ["湿度 ", weatherData.humidity, "%"]
+        }), /* @__PURE__ */jsx_runtime.jsxs(Text, {
+          style: {
+            color: "#c0d8f0",
+            fontSize: 12
+          },
+          children: ["风速 ", weatherData.windSpeed, "km/h"]
+        })]
+      }), /* @__PURE__ */jsx_runtime.jsxs(Text, {
+        style: {
+          color: "#88b8e8",
+          fontSize: 11,
+          fontStyle: "italic"
+        },
+        children: ["更新于 ", weatherData.updatedAt]
+      })]
+    })]
+  });
+}
+function Stats({
+  records,
+  sessionClicks,
+  onAddRecord,
+  onClear
+}) {
+  return /* @__PURE__ */jsx_runtime.jsxs(ScrollView, {
+    style: {
+      flex: 1,
+      backgroundColor: "#1a1a2e"
+    },
+    contentContainerStyle: {
+      padding: 16
+    },
+    children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+      style: {
+        color: "#ffffff",
+        fontSize: 20,
+        fontWeight: "bold",
+        marginBottom: 20
+      },
+      children: "\uD83D\uDCCA 交互统计"
+    }), /* @__PURE__ */jsx_runtime.jsxs(View, {
+      style: {
+        backgroundColor: "#2a2a4e",
+        padding: 16,
+        borderRadius: 8,
+        marginBottom: 20
+      },
+      children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#888888",
+          fontSize: 12,
+          marginBottom: 8
+        },
+        children: "本次会话点击"
+      }), /* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#00ff88",
+          fontSize: 32,
+          fontWeight: "bold"
+        },
+        children: sessionClicks
+      }), /* @__PURE__ */jsx_runtime.jsxs(Text, {
+        style: {
+          color: "#666666",
+          fontSize: 10,
+          marginTop: 4
+        },
+        children: ["历史记录: ", records.length, " 条"]
+      })]
+    }), /* @__PURE__ */jsx_runtime.jsxs(View, {
+      style: {
+        marginBottom: 20
+      },
+      children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+        style: {
+          color: "#888888",
+          fontSize: 12,
+          marginBottom: 8
+        },
+        children: "快速测试"
+      }), /* @__PURE__ */jsx_runtime.jsx(TouchableOpacity, {
+        onPress: Object.assign(() => onAddRecord("快速点击", "⚡", "#ffaa00"), {
+          __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/unified-app.js",
+          __sourceLine: 735
+        }),
+        style: {
+          backgroundColor: "#ffaa00",
+          padding: 12,
+          borderRadius: 6,
+          marginBottom: 8,
+          alignItems: "center"
+        },
+        children: /* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#000000",
+            fontSize: 14,
+            fontWeight: "bold"
+          },
+          children: "⚡ 快速测试"
+        })
+      }), /* @__PURE__ */jsx_runtime.jsx(TouchableOpacity, {
+        onPress: Object.assign(() => onAddRecord("星标动作", "⭐", "#ff88ff"), {
+          __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/unified-app.js",
+          __sourceLine: 749
+        }),
+        style: {
+          backgroundColor: "#ff88ff",
+          padding: 12,
+          borderRadius: 6,
+          marginBottom: 8,
+          alignItems: "center"
+        },
+        children: /* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#000000",
+            fontSize: 14,
+            fontWeight: "bold"
+          },
+          children: "⭐ 星标测试"
+        })
+      }), /* @__PURE__ */jsx_runtime.jsx(TouchableOpacity, {
+        onPress: Object.assign(() => onAddRecord("火箭发射", "\uD83D\uDE80", "#00aaff"), {
+          __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/unified-app.js",
+          __sourceLine: 763
+        }),
+        style: {
+          backgroundColor: "#00aaff",
+          padding: 12,
+          borderRadius: 6,
+          alignItems: "center"
+        },
+        children: /* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#ffffff",
+            fontSize: 14,
+            fontWeight: "bold"
+          },
+          children: "\uD83D\uDE80 火箭测试"
+        })
+      })]
+    }), /* @__PURE__ */jsx_runtime.jsxs(View, {
+      children: [/* @__PURE__ */jsx_runtime.jsxs(View, {
+        style: {
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 12
+        },
+        children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#888888",
+            fontSize: 12
+          },
+          children: "点击历史"
+        }), records.length > 0 && /* @__PURE__ */jsx_runtime.jsx(TouchableOpacity, {
+          onPress: onClear,
+          style: {
+            padding: 4
+          },
+          children: /* @__PURE__ */jsx_runtime.jsx(Text, {
+            style: {
+              color: "#ff6666",
+              fontSize: 11
+            },
+            children: "清空"
+          })
+        })]
+      }), records.length === 0 ? /* @__PURE__ */jsx_runtime.jsxs(View, {
+        style: {
+          backgroundColor: "#2a2a3a",
+          padding: 20,
+          borderRadius: 8,
+          alignItems: "center"
+        },
+        children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#666666",
+            fontSize: 13
+          },
+          children: "暂无记录"
+        }), /* @__PURE__ */jsx_runtime.jsx(Text, {
+          style: {
+            color: "#555555",
+            fontSize: 11,
+            marginTop: 4
+          },
+          children: "点击上方按钮开始测试"
+        })]
+      }) : records.map(record => /* @__PURE__ */jsx_runtime.jsx(View, {
+        style: {
+          backgroundColor: "#2a2a3a",
+          padding: 12,
+          borderRadius: 6,
+          marginBottom: 8,
+          borderLeftWidth: 3,
+          borderLeftColor: record.color
+        },
+        children: /* @__PURE__ */jsx_runtime.jsxs(View, {
+          style: {
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center"
+          },
+          children: [/* @__PURE__ */jsx_runtime.jsxs(View, {
+            style: {
+              flexDirection: "row",
+              alignItems: "center"
+            },
+            children: [/* @__PURE__ */jsx_runtime.jsx(Text, {
+              style: {
+                fontSize: 16,
+                marginRight: 8
+              },
+              children: record.emoji
+            }), /* @__PURE__ */jsx_runtime.jsx(Text, {
+              style: {
+                color: "#ffffff",
+                fontSize: 13
+              },
+              children: record.action
+            })]
+          }), /* @__PURE__ */jsx_runtime.jsx(Text, {
+            style: {
+              color: "#666666",
+              fontSize: 11
+            },
+            children: record.time
+          })]
+        })
+      }, record.id))]
+    }), /* @__PURE__ */jsx_runtime.jsx(View, {
+      style: {
+        marginTop: 20,
+        padding: 12,
+        backgroundColor: "#2a2a3a",
+        borderRadius: 8,
+        borderLeftWidth: 4,
+        borderLeftColor: "#00ff88"
+      },
+      children: /* @__PURE__ */jsx_runtime.jsxs(Text, {
+        style: {
+          color: "#cccccc",
+          fontSize: 11,
+          lineHeight: 16
+        },
+        children: ["\uD83D\uDCCA 实时统计点击次数", `
+`, "⚡ 快速测试按钮验证交互", `
+`, "\uD83D\uDCDC 自动记录最近20次操作"]
+      })
+    })]
+  });
+}
+function usePanels() {
+  const [records, setRecords] = import_react.useState([]);
+  const [sessionClicks, setSessionClicks] = import_react.useState(0);
+  const addRecord = import_react.useCallback((action, emoji, color) => {
+    const now = new Date();
+    const timeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+    setRecords(prev => [{
+      id: Date.now(),
+      time: timeStr,
+      action,
+      emoji,
+      color
+    }, ...prev].slice(0, 20));
+    setSessionClicks(c => c + 1);
+  }, []);
+  const clearRecords = import_react.useCallback(() => {
+    setRecords([]);
+    setSessionClicks(0);
+  }, []);
+  const left = import_react.useMemo(() => /* @__PURE__ */jsx_runtime.jsx(Counter, {
+    onChange: addRecord
+  }), [addRecord]);
+  const right = import_react.useMemo(() => /* @__PURE__ */jsx_runtime.jsx(Stats, {
+    records,
+    sessionClicks,
+    onAddRecord: addRecord,
+    onClear: clearRecords
+  }), [records, sessionClicks, addRecord, clearRecords]);
+  return {
+    left,
+    right
+  };
+}
 
 try {
   var __rillModuleExports = (typeof module !== 'undefined' && module && module.exports) ? module.exports : (typeof exports !== 'undefined' ? exports : undefined);

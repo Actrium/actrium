@@ -139,7 +139,7 @@ struct DevToolsNetworkRequest: Identifiable {
     }
 
     var statusText: String {
-        if let error { return "Error" }
+        if error != nil { return "Error" }
         if let status { return "\(status)" }
         return "Pending"
     }
@@ -357,6 +357,9 @@ class DevToolsManager: ObservableObject {
 
     /// Console log entries
     @Published private(set) var consoleLogs: [DevToolsLogEntry] = []
+
+    /// Performance events
+    @Published private(set) var performanceEvents: [DevToolsPerformanceEvent] = []
 
     /// Network requests
     @Published private(set) var networkRequests: [DevToolsNetworkRequest] = []
@@ -781,10 +784,87 @@ class DevToolsManager: ObservableObject {
         messages.removeAll()
     }
 
+    /// Evaluate JavaScript in the active tab
+    func evaluateScript(_ code: String) {
+        guard let tabId = inspectedTabId else {
+            log("No active tab to evaluate script", level: .error, source: "DevTools")
+            return
+        }
+        CanvasReactNativeHost.shared.evaluateScript(code, tabId: tabId)
+    }
+
+    // MARK: - Profiling
+    
+    /// Whether profiling is currently active
+    @Published var isProfiling: Bool = false
+    
+    /// The last profiling report
+    @Published var profilingReport: DevToolsProfilingReport?
+    
+    func startProfiling() {
+        guard inspectedTabId != nil else { return }
+        isProfiling = true
+        profilingReport = nil
+        
+        let code = """
+        (function() {
+            try {
+                const devtools = require('@rill/devtools').getDevTools();
+                devtools.startProfiling();
+                console.log('__DEVTOOLS_PROFILE_STARTED__');
+            } catch (e) {
+                console.error('Failed to start profiling:', e);
+            }
+        })();
+        """
+        evaluateScript(code)
+    }
+    
+    func stopProfiling() {
+        guard inspectedTabId != nil else { return }
+        
+        let code = """
+        (function() {
+            try {
+                const devtools = require('@rill/devtools').getDevTools();
+                const report = devtools.stopProfiling();
+                console.log('__DEVTOOLS_PROFILE_REPORT__:' + JSON.stringify(report));
+            } catch (e) {
+                console.error('Failed to stop profiling:', e);
+            }
+        })();
+        """
+        evaluateScript(code)
+    }
+
     // MARK: - Logging
 
     /// Add a console log entry
     func log(_ message: String, level: DevToolsLogEntry.LogLevel = .info, source: String = "System", details: String? = nil) {
+        // Intercept profiling messages
+        if message.starts(with: "__DEVTOOLS_PROFILE_REPORT__:") {
+            let json = String(message.dropFirst("__DEVTOOLS_PROFILE_REPORT__:".count))
+            if let data = json.data(using: .utf8) {
+                do {
+                    let report = try JSONDecoder().decode(DevToolsProfilingReport.self, from: data)
+                    DispatchQueue.main.async {
+                        self.profilingReport = report
+                        self.isProfiling = false
+                    }
+                } catch {
+                    print("Failed to decode profiling report: \(error)")
+                }
+            }
+            return
+        }
+        
+        if message == "__DEVTOOLS_PROFILE_STARTED__" {
+             DispatchQueue.main.async {
+                self.isProfiling = true
+             }
+             return
+        }
+
         let entry = DevToolsLogEntry(
             timestamp: Date(),
             level: level,
@@ -803,6 +883,37 @@ class DevToolsManager: ObservableObject {
     /// Clear console logs
     func clearConsoleLogs() {
         consoleLogs.removeAll()
+    }
+
+    /// Log a performance event
+    func logPerformance(
+        category: String,
+        name: String,
+        startTime: Date,
+        duration: TimeInterval? = nil,
+        details: [String: Any]? = nil
+    ) {
+        let event = DevToolsPerformanceEvent(
+            timestamp: startTime,
+            category: category,
+            name: name,
+            duration: duration,
+            details: details
+        )
+        performanceEvents.append(event)
+        
+        // Keep sorted by timestamp
+        performanceEvents.sort { $0.timestamp < $1.timestamp }
+        
+        if performanceEvents.count > maxLogEntries {
+            performanceEvents.removeFirst(performanceEvents.count - maxLogEntries)
+        }
+    }
+    
+    /// Clear performance events
+    func clearPerformance() {
+        performanceEvents.removeAll()
+        profilingReport = nil
     }
 
     /// Clear network requests
@@ -934,5 +1045,74 @@ extension DevToolsManager {
         Task { @MainActor in
             DevToolsManager.shared.toggle()
         }
+    }
+}
+
+struct DevToolsPerformanceEvent: Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let category: String
+    let name: String
+    let duration: TimeInterval?
+    let details: [String: Any]?
+}
+
+// MARK: - Profiling Models
+
+struct DevToolsProfilingReport: Codable {
+    let duration: Double
+    let summary: ProfilingSummary
+    let timeline: [ProfilingTimelineEvent]
+}
+
+struct ProfilingSummary: Codable {
+    let totalOperations: Int
+    let totalRenders: Int
+    let avgOperationTime: Double
+    let avgRenderTime: Double
+    let slowestNodes: [SlowestNode]
+    let errorCount: Int
+}
+
+struct SlowestNode: Codable, Identifiable {
+    var id: Int { nodeId }
+    let nodeId: Int
+    let type: String
+    let avgTime: Double
+    let count: Int
+}
+
+struct ProfilingTimelineEvent: Codable, Identifiable {
+    var id = UUID()
+    let timestamp: Double
+    let type: String // "operation", "render", "error"
+    let duration: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case timestamp, type, data
+    }
+    
+    enum DataKeys: String, CodingKey {
+        case duration
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try container.decode(Double.self, forKey: .timestamp)
+        type = try container.decode(String.self, forKey: .type)
+        
+        // Try to extract duration from data
+        if let dataContainer = try? container.nestedContainer(keyedBy: DataKeys.self, forKey: .data) {
+            duration = try? dataContainer.decode(Double.self, forKey: .duration)
+        } else {
+            duration = nil
+        }
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(type, forKey: .type)
+        // Encoding data is skipped for simplicity as we only decoded duration
     }
 }
