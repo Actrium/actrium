@@ -538,10 +538,26 @@ struct DevToolsPropRowView: View {
 
     @State private var isExpanded: Bool = false
 
-    /// Check if value is expandable (object or array with items)
+    /// Check if value is a serialized function with source
+    private var functionInfo: (name: String, source: String?)? {
+        guard let dict = value as? [String: Any],
+              let type = dict["__type"] as? String,
+              type == "function" else { return nil }
+        let name = dict["name"] as? String ?? "anonymous"
+        let source = dict["source"] as? String
+        return (name, source)
+    }
+
+    /// Check if value is expandable (object or array with items, or function with source)
     private var isExpandable: Bool {
+        // Function with source is expandable
+        if let fn = functionInfo, fn.source != nil {
+            return true
+        }
         switch value {
         case let dict as [String: Any]:
+            // Don't expand function objects as regular objects
+            if dict["__type"] as? String == "function" { return false }
             return !dict.isEmpty
         case let array as [Any]:
             return !array.isEmpty
@@ -552,6 +568,8 @@ struct DevToolsPropRowView: View {
 
     /// Get child items for expansion
     private var childItems: [(key: String, value: Any?)] {
+        // For functions, don't return child items (source is shown differently)
+        if functionInfo != nil { return [] }
         switch value {
         case let dict as [String: Any]:
             return dict.keys.sorted().map { ($0, dict[$0]) }
@@ -595,8 +613,18 @@ struct DevToolsPropRowView: View {
                 Spacer()
             }
 
-            // Expanded children
-            if isExpanded && isExpandable {
+            // Expanded function source
+            if isExpanded, let fn = functionInfo, let source = fn.source {
+                Text(source)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 14)
+                    .padding(.top, 2)
+                    .textSelection(.enabled)
+            }
+
+            // Expanded children (for objects/arrays)
+            if isExpanded && !childItems.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(childItems.enumerated()), id: \.offset) { _, item in
                         DevToolsPropRowView(key: item.key, value: item.value, depth: depth + 1)
@@ -612,7 +640,7 @@ struct DevToolsPropRowView: View {
 
         switch value {
         case let str as String:
-            // Check for function marker: [Function] or [Function: name]
+            // Check for legacy function marker: [Function] or [Function: name]
             if str.hasPrefix("[Function") {
                 // Extract name from [Function: name] format
                 if str.hasPrefix("[Function: "), str.hasSuffix("]") {
@@ -638,6 +666,11 @@ struct DevToolsPropRowView: View {
             }
             return "Array(\(array.count))"
         case let dict as [String: Any]:
+            // Check for function object type
+            if dict["__type"] as? String == "function" {
+                let name = dict["name"] as? String ?? "anonymous"
+                return "ƒ \(name)()"
+            }
             if brief {
                 return "Object(\(dict.count))"
             }
@@ -667,7 +700,11 @@ struct DevToolsPropRowView: View {
             return .cyan
         case is [Any]:
             return .green
-        case is [String: Any]:
+        case let dict as [String: Any]:
+            // Function objects are blue
+            if dict["__type"] as? String == "function" {
+                return .blue
+            }
             return .green
         default:
             return .primary
