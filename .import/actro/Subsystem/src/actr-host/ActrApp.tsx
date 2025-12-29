@@ -12,7 +12,7 @@
  * @version 8.0.0 - Single Engine + usePanels Hook Pattern
  */
 import React, { useCallback, useRef, useState, useEffect, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, NativeEventEmitter, StyleSheet, findNodeHandle, UIManager } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, NativeEventEmitter, StyleSheet, findNodeHandle, UIManager, DeviceEventEmitter } from 'react-native';
 
 // Import RN's Inspector API for accurate view hit testing
 // This uses React's internal renderer to find views at a point
@@ -99,6 +99,7 @@ const DevToolsBridge = NativeModules.DevToolsBridge as {
   registerPauseHandler?: () => void;
   updateComponentTree?: (treeJson: string | null, tabId: string | null) => void;
   setInspectMode?: (enabled: boolean) => void;
+  setRNInspectorActive?: (active: boolean) => void;
   highlightNode?: (nodeId: string | null, frame: { x: number; y: number; width: number; height: number } | null) => void;
   clearHighlight?: () => void;
   selectNodeFromInspect?: (nodeId: string) => void;
@@ -976,10 +977,25 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       measureAndHighlightNode(data.nodeId, activeEngine ?? null);
     });
 
+    // Set up event listener to toggle RN's built-in Element Inspector
+    const rnInspectorSubscription = eventEmitter.addListener('onToggleRNInspector', () => {
+      // Emit the event that RN's AppContainer listens to
+      DeviceEventEmitter.emit('toggleElementInspector');
+    });
+
+    // Track RN Inspector state (listen to our own toggle events for state sync)
+    let rnInspectorActive = false;
+    const rnInspectorStateSubscription = DeviceEventEmitter.addListener('toggleElementInspector', () => {
+      rnInspectorActive = !rnInspectorActive;
+      DevToolsBridge?.setRNInspectorActive?.(rnInspectorActive);
+    });
+
     return () => {
       pauseSubscription.remove();
       inspectSubscription.remove();
       selectSubscription.remove();
+      rnInspectorSubscription.remove();
+      rnInspectorStateSubscription.remove();
     };
   }, [activeTabId, measureAndHighlightNode, measureAllNodeFrames]);
 

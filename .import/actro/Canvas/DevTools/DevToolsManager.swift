@@ -256,6 +256,12 @@ class DevToolsManager: ObservableObject {
     /// Callback to notify RN when a node is selected from the tree
     var onSelectNodeFromTree: ((String) -> Void)?
 
+    /// Callback to toggle RN's built-in Element Inspector
+    var onToggleRNInspector: (() -> Void)?
+
+    /// Whether RN's built-in Inspector is active
+    @Published var isRNInspectorActive: Bool = false
+
     // MARK: - Window Management
 
     /// Whether the detached window is currently open
@@ -327,6 +333,11 @@ class DevToolsManager: ObservableObject {
     /// Toggle inspect mode
     func toggleInspect() {
         onToggleInspect?()
+    }
+
+    /// Toggle RN's built-in Element Inspector
+    func toggleRNInspector() {
+        onToggleRNInspector?()
     }
 
     // MARK: - Messages

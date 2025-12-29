@@ -234,7 +234,7 @@ struct DevToolsElementsView: View {
 
                     Spacer()
 
-                    // Inspect mode button
+                    // Inspect mode button (our custom implementation)
                     Button(action: { devTools.toggleInspect() }) {
                         HStack(spacing: 4) {
                             Image(systemName: "cursorarrow.click.2")
@@ -248,6 +248,19 @@ struct DevToolsElementsView: View {
                     }
                     .buttonStyle(.borderless)
                     .help(devTools.isInspectMode ? "Exit Inspect Mode" : "Inspect Element")
+
+                    // RN's built-in Element Inspector button
+                    Button(action: { devTools.toggleRNInspector() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "eye")
+                                .font(.system(size: 10))
+                            Text("RN")
+                                .font(.system(size: 9, weight: .medium))
+                        }
+                        .foregroundColor(devTools.isRNInspectorActive ? .accentColor : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Toggle React Native's built-in Element Inspector")
 
                     // Node count
                     if let tree = devTools.componentTree {

@@ -66,6 +66,9 @@ class DevToolsBridge: RCTEventEmitter {
                 print("[DevToolsBridge] onSelectNodeFromTree callback invoked for nodeId: \(nodeId)")
                 self?.emitSelectNode(nodeId)
             }
+            DevToolsManager.shared.onToggleRNInspector = { [weak self] in
+                self?.emitToggleRNInspector()
+            }
             print("[DevToolsBridge] Callbacks set up complete")
         }
     }
@@ -124,6 +127,14 @@ class DevToolsBridge: RCTEventEmitter {
         }
     }
 
+    /// Update RN Inspector active state (called from RN when Inspector is toggled)
+    @objc
+    func setRNInspectorActive(_ active: Bool) {
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
+            DevToolsManager.shared.isRNInspectorActive = active
+        }
+    }
+
     /// Highlight a node with frame information
     @objc
     func highlightNode(_ nodeId: String?, _ frame: NSDictionary?) {
@@ -174,6 +185,13 @@ class DevToolsBridge: RCTEventEmitter {
         }
     }
 
+    /// Emit request to toggle RN's built-in Element Inspector
+    private func emitToggleRNInspector() {
+        if hasListeners {
+            sendEvent(withName: "onToggleRNInspector", body: nil)
+        }
+    }
+
     /// Emit request to select a node in RN (for Inspect click)
     private func emitSelectNode(_ nodeId: String) {
         print("[DevToolsBridge] emitSelectNode called with nodeId: \(nodeId), hasListeners: \(hasListeners)")
@@ -188,7 +206,7 @@ class DevToolsBridge: RCTEventEmitter {
     // MARK: - RCTEventEmitter
 
     override func supportedEvents() -> [String]! {
-        return ["onTogglePause", "onToggleInspect", "onSelectNode"]
+        return ["onTogglePause", "onToggleInspect", "onSelectNode", "onToggleRNInspector"]
     }
 
     override func startObserving() {
