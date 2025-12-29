@@ -68,6 +68,29 @@ function extractPanelsByPanelId(
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
 
+// DevTools message logging helper
+const DevToolsBridge = NativeModules.DevToolsBridge as {
+  logMessage?: (direction: string, event: string, payload: string | null, tabId: string | null) => void;
+} | undefined;
+
+function logDevToolsMessage(
+  direction: 'guestToHost' | 'hostToGuest',
+  event: string,
+  payload: unknown,
+  tabId?: string
+) {
+  try {
+    DevToolsBridge?.logMessage?.(
+      direction,
+      event,
+      payload ? JSON.stringify(payload) : null,
+      tabId ?? null
+    );
+  } catch {
+    // Ignore DevTools logging errors
+  }
+}
+
 // 模块级别的 props 缓存
 let cachedValidProps: ActrProps | null = null;
 
@@ -196,7 +219,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     const send = createHostToGuestSender(eng, {
       onViolation: (v) => onContractViolation?.(tab.id, v),
     });
-    send('HOST_VISIBILITY', { visible: isActive, tabId: tab.id });
+    const visibilityPayload = { visible: isActive, tabId: tab.id };
+    logDevToolsMessage('hostToGuest', 'HOST_VISIBILITY', visibilityPayload, tab.id);
+    send('HOST_VISIBILITY', visibilityPayload);
     if (isActive && pendingUpdateRef.current) {
       pendingUpdateRef.current = false;
       handleUpdate();
@@ -228,8 +253,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         });
         currentEngine.register(hostComponents);
 
-        // Generic fetch handler: Guest sends APP_FETCH_REQUEST, Host responds with APP_FETCH_RESPONSE
+        // Generic message handler with DevTools logging
         const unsubscribeFetch = currentEngine.on('message', async (msg: { event: string; payload?: unknown }) => {
+          // Log all Guest → Host messages to DevTools
+          logDevToolsMessage('guestToHost', msg.event, msg.payload, tab.id);
+
+          // Handle APP_FETCH_REQUEST
           if (msg.event !== 'APP_FETCH_REQUEST') return;
           const { requestId, url, options } = msg.payload as {
             requestId: string;
@@ -242,19 +271,23 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             const data = contentType.includes('application/json')
               ? await response.json()
               : await response.text();
-            currentEngine!.sendEvent('APP_FETCH_RESPONSE', {
+            const responsePayload = {
               requestId,
               ok: response.ok,
               status: response.status,
               data,
-            });
+            };
+            logDevToolsMessage('hostToGuest', 'APP_FETCH_RESPONSE', responsePayload, tab.id);
+            currentEngine!.sendEvent('APP_FETCH_RESPONSE', responsePayload);
           } catch (error: unknown) {
-            currentEngine!.sendEvent('APP_FETCH_RESPONSE', {
+            const errorPayload = {
               requestId,
               ok: false,
               status: 0,
               error: error instanceof Error ? error.message : String(error),
-            });
+            };
+            logDevToolsMessage('hostToGuest', 'APP_FETCH_RESPONSE', errorPayload, tab.id);
+            currentEngine!.sendEvent('APP_FETCH_RESPONSE', errorPayload);
           }
         });
 
