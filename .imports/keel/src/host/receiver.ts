@@ -898,10 +898,10 @@ export class Receiver {
 
         serializableProps[key] = {
           __type: 'function',
-          name: fnName,
+          __name: fnName,
           // Pre-attached source location (from Babel plugin if available)
-          sourceFile: fnMeta.__sourceFile,
-          sourceLine: fnMeta.__sourceLine,
+          __sourceFile: fnMeta.__sourceFile,
+          __sourceLine: fnMeta.__sourceLine,
         };
       } else if (value instanceof Date) {
         serializableProps[key] = value.toISOString();
