@@ -79,8 +79,6 @@ export interface SerializedFunction {
   __name?: string; // Original function name for DevTools
   __sourceFile?: string; // Original source file path (from Babel plugin)
   __sourceLine?: number; // Original source line number (from Babel plugin)
-  __bundleLine?: number; // Bundle line number (from Error().stack at serialization time)
-  __bundleColumn?: number; // Bundle column number (from Error().stack at serialization time)
 }
 
 /**
