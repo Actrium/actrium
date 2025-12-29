@@ -178,6 +178,75 @@ class DevToolsBridge: RCTEventEmitter {
         }
     }
 
+    /// Update box model data for the selected node
+    @objc
+    func updateBoxModel(_ data: NSDictionary) {
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
+            guard let frame = data["frame"] as? [String: Any] else { return }
+
+            let x = frame["x"] as? CGFloat ?? 0
+            let y = frame["y"] as? CGFloat ?? 0
+            let width = frame["width"] as? CGFloat ?? 0
+            let height = frame["height"] as? CGFloat ?? 0
+
+            // Parse margin
+            let marginDict = data["margin"] as? [String: Any] ?? [:]
+            let margin = (
+                top: marginDict["top"] as? CGFloat ?? 0,
+                right: marginDict["right"] as? CGFloat ?? 0,
+                bottom: marginDict["bottom"] as? CGFloat ?? 0,
+                left: marginDict["left"] as? CGFloat ?? 0
+            )
+
+            // Parse padding
+            let paddingDict = data["padding"] as? [String: Any] ?? [:]
+            let padding = (
+                top: paddingDict["top"] as? CGFloat ?? 0,
+                right: paddingDict["right"] as? CGFloat ?? 0,
+                bottom: paddingDict["bottom"] as? CGFloat ?? 0,
+                left: paddingDict["left"] as? CGFloat ?? 0
+            )
+
+            // Parse border (optional)
+            let borderDict = data["border"] as? [String: Any] ?? [:]
+            let border = (
+                top: borderDict["top"] as? CGFloat ?? 0,
+                right: borderDict["right"] as? CGFloat ?? 0,
+                bottom: borderDict["bottom"] as? CGFloat ?? 0,
+                left: borderDict["left"] as? CGFloat ?? 0
+            )
+
+            DevToolsManager.shared.updateBoxModel(
+                margin: margin,
+                padding: padding,
+                border: border,
+                width: width,
+                height: height,
+                x: x,
+                y: y
+            )
+
+            // Update computed styles if provided
+            if let style = data["style"] as? [String: Any] {
+                DevToolsManager.shared.updateComputedStyles(
+                    position: style["position"] as? String,
+                    backgroundColor: style["backgroundColor"] as? String,
+                    top: style["top"] as? CGFloat,
+                    left: style["left"] as? CGFloat,
+                    right: style["right"] as? CGFloat,
+                    bottom: style["bottom"] as? CGFloat,
+                    display: style["display"] as? String,
+                    flexDirection: style["flexDirection"] as? String,
+                    alignItems: style["alignItems"] as? String,
+                    justifyContent: style["justifyContent"] as? String,
+                    flex: style["flex"] as? CGFloat,
+                    opacity: style["opacity"] as? CGFloat,
+                    overflow: style["overflow"] as? String
+                )
+            }
+        }
+    }
+
     /// Emit request to toggle inspect mode in RN
     private func emitToggleInspect() {
         if hasListeners {

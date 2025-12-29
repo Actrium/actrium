@@ -128,6 +128,53 @@ struct DevToolsComponentNode: Identifiable {
     var isSelected: Bool = false
 }
 
+/// Box model data for selected node (margin, border, padding, content)
+struct DevToolsBoxModel {
+    var margin: EdgeInsets
+    var border: EdgeInsets
+    var padding: EdgeInsets
+    var width: CGFloat
+    var height: CGFloat
+    var x: CGFloat
+    var y: CGFloat
+
+    struct EdgeInsets {
+        var top: CGFloat
+        var right: CGFloat
+        var bottom: CGFloat
+        var left: CGFloat
+
+        static let zero = EdgeInsets(top: 0, right: 0, bottom: 0, left: 0)
+    }
+
+    static let empty = DevToolsBoxModel(
+        margin: .zero,
+        border: .zero,
+        padding: .zero,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: 0
+    )
+}
+
+/// Computed styles for selected node
+struct DevToolsComputedStyles {
+    var position: String?
+    var backgroundColor: String?
+    var top: CGFloat?
+    var left: CGFloat?
+    var right: CGFloat?
+    var bottom: CGFloat?
+    var display: String?
+    var flexDirection: String?
+    var alignItems: String?
+    var justifyContent: String?
+    var flex: CGFloat?
+    var opacity: CGFloat?
+    var overflow: String?
+}
+
 /// DevTools state manager - shared between main window and detached window
 @MainActor
 class DevToolsManager: ObservableObject {
@@ -160,6 +207,12 @@ class DevToolsManager: ObservableObject {
 
     /// Selected component node ID
     @Published var selectedNodeId: String?
+
+    /// Box model data for selected node
+    @Published var boxModel: DevToolsBoxModel?
+
+    /// Computed styles for selected node
+    @Published var computedStyles: DevToolsComputedStyles?
 
     /// Expanded node IDs (for tree collapse/expand state)
     @Published var expandedNodeIds: Set<String> = []
@@ -508,11 +561,70 @@ class DevToolsManager: ObservableObject {
     func selectNode(_ nodeId: String?) {
         os_log("[DevToolsManager] selectNode called with: %{public}@", log: devToolsLog, type: .debug, nodeId ?? "nil")
         selectedNodeId = nodeId
+        // Clear box model when deselecting
+        if nodeId == nil {
+            boxModel = nil
+            computedStyles = nil
+        }
         // Notify RN to highlight the selected node
         if let nodeId = nodeId {
             os_log("[DevToolsManager] Calling onSelectNodeFromTree callback, hasCallback: %{public}d", log: devToolsLog, type: .debug, onSelectNodeFromTree != nil ? 1 : 0)
             onSelectNodeFromTree?(nodeId)
         }
+    }
+
+    /// Update box model data for the selected node
+    func updateBoxModel(
+        margin: (top: CGFloat, right: CGFloat, bottom: CGFloat, left: CGFloat),
+        padding: (top: CGFloat, right: CGFloat, bottom: CGFloat, left: CGFloat),
+        border: (top: CGFloat, right: CGFloat, bottom: CGFloat, left: CGFloat) = (0, 0, 0, 0),
+        width: CGFloat,
+        height: CGFloat,
+        x: CGFloat,
+        y: CGFloat
+    ) {
+        boxModel = DevToolsBoxModel(
+            margin: DevToolsBoxModel.EdgeInsets(top: margin.top, right: margin.right, bottom: margin.bottom, left: margin.left),
+            border: DevToolsBoxModel.EdgeInsets(top: border.top, right: border.right, bottom: border.bottom, left: border.left),
+            padding: DevToolsBoxModel.EdgeInsets(top: padding.top, right: padding.right, bottom: padding.bottom, left: padding.left),
+            width: width,
+            height: height,
+            x: x,
+            y: y
+        )
+    }
+
+    /// Update computed styles for the selected node
+    func updateComputedStyles(
+        position: String? = nil,
+        backgroundColor: String? = nil,
+        top: CGFloat? = nil,
+        left: CGFloat? = nil,
+        right: CGFloat? = nil,
+        bottom: CGFloat? = nil,
+        display: String? = nil,
+        flexDirection: String? = nil,
+        alignItems: String? = nil,
+        justifyContent: String? = nil,
+        flex: CGFloat? = nil,
+        opacity: CGFloat? = nil,
+        overflow: String? = nil
+    ) {
+        var styles = DevToolsComputedStyles()
+        styles.position = position
+        styles.backgroundColor = backgroundColor
+        styles.top = top
+        styles.left = left
+        styles.right = right
+        styles.bottom = bottom
+        styles.display = display
+        styles.flexDirection = flexDirection
+        styles.alignItems = alignItems
+        styles.justifyContent = justifyContent
+        styles.flex = flex
+        styles.opacity = opacity
+        styles.overflow = overflow
+        computedStyles = styles
     }
 
     // MARK: - Persistence

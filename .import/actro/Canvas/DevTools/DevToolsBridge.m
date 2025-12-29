@@ -12,5 +12,7 @@ RCT_EXTERN_METHOD(setInspectMode:(BOOL)enabled)
 RCT_EXTERN_METHOD(highlightNode:(NSString *)nodeId :(NSDictionary *)frame)
 RCT_EXTERN_METHOD(clearHighlight)
 RCT_EXTERN_METHOD(selectNodeFromInspect:(NSString *)nodeId)
+RCT_EXTERN_METHOD(setRNInspectorActive:(BOOL)active)
+RCT_EXTERN_METHOD(updateBoxModel:(NSDictionary *)data)
 
 @end

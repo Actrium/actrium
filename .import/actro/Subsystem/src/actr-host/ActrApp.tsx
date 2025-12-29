@@ -103,6 +103,27 @@ const DevToolsBridge = NativeModules.DevToolsBridge as {
   highlightNode?: (nodeId: string | null, frame: { x: number; y: number; width: number; height: number } | null) => void;
   clearHighlight?: () => void;
   selectNodeFromInspect?: (nodeId: string) => void;
+  updateBoxModel?: (data: {
+    frame: { x: number; y: number; width: number; height: number };
+    margin: { top: number; right: number; bottom: number; left: number };
+    padding: { top: number; right: number; bottom: number; left: number };
+    border?: { top: number; right: number; bottom: number; left: number };
+    style?: {
+      position?: string;
+      backgroundColor?: string;
+      top?: number;
+      left?: number;
+      right?: number;
+      bottom?: number;
+      display?: string;
+      flexDirection?: string;
+      alignItems?: string;
+      justifyContent?: string;
+      flex?: number;
+      opacity?: number;
+      overflow?: string;
+    };
+  }) => void;
   addListener?: (eventName: string) => void;
   removeListeners?: (count: number) => void;
 } | undefined;
@@ -123,6 +144,68 @@ function logDevToolsMessage(
   } catch {
     // Ignore DevTools logging errors
   }
+}
+
+// Extract margin/padding from style object for box model visualization
+function extractBoxModelFromStyle(
+  style: Record<string, unknown> | undefined,
+  frame: { left: number; top: number; width: number; height: number }
+): Parameters<NonNullable<typeof DevToolsBridge>['updateBoxModel']>[0] {
+  // Parse numeric value (handles number or "10px" style strings)
+  const parseNum = (val: unknown): number => {
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string') return parseFloat(val) || 0;
+    return 0;
+  };
+
+  // Extract margin
+  const margin = {
+    top: parseNum(style?.marginTop ?? style?.marginVertical ?? style?.margin ?? 0),
+    right: parseNum(style?.marginRight ?? style?.marginHorizontal ?? style?.margin ?? 0),
+    bottom: parseNum(style?.marginBottom ?? style?.marginVertical ?? style?.margin ?? 0),
+    left: parseNum(style?.marginLeft ?? style?.marginHorizontal ?? style?.margin ?? 0),
+  };
+
+  // Extract padding
+  const padding = {
+    top: parseNum(style?.paddingTop ?? style?.paddingVertical ?? style?.padding ?? 0),
+    right: parseNum(style?.paddingRight ?? style?.paddingHorizontal ?? style?.padding ?? 0),
+    bottom: parseNum(style?.paddingBottom ?? style?.paddingVertical ?? style?.padding ?? 0),
+    left: parseNum(style?.paddingLeft ?? style?.paddingHorizontal ?? style?.padding ?? 0),
+  };
+
+  // Extract border
+  const border = {
+    top: parseNum(style?.borderTopWidth ?? style?.borderWidth ?? 0),
+    right: parseNum(style?.borderRightWidth ?? style?.borderWidth ?? 0),
+    bottom: parseNum(style?.borderBottomWidth ?? style?.borderWidth ?? 0),
+    left: parseNum(style?.borderLeftWidth ?? style?.borderWidth ?? 0),
+  };
+
+  // Extract computed styles
+  const computedStyle: NonNullable<Parameters<NonNullable<typeof DevToolsBridge>['updateBoxModel']>[0]['style']> = {};
+
+  if (style?.position) computedStyle.position = String(style.position);
+  if (style?.backgroundColor) computedStyle.backgroundColor = String(style.backgroundColor);
+  if (style?.top !== undefined) computedStyle.top = parseNum(style.top);
+  if (style?.left !== undefined) computedStyle.left = parseNum(style.left);
+  if (style?.right !== undefined) computedStyle.right = parseNum(style.right);
+  if (style?.bottom !== undefined) computedStyle.bottom = parseNum(style.bottom);
+  if (style?.display) computedStyle.display = String(style.display);
+  if (style?.flexDirection) computedStyle.flexDirection = String(style.flexDirection);
+  if (style?.alignItems) computedStyle.alignItems = String(style.alignItems);
+  if (style?.justifyContent) computedStyle.justifyContent = String(style.justifyContent);
+  if (style?.flex !== undefined) computedStyle.flex = parseNum(style.flex);
+  if (style?.opacity !== undefined) computedStyle.opacity = parseNum(style.opacity);
+  if (style?.overflow) computedStyle.overflow = String(style.overflow);
+
+  return {
+    frame: { x: frame.left, y: frame.top, width: frame.width, height: frame.height },
+    margin,
+    padding,
+    border,
+    style: Object.keys(computedStyle).length > 0 ? computedStyle : undefined,
+  };
 }
 
 function logDevToolsRenderOp(
@@ -753,19 +836,21 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
   // Build viewTag <-> nodeId mapping and measure all frames
   const measureAllNodeFrames = useCallback((engine: Engine | null) => {
-    console.log('[DevTools] measureAllNodeFrames called');
+    console.log('[DevTools] measureAllNodeFrames called, engine:', engine ? 'exists' : 'null');
     if (!engine) {
       console.log('[DevTools] No engine for measureAllNodeFrames');
       return;
     }
 
     const receiver = engine.getReceiver();
+    console.log('[DevTools] receiver:', receiver ? 'exists' : 'null');
     if (!receiver) {
       console.log('[DevTools] No receiver for measureAllNodeFrames');
       return;
     }
 
     const allRefs = receiver.getAllNodeRefs?.();
+    console.log('[DevTools] getAllNodeRefs available:', !!receiver.getAllNodeRefs);
     if (!allRefs) {
       console.log('[DevTools] No refs from getAllNodeRefs');
       return;
@@ -776,14 +861,21 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     const viewTagToNodeId = new Map<number, string>();
     const nodeIdToViewTag = new Map<string, number>();
 
+    let refCount = 0;
+    let viewTagCount = 0;
     allRefs.forEach((ref, nodeId) => {
-      if (!ref.current) return;
+      if (!ref.current) {
+        return;
+      }
+      refCount++;
 
       // Get native view tag for this node
       const viewTag = findNodeHandle(ref.current as React.Component);
       if (viewTag) {
+        viewTagCount++;
         viewTagToNodeId.set(viewTag, String(nodeId));
         nodeIdToViewTag.set(String(nodeId), viewTag);
+        console.log('[DevTools] Mapped viewTag', viewTag, '-> nodeId', nodeId);
       }
 
       // Try measuring the node
@@ -796,6 +888,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         });
       }
     });
+
+    console.log('[DevTools] Refs with .current:', refCount, 'ViewTags found:', viewTagCount);
 
     // Update mappings
     viewTagToNodeIdRef.current = viewTagToNodeId;
@@ -957,10 +1051,13 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       setIsInspectMode((prev) => {
         const next = !prev;
         DevToolsBridge?.setInspectMode?.(next);
+        console.log('[DevTools] Inspect mode toggled to:', next, 'activeTabId:', activeTabId);
+        console.log('[DevTools] engineMapRef keys:', Array.from(engineMapRef.current.keys()));
 
         if (next) {
           // Entering inspect mode - measure all node frames
           const activeEngine = engineMapRef.current.get(activeTabId);
+          console.log('[DevTools] Active engine for inspect:', activeEngine ? 'exists' : 'null');
           measureAllNodeFrames(activeEngine ?? null);
         } else {
           // Exiting inspect mode - clear highlight
@@ -979,6 +1076,37 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       const activeEngine = engineMapRef.current.get(activeTabId);
       console.log('[DevTools] Active engine:', activeEngine ? 'exists' : 'null', 'tabId:', activeTabId);
       measureAndHighlightNode(data.nodeId, activeEngine ?? null);
+
+      // Also update box model from the component tree node props
+      if (activeEngine) {
+        const receiver = activeEngine.getReceiver();
+        const tree = receiver?.getComponentTree?.();
+        if (tree) {
+          // Find the node in the tree
+          const findNode = (node: { id: string; props?: Record<string, unknown>; children: unknown[] }): Record<string, unknown> | null => {
+            if (String(node.id) === data.nodeId) {
+              return node.props ?? null;
+            }
+            for (const child of node.children) {
+              const found = findNode(child as { id: string; props?: Record<string, unknown>; children: unknown[] });
+              if (found !== null) return found;
+            }
+            return null;
+          };
+          const nodeProps = findNode(tree as { id: string; props?: Record<string, unknown>; children: unknown[] });
+          const nodeFrame = nodeFramesRef.current.get(data.nodeId);
+          if (nodeFrame) {
+            const style = nodeProps?.style as Record<string, unknown> | undefined;
+            const boxModelData = extractBoxModelFromStyle(style, {
+              left: nodeFrame.x,
+              top: nodeFrame.y,
+              width: nodeFrame.width,
+              height: nodeFrame.height,
+            });
+            DevToolsBridge?.updateBoxModel?.(boxModelData);
+          }
+        }
+      }
     });
 
     // Set up event listener to toggle RN's built-in Element Inspector
@@ -1154,6 +1282,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
               // Find the corresponding Rill node ID using our mapping
               // First try direct match
+              console.log('[DevTools] viewTagToNodeId map size:', viewTagToNodeIdRef.current.size);
+              console.log('[DevTools] nodeFrames map size:', nodeFramesRef.current.size);
               let nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
               console.log('[DevTools] Direct viewTag lookup:', viewData.touchedViewTag, '->', nodeId);
 
@@ -1209,6 +1339,17 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
               if (nodeId) {
                 console.log('[DevTools] Found Rill nodeId:', nodeId);
                 DevToolsBridge?.selectNodeFromInspect?.(nodeId);
+
+                // Send box model data to DevTools
+                if (frame && frame.width > 0 && frame.height > 0) {
+                  // Try to get style from viewData.props or hierarchy
+                  const style = (viewData.props?.style as Record<string, unknown>) ??
+                    (viewData.hierarchy?.[viewData.selectedIndex]?.getInspectorData(
+                      findNodeHandle as (component: unknown) => number | null
+                    )?.props?.style as Record<string, unknown>);
+                  const boxModelData = extractBoxModelFromStyle(style, frame);
+                  DevToolsBridge?.updateBoxModel?.(boxModelData);
+                }
               } else {
                 console.log('[DevTools] No Rill node found for viewTag:', viewData.touchedViewTag);
               }
