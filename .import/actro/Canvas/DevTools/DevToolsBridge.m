@@ -7,5 +7,9 @@ RCT_EXTERN_METHOD(logMessage:(NSString *)direction :(NSString *)event :(NSString
 RCT_EXTERN_METHOD(logRenderOp:(NSString *)operationType :(NSString *)componentType :(NSString *)nodeId :(NSString *)payload :(NSString *)tabId)
 RCT_EXTERN_METHOD(setEnginePaused:(BOOL)isPaused)
 RCT_EXTERN_METHOD(registerPauseHandler)
+RCT_EXTERN_METHOD(updateComponentTree:(NSString *)treeJson :(NSString *)tabId)
+RCT_EXTERN_METHOD(setInspectMode:(BOOL)enabled)
+RCT_EXTERN_METHOD(highlightNode:(NSString *)nodeId :(NSDictionary *)frame)
+RCT_EXTERN_METHOD(clearHighlight)
 
 @end

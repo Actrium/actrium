@@ -74,6 +74,10 @@ const DevToolsBridge = NativeModules.DevToolsBridge as {
   logRenderOp?: (operationType: string, componentType: string | null, nodeId: string | null, payload: string | null, tabId: string | null) => void;
   setEnginePaused?: (isPaused: boolean) => void;
   registerPauseHandler?: () => void;
+  updateComponentTree?: (treeJson: string | null, tabId: string | null) => void;
+  setInspectMode?: (enabled: boolean) => void;
+  highlightNode?: (nodeId: string | null, frame: { x: number; y: number; width: number; height: number } | null) => void;
+  clearHighlight?: () => void;
   addListener?: (eventName: string) => void;
   removeListeners?: (count: number) => void;
 } | undefined;
@@ -113,6 +117,34 @@ function logDevToolsRenderOp(
     );
   } catch {
     // Ignore DevTools logging errors
+  }
+}
+
+function updateDevToolsComponentTree(engine: Engine | null, tabId?: string) {
+  try {
+    if (!engine) {
+      DevToolsBridge?.updateComponentTree?.(null, tabId ?? null);
+      return;
+    }
+
+    const receiver = engine.getReceiver();
+    if (!receiver) {
+      DevToolsBridge?.updateComponentTree?.(null, tabId ?? null);
+      return;
+    }
+
+    // Get the component tree from Receiver
+    const tree = receiver.getComponentTree?.();
+    if (!tree) {
+      DevToolsBridge?.updateComponentTree?.(null, tabId ?? null);
+      return;
+    }
+
+    // Serialize and send to DevTools
+    const treeJson = JSON.stringify(tree);
+    DevToolsBridge?.updateComponentTree?.(treeJson, tabId ?? null);
+  } catch {
+    // Ignore DevTools errors
   }
 }
 
@@ -222,6 +254,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     const panels = extractPanelsByPanelId(fullTree);
     setLeftPanel(panels.left);
     setRightPanel(panels.right);
+
+    // Update DevTools component tree
+    updateDevToolsComponentTree(eng, tab.id);
   }, [tab.id]);
 
   // 组件卸载时清理（tab 关闭）
@@ -671,6 +706,9 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     }
   }, []);
 
+  // Inspect mode state
+  const [isInspectMode, setIsInspectMode] = useState(false);
+
   // DevTools pause handler - toggle pause for active engine
   useEffect(() => {
     if (!DevToolsBridge) return;
@@ -680,7 +718,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
     // Set up event listener for pause toggle from DevTools UI
     const eventEmitter = new NativeEventEmitter(NativeModules.DevToolsBridge);
-    const subscription = eventEmitter.addListener('onTogglePause', () => {
+
+    const pauseSubscription = eventEmitter.addListener('onTogglePause', () => {
       // Get the active engine
       const activeEngine = engineMapRef.current.get(activeTabId);
       if (!activeEngine) return;
@@ -695,8 +734,27 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       }
     });
 
+    // Set up event listener for inspect mode toggle
+    const inspectSubscription = eventEmitter.addListener('onToggleInspect', () => {
+      setIsInspectMode((prev) => {
+        const next = !prev;
+        DevToolsBridge?.setInspectMode?.(next);
+        return next;
+      });
+    });
+
+    // Set up event listener for node selection from DevTools tree
+    const selectSubscription = eventEmitter.addListener('onSelectNode', (data: { nodeId: string }) => {
+      // When user selects a node in the DevTools tree, highlight it in the UI
+      // For now, just log it - full implementation would require measuring node frames
+      console.log('[DevTools] Node selected from tree:', data.nodeId);
+      // TODO: Implement node highlighting by measuring the component's frame
+    });
+
     return () => {
-      subscription.remove();
+      pauseSubscription.remove();
+      inspectSubscription.remove();
+      selectSubscription.remove();
     };
   }, [activeTabId]);
 

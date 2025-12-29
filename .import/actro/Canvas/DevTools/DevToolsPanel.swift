@@ -208,17 +208,34 @@ struct DevToolsElementsView: View {
         HSplitView {
             // Component tree (left)
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
+                HStack(spacing: 8) {
                     Text("Component Tree")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.secondary)
+
                     Spacer()
-                    Button(action: refreshTree) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10))
+
+                    // Inspect mode button
+                    Button(action: { devTools.toggleInspect() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "cursorarrow.click.2")
+                                .font(.system(size: 10))
+                            if devTools.isInspectMode {
+                                Text("Inspecting")
+                                    .font(.system(size: 10))
+                            }
+                        }
+                        .foregroundColor(devTools.isInspectMode ? .accentColor : .secondary)
                     }
                     .buttonStyle(.borderless)
-                    .help("Refresh")
+                    .help(devTools.isInspectMode ? "Exit Inspect Mode" : "Inspect Element")
+
+                    // Node count
+                    if let tree = devTools.componentTree {
+                        Text("\(countNodes(tree))")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
@@ -234,11 +251,14 @@ struct DevToolsElementsView: View {
                         .padding(4)
                     }
                 } else {
-                    VStack {
+                    VStack(spacing: 8) {
+                        Image(systemName: "square.stack.3d.up")
+                            .font(.system(size: 24))
+                            .foregroundColor(.secondary)
                         Text("No component tree available")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
-                        Text("Select a tab to inspect")
+                        Text("Components will appear when the app renders")
                             .font(.system(size: 11))
                             .foregroundColor(Color(nsColor: .tertiaryLabelColor))
                     }
@@ -261,22 +281,54 @@ struct DevToolsElementsView: View {
 
                 Divider()
 
-                if let nodeId = devTools.selectedNodeId {
+                if let nodeId = devTools.selectedNodeId,
+                   let node = findNode(in: devTools.componentTree, id: nodeId) {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Selected: \(nodeId)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.secondary)
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Node info header
+                            HStack(spacing: 6) {
+                                Text("<\(node.type)>")
+                                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.accentColor)
+                                Text("#\(node.id)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
 
-                            // TODO: Show actual props when tree is connected
-                            Text("Props will be shown here")
-                                .font(.system(size: 12))
-                                .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                            Divider()
+
+                            // Props list
+                            if node.props.isEmpty {
+                                Text("No props")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else {
+                                ForEach(Array(node.props.keys.sorted()), id: \.self) { key in
+                                    DevToolsPropRowView(key: key, value: node.props[key])
+                                }
+                            }
+
+                            // Children count
+                            if !node.children.isEmpty {
+                                Divider()
+                                HStack {
+                                    Text("Children:")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                    Text("\(node.children.count)")
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(.primary)
+                                }
+                            }
                         }
                         .padding(8)
                     }
                 } else {
-                    VStack {
+                    VStack(spacing: 8) {
+                        Image(systemName: "sidebar.right")
+                            .font(.system(size: 20))
+                            .foregroundColor(.secondary)
                         Text("Select a component")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
@@ -289,8 +341,101 @@ struct DevToolsElementsView: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
-    private func refreshTree() {
-        // TODO: Request tree refresh from React Native
+    /// Count total nodes in tree
+    private func countNodes(_ node: DevToolsComponentNode) -> Int {
+        return 1 + node.children.reduce(0) { $0 + countNodes($1) }
+    }
+
+    /// Find a node by ID in the tree
+    private func findNode(in tree: DevToolsComponentNode?, id: String) -> DevToolsComponentNode? {
+        guard let tree = tree else { return nil }
+        if tree.id == id { return tree }
+        for child in tree.children {
+            if let found = findNode(in: child, id: id) {
+                return found
+            }
+        }
+        return nil
+    }
+}
+
+/// Single prop row view
+struct DevToolsPropRowView: View {
+    let key: String
+    let value: Any?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(key)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.purple)
+                .frame(minWidth: 60, alignment: .leading)
+
+            Text("=")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+
+            Text(formatValue(value))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(colorForValue(value))
+                .lineLimit(3)
+                .textSelection(.enabled)
+
+            Spacer()
+        }
+    }
+
+    private func formatValue(_ value: Any?) -> String {
+        guard let value = value else { return "null" }
+
+        switch value {
+        case let str as String:
+            if str == "[Function]" {
+                return "ƒ()"
+            }
+            return "\"\(str)\""
+        // Note: Check Bool before NSNumber since Bool bridges to NSNumber
+        case let num as NSNumber where CFBooleanGetTypeID() == CFGetTypeID(num):
+            return num.boolValue ? "true" : "false"
+        case let num as NSNumber:
+            return "\(num)"
+        case let array as [Any]:
+            if array.count <= 3 {
+                return "[\(array.map { formatValue($0) }.joined(separator: ", "))]"
+            }
+            return "Array(\(array.count))"
+        case let dict as [String: Any]:
+            if dict.count <= 2 {
+                let items = dict.map { "\($0.key): \(formatValue($0.value))" }
+                return "{\(items.joined(separator: ", "))}"
+            }
+            return "Object(\(dict.count))"
+        default:
+            return String(describing: value)
+        }
+    }
+
+    private func colorForValue(_ value: Any?) -> Color {
+        guard let value = value else { return .secondary }
+
+        switch value {
+        case let str as String:
+            if str == "[Function]" {
+                return .blue
+            }
+            return .orange
+        // Note: Check Bool before NSNumber since Bool bridges to NSNumber
+        case let num as NSNumber where CFBooleanGetTypeID() == CFGetTypeID(num):
+            return .purple
+        case is NSNumber:
+            return .cyan
+        case is [Any]:
+            return .green
+        case is [String: Any]:
+            return .green
+        default:
+            return .primary
+        }
     }
 }
 
