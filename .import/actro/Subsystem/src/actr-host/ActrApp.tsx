@@ -236,17 +236,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             url: string;
             options?: RequestInit;
           };
-          log.info(`[Fetch] Received request: ${requestId} ${url}`);
           try {
             const response = await fetch(url, options);
             const contentType = response.headers.get('content-type') || '';
-            let data: unknown;
-            if (contentType.includes('application/json')) {
-              data = await response.json();
-            } else {
-              data = await response.text();
-            }
-            log.info(`[Fetch] Response: ${requestId} ok=${response.ok} status=${response.status}`);
+            const data = contentType.includes('application/json')
+              ? await response.json()
+              : await response.text();
             currentEngine!.sendEvent('APP_FETCH_RESPONSE', {
               requestId,
               ok: response.ok,
@@ -254,13 +249,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
               data,
             });
           } catch (error: unknown) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            log.error(`[Fetch] Error: ${requestId} ${errorMsg}`);
             currentEngine!.sendEvent('APP_FETCH_RESPONSE', {
               requestId,
               ok: false,
               status: 0,
-              error: errorMsg,
+              error: error instanceof Error ? error.message : String(error),
             });
           }
         });
