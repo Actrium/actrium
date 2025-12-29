@@ -845,4 +845,85 @@ export class Receiver {
   findByTestId(testID: string): NodeInstance | undefined {
     return this.getNodes().find((node) => node.props.testID === testID);
   }
+
+  // ============================================
+  // DevTools Support
+  // ============================================
+
+  /**
+   * DevTools component tree node
+   */
+  getComponentTree(): DevToolsTreeNode | null {
+    if (this.rootChildren.length === 0) {
+      return null;
+    }
+
+    // If multiple root children, create a virtual root
+    if (this.rootChildren.length > 1) {
+      return {
+        id: 'root',
+        type: 'Root',
+        props: {},
+        children: this.rootChildren
+          .map((childId) => this.buildTreeNode(childId))
+          .filter((n): n is DevToolsTreeNode => n !== null),
+      };
+    }
+
+    // Single root
+    const firstChild = this.rootChildren[0];
+    if (firstChild === undefined) return null;
+    return this.buildTreeNode(firstChild);
+  }
+
+  /**
+   * Build tree node recursively
+   */
+  private buildTreeNode(nodeId: number): DevToolsTreeNode | null {
+    const node = this.nodeMap.get(nodeId);
+    if (!node) return null;
+
+    // Serialize props for DevTools (remove functions, keep serializable values)
+    const serializableProps: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node.props)) {
+      if (typeof value === 'function') {
+        // Show function marker instead of actual function
+        serializableProps[key] = '[Function]';
+      } else if (value instanceof Date) {
+        serializableProps[key] = value.toISOString();
+      } else if (value instanceof RegExp) {
+        serializableProps[key] = value.toString();
+      } else if (value instanceof Map || value instanceof Set) {
+        serializableProps[key] = Array.from(value);
+      } else {
+        serializableProps[key] = value;
+      }
+    }
+
+    return {
+      id: String(nodeId),
+      type: node.type,
+      props: serializableProps,
+      children: node.children
+        .map((childId) => this.buildTreeNode(childId))
+        .filter((n): n is DevToolsTreeNode => n !== null),
+    };
+  }
+
+  /**
+   * Get node by ID (for DevTools inspection)
+   */
+  getNodeById(nodeId: number): NodeInstance | undefined {
+    return this.nodeMap.get(nodeId);
+  }
+}
+
+/**
+ * DevTools tree node structure
+ */
+export interface DevToolsTreeNode {
+  id: string;
+  type: string;
+  props: Record<string, unknown>;
+  children: DevToolsTreeNode[];
 }

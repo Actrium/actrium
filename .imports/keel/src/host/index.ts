@@ -40,11 +40,11 @@ export {
   ThrottledScheduler,
   VirtualScrollCalculator,
 } from './performance';
-export type { SendToSandbox } from './receiver';
+export type { DevToolsTreeNode, SendToSandbox } from './receiver';
 export { Receiver } from './receiver';
 export type { ComponentMap, ComponentType } from './registry';
 export { ComponentRegistry, createRegistry } from './registry';
-// Note: DefaultComponents and EngineView are in presets (presets/react-native, presets/react-web)
+// Note: DefaultComponents and EngineView are in rill/host/preset
 // Type exports
 export type {
   AppendOperation,
