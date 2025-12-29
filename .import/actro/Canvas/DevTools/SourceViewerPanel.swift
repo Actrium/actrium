@@ -6,6 +6,7 @@ import Highlightr
 /// Source viewer panel for browsing and viewing source files
 struct SourceViewerPanel: View {
     @StateObject private var viewModel = SourceViewerViewModel()
+    @ObservedObject private var devTools = DevToolsManager.shared
 
     var body: some View {
         HSplitView {
@@ -20,12 +21,19 @@ struct SourceViewerPanel: View {
             // Code viewer
             CodeViewerView(
                 file: viewModel.selectedFile,
-                content: viewModel.selectedContent
+                content: viewModel.selectedContent,
+                highlightLineNumber: viewModel.highlightLineNumber
             )
             .frame(minWidth: 300)
         }
         .task {
             await viewModel.loadSourceMap()
+        }
+        .onChange(of: devTools.pendingSourceNavigation) { navigation in
+            if let nav = navigation {
+                viewModel.navigateToSource(searchText: nav.searchText, files: viewModel.files)
+                devTools.clearPendingSourceNavigation()
+            }
         }
     }
 }
@@ -39,11 +47,16 @@ final class SourceViewerViewModel: ObservableObject {
     @Published var selectedFile: SourceFile? {
         didSet {
             selectedContent = selectedFile?.content
+            // Clear highlight when manually selecting a file
+            if highlightLineNumber != nil {
+                highlightLineNumber = nil
+            }
         }
     }
     @Published var selectedContent: String?
     @Published var isLoading = false
     @Published var error: String?
+    @Published var highlightLineNumber: Int?
 
     func loadSourceMap() async {
         isLoading = true
@@ -57,6 +70,46 @@ final class SourceViewerViewModel: ObservableObject {
             self.error = error.localizedDescription
         }
     }
+
+    /// Navigate to source containing the search text
+    func navigateToSource(searchText: String, files: [SourceFile]) {
+        // Search through all files for the text
+        for file in files {
+            guard let content = file.content else { continue }
+
+            // Find the line containing the search text
+            let lines = content.components(separatedBy: .newlines)
+            for (index, line) in lines.enumerated() {
+                if line.contains(searchText) {
+                    // Found it - select this file and highlight the line
+                    selectedFile = file
+                    selectedContent = content
+                    highlightLineNumber = index + 1 // 1-based line number
+                    return
+                }
+            }
+        }
+
+        // If exact match not found, try matching function name pattern
+        let functionPattern = "function \(searchText)" // Basic pattern
+        for file in files {
+            guard let content = file.content else { continue }
+
+            let lines = content.components(separatedBy: .newlines)
+            for (index, line) in lines.enumerated() {
+                if line.contains(functionPattern) ||
+                   line.contains("const \(searchText)") ||
+                   line.contains("let \(searchText)") ||
+                   line.contains("\(searchText) =") ||
+                   line.contains("\(searchText)(") {
+                    selectedFile = file
+                    selectedContent = content
+                    highlightLineNumber = index + 1
+                    return
+                }
+            }
+        }
+    }
 }
 
 // MARK: - File Tree View
@@ -68,7 +121,6 @@ struct FileTreeView: View {
 
     @State private var expandedPaths: Set<String> = []
     @State private var focusedPath: String?
-    @FocusState private var isTreeFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -111,7 +163,7 @@ struct FileTreeView: View {
                                     node: item.node,
                                     depth: item.depth,
                                     isExpanded: expandedPaths.contains(item.node.path),
-                                    isSelected: selectedFile?.fullPath == item.node.file?.fullPath,
+                                    isSelected: selectedFile != nil && selectedFile?.fullPath == item.node.file?.fullPath,
                                     isFocused: focusedPath == item.node.path,
                                     onTap: { handleTap(item.node) },
                                     onToggle: { toggleExpanded(item.node.path) }
@@ -121,7 +173,8 @@ struct FileTreeView: View {
                         }
                         .padding(.vertical, 4)
                     }
-                    .focused($isTreeFocused)
+                    .focusable()
+                    .focusEffectDisabled()
                     .onKeyPress(.upArrow) { navigateUp(); return .handled }
                     .onKeyPress(.downArrow) { navigateDown(); return .handled }
                     .onKeyPress(.leftArrow) { navigateLeft(); return .handled }
@@ -163,7 +216,6 @@ struct FileTreeView: View {
 
     private func handleTap(_ node: FileTreeNode) {
         focusedPath = node.path
-        isTreeFocused = true
         if let file = node.file {
             selectedFile = file
         } else if node.isDirectory {
@@ -328,6 +380,11 @@ struct FileTreeRowView: View {
         case "ts", "js": return "doc.fill"
         case "json": return "curlybraces"
         case "css": return "paintbrush.fill"
+        case "png", "jpg", "jpeg", "gif", "webp", "ico": return "photo.fill"
+        case "svg": return "square.on.circle"
+        case "ttf", "otf", "woff", "woff2": return "textformat"
+        case "mp3", "wav": return "waveform"
+        case "mp4", "mov": return "video.fill"
         default: return "doc.fill"
         }
     }
@@ -340,6 +397,10 @@ struct FileTreeRowView: View {
         case "js": return .yellow
         case "json": return .orange
         case "css": return .pink
+        case "png", "jpg", "jpeg", "gif", "webp", "ico", "svg": return .green
+        case "ttf", "otf", "woff", "woff2": return .purple
+        case "mp3", "wav": return .red
+        case "mp4", "mov": return .indigo
         default: return .secondary
         }
     }
@@ -350,54 +411,24 @@ struct FileTreeRowView: View {
 struct CodeViewerView: View {
     let file: SourceFile?
     let content: String?
-
-    private static let highlightr: Highlightr? = {
-        let h = Highlightr()
-        h?.setTheme(to: "atom-one-dark")
-        // Use 11px to match Chrome DevTools, monospacedSystemFont for better CJK support
-        h?.theme.codeFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        return h
-    }()
-
-    // Cache highlighted results for performance (keyed by font size too)
-    private static var highlightCache: [String: AttributedString] = [:]
-    private static let cacheLock = NSLock()
-    private static let cacheVersion = 2 // Increment when font changes
-
-    private func getCachedHighlight(code: String, language: String) -> AttributedString? {
-        let key = "v\(Self.cacheVersion):\(language):\(code.hashValue)"
-        Self.cacheLock.lock()
-        defer { Self.cacheLock.unlock() }
-
-        if let cached = Self.highlightCache[key] {
-            return cached
-        }
-
-        guard let highlightr = Self.highlightr,
-              let highlighted = highlightr.highlight(code, as: language) else {
-            return nil
-        }
-
-        let result = AttributedString(highlighted)
-        // Limit cache size
-        if Self.highlightCache.count > 50 {
-            Self.highlightCache.removeAll()
-        }
-        Self.highlightCache[key] = result
-        return result
-    }
+    var highlightLineNumber: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack {
                 if let file = file {
-                    Image(systemName: "doc.text")
+                    Image(systemName: fileIcon(for: file))
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                     Text(file.relativePath)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.primary)
+                    if let line = highlightLineNumber {
+                        Text(":\(line)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.orange)
+                    }
                 } else {
                     Text("Select a file to view")
                         .font(.system(size: 11))
@@ -411,14 +442,30 @@ struct CodeViewerView: View {
 
             Divider()
 
-            // Content - left aligned
-            if let content = content, let file = file {
-                ScrollView([.horizontal, .vertical]) {
-                    highlightedCode(content, language: file.language)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // Content
+            if let file = file {
+                if file.isImage {
+                    // Image preview
+                    ImagePreviewView(file: file)
+                } else if let content = content {
+                    // Code view
+                    NativeCodeView(code: content, language: file.language, scrollToLine: highlightLineNumber)
+                } else if file.isAsset {
+                    // Asset without preview
+                    AssetInfoView(file: file)
+                } else {
+                    // Loading or no content
+                    VStack {
+                        Spacer()
+                        ProgressView()
+                        Text("Loading...")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .textBackgroundColor))
                 }
-                .background(Color(red: 0.1, green: 0.1, blue: 0.12))
             } else {
                 VStack {
                     Spacer()
@@ -436,39 +483,473 @@ struct CodeViewerView: View {
         }
     }
 
-    // Code font matching Chrome DevTools (11px monospace)
-    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    private func fileIcon(for file: SourceFile) -> String {
+        if file.isImage { return "photo" }
+        if file.isFont { return "textformat" }
+        return "doc.text"
+    }
+}
 
-    @ViewBuilder
-    private func highlightedCode(_ code: String, language: String) -> some View {
-        let lineCount = code.components(separatedBy: "\n").count
-        // Generate line numbers as single string (much faster than ForEach)
-        let lineNumbers = (1...lineCount).map { String($0) }.joined(separator: "\n")
+// MARK: - Image Preview View
 
-        HStack(alignment: .top, spacing: 0) {
-            // Line numbers - single Text is much faster than ForEach
-            Text(lineNumbers)
-                .font(Font(Self.codeFont))
-                .foregroundColor(.secondary.opacity(0.5))
-                .frame(width: 45, alignment: .trailing)
-                .padding(.trailing, 8)
+struct ImagePreviewView: View {
+    let file: SourceFile
 
-            Divider()
-                .background(Color.secondary.opacity(0.2))
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            VStack(spacing: 16) {
+                if let image = NSImage(contentsOfFile: file.fullPath) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 600, maxHeight: 400)
+                        .background(
+                            // Checkerboard pattern for transparency
+                            CheckerboardPattern()
+                        )
+                        .cornerRadius(4)
+                        .shadow(radius: 2)
 
-            // Code - highlighted (with caching)
-            if let highlighted = getCachedHighlight(code: code, language: language) {
-                Text(highlighted)
-                    .textSelection(.enabled)
-                    .padding(.leading, 8)
-            } else {
-                Text(code)
-                    .font(Font(Self.codeFont))
-                    .foregroundColor(.green.opacity(0.9))
-                    .textSelection(.enabled)
-                    .padding(.leading, 8)
+                    // Image info
+                    VStack(spacing: 4) {
+                        Text("\(Int(image.size.width)) × \(Int(image.size.height))")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(.primary)
+
+                        if let fileSize = try? FileManager.default.attributesOfItem(atPath: file.fullPath)[.size] as? Int {
+                            Text(formatFileSize(fileSize))
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                } else {
+                    Image(systemName: "photo")
+                        .font(.system(size: 48))
+                        .foregroundColor(.secondary)
+                    Text("Unable to load image")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(20)
+        }
+        .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+    }
+
+    private func formatFileSize(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+    }
+}
+
+// MARK: - Checkerboard Pattern (for transparency)
+
+struct CheckerboardPattern: View {
+    let size: CGFloat = 10
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            let rows = Int(canvasSize.height / size) + 1
+            let cols = Int(canvasSize.width / size) + 1
+            for row in 0..<rows {
+                for col in 0..<cols {
+                    let isLight = (row + col) % 2 == 0
+                    let rect = CGRect(x: CGFloat(col) * size, y: CGFloat(row) * size, width: size, height: size)
+                    context.fill(Path(rect), with: .color(isLight ? Color.white.opacity(0.3) : Color.black.opacity(0.1)))
+                }
             }
         }
+    }
+}
+
+// MARK: - Asset Info View (for non-previewable assets)
+
+struct AssetInfoView: View {
+    let file: SourceFile
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: iconForFile(file))
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+
+            Text(file.name)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.primary)
+
+            if let fileSize = try? FileManager.default.attributesOfItem(atPath: file.fullPath)[.size] as? Int {
+                Text(formatFileSize(fileSize))
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+
+            Text(file.fileExtension.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.blue.opacity(0.8))
+                .cornerRadius(4)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private func iconForFile(_ file: SourceFile) -> String {
+        if file.isFont { return "textformat" }
+        let ext = file.fileExtension.lowercased()
+        switch ext {
+        case "mp3", "wav": return "waveform"
+        case "mp4", "mov": return "video"
+        case "json": return "curlybraces"
+        default: return "doc"
+        }
+    }
+
+    private func formatFileSize(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+    }
+}
+
+// MARK: - Native Code View (NSTextView-based for performance)
+
+struct NativeCodeView: NSViewRepresentable {
+    let code: String
+    let language: String
+    var scrollToLine: Int? = nil
+
+    // Code font - 11px monospace to match Chrome DevTools
+    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    private static let lineNumberFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+
+    // Dark theme colors
+    private static let backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
+    private static let textColor = NSColor(red: 0.67, green: 0.76, blue: 0.69, alpha: 1.0) // Light green
+    private static let lineNumberColor = NSColor.secondaryLabelColor.withAlphaComponent(0.5)
+
+    // Highlightr instance
+    private static let highlightr: Highlightr? = {
+        let h = Highlightr()
+        h?.setTheme(to: "atom-one-dark")
+        h?.theme.codeFont = codeFont
+        return h
+    }()
+
+    // Cache
+    private static var highlightCache: [String: NSAttributedString] = [:]
+    private static let cacheLock = NSLock()
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = Self.backgroundColor
+
+        let textView = LineNumberTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = true
+        textView.backgroundColor = Self.backgroundColor
+        textView.textColor = Self.textColor
+        textView.font = Self.codeFont
+        textView.isRichText = true
+        textView.allowsUndo = false
+        textView.usesFindPanel = true
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+
+        // Configure text container for horizontal scrolling
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = false
+        textView.isHorizontallyResizable = true
+        textView.isVerticallyResizable = true
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+
+        // Line number styling
+        textView.lineNumberFont = Self.lineNumberFont
+        textView.lineNumberColor = Self.lineNumberColor
+
+        scrollView.documentView = textView
+
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? LineNumberTextView else { return }
+
+        // Check if content changed
+        let currentCode = textView.string
+        let contentChanged = currentCode != code
+
+        if contentChanged {
+            // Set plain text immediately for responsiveness
+            let plainAttr = NSAttributedString(string: code, attributes: [
+                .font: Self.codeFont,
+                .foregroundColor: Self.textColor
+            ])
+            textView.textStorage?.setAttributedString(plainAttr)
+
+            // Highlight async (runs in background, NSTextView can handle large attributed strings)
+            highlightAsync(code: code, language: language, textView: textView)
+        }
+
+        // Update highlighted line
+        textView.highlightedLine = scrollToLine
+
+        // Scroll to line if specified
+        if let lineNumber = scrollToLine, contentChanged || textView.lastScrolledLine != lineNumber {
+            textView.lastScrolledLine = lineNumber
+            DispatchQueue.main.async {
+                self.scrollToLine(lineNumber, in: textView, scrollView: scrollView)
+            }
+        }
+    }
+
+    private func scrollToLine(_ lineNumber: Int, in textView: NSTextView, scrollView: NSScrollView) {
+        let text = textView.string as NSString
+        var currentLine = 1
+        var lineStart = 0
+
+        // Find the character index of the target line
+        for i in 0..<text.length {
+            if currentLine == lineNumber {
+                lineStart = i
+                break
+            }
+            if text.character(at: i) == UInt16(UnicodeScalar("\n").value) {
+                currentLine += 1
+            }
+        }
+
+        // Get the rect for that character position
+        let layoutManager = textView.layoutManager!
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: NSRange(location: lineStart, length: 0), actualCharacterRange: nil)
+        let lineRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textView.textContainer!)
+
+        // Scroll to make that line visible (with some padding)
+        let targetY = max(0, lineRect.origin.y - 100) // 100px padding from top
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: targetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        // Force redraw to show highlight
+        textView.needsDisplay = true
+    }
+
+    private func highlightAsync(code: String, language: String, textView: NSTextView) {
+        let cacheKey = "\(language):\(code.hashValue)"
+
+        // Check cache
+        Self.cacheLock.lock()
+        if let cached = Self.highlightCache[cacheKey] {
+            Self.cacheLock.unlock()
+            textView.textStorage?.setAttributedString(cached)
+            return
+        }
+        Self.cacheLock.unlock()
+
+        // Highlight on background thread
+        Task.detached(priority: .userInitiated) {
+            guard let highlightr = Self.highlightr,
+                  let highlighted = highlightr.highlight(code, as: language) else {
+                return
+            }
+
+            // Apply uniform font
+            let mutableAttr = NSMutableAttributedString(attributedString: highlighted)
+            mutableAttr.addAttribute(.font, value: Self.codeFont, range: NSRange(location: 0, length: mutableAttr.length))
+
+            // Cache
+            Self.cacheLock.lock()
+            if Self.highlightCache.count > 30 {
+                Self.highlightCache.removeAll()
+            }
+            Self.highlightCache[cacheKey] = mutableAttr
+            Self.cacheLock.unlock()
+
+            await MainActor.run {
+                textView.textStorage?.setAttributedString(mutableAttr)
+            }
+        }
+    }
+}
+
+// MARK: - Line Number Text View
+
+class LineNumberTextView: NSTextView {
+    var lineNumberFont: NSFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    var lineNumberColor: NSColor = .secondaryLabelColor
+    var highlightedLine: Int? = nil
+    var lastScrolledLine: Int? = nil
+
+    private let lineNumberWidth: CGFloat = 45
+    private let lineNumberPadding: CGFloat = 8
+    private let highlightColor = NSColor.orange.withAlphaComponent(0.2)
+
+    override var textContainerOrigin: NSPoint {
+        return NSPoint(x: lineNumberWidth + lineNumberPadding, y: 10)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Draw gutter background first (before clipping)
+        drawGutterBackground()
+
+        // Draw line highlight if set
+        drawLineHighlight()
+
+        super.draw(dirtyRect)
+
+        // Draw line numbers on top
+        drawLineNumbers()
+    }
+
+    private func drawLineHighlight() {
+        guard let lineNumber = highlightedLine,
+              let layoutManager = layoutManager,
+              let textContainer = textContainer else { return }
+
+        let content = string as NSString
+        guard content.length > 0 else { return }
+
+        // Find the character range for the highlighted line
+        var currentLine = 1
+        var lineStart = 0
+        var lineEnd = 0
+
+        for i in 0..<content.length {
+            if currentLine == lineNumber {
+                lineStart = i
+                // Find end of line
+                for j in i..<content.length {
+                    if content.character(at: j) == UInt16(UnicodeScalar("\n").value) {
+                        lineEnd = j
+                        break
+                    }
+                    lineEnd = j + 1
+                }
+                break
+            }
+            if content.character(at: i) == UInt16(UnicodeScalar("\n").value) {
+                currentLine += 1
+            }
+        }
+
+        if currentLine != lineNumber { return }
+
+        // Get the rect for that line
+        let charRange = NSRange(location: lineStart, length: max(1, lineEnd - lineStart))
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+        let lineRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+
+        // Draw highlight across the full width
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: bounds).setClip()
+
+        let highlightRect = NSRect(
+            x: 0,
+            y: lineRect.origin.y + textContainerOrigin.y,
+            width: max(bounds.width, 2000),
+            height: lineRect.height
+        )
+        highlightColor.setFill()
+        highlightRect.fill()
+
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawGutterBackground() {
+        guard let scrollView = enclosingScrollView else { return }
+        let visibleRect = scrollView.documentVisibleRect
+
+        NSGraphicsContext.saveGraphicsState()
+        // Reset clipping to draw in gutter area
+        NSBezierPath(rect: bounds).setClip()
+
+        // Gutter background
+        let gutterRect = NSRect(x: 0, y: visibleRect.origin.y, width: lineNumberWidth, height: visibleRect.height + 100)
+        NSColor(red: 0.08, green: 0.08, blue: 0.1, alpha: 1.0).setFill()
+        gutterRect.fill()
+
+        // Separator line
+        let separatorX = lineNumberWidth + 4
+        let separatorRect = NSRect(x: separatorX, y: visibleRect.origin.y, width: 1, height: visibleRect.height + 100)
+        NSColor.separatorColor.withAlphaComponent(0.3).setFill()
+        separatorRect.fill()
+
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawLineNumbers() {
+        guard let layoutManager = layoutManager,
+              let textContainer = textContainer,
+              let scrollView = enclosingScrollView else { return }
+
+        let visibleRect = scrollView.documentVisibleRect
+        let content = string as NSString
+
+        guard content.length > 0 else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        // Reset clipping to draw in gutter area
+        NSBezierPath(rect: bounds).setClip()
+
+        // Draw line numbers
+        let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: textContainer)
+        guard glyphRange.length > 0 else {
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
+
+        var lineNumber = 1
+
+        // Count lines before visible range
+        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        if charRange.location > 0 {
+            let beforeText = content.substring(to: charRange.location)
+            lineNumber = beforeText.components(separatedBy: "\n").count
+        }
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: lineNumberFont,
+            .foregroundColor: lineNumberColor
+        ]
+
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { [weak self] (rect, usedRect, container, range, stop) in
+            guard let self = self else { return }
+
+            let lineStr = "\(lineNumber)" as NSString
+            let size = lineStr.size(withAttributes: attributes)
+            let y = rect.origin.y + self.textContainerOrigin.y + (rect.height - size.height) / 2
+            let x = self.lineNumberWidth - size.width - 4
+
+            lineStr.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
+
+            // Check if this line fragment ends with newline
+            let charRange = layoutManager.characterRange(forGlyphRange: range, actualGlyphRange: nil)
+            if charRange.location + charRange.length <= content.length {
+                let endIndex = min(charRange.location + charRange.length, content.length)
+                if endIndex > 0 && content.character(at: endIndex - 1) == 10 { // newline
+                    lineNumber += 1
+                }
+            }
+        }
+
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        super.setNeedsDisplay(bounds)
     }
 }
 
