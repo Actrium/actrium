@@ -37,7 +37,11 @@ const getInspectorDataForViewAtPoint = require('react-native/src/private/inspect
   }) => boolean
 ) => void;
 import { logger } from '../logger';
+import { installConsoleInterceptor } from '../devtools-console';
 import { Engine } from 'rill';
+
+// Install console interceptor to forward logs to DevTools Console panel
+installConsoleInterceptor();
 import { hostComponents } from './BundleView';
 import { EngineMonitorOverlay } from 'askit';
 import type { ContractViolation } from 'askit/contracts';
@@ -228,9 +232,6 @@ function logDevToolsRenderOp(
   }
 }
 
-// Track if DevTools source map has been initialized
-let devToolsSourceMapInitialized = false;
-
 function updateDevToolsComponentTree(engine: Engine | null, tabId?: string) {
   try {
     if (!engine) {
@@ -242,14 +243,6 @@ function updateDevToolsComponentTree(engine: Engine | null, tabId?: string) {
     if (!receiver) {
       DevToolsBridge?.updateComponentTree?.(null, tabId ?? null);
       return;
-    }
-
-    // Initialize source map for DevTools function location resolution (once)
-    if (!devToolsSourceMapInitialized) {
-      devToolsSourceMapInitialized = true;
-      receiver.initDevToolsSourceMap?.(8082, 'macos').catch(() => {
-        // Ignore source map loading errors
-      });
     }
 
     // Get the component tree from Receiver

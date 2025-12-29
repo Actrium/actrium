@@ -78,7 +78,16 @@ final class SourceViewerViewModel: ObservableObject {
 
     /// Navigate to source - prefer direct file+line if available, otherwise search
     func navigateToSource(functionName: String, sourceFile: String?, sourceLine: Int?, files: [SourceFile]) {
-        print("[SourceViewer] navigateToSource: func='\(functionName)', file=\(sourceFile ?? "nil"), line=\(sourceLine ?? 0), files=\(files.count)")
+        print("🔍 [SourceViewer] navigateToSource called:")
+        print("   - functionName: '\(functionName)'")
+        print("   - sourceFile: \(sourceFile ?? "nil")")
+        print("   - sourceLine: \(sourceLine ?? 0)")
+        print("   - files count: \(files.count)")
+
+        if files.isEmpty {
+            print("⚠️ [SourceViewer] No files loaded! Navigation cannot proceed.")
+            return
+        }
 
         // Priority 0: If we have exact file and line, navigate directly
         if let filePath = sourceFile, let line = sourceLine {
@@ -97,7 +106,7 @@ final class SourceViewerViewModel: ObservableObject {
 
         // Fallback: Extract function name and search
         let searchName = extractFunctionName(from: functionName) ?? functionName
-        print("[SourceViewer] Fallback search for function: \(searchName)")
+        print("🔍 [SourceViewer] Searching for function: '\(searchName)' in \(files.count) files")
 
         // Priority 1: Search for exact function name definitions
         for file in files {
@@ -113,7 +122,7 @@ final class SourceViewerViewModel: ObservableObject {
                    line.contains("\(searchName) =") && line.contains("=>") ||
                    line.contains("\(searchName): function") ||
                    line.contains("\(searchName)(") && (line.contains("function") || line.contains("=>")) {
-                    print("[SourceViewer] Found '\(searchName)' in \(file.relativePath) at line \(index + 1)")
+                    print("✅ [SourceViewer] Found '\(searchName)' in \(file.relativePath) at line \(index + 1)")
                     selectedFile = file
                     selectedContent = content
                     highlightLineNumber = index + 1
@@ -121,7 +130,7 @@ final class SourceViewerViewModel: ObservableObject {
                 }
             }
         }
-        print("[SourceViewer] No match found for function name '\(searchName)'")
+        print("⚠️ [SourceViewer] No exact definition found for function '\(searchName)', trying text match...")
 
         // Priority 2: Try exact text match (for non-minified code)
         for file in files {
@@ -148,6 +157,7 @@ final class SourceViewerViewModel: ObservableObject {
 
                 for (index, line) in lines.enumerated() {
                     if line.contains(literal) {
+                        print("✅ [SourceViewer] Found string literal '\(literal)' in \(file.relativePath) at line \(index + 1)")
                         selectedFile = file
                         selectedContent = content
                         highlightLineNumber = index + 1
@@ -156,6 +166,8 @@ final class SourceViewerViewModel: ObservableObject {
                 }
             }
         }
+
+        print("❌ [SourceViewer] No match found for '\(functionName)' in any file")
     }
 
     /// Extract function name from search text

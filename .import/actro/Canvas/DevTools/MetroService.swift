@@ -151,14 +151,12 @@ struct SourceMap: Decodable, Sendable {
     let names: [String]?
     let mappings: String
 
-    /// Get project files (excluding node_modules)
+    /// Get all source files from source map (no filtering)
     var projectFiles: [SourceFile] {
         var files: [SourceFile] = []
         for (index, path) in sources.enumerated() {
-            // Skip internal/polyfill files
+            // Skip internal/polyfill files only
             guard !path.starts(with: "__") else { continue }
-            // Skip node_modules
-            guard !path.contains("/node_modules/") else { continue }
 
             let content = sourcesContent?[safe: index] ?? nil
             files.append(SourceFile(
@@ -203,18 +201,29 @@ struct SourceFile: Identifiable, Hashable, Sendable {
         (fullPath as NSString).deletingLastPathComponent
     }
 
-    /// Relative path from project root
-    /// Uses host/ for Subsystem (host app code) and guest/ for countapp (embedded app code)
+    /// Relative path for file tree display
+    /// Two fixed root directories: Host (actr-host) and Guest (embedded app)
     var relativePath: String {
-        // host/ = Subsystem (the host app)
-        if let range = fullPath.range(of: "/Subsystem/") {
-            return "host/" + String(fullPath[range.upperBound...])
+        // Host = actr-host directory (the host application code)
+        if let range = fullPath.range(of: "/actr-host/") {
+            return "Host/" + String(fullPath[range.upperBound...])
         }
-        // guest/ = countapp or similar embedded apps
+        // Also include Subsystem-level files under Host
+        if let range = fullPath.range(of: "/Subsystem/src/") {
+            let remainder = String(fullPath[range.upperBound...])
+            // Files directly in Subsystem/src but not in actr-host
+            if !remainder.contains("actr-host") {
+                return "Host/" + remainder
+            }
+        }
+        // Guest = countapp or any guest app directory
         if let range = fullPath.range(of: "/countapp/") {
-            return "guest/" + String(fullPath[range.upperBound...])
+            return "Guest/" + String(fullPath[range.upperBound...])
         }
-        // Remote packages (rill, askit) keep their own namespace
+        // For other paths, show full relative path from a recognizable root
+        if let range = fullPath.range(of: "/node_modules/") {
+            return "node_modules/" + String(fullPath[range.upperBound...])
+        }
         if let range = fullPath.range(of: "/rill/") {
             return "rill/" + String(fullPath[range.upperBound...])
         }
