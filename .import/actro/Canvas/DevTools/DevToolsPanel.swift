@@ -915,19 +915,57 @@ struct DevToolsTreeNodeView: View {
 
 struct DevToolsConsoleView: View {
     @ObservedObject var devTools: DevToolsManager
+    @State private var levelFilter: DevToolsLogEntry.LogLevel? = nil
+    @State private var textFilter: String = ""
+
+    private var filteredLogs: [DevToolsLogEntry] {
+        devTools.consoleLogs.filter { entry in
+            // Level filter
+            if let level = levelFilter, entry.level != level {
+                return false
+            }
+            // Text filter
+            if !textFilter.isEmpty {
+                let searchText = textFilter.lowercased()
+                return entry.message.lowercased().contains(searchText) ||
+                       entry.source.lowercased().contains(searchText)
+            }
+            return true
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             // Filter bar
-            HStack {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Text("All Levels")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                // Level filter
+                Picker("", selection: $levelFilter) {
+                    Text("All").tag(nil as DevToolsLogEntry.LogLevel?)
+                    Label("Info", systemImage: "info.circle").tag(DevToolsLogEntry.LogLevel.info as DevToolsLogEntry.LogLevel?)
+                    Label("Warn", systemImage: "exclamationmark.triangle").tag(DevToolsLogEntry.LogLevel.warn as DevToolsLogEntry.LogLevel?)
+                    Label("Error", systemImage: "xmark.circle").tag(DevToolsLogEntry.LogLevel.error as DevToolsLogEntry.LogLevel?)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+
+                // Text search
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    TextField("Filter", text: $textFilter)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color(nsColor: .textBackgroundColor))
+                .cornerRadius(4)
+                .frame(maxWidth: 150)
+
                 Spacer()
-                Text("\(devTools.consoleLogs.count) entries")
+
+                Text("\(filteredLogs.count) / \(devTools.consoleLogs.count)")
                     .font(.system(size: 10))
                     .foregroundColor(Color(nsColor: .tertiaryLabelColor))
 
@@ -946,18 +984,24 @@ struct DevToolsConsoleView: View {
             Divider()
 
             // Log list
-            if devTools.consoleLogs.isEmpty {
+            if filteredLogs.isEmpty {
                 VStack {
-                    Text("No console output")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                    if devTools.consoleLogs.isEmpty {
+                        Text("No console output")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("No logs match filter")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(devTools.consoleLogs) { entry in
+                            ForEach(filteredLogs) { entry in
                                 DevToolsLogEntryView(entry: entry)
                             }
                         }
