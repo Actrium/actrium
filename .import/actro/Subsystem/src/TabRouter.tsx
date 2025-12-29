@@ -8,10 +8,7 @@
  */
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import type { TabRouterProps, TabConfig } from './actr-host/types';
-import { logger } from './logger';
-
-const log = logger.child('TabRouter');
+import type { TabRouterProps } from './actr-host/types';
 
 // Lazy imports to avoid circular dependencies
 const ActrApp = React.lazy(() => import('./actr-host/ActrApp').then(m => ({ default: m.ActrApp })));
@@ -28,16 +25,7 @@ const LoadingFallback = () => (
   </View>
 );
 
-// Track previous containerWidth for logging
-let prevContainerWidth: number | undefined;
-
 export const TabRouter: React.FC<TabRouterProps> = (props) => {
-  // Log containerWidth changes
-  if (props?.containerWidth !== prevContainerWidth) {
-    log.debug(`[ResizeFlow] TabRouter received containerWidth: ${prevContainerWidth} -> ${props?.containerWidth}`);
-    prevContainerWidth = props?.containerWidth;
-  }
-
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
@@ -64,9 +52,12 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
       );
     }
 
-    // ACTR tab - render single tab
+    // ACTR tab - 使用 flex: 1 让 Yoga 自动适应 RootView 尺寸
+    // 避免显式 width/height 触发不必要的 re-render
+    const containerStyle = styles.container;
+
     return (
-      <View style={styles.container} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
+      <View style={containerStyle} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
         <React.Suspense fallback={<LoadingFallback />}>
           <ActrApp
             tabs={[tab]}

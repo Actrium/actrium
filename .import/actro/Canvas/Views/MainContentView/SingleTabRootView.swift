@@ -66,30 +66,64 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         #if canImport(React)
         guard let rootView = nsView as? RCTRootView else { return }
+        guard containerSize.width > 0 && containerSize.height > 0 else { return }
 
-        // Update frame if size actually changed
-        if containerSize.width > 0 && containerSize.height > 0 {
-            if rootView.frame.size != containerSize {
-                logger.debug("[ResizeFlow] Native frame changed: \(Int(rootView.frame.size.width))x\(Int(rootView.frame.size.height)) -> \(Int(containerSize.width))x\(Int(containerSize.height))")
-                rootView.setFrameSize(containerSize)
-                rootView.bounds = CGRect(origin: .zero, size: containerSize)
-                // 强制触发布局更新，确保 RN 检测到尺寸变化（解决缩小窗口时不同步问题）
-                rootView.needsLayout = true
-                rootView.layoutSubtreeIfNeeded()
-            }
+        let coordinator = context.coordinator
+        let newFrame = CGRect(origin: .zero, size: containerSize)
+
+        // 首次设置：确保 layer 和约束正确配置
+        if coordinator.lastUpdatedSize == .zero {
+            setupRootViewOnce(rootView, frame: newFrame)
         }
 
-        // Only update properties if they actually changed (avoid triggering RN re-renders during animations)
-        let newProperties = makeProperties()
-        let oldWidth = (rootView.appProperties?["containerWidth"] as? CGFloat) ?? 0
-        let newWidth = containerSize.width
-        if oldWidth != newWidth {
-            logger.debug("[ResizeFlow] Native appProperties.containerWidth: \(Int(oldWidth)) -> \(Int(newWidth))")
+        // Native frame 始终立即更新（轻量操作）
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        rootView.frame = newFrame
+        rootView.bounds = newFrame
+        CATransaction.commit()
+
+        // 拖动中：只更新 Yoga 布局（60fps 节流），不触发 React re-render
+        coordinator.throttledYogaUpdate(newSize: containerSize) { [weak rootView] throttledSize in
+            guard let rootView = rootView else { return }
+
+            // 通知 Yoga 新尺寸（关键：解决缩小时不更新的问题）
+            rootView.bridge.uiManager.setSize(throttledSize, for: rootView)
+
+            // 强制布局更新
+            rootView.needsLayout = true
+            rootView.layoutSubtreeIfNeeded()
         }
-        if !NSDictionary(dictionary: newProperties).isEqual(to: rootView.appProperties ?? [:]) {
-            rootView.appProperties = newProperties
+
+        // 拖动结束：延迟 150ms 后更新 React props（减少 re-render 次数）
+        coordinator.scheduleDragEndUpdate { [weak rootView] in
+            guard let rootView = rootView else { return }
+            rootView.appProperties = self.makeProperties()
         }
         #endif
+    }
+
+    /// 首次设置 RootView 的 layer 和约束（只执行一次）
+    private func setupRootViewOnce(_ rootView: RCTRootView, frame: CGRect) {
+        // 设置 masksToBounds 防止 RN 内容溢出
+        rootView.wantsLayer = true
+        rootView.layer?.masksToBounds = true
+
+        rootView.frame = frame
+        rootView.bounds = frame
+
+        // 设置 contentView 的约束
+        let contentView = rootView.contentView
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.wantsLayer = true
+        contentView.layer?.masksToBounds = true
+
+        NSLayoutConstraint.activate([
+            contentView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
+            contentView.topAnchor.constraint(equalTo: rootView.topAnchor),
+            contentView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor)
+        ])
     }
 
     private func makeProperties() -> [String: Any] {
@@ -209,13 +243,72 @@ struct SingleTabRootRepresentable: NSViewRepresentable {
         var rootView: RCTRootView?
         #endif
 
+        // 节流相关状态
+        var lastUpdateTime: CFAbsoluteTime = 0
+        var lastUpdatedSize: CGSize = .zero
+        var pendingSize: CGSize?
+        var throttleWorkItem: DispatchWorkItem?
+        var dragEndWorkItem: DispatchWorkItem?
+
+        // 节流间隔：约 10ms (100fps)
+        static let throttleInterval: CFAbsoluteTime = 0.010
+        // 拖动结束判定延迟：20ms 无变化视为拖动结束
+        static let dragEndDelay: CFAbsoluteTime = 0.020
+
         init(tab: Tab, viewModel: BrowserViewModel) {
             self.tab = tab
             self.viewModel = viewModel
         }
 
         deinit {
+            throttleWorkItem?.cancel()
+            dragEndWorkItem?.cancel()
             logger.debug("[SingleTabRootView] Coordinator deinit for Tab: \(self.tab.title)")
+        }
+
+        /// 拖动中更新：只更新 Yoga 布局，不触发 React re-render
+        func throttledYogaUpdate(newSize: CGSize, yogaBlock: @escaping (CGSize) -> Void) {
+            let now = CFAbsoluteTimeGetCurrent()
+            let elapsed = now - lastUpdateTime
+
+            // 如果尺寸没变，跳过
+            if newSize == lastUpdatedSize {
+                return
+            }
+
+            // 如果距离上次更新超过节流间隔，立即更新 Yoga
+            if elapsed >= Self.throttleInterval {
+                lastUpdateTime = now
+                lastUpdatedSize = newSize
+                throttleWorkItem?.cancel()
+                pendingSize = nil
+                yogaBlock(newSize)
+            } else {
+                // 否则，延迟到下一个节流周期
+                pendingSize = newSize
+                throttleWorkItem?.cancel()
+
+                let workItem = DispatchWorkItem { [weak self] in
+                    guard let self = self, let size = self.pendingSize else { return }
+                    self.lastUpdateTime = CFAbsoluteTimeGetCurrent()
+                    self.lastUpdatedSize = size
+                    self.pendingSize = nil
+                    yogaBlock(size)
+                }
+                throttleWorkItem = workItem
+                let delay = Self.throttleInterval - elapsed
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+            }
+        }
+
+        /// 拖动结束时更新：debounce 后触发 React props 更新
+        func scheduleDragEndUpdate(propsBlock: @escaping () -> Void) {
+            dragEndWorkItem?.cancel()
+            let workItem = DispatchWorkItem {
+                propsBlock()
+            }
+            dragEndWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.dragEndDelay, execute: workItem)
         }
     }
 }
