@@ -73,35 +73,41 @@ final class SourceViewerViewModel: ObservableObject {
 
     /// Navigate to source containing the search text
     func navigateToSource(searchText: String, files: [SourceFile]) {
-        // Search through all files for the text
-        for file in files {
-            guard let content = file.content else { continue }
+        // Extract potential function name from the search text
+        // The searchText might be minified code or just a function name
+        let functionName = extractFunctionName(from: searchText)
 
-            // Find the line containing the search text
-            let lines = content.components(separatedBy: .newlines)
-            for (index, line) in lines.enumerated() {
-                if line.contains(searchText) {
-                    // Found it - select this file and highlight the line
-                    selectedFile = file
-                    selectedContent = content
-                    highlightLineNumber = index + 1 // 1-based line number
-                    return
+        // Priority 1: Search for exact function name definitions
+        if let name = functionName {
+            for file in files {
+                guard let content = file.content else { continue }
+                let lines = content.components(separatedBy: .newlines)
+
+                for (index, line) in lines.enumerated() {
+                    // Look for function definitions
+                    if line.contains("function \(name)") ||
+                       line.contains("const \(name) =") ||
+                       line.contains("let \(name) =") ||
+                       line.contains("var \(name) =") ||
+                       line.contains("\(name) =") && line.contains("=>") ||
+                       line.contains("\(name): function") ||
+                       line.contains("\(name)(") && (line.contains("function") || line.contains("=>")) {
+                        selectedFile = file
+                        selectedContent = content
+                        highlightLineNumber = index + 1
+                        return
+                    }
                 }
             }
         }
 
-        // If exact match not found, try matching function name pattern
-        let functionPattern = "function \(searchText)" // Basic pattern
+        // Priority 2: Try exact text match (for non-minified code)
         for file in files {
             guard let content = file.content else { continue }
-
             let lines = content.components(separatedBy: .newlines)
+
             for (index, line) in lines.enumerated() {
-                if line.contains(functionPattern) ||
-                   line.contains("const \(searchText)") ||
-                   line.contains("let \(searchText)") ||
-                   line.contains("\(searchText) =") ||
-                   line.contains("\(searchText)(") {
+                if line.contains(searchText) {
                     selectedFile = file
                     selectedContent = content
                     highlightLineNumber = index + 1
@@ -109,6 +115,66 @@ final class SourceViewerViewModel: ObservableObject {
                 }
             }
         }
+
+        // Priority 3: Look for any identifiable strings in the search text
+        // Extract string literals from minified code like: y?.("蓝色按钮", ...
+        let stringLiterals = extractStringLiterals(from: searchText)
+        for literal in stringLiterals {
+            for file in files {
+                guard let content = file.content else { continue }
+                let lines = content.components(separatedBy: .newlines)
+
+                for (index, line) in lines.enumerated() {
+                    if line.contains(literal) {
+                        selectedFile = file
+                        selectedContent = content
+                        highlightLineNumber = index + 1
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    /// Extract function name from search text
+    private func extractFunctionName(from text: String) -> String? {
+        // If it's already just a function name (no special chars except _)
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.range(of: "^[a-zA-Z_][a-zA-Z0-9_]*$", options: .regularExpression) != nil {
+            return trimmed
+        }
+
+        // Try to extract from patterns like "function name(" or "name =>"
+        if let match = trimmed.range(of: "function\\s+([a-zA-Z_][a-zA-Z0-9_]*)", options: .regularExpression) {
+            let funcPart = String(trimmed[match])
+            return funcPart.replacingOccurrences(of: "function ", with: "").trimmingCharacters(in: .whitespaces)
+        }
+
+        return nil
+    }
+
+    /// Extract string literals from minified code
+    private func extractStringLiterals(from text: String) -> [String] {
+        var literals: [String] = []
+        // Match both single and double quoted strings
+        let patterns = ["\"([^\"]+)\"", "'([^']+)'"]
+
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern) {
+                let range = NSRange(text.startIndex..., in: text)
+                let matches = regex.matches(in: text, range: range)
+                for match in matches {
+                    if let stringRange = Range(match.range(at: 1), in: text) {
+                        let literal = String(text[stringRange])
+                        // Skip very short or Unicode escape sequences
+                        if literal.count > 2 && !literal.hasPrefix("\\u") {
+                            literals.append(literal)
+                        }
+                    }
+                }
+            }
+        }
+        return literals
     }
 }
 

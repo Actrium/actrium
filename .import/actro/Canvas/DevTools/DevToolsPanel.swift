@@ -608,18 +608,11 @@ struct DevToolsPropRowView: View {
 
                 // Function props are clickable links to navigate to source
                 if let fn = functionInfo {
-                    Button(action: {
-                        // Navigate to source - use function name or source snippet
-                        let searchText = fn.source ?? fn.name
-                        DevToolsManager.shared.navigateToSource(functionName: searchText)
-                    }) {
-                        Text(formatValue(value))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.blue)
-                            .underline()
-                    }
-                    .buttonStyle(.plain)
-                    .help("Click to view source in Sources panel")
+                    FunctionLinkButton(
+                        displayText: formatValue(value),
+                        // Prefer function name for searching, fall back to source if anonymous
+                        searchText: fn.name != "anonymous" ? fn.name : (fn.source ?? fn.name)
+                    )
                 } else {
                     Text(formatValue(value, brief: isExpandable && isExpanded))
                         .font(.system(size: 11, design: .monospaced))
@@ -1633,6 +1626,32 @@ struct StyleRow: View {
                 .foregroundColor(.primary)
             Spacer()
         }
+    }
+}
+
+// MARK: - Function Link Button
+
+/// Button that displays function as clickable link with hover underline
+struct FunctionLinkButton: View {
+    let displayText: String
+    let searchText: String
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: {
+            DevToolsManager.shared.navigateToSource(functionName: searchText)
+        }) {
+            Text(displayText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.blue)
+                .underline(isHovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .help("Click to view source in Sources panel")
     }
 }
 
