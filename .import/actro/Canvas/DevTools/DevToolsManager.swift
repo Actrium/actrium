@@ -106,6 +106,74 @@ struct DevToolsLogEntry: Identifiable {
     }
 }
 
+// MARK: - Network
+
+/// Network request state
+enum DevToolsNetworkRequestState {
+    case pending
+    case completed
+    case failed
+}
+
+/// Network request (APP_FETCH_* lifecycle)
+struct DevToolsNetworkRequest: Identifiable {
+    let id = UUID()
+    let requestId: String
+    var tabId: String?
+    var url: String
+    var method: String
+    var startTime: Date
+    var endTime: Date?
+    var status: Int?
+    var ok: Bool?
+    var error: String?
+    var requestHeaders: [String: String]?
+    var responseHeaders: [String: String]?
+    var requestBody: String?
+    var responseBody: String?
+    var state: DevToolsNetworkRequestState = .pending
+
+    var duration: TimeInterval? {
+        guard let endTime else { return nil }
+        return endTime.timeIntervalSince(startTime)
+    }
+
+    var statusText: String {
+        if let error { return "Error" }
+        if let status { return "\(status)" }
+        return "Pending"
+    }
+
+    var statusColor: SwiftUI.Color {
+        switch state {
+        case .pending:
+            return .gray
+        case .failed:
+            return .red
+        case .completed:
+            if let status, status >= 400 { return .red }
+            return .green
+        }
+    }
+
+    var displayHost: String {
+        URL(string: url)?.host ?? ""
+    }
+
+    var displayPathWithQuery: String {
+        guard let components = URLComponents(string: url) else { return url }
+        var path = components.path.isEmpty ? "/" : components.path
+        if let query = components.percentEncodedQuery, !query.isEmpty {
+            path += "?\(query)"
+        }
+        return path
+    }
+
+    var responseSizeBytes: Int? {
+        responseBody?.utf8.count
+    }
+}
+
 /// Component tree node for Elements inspector
 struct DevToolsComponentNode: Identifiable {
     let id: String
@@ -211,28 +279,22 @@ class DevToolsManager: ObservableObject {
     @Published var pendingSourceNavigation: SourceNavigation?
 
     struct SourceNavigation: Equatable {
-        let searchText: String  // Function name or code to search for
-        let fileName: String?   // Optional specific file to search in (from Babel plugin)
-        let lineNumber: Int?    // Optional specific line number (from Babel plugin)
-        let bundleLine: Int?    // Bundle line number (from Error().stack)
-        let bundleColumn: Int?  // Bundle column number (from Error().stack)
+        let searchText: String  // Function name for search fallback
+        let fileName: String?   // Source file path (from Babel plugin)
+        let lineNumber: Int?    // Source line number (from Babel plugin)
     }
 
-    /// Navigate to source location (switches to Sources tab and triggers source map resolution)
-    func navigateToSource(functionName: String, fileName: String? = nil, lineNumber: Int? = nil, bundleLine: Int? = nil, bundleColumn: Int? = nil) {
+    /// Navigate to source location (switches to Sources tab)
+    func navigateToSource(functionName: String, fileName: String? = nil, lineNumber: Int? = nil) {
         print("🔍 [DevToolsManager] navigateToSource called:")
         print("   - functionName: '\(functionName)'")
-        print("   - fileName: \(fileName ?? "nil")")
-        print("   - lineNumber: \(lineNumber ?? 0)")
-        print("   - bundleLine: \(bundleLine ?? 0)")
-        print("   - bundleColumn: \(bundleColumn ?? 0)")
+        print("   - fileName (from Babel): \(fileName ?? "nil")")
+        print("   - lineNumber (from Babel): \(lineNumber ?? 0)")
 
         pendingSourceNavigation = SourceNavigation(
             searchText: functionName,
             fileName: fileName,
-            lineNumber: lineNumber,
-            bundleLine: bundleLine,
-            bundleColumn: bundleColumn
+            lineNumber: lineNumber
         )
         activeTab = .sources
 
@@ -296,8 +358,12 @@ class DevToolsManager: ObservableObject {
     /// Console log entries
     @Published private(set) var consoleLogs: [DevToolsLogEntry] = []
 
+    /// Network requests
+    @Published private(set) var networkRequests: [DevToolsNetworkRequest] = []
+
     /// Maximum log entries to keep
     private let maxLogEntries = 1000
+    private let maxNetworkEntries = 1000
 
     /// Message filter (event name pattern)
     @Published var messageFilter: String = ""
@@ -486,7 +552,205 @@ class DevToolsManager: ObservableObject {
             if self.messages.count > self.maxLogEntries {
                 self.messages.removeFirst(self.messages.count - self.maxLogEntries)
             }
+
+            self.processNetworkMessage(message)
         }
+    }
+
+    private func processNetworkMessage(_ message: DevToolsMessage) {
+        switch message.event {
+        case "APP_FETCH_REQUEST":
+            guard let payload = message.payload,
+                  let dict = parseJSONDictionary(payload),
+                  let requestId = dict["requestId"] as? String,
+                  let url = dict["url"] as? String else { return }
+
+            let options = dict["options"]
+            let method = (options as? [String: Any])?["method"] as? String ?? "GET"
+            let headers = normalizeHeaders((options as? [String: Any])?["headers"])
+            let body = normalizeBody((options as? [String: Any])?["body"])
+
+            upsertNetworkRequestStart(
+                requestId: requestId,
+                tabId: message.tabId,
+                url: url,
+                method: method,
+                startTime: message.timestamp,
+                requestHeaders: headers,
+                requestBody: body
+            )
+        case "APP_FETCH_RESPONSE":
+            guard let payload = message.payload,
+                  let dict = parseJSONDictionary(payload),
+                  let requestId = dict["requestId"] as? String else { return }
+
+            let ok = dict["ok"] as? Bool
+            let status = dict["status"] as? Int
+            let error = dict["error"] as? String
+            let responseHeaders = normalizeHeaders(dict["headers"])
+            let responseBody = normalizeBody(dict["data"]) ?? error
+
+            upsertNetworkRequestEnd(
+                requestId: requestId,
+                tabId: message.tabId,
+                endTime: message.timestamp,
+                ok: ok,
+                status: status,
+                error: error,
+                responseHeaders: responseHeaders,
+                responseBody: responseBody
+            )
+        default:
+            return
+        }
+    }
+
+    private func upsertNetworkRequestStart(
+        requestId: String,
+        tabId: String?,
+        url: String,
+        method: String,
+        startTime: Date,
+        requestHeaders: [String: String]?,
+        requestBody: String?
+    ) {
+        if let index = networkRequests.firstIndex(where: { $0.requestId == requestId && ($0.tabId == tabId || tabId == nil || $0.tabId == nil) }) {
+            var req = networkRequests[index]
+            // Fill missing info for placeholders created from response.
+            req.tabId = req.tabId ?? tabId
+            if req.url == "unknown" { req.url = url }
+            if req.method == "GET" { req.method = method }
+            // Only move startTime earlier.
+            if startTime < req.startTime { req.startTime = startTime }
+            req.requestHeaders = requestHeaders ?? req.requestHeaders
+            req.requestBody = requestBody ?? req.requestBody
+            if req.endTime == nil { req.state = .pending }
+            networkRequests[index] = req
+            return
+        }
+
+        let req = DevToolsNetworkRequest(
+            requestId: requestId,
+            tabId: tabId,
+            url: url,
+            method: method,
+            startTime: startTime,
+            requestHeaders: requestHeaders,
+            requestBody: requestBody
+        )
+        networkRequests.append(req)
+        trimNetworkIfNeeded()
+    }
+
+    private func upsertNetworkRequestEnd(
+        requestId: String,
+        tabId: String?,
+        endTime: Date,
+        ok: Bool?,
+        status: Int?,
+        error: String?,
+        responseHeaders: [String: String]?,
+        responseBody: String?
+    ) {
+        if let index = networkRequests.firstIndex(where: { $0.requestId == requestId && ($0.tabId == tabId || tabId == nil || $0.tabId == nil) }) {
+            var req = networkRequests[index]
+            req.endTime = endTime
+            req.ok = ok
+            req.status = status
+            req.error = error
+            req.responseHeaders = responseHeaders ?? req.responseHeaders
+            req.responseBody = responseBody ?? req.responseBody
+            req.state = (error != nil || ok == false || (status ?? 0) >= 400) ? .failed : .completed
+            networkRequests[index] = req
+            return
+        }
+
+        // Response arrived before request start log (or request start missing) - create a placeholder.
+        var req = DevToolsNetworkRequest(
+            requestId: requestId,
+            tabId: tabId,
+            url: "unknown",
+            method: "GET",
+            startTime: endTime
+        )
+        req.endTime = endTime
+        req.ok = ok
+        req.status = status
+        req.error = error
+        req.responseHeaders = responseHeaders
+        req.responseBody = responseBody
+        req.state = (error != nil || ok == false || (status ?? 0) >= 400) ? .failed : .completed
+        networkRequests.append(req)
+        trimNetworkIfNeeded()
+    }
+
+    private func trimNetworkIfNeeded() {
+        if networkRequests.count > maxNetworkEntries {
+            networkRequests.removeFirst(networkRequests.count - maxNetworkEntries)
+        }
+    }
+
+    private func parseJSONDictionary(_ json: String) -> [String: Any]? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private func normalizeHeaders(_ headers: Any?) -> [String: String]? {
+        guard let headers else { return nil }
+        if let dict = headers as? [String: Any] {
+            var result: [String: String] = [:]
+            for (key, value) in dict {
+                result[key] = normalizeScalarString(value) ?? String(describing: value)
+            }
+            return result.isEmpty ? nil : result
+        }
+        if let dict = headers as? [String: String] {
+            return dict.isEmpty ? nil : dict
+        }
+        // React Native / fetch may pass headers as array of pairs.
+        if let array = headers as? [[Any]] {
+            var result: [String: String] = [:]
+            for pair in array {
+                guard pair.count >= 2 else { continue }
+                let key = normalizeScalarString(pair[0]) ?? String(describing: pair[0])
+                let value = normalizeScalarString(pair[1]) ?? String(describing: pair[1])
+                result[key] = value
+            }
+            return result.isEmpty ? nil : result
+        }
+        return nil
+    }
+
+    private func normalizeBody(_ body: Any?) -> String? {
+        guard let body else { return nil }
+        if let str = body as? String {
+            return prettyPrintedJSONStringIfPossible(str) ?? str
+        }
+        // JSON objects/arrays -> pretty JSON
+        if JSONSerialization.isValidJSONObject(body),
+           let data = try? JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys]),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        return String(describing: body)
+    }
+
+    private func normalizeScalarString(_ value: Any?) -> String? {
+        if let str = value as? String { return str }
+        if let num = value as? NSNumber { return num.stringValue }
+        if let bool = value as? Bool { return bool ? "true" : "false" }
+        return nil
+    }
+
+    private func prettyPrintedJSONStringIfPossible(_ string: String) -> String? {
+        guard let data = string.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data),
+              JSONSerialization.isValidJSONObject(json),
+              let outData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
+              let outString = String(data: outData, encoding: .utf8) else {
+            return nil
+        }
+        return outString
     }
 
     /// Get filtered messages
@@ -539,6 +803,11 @@ class DevToolsManager: ObservableObject {
     /// Clear console logs
     func clearConsoleLogs() {
         consoleLogs.removeAll()
+    }
+
+    /// Clear network requests
+    func clearNetwork() {
+        networkRequests.removeAll()
     }
 
     // MARK: - Component Tree

@@ -1,5 +1,6 @@
 import SwiftUI
 import Highlightr
+import AppKit
 
 /// Main DevTools panel view - used both for docked mode and detached window
 struct DevToolsPanel: View {
@@ -169,7 +170,7 @@ struct DevToolsContent: View {
             case .console:
                 DevToolsConsoleView(devTools: devTools)
             case .network:
-                DevToolsPlaceholderView(title: "Network", message: "Network inspector coming soon")
+                DevToolsNetworkView(devTools: devTools, viewModel: viewModel)
             case .performance:
                 DevToolsPlaceholderView(title: "Performance", message: "Performance profiler coming soon")
             }
@@ -542,17 +543,16 @@ struct DevToolsPropRowView: View {
     @State private var isExpanded: Bool = false
 
     /// Check if value is a serialized function with source location
-    private var functionInfo: (name: String, source: String?, sourceFile: String?, sourceLine: Int?, bundleLine: Int?, bundleColumn: Int?)? {
+    private var functionInfo: (name: String, source: String?, sourceFile: String?, sourceLine: Int?)? {
         guard let dict = value as? [String: Any],
               let type = dict["__type"] as? String,
               type == "function" else { return nil }
         let name = dict["__name"] as? String ?? dict["name"] as? String ?? "anonymous"
         let source = dict["source"] as? String
-        let sourceFile = dict["__sourceFile"] as? String ?? dict["sourceFile"] as? String
-        let sourceLine = dict["__sourceLine"] as? Int ?? dict["sourceLine"] as? Int
-        let bundleLine = dict["__bundleLine"] as? Int
-        let bundleColumn = dict["__bundleColumn"] as? Int
-        return (name, source, sourceFile, sourceLine, bundleLine, bundleColumn)
+        // Source location is injected by Babel plugin at compile time
+        let sourceFile = dict["__sourceFile"] as? String
+        let sourceLine = dict["__sourceLine"] as? Int
+        return (name, source, sourceFile, sourceLine)
     }
 
     /// Check if value is expandable (object or array with items)
@@ -617,10 +617,7 @@ struct DevToolsPropRowView: View {
                         displayText: formatValue(value),
                         functionName: fn.name,
                         sourceFile: fn.sourceFile,
-                        sourceLine: fn.sourceLine,
-                        bundleLine: fn.bundleLine,
-                        bundleColumn: fn.bundleColumn,
-                        fallbackSource: fn.source
+                        sourceLine: fn.sourceLine
                     )
                 } else {
                     Text(formatValue(value, brief: isExpandable && isExpanded))
@@ -1581,27 +1578,20 @@ struct StyleRow: View {
 struct FunctionLinkButton: View {
     let displayText: String
     let functionName: String
-    let sourceFile: String?
-    let sourceLine: Int?
-    let bundleLine: Int?
-    let bundleColumn: Int?
-    let fallbackSource: String? // Minified source for search fallback
+    let sourceFile: String?  // Injected by Babel plugin
+    let sourceLine: Int?     // Injected by Babel plugin
 
     @State private var isHovered = false
 
     var body: some View {
         Button(action: {
             print("🔍 [FunctionLinkButton] Clicked: \(functionName)")
-            print("   - sourceFile: \(sourceFile ?? "nil")")
-            print("   - sourceLine: \(sourceLine ?? 0)")
-            print("   - bundleLine: \(bundleLine ?? 0)")
-            print("   - bundleColumn: \(bundleColumn ?? 0)")
+            print("   - sourceFile (from Babel): \(sourceFile ?? "nil")")
+            print("   - sourceLine (from Babel): \(sourceLine ?? 0)")
             DevToolsManager.shared.navigateToSource(
                 functionName: functionName,
                 fileName: sourceFile,
-                lineNumber: sourceLine,
-                bundleLine: bundleLine,
-                bundleColumn: bundleColumn
+                lineNumber: sourceLine
             )
         }) {
             Text(displayText)

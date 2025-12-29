@@ -44,9 +44,9 @@ struct SourceViewerPanel: View {
         guard let nav = devTools.pendingSourceNavigation else { return }
 
         print("🔍 [SourceViewerPanel] Navigation triggered: \(nav.searchText)")
+        print("   - fileName (from Babel): \(nav.fileName ?? "nil")")
+        print("   - lineNumber (from Babel): \(nav.lineNumber ?? 0)")
         print("   - files loaded: \(viewModel.files.count)")
-        print("   - bundleLine: \(nav.bundleLine ?? 0)")
-        print("   - bundleColumn: \(nav.bundleColumn ?? 0)")
 
         Task {
             // If files not loaded yet, load them first
@@ -55,23 +55,13 @@ struct SourceViewerPanel: View {
                 await viewModel.loadSourceMap()
             }
 
-            // Priority: Use source map resolution if bundleLine/bundleColumn available
-            if let bundleLine = nav.bundleLine, let bundleColumn = nav.bundleColumn {
-                await viewModel.navigateWithSourceMap(
-                    bundleLine: bundleLine,
-                    bundleColumn: bundleColumn,
-                    functionName: nav.searchText,
-                    files: viewModel.files
-                )
-            } else {
-                // Fallback to direct file/line or search
-                viewModel.navigateToSource(
-                    functionName: nav.searchText,
-                    sourceFile: nav.fileName,
-                    sourceLine: nav.lineNumber,
-                    files: viewModel.files
-                )
-            }
+            // Navigate using Babel-injected source location or search fallback
+            viewModel.navigateToSource(
+                functionName: nav.searchText,
+                sourceFile: nav.fileName,
+                sourceLine: nav.lineNumber,
+                files: viewModel.files
+            )
             devTools.clearPendingSourceNavigation()
         }
     }
@@ -108,56 +98,6 @@ final class SourceViewerViewModel: ObservableObject {
         } catch {
             self.error = error.localizedDescription
         }
-    }
-
-    /// Navigate using source map resolution from bundle line/column
-    func navigateWithSourceMap(bundleLine: Int, bundleColumn: Int, functionName: String, files: [SourceFile]) async {
-        print("🗺️ [SourceViewer] navigateWithSourceMap called:")
-        print("   - bundleLine: \(bundleLine)")
-        print("   - bundleColumn: \(bundleColumn)")
-        print("   - functionName: '\(functionName)'")
-
-        do {
-            if let resolved = try await MetroService.shared.resolveOriginalPosition(bundleLine: bundleLine, bundleColumn: bundleColumn) {
-                print("✅ [SourceViewer] Source map resolved:")
-                print("   - source: \(resolved.source)")
-                print("   - line: \(resolved.line)")
-                print("   - column: \(resolved.column)")
-
-                // Find the file in our loaded files
-                for file in files {
-                    if file.fullPath == resolved.source || file.fullPath.hasSuffix(resolved.source) || resolved.source.contains(file.name) {
-                        print("✅ [SourceViewer] Found file: \(file.relativePath)")
-                        selectedFile = file
-                        selectedContent = file.content
-                        highlightLineNumber = resolved.line
-                        return
-                    }
-                }
-
-                // File not found in project files, try to match by path suffix
-                let sourceName = (resolved.source as NSString).lastPathComponent
-                for file in files {
-                    if file.name == sourceName {
-                        print("✅ [SourceViewer] Found file by name match: \(file.relativePath)")
-                        selectedFile = file
-                        selectedContent = file.content
-                        highlightLineNumber = resolved.line
-                        return
-                    }
-                }
-
-                print("⚠️ [SourceViewer] Source file not found in loaded files: \(resolved.source)")
-            } else {
-                print("⚠️ [SourceViewer] Source map resolution returned nil")
-            }
-        } catch {
-            print("❌ [SourceViewer] Source map resolution failed: \(error)")
-        }
-
-        // Fallback to search-based navigation
-        print("🔄 [SourceViewer] Falling back to search-based navigation")
-        navigateToSource(functionName: functionName, sourceFile: nil, sourceLine: nil, files: files)
     }
 
     /// Navigate to source - prefer direct file+line if available, otherwise search
