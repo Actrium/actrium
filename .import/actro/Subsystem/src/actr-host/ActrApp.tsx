@@ -1169,34 +1169,37 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   }, [activeTabId, findNodeAtPosition, measureAndHighlightNode]);
 
   return (
-    <View style={tabHostStyle} ref={inspectedViewRef}>
-      {tabs.map((tab) => {
-        const isActive = tab.id === activeTabId;
-        // 重要：显式尺寸模式下不使用 flex:1，完全依赖父容器的宽高
-        const displayStyle = { display: isActive ? 'flex' as const : 'none' as const };
-        const tabContainerStyle = hasExplicitSize
-          ? { width: containerWidth, height: containerHeight, ...displayStyle }
-          : [StyleSheet.absoluteFill, displayStyle];
-        return (
-          <View
-            key={`${tab.id}-${tab.reloadKey ?? 0}`}
-            style={tabContainerStyle}
-          >
-            <ActrTabView
-              tab={tab}
-              isActive={isActive}
-              isLeftPanelVisible={isLeftPanelVisible}
-              containerWidth={containerWidth}
-              onContractViolation={recordContractViolation}
-              onEngineChange={handleEngineChange}
-            />
-          </View>
-        );
-      })}
+    <View style={tabHostStyle}>
+      {/* Content container - ref used for Inspector API (excludes overlays) */}
+      <View style={StyleSheet.absoluteFill} ref={inspectedViewRef} pointerEvents={isInspectMode ? 'none' : 'auto'}>
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeTabId;
+          // 重要：显式尺寸模式下不使用 flex:1，完全依赖父容器的宽高
+          const displayStyle = { display: isActive ? 'flex' as const : 'none' as const };
+          const tabContainerStyle = hasExplicitSize
+            ? { width: containerWidth, height: containerHeight, ...displayStyle }
+            : [StyleSheet.absoluteFill, displayStyle];
+          return (
+            <View
+              key={`${tab.id}-${tab.reloadKey ?? 0}`}
+              style={tabContainerStyle}
+            >
+              <ActrTabView
+                tab={tab}
+                isActive={isActive}
+                isLeftPanelVisible={isLeftPanelVisible}
+                containerWidth={containerWidth}
+                onContractViolation={recordContractViolation}
+                onEngineChange={handleEngineChange}
+              />
+            </View>
+          );
+        })}
 
-      {typeof EngineMonitorOverlay === 'function' ? (
-        <EngineMonitorOverlay tabs={monitorTabs} activeTabId={activeTabId} getEngine={getEngine} />
-      ) : null}
+        {typeof EngineMonitorOverlay === 'function' ? (
+          <EngineMonitorOverlay tabs={monitorTabs} activeTabId={activeTabId} getEngine={getEngine} />
+        ) : null}
+      </View>
 
       {/* Highlight overlay for selected node (always visible when frame is set) */}
       {highlightedFrame && (
