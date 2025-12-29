@@ -11,8 +11,8 @@
  *
  * @version 8.0.0 - Single Engine + usePanels Hook Pattern
  */
-import React, { useCallback, useRef, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, StyleSheet } from 'react-native';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, NativeEventEmitter, StyleSheet } from 'react-native';
 import { logger } from '../logger';
 import { Engine } from 'rill';
 import { hostComponents } from './BundleView';
@@ -72,6 +72,10 @@ const nerror = (msg: string) => log.error(msg);
 const DevToolsBridge = NativeModules.DevToolsBridge as {
   logMessage?: (direction: string, event: string, payload: string | null, tabId: string | null) => void;
   logRenderOp?: (operationType: string, componentType: string | null, nodeId: string | null, payload: string | null, tabId: string | null) => void;
+  setEnginePaused?: (isPaused: boolean) => void;
+  registerPauseHandler?: () => void;
+  addListener?: (eventName: string) => void;
+  removeListeners?: (count: number) => void;
 } | undefined;
 
 function logDevToolsMessage(
@@ -663,6 +667,35 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       contractCollectorsRef.current.delete(tabId);
     }
   }, []);
+
+  // DevTools pause handler - toggle pause for active engine
+  useEffect(() => {
+    if (!DevToolsBridge) return;
+
+    // Register pause handler with native side
+    DevToolsBridge.registerPauseHandler?.();
+
+    // Set up event listener for pause toggle from DevTools UI
+    const eventEmitter = new NativeEventEmitter(NativeModules.DevToolsBridge);
+    const subscription = eventEmitter.addListener('onTogglePause', () => {
+      // Get the active engine
+      const activeEngine = engineMapRef.current.get(activeTabId);
+      if (!activeEngine) return;
+
+      // Toggle pause state
+      if (activeEngine.isPaused) {
+        activeEngine.resume();
+        DevToolsBridge?.setEnginePaused?.(false);
+      } else {
+        activeEngine.pause();
+        DevToolsBridge?.setEnginePaused?.(true);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [activeTabId]);
 
   const getEngine = useCallback((tabId: string) => {
     const engine = engineMapRef.current.get(tabId);

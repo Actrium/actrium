@@ -181,6 +181,14 @@ class DevToolsManager: ObservableObject {
     /// Category filter for messages
     @Published var messageCategoryFilter: MessageCategory? = nil
 
+    // MARK: - Engine State
+
+    /// Whether the current engine is paused (controlled from DevTools)
+    @Published var isEnginePaused: Bool = false
+
+    /// Callback to toggle engine pause state
+    var onTogglePause: (() -> Void)?
+
     // MARK: - Window Management
 
     /// Whether the detached window is currently open
@@ -242,6 +250,11 @@ class DevToolsManager: ObservableObject {
     /// Toggle dock position (bottom <-> right)
     func toggleDockPosition() {
         dockPosition = dockPosition == .bottom ? .right : .bottom
+    }
+
+    /// Toggle engine pause state
+    func togglePause() {
+        onTogglePause?()
     }
 
     // MARK: - Messages
