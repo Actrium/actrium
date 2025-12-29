@@ -31,7 +31,7 @@ import type {
   SerializedOperationBatch,
 } from '../shared';
 import { CallbackRegistryImpl as CallbackRegistry } from '../shared';
-import { Bridge } from './bridge/Bridge';
+import { Bridge } from '../shared/bridge/Bridge';
 import { DiagnosticsCollector } from './engine/DiagnosticsCollector';
 import {
   createCommonJSGlobals,
@@ -118,6 +118,10 @@ export class Engine implements IEngine {
   private errorCount = 0;
   private lastErrorAt: number | null = null;
   private _timeoutTimer?: ReturnType<typeof setTimeout>;
+
+  // Pause state
+  private _isPaused = false;
+  private _eventQueue: Array<{ eventName: string; payload?: unknown }> = [];
 
   // Unique engine ID (UUID-like format)
   public readonly id: string;
@@ -433,56 +437,34 @@ export class Engine implements IEngine {
       callbackRegistry: this.callbackRegistry,
       // Guest callback invoker - routes Guest callbacks to sandbox
       // Handles both fn_N (__registerCallback) and fn_xxx_N (Guest globalCallbackRegistry)
-      // IMPORTANT: Must use eval() instead of direct function calls because
-      // getGlobal() returns references that cannot be called directly across JSC contexts
       guestInvoker: (fnId, args) => {
-        if (!this.context) {
-          logger.warn(`[rill:${this.id}] No context for invoking ${fnId}`);
-          return undefined;
-        }
-
-        // Set args as globals for the call (JSON serialize for cross-context safety)
-        this.context.setGlobal('__guestInvokerFnId', fnId);
-        this.context.setGlobal('__guestInvokerArgs', args || []);
-
-        try {
-          // fn_N pattern: sandbox __registerCallback (simple counter)
-          if (/^fn_\d+$/.test(fnId)) {
-            const result = this.context.eval(
-              'globalThis.__invokeCallback(__guestInvokerFnId, __guestInvokerArgs)'
-            );
-            return result;
+        // fn_N pattern: sandbox __registerCallback (simple counter)
+        if (/^fn_\d+$/.test(fnId)) {
+          const invokeCallback = this.context?.getGlobal('__invokeCallback') as
+            | ((fnId: string, args: unknown[]) => unknown)
+            | undefined;
+          if (invokeCallback) {
+            return invokeCallback(fnId, args);
           }
-
-          // fn_xxx_N pattern: Guest's globalCallbackRegistry (via RillReconciler)
-          const result = this.context.eval(
-            'globalThis.RillReconciler?.invokeCallback?.(__guestInvokerFnId, __guestInvokerArgs)'
-          );
-          if (result !== undefined) {
-            return result;
-          }
-
-          logger.warn(`[rill:${this.id}] No invoker found for ${fnId}`);
-          return undefined;
-        } finally {
-          // Clean up globals
-          this.context.setGlobal('__guestInvokerFnId', undefined);
-          this.context.setGlobal('__guestInvokerArgs', undefined);
         }
+        // fn_xxx_N pattern: Guest's globalCallbackRegistry (via RillReconciler)
+        const reconciler = this.context?.getGlobal('RillReconciler') as
+          | { invokeCallback?: (fnId: string, args: unknown[]) => unknown }
+          | undefined;
+        if (reconciler?.invokeCallback) {
+          return reconciler.invokeCallback(fnId, args);
+        }
+        logger.warn(`[rill:${this.id}] No invoker found for ${fnId}`);
+        return undefined;
       },
       // Guest callback releaser - routes release calls to Guest's registry
-      // IMPORTANT: Must use eval() instead of direct function calls (same as guestInvoker)
       guestReleaseCallback: (fnId) => {
-        if (!this.context) return;
-
         // fn_xxx_N pattern: Guest's globalCallbackRegistry (via RillReconciler)
-        this.context.setGlobal('__guestReleaseFnId', fnId);
-        try {
-          this.context.eval(
-            'globalThis.RillReconciler?.releaseCallback?.(__guestReleaseFnId)'
-          );
-        } finally {
-          this.context.setGlobal('__guestReleaseFnId', undefined);
+        const reconciler = this.context?.getGlobal('RillReconciler') as
+          | { releaseCallback?: (fnId: string) => void }
+          | undefined;
+        if (reconciler?.releaseCallback) {
+          reconciler.releaseCallback(fnId);
         }
         // Note: fn_N pattern (sandbox __registerCallback) doesn't need explicit release
         // as those callbacks are managed by the sandbox's own lifecycle
@@ -494,6 +476,9 @@ export class Engine implements IEngine {
 
           // Record activity for diagnostics via DiagnosticsCollector
           this.diagnostics.recordBatch(stats);
+
+          // Emit operation event for DevTools
+          this.emit('operation', batch as OperationBatch);
         } else {
           logger.warn(`[rill:${this.id}] No receiver to apply batch!`);
         }
@@ -1246,9 +1231,28 @@ export class Engine implements IEngine {
 
   /**
    * Send event to sandbox guest
+   * If engine is paused, events are queued and sent when resumed
    */
   // Reason: Event payload can be any serializable type
   sendEvent(eventName: string, payload?: unknown): void {
+    // If paused, queue the event for later
+    if (this._isPaused) {
+      this._eventQueue.push({ eventName, payload });
+      if (this.options.debug) {
+        this.options.logger.log(
+          `[rill:${this.id}] Event queued (paused): ${eventName}, queue size: ${this._eventQueue.length}`
+        );
+      }
+      return;
+    }
+
+    this._sendEventInternal(eventName, payload);
+  }
+
+  /**
+   * Internal method to actually send an event
+   */
+  private _sendEventInternal(eventName: string, payload?: unknown): void {
     // Record host event via DiagnosticsCollector
     const payloadBytes =
       payload === undefined
@@ -1336,6 +1340,64 @@ export class Engine implements IEngine {
    */
   get isDestroyed(): boolean {
     return this.destroyed;
+  }
+
+  /**
+   * Check if engine is paused
+   */
+  get isPaused(): boolean {
+    return this._isPaused;
+  }
+
+  /**
+   * Pause the engine - freeze timers and queue incoming events
+   * Timer clocks are frozen (not just callbacks blocked)
+   */
+  pause(): void {
+    if (this._isPaused || this.destroyed) return;
+
+    this._isPaused = true;
+
+    // Pause all timers (true clock freeze)
+    this.timerManager.pause();
+
+    if (this.options.debug) {
+      this.options.logger.log(`[rill:${this.id}] Engine paused`);
+    }
+
+    // Emit pause event
+    this.emit('pause');
+  }
+
+  /**
+   * Resume the engine - unfreeze timers and flush queued events
+   * Timers continue from where they left off
+   */
+  resume(): void {
+    if (!this._isPaused || this.destroyed) return;
+
+    this._isPaused = false;
+
+    // Resume all timers (continue from remaining time)
+    this.timerManager.resume();
+
+    // Flush queued events
+    const queuedEvents = this._eventQueue.splice(0);
+    if (queuedEvents.length > 0 && this.options.debug) {
+      this.options.logger.log(
+        `[rill:${this.id}] Flushing ${queuedEvents.length} queued events`
+      );
+    }
+    for (const event of queuedEvents) {
+      this._sendEventInternal(event.eventName, event.payload);
+    }
+
+    if (this.options.debug) {
+      this.options.logger.log(`[rill:${this.id}] Engine resumed`);
+    }
+
+    // Emit resume event
+    this.emit('resume');
   }
 
   /**

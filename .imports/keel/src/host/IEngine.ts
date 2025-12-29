@@ -54,6 +54,14 @@ export interface EngineEvents {
    */
   fatalError: (error: Error) => void;
   /**
+   * Emitted when engine is paused
+   */
+  pause: () => void;
+  /**
+   * Emitted when engine is resumed
+   */
+  resume: () => void;
+  /**
    * DevTools: Console log from Guest sandbox
    */
   devtoolsConsole: (entry: DevToolsConsoleEntry) => void;
@@ -257,6 +265,23 @@ export interface IEngine {
    * Check if engine is destroyed
    */
   readonly isDestroyed: boolean;
+
+  /**
+   * Check if engine is paused
+   */
+  readonly isPaused: boolean;
+
+  /**
+   * Pause the engine - freeze timers and queue incoming events
+   * Timer clocks are frozen (not just callbacks blocked)
+   */
+  pause(): void;
+
+  /**
+   * Resume the engine - unfreeze timers and flush queued events
+   * Timers continue from where they left off
+   */
+  resume(): void;
 
   /**
    * Get health snapshot for observability
