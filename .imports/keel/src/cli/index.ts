@@ -30,6 +30,7 @@ program
     'Fail build if React/reconciler versions mismatch recommended matrix'
   )
   .option('--footer <path>', 'Custom footer file (replaces default auto-render)')
+  .option('--dev', 'Dev mode - inject source locations for DevTools navigation')
   .action(async (entry: string, options: Partial<BuildOptions>) => {
     try {
       const buildOpts: BuildOptions = {
@@ -46,6 +47,9 @@ program
       }
       if (options.footer !== undefined) {
         buildOpts.footer = options.footer;
+      }
+      if (options.dev !== undefined) {
+        buildOpts.dev = options.dev;
       }
       await build(buildOpts);
     } catch (error) {
