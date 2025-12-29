@@ -3,7 +3,9 @@ import React
 
 /// Native module for DevTools message logging from React Native
 @objc(DevToolsBridge)
-class DevToolsBridge: NSObject {
+class DevToolsBridge: RCTEventEmitter {
+
+    private var hasListeners = false
 
     /// Log an application message (APP_FETCH_REQUEST, etc.)
     @objc
@@ -40,6 +42,47 @@ class DevToolsBridge: NSObject {
         }
     }
 
+    /// Update the engine pause state (called from RN after engine.pause()/resume())
+    @objc
+    func setEnginePaused(_ isPaused: Bool) {
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
+            DevToolsManager.shared.isEnginePaused = isPaused
+        }
+    }
+
+    /// Set up the pause toggle callback from DevTools UI
+    @objc
+    func registerPauseHandler() {
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
+            DevToolsManager.shared.onTogglePause = { [weak self] in
+                self?.emitTogglePause()
+            }
+        }
+    }
+
+    /// Emit toggle pause event to RN
+    private func emitTogglePause() {
+        if hasListeners {
+            sendEvent(withName: "onTogglePause", body: nil)
+        }
+    }
+
+    // MARK: - RCTEventEmitter
+
+    override func supportedEvents() -> [String]! {
+        return ["onTogglePause"]
+    }
+
+    override func startObserving() {
+        hasListeners = true
+    }
+
+    override func stopObserving() {
+        hasListeners = false
+    }
+
+    // MARK: - Helpers
+
     private func parseDirection(_ direction: String) -> MessageDirection {
         switch direction {
         case "guestToHost":
@@ -61,12 +104,12 @@ class DevToolsBridge: NSObject {
     }
 
     @objc
-    static func requiresMainQueueSetup() -> Bool {
+    override static func requiresMainQueueSetup() -> Bool {
         return false
     }
 
     @objc
-    static func moduleName() -> String! {
+    override static func moduleName() -> String! {
         return "DevToolsBridge"
     }
 }

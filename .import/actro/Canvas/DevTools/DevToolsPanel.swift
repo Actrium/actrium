@@ -50,12 +50,25 @@ struct DevToolsToolbar: View {
 
             Spacer()
 
-            // Current inspected tab indicator
+            // Pause button and current inspected tab indicator
             if let currentTab = viewModel.currentTab {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 6, height: 6)
+                HStack(spacing: 6) {
+                    // Pause/Resume button
+                    Button(action: {
+                        devTools.togglePause()
+                    }) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(devTools.isEnginePaused ? Color.yellow : Color.green)
+                                .frame(width: 8, height: 8)
+                            Image(systemName: devTools.isEnginePaused ? "play.fill" : "pause.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(devTools.isEnginePaused ? .yellow : .secondary)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .help(devTools.isEnginePaused ? "Resume Engine" : "Pause Engine")
+
                     Text(currentTab.title)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
