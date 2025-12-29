@@ -3,12 +3,19 @@ import React
 
 private let logger = AppLogger.reactNative
 
-/// 原生日志模块 - 将 JavaScript 日志输出到 Xcode 控制台 + 远程日志服务器
+/// 原生日志模块 - 将 JavaScript 日志输出到 Xcode 控制台 + DevTools Console + 远程日志服务器
 @objc(NativeLogger)
 class NativeLogger: NSObject {
 
   // 远程日志服务器地址
   private static let logServerURL = "http://localhost:9999/log"
+
+  // 发送日志到 DevTools Console
+  private static func sendToDevTools(level: DevToolsLogEntry.LogLevel, source: String, message: String) {
+    Task { @MainActor in
+      DevToolsManager.shared.log(message, level: level, source: source)
+    }
+  }
 
   // 发送日志到远程服务器 (异步，不阻塞)
   private static func sendToRemote(level: String, message: String) {
@@ -43,18 +50,21 @@ class NativeLogger: NSObject {
   @objc
   func log(_ message: String) {
     logger.info("[JS] \(message)")
+    NativeLogger.sendToDevTools(level: .info, source: "JS", message: message)
     NativeLogger.sendToRemote(level: "log", message: message)
   }
 
   @objc
   func warn(_ message: String) {
     logger.warning("[JS WARN] \(message)")
+    NativeLogger.sendToDevTools(level: .warn, source: "JS", message: message)
     NativeLogger.sendToRemote(level: "warn", message: message)
   }
 
   @objc
   func error(_ message: String) {
     logger.error("[JS ERROR] \(message)")
+    NativeLogger.sendToDevTools(level: .error, source: "JS", message: message)
     NativeLogger.sendToRemote(level: "error", message: message)
   }
 
@@ -62,18 +72,21 @@ class NativeLogger: NSObject {
   @objc
   static func nativeLog(_ message: String) {
     logger.info("[Native] \(message)")
+    sendToDevTools(level: .info, source: "Native", message: message)
     sendToRemote(level: "log", message: "[Native] \(message)")
   }
 
   @objc
   static func nativeWarn(_ message: String) {
     logger.warning("[Native WARN] \(message)")
+    sendToDevTools(level: .warn, source: "Native", message: message)
     sendToRemote(level: "warn", message: "[Native] \(message)")
   }
 
   @objc
   static func nativeError(_ message: String) {
     logger.error("[Native ERROR] \(message)")
+    sendToDevTools(level: .error, source: "Native", message: message)
     sendToRemote(level: "error", message: "[Native] \(message)")
   }
 
