@@ -189,6 +189,23 @@ class DevToolsManager: ObservableObject {
     /// Callback to toggle engine pause state
     var onTogglePause: (() -> Void)?
 
+    // MARK: - Inspect Mode
+
+    /// Whether inspect mode is active (click to select components)
+    @Published var isInspectMode: Bool = false
+
+    /// Currently highlighted node ID (during hover in inspect mode)
+    @Published var highlightedNodeId: String?
+
+    /// Frame of the highlighted node (for overlay rendering)
+    @Published var highlightFrame: CGRect?
+
+    /// Callback to toggle inspect mode in RN
+    var onToggleInspect: (() -> Void)?
+
+    /// Callback to notify RN when a node is selected from the tree
+    var onSelectNodeFromTree: ((String) -> Void)?
+
     // MARK: - Window Management
 
     /// Whether the detached window is currently open
@@ -255,6 +272,11 @@ class DevToolsManager: ObservableObject {
     /// Toggle engine pause state
     func togglePause() {
         onTogglePause?()
+    }
+
+    /// Toggle inspect mode
+    func toggleInspect() {
+        onToggleInspect?()
     }
 
     // MARK: - Messages
@@ -424,6 +446,10 @@ class DevToolsManager: ObservableObject {
     /// Select a component node
     func selectNode(_ nodeId: String?) {
         selectedNodeId = nodeId
+        // Notify RN to highlight the selected node
+        if let nodeId = nodeId {
+            onSelectNodeFromTree?(nodeId)
+        }
     }
 
     // MARK: - Persistence
