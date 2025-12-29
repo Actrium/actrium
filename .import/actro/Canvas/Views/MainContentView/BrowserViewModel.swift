@@ -690,13 +690,22 @@ class BrowserViewModel: ObservableObject {
     /// Reload the current tab by re-reading its source .actr package
     func reloadCurrentTab() {
         guard let id = currentTabId,
-              let index = tabs.firstIndex(where: { $0.id == id }),
-              let sourceURL = tabs[index].url else {
-            logger.warning(" [reloadCurrentTab] 无法刷新：当前 tab 没有源 URL")
+              let index = tabs.firstIndex(where: { $0.id == id }) else {
+            logger.warning("⚠️ [reloadCurrentTab] 无法刷新：没有当前 tab")
             return
         }
 
-        logger.debug("🔄 [reloadCurrentTab] 开始刷新 tab: \(self.tabs[index].title)")
+        logger.notice("🔄 [reloadCurrentTab] 开始刷新 tab: \(self.tabs[index].title), reloadNonce: \(self.tabs[index].reloadNonce)")
+
+        // 如果没有源 URL，只增加 reloadNonce 强制 RN 重新挂载
+        guard let sourceURL = tabs[index].url else {
+            logger.notice("🔄 [reloadCurrentTab] 无源 URL，仅强制 RN remount")
+            tabs[index].reloadNonce &+= 1
+            objectWillChange.send()
+            return
+        }
+
+        logger.debug("🔄 [reloadCurrentTab] 有源 URL，重新读取包")
 
         // Re-read the .actr package
         let resolvedURL = sourceURL.standardizedFileURL

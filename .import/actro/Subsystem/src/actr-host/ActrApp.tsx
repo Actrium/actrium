@@ -122,17 +122,6 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   onEngineChange,
 }) => {
   const gate = evaluateTabGate(tab);
-  // 使用 Native 传递的 containerWidth 作为初始值，确保窗口缩小时也能同步
-  const [layoutWidth, setLayoutWidth] = React.useState<number>(propsContainerWidth ?? 0);
-
-  // 当 Native 传递的 containerWidth 变化时，强制更新 layoutWidth
-  // 这解决了窗口缩小时 onLayout 可能不触发的问题
-  React.useEffect(() => {
-    if (propsContainerWidth != null && propsContainerWidth > 0) {
-      log.debug(`[ResizeFlow] ActrTabView propsContainerWidth changed: ${layoutWidth} -> ${propsContainerWidth}`);
-      setLayoutWidth(propsContainerWidth);
-    }
-  }, [propsContainerWidth]);
 
   // 右侧面板可见性（按 tab 维度保存）
   const [isRightPanelVisible, setIsRightPanelVisible] = useState(tab.rightPanelDefaultVisible ?? false);
@@ -157,54 +146,10 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   const showRightPanel = isRightPanelVisible && rightPanel;
 
-  // 根据可用宽度动态压缩左右面板，确保窗口变小时三栏仍能自适应
-  const { leftWidth, rightWidth } = React.useMemo(() => {
-    const width = Math.max(layoutWidth, 0);
-    if (width === 0) {
-      return { leftWidth: isLeftPanelVisible ? LAYOUT.LEFT_PANEL_WIDTH : 0, rightWidth: showRightPanel ? LAYOUT.RIGHT_PANEL_WIDTH : 0 };
-    }
-
-    const budgetForSides = Math.max(width - LAYOUT.CENTER_MIN_WIDTH, 0);
-    const baseLeft = isLeftPanelVisible ? LAYOUT.LEFT_PANEL_WIDTH : 0;
-    const baseRight = showRightPanel ? LAYOUT.RIGHT_PANEL_WIDTH : 0;
-    const desiredSides = baseLeft + baseRight;
-
-    if (desiredSides === 0 || budgetForSides <= 0) {
-      return { leftWidth: baseLeft, rightWidth: baseRight };
-    }
-
-    // 如果可用宽度不足，按比例压缩左右面板并应用最小宽度
-    let scaledLeft = baseLeft;
-    let scaledRight = baseRight;
-    if (budgetForSides < desiredSides) {
-      const scale = budgetForSides / desiredSides;
-      scaledLeft = baseLeft * scale;
-      scaledRight = baseRight * scale;
-    }
-
-    // 应用最小宽度，再次按比例压缩以不超过预算
-    if (isLeftPanelVisible) {
-      scaledLeft = Math.max(scaledLeft, LAYOUT.LEFT_PANEL_MIN_WIDTH);
-    }
-    if (showRightPanel) {
-      scaledRight = Math.max(scaledRight, LAYOUT.RIGHT_PANEL_MIN_WIDTH);
-    }
-
-    let finalSides = scaledLeft + scaledRight;
-    if (finalSides > budgetForSides && finalSides > 0) {
-      const rescale = budgetForSides / finalSides;
-      scaledLeft *= rescale;
-      scaledRight *= rescale;
-      finalSides = scaledLeft + scaledRight;
-    }
-
-    const result = {
-      leftWidth: isLeftPanelVisible ? scaledLeft : 0,
-      rightWidth: showRightPanel ? scaledRight : 0,
-    };
-    log.debug(`[ResizeFlow] Panel widths calculated: layoutWidth=${Math.round(width)}, left=${Math.round(result.leftWidth)}, right=${Math.round(result.rightWidth)}`);
-    return result;
-  }, [layoutWidth, isLeftPanelVisible, showRightPanel]);
+  // 优化：使用固定宽度 + flexShrink，让 Yoga 自动处理收缩
+  // 不再依赖 propsContainerWidth 计算，避免 re-render
+  const leftWidth = isLeftPanelVisible ? LAYOUT.LEFT_PANEL_WIDTH : 0;
+  const rightWidth = showRightPanel ? LAYOUT.RIGHT_PANEL_WIDTH : 0;
 
   // 更新回调：提取面板
   const handleUpdate = useCallback(() => {
@@ -397,6 +342,10 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     loadUnifiedBundle();
   }, [engine, isActive, tab.id, tab.unifiedScript, handleUpdate]);
 
+  // 渲染三栏布局 - 使用纯 flex 布局，让 Yoga 自动适应
+  // 不依赖 propsContainerWidth，避免 re-render
+  const threeColumnStyle = styles.threeColumn;
+
   if (isActive && gate.status === 'blocked') {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
@@ -432,21 +381,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     );
   }
 
-  // 渲染三栏布局
-  // 使用 containerWidth 作为 maxWidth，强制 View 在窗口缩小时收缩
-  const effectiveMaxWidth = propsContainerWidth && propsContainerWidth > 0 ? propsContainerWidth : undefined;
-
   return (
-    <View
-      style={[styles.threeColumn, effectiveMaxWidth ? { maxWidth: effectiveMaxWidth, width: effectiveMaxWidth } : null]}
-      onLayout={(e) => {
-        const next = Math.max(e.nativeEvent.layout.width, 0);
-        if (next !== layoutWidth) {
-          log.debug(`[ResizeFlow] ActrTabView onLayout fired: ${layoutWidth} -> ${next}`);
-          setLayoutWidth(next);
-        }
-      }}
-    >
+    <View style={threeColumnStyle}>
       {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
       {isLeftPanelVisible && leftPanel && (
         <View
@@ -570,9 +506,6 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   );
 };
 
-// Track previous containerWidth for logging
-let prevActrAppContainerWidth: number | undefined;
-
 export const ActrApp: React.FC<ActrProps> = (props) => {
   // Props 稳定化
   const hasValidTabs = props?.tabs && props.tabs.length > 0;
@@ -584,13 +517,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     effectiveProps = cachedValidProps;
   }
 
-  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth } = effectiveProps || {};
-
-  // Log containerWidth changes
-  if (containerWidth !== prevActrAppContainerWidth) {
-    log.debug(`[ResizeFlow] ActrApp received containerWidth: ${prevActrAppContainerWidth} -> ${containerWidth}`);
-    prevActrAppContainerWidth = containerWidth;
-  }
+  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth, containerHeight } = effectiveProps || {};
 
   if (!tabs.length) {
     return <View style={{ flex: 1, backgroundColor: '#111' }} />;
@@ -657,17 +584,30 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     };
   }, []);
 
+  // 使用显式尺寸替代 absoluteFill，确保容器尺寸正确
+  const hasExplicitSize = containerWidth && containerWidth > 0 && containerHeight && containerHeight > 0;
+
+  // 当有显式尺寸时，完全不使用 flex，避免布局冲突
+  const tabHostStyle = React.useMemo(() => {
+    if (hasExplicitSize) {
+      return { width: containerWidth, height: containerHeight, position: 'relative' as const };
+    }
+    return styles.tabHost;
+  }, [hasExplicitSize, containerWidth, containerHeight]);
+
   return (
-    <View style={styles.tabHost}>
+    <View style={tabHostStyle}>
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
+        // 重要：显式尺寸模式下不使用 flex:1，完全依赖父容器的宽高
+        const displayStyle = { display: isActive ? 'flex' as const : 'none' as const };
+        const tabContainerStyle = hasExplicitSize
+          ? { width: containerWidth, height: containerHeight, ...displayStyle }
+          : [StyleSheet.absoluteFill, displayStyle];
         return (
           <View
             key={`${tab.id}-${tab.reloadKey ?? 0}`}
-            style={[
-              StyleSheet.absoluteFill,
-              { display: isActive ? 'flex' : 'none' },
-            ]}
+            style={tabContainerStyle}
           >
             <ActrTabView
               tab={tab}
@@ -699,16 +639,18 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: LAYOUT.BORDER_COLOR,
     flexShrink: 1,
+    minWidth: LAYOUT.LEFT_PANEL_MIN_WIDTH, // 最小宽度，允许 Yoga 自动收缩
   },
   centerColumn: {
     flex: 1,
     backgroundColor: '#0a0a0a',
-    minWidth: 0,
+    minWidth: LAYOUT.CENTER_MIN_WIDTH,
   },
   rightPanel: {
     borderLeftWidth: 1,
     borderLeftColor: LAYOUT.BORDER_COLOR,
     flexShrink: 1,
+    minWidth: LAYOUT.RIGHT_PANEL_MIN_WIDTH, // 最小宽度，允许 Yoga 自动收缩
   },
   container: {
     flex: 1,

@@ -59,6 +59,8 @@ struct UnifiedCanvasView: View {
     var body: some View {
         GeometryReader { geometry in
             let viewportSize = geometry.size
+            // DEBUG: 追踪 GeometryReader 提供的尺寸（用 print 确保可见）
+            let _ = print("[ResizeFlow] 📏 GeometryReader.size = \(Int(viewportSize.width))x\(Int(viewportSize.height))")
             // 极窄/极矮窗口时避免 0 尺寸导致矩阵奇异
             let safeViewportSize = CGSize(
                 width: max(viewportSize.width, 1),
@@ -1136,10 +1138,11 @@ private struct TabCardView: View {
         // 使用 ZStack 允许标题栏悬浮在卡片上方
         ZStack(alignment: .top) {
             // 卡片主体（纯内容）
+            // 圆角仅 Overview 模式显示，Focus 模式不要圆角
             contentView
                 .frame(width: cardWidth, height: cardHeight)
-                .cornerRadius(10)
-                .shadow(color: Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
+                .cornerRadius(isFocused ? 0 : 10)
+                .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
 
             // 悬浮标题栏 - 仅 Overview 模式显示（Focus 模式隐藏）
             if !isFocused {
@@ -1242,16 +1245,11 @@ private struct TabCardView: View {
     }
 
     // RN 视图需要缩放的比例
-    // 关键：在 Focus 模式下，外层 currentScale 会把卡片放大到填满视口
-    // 我们需要 rnScaleFactor * currentScale = 1.0（最终 RN 以原始尺寸显示）
-    // 所以 rnScaleFactor = 1.0 / currentScale
-    // 这样避免了两层缩放的浮点精度问题
+    // RN 始终按 viewportSize 渲染（保持高清），然后缩放到 cardContentSize
+    // 在 Focus 模式下，外层 canvas scale 会把卡片放大回 viewportSize
+    // 最终效果：RN 内容以 1:1 比例显示
     private var rnScaleFactor: CGFloat {
         guard currentScale > 0 else { return 1 }
-        // 目标最终缩放 = cardContentSize.width / viewportSize.width * currentScale
-        // 在 Focus 模式下这应该等于 1.0
-        // 直接计算：rnScaleFactor = cardContentSize.width / viewportSize.width
-        // 简化后不变，但关键是确保计算一致性
         let baseScale = cardContentSize.width / max(viewportSize.width, 1)
         return baseScale
     }
@@ -1272,24 +1270,32 @@ private struct TabCardView: View {
 
             // 每个 Tab 都有独立的 RCTRootView - 实现真正的缩放
             if hasRNContent {
-                // RN 视图用视口尺寸渲染（布局正确），然后缩放到卡片尺寸
-                SingleTabRootView(
-                    tab: tab,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
-                    containerSize: CGSize(
-                        width: max(rnRenderSize.width, 1),
-                        height: max(rnRenderSize.height, 1)
-                    )
-                )
-                .frame(
-                    width: max(rnRenderSize.width, 1),
-                    height: max(rnRenderSize.height, 1)
-                )
-                .scaleEffect(rnScaleFactor, anchor: .topLeading)
-                .frame(width: cardContentSize.width, height: cardContentSize.height, alignment: .topLeading)
-                .clipped()
+                // DEBUG: 记录关键尺寸
+                let _ = print("[ResizeFlow] 📦 TabCardView: isFocused=\(isFocused), viewportSize=\(Int(viewportSize.width))x\(Int(viewportSize.height)), cardSize=\(Int(cardWidth))x\(Int(cardHeight)), rnScale=\(String(format: "%.3f", rnScaleFactor))")
+
+                // 关键修复：使用 overlay 而非 frame+scaleEffect 组合
+                // 原来的方式 scaleEffect 后用 frame 对齐会有问题，因为 SwiftUI 使用原始尺寸计算位置
+                // 新方式：用固定尺寸的容器，overlay 放置缩放后的内容
+                Color.clear
+                    .frame(width: cardContentSize.width, height: cardContentSize.height)
+                    .overlay(alignment: .topLeading) {
+                        SingleTabRootView(
+                            tab: tab,
+                            viewModel: viewModel,
+                            historyVM: historyVM,
+                            bookmarkVM: bookmarkVM,
+                            containerSize: CGSize(
+                                width: max(rnRenderSize.width, 1),
+                                height: max(rnRenderSize.height, 1)
+                            )
+                        )
+                        .frame(
+                            width: max(rnRenderSize.width, 1),
+                            height: max(rnRenderSize.height, 1)
+                        )
+                        .scaleEffect(rnScaleFactor, anchor: .topLeading)
+                    }
+                    .clipped()
             } else if let _ = tab.htmlContent {
                 // 有 htmlContent，显示网页内容（暂时用占位）
                 Image(systemName: "doc.text")
