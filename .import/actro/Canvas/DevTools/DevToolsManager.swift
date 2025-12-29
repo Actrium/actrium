@@ -43,14 +43,37 @@ enum MessageDirection: String {
     case hostToGuest = "hostToGuest"  // Host → Guest (↙)
 }
 
+/// Category of Host-Guest message
+enum MessageCategory: String, CaseIterable {
+    case render = "render"  // Render operations (CREATE, UPDATE, DELETE, TEXT)
+    case app = "app"        // Application messages (APP_FETCH_REQUEST, etc.)
+
+    var icon: String {
+        switch self {
+        case .render: return "hammer"
+        case .app: return "envelope"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .render: return "Render"
+        case .app: return "App"
+        }
+    }
+}
+
 /// Host-Guest message entry for Messages inspector
 struct DevToolsMessage: Identifiable {
     let id = UUID()
     let timestamp: Date
+    let category: MessageCategory
     let direction: MessageDirection
     let event: String
     let payload: String?  // JSON string representation
     let tabId: String?
+    let nodeId: String?   // For render operations
+    let componentType: String?  // For render operations
 
     /// Arrow indicator based on direction
     var directionArrow: String {
@@ -155,6 +178,9 @@ class DevToolsManager: ObservableObject {
     /// Direction filter for messages
     @Published var messageDirectionFilter: MessageDirection? = nil
 
+    /// Category filter for messages
+    @Published var messageCategoryFilter: MessageCategory? = nil
+
     // MARK: - Window Management
 
     /// Whether the detached window is currently open
@@ -220,34 +246,63 @@ class DevToolsManager: ObservableObject {
 
     // MARK: - Messages
 
-    /// Add a Host-Guest message entry
+    /// Add an application message entry (APP_FETCH_REQUEST, etc.)
     func logMessage(
         direction: MessageDirection,
         event: String,
         payload: Any? = nil,
         tabId: String? = nil
     ) {
-        let payloadString: String?
-        if let payload = payload {
-            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
-               let str = String(data: data, encoding: .utf8) {
-                payloadString = str
-            } else {
-                payloadString = String(describing: payload)
-            }
-        } else {
-            payloadString = nil
-        }
+        let payloadString = formatPayload(payload)
 
         let message = DevToolsMessage(
             timestamp: Date(),
+            category: .app,
             direction: direction,
             event: event,
             payload: payloadString,
-            tabId: tabId
+            tabId: tabId,
+            nodeId: nil,
+            componentType: nil
         )
-        messages.append(message)
+        appendMessage(message)
+    }
 
+    /// Add a render operation entry (CREATE, UPDATE, DELETE, TEXT)
+    func logRenderOperation(
+        direction: MessageDirection = .guestToHost,
+        operationType: String,
+        componentType: String? = nil,
+        nodeId: String? = nil,
+        props: [String: Any]? = nil,
+        tabId: String? = nil
+    ) {
+        let payloadString = formatPayload(props)
+
+        let message = DevToolsMessage(
+            timestamp: Date(),
+            category: .render,
+            direction: direction,
+            event: operationType,
+            payload: payloadString,
+            tabId: tabId,
+            nodeId: nodeId,
+            componentType: componentType
+        )
+        appendMessage(message)
+    }
+
+    private func formatPayload(_ payload: Any?) -> String? {
+        guard let payload = payload else { return nil }
+        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        return String(describing: payload)
+    }
+
+    private func appendMessage(_ message: DevToolsMessage) {
+        messages.append(message)
         // Trim if exceeds max
         if messages.count > maxLogEntries {
             messages.removeFirst(messages.count - maxLogEntries)
@@ -257,13 +312,21 @@ class DevToolsManager: ObservableObject {
     /// Get filtered messages
     var filteredMessages: [DevToolsMessage] {
         messages.filter { msg in
+            // Category filter
+            if let catFilter = messageCategoryFilter, msg.category != catFilter {
+                return false
+            }
             // Direction filter
             if let dirFilter = messageDirectionFilter, msg.direction != dirFilter {
                 return false
             }
             // Event name filter
             if !messageFilter.isEmpty {
-                return msg.event.localizedCaseInsensitiveContains(messageFilter)
+                let searchText = messageFilter.lowercased()
+                let matchesEvent = msg.event.lowercased().contains(searchText)
+                let matchesComponent = msg.componentType?.lowercased().contains(searchText) ?? false
+                let matchesNode = msg.nodeId?.lowercased().contains(searchText) ?? false
+                return matchesEvent || matchesComponent || matchesNode
             }
             return true
         }
