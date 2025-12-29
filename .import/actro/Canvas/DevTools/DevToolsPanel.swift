@@ -164,6 +164,8 @@ struct DevToolsContent: View {
                 DevToolsMessagesView(devTools: devTools)
             case .elements:
                 DevToolsElementsView(devTools: devTools, viewModel: viewModel)
+            case .sources:
+                SourceViewerPanel()
             case .console:
                 DevToolsConsoleView(devTools: devTools)
             case .operations:

@@ -21,6 +21,7 @@ enum DevToolsDockPosition: String, CaseIterable {
 enum DevToolsTab: String, CaseIterable, Identifiable {
     case messages = "Messages"       // Host-Guest message inspector
     case elements = "Elements"       // Component tree inspector
+    case sources = "Sources"         // Source code viewer
     case console = "Console"         // Console logs
     case operations = "Operations"   // Render operations log
     case network = "Network"         // Network requests (future)
@@ -32,6 +33,7 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
         switch self {
         case .messages: return "arrow.left.arrow.right"
         case .elements: return "square.stack.3d.up"
+        case .sources: return "doc.text"
         case .console: return "terminal"
         case .operations: return "list.bullet.rectangle"
         case .network: return "network"
