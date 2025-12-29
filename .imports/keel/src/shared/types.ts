@@ -76,6 +76,7 @@ export interface BridgeValueObject {
 export interface SerializedFunction {
   __type: 'function';
   __fnId: string;
+  __source?: string; // Function source code for DevTools
 }
 
 /**

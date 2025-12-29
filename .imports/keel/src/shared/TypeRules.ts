@@ -153,11 +153,18 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       (v as SerializedFunction).__type === 'function' &&
       '__fnId' in v,
     decode: (v, ctx) => {
-      const { __fnId } = v as SerializedFunction;
+      const { __fnId, __source } = v as SerializedFunction;
       // Reason: Deserialized function proxy accepts arbitrary arguments
-      return (...args: unknown[]) => {
+      const proxy = (...args: unknown[]) => {
         try {
-          const result = ctx.invokeFunction(__fnId, args);
+          // IMPORTANT: Encode args before crossing JSI boundary to Guest sandbox
+          // This handles complex objects like GestureResponderEvent which may contain:
+          // - Functions (preventDefault, stopPropagation) → { __type: 'function', __fnId }
+          // - Native object references → recursively encoded to plain objects
+          // - Circular references → { __type: 'circular' }
+          // Without encoding, JSI setGlobal would crash when passing these types
+          const encodedArgs = args.map((arg) => ctx.encode(arg));
+          const result = ctx.invokeFunction(__fnId, encodedArgs);
           // Async errors propagate naturally as Promise rejections
           return result;
         } catch (err) {
@@ -180,6 +187,11 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
           return undefined;
         }
       };
+      // Attach source for DevTools inspection
+      if (__source) {
+        (proxy as { __source?: string }).__source = __source;
+      }
+      return proxy;
     },
     strategy: 'proxy',
   },
@@ -191,7 +203,16 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     encode: (fn, ctx) => {
       // biome-ignore lint/complexity/noBannedTypes: fn is verified as function by match()
       const fnId = ctx.registerFunction(fn as Function);
-      return { __type: 'function', __fnId: fnId } as SerializedFunction;
+      // Capture function source for DevTools (truncate if too long)
+      let source: string | undefined;
+      try {
+        const fullSource = (fn as Function).toString();
+        // Truncate long sources to avoid performance issues
+        source = fullSource.length > 500 ? fullSource.slice(0, 500) + '...' : fullSource;
+      } catch {
+        // Some functions may not support toString()
+      }
+      return { __type: 'function', __fnId: fnId, __source: source } as SerializedFunction;
     },
     strategy: 'proxy',
   },
