@@ -24,6 +24,11 @@ import type {
   RefCallOperation,
   SerializedError,
 } from './types';
+import {
+  loadSourceMap,
+  findFunctionInSources,
+  getSourceMapConsumer,
+} from './devtools-source-map';
 
 // Re-export types for backward compatibility
 export type {
@@ -851,6 +856,14 @@ export class Receiver {
   // ============================================
 
   /**
+   * Initialize DevTools source map for function location resolution
+   * Call this once when DevTools is opened
+   */
+  async initDevToolsSourceMap(metroPort = 8082, platform = 'macos'): Promise<void> {
+    await loadSourceMap({ metroPort, platform });
+  }
+
+  /**
    * DevTools component tree node
    */
   getComponentTree(): DevToolsTreeNode | null {
@@ -895,12 +908,26 @@ export class Receiver {
           __sourceLine?: number;
         };
         const fnName = fnMeta.__name || (value as { name?: string }).name || 'anonymous';
+
+        // Try to get source location from pre-attached metadata first
+        let sourceFile = fnMeta.__sourceFile;
+        let sourceLine = fnMeta.__sourceLine;
+
+        // If no pre-attached location, try to find it using source map
+        if (!sourceFile && getSourceMapConsumer()) {
+          const location = findFunctionInSources(fnMeta.__source || '', fnName);
+          if (location) {
+            sourceFile = location.sourceFile;
+            sourceLine = location.sourceLine;
+          }
+        }
+
         serializableProps[key] = {
           __type: 'function',
           name: fnName,
           source: fnMeta.__source,
-          sourceFile: fnMeta.__sourceFile,
-          sourceLine: fnMeta.__sourceLine,
+          sourceFile,
+          sourceLine,
         };
       } else if (value instanceof Date) {
         serializableProps[key] = value.toISOString();
