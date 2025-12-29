@@ -1,12 +1,32 @@
 {
   "name": "rill",
   "version": "0.1.0",
-  "description": "A lightweight, headless, sandboxed dynamic UI rendering engine for React Native",
-  "homepage": "https://github.com/GoAskAway/rill",
   "repository": "https://github.com/GoAskAway/rill.git",
-  "license": "Apache-2.0",
   "main": "./src/host/index.ts",
-  "types": "./src/host/index.ts",
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.9",
+    "@happy-dom/global-registrator": "^15.0.0",
+    "@playwright/test": "^1.57.0",
+    "@types/bun": "latest",
+    "@types/react": "19.0.0",
+    "@types/react-reconciler": "^0.32.3",
+    "@types/react-test-renderer": "^18.3.0",
+    "@vitest/browser-webdriverio": "4.0.16",
+    "commander": "^14.0.2",
+    "oxc-parser": "^0.26.0",
+    "react": "19.0.0",
+    "react-reconciler": "0.31.0",
+    "react-test-renderer": "19.0.0",
+    "source-map": "^0.7.6",
+    "typescript": "^5.9.3",
+    "vitest": "4.0.16",
+    "webdriverio": "^8.36.1"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.70.0",
+    "react-native-web": ">=0.19.0"
+  },
   "exports": {
     ".": "./src/host/index.ts",
     "./let": "./src/guest/let/index.ts",
@@ -17,6 +37,11 @@
     "./devtools": "./src/devtools/index.ts",
     "./cli": "./src/cli/index.ts"
   },
+  "description": "A lightweight, headless, sandboxed dynamic UI rendering engine for React Native",
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  },
   "files": [
     "src",
     "native",
@@ -24,6 +49,16 @@
     "README.md",
     "LICENSE"
   ],
+  "homepage": "https://github.com/GoAskAway/rill",
+  "license": "Apache-2.0",
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    },
+    "react-native-web": {
+      "optional": true
+    }
+  },
   "scripts": {
     "test": "bun test",
     "test:native": "bash native/quickjs/run-tests.sh && bash native/jsc/run-tests.sh",
@@ -39,39 +74,5 @@
     "check:unknown": "bun scripts/check-unknown.ts",
     "precommit": "bun check:unknown && bun typecheck && bun lint && bun test"
   },
-  "engines": {
-    "node": ">=18.0.0",
-    "bun": ">=1.0.0"
-  },
-  "peerDependencies": {
-    "react": ">=18.0.0",
-    "react-native": ">=0.70.0",
-    "react-native-web": ">=0.19.0"
-  },
-  "peerDependenciesMeta": {
-    "react-native": {
-      "optional": true
-    },
-    "react-native-web": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.3.9",
-    "@happy-dom/global-registrator": "^15.0.0",
-    "@playwright/test": "^1.57.0",
-    "@types/bun": "latest",
-    "@types/react": "19.0.0",
-    "@types/react-reconciler": "^0.32.3",
-    "@types/react-test-renderer": "^18.3.0",
-    "@vitest/browser-webdriverio": "4.0.16",
-    "commander": "^14.0.2",
-    "oxc-parser": "^0.26.0",
-    "react": "19.0.0",
-    "react-reconciler": "0.31.0",
-    "react-test-renderer": "19.0.0",
-    "typescript": "^5.9.3",
-    "vitest": "4.0.16",
-    "webdriverio": "^8.36.1"
-  }
+  "types": "./src/host/index.ts"
 }
