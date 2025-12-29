@@ -203,6 +203,25 @@ struct DevToolsPlaceholderView: View {
 struct DevToolsElementsView: View {
     @ObservedObject var devTools: DevToolsManager
     @ObservedObject var viewModel: BrowserViewModel
+    @FocusState private var isTreeFocused: Bool
+
+    /// Build flat list of visible nodes for keyboard navigation
+    private var visibleNodes: [DevToolsComponentNode] {
+        guard let tree = devTools.componentTree else { return [] }
+        var result: [DevToolsComponentNode] = []
+        collectVisibleNodes(tree, into: &result)
+        return result
+    }
+
+    private func collectVisibleNodes(_ node: DevToolsComponentNode, into result: inout [DevToolsComponentNode]) {
+        result.append(node)
+        if devTools.isNodeExpanded(node.id) || (devTools.expandedNodeIds.isEmpty && !node.children.isEmpty) {
+            // Default: expand all if no explicit state set
+            for child in node.children {
+                collectVisibleNodes(child, into: &result)
+            }
+        }
+    }
 
     var body: some View {
         HSplitView {
@@ -244,11 +263,44 @@ struct DevToolsElementsView: View {
                 Divider()
 
                 if let tree = devTools.componentTree {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            DevToolsTreeNodeView(node: tree, depth: 0, devTools: devTools)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                DevToolsTreeNodeView(node: tree, depth: 0, devTools: devTools)
+                            }
+                            .padding(4)
                         }
-                        .padding(4)
+                        .onChange(of: devTools.selectedNodeId) { _, newId in
+                            if let id = newId {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    proxy.scrollTo(id, anchor: .center)
+                                }
+                            }
+                        }
+                    }
+                    .focusable()
+                    .focused($isTreeFocused)
+                    .onKeyPress(.upArrow) {
+                        navigateTree(direction: -1)
+                        return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        navigateTree(direction: 1)
+                        return .handled
+                    }
+                    .onKeyPress(.leftArrow) {
+                        collapseOrMoveUp()
+                        return .handled
+                    }
+                    .onKeyPress(.rightArrow) {
+                        expandOrMoveDown()
+                        return .handled
+                    }
+                    .onAppear {
+                        // Auto-expand all nodes on first load
+                        if devTools.expandedNodeIds.isEmpty {
+                            devTools.expandAllNodes()
+                        }
                     }
                 } else {
                     VStack(spacing: 8) {
@@ -339,6 +391,69 @@ struct DevToolsElementsView: View {
             .frame(minWidth: 200)
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    // MARK: - Keyboard Navigation
+
+    /// Navigate up or down in the tree
+    private func navigateTree(direction: Int) {
+        let nodes = visibleNodes
+        guard !nodes.isEmpty else { return }
+
+        if let currentId = devTools.selectedNodeId,
+           let currentIndex = nodes.firstIndex(where: { $0.id == currentId }) {
+            let newIndex = max(0, min(nodes.count - 1, currentIndex + direction))
+            devTools.selectNode(nodes[newIndex].id)
+        } else {
+            // No selection, select first or last
+            devTools.selectNode(direction > 0 ? nodes.first?.id : nodes.last?.id)
+        }
+    }
+
+    /// Left arrow: collapse current node, or move to parent
+    private func collapseOrMoveUp() {
+        guard let currentId = devTools.selectedNodeId,
+              let currentNode = findNode(in: devTools.componentTree, id: currentId) else { return }
+
+        // If node is expanded and has children, collapse it
+        if !currentNode.children.isEmpty && devTools.isNodeExpanded(currentId) {
+            devTools.collapseNode(currentId)
+        } else {
+            // Move to parent
+            if let parentId = findParentId(of: currentId, in: devTools.componentTree) {
+                devTools.selectNode(parentId)
+            }
+        }
+    }
+
+    /// Right arrow: expand current node, or move to first child
+    private func expandOrMoveDown() {
+        guard let currentId = devTools.selectedNodeId,
+              let currentNode = findNode(in: devTools.componentTree, id: currentId) else { return }
+
+        guard !currentNode.children.isEmpty else { return }
+
+        // If node is collapsed, expand it
+        if !devTools.isNodeExpanded(currentId) {
+            devTools.expandNode(currentId)
+        } else {
+            // Move to first child
+            if let firstChild = currentNode.children.first {
+                devTools.selectNode(firstChild.id)
+            }
+        }
+    }
+
+    /// Find parent node ID
+    private func findParentId(of nodeId: String, in tree: DevToolsComponentNode?, parentId: String? = nil) -> String? {
+        guard let tree = tree else { return nil }
+        if tree.id == nodeId { return parentId }
+        for child in tree.children {
+            if let found = findParentId(of: nodeId, in: child, parentId: tree.id) {
+                return found
+            }
+        }
+        return nil
     }
 
     /// Count total nodes in tree
@@ -445,7 +560,11 @@ struct DevToolsTreeNodeView: View {
     let depth: Int
     @ObservedObject var devTools: DevToolsManager
 
-    @State private var isExpanded: Bool = true
+    /// Whether this node is expanded (from global state)
+    private var isExpanded: Bool {
+        // Default: expand if no explicit state set, or if explicitly expanded
+        devTools.expandedNodeIds.isEmpty || devTools.isNodeExpanded(node.id)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -453,7 +572,7 @@ struct DevToolsTreeNodeView: View {
             HStack(spacing: 4) {
                 // Expand/collapse button
                 if !node.children.isEmpty {
-                    Button(action: { isExpanded.toggle() }) {
+                    Button(action: { devTools.toggleNodeExpanded(node.id) }) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 8, weight: .bold))
                             .foregroundColor(.secondary)
@@ -483,6 +602,7 @@ struct DevToolsTreeNodeView: View {
             .onTapGesture {
                 devTools.selectNode(node.id)
             }
+            .id(node.id) // For ScrollViewReader
 
             // Children
             if isExpanded {

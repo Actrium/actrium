@@ -158,6 +158,53 @@ class DevToolsManager: ObservableObject {
     /// Selected component node ID
     @Published var selectedNodeId: String?
 
+    /// Expanded node IDs (for tree collapse/expand state)
+    @Published var expandedNodeIds: Set<String> = []
+
+    /// Whether a node is expanded
+    func isNodeExpanded(_ nodeId: String) -> Bool {
+        expandedNodeIds.contains(nodeId)
+    }
+
+    /// Toggle node expand/collapse state
+    func toggleNodeExpanded(_ nodeId: String) {
+        if expandedNodeIds.contains(nodeId) {
+            expandedNodeIds.remove(nodeId)
+        } else {
+            expandedNodeIds.insert(nodeId)
+        }
+    }
+
+    /// Expand a node
+    func expandNode(_ nodeId: String) {
+        expandedNodeIds.insert(nodeId)
+    }
+
+    /// Collapse a node
+    func collapseNode(_ nodeId: String) {
+        expandedNodeIds.remove(nodeId)
+    }
+
+    /// Expand all nodes
+    func expandAllNodes() {
+        guard let tree = componentTree else { return }
+        collectAllNodeIds(tree, into: &expandedNodeIds)
+    }
+
+    /// Collapse all nodes
+    func collapseAllNodes() {
+        expandedNodeIds.removeAll()
+    }
+
+    private func collectAllNodeIds(_ node: DevToolsComponentNode, into set: inout Set<String>) {
+        if !node.children.isEmpty {
+            set.insert(node.id)
+            for child in node.children {
+                collectAllNodeIds(child, into: &set)
+            }
+        }
+    }
+
     // MARK: - Logs
 
     /// Host-Guest message entries
