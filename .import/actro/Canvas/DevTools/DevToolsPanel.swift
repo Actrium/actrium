@@ -740,13 +740,14 @@ struct DevToolsTreeNodeView: View {
 
                 // Expanded text content (multiline or long text)
                 if isExpanded, let textLines = expandedTextLines {
+                    let isSelected = devTools.selectedNodeId == node.id
                     ForEach(Array(textLines.enumerated()), id: \.offset) { _, line in
                         HStack(spacing: 4) {
                             Spacer()
                                 .frame(width: 12)
                             Text(truncateText(line, maxLength: 50))
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.primary.opacity(0.8))
+                                .foregroundColor(isSelected ? .white.opacity(0.9) : .primary.opacity(0.8))
                             Spacer()
                         }
                         .padding(.leading, CGFloat(depth + 1) * 16)
@@ -760,7 +761,7 @@ struct DevToolsTreeNodeView: View {
                             .frame(width: 12)
                         Text("</\(node.type)>")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.accentColor.opacity(0.7))
+                            .foregroundColor(isSelected ? .white : .accentColor.opacity(0.7))
                         Spacer()
                     }
                     .padding(.leading, CGFloat(depth) * 16)
