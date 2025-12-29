@@ -11,8 +11,8 @@
  *
  * @version 8.0.0 - Single Engine + usePanels Hook Pattern
  */
-import React, { useCallback, useRef, useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, NativeEventEmitter, StyleSheet } from 'react-native';
+import React, { useCallback, useRef, useState, useEffect, useMemo } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, NativeEventEmitter, StyleSheet, findNodeHandle, UIManager } from 'react-native';
 import { logger } from '../logger';
 import { Engine } from 'rill';
 import { hostComponents } from './BundleView';
@@ -78,6 +78,7 @@ const DevToolsBridge = NativeModules.DevToolsBridge as {
   setInspectMode?: (enabled: boolean) => void;
   highlightNode?: (nodeId: string | null, frame: { x: number; y: number; width: number; height: number } | null) => void;
   clearHighlight?: () => void;
+  selectNodeFromInspect?: (nodeId: string) => void;
   addListener?: (eventName: string) => void;
   removeListeners?: (count: number) => void;
 } | undefined;
@@ -709,6 +710,128 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   // Inspect mode state
   const [isInspectMode, setIsInspectMode] = useState(false);
 
+  // Highlighted node frame for bidirectional linking
+  const [highlightedFrame, setHighlightedFrame] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    nodeId: string;
+  } | null>(null);
+
+  // Node frames cache for hit testing
+  const nodeFramesRef = useRef<Map<string, { x: number; y: number; width: number; height: number }>>(new Map());
+
+  // Measure all node frames when entering inspect mode or when tree updates
+  const measureAllNodeFrames = useCallback((engine: Engine | null) => {
+    if (!engine) return;
+
+    const receiver = engine.getReceiver();
+    if (!receiver) return;
+
+    const allRefs = receiver.getAllNodeRefs?.();
+    if (!allRefs) return;
+
+    const frames = new Map<string, { x: number; y: number; width: number; height: number }>();
+
+    allRefs.forEach((ref, nodeId) => {
+      if (!ref.current) return;
+
+      // Cast to correct type for findNodeHandle (it expects Component | null)
+      const handle = findNodeHandle(ref.current as React.Component);
+      if (!handle) return;
+
+      UIManager.measure(handle, (x, y, width, height, pageX, pageY) => {
+        if (width > 0 && height > 0) {
+          frames.set(String(nodeId), { x: pageX, y: pageY, width, height });
+        }
+      });
+    });
+
+    // Update after all measurements complete
+    setTimeout(() => {
+      nodeFramesRef.current = frames;
+    }, 50);
+  }, []);
+
+  // Measure single node frame and highlight it
+  const measureAndHighlightNode = useCallback((nodeId: string, engine: Engine | null) => {
+    if (!engine) return;
+
+    const receiver = engine.getReceiver();
+    if (!receiver) return;
+
+    const ref = receiver.getNodeRef?.(Number(nodeId));
+    if (!ref?.current) {
+      setHighlightedFrame(null);
+      return;
+    }
+
+    // Cast to correct type for findNodeHandle (it expects Component | null)
+    const handle = findNodeHandle(ref.current as React.Component);
+    if (!handle) {
+      setHighlightedFrame(null);
+      return;
+    }
+
+    UIManager.measure(handle, (x, y, width, height, pageX, pageY) => {
+      if (width > 0 && height > 0) {
+        setHighlightedFrame({ x: pageX, y: pageY, width, height, nodeId });
+        // Also send to native DevTools for overlay rendering
+        DevToolsBridge?.highlightNode?.(nodeId, { x: pageX, y: pageY, width, height });
+      } else {
+        setHighlightedFrame(null);
+        DevToolsBridge?.clearHighlight?.();
+      }
+    });
+  }, []);
+
+  // Find deepest node at given position
+  const findNodeAtPosition = useCallback((x: number, y: number, engine: Engine | null): string | null => {
+    if (!engine) return null;
+
+    const receiver = engine.getReceiver();
+    if (!receiver) return null;
+
+    const tree = receiver.getComponentTree?.();
+    if (!tree) return null;
+
+    // Get fresh frame measurements
+    const allRefs = receiver.getAllNodeRefs?.();
+    if (!allRefs) return null;
+
+    // Build frames map synchronously from cached values
+    const frames = nodeFramesRef.current;
+
+    // Find deepest node containing the point
+    let deepestNode: string | null = null;
+    let smallestArea = Infinity;
+
+    function traverse(node: { id: string; children: Array<{ id: string; children: unknown[] }> }) {
+      const frame = frames.get(node.id);
+      if (frame) {
+        const { x: fx, y: fy, width, height } = frame;
+        // Check if point is inside this node's frame
+        if (x >= fx && x <= fx + width && y >= fy && y <= fy + height) {
+          const area = width * height;
+          // Prefer smaller (deeper) nodes
+          if (area < smallestArea) {
+            smallestArea = area;
+            deepestNode = node.id;
+          }
+        }
+      }
+
+      // Traverse children
+      for (const child of node.children) {
+        traverse(child as { id: string; children: Array<{ id: string; children: unknown[] }> });
+      }
+    }
+
+    traverse(tree as { id: string; children: Array<{ id: string; children: unknown[] }> });
+    return deepestNode;
+  }, []);
+
   // DevTools pause handler - toggle pause for active engine
   useEffect(() => {
     if (!DevToolsBridge) return;
@@ -739,6 +862,17 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       setIsInspectMode((prev) => {
         const next = !prev;
         DevToolsBridge?.setInspectMode?.(next);
+
+        if (next) {
+          // Entering inspect mode - measure all node frames
+          const activeEngine = engineMapRef.current.get(activeTabId);
+          measureAllNodeFrames(activeEngine ?? null);
+        } else {
+          // Exiting inspect mode - clear highlight
+          setHighlightedFrame(null);
+          DevToolsBridge?.clearHighlight?.();
+        }
+
         return next;
       });
     });
@@ -746,9 +880,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     // Set up event listener for node selection from DevTools tree
     const selectSubscription = eventEmitter.addListener('onSelectNode', (data: { nodeId: string }) => {
       // When user selects a node in the DevTools tree, highlight it in the UI
-      // For now, just log it - full implementation would require measuring node frames
-      console.log('[DevTools] Node selected from tree:', data.nodeId);
-      // TODO: Implement node highlighting by measuring the component's frame
+      const activeEngine = engineMapRef.current.get(activeTabId);
+      measureAndHighlightNode(data.nodeId, activeEngine ?? null);
     });
 
     return () => {
@@ -801,24 +934,21 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     const activeEngine = engineMapRef.current.get(activeTabId);
     if (!activeEngine) return;
 
-    const receiver = activeEngine.getReceiver();
-    if (!receiver) return;
+    // Find the deepest node at the clicked position
+    const nodeId = findNodeAtPosition(x, y, activeEngine);
 
-    // Get component tree and find the deepest node at the clicked position
-    // For now, we just log the click and exit inspect mode
-    // Full implementation would require measuring all component frames
-    console.log('[DevTools] Inspect click at:', x, y);
+    if (nodeId) {
+      // Select this node in DevTools tree (triggers tree selection UI)
+      DevToolsBridge?.selectNodeFromInspect?.(nodeId);
+
+      // Highlight the selected node in RN UI
+      measureAndHighlightNode(nodeId, activeEngine);
+    }
 
     // Exit inspect mode after click
     setIsInspectMode(false);
     DevToolsBridge?.setInspectMode?.(false);
-
-    // TODO: Implement proper hit testing by:
-    // 1. Traversing the component tree
-    // 2. Measuring each component's frame using UIManager.measure
-    // 3. Finding the deepest component containing (x, y)
-    // 4. Selecting that node in DevTools
-  }, [activeTabId]);
+  }, [activeTabId, findNodeAtPosition, measureAndHighlightNode]);
 
   return (
     <View style={tabHostStyle}>
@@ -849,6 +979,28 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       {typeof EngineMonitorOverlay === 'function' ? (
         <EngineMonitorOverlay tabs={monitorTabs} activeTabId={activeTabId} getEngine={getEngine} />
       ) : null}
+
+      {/* Highlight overlay for selected node (always visible when frame is set) */}
+      {highlightedFrame && (
+        <View
+          style={[
+            styles.highlightOverlay,
+            {
+              left: highlightedFrame.x,
+              top: highlightedFrame.y,
+              width: highlightedFrame.width,
+              height: highlightedFrame.height,
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View style={styles.highlightLabel}>
+            <Text style={styles.highlightLabelText}>
+              #{highlightedFrame.nodeId}
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* Inspect mode overlay */}
       {isInspectMode && (
@@ -936,5 +1088,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  highlightOverlay: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: 'rgba(0, 122, 255, 0.9)',
+    backgroundColor: 'rgba(0, 122, 255, 0.15)',
+    zIndex: 9998,
+  },
+  highlightLabel: {
+    position: 'absolute',
+    top: -20,
+    left: 0,
+    backgroundColor: 'rgba(0, 122, 255, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 3,
+  },
+  highlightLabelText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
   },
 });
