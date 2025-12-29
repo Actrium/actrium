@@ -14,12 +14,25 @@
  * Only applies to functions passed as JSX props to avoid performance overhead.
  */
 
+console.log('[Babel Plugin] function-source-location loaded');
+
 module.exports = function functionSourceLocationPlugin({ types: t }) {
+  console.log('[Babel Plugin] function-source-location initialized');
+  let fileCount = 0;
+  let jsxAttrCount = 0;
+  let transformCount = 0;
   return {
     name: 'function-source-location',
     visitor: {
+      Program(path, state) {
+        fileCount++;
+        if (state.filename && state.filename.includes('countapp')) {
+          console.log(`[Babel Plugin] Processing file: ${state.filename}`);
+        }
+      },
       // Handle JSX attributes with function expressions
       JSXAttribute(path, state) {
+        jsxAttrCount++;
         const value = path.node.value;
 
         // Only process JSX expression containers
@@ -47,6 +60,13 @@ module.exports = function functionSourceLocationPlugin({ types: t }) {
 
         const filename = state.filename || 'unknown';
         const line = loc.start.line;
+
+        // Get the attribute name for logging
+        const attrName = path.node.name?.name || 'unknown';
+        transformCount++;
+        if (filename.includes('countapp') || filename.includes('App')) {
+          console.log(`[Babel Plugin] Transforming ${attrName} at ${filename}:${line}`);
+        }
 
         // Create Object.assign(fn, { __sourceFile, __sourceLine })
         const wrappedFunction = t.callExpression(

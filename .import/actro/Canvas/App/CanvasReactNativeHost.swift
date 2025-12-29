@@ -168,6 +168,9 @@ final class CanvasReactNativeHost {
         NativePerfTimer.shared.mark("RootView 实例创建完成")
 
         if let rctRootView = rootView as? RCTRootView {
+            // Store bridge reference
+            self.bridge = rctRootView.bridge
+            
             // 监听 React 内容首次挂载（当 contentView 有了第一个子视图）
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name(rawValue: "RCTContentDidAppearNotification"),
@@ -271,5 +274,15 @@ final class CanvasReactNativeHost {
         }
 
         return rootView
+    }
+    
+    func evaluateScript(_ code: String, tabId: UUID) {
+        guard let bridge = self.bridge else { return }
+        
+        // Send event to ActrApp to evaluate in the specific engine
+        bridge.eventDispatcher().sendAppEvent(withName: "DEVTOOLS_EVAL", body: [
+            "tabId": tabId.uuidString,
+            "code": code
+        ])
     }
 }
