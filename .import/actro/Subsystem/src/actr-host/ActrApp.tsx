@@ -1060,8 +1060,28 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
               // Get component name from hierarchy
               const componentName = hierarchy[selectedIndex]?.name || 'Unknown';
 
-              // Try to find Rill node ID
-              const nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
+              // Try to find Rill node ID - first direct match
+              let nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
+
+              // If no direct match, find via frame matching
+              if (!nodeId) {
+                for (const [, rillNodeId] of viewTagToNodeIdRef.current.entries()) {
+                  const nodeFrame = nodeFramesRef.current.get(rillNodeId);
+                  if (nodeFrame) {
+                    if (x >= nodeFrame.x && x <= nodeFrame.x + nodeFrame.width &&
+                        y >= nodeFrame.y && y <= nodeFrame.y + nodeFrame.height) {
+                      if (!nodeId) {
+                        nodeId = rillNodeId;
+                      } else {
+                        const currentFrame = nodeFramesRef.current.get(nodeId);
+                        if (currentFrame && nodeFrame.width * nodeFrame.height < currentFrame.width * currentFrame.height) {
+                          nodeId = rillNodeId;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
 
               if (frame && frame.width > 0 && frame.height > 0) {
                 setHighlightedFrame({
@@ -1133,13 +1153,64 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
               }
 
               // Find the corresponding Rill node ID using our mapping
-              const nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
+              // First try direct match
+              let nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
+              console.log('[DevTools] Direct viewTag lookup:', viewData.touchedViewTag, '->', nodeId);
+
+              // If no direct match, walk up the hierarchy to find a Rill node
+              if (!nodeId && viewData.hierarchy) {
+                console.log('[DevTools] Walking hierarchy to find Rill node...');
+                for (let i = viewData.selectedIndex; i < viewData.hierarchy.length; i++) {
+                  const item = viewData.hierarchy[i];
+                  if (!item) continue;
+
+                  try {
+                    const inspectorData = item.getInspectorData(findNodeHandle as (component: unknown) => number | null);
+                    if (inspectorData && typeof inspectorData.measure === 'function') {
+                      // Get the view tag for this hierarchy item by measuring it
+                      inspectorData.measure((mx, my, mw, mh, pageX, pageY) => {
+                        // Check if this hierarchy item's view tag is in our mapping
+                        // We can't easily get the view tag here, but we can check by component name
+                      });
+                    }
+                  } catch {
+                    // Ignore errors
+                  }
+
+                  // Check if the component name looks like a Rill component
+                  const componentName = item.name;
+                  console.log('[DevTools] Hierarchy item:', i, componentName);
+                }
+
+                // Alternative: scan all mapped view tags and find one whose frame contains the click point
+                const clickX = x;
+                const clickY = y;
+                for (const [tag, rillNodeId] of viewTagToNodeIdRef.current.entries()) {
+                  const frame = nodeFramesRef.current.get(rillNodeId);
+                  if (frame) {
+                    if (clickX >= frame.x && clickX <= frame.x + frame.width &&
+                        clickY >= frame.y && clickY <= frame.y + frame.height) {
+                      // This Rill node contains the click point
+                      // Use the smallest (most specific) matching node
+                      if (!nodeId) {
+                        nodeId = rillNodeId;
+                      } else {
+                        const currentFrame = nodeFramesRef.current.get(nodeId);
+                        if (currentFrame && frame.width * frame.height < currentFrame.width * currentFrame.height) {
+                          nodeId = rillNodeId;
+                        }
+                      }
+                    }
+                  }
+                }
+                console.log('[DevTools] Found via frame matching:', nodeId);
+              }
 
               if (nodeId) {
-                console.log('[DevTools] Found Rill nodeId from viewTag mapping:', nodeId);
+                console.log('[DevTools] Found Rill nodeId:', nodeId);
                 DevToolsBridge?.selectNodeFromInspect?.(nodeId);
               } else {
-                console.log('[DevTools] No mapping found for viewTag:', viewData.touchedViewTag);
+                console.log('[DevTools] No Rill node found for viewTag:', viewData.touchedViewTag);
               }
             }
           } catch (callbackError) {
