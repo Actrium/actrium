@@ -153,57 +153,83 @@ struct FileTreeNode: Identifiable {
     var file: SourceFile?
 
     static func buildTree(from files: [SourceFile]) -> [FileTreeNode] {
-        var root: [String: FileTreeNode] = [:]
+        // Use a class-based builder for proper reference semantics
+        class TreeBuilder {
+            var name: String
+            var path: String
+            var isDirectory: Bool
+            var children: [String: TreeBuilder] = [:]
+            var file: SourceFile?
+
+            init(name: String, path: String, isDirectory: Bool, file: SourceFile? = nil) {
+                self.name = name
+                self.path = path
+                self.isDirectory = isDirectory
+                self.file = file
+            }
+
+            func toNode() -> FileTreeNode {
+                FileTreeNode(
+                    name: name,
+                    path: path,
+                    isDirectory: isDirectory,
+                    children: children.values
+                        .map { $0.toNode() }
+                        .sorted { sortNodes($0, $1) },
+                    file: file
+                )
+            }
+
+            private func sortNodes(_ a: FileTreeNode, _ b: FileTreeNode) -> Bool {
+                if a.isDirectory != b.isDirectory {
+                    return a.isDirectory
+                }
+                return a.name.lowercased() < b.name.lowercased()
+            }
+        }
+
+        let root = TreeBuilder(name: "", path: "", isDirectory: true)
 
         for file in files {
             let components = file.relativePath.components(separatedBy: "/")
+            var current = root
             var currentPath = ""
 
             for (index, component) in components.enumerated() {
                 let isLast = index == components.count - 1
-                let parentPath = currentPath
                 currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
 
                 if isLast {
                     // It's a file
-                    let node = FileTreeNode(
+                    current.children[component] = TreeBuilder(
                         name: component,
                         path: currentPath,
                         isDirectory: false,
-                        children: [],
                         file: file
                     )
-                    if parentPath.isEmpty {
-                        root[currentPath] = node
-                    } else if var parent = root[parentPath] {
-                        parent.children.append(node)
-                        root[parentPath] = parent
-                    }
                 } else {
                     // It's a directory
-                    if root[currentPath] == nil {
-                        let node = FileTreeNode(
+                    if current.children[component] == nil {
+                        current.children[component] = TreeBuilder(
                             name: component,
                             path: currentPath,
-                            isDirectory: true,
-                            children: [],
-                            file: nil
+                            isDirectory: true
                         )
-                        if parentPath.isEmpty {
-                            root[currentPath] = node
-                        } else if var parent = root[parentPath] {
-                            parent.children.append(node)
-                            root[parentPath] = parent
-                        }
                     }
+                    current = current.children[component]!
                 }
             }
         }
 
-        // Get top-level nodes and sort
-        return root.values
-            .filter { !$0.path.contains("/") }
-            .sorted { $0.name < $1.name }
+        // Convert to nodes and return top-level children
+        return root.children.values
+            .map { $0.toNode() }
+            .sorted {
+                if $0.isDirectory != $1.isDirectory {
+                    return $0.isDirectory
+                }
+                return $0.name.lowercased() < $1.name.lowercased()
+            }
     }
 }
 

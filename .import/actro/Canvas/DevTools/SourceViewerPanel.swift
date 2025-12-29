@@ -35,7 +35,11 @@ struct SourceViewerPanel: View {
 final class SourceViewerViewModel: ObservableObject {
     @Published var files: [SourceFile] = []
     @Published var fileTree: [FileTreeNode] = []
-    @Published var selectedFile: SourceFile?
+    @Published var selectedFile: SourceFile? {
+        didSet {
+            selectedContent = selectedFile?.content
+        }
+    }
     @Published var selectedContent: String?
     @Published var isLoading = false
     @Published var error: String?
@@ -51,11 +55,6 @@ final class SourceViewerViewModel: ObservableObject {
         } catch {
             self.error = error.localizedDescription
         }
-    }
-
-    func selectFile(_ file: SourceFile) {
-        selectedFile = file
-        selectedContent = file.content
     }
 }
 
@@ -180,9 +179,9 @@ struct FileTreeNodeView: View {
                 }
             }
 
-            // Children
+            // Children (already sorted during tree build)
             if node.isDirectory && isExpanded {
-                ForEach(node.children.sorted { sortNodes($0, $1) }) { child in
+                ForEach(node.children) { child in
                     FileTreeNodeView(
                         node: child,
                         selectedFile: $selectedFile,
@@ -191,13 +190,6 @@ struct FileTreeNodeView: View {
                 }
             }
         }
-    }
-
-    private func sortNodes(_ a: FileTreeNode, _ b: FileTreeNode) -> Bool {
-        if a.isDirectory != b.isDirectory {
-            return a.isDirectory
-        }
-        return a.name.lowercased() < b.name.lowercased()
     }
 
     private func fileIcon(for name: String) -> String {
