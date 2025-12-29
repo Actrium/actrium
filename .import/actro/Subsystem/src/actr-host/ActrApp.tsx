@@ -13,6 +13,29 @@
  */
 import React, { useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, NativeEventEmitter, StyleSheet, findNodeHandle, UIManager } from 'react-native';
+
+// Import RN's Inspector API for accurate view hit testing
+// This uses React's internal renderer to find views at a point
+const getInspectorDataForViewAtPoint = require('react-native/src/private/inspector/getInspectorDataForViewAtPoint').default as (
+  inspectedView: unknown,
+  locationX: number,
+  locationY: number,
+  callback: (viewData: {
+    hierarchy: Array<{
+      name: string;
+      getInspectorData: (findNodeHandle: (component: unknown) => number | null) => {
+        measure: (callback: (x: number, y: number, width: number, height: number, left: number, top: number) => void) => void;
+        props: Record<string, unknown>;
+      };
+    }>;
+    props: Record<string, unknown>;
+    selectedIndex: number;
+    frame: { left: number; top: number; width: number; height: number };
+    pointerY: number;
+    touchedViewTag: number;
+    closestInstance: unknown;
+  }) => boolean
+) => void;
 import { logger } from '../logger';
 import { Engine } from 'rill';
 import { hostComponents } from './BundleView';
@@ -997,37 +1020,99 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     return styles.tabHost;
   }, [hasExplicitSize, containerWidth, containerHeight]);
 
-  // Handle inspect click - find the component at the clicked position
+  // Ref to the main content view for Inspector API
+  const inspectedViewRef = useRef<View>(null);
+
+  // Handle inspect click - use RN's Inspector API for accurate view detection
   const handleInspectClick = useCallback((x: number, y: number) => {
     console.log('[DevTools] handleInspectClick at:', x, y);
-    const activeEngine = engineMapRef.current.get(activeTabId);
-    if (!activeEngine) {
-      console.log('[DevTools] No active engine for Inspect click');
-      return;
+
+    // Use RN's getInspectorDataForViewAtPoint API
+    // This is much more reliable than our manual frame calculation
+    try {
+      getInspectorDataForViewAtPoint(
+        inspectedViewRef.current,
+        x,
+        y,
+        (viewData) => {
+          console.log('[DevTools] Inspector API result:', {
+            hierarchyLength: viewData.hierarchy?.length ?? 0,
+            selectedIndex: viewData.selectedIndex,
+            frame: viewData.frame,
+            touchedViewTag: viewData.touchedViewTag,
+          });
+
+          if (viewData.hierarchy && viewData.hierarchy.length > 0) {
+            // Get the frame from the API response - this is accurate!
+            const { frame } = viewData;
+            console.log('[DevTools] Using Inspector frame:', frame);
+
+            // Update highlight with accurate frame data
+            if (frame && frame.width > 0 && frame.height > 0) {
+              setHighlightedFrame({
+                x: frame.left,
+                y: frame.top,
+                width: frame.width,
+                height: frame.height,
+                nodeId: String(viewData.touchedViewTag),
+              });
+              DevToolsBridge?.highlightNode?.(String(viewData.touchedViewTag), {
+                x: frame.left,
+                y: frame.top,
+                width: frame.width,
+                height: frame.height,
+              });
+            }
+
+            // Try to find the corresponding node in our tree
+            const activeEngine = engineMapRef.current.get(activeTabId);
+            if (activeEngine) {
+              // The touchedViewTag is the native view tag
+              // We need to find our node ID that corresponds to this view
+              const receiver = activeEngine.getReceiver();
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const nodeId = (receiver as any)?.findNodeByViewTag?.(viewData.touchedViewTag);
+
+              if (nodeId) {
+                console.log('[DevTools] Found matching node:', nodeId);
+                DevToolsBridge?.selectNodeFromInspect?.(String(nodeId));
+              } else {
+                // Fallback: use the view tag as node ID
+                console.log('[DevTools] Using viewTag as nodeId:', viewData.touchedViewTag);
+                DevToolsBridge?.selectNodeFromInspect?.(String(viewData.touchedViewTag));
+              }
+            }
+          }
+
+          // Exit inspect mode after click
+          setIsInspectMode(false);
+          DevToolsBridge?.setInspectMode?.(false);
+
+          return false; // Don't continue traversing
+        }
+      );
+    } catch (error) {
+      console.log('[DevTools] Inspector API error:', error);
+
+      // Fallback to our manual implementation
+      const activeEngine = engineMapRef.current.get(activeTabId);
+      if (activeEngine) {
+        const nodeId = findNodeAtPosition(x, y, activeEngine);
+        console.log('[DevTools] Fallback findNodeAtPosition result:', nodeId);
+
+        if (nodeId) {
+          DevToolsBridge?.selectNodeFromInspect?.(nodeId);
+          measureAndHighlightNode(nodeId, activeEngine);
+        }
+      }
+
+      setIsInspectMode(false);
+      DevToolsBridge?.setInspectMode?.(false);
     }
-
-    // Find the deepest node at the clicked position
-    const nodeId = findNodeAtPosition(x, y, activeEngine);
-    console.log('[DevTools] findNodeAtPosition result:', nodeId);
-
-    if (nodeId) {
-      console.log('[DevTools] Selecting node from Inspect:', nodeId);
-      // Select this node in DevTools tree (triggers tree selection UI)
-      DevToolsBridge?.selectNodeFromInspect?.(nodeId);
-
-      // Highlight the selected node in RN UI
-      measureAndHighlightNode(nodeId, activeEngine);
-    } else {
-      console.log('[DevTools] No node found at position');
-    }
-
-    // Exit inspect mode after click
-    setIsInspectMode(false);
-    DevToolsBridge?.setInspectMode?.(false);
   }, [activeTabId, findNodeAtPosition, measureAndHighlightNode]);
 
   return (
-    <View style={tabHostStyle}>
+    <View style={tabHostStyle} ref={inspectedViewRef}>
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         // 重要：显式尺寸模式下不使用 flex:1，完全依赖父容器的宽高
