@@ -534,29 +534,80 @@ struct DevToolsElementsView: View {
 struct DevToolsPropRowView: View {
     let key: String
     let value: Any?
+    var depth: Int = 0
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(key)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.purple)
-                .frame(minWidth: 60, alignment: .leading)
+    @State private var isExpanded: Bool = false
 
-            Text("=")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-
-            Text(formatValue(value))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(colorForValue(value))
-                .lineLimit(3)
-                .textSelection(.enabled)
-
-            Spacer()
+    /// Check if value is expandable (object or array with items)
+    private var isExpandable: Bool {
+        switch value {
+        case let dict as [String: Any]:
+            return !dict.isEmpty
+        case let array as [Any]:
+            return !array.isEmpty
+        default:
+            return false
         }
     }
 
-    private func formatValue(_ value: Any?) -> String {
+    /// Get child items for expansion
+    private var childItems: [(key: String, value: Any?)] {
+        switch value {
+        case let dict as [String: Any]:
+            return dict.keys.sorted().map { ($0, dict[$0]) }
+        case let array as [Any]:
+            return array.enumerated().map { ("[\($0.offset)]", $0.element) }
+        default:
+            return []
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .top, spacing: 4) {
+                // Expand/collapse button for expandable values
+                if isExpandable {
+                    Button(action: { isExpanded.toggle() }) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 10, height: 10)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Spacer().frame(width: 10)
+                }
+
+                Text(key)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.purple)
+
+                Text("=")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+
+                Text(formatValue(value, brief: isExpandable && isExpanded))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(colorForValue(value))
+                    .lineLimit(isExpanded ? nil : 3)
+                    .textSelection(.enabled)
+
+                Spacer()
+            }
+
+            // Expanded children
+            if isExpanded && isExpandable {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(childItems.enumerated()), id: \.offset) { _, item in
+                        DevToolsPropRowView(key: item.key, value: item.value, depth: depth + 1)
+                            .padding(.leading, 14)
+                    }
+                }
+            }
+        }
+    }
+
+    private func formatValue(_ value: Any?, brief: Bool = false) -> String {
         guard let value = value else { return "null" }
 
         switch value {
@@ -571,11 +622,17 @@ struct DevToolsPropRowView: View {
         case let num as NSNumber:
             return "\(num)"
         case let array as [Any]:
+            if brief {
+                return "Array(\(array.count))"
+            }
             if array.count <= 3 {
                 return "[\(array.map { formatValue($0) }.joined(separator: ", "))]"
             }
             return "Array(\(array.count))"
         case let dict as [String: Any]:
+            if brief {
+                return "Object(\(dict.count))"
+            }
             if dict.count <= 2 {
                 let items = dict.map { "\($0.key): \(formatValue($0.value))" }
                 return "{\(items.joined(separator: ", "))}"
