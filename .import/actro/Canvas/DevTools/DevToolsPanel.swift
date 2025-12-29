@@ -263,35 +263,37 @@ struct DevToolsElementsView: View {
                 Divider()
 
                 if let tree = devTools.componentTree {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            DevToolsTreeNodeView(node: tree, depth: 0, devTools: devTools)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                DevToolsTreeNodeView(node: tree, depth: 0, devTools: devTools)
+                            }
+                            .padding(4)
                         }
-                        .padding(4)
-                    }
-                    .focusable()
-                    .focused($isTreeFocused)
-                    .focusEffectDisabled()  // Remove blue border on focus
-                    .onKeyPress(.upArrow) {
-                        navigateTree(direction: -1)
-                        return .handled
-                    }
-                    .onKeyPress(.downArrow) {
-                        navigateTree(direction: 1)
-                        return .handled
-                    }
-                    .onKeyPress(.leftArrow) {
-                        collapseOrMoveUp()
-                        return .handled
-                    }
-                    .onKeyPress(.rightArrow) {
-                        expandOrMoveDown()
-                        return .handled
-                    }
-                    .onAppear {
-                        // Auto-expand all nodes on first load
-                        if devTools.expandedNodeIds.isEmpty {
-                            devTools.expandAllNodes()
+                        .focusable()
+                        .focused($isTreeFocused)
+                        .focusEffectDisabled()  // Remove blue border on focus
+                        .onKeyPress(.upArrow) {
+                            navigateTree(direction: -1, proxy: proxy)
+                            return .handled
+                        }
+                        .onKeyPress(.downArrow) {
+                            navigateTree(direction: 1, proxy: proxy)
+                            return .handled
+                        }
+                        .onKeyPress(.leftArrow) {
+                            collapseOrMoveUp()
+                            return .handled
+                        }
+                        .onKeyPress(.rightArrow) {
+                            expandOrMoveDown()
+                            return .handled
+                        }
+                        .onAppear {
+                            // Auto-expand all nodes on first load
+                            if devTools.expandedNodeIds.isEmpty {
+                                devTools.expandAllNodes()
+                            }
                         }
                     }
                 } else {
@@ -388,17 +390,32 @@ struct DevToolsElementsView: View {
     // MARK: - Keyboard Navigation
 
     /// Navigate up or down in the tree
-    private func navigateTree(direction: Int) {
+    private func navigateTree(direction: Int, proxy: ScrollViewProxy? = nil) {
         let nodes = visibleNodes
         guard !nodes.isEmpty else { return }
+
+        var newNodeId: String?
 
         if let currentId = devTools.selectedNodeId,
            let currentIndex = nodes.firstIndex(where: { $0.id == currentId }) {
             let newIndex = max(0, min(nodes.count - 1, currentIndex + direction))
-            devTools.selectNode(nodes[newIndex].id)
+            newNodeId = nodes[newIndex].id
         } else {
             // No selection, select first or last
-            devTools.selectNode(direction > 0 ? nodes.first?.id : nodes.last?.id)
+            newNodeId = direction > 0 ? nodes.first?.id : nodes.last?.id
+        }
+
+        if let nodeId = newNodeId {
+            devTools.selectNode(nodeId)
+
+            // Smart scroll: only scroll when item is near edge
+            // Using nil anchor lets SwiftUI decide the minimal scroll needed
+            // to make the item visible (won't scroll if already visible)
+            if let proxy = proxy {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    proxy.scrollTo(nodeId, anchor: direction > 0 ? .bottom : .top)
+                }
+            }
         }
     }
 
@@ -594,6 +611,7 @@ struct DevToolsTreeNodeView: View {
             .onTapGesture {
                 devTools.selectNode(node.id)
             }
+            .id(node.id)  // For ScrollViewReader scrollTo
 
             // Children
             if isExpanded {
