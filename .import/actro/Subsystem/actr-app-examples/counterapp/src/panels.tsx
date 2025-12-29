@@ -63,23 +63,11 @@ function Counter({
 
   // Listen for fetch responses from Host
   useHostEvent<FetchResponse>('APP_FETCH_RESPONSE', (response) => {
-    console.log('[Weather] Received response:', JSON.stringify(response));
-    if (response.requestId !== pendingRequestRef.current) {
-      console.log('[Weather] RequestId mismatch, ignoring');
-      return;
-    }
+    if (response.requestId !== pendingRequestRef.current) return;
     pendingRequestRef.current = null;
     setWeatherLoading(false);
 
-    if (!response.ok) {
-      console.warn('[Weather] Request failed:', response.status, response.error);
-      return;
-    }
-
-    if (!response.data) {
-      console.warn('[Weather] No data in response');
-      return;
-    }
+    if (!response.ok || !response.data) return;
 
     // Parse Open-Meteo response
     const data = response.data as {
@@ -92,8 +80,6 @@ function Counter({
         relativehumidity_2m?: number[];
       };
     };
-
-    console.log('[Weather] Parsed data:', JSON.stringify(data));
 
     if (data.current_weather) {
       const now = new Date();
@@ -133,8 +119,6 @@ function Counter({
         updatedAt: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
       });
       setWeatherExpanded(true);
-    } else {
-      console.warn('[Weather] Invalid data format');
     }
   });
 
@@ -147,20 +131,13 @@ function Counter({
     pendingRequestRef.current = requestId;
 
     // Open-Meteo API - Shanghai (free, no API key needed)
-    // latitude=31.23, longitude=121.47
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=31.23&longitude=121.47&current_weather=true&hourly=relativehumidity_2m';
 
-    console.log('[Weather] Sending request:', requestId);
-    sendToHost('APP_FETCH_REQUEST', {
-      requestId,
-      url,
-      options: { method: 'GET' },
-    });
+    sendToHost('APP_FETCH_REQUEST', { requestId, url, options: { method: 'GET' } });
 
-    // Timeout fallback (in case Host doesn't respond)
+    // Timeout fallback
     setTimeout(() => {
       if (pendingRequestRef.current === requestId) {
-        console.warn('[Weather] Request timeout, no response from Host');
         pendingRequestRef.current = null;
         setWeatherLoading(false);
       }
