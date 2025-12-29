@@ -31,7 +31,12 @@ struct SourceViewerPanel: View {
         }
         .onChange(of: devTools.pendingSourceNavigation) { navigation in
             if let nav = navigation {
-                viewModel.navigateToSource(searchText: nav.searchText, files: viewModel.files)
+                viewModel.navigateToSource(
+                    functionName: nav.searchText,
+                    sourceFile: nav.fileName,
+                    sourceLine: nav.lineNumber,
+                    files: viewModel.files
+                )
                 devTools.clearPendingSourceNavigation()
             }
         }
@@ -71,35 +76,52 @@ final class SourceViewerViewModel: ObservableObject {
         }
     }
 
-    /// Navigate to source containing the search text
-    func navigateToSource(searchText: String, files: [SourceFile]) {
-        // Extract potential function name from the search text
-        // The searchText might be minified code or just a function name
-        let functionName = extractFunctionName(from: searchText)
+    /// Navigate to source - prefer direct file+line if available, otherwise search
+    func navigateToSource(functionName: String, sourceFile: String?, sourceLine: Int?, files: [SourceFile]) {
+        print("[SourceViewer] navigateToSource: func='\(functionName)', file=\(sourceFile ?? "nil"), line=\(sourceLine ?? 0), files=\(files.count)")
+
+        // Priority 0: If we have exact file and line, navigate directly
+        if let filePath = sourceFile, let line = sourceLine {
+            // Find the file by path (match by relative path or full path)
+            for file in files {
+                if file.fullPath.hasSuffix(filePath) || file.relativePath == filePath || filePath.contains(file.name) {
+                    print("[SourceViewer] Direct navigation to \(file.relativePath):\(line)")
+                    selectedFile = file
+                    selectedContent = file.content
+                    highlightLineNumber = line
+                    return
+                }
+            }
+            print("[SourceViewer] File not found for path: \(filePath)")
+        }
+
+        // Fallback: Extract function name and search
+        let searchName = extractFunctionName(from: functionName) ?? functionName
+        print("[SourceViewer] Fallback search for function: \(searchName)")
 
         // Priority 1: Search for exact function name definitions
-        if let name = functionName {
-            for file in files {
-                guard let content = file.content else { continue }
-                let lines = content.components(separatedBy: .newlines)
+        for file in files {
+            guard let content = file.content else { continue }
+            let lines = content.components(separatedBy: .newlines)
 
-                for (index, line) in lines.enumerated() {
-                    // Look for function definitions
-                    if line.contains("function \(name)") ||
-                       line.contains("const \(name) =") ||
-                       line.contains("let \(name) =") ||
-                       line.contains("var \(name) =") ||
-                       line.contains("\(name) =") && line.contains("=>") ||
-                       line.contains("\(name): function") ||
-                       line.contains("\(name)(") && (line.contains("function") || line.contains("=>")) {
-                        selectedFile = file
-                        selectedContent = content
-                        highlightLineNumber = index + 1
-                        return
-                    }
+            for (index, line) in lines.enumerated() {
+                // Look for function definitions
+                if line.contains("function \(searchName)") ||
+                   line.contains("const \(searchName) =") ||
+                   line.contains("let \(searchName) =") ||
+                   line.contains("var \(searchName) =") ||
+                   line.contains("\(searchName) =") && line.contains("=>") ||
+                   line.contains("\(searchName): function") ||
+                   line.contains("\(searchName)(") && (line.contains("function") || line.contains("=>")) {
+                    print("[SourceViewer] Found '\(searchName)' in \(file.relativePath) at line \(index + 1)")
+                    selectedFile = file
+                    selectedContent = content
+                    highlightLineNumber = index + 1
+                    return
                 }
             }
         }
+        print("[SourceViewer] No match found for function name '\(searchName)'")
 
         // Priority 2: Try exact text match (for non-minified code)
         for file in files {
@@ -107,7 +129,7 @@ final class SourceViewerViewModel: ObservableObject {
             let lines = content.components(separatedBy: .newlines)
 
             for (index, line) in lines.enumerated() {
-                if line.contains(searchText) {
+                if line.contains(functionName) {
                     selectedFile = file
                     selectedContent = content
                     highlightLineNumber = index + 1
@@ -118,7 +140,7 @@ final class SourceViewerViewModel: ObservableObject {
 
         // Priority 3: Look for any identifiable strings in the search text
         // Extract string literals from minified code like: y?.("蓝色按钮", ...
-        let stringLiterals = extractStringLiterals(from: searchText)
+        let stringLiterals = extractStringLiterals(from: functionName)
         for literal in stringLiterals {
             for file in files {
                 guard let content = file.content else { continue }

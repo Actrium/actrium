@@ -541,14 +541,16 @@ struct DevToolsPropRowView: View {
 
     @State private var isExpanded: Bool = false
 
-    /// Check if value is a serialized function with source
-    private var functionInfo: (name: String, source: String?)? {
+    /// Check if value is a serialized function with source location
+    private var functionInfo: (name: String, source: String?, sourceFile: String?, sourceLine: Int?)? {
         guard let dict = value as? [String: Any],
               let type = dict["__type"] as? String,
               type == "function" else { return nil }
         let name = dict["name"] as? String ?? "anonymous"
         let source = dict["source"] as? String
-        return (name, source)
+        let sourceFile = dict["sourceFile"] as? String
+        let sourceLine = dict["sourceLine"] as? Int
+        return (name, source, sourceFile, sourceLine)
     }
 
     /// Check if value is expandable (object or array with items)
@@ -610,8 +612,10 @@ struct DevToolsPropRowView: View {
                 if let fn = functionInfo {
                     FunctionLinkButton(
                         displayText: formatValue(value),
-                        // Prefer function name for searching, fall back to source if anonymous
-                        searchText: fn.name != "anonymous" ? fn.name : (fn.source ?? fn.name)
+                        functionName: fn.name,
+                        sourceFile: fn.sourceFile,
+                        sourceLine: fn.sourceLine,
+                        fallbackSource: fn.source
                     )
                 } else {
                     Text(formatValue(value, brief: isExpandable && isExpanded))
@@ -1634,13 +1638,20 @@ struct StyleRow: View {
 /// Button that displays function as clickable link with hover underline
 struct FunctionLinkButton: View {
     let displayText: String
-    let searchText: String
+    let functionName: String
+    let sourceFile: String?
+    let sourceLine: Int?
+    let fallbackSource: String? // Minified source for search fallback
 
     @State private var isHovered = false
 
     var body: some View {
         Button(action: {
-            DevToolsManager.shared.navigateToSource(functionName: searchText)
+            DevToolsManager.shared.navigateToSource(
+                functionName: functionName,
+                fileName: sourceFile,
+                lineNumber: sourceLine
+            )
         }) {
             Text(displayText)
                 .font(.system(size: 11, design: .monospaced))
@@ -1651,7 +1662,7 @@ struct FunctionLinkButton: View {
         .onHover { hovering in
             isHovered = hovering
         }
-        .help("Click to view source in Sources panel")
+        .help(sourceFile != nil ? "Click to open \(sourceFile!):\(sourceLine ?? 0)" : "Click to search in Sources panel")
     }
 }
 
