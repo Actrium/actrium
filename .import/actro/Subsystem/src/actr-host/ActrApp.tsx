@@ -796,6 +796,30 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     return styles.tabHost;
   }, [hasExplicitSize, containerWidth, containerHeight]);
 
+  // Handle inspect click - find the component at the clicked position
+  const handleInspectClick = useCallback((x: number, y: number) => {
+    const activeEngine = engineMapRef.current.get(activeTabId);
+    if (!activeEngine) return;
+
+    const receiver = activeEngine.getReceiver();
+    if (!receiver) return;
+
+    // Get component tree and find the deepest node at the clicked position
+    // For now, we just log the click and exit inspect mode
+    // Full implementation would require measuring all component frames
+    console.log('[DevTools] Inspect click at:', x, y);
+
+    // Exit inspect mode after click
+    setIsInspectMode(false);
+    DevToolsBridge?.setInspectMode?.(false);
+
+    // TODO: Implement proper hit testing by:
+    // 1. Traversing the component tree
+    // 2. Measuring each component's frame using UIManager.measure
+    // 3. Finding the deepest component containing (x, y)
+    // 4. Selecting that node in DevTools
+  }, [activeTabId]);
+
   return (
     <View style={tabHostStyle}>
       {tabs.map((tab) => {
@@ -825,6 +849,24 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       {typeof EngineMonitorOverlay === 'function' ? (
         <EngineMonitorOverlay tabs={monitorTabs} activeTabId={activeTabId} getEngine={getEngine} />
       ) : null}
+
+      {/* Inspect mode overlay */}
+      {isInspectMode && (
+        <TouchableOpacity
+          style={styles.inspectOverlay}
+          activeOpacity={1}
+          onPress={(event) => {
+            const { locationX, locationY } = event.nativeEvent;
+            handleInspectClick(locationX, locationY);
+          }}
+        >
+          <View style={styles.inspectBanner}>
+            <Text style={styles.inspectBannerText}>
+              Inspect Mode - Click to select element
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -874,5 +916,25 @@ const styles = StyleSheet.create({
   tabHost: {
     flex: 1,
     position: 'relative',
+  },
+  inspectOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    zIndex: 9999,
+  },
+  inspectBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 122, 255, 0.9)',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  inspectBannerText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
