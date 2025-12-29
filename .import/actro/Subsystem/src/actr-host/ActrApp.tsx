@@ -320,10 +320,13 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         const unsubscribeOperation = currentEngine.on('operation', (batch) => {
           // Log each operation in the batch to DevTools
           for (const op of batch.operations) {
+            // Note: Operation uses 'op' field for operation type (CREATE/UPDATE/DELETE/TEXT etc.)
+            // and 'type' field for component type (View/Text etc.)
+            const opType = (op as { op: string }).op;
             logDevToolsRenderOp(
-              op.type,
-              op.type === 'CREATE' ? (op as { componentType?: string }).componentType : undefined,
-              (op as { nodeId?: string }).nodeId,
+              opType,
+              opType === 'CREATE' ? (op as { type?: string }).type : undefined,
+              String((op as { id?: number }).id),
               (op as { props?: unknown }).props,
               tab.id
             );
