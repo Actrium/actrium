@@ -4,6 +4,7 @@
   "repository": "https://github.com/GoAskAway/rill.git",
   "main": "./src/host/index.ts",
   "devDependencies": {
+    "@babel/core": "^7.28.5",
     "@biomejs/biome": "^2.3.9",
     "@happy-dom/global-registrator": "^15.0.0",
     "@playwright/test": "^1.57.0",
