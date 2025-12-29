@@ -11,5 +11,6 @@ RCT_EXTERN_METHOD(updateComponentTree:(NSString *)treeJson :(NSString *)tabId)
 RCT_EXTERN_METHOD(setInspectMode:(BOOL)enabled)
 RCT_EXTERN_METHOD(highlightNode:(NSString *)nodeId :(NSDictionary *)frame)
 RCT_EXTERN_METHOD(clearHighlight)
+RCT_EXTERN_METHOD(selectNodeFromInspect:(NSString *)nodeId)
 
 @end

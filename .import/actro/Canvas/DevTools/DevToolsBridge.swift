@@ -152,6 +152,17 @@ class DevToolsBridge: RCTEventEmitter {
         }
     }
 
+    /// Select a node in the DevTools tree (called from RN after Inspect click)
+    @objc
+    func selectNodeFromInspect(_ nodeId: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
+            // Select the node in the tree
+            DevToolsManager.shared.selectNode(nodeId)
+            // Also update highlight state
+            DevToolsManager.shared.highlightedNodeId = nodeId
+        }
+    }
+
     /// Emit request to toggle inspect mode in RN
     private func emitToggleInspect() {
         if hasListeners {
