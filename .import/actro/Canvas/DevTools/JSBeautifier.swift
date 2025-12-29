@@ -16,10 +16,13 @@ final class JSBeautifier {
     private func setupContext() {
         guard let context = context else { return }
 
+        // Create global/window objects for js-beautify to attach to
+        context.evaluateScript("var global = this; var window = this;")
+
         // Load js-beautify library
         guard let beautifyURL = Bundle.main.url(forResource: "beautify.min", withExtension: "js"),
               let beautifyScript = try? String(contentsOf: beautifyURL, encoding: .utf8) else {
-            print("[JSBeautifier] Failed to load beautify.min.js")
+            NSLog("[JSBeautifier] Failed to load beautify.min.js")
             return
         }
 
@@ -30,8 +33,9 @@ final class JSBeautifier {
         if let jsBeautify = context.objectForKeyedSubscript("js_beautify"),
            !jsBeautify.isUndefined {
             isReady = true
+            NSLog("[JSBeautifier] Ready")
         } else {
-            print("[JSBeautifier] js_beautify function not found")
+            NSLog("[JSBeautifier] js_beautify function not found after loading")
         }
     }
 
@@ -40,44 +44,45 @@ final class JSBeautifier {
     /// - Returns: Beautified code, or original if beautification fails
     func beautify(_ source: String) -> String {
         guard isReady, let context = context else {
+            NSLog("[JSBeautifier] Not ready, returning original")
             return source
         }
 
-        // Escape the source for JavaScript string
-        let escaped = source
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-            .replacingOccurrences(of: "\t", with: "\\t")
+        // Use JSValue call to pass source directly, avoiding escaping issues
+        guard let jsBeautify = context.objectForKeyedSubscript("js_beautify") else {
+            NSLog("[JSBeautifier] js_beautify not found")
+            return source
+        }
 
-        // Call js_beautify with options
-        let script = """
-        js_beautify("\(escaped)", {
-            indent_size: 2,
-            indent_char: " ",
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            keep_array_indentation: false,
-            break_chained_methods: false,
-            brace_style: "collapse",
-            space_before_conditional: true,
-            unescape_strings: false,
-            jslint_happy: false,
-            end_with_newline: false,
-            wrap_line_length: 0,
-            e4x: false,
-            comma_first: false,
-            operator_position: "before-newline"
-        })
-        """
+        // Create options object
+        let options: [String: Any] = [
+            "indent_size": 2,
+            "indent_char": " ",
+            "max_preserve_newlines": 2,
+            "preserve_newlines": true,
+            "break_chained_methods": false,
+            "brace_style": "collapse",
+            "space_before_conditional": true,
+            "end_with_newline": false
+        ]
 
-        if let result = context.evaluateScript(script),
+        // Call js_beautify(source, options)
+        let result = jsBeautify.call(withArguments: [source, options])
+
+        NSLog("[JSBeautifier] Input length: %d", source.count)
+        NSLog("[JSBeautifier] Result isUndefined: %d, isNull: %d", result?.isUndefined ?? true, result?.isNull ?? true)
+
+        if let result = result,
            !result.isUndefined,
-           let beautified = result.toString() {
+           !result.isNull,
+           let beautified = result.toString(),
+           beautified != "undefined" {
+            NSLog("[JSBeautifier] Output length: %d", beautified.count)
+            NSLog("[JSBeautifier] Output preview: %@", String(beautified.prefix(100)))
             return beautified
         }
 
+        NSLog("[JSBeautifier] Beautify failed, returning original")
         return source
     }
 }
