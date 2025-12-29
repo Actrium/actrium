@@ -28,34 +28,45 @@ struct SourceViewerPanel: View {
         }
         .task {
             await viewModel.loadSourceMap()
+            // Check for pending navigation after load
+            handlePendingNavigation()
         }
-        .onChange(of: devTools.pendingSourceNavigation) { _, navigation in
-            if let nav = navigation {
-                print("🔍 [SourceViewerPanel] Navigation triggered: \(nav.searchText)")
-                print("   - files loaded: \(viewModel.files.count)")
+        .onAppear {
+            // Check for pending navigation on appear
+            handlePendingNavigation()
+        }
+        .onChange(of: devTools.pendingSourceNavigation) { _, _ in
+            handlePendingNavigation()
+        }
+    }
 
-                // If files not loaded yet, load them first
-                if viewModel.files.isEmpty {
-                    print("⚠️ [SourceViewerPanel] Files not loaded, loading now...")
-                    Task {
-                        await viewModel.loadSourceMap()
-                        viewModel.navigateToSource(
-                            functionName: nav.searchText,
-                            sourceFile: nav.fileName,
-                            sourceLine: nav.lineNumber,
-                            files: viewModel.files
-                        )
-                    }
-                } else {
-                    viewModel.navigateToSource(
-                        functionName: nav.searchText,
-                        sourceFile: nav.fileName,
-                        sourceLine: nav.lineNumber,
-                        files: viewModel.files
-                    )
-                }
+    private func handlePendingNavigation() {
+        guard let nav = devTools.pendingSourceNavigation else { return }
+
+        print("🔍 [SourceViewerPanel] Navigation triggered: \(nav.searchText)")
+        print("   - files loaded: \(viewModel.files.count)")
+
+        // If files not loaded yet, load them first
+        if viewModel.files.isEmpty {
+            print("⚠️ [SourceViewerPanel] Files not loaded, loading now...")
+            Task {
+                await viewModel.loadSourceMap()
+                viewModel.navigateToSource(
+                    functionName: nav.searchText,
+                    sourceFile: nav.fileName,
+                    sourceLine: nav.lineNumber,
+                    files: viewModel.files
+                )
                 devTools.clearPendingSourceNavigation()
             }
+        } else {
+            viewModel.navigateToSource(
+                functionName: nav.searchText,
+                sourceFile: nav.fileName,
+                sourceLine: nav.lineNumber,
+                files: viewModel.files
+            )
+            devTools.clearPendingSourceNavigation()
         }
     }
 }

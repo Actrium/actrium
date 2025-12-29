@@ -218,12 +218,19 @@ class DevToolsManager: ObservableObject {
 
     /// Navigate to source location (switches to Sources tab and triggers search)
     func navigateToSource(functionName: String, fileName: String? = nil, lineNumber: Int? = nil) {
+        print("🔍 [DevToolsManager] navigateToSource called:")
+        print("   - functionName: '\(functionName)'")
+        print("   - fileName: \(fileName ?? "nil")")
+        print("   - lineNumber: \(lineNumber ?? 0)")
+
         pendingSourceNavigation = SourceNavigation(
             searchText: functionName,
             fileName: fileName,
             lineNumber: lineNumber
         )
         activeTab = .sources
+
+        print("   - pendingSourceNavigation set, activeTab = .sources")
     }
 
     /// Clear pending navigation after it's been handled

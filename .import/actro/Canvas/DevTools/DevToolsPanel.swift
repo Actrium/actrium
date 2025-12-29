@@ -282,7 +282,7 @@ struct DevToolsElementsView: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.vertical, 4)
                 .background(Color(nsColor: .controlBackgroundColor))
 
                 Divider()
@@ -364,7 +364,7 @@ struct DevToolsElementsView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.vertical, 4)
                 .background(Color(nsColor: .controlBackgroundColor))
 
                 Divider()
@@ -1101,17 +1101,17 @@ struct DevToolsMessagesView: View {
                 // Search filter
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundColor(.secondary)
-                    TextField("Filter...", text: $devTools.messageFilter)
+                    TextField("Filter", text: $devTools.messageFilter)
                         .textFieldStyle(.plain)
                         .font(.system(size: 11))
-                        .frame(maxWidth: 150)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
                 .background(Color(nsColor: .textBackgroundColor))
                 .cornerRadius(4)
+                .frame(maxWidth: 150)
 
                 Spacer()
 
@@ -1128,7 +1128,7 @@ struct DevToolsMessagesView: View {
                 .help("Clear messages")
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, 4)
             .background(Color(nsColor: .controlBackgroundColor))
 
             Divider()
@@ -1585,6 +1585,7 @@ struct FunctionLinkButton: View {
 
     var body: some View {
         Button(action: {
+            print("🔍 [FunctionLinkButton] Clicked: \(functionName)")
             DevToolsManager.shared.navigateToSource(
                 functionName: functionName,
                 fileName: sourceFile,
