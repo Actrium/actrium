@@ -153,7 +153,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       (v as SerializedFunction).__type === 'function' &&
       '__fnId' in v,
     decode: (v, ctx) => {
-      const { __fnId, __source } = v as SerializedFunction;
+      const { __fnId, __name, __source } = v as SerializedFunction;
       // Reason: Deserialized function proxy accepts arbitrary arguments
       const proxy = (...args: unknown[]) => {
         try {
@@ -187,7 +187,10 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
           return undefined;
         }
       };
-      // Attach source for DevTools inspection
+      // Attach name and source for DevTools inspection
+      if (__name) {
+        (proxy as { __name?: string }).__name = __name;
+      }
       if (__source) {
         (proxy as { __source?: string }).__source = __source;
       }
@@ -202,17 +205,19 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     match: (v) => typeof v === 'function',
     encode: (fn, ctx) => {
       // biome-ignore lint/complexity/noBannedTypes: fn is verified as function by match()
-      const fnId = ctx.registerFunction(fn as Function);
-      // Capture function source for DevTools (truncate if too long)
+      const func = fn as Function;
+      const fnId = ctx.registerFunction(func);
+      // Capture function name and source for DevTools
+      const fnName = func.name || undefined;
       let source: string | undefined;
       try {
-        const fullSource = (fn as Function).toString();
+        const fullSource = func.toString();
         // Truncate long sources to avoid performance issues
         source = fullSource.length > 500 ? fullSource.slice(0, 500) + '...' : fullSource;
       } catch {
         // Some functions may not support toString()
       }
-      return { __type: 'function', __fnId: fnId, __source: source } as SerializedFunction;
+      return { __type: 'function', __fnId: fnId, __name: fnName, __source: source } as SerializedFunction;
     },
     strategy: 'proxy',
   },

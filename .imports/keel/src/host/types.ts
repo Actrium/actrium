@@ -166,7 +166,7 @@ export type {
   ScrollEvent,
   StyleObject,
   StyleProp,
-} from '../style-types';
+} from '../shared/style-types';
 
 // ============================================
 // EngineView Interface

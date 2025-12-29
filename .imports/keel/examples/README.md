@@ -100,14 +100,13 @@ bun run verify-examples.ts
 
 For host-side integration (Engine, EngineView), see:
 
-- `rill/presets/react-native` - React Native preset
-- `rill/presets/react-web` - Web preset
+- `rill/host/preset` - Host UI components (works for both React Native and Web)
 
 Host integration example:
 
 ```tsx
-import { Engine, EngineView } from 'rill';
-import { DefaultComponents } from 'rill/presets/react-native';
+import { Engine } from 'rill';
+import { DefaultComponents, EngineView } from 'rill/host/preset';
 
 const engine = new Engine({
   sandbox: createSandboxProvider(),

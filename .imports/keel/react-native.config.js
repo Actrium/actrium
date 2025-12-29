@@ -1,17 +1,12 @@
-const path = require('path');
-
+// Native sandbox is optional - most users only need rill/let (pure JS SDK)
+// Set platforms to null to disable auto-linking
+// For native sandbox users: manually add RillSandboxNative.podspec to Podfile
 module.exports = {
   dependency: {
     platforms: {
-      ios: {
-        podspecPath: path.join(__dirname, 'native/platform/RillSandboxNative.podspec'),
-      },
-      macos: {
-        podspecPath: path.join(__dirname, 'native/platform/RillSandboxNative.podspec'),
-      },
-      android: {
-        sourceDir: path.join(__dirname, 'native/platform/android'),
-      },
+      ios: null, // Disable iOS auto-linking
+      macos: null, // Disable macOS auto-linking
+      android: null, // Disable Android auto-linking
     },
   },
 };

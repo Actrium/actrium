@@ -7,6 +7,10 @@
  * (like react-test-renderer) expect these globals during load time.
  */
 
+// Set __RILL_GUEST_ENV__ to enable sandbox mode for SDK tests
+// This makes components return string identifiers instead of react-native components
+(globalThis as Record<string, unknown>).__RILL_GUEST_ENV__ = true;
+
 // Store original console if it exists
 const originalConsole = globalThis.console;
 

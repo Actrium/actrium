@@ -24,7 +24,7 @@ export {
   formatWithPlaceholders,
   RUNTIME_HELPERS_CODE,
 } from './SandboxHelpers';
-export { ALL_SHIMS, DEVTOOLS_SHIM } from './shims';
+export { DEVTOOLS_SHIM } from './shims';
 export type { TimerManagerOptions } from './TimerManager';
 // Export refactored modules
 export { TimerManager } from './TimerManager';

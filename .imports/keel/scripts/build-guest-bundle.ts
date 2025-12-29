@@ -13,8 +13,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const ROOT = path.resolve(import.meta.dir, '..');
-const INPUT = path.join(ROOT, 'src/guest-bundle/entry.ts');
-const OUTPUT = path.join(ROOT, 'src/guest-bundle/build/bundle.ts');
+const INPUT = path.join(ROOT, 'src/guest/bundle.ts');
+const OUTPUT = path.join(ROOT, 'src/guest/build/bundle.ts');
 const TEMP_DIR = '/tmp/rill-build';
 const TEMP_FILE = path.join(TEMP_DIR, 'guest-bundle.js');
 

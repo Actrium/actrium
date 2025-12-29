@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import React from 'react';
-import { CallbackRegistry, OperationCollector } from '../../../guest/reconciler';
+import { CallbackRegistry, OperationCollector } from '../../../guest/runtime/reconciler';
 import { Engine } from '../../Engine';
 import { Receiver } from '../../receiver';
 import { ComponentRegistry } from '../../registry';

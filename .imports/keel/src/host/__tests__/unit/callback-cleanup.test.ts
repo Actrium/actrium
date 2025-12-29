@@ -6,8 +6,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { CallbackRegistry } from '../../../guest/reconciler';
-import { Bridge } from '../../bridge/Bridge';
+import { CallbackRegistryImpl as CallbackRegistry } from '../../../shared';
+import { Bridge } from '../../../shared/bridge/Bridge';
 import type { OperationBatch } from '../../../shared/types';
 import { Receiver } from '../../receiver';
 import { ComponentRegistry } from '../../registry';

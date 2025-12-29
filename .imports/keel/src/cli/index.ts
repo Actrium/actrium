@@ -29,6 +29,7 @@ program
     '--strict-peer-versions',
     'Fail build if React/reconciler versions mismatch recommended matrix'
   )
+  .option('--footer <path>', 'Custom footer file (replaces default auto-render)')
   .action(async (entry: string, options: Partial<BuildOptions>) => {
     try {
       const buildOpts: BuildOptions = {
@@ -42,6 +43,9 @@ program
       };
       if (options.metafile !== undefined) {
         buildOpts.metafile = options.metafile;
+      }
+      if (options.footer !== undefined) {
+        buildOpts.footer = options.footer;
       }
       await build(buildOpts);
     } catch (error) {
