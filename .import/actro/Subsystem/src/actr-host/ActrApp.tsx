@@ -747,7 +747,11 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   // Node frames cache for hit testing
   const nodeFramesRef = useRef<Map<string, { x: number; y: number; width: number; height: number }>>(new Map());
 
-  // Measure all node frames when entering inspect mode or when tree updates
+  // Bidirectional mapping: viewTag <-> nodeId
+  const viewTagToNodeIdRef = useRef<Map<number, string>>(new Map());
+  const nodeIdToViewTagRef = useRef<Map<string, number>>(new Map());
+
+  // Build viewTag <-> nodeId mapping and measure all frames
   const measureAllNodeFrames = useCallback((engine: Engine | null) => {
     console.log('[DevTools] measureAllNodeFrames called');
     if (!engine) {
@@ -767,41 +771,41 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       return;
     }
 
-    console.log('[DevTools] Measuring', allRefs.size, 'nodes');
+    console.log('[DevTools] Building viewTag mapping for', allRefs.size, 'nodes');
     const frames = new Map<string, { x: number; y: number; width: number; height: number }>();
-    let measureCount = 0;
+    const viewTagToNodeId = new Map<number, string>();
+    const nodeIdToViewTag = new Map<string, number>();
 
     allRefs.forEach((ref, nodeId) => {
       if (!ref.current) return;
 
-      // Try using component's measure method directly
+      // Get native view tag for this node
+      const viewTag = findNodeHandle(ref.current as React.Component);
+      if (viewTag) {
+        viewTagToNodeId.set(viewTag, String(nodeId));
+        nodeIdToViewTag.set(String(nodeId), viewTag);
+      }
+
+      // Try measuring the node
       const component = ref.current as { measure?: (callback: (x: number, y: number, width: number, height: number, pageX: number, pageY: number) => void) => void };
       if (typeof component.measure === 'function') {
         component.measure((x, y, width, height, pageX, pageY) => {
           if (width > 0 && height > 0) {
             frames.set(String(nodeId), { x: pageX, y: pageY, width, height });
-            measureCount++;
           }
         });
-        return;
       }
-
-      // Fallback to UIManager.measure
-      const handle = findNodeHandle(ref.current as React.Component);
-      if (!handle) return;
-
-      UIManager.measure(handle, (x, y, width, height, pageX, pageY) => {
-        if (width > 0 && height > 0) {
-          frames.set(String(nodeId), { x: pageX, y: pageY, width, height });
-          measureCount++;
-        }
-      });
     });
 
-    // Update after all measurements complete
+    // Update mappings
+    viewTagToNodeIdRef.current = viewTagToNodeId;
+    nodeIdToViewTagRef.current = nodeIdToViewTag;
+    console.log('[DevTools] Built viewTag mapping:', viewTagToNodeId.size, 'entries');
+
+    // Update frames after a short delay to let measurements complete
     setTimeout(() => {
-      console.log('[DevTools] Measured', measureCount, 'nodes, total frames:', frames.size);
       nodeFramesRef.current = frames;
+      console.log('[DevTools] Frames cached:', frames.size, 'entries');
     }, 100);
   }, []);
 
@@ -1052,13 +1056,17 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             const { frame, selectedIndex, hierarchy } = viewData;
             // Get component name from hierarchy
             const componentName = hierarchy[selectedIndex]?.name || 'Unknown';
+
+            // Try to find Rill node ID
+            const nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
+
             if (frame && frame.width > 0 && frame.height > 0) {
               setHighlightedFrame({
                 x: frame.left,
                 y: frame.top,
                 width: frame.width,
                 height: frame.height,
-                nodeId: String(viewData.touchedViewTag),
+                nodeId: nodeId || String(viewData.touchedViewTag),
                 componentName,
               });
             }
@@ -1112,23 +1120,35 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
               });
             }
 
-            // Try to find the corresponding node in our tree
-            const activeEngine = engineMapRef.current.get(activeTabId);
-            if (activeEngine) {
-              // The touchedViewTag is the native view tag
-              // We need to find our node ID that corresponds to this view
-              const receiver = activeEngine.getReceiver();
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const nodeId = (receiver as any)?.findNodeByViewTag?.(viewData.touchedViewTag);
+            // Find the corresponding Rill node ID using our mapping
+            // First, try exact match with touchedViewTag
+            let nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
 
-              if (nodeId) {
-                console.log('[DevTools] Found matching node:', nodeId);
-                DevToolsBridge?.selectNodeFromInspect?.(String(nodeId));
-              } else {
-                // Fallback: use the view tag as node ID
-                console.log('[DevTools] Using viewTag as nodeId:', viewData.touchedViewTag);
-                DevToolsBridge?.selectNodeFromInspect?.(String(viewData.touchedViewTag));
+            // If no match, walk up the hierarchy to find a matching view tag
+            if (!nodeId && viewData.hierarchy) {
+              for (let i = viewData.selectedIndex; i < viewData.hierarchy.length; i++) {
+                const item = viewData.hierarchy[i];
+                if (!item) continue;
+                // Use getInspectorData to get more info about this hierarchy item
+                try {
+                  const inspectorData = item.getInspectorData(findNodeHandle as (component: unknown) => number | null);
+                  if (inspectorData && typeof inspectorData.measure === 'function') {
+                    // Measure to trigger viewTag resolution if needed
+                    inspectorData.measure(() => {});
+                  }
+                } catch {
+                  // Ignore
+                }
               }
+            }
+
+            if (nodeId) {
+              console.log('[DevTools] Found Rill nodeId from viewTag mapping:', nodeId);
+              DevToolsBridge?.selectNodeFromInspect?.(nodeId);
+            } else {
+              console.log('[DevTools] No mapping found for viewTag:', viewData.touchedViewTag);
+              // Still select with viewTag as fallback - won't match tree but at least highlights
+              DevToolsBridge?.selectNodeFromInspect?.(String(viewData.touchedViewTag));
             }
           }
 
@@ -1159,8 +1179,25 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     }
   }, [activeTabId, findNodeAtPosition, measureAndHighlightNode]);
 
+  // Responder handlers for Inspect mode - only active when inspecting
+  const inspectResponderHandlers = isInspectMode ? {
+    onStartShouldSetResponder: () => true,
+    onResponderGrant: (event: { nativeEvent: { locationX: number; locationY: number } }) => {
+      const { locationX, locationY } = event.nativeEvent;
+      handleInspectHover(locationX, locationY);
+    },
+    onResponderMove: (event: { nativeEvent: { locationX: number; locationY: number } }) => {
+      const { locationX, locationY } = event.nativeEvent;
+      handleInspectHover(locationX, locationY);
+    },
+    onResponderRelease: (event: { nativeEvent: { locationX: number; locationY: number } }) => {
+      const { locationX, locationY } = event.nativeEvent;
+      handleInspectClick(locationX, locationY);
+    },
+  } : {};
+
   return (
-    <View style={tabHostStyle} ref={inspectedViewRef}>
+    <View style={tabHostStyle} ref={inspectedViewRef} {...inspectResponderHandlers}>
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         // 重要：显式尺寸模式下不使用 flex:1，完全依赖父容器的宽高
@@ -1211,36 +1248,6 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         </View>
       )}
 
-      {/* Inspect mode overlay - using gesture responders for hover support */}
-      {isInspectMode && (
-        <View
-          style={styles.inspectOverlay}
-          onStartShouldSetResponder={() => {
-            return true;
-          }}
-          onResponderGrant={(event) => {
-            // Initial touch - highlight the element
-            const { locationX, locationY } = event.nativeEvent;
-            handleInspectHover(locationX, locationY);
-          }}
-          onResponderMove={(event) => {
-            // Dragging - update highlight as mouse moves
-            const { locationX, locationY } = event.nativeEvent;
-            handleInspectHover(locationX, locationY);
-          }}
-          onResponderRelease={(event) => {
-            // Release - select the element
-            const { locationX, locationY } = event.nativeEvent;
-            handleInspectClick(locationX, locationY);
-          }}
-        >
-          <View style={styles.inspectBanner}>
-            <Text style={styles.inspectBannerText}>
-              Inspect Mode - Click to select element
-            </Text>
-          </View>
-        </View>
-      )}
     </View>
   );
 };
@@ -1290,26 +1297,6 @@ const styles = StyleSheet.create({
   tabHost: {
     flex: 1,
     position: 'relative',
-  },
-  inspectOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
-    zIndex: 9999,
-  },
-  inspectBanner: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0, 122, 255, 0.9)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  inspectBannerText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
   },
   highlightOverlay: {
     position: 'absolute',
