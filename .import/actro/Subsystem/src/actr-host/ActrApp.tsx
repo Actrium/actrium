@@ -71,6 +71,7 @@ const nerror = (msg: string) => log.error(msg);
 // DevTools message logging helper
 const DevToolsBridge = NativeModules.DevToolsBridge as {
   logMessage?: (direction: string, event: string, payload: string | null, tabId: string | null) => void;
+  logRenderOp?: (operationType: string, componentType: string | null, nodeId: string | null, payload: string | null, tabId: string | null) => void;
 } | undefined;
 
 function logDevToolsMessage(
@@ -84,6 +85,26 @@ function logDevToolsMessage(
       direction,
       event,
       payload ? JSON.stringify(payload) : null,
+      tabId ?? null
+    );
+  } catch {
+    // Ignore DevTools logging errors
+  }
+}
+
+function logDevToolsRenderOp(
+  operationType: string,
+  componentType: string | undefined,
+  nodeId: string | undefined,
+  props: unknown,
+  tabId?: string
+) {
+  try {
+    DevToolsBridge?.logRenderOp?.(
+      operationType,
+      componentType ?? null,
+      nodeId ?? null,
+      props ? JSON.stringify(props) : null,
       tabId ?? null
     );
   } catch {
@@ -254,7 +275,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         currentEngine.register(hostComponents);
 
         // Generic message handler with DevTools logging
-        const unsubscribeFetch = currentEngine.on('message', async (msg: { event: string; payload?: unknown }) => {
+        const unsubscribeMessage = currentEngine.on('message', async (msg: { event: string; payload?: unknown }) => {
           // Log all Guest → Host messages to DevTools
           logDevToolsMessage('guestToHost', msg.event, msg.payload, tab.id);
 
@@ -291,6 +312,20 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           }
         });
 
+        // Render operation handler with DevTools logging
+        const unsubscribeOperation = currentEngine.on('operation', (batch) => {
+          // Log each operation in the batch to DevTools
+          for (const op of batch.operations) {
+            logDevToolsRenderOp(
+              op.type,
+              op.type === 'CREATE' ? (op as { componentType?: string }).componentType : undefined,
+              (op as { nodeId?: string }).nodeId,
+              (op as { props?: unknown }).props,
+              tab.id
+            );
+          }
+        });
+
         currentAdapter = createEngineAdapter(currentEngine, {
           onContractViolation: (v) => onContractViolation?.(tab.id, v),
           permissions: tab.permissions ?? [],
@@ -300,7 +335,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         // Store unsubscribe for cleanup
         const originalDispose = currentAdapter.dispose;
         currentAdapter.dispose = () => {
-          unsubscribeFetch();
+          unsubscribeMessage();
+          unsubscribeOperation();
           originalDispose();
         };
 

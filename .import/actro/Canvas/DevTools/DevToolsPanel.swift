@@ -578,29 +578,38 @@ struct DevToolsMessagesView: View {
         VStack(spacing: 0) {
             // Filter bar
             HStack(spacing: 8) {
+                // Category filter
+                Picker("", selection: $devTools.messageCategoryFilter) {
+                    Text("All").tag(nil as MessageCategory?)
+                    Label("Render", systemImage: "hammer").tag(MessageCategory.render as MessageCategory?)
+                    Label("App", systemImage: "envelope").tag(MessageCategory.app as MessageCategory?)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+
+                // Direction filter
+                Picker("", selection: $devTools.messageDirectionFilter) {
+                    Text("↔").tag(nil as MessageDirection?)
+                    Text("↗").tag(MessageDirection.guestToHost as MessageDirection?)
+                    Text("↙").tag(MessageDirection.hostToGuest as MessageDirection?)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 90)
+
                 // Search filter
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
-                    TextField("Filter by event name...", text: $devTools.messageFilter)
+                    TextField("Filter...", text: $devTools.messageFilter)
                         .textFieldStyle(.plain)
                         .font(.system(size: 11))
-                        .frame(maxWidth: 200)
+                        .frame(maxWidth: 150)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color(nsColor: .textBackgroundColor))
                 .cornerRadius(4)
-
-                // Direction filter
-                Picker("", selection: $devTools.messageDirectionFilter) {
-                    Text("All").tag(nil as MessageDirection?)
-                    Text("↗ Guest→Host").tag(MessageDirection.guestToHost as MessageDirection?)
-                    Text("↙ Host→Guest").tag(MessageDirection.hostToGuest as MessageDirection?)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 220)
 
                 Spacer()
 
@@ -729,39 +738,67 @@ struct DevToolsMessageRowView: View {
     let message: DevToolsMessage
     let isSelected: Bool
 
+    private var categoryColor: Color {
+        message.category == .render ? .orange : .purple
+    }
+
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 6) {
             // Timestamp
             Text(message.timestamp, format: .dateTime.hour().minute().second().secondFraction(.fractional(3)))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(Color(nsColor: .tertiaryLabelColor))
                 .frame(width: 85, alignment: .leading)
 
-            // Direction arrow
+            // Category icon
+            Image(systemName: message.category.icon)
+                .font(.system(size: 9))
+                .foregroundColor(isSelected ? .white : categoryColor)
+                .frame(width: 14)
+
+            // Direction arrow (only for app messages or if direction matters)
             Text(message.directionArrow)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(message.direction == .guestToHost ? .blue : .green)
-                .frame(width: 16)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(isSelected ? .white : (message.direction == .guestToHost ? .blue : .green))
+                .frame(width: 14)
 
             // Event name
             Text(message.event)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(isSelected ? .white : .primary)
-                .lineLimit(1)
+                .frame(width: 70, alignment: .leading)
+
+            // Component type (for render) or detail
+            if let componentType = message.componentType {
+                Text(componentType)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(isSelected ? .white.opacity(0.9) : .accentColor)
+                    .lineLimit(1)
+                    .frame(width: 80, alignment: .leading)
+            }
+
+            // Node ID (for render)
+            if let nodeId = message.nodeId {
+                Text(nodeId)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(isSelected ? .white.opacity(0.7) : .secondary)
+                    .lineLimit(1)
+                    .frame(width: 60, alignment: .leading)
+            }
 
             Spacer()
 
             // Payload preview
             if let payload = message.payload {
-                Text(payload.prefix(50).replacingOccurrences(of: "\n", with: " "))
+                Text(payload.prefix(40).replacingOccurrences(of: "\n", with: " "))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(isSelected ? .white.opacity(0.7) : .secondary)
                     .lineLimit(1)
-                    .frame(maxWidth: 200, alignment: .trailing)
+                    .frame(maxWidth: 150, alignment: .trailing)
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 2)
                 .fill(isSelected ? Color.accentColor : Color.clear)
