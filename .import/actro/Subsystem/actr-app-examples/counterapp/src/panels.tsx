@@ -61,6 +61,22 @@ function Counter({
     return () => clearInterval(interval);
   }, []);
 
+  // Helper to set mock weather data
+  const setMockWeather = useCallback(() => {
+    const now = new Date();
+    setWeatherData({
+      city: 'Shanghai',
+      temperature: 22,
+      description: 'Partly Cloudy',
+      humidity: 65,
+      windSpeed: 12,
+      feelsLike: 24,
+      icon: '02d',
+      updatedAt: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
+    });
+    setWeatherExpanded(true);
+  }, []);
+
   // Listen for fetch responses from Host
   useHostEvent<FetchResponse>('APP_FETCH_RESPONSE', (response) => {
     if (response.requestId !== pendingRequestRef.current) return;
@@ -68,7 +84,8 @@ function Counter({
     setWeatherLoading(false);
 
     if (!response.ok || !response.data) {
-      console.warn('Weather fetch failed:', response.error);
+      // API failed (e.g., invalid key), use mock data
+      setMockWeather();
       return;
     }
 
@@ -93,6 +110,9 @@ function Counter({
         updatedAt: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
       });
       setWeatherExpanded(true);
+    } else {
+      // Invalid data format, use mock
+      setMockWeather();
     }
   });
 
@@ -115,27 +135,15 @@ function Counter({
       options: { method: 'GET' },
     });
 
-    // Timeout fallback
+    // Timeout fallback (in case Host doesn't respond)
     setTimeout(() => {
       if (pendingRequestRef.current === requestId) {
         pendingRequestRef.current = null;
         setWeatherLoading(false);
-        // Use mock data for demo
-        const now = new Date();
-        setWeatherData({
-          city: 'Shanghai',
-          temperature: 22,
-          description: 'Partly Cloudy',
-          humidity: 65,
-          windSpeed: 12,
-          feelsLike: 24,
-          icon: '02d',
-          updatedAt: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
-        });
-        setWeatherExpanded(true);
+        setMockWeather();
       }
-    }, 3000);
-  }, [weatherLoading, sendToHost]);
+    }, 5000);
+  }, [weatherLoading, sendToHost, setMockWeather]);
 
   const totalCount = redCount + blueCount + greenCount;
 
