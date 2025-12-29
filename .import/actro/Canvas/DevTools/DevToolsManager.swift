@@ -315,6 +315,9 @@ class DevToolsManager: ObservableObject {
     }
 
     private func appendMessage(_ message: DevToolsMessage) {
+        // Don't record messages when engine is paused (freeze the log view)
+        guard !isEnginePaused else { return }
+
         messages.append(message)
         // Trim if exceeds max
         if messages.count > maxLogEntries {
