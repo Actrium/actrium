@@ -315,13 +315,17 @@ class DevToolsManager: ObservableObject {
     }
 
     private func appendMessage(_ message: DevToolsMessage) {
-        // Don't record messages when engine is paused (freeze the log view)
-        guard !isEnginePaused else { return }
+        // Use asyncAfter to avoid "Publishing changes from within view updates" warning
+        DispatchQueue.main.asyncAfter(deadline: .now()) { [weak self] in
+            guard let self = self else { return }
+            // Don't record messages when engine is paused (freeze the log view)
+            guard !self.isEnginePaused else { return }
 
-        messages.append(message)
-        // Trim if exceeds max
-        if messages.count > maxLogEntries {
-            messages.removeFirst(messages.count - maxLogEntries)
+            self.messages.append(message)
+            // Trim if exceeds max
+            if self.messages.count > self.maxLogEntries {
+                self.messages.removeFirst(self.messages.count - self.maxLogEntries)
+            }
         }
     }
 
