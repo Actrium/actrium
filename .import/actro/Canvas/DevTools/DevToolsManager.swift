@@ -219,6 +219,32 @@ class DevToolsManager: ObservableObject {
     /// Expanded node IDs (for tree collapse/expand state)
     @Published var expandedNodeIds: Set<String> = []
 
+    // MARK: - Source Navigation
+
+    /// Pending source navigation request (for jumping to source from function props)
+    @Published var pendingSourceNavigation: SourceNavigation?
+
+    struct SourceNavigation: Equatable {
+        let searchText: String  // Function name or code to search for
+        let fileName: String?   // Optional specific file to search in
+        let lineNumber: Int?    // Optional specific line number
+    }
+
+    /// Navigate to source location (switches to Sources tab and triggers search)
+    func navigateToSource(functionName: String, fileName: String? = nil, lineNumber: Int? = nil) {
+        pendingSourceNavigation = SourceNavigation(
+            searchText: functionName,
+            fileName: fileName,
+            lineNumber: lineNumber
+        )
+        activeTab = .sources
+    }
+
+    /// Clear pending navigation after it's been handled
+    func clearPendingSourceNavigation() {
+        pendingSourceNavigation = nil
+    }
+
     /// Whether a node is expanded
     func isNodeExpanded(_ nodeId: String) -> Bool {
         expandedNodeIds.contains(nodeId)

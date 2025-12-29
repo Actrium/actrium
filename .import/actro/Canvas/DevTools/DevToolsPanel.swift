@@ -551,11 +551,12 @@ struct DevToolsPropRowView: View {
         return (name, source)
     }
 
-    /// Check if value is expandable (object or array with items, or function)
+    /// Check if value is expandable (object or array with items)
+    /// Note: functions are now clickable links, not expandable
     private var isExpandable: Bool {
-        // Functions are always expandable (to show source or at least type info)
+        // Functions are clickable links, not expandable
         if functionInfo != nil {
-            return true
+            return false
         }
         switch value {
         case let dict as [String: Any]:
@@ -605,29 +606,29 @@ struct DevToolsPropRowView: View {
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
 
-                Text(formatValue(value, brief: isExpandable && isExpanded))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(colorForValue(value))
-                    .lineLimit(isExpanded ? nil : 3)
-                    .textSelection(.enabled)
+                // Function props are clickable links to navigate to source
+                if let fn = functionInfo {
+                    Button(action: {
+                        // Navigate to source - use function name or source snippet
+                        let searchText = fn.source ?? fn.name
+                        DevToolsManager.shared.navigateToSource(functionName: searchText)
+                    }) {
+                        Text(formatValue(value))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.blue)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                    .help("Click to view source in Sources panel")
+                } else {
+                    Text(formatValue(value, brief: isExpandable && isExpanded))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(colorForValue(value))
+                        .lineLimit(isExpanded ? nil : 3)
+                        .textSelection(.enabled)
+                }
 
                 Spacer()
-            }
-
-            // Expanded function source with syntax highlighting
-            if isExpanded, let fn = functionInfo {
-                if let source = fn.source, !source.isEmpty {
-                    JavaScriptSourceView(source: source)
-                        .padding(.leading, 14)
-                        .padding(.top, 2)
-                } else {
-                    Text("// Source not available")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary.opacity(0.6))
-                        .italic()
-                        .padding(.leading, 14)
-                        .padding(.top, 2)
-                }
             }
 
             // Expanded children (for objects/arrays)
