@@ -36,10 +36,10 @@ function Counter({
   const [blueCount, setBlueCount] = useState(0);
   const [greenCount, setGreenCount] = useState(0);
 
-  // Clock state
+  // Clock state (with seconds)
   const [currentTime, setCurrentTime] = useState(() => {
     const now = new Date();
-    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
   });
 
   // Weather state
@@ -55,64 +55,86 @@ function Counter({
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setCurrentTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
+      setCurrentTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`);
     };
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // Helper to set mock weather data
-  const setMockWeather = useCallback(() => {
-    const now = new Date();
-    setWeatherData({
-      city: 'Shanghai',
-      temperature: 22,
-      description: 'Partly Cloudy',
-      humidity: 65,
-      windSpeed: 12,
-      feelsLike: 24,
-      icon: '02d',
-      updatedAt: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
-    });
-    setWeatherExpanded(true);
-  }, []);
-
   // Listen for fetch responses from Host
   useHostEvent<FetchResponse>('APP_FETCH_RESPONSE', (response) => {
-    if (response.requestId !== pendingRequestRef.current) return;
+    console.log('[Weather] Received response:', JSON.stringify(response));
+    if (response.requestId !== pendingRequestRef.current) {
+      console.log('[Weather] RequestId mismatch, ignoring');
+      return;
+    }
     pendingRequestRef.current = null;
     setWeatherLoading(false);
 
-    if (!response.ok || !response.data) {
-      // API failed (e.g., invalid key), use mock data
-      setMockWeather();
+    if (!response.ok) {
+      console.warn('[Weather] Request failed:', response.status, response.error);
       return;
     }
 
-    // Parse OpenWeatherMap response
+    if (!response.data) {
+      console.warn('[Weather] No data in response');
+      return;
+    }
+
+    // Parse Open-Meteo response
     const data = response.data as {
-      name?: string;
-      main?: { temp?: number; humidity?: number; feels_like?: number };
-      weather?: Array<{ description?: string; icon?: string }>;
-      wind?: { speed?: number };
+      current_weather?: {
+        temperature?: number;
+        windspeed?: number;
+        weathercode?: number;
+      };
+      hourly?: {
+        relativehumidity_2m?: number[];
+      };
     };
 
-    if (data.main && data.weather?.[0]) {
+    console.log('[Weather] Parsed data:', JSON.stringify(data));
+
+    if (data.current_weather) {
       const now = new Date();
+      const temp = data.current_weather.temperature ?? 0;
+      const windSpeed = data.current_weather.windspeed ?? 0;
+      const humidity = data.hourly?.relativehumidity_2m?.[0] ?? 0;
+      const weatherCode = data.current_weather.weathercode ?? 0;
+
+      // Map weather code to description
+      const weatherDescriptions: Record<number, string> = {
+        0: 'Clear',
+        1: 'Mainly Clear',
+        2: 'Partly Cloudy',
+        3: 'Overcast',
+        45: 'Fog',
+        48: 'Fog',
+        51: 'Light Drizzle',
+        53: 'Drizzle',
+        55: 'Heavy Drizzle',
+        61: 'Light Rain',
+        63: 'Rain',
+        65: 'Heavy Rain',
+        71: 'Light Snow',
+        73: 'Snow',
+        75: 'Heavy Snow',
+        95: 'Thunderstorm',
+      };
+
       setWeatherData({
-        city: data.name || 'Unknown',
-        temperature: Math.round((data.main.temp || 0) - 273.15),
-        description: data.weather[0].description || '',
-        humidity: data.main.humidity || 0,
-        windSpeed: Math.round((data.wind?.speed || 0) * 3.6),
-        feelsLike: Math.round((data.main.feels_like || 0) - 273.15),
-        icon: data.weather[0].icon || '01d',
+        city: 'Shanghai',
+        temperature: Math.round(temp),
+        description: weatherDescriptions[weatherCode] || 'Unknown',
+        humidity: humidity,
+        windSpeed: Math.round(windSpeed),
+        feelsLike: Math.round(temp), // Open-Meteo doesn't provide feels_like in basic API
+        icon: weatherCode <= 3 ? '01d' : '03d',
         updatedAt: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
       });
       setWeatherExpanded(true);
     } else {
-      // Invalid data format, use mock
-      setMockWeather();
+      console.warn('[Weather] Invalid data format');
     }
   });
 
@@ -124,11 +146,11 @@ function Counter({
     const requestId = `weather-${Date.now()}`;
     pendingRequestRef.current = requestId;
 
-    // OpenWeatherMap API - Shanghai
-    const apiKey = 'demo'; // Would use real key in production
-    const city = 'Shanghai';
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${apiKey}`;
+    // Open-Meteo API - Shanghai (free, no API key needed)
+    // latitude=31.23, longitude=121.47
+    const url = 'https://api.open-meteo.com/v1/forecast?latitude=31.23&longitude=121.47&current_weather=true&hourly=relativehumidity_2m';
 
+    console.log('[Weather] Sending request:', requestId);
     sendToHost('APP_FETCH_REQUEST', {
       requestId,
       url,
@@ -138,12 +160,12 @@ function Counter({
     // Timeout fallback (in case Host doesn't respond)
     setTimeout(() => {
       if (pendingRequestRef.current === requestId) {
+        console.warn('[Weather] Request timeout, no response from Host');
         pendingRequestRef.current = null;
         setWeatherLoading(false);
-        setMockWeather();
       }
-    }, 5000);
-  }, [weatherLoading, sendToHost, setMockWeather]);
+    }, 10000);
+  }, [weatherLoading, sendToHost]);
 
   const totalCount = redCount + blueCount + greenCount;
 
