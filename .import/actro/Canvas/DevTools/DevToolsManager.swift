@@ -212,21 +212,27 @@ class DevToolsManager: ObservableObject {
 
     struct SourceNavigation: Equatable {
         let searchText: String  // Function name or code to search for
-        let fileName: String?   // Optional specific file to search in
-        let lineNumber: Int?    // Optional specific line number
+        let fileName: String?   // Optional specific file to search in (from Babel plugin)
+        let lineNumber: Int?    // Optional specific line number (from Babel plugin)
+        let bundleLine: Int?    // Bundle line number (from Error().stack)
+        let bundleColumn: Int?  // Bundle column number (from Error().stack)
     }
 
-    /// Navigate to source location (switches to Sources tab and triggers search)
-    func navigateToSource(functionName: String, fileName: String? = nil, lineNumber: Int? = nil) {
+    /// Navigate to source location (switches to Sources tab and triggers source map resolution)
+    func navigateToSource(functionName: String, fileName: String? = nil, lineNumber: Int? = nil, bundleLine: Int? = nil, bundleColumn: Int? = nil) {
         print("🔍 [DevToolsManager] navigateToSource called:")
         print("   - functionName: '\(functionName)'")
         print("   - fileName: \(fileName ?? "nil")")
         print("   - lineNumber: \(lineNumber ?? 0)")
+        print("   - bundleLine: \(bundleLine ?? 0)")
+        print("   - bundleColumn: \(bundleColumn ?? 0)")
 
         pendingSourceNavigation = SourceNavigation(
             searchText: functionName,
             fileName: fileName,
-            lineNumber: lineNumber
+            lineNumber: lineNumber,
+            bundleLine: bundleLine,
+            bundleColumn: bundleColumn
         )
         activeTab = .sources
 

@@ -58,6 +58,12 @@ actor MetroService {
         lastFetchTime = nil
     }
 
+    /// Resolve bundle line/column to original source position using source map
+    func resolveOriginalPosition(bundleLine: Int, bundleColumn: Int, port: Int = 8082) async throws -> (source: String, line: Int, column: Int)? {
+        let sourceMap = try await fetchSourceMap(port: port)
+        return sourceMap.resolveOriginalPosition(bundleLine: bundleLine, bundleColumn: bundleColumn)
+    }
+
     /// Scan for asset files in project directories
     private func scanProjectAssets(from sourceFiles: [SourceFile]) -> [SourceFile] {
         // Return cached if available
@@ -176,6 +182,124 @@ struct SourceMap: Decodable, Sendable {
         }
         return contents[index]
     }
+
+    /// Resolve bundle line/column to original source file and line
+    /// Returns (sourceFile, line, column) if found
+    func resolveOriginalPosition(bundleLine: Int, bundleColumn: Int) -> (source: String, line: Int, column: Int)? {
+        // Parse VLQ mappings
+        let segments = parseMappings()
+
+        // Find the mapping for the given bundle line/column
+        // Segments are organized by output (bundle) line
+        guard bundleLine > 0, bundleLine <= segments.count else { return nil }
+
+        let lineSegments = segments[bundleLine - 1]
+
+        // Find the segment that covers this column
+        var bestMatch: MappingSegment?
+        for segment in lineSegments {
+            if segment.generatedColumn <= bundleColumn {
+                bestMatch = segment
+            } else {
+                break // Segments are sorted by column
+            }
+        }
+
+        guard let match = bestMatch else { return nil }
+        guard match.sourceIndex >= 0, match.sourceIndex < sources.count else { return nil }
+
+        let sourcePath = sources[match.sourceIndex]
+        return (sourcePath, match.sourceLine + 1, match.sourceColumn)
+    }
+
+    /// Parse VLQ-encoded mappings into segments
+    private func parseMappings() -> [[MappingSegment]] {
+        var result: [[MappingSegment]] = []
+        var currentLine: [MappingSegment] = []
+
+        // State carried across segments
+        var generatedColumn = 0
+        var sourceIndex = 0
+        var sourceLine = 0
+        var sourceColumn = 0
+        var nameIndex = 0
+
+        for line in mappings.split(separator: ";", omittingEmptySubsequences: false) {
+            generatedColumn = 0 // Reset for each line
+            currentLine = []
+
+            if !line.isEmpty {
+                for segment in line.split(separator: ",") {
+                    let values = decodeVLQ(String(segment))
+
+                    guard values.count >= 1 else { continue }
+
+                    generatedColumn += values[0]
+
+                    if values.count >= 4 {
+                        sourceIndex += values[1]
+                        sourceLine += values[2]
+                        sourceColumn += values[3]
+
+                        if values.count >= 5 {
+                            nameIndex += values[4]
+                        }
+
+                        currentLine.append(MappingSegment(
+                            generatedColumn: generatedColumn,
+                            sourceIndex: sourceIndex,
+                            sourceLine: sourceLine,
+                            sourceColumn: sourceColumn
+                        ))
+                    }
+                }
+            }
+
+            result.append(currentLine)
+        }
+
+        return result
+    }
+
+    /// Decode a VLQ-encoded segment into an array of integers
+    private func decodeVLQ(_ str: String) -> [Int] {
+        let base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        var result: [Int] = []
+        var shift = 0
+        var value = 0
+
+        for char in str {
+            guard let index = base64Chars.firstIndex(of: char) else { continue }
+            let digit = base64Chars.distance(from: base64Chars.startIndex, to: index)
+
+            let hasMore = (digit & 32) != 0
+            value += (digit & 31) << shift
+
+            if hasMore {
+                shift += 5
+            } else {
+                // Convert from unsigned to signed
+                let isNegative = (value & 1) != 0
+                value >>= 1
+                if isNegative {
+                    value = -value
+                }
+                result.append(value)
+                value = 0
+                shift = 0
+            }
+        }
+
+        return result
+    }
+}
+
+/// A single mapping segment
+private struct MappingSegment {
+    let generatedColumn: Int
+    let sourceIndex: Int
+    let sourceLine: Int
+    let sourceColumn: Int
 }
 
 /// Represents a source file from the bundle

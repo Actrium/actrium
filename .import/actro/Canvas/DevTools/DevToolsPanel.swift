@@ -542,15 +542,17 @@ struct DevToolsPropRowView: View {
     @State private var isExpanded: Bool = false
 
     /// Check if value is a serialized function with source location
-    private var functionInfo: (name: String, source: String?, sourceFile: String?, sourceLine: Int?)? {
+    private var functionInfo: (name: String, source: String?, sourceFile: String?, sourceLine: Int?, bundleLine: Int?, bundleColumn: Int?)? {
         guard let dict = value as? [String: Any],
               let type = dict["__type"] as? String,
               type == "function" else { return nil }
-        let name = dict["name"] as? String ?? "anonymous"
+        let name = dict["__name"] as? String ?? dict["name"] as? String ?? "anonymous"
         let source = dict["source"] as? String
-        let sourceFile = dict["sourceFile"] as? String
-        let sourceLine = dict["sourceLine"] as? Int
-        return (name, source, sourceFile, sourceLine)
+        let sourceFile = dict["__sourceFile"] as? String ?? dict["sourceFile"] as? String
+        let sourceLine = dict["__sourceLine"] as? Int ?? dict["sourceLine"] as? Int
+        let bundleLine = dict["__bundleLine"] as? Int
+        let bundleColumn = dict["__bundleColumn"] as? Int
+        return (name, source, sourceFile, sourceLine, bundleLine, bundleColumn)
     }
 
     /// Check if value is expandable (object or array with items)
@@ -616,6 +618,8 @@ struct DevToolsPropRowView: View {
                         functionName: fn.name,
                         sourceFile: fn.sourceFile,
                         sourceLine: fn.sourceLine,
+                        bundleLine: fn.bundleLine,
+                        bundleColumn: fn.bundleColumn,
                         fallbackSource: fn.source
                     )
                 } else {
@@ -1579,6 +1583,8 @@ struct FunctionLinkButton: View {
     let functionName: String
     let sourceFile: String?
     let sourceLine: Int?
+    let bundleLine: Int?
+    let bundleColumn: Int?
     let fallbackSource: String? // Minified source for search fallback
 
     @State private var isHovered = false
@@ -1586,10 +1592,16 @@ struct FunctionLinkButton: View {
     var body: some View {
         Button(action: {
             print("🔍 [FunctionLinkButton] Clicked: \(functionName)")
+            print("   - sourceFile: \(sourceFile ?? "nil")")
+            print("   - sourceLine: \(sourceLine ?? 0)")
+            print("   - bundleLine: \(bundleLine ?? 0)")
+            print("   - bundleColumn: \(bundleColumn ?? 0)")
             DevToolsManager.shared.navigateToSource(
                 functionName: functionName,
                 fileName: sourceFile,
-                lineNumber: sourceLine
+                lineNumber: sourceLine,
+                bundleLine: bundleLine,
+                bundleColumn: bundleColumn
             )
         }) {
             Text(displayText)
