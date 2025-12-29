@@ -740,6 +740,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     width: number;
     height: number;
     nodeId: string;
+    componentName?: string;
   } | null>(null);
 
   // Node frames cache for hit testing
@@ -1023,6 +1024,37 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   // Ref to the main content view for Inspector API
   const inspectedViewRef = useRef<View>(null);
 
+  // Handle inspect hover - highlight element without selecting
+  const handleInspectHover = useCallback((x: number, y: number) => {
+    try {
+      getInspectorDataForViewAtPoint(
+        inspectedViewRef.current,
+        x,
+        y,
+        (viewData) => {
+          if (viewData.hierarchy && viewData.hierarchy.length > 0) {
+            const { frame, selectedIndex, hierarchy } = viewData;
+            // Get component name from hierarchy
+            const componentName = hierarchy[selectedIndex]?.name || 'Unknown';
+            if (frame && frame.width > 0 && frame.height > 0) {
+              setHighlightedFrame({
+                x: frame.left,
+                y: frame.top,
+                width: frame.width,
+                height: frame.height,
+                nodeId: String(viewData.touchedViewTag),
+                componentName,
+              });
+            }
+          }
+          return false;
+        }
+      );
+    } catch (error) {
+      console.log('[DevTools] Inspector hover error:', error);
+    }
+  }, []);
+
   // Handle inspect click - use RN's Inspector API for accurate view detection
   const handleInspectClick = useCallback((x: number, y: number) => {
     console.log('[DevTools] handleInspectClick at:', x, y);
@@ -1157,18 +1189,31 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         >
           <View style={styles.highlightLabel}>
             <Text style={styles.highlightLabelText}>
-              #{highlightedFrame.nodeId}
+              {highlightedFrame.componentName || `#${highlightedFrame.nodeId}`}
             </Text>
           </View>
         </View>
       )}
 
-      {/* Inspect mode overlay */}
+      {/* Inspect mode overlay - using gesture responders for hover support */}
       {isInspectMode && (
-        <TouchableOpacity
+        <View
           style={styles.inspectOverlay}
-          activeOpacity={1}
-          onPress={(event) => {
+          onStartShouldSetResponder={() => {
+            return true;
+          }}
+          onResponderGrant={(event) => {
+            // Initial touch - highlight the element
+            const { locationX, locationY } = event.nativeEvent;
+            handleInspectHover(locationX, locationY);
+          }}
+          onResponderMove={(event) => {
+            // Dragging - update highlight as mouse moves
+            const { locationX, locationY } = event.nativeEvent;
+            handleInspectHover(locationX, locationY);
+          }}
+          onResponderRelease={(event) => {
+            // Release - select the element
             const { locationX, locationY } = event.nativeEvent;
             handleInspectClick(locationX, locationY);
           }}
@@ -1178,7 +1223,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
               Inspect Mode - Click to select element
             </Text>
           </View>
-        </TouchableOpacity>
+        </View>
       )}
     </View>
   );
