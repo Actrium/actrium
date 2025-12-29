@@ -1091,8 +1091,6 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
     if (!inspectedViewRef.current) {
       console.log('[DevTools] No inspected view ref');
-      setIsInspectMode(false);
-      DevToolsBridge?.setInspectMode?.(false);
       return;
     }
 
@@ -1146,11 +1144,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             }
           } catch (callbackError) {
             console.log('[DevTools] Inspector callback error:', callbackError);
-          } finally {
-            // Always exit inspect mode after click
-            setIsInspectMode(false);
-            DevToolsBridge?.setInspectMode?.(false);
           }
+          // Note: Don't exit inspect mode - let user manually exit
 
           return false; // Don't continue traversing
         }
@@ -1169,31 +1164,12 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
           measureAndHighlightNode(nodeId, activeEngine);
         }
       }
-
-      setIsInspectMode(false);
-      DevToolsBridge?.setInspectMode?.(false);
+      // Don't exit inspect mode on error - let user manually exit
     }
   }, [activeTabId, findNodeAtPosition, measureAndHighlightNode]);
 
-  // Responder handlers for Inspect mode - only active when inspecting
-  const inspectResponderHandlers = isInspectMode ? {
-    onStartShouldSetResponder: () => true,
-    onResponderGrant: (event: { nativeEvent: { locationX: number; locationY: number } }) => {
-      const { locationX, locationY } = event.nativeEvent;
-      handleInspectHover(locationX, locationY);
-    },
-    onResponderMove: (event: { nativeEvent: { locationX: number; locationY: number } }) => {
-      const { locationX, locationY } = event.nativeEvent;
-      handleInspectHover(locationX, locationY);
-    },
-    onResponderRelease: (event: { nativeEvent: { locationX: number; locationY: number } }) => {
-      const { locationX, locationY } = event.nativeEvent;
-      handleInspectClick(locationX, locationY);
-    },
-  } : {};
-
   return (
-    <View style={tabHostStyle} ref={inspectedViewRef} {...inspectResponderHandlers}>
+    <View style={tabHostStyle} ref={inspectedViewRef}>
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         // 重要：显式尺寸模式下不使用 flex:1，完全依赖父容器的宽高
@@ -1244,6 +1220,26 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         </View>
       )}
 
+      {/* Inspect mode touch capture layer - blocks all interactions */}
+      {isInspectMode && (
+        <View
+          style={styles.inspectTouchLayer}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={(event) => {
+            const { locationX, locationY } = event.nativeEvent;
+            handleInspectHover(locationX, locationY);
+          }}
+          onResponderMove={(event) => {
+            const { locationX, locationY } = event.nativeEvent;
+            handleInspectHover(locationX, locationY);
+          }}
+          onResponderRelease={(event) => {
+            const { locationX, locationY } = event.nativeEvent;
+            handleInspectClick(locationX, locationY);
+          }}
+        />
+      )}
     </View>
   );
 };
@@ -1293,6 +1289,11 @@ const styles = StyleSheet.create({
   tabHost: {
     flex: 1,
     position: 'relative',
+  },
+  inspectTouchLayer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+    zIndex: 9997, // Below highlight overlay but above content
   },
   highlightOverlay: {
     position: 'absolute',
