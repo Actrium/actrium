@@ -548,16 +548,14 @@ struct DevToolsPropRowView: View {
         return (name, source)
     }
 
-    /// Check if value is expandable (object or array with items, or function with source)
+    /// Check if value is expandable (object or array with items, or function)
     private var isExpandable: Bool {
-        // Function with source is expandable
-        if let fn = functionInfo, fn.source != nil {
+        // Functions are always expandable (to show source or at least type info)
+        if functionInfo != nil {
             return true
         }
         switch value {
         case let dict as [String: Any]:
-            // Don't expand function objects as regular objects
-            if dict["__type"] as? String == "function" { return false }
             return !dict.isEmpty
         case let array as [Any]:
             return !array.isEmpty
@@ -614,13 +612,22 @@ struct DevToolsPropRowView: View {
             }
 
             // Expanded function source
-            if isExpanded, let fn = functionInfo, let source = fn.source {
-                Text(source)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .padding(.leading, 14)
-                    .padding(.top, 2)
-                    .textSelection(.enabled)
+            if isExpanded, let fn = functionInfo {
+                if let source = fn.source, !source.isEmpty {
+                    Text(source)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 14)
+                        .padding(.top, 2)
+                        .textSelection(.enabled)
+                } else {
+                    Text("// Source not available")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary.opacity(0.6))
+                        .italic()
+                        .padding(.leading, 14)
+                        .padding(.top, 2)
+                }
             }
 
             // Expanded children (for objects/arrays)
@@ -1408,14 +1415,14 @@ struct DevToolsBoxModelView: View {
                     // Top margin label
                     Text(formatValue(boxModel.margin.top))
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.orange)
+                        .foregroundColor(.white)
                         .frame(height: 16)
 
                     HStack(spacing: 0) {
                         // Left margin label
                         Text(formatValue(boxModel.margin.left))
                             .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.orange)
+                            .foregroundColor(.white)
                             .frame(width: 24)
 
                         // Border box
@@ -1427,14 +1434,14 @@ struct DevToolsBoxModelView: View {
                                 // Top border label
                                 Text(formatValue(boxModel.border.top))
                                     .font(.system(size: 8, design: .monospaced))
-                                    .foregroundColor(.yellow)
+                                    .foregroundColor(.white)
                                     .frame(height: 12)
 
                                 HStack(spacing: 0) {
                                     // Left border label
                                     Text(formatValue(boxModel.border.left))
                                         .font(.system(size: 8, design: .monospaced))
-                                        .foregroundColor(.yellow)
+                                        .foregroundColor(.white)
                                         .frame(width: 16)
 
                                     // Padding box
@@ -1446,14 +1453,14 @@ struct DevToolsBoxModelView: View {
                                             // Top padding label
                                             Text(formatValue(boxModel.padding.top))
                                                 .font(.system(size: 9, design: .monospaced))
-                                                .foregroundColor(.green)
+                                                .foregroundColor(.white)
                                                 .frame(height: 14)
 
                                             HStack(spacing: 0) {
                                                 // Left padding label
                                                 Text(formatValue(boxModel.padding.left))
                                                     .font(.system(size: 9, design: .monospaced))
-                                                    .foregroundColor(.green)
+                                                    .foregroundColor(.white)
                                                     .frame(width: 20)
 
                                                 // Content box (innermost)
@@ -1463,21 +1470,21 @@ struct DevToolsBoxModelView: View {
 
                                                     Text("\(Int(boxModel.width)) × \(Int(boxModel.height))")
                                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                                        .foregroundColor(.blue)
+                                                        .foregroundColor(.white)
                                                 }
                                                 .frame(minWidth: 60, minHeight: 30)
 
                                                 // Right padding label
                                                 Text(formatValue(boxModel.padding.right))
                                                     .font(.system(size: 9, design: .monospaced))
-                                                    .foregroundColor(.green)
+                                                    .foregroundColor(.white)
                                                     .frame(width: 20)
                                             }
 
                                             // Bottom padding label
                                             Text(formatValue(boxModel.padding.bottom))
                                                 .font(.system(size: 9, design: .monospaced))
-                                                .foregroundColor(.green)
+                                                .foregroundColor(.white)
                                                 .frame(height: 14)
                                         }
                                     }
@@ -1485,14 +1492,14 @@ struct DevToolsBoxModelView: View {
                                     // Right border label
                                     Text(formatValue(boxModel.border.right))
                                         .font(.system(size: 8, design: .monospaced))
-                                        .foregroundColor(.yellow)
+                                        .foregroundColor(.white)
                                         .frame(width: 16)
                                 }
 
                                 // Bottom border label
                                 Text(formatValue(boxModel.border.bottom))
                                     .font(.system(size: 8, design: .monospaced))
-                                    .foregroundColor(.yellow)
+                                    .foregroundColor(.white)
                                     .frame(height: 12)
                             }
                         }
@@ -1500,14 +1507,14 @@ struct DevToolsBoxModelView: View {
                         // Right margin label
                         Text(formatValue(boxModel.margin.right))
                             .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.orange)
+                            .foregroundColor(.white)
                             .frame(width: 24)
                     }
 
                     // Bottom margin label
                     Text(formatValue(boxModel.margin.bottom))
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.orange)
+                        .foregroundColor(.white)
                         .frame(height: 16)
                 }
             }
