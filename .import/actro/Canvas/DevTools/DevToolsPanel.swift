@@ -1635,7 +1635,7 @@ struct StyleRow: View {
 
 // MARK: - JavaScript Source View
 
-/// View that displays JavaScript source code with syntax highlighting
+/// View that displays JavaScript source code with formatting and syntax highlighting
 struct JavaScriptSourceView: View {
     let source: String
 
@@ -1645,15 +1645,20 @@ struct JavaScriptSourceView: View {
         return h
     }()
 
+    private var beautifiedSource: String {
+        JSBeautifier.shared.beautify(source)
+    }
+
     var body: some View {
+        let formatted = beautifiedSource
         if let highlightr = Self.highlightr,
-           let highlighted = highlightr.highlight(source, as: "javascript") {
+           let highlighted = highlightr.highlight(formatted, as: "javascript") {
             Text(AttributedString(highlighted))
                 .font(.system(size: 10, design: .monospaced))
                 .textSelection(.enabled)
         } else {
             // Fallback if highlighting fails
-            Text(source)
+            Text(formatted)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.green.opacity(0.9))
                 .textSelection(.enabled)
