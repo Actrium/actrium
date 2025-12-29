@@ -6,6 +6,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import * as babel from '@babel/core';
 
 /**
  * Build options
@@ -57,6 +58,12 @@ export interface BuildOptions {
    * Used for custom render logic (e.g., actr usePanels hook)
    */
   footer?: string;
+
+  /**
+   * Dev mode - inject source location into functions for DevTools navigation
+   * @default false
+   */
+  dev?: boolean;
 }
 
 /**
@@ -278,6 +285,30 @@ export async function build(options: BuildOptions): Promise<void> {
   // Post-process: wrap in IIFE with globals mapping
   const targetPath = path.join(outDir, outFileName);
   let bundleCode = await Bun.file(result.outputs[0]!.path).text();
+
+  // Dev mode: inject source locations into JSX function props using Babel
+  if (options.dev) {
+    console.log('\nApplying dev mode transforms (source location injection)...');
+    const functionSourceLocationPlugin = (await import('./babel-plugin-function-source-location')).default;
+
+    const babelResult = await babel.transformAsync(bundleCode, {
+      filename: outFileName,
+      plugins: [functionSourceLocationPlugin],
+      parserOpts: {
+        sourceType: 'script',
+      },
+      generatorOpts: {
+        retainLines: false,
+      },
+    });
+
+    if (babelResult?.code) {
+      bundleCode = babelResult.code;
+      console.log('  ✓ Source location injection complete');
+    } else {
+      console.warn('  ⚠ Babel transform returned no code');
+    }
+  }
 
   // Analyze JSX props for JSI optimization
   console.log('\nAnalyzing JSX props for JSI optimization...');
