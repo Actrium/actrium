@@ -68,17 +68,6 @@ struct DevToolsToolbar: View {
 
             // Action buttons
             HStack(spacing: 4) {
-                // Clear button (context-dependent)
-                Button(action: clearCurrentTab) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12))
-                }
-                .buttonStyle(.borderless)
-                .help("Clear")
-
-                Divider()
-                    .frame(height: 16)
-
                 // Dock position toggle (only when docked)
                 if !isDetached {
                     Button(action: {
@@ -120,19 +109,6 @@ struct DevToolsToolbar: View {
         }
         .frame(height: 32)
         .background(Color(nsColor: .controlBackgroundColor))
-    }
-
-    private func clearCurrentTab() {
-        switch devTools.activeTab {
-        case .messages:
-            devTools.clearMessages()
-        case .console:
-            devTools.clearConsoleLogs()
-        case .operations:
-            devTools.clearOperations()
-        default:
-            break
-        }
     }
 }
 
@@ -379,6 +355,14 @@ struct DevToolsConsoleView: View {
                 Text("\(devTools.consoleLogs.count) entries")
                     .font(.system(size: 10))
                     .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+
+                // Clear button
+                Button(action: { devTools.clearConsoleLogs() }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .help("Clear console")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -486,6 +470,14 @@ struct DevToolsOperationsView: View {
                 Text("\(devTools.operations.count) ops")
                     .font(.system(size: 10))
                     .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+
+                // Clear button
+                Button(action: { devTools.clearOperations() }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .help("Clear operations")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -589,12 +581,12 @@ struct DevToolsMessagesView: View {
 
                 // Direction filter
                 Picker("", selection: $devTools.messageDirectionFilter) {
-                    Text("↔").tag(nil as MessageDirection?)
-                    Text("↗").tag(MessageDirection.guestToHost as MessageDirection?)
-                    Text("↙").tag(MessageDirection.hostToGuest as MessageDirection?)
+                    Text("All").tag(nil as MessageDirection?)
+                    Text("↗ G→H").tag(MessageDirection.guestToHost as MessageDirection?)
+                    Text("↙ H→G").tag(MessageDirection.hostToGuest as MessageDirection?)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 90)
+                .frame(width: 160)
 
                 // Search filter
                 HStack(spacing: 4) {
@@ -616,6 +608,14 @@ struct DevToolsMessagesView: View {
                 Text("\(devTools.filteredMessages.count) / \(devTools.messages.count)")
                     .font(.system(size: 10))
                     .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+
+                // Clear button
+                Button(action: { devTools.clearMessages() }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .help("Clear messages")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
