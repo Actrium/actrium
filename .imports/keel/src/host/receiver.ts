@@ -887,8 +887,9 @@ export class Receiver {
     const serializableProps: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(node.props)) {
       if (typeof value === 'function') {
-        // Show function marker instead of actual function
-        serializableProps[key] = '[Function]';
+        // Show function marker with name if available
+        const fnName = value.name || 'anonymous';
+        serializableProps[key] = `[Function: ${fnName}]`;
       } else if (value instanceof Date) {
         serializableProps[key] = value.toISOString();
       } else if (value instanceof RegExp) {
@@ -915,6 +916,20 @@ export class Receiver {
    */
   getNodeById(nodeId: number): NodeInstance | undefined {
     return this.nodeMap.get(nodeId);
+  }
+
+  /**
+   * Get ref for a node (for DevTools frame measurement)
+   */
+  getNodeRef(nodeId: number): React.RefObject<unknown> | undefined {
+    return this.refMap.get(nodeId);
+  }
+
+  /**
+   * Get all node refs (for DevTools inspection)
+   */
+  getAllNodeRefs(): Map<number, React.RefObject<unknown>> {
+    return new Map(this.refMap);
   }
 }
 
