@@ -3,51 +3,27 @@
  * Guest 导出 usePanels Hook，Host 直接调用获取 left/right
  * 与 counterapp 保持一致
  */
-import React, {useState, useEffect, useCallback, useMemo} from 'react';
-import {View, Text, TouchableOpacity, ScrollView} from 'rill/let';
+import React, {useState, useCallback, useMemo, useEffect, useRef} from 'react';
+import {View, Text, TouchableOpacity, ScrollView, ActivityIndicator, useSendToHost, useHostEvent} from 'rill/let';
 
-// ============ Clock Component ============
-function Clock() {
-  const [time, setTime] = useState(new Date());
+// ============ Weather Types ============
+interface WeatherData {
+  city: string;
+  temperature: number;
+  description: string;
+  humidity: number;
+  windSpeed: number;
+  feelsLike: number;
+  icon: string;
+  updatedAt: string;
+}
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTime(new Date());
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  const hours = time.getHours().toString().padStart(2, '0');
-  const minutes = time.getMinutes().toString().padStart(2, '0');
-  const seconds = time.getSeconds().toString().padStart(2, '0');
-
-  return (
-    <View
-      style={{
-        marginTop: 20,
-        padding: 20,
-        backgroundColor: '#0a0a1a',
-        borderRadius: 12,
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: '#333366',
-      }}>
-      <Text style={{color: '#666688', fontSize: 12, marginBottom: 8}}>
-        🕐 实时时钟
-      </Text>
-      <Text
-        style={{
-          color: '#00ff88',
-          fontSize: 48,
-          fontWeight: 'bold',
-          fontFamily: 'Menlo',
-          letterSpacing: 4,
-        }}>
-        {hours}:{minutes}:{seconds}
-      </Text>
-    </View>
-  );
+interface FetchResponse {
+  requestId: string;
+  ok: boolean;
+  status: number;
+  data?: unknown;
+  error?: string;
 }
 
 // ============ Left Panel: Counter ============
@@ -60,12 +36,113 @@ function Counter({
   const [blueCount, setBlueCount] = useState(0);
   const [greenCount, setGreenCount] = useState(0);
 
+  // Clock state
+  const [currentTime, setCurrentTime] = useState(() => {
+    const now = new Date();
+    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+  });
+
+  // Weather state
+  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherExpanded, setWeatherExpanded] = useState(false);
+
+  // Host communication
+  const sendToHost = useSendToHost();
+  const pendingRequestRef = useRef<string | null>(null);
+
+  // Clock update effect
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
+    };
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Listen for fetch responses from Host
+  useHostEvent<FetchResponse>('APP_FETCH_RESPONSE', (response) => {
+    if (response.requestId !== pendingRequestRef.current) return;
+    pendingRequestRef.current = null;
+    setWeatherLoading(false);
+
+    if (!response.ok || !response.data) {
+      console.warn('Weather fetch failed:', response.error);
+      return;
+    }
+
+    // Parse OpenWeatherMap response
+    const data = response.data as {
+      name?: string;
+      main?: { temp?: number; humidity?: number; feels_like?: number };
+      weather?: Array<{ description?: string; icon?: string }>;
+      wind?: { speed?: number };
+    };
+
+    if (data.main && data.weather?.[0]) {
+      const now = new Date();
+      setWeatherData({
+        city: data.name || 'Unknown',
+        temperature: Math.round((data.main.temp || 0) - 273.15),
+        description: data.weather[0].description || '',
+        humidity: data.main.humidity || 0,
+        windSpeed: Math.round((data.wind?.speed || 0) * 3.6),
+        feelsLike: Math.round((data.main.feels_like || 0) - 273.15),
+        icon: data.weather[0].icon || '01d',
+        updatedAt: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
+      });
+      setWeatherExpanded(true);
+    }
+  });
+
+  // Fetch weather data
+  const fetchWeather = useCallback(() => {
+    if (weatherLoading) return;
+
+    setWeatherLoading(true);
+    const requestId = `weather-${Date.now()}`;
+    pendingRequestRef.current = requestId;
+
+    // OpenWeatherMap API - Shanghai
+    const apiKey = 'demo'; // Would use real key in production
+    const city = 'Shanghai';
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${apiKey}`;
+
+    sendToHost('APP_FETCH_REQUEST', {
+      requestId,
+      url,
+      options: { method: 'GET' },
+    });
+
+    // Timeout fallback
+    setTimeout(() => {
+      if (pendingRequestRef.current === requestId) {
+        pendingRequestRef.current = null;
+        setWeatherLoading(false);
+        // Use mock data for demo
+        const now = new Date();
+        setWeatherData({
+          city: 'Shanghai',
+          temperature: 22,
+          description: 'Partly Cloudy',
+          humidity: 65,
+          windSpeed: 12,
+          feelsLike: 24,
+          icon: '02d',
+          updatedAt: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
+        });
+        setWeatherExpanded(true);
+      }
+    }, 3000);
+  }, [weatherLoading, sendToHost]);
+
   const totalCount = redCount + blueCount + greenCount;
 
   return (
     <ScrollView
       style={{flex: 1, backgroundColor: '#1a1a2e'}}
-      contentContainerStyle={{padding: 16}}>
+      contentContainerStyle={{padding: 16, paddingBottom: 80}}>
       <Text
         style={{
           color: '#ffffff',
@@ -195,8 +272,107 @@ function Counter({
         </Text>
       </View>
 
-      {/* 实时时钟 */}
-      <Clock />
+      {/* Bottom Toolbar: Clock + Weather */}
+      <View
+        style={{
+          marginTop: 20,
+          padding: 12,
+          backgroundColor: '#2a2a4e',
+          borderRadius: 8,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+        {/* Clock */}
+        <Text style={{color: '#888888', fontSize: 14, fontVariant: ['tabular-nums']}}>
+          {currentTime}
+        </Text>
+
+        {/* Weather Button */}
+        <TouchableOpacity
+          onPress={fetchWeather}
+          disabled={weatherLoading}
+          style={{
+            padding: 8,
+            backgroundColor: weatherExpanded ? '#1a365d' : '#3a3a5e',
+            borderRadius: 6,
+            flexDirection: 'row',
+            alignItems: 'center',
+          }}>
+          {weatherLoading ? (
+            <ActivityIndicator size="small" color="#88b8e8" />
+          ) : (
+            <Text style={{color: '#88b8e8', fontSize: 14}}>
+              {weatherData ? `${weatherData.temperature}°C` : '🌤️'}
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Expandable Weather Card */}
+      {weatherExpanded && weatherData && (
+        <View
+          style={{
+            marginTop: 12,
+            padding: 16,
+            backgroundColor: '#1a365d',
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: '#2d4a77',
+          }}>
+          {/* Header */}
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 12,
+            }}>
+            <Text style={{color: '#ffffff', fontSize: 16, fontWeight: 'bold'}}>
+              {weatherData.city}
+            </Text>
+            <TouchableOpacity onPress={() => setWeatherExpanded(false)}>
+              <Text style={{color: '#88b8e8', fontSize: 12}}>
+                收起 ▲
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Main Info */}
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'baseline',
+              marginBottom: 12,
+            }}>
+            <Text style={{color: '#ffffff', fontSize: 36, fontWeight: '300', marginRight: 12}}>
+              {weatherData.temperature}°C
+            </Text>
+            <Text style={{color: '#a0c4e8', fontSize: 16}}>
+              {weatherData.description}
+            </Text>
+          </View>
+
+          {/* Details */}
+          <View style={{flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8}}>
+            <Text style={{color: '#c0d8f0', fontSize: 12, marginRight: 16}}>
+              体感 {weatherData.feelsLike}°C
+            </Text>
+            <Text style={{color: '#c0d8f0', fontSize: 12, marginRight: 16}}>
+              湿度 {weatherData.humidity}%
+            </Text>
+            <Text style={{color: '#c0d8f0', fontSize: 12}}>
+              风速 {weatherData.windSpeed}km/h
+            </Text>
+          </View>
+
+          {/* Update Time */}
+          <Text style={{color: '#88b8e8', fontSize: 11, fontStyle: 'italic'}}>
+            更新于 {weatherData.updatedAt}
+          </Text>
+        </View>
+      )}
+
     </ScrollView>
   );
 }
