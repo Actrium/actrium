@@ -1046,42 +1046,55 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
   // Handle inspect hover - highlight element without selecting
   const handleInspectHover = useCallback((x: number, y: number) => {
+    if (!inspectedViewRef.current) return;
+
     try {
       getInspectorDataForViewAtPoint(
         inspectedViewRef.current,
         x,
         y,
         (viewData) => {
-          if (viewData.hierarchy && viewData.hierarchy.length > 0) {
-            const { frame, selectedIndex, hierarchy } = viewData;
-            // Get component name from hierarchy
-            const componentName = hierarchy[selectedIndex]?.name || 'Unknown';
+          try {
+            if (viewData.hierarchy && viewData.hierarchy.length > 0) {
+              const { frame, selectedIndex, hierarchy } = viewData;
+              // Get component name from hierarchy
+              const componentName = hierarchy[selectedIndex]?.name || 'Unknown';
 
-            // Try to find Rill node ID
-            const nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
+              // Try to find Rill node ID
+              const nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
 
-            if (frame && frame.width > 0 && frame.height > 0) {
-              setHighlightedFrame({
-                x: frame.left,
-                y: frame.top,
-                width: frame.width,
-                height: frame.height,
-                nodeId: nodeId || String(viewData.touchedViewTag),
-                componentName,
-              });
+              if (frame && frame.width > 0 && frame.height > 0) {
+                setHighlightedFrame({
+                  x: frame.left,
+                  y: frame.top,
+                  width: frame.width,
+                  height: frame.height,
+                  nodeId: nodeId || String(viewData.touchedViewTag),
+                  componentName,
+                });
+              }
             }
+          } catch {
+            // Silently ignore hover errors to prevent noise
           }
           return false;
         }
       );
-    } catch (error) {
-      console.log('[DevTools] Inspector hover error:', error);
+    } catch {
+      // Silently ignore hover errors
     }
   }, []);
 
   // Handle inspect click - use RN's Inspector API for accurate view detection
   const handleInspectClick = useCallback((x: number, y: number) => {
     console.log('[DevTools] handleInspectClick at:', x, y);
+
+    if (!inspectedViewRef.current) {
+      console.log('[DevTools] No inspected view ref');
+      setIsInspectMode(false);
+      DevToolsBridge?.setInspectMode?.(false);
+      return;
+    }
 
     // Use RN's getInspectorDataForViewAtPoint API
     // This is much more reliable than our manual frame calculation
@@ -1091,70 +1104,53 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         x,
         y,
         (viewData) => {
-          console.log('[DevTools] Inspector API result:', {
-            hierarchyLength: viewData.hierarchy?.length ?? 0,
-            selectedIndex: viewData.selectedIndex,
-            frame: viewData.frame,
-            touchedViewTag: viewData.touchedViewTag,
-          });
+          try {
+            console.log('[DevTools] Inspector API result:', {
+              hierarchyLength: viewData.hierarchy?.length ?? 0,
+              selectedIndex: viewData.selectedIndex,
+              frame: viewData.frame,
+              touchedViewTag: viewData.touchedViewTag,
+            });
 
-          if (viewData.hierarchy && viewData.hierarchy.length > 0) {
-            // Get the frame from the API response - this is accurate!
-            const { frame } = viewData;
-            console.log('[DevTools] Using Inspector frame:', frame);
+            if (viewData.hierarchy && viewData.hierarchy.length > 0) {
+              // Get the frame from the API response - this is accurate!
+              const { frame } = viewData;
+              console.log('[DevTools] Using Inspector frame:', frame);
 
-            // Update highlight with accurate frame data
-            if (frame && frame.width > 0 && frame.height > 0) {
-              setHighlightedFrame({
-                x: frame.left,
-                y: frame.top,
-                width: frame.width,
-                height: frame.height,
-                nodeId: String(viewData.touchedViewTag),
-              });
-              DevToolsBridge?.highlightNode?.(String(viewData.touchedViewTag), {
-                x: frame.left,
-                y: frame.top,
-                width: frame.width,
-                height: frame.height,
-              });
-            }
+              // Update highlight with accurate frame data
+              if (frame && frame.width > 0 && frame.height > 0) {
+                setHighlightedFrame({
+                  x: frame.left,
+                  y: frame.top,
+                  width: frame.width,
+                  height: frame.height,
+                  nodeId: String(viewData.touchedViewTag),
+                });
+                DevToolsBridge?.highlightNode?.(String(viewData.touchedViewTag), {
+                  x: frame.left,
+                  y: frame.top,
+                  width: frame.width,
+                  height: frame.height,
+                });
+              }
 
-            // Find the corresponding Rill node ID using our mapping
-            // First, try exact match with touchedViewTag
-            let nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
+              // Find the corresponding Rill node ID using our mapping
+              const nodeId = viewTagToNodeIdRef.current.get(viewData.touchedViewTag);
 
-            // If no match, walk up the hierarchy to find a matching view tag
-            if (!nodeId && viewData.hierarchy) {
-              for (let i = viewData.selectedIndex; i < viewData.hierarchy.length; i++) {
-                const item = viewData.hierarchy[i];
-                if (!item) continue;
-                // Use getInspectorData to get more info about this hierarchy item
-                try {
-                  const inspectorData = item.getInspectorData(findNodeHandle as (component: unknown) => number | null);
-                  if (inspectorData && typeof inspectorData.measure === 'function') {
-                    // Measure to trigger viewTag resolution if needed
-                    inspectorData.measure(() => {});
-                  }
-                } catch {
-                  // Ignore
-                }
+              if (nodeId) {
+                console.log('[DevTools] Found Rill nodeId from viewTag mapping:', nodeId);
+                DevToolsBridge?.selectNodeFromInspect?.(nodeId);
+              } else {
+                console.log('[DevTools] No mapping found for viewTag:', viewData.touchedViewTag);
               }
             }
-
-            if (nodeId) {
-              console.log('[DevTools] Found Rill nodeId from viewTag mapping:', nodeId);
-              DevToolsBridge?.selectNodeFromInspect?.(nodeId);
-            } else {
-              console.log('[DevTools] No mapping found for viewTag:', viewData.touchedViewTag);
-              // Still select with viewTag as fallback - won't match tree but at least highlights
-              DevToolsBridge?.selectNodeFromInspect?.(String(viewData.touchedViewTag));
-            }
+          } catch (callbackError) {
+            console.log('[DevTools] Inspector callback error:', callbackError);
+          } finally {
+            // Always exit inspect mode after click
+            setIsInspectMode(false);
+            DevToolsBridge?.setInspectMode?.(false);
           }
-
-          // Exit inspect mode after click
-          setIsInspectMode(false);
-          DevToolsBridge?.setInspectMode?.(false);
 
           return false; // Don't continue traversing
         }
