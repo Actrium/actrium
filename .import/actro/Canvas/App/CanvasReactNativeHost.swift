@@ -209,6 +209,15 @@ final class CanvasReactNativeHost {
             NativePerfTimer.shared.mark("Bridge 状态检查")
             nlog("🌉 [Native] Bridge valid: \(bridge.isValid), loading: \(bridge.isLoading)")
 
+            #if DEBUG
+            // 禁用 RN Dev Menu 默认快捷键（Cmd+D、Cmd+I）
+            // 我们用自己的 DevTools 代替
+            if let devMenu = bridge.module(forName: "DevMenu") as? RCTDevMenu {
+                devMenu.hotkeysEnabled = false
+                nlog("🔧 [Native] 已禁用 RN DevMenu 快捷键（使用我们的 DevTools）")
+            }
+            #endif
+
             // 🔴 关键：在 macOS 上必须设置 sizeFlexibility 为 .none
             rctRootView.sizeFlexibility = .none
             rctRootView.backgroundColor = NSColor.clear
