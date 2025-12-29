@@ -611,15 +611,12 @@ struct DevToolsPropRowView: View {
                 Spacer()
             }
 
-            // Expanded function source
+            // Expanded function source with syntax highlighting
             if isExpanded, let fn = functionInfo {
                 if let source = fn.source, !source.isEmpty {
-                    Text(source)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
+                    JavaScriptSourceView(source: source)
                         .padding(.leading, 14)
                         .padding(.top, 2)
-                        .textSelection(.enabled)
                 } else {
                     Text("// Source not available")
                         .font(.system(size: 10, design: .monospaced))
@@ -1632,6 +1629,22 @@ struct StyleRow: View {
                 .foregroundColor(.primary)
             Spacer()
         }
+    }
+}
+
+// MARK: - JavaScript Source View
+
+/// View that displays JavaScript source code
+/// TODO: Add Highlightr for proper syntax highlighting
+/// Xcode → File → Add Package Dependencies → https://github.com/raspu/Highlightr
+struct JavaScriptSourceView: View {
+    let source: String
+
+    var body: some View {
+        Text(source)
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundColor(.green.opacity(0.9))
+            .textSelection(.enabled)
     }
 }
 
