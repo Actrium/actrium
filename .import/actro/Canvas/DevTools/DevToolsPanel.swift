@@ -263,20 +263,11 @@ struct DevToolsElementsView: View {
                 Divider()
 
                 if let tree = devTools.componentTree {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                DevToolsTreeNodeView(node: tree, depth: 0, devTools: devTools)
-                            }
-                            .padding(4)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            DevToolsTreeNodeView(node: tree, depth: 0, devTools: devTools)
                         }
-                        .onChange(of: devTools.selectedNodeId) { _, newId in
-                            if let id = newId {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    proxy.scrollTo(id, anchor: .center)
-                                }
-                            }
-                        }
+                        .padding(4)
                     }
                     .focusable()
                     .focused($isTreeFocused)
@@ -602,7 +593,6 @@ struct DevToolsTreeNodeView: View {
             .onTapGesture {
                 devTools.selectNode(node.id)
             }
-            .id(node.id) // For ScrollViewReader
 
             // Children
             if isExpanded {
