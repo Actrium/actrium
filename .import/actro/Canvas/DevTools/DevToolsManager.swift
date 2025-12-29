@@ -1,5 +1,8 @@
 import SwiftUI
 import Combine
+import os.log
+
+private let devToolsLog = OSLog(subsystem: "com.canvas.devtools", category: "DevTools")
 
 /// DevTools display mode
 enum DevToolsDisplayMode: String, CaseIterable {
@@ -492,9 +495,11 @@ class DevToolsManager: ObservableObject {
 
     /// Select a component node
     func selectNode(_ nodeId: String?) {
+        os_log("[DevToolsManager] selectNode called with: %{public}@", log: devToolsLog, type: .debug, nodeId ?? "nil")
         selectedNodeId = nodeId
         // Notify RN to highlight the selected node
         if let nodeId = nodeId {
+            os_log("[DevToolsManager] Calling onSelectNodeFromTree callback, hasCallback: %{public}d", log: devToolsLog, type: .debug, onSelectNodeFromTree != nil ? 1 : 0)
             onSelectNodeFromTree?(nodeId)
         }
     }

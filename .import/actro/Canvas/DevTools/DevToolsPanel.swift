@@ -271,6 +271,7 @@ struct DevToolsElementsView: View {
                     }
                     .focusable()
                     .focused($isTreeFocused)
+                    .focusEffectDisabled()  // Remove blue border on focus
                     .onKeyPress(.upArrow) {
                         navigateTree(direction: -1)
                         return .handled

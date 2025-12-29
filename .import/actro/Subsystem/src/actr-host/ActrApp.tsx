@@ -724,62 +724,119 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
   // Measure all node frames when entering inspect mode or when tree updates
   const measureAllNodeFrames = useCallback((engine: Engine | null) => {
-    if (!engine) return;
+    console.log('[DevTools] measureAllNodeFrames called');
+    if (!engine) {
+      console.log('[DevTools] No engine for measureAllNodeFrames');
+      return;
+    }
 
     const receiver = engine.getReceiver();
-    if (!receiver) return;
+    if (!receiver) {
+      console.log('[DevTools] No receiver for measureAllNodeFrames');
+      return;
+    }
 
     const allRefs = receiver.getAllNodeRefs?.();
-    if (!allRefs) return;
+    if (!allRefs) {
+      console.log('[DevTools] No refs from getAllNodeRefs');
+      return;
+    }
 
+    console.log('[DevTools] Measuring', allRefs.size, 'nodes');
     const frames = new Map<string, { x: number; y: number; width: number; height: number }>();
+    let measureCount = 0;
 
     allRefs.forEach((ref, nodeId) => {
       if (!ref.current) return;
 
-      // Cast to correct type for findNodeHandle (it expects Component | null)
+      // Try using component's measure method directly
+      const component = ref.current as { measure?: (callback: (x: number, y: number, width: number, height: number, pageX: number, pageY: number) => void) => void };
+      if (typeof component.measure === 'function') {
+        component.measure((x, y, width, height, pageX, pageY) => {
+          if (width > 0 && height > 0) {
+            frames.set(String(nodeId), { x: pageX, y: pageY, width, height });
+            measureCount++;
+          }
+        });
+        return;
+      }
+
+      // Fallback to UIManager.measure
       const handle = findNodeHandle(ref.current as React.Component);
       if (!handle) return;
 
       UIManager.measure(handle, (x, y, width, height, pageX, pageY) => {
         if (width > 0 && height > 0) {
           frames.set(String(nodeId), { x: pageX, y: pageY, width, height });
+          measureCount++;
         }
       });
     });
 
     // Update after all measurements complete
     setTimeout(() => {
+      console.log('[DevTools] Measured', measureCount, 'nodes, total frames:', frames.size);
       nodeFramesRef.current = frames;
-    }, 50);
+    }, 100);
   }, []);
 
   // Measure single node frame and highlight it
   const measureAndHighlightNode = useCallback((nodeId: string, engine: Engine | null) => {
-    if (!engine) return;
+    console.log('[DevTools] measureAndHighlightNode called with nodeId:', nodeId);
+    if (!engine) {
+      console.log('[DevTools] No engine available');
+      return;
+    }
 
     const receiver = engine.getReceiver();
-    if (!receiver) return;
+    if (!receiver) {
+      console.log('[DevTools] No receiver available');
+      return;
+    }
 
     const ref = receiver.getNodeRef?.(Number(nodeId));
+    console.log('[DevTools] Got ref for node:', nodeId, 'ref:', ref, 'current:', ref?.current);
     if (!ref?.current) {
+      console.log('[DevTools] No ref.current, clearing highlight');
       setHighlightedFrame(null);
       return;
     }
 
-    // Cast to correct type for findNodeHandle (it expects Component | null)
+    // Try using component's measure method directly (more reliable on macOS)
+    const component = ref.current as { measure?: (callback: (x: number, y: number, width: number, height: number, pageX: number, pageY: number) => void) => void };
+    if (typeof component.measure === 'function') {
+      console.log('[DevTools] Using component.measure directly');
+      component.measure((x, y, width, height, pageX, pageY) => {
+        console.log('[DevTools] component.measure result:', { x, y, width, height, pageX, pageY });
+        if (width > 0 && height > 0) {
+          setHighlightedFrame({ x: pageX, y: pageY, width, height, nodeId });
+          DevToolsBridge?.highlightNode?.(nodeId, { x: pageX, y: pageY, width, height });
+        } else {
+          console.log('[DevTools] Invalid dimensions, clearing highlight');
+          setHighlightedFrame(null);
+          DevToolsBridge?.clearHighlight?.();
+        }
+      });
+      return;
+    }
+
+    // Fallback to UIManager.measure
+    console.log('[DevTools] Fallback to UIManager.measure');
     const handle = findNodeHandle(ref.current as React.Component);
+    console.log('[DevTools] findNodeHandle result:', handle);
     if (!handle) {
+      console.log('[DevTools] No handle, clearing highlight');
       setHighlightedFrame(null);
       return;
     }
 
     UIManager.measure(handle, (x, y, width, height, pageX, pageY) => {
+      console.log('[DevTools] UIManager.measure result:', { x, y, width, height, pageX, pageY });
       if (width > 0 && height > 0) {
         setHighlightedFrame({ x: pageX, y: pageY, width, height, nodeId });
-        // Also send to native DevTools for overlay rendering
         DevToolsBridge?.highlightNode?.(nodeId, { x: pageX, y: pageY, width, height });
       } else {
+        console.log('[DevTools] Invalid dimensions, clearing highlight');
         setHighlightedFrame(null);
         DevToolsBridge?.clearHighlight?.();
       }
@@ -788,20 +845,27 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
   // Find deepest node at given position
   const findNodeAtPosition = useCallback((x: number, y: number, engine: Engine | null): string | null => {
-    if (!engine) return null;
+    console.log('[DevTools] findNodeAtPosition called at:', x, y);
+    if (!engine) {
+      console.log('[DevTools] No engine');
+      return null;
+    }
 
     const receiver = engine.getReceiver();
-    if (!receiver) return null;
+    if (!receiver) {
+      console.log('[DevTools] No receiver');
+      return null;
+    }
 
     const tree = receiver.getComponentTree?.();
-    if (!tree) return null;
-
-    // Get fresh frame measurements
-    const allRefs = receiver.getAllNodeRefs?.();
-    if (!allRefs) return null;
+    if (!tree) {
+      console.log('[DevTools] No tree');
+      return null;
+    }
 
     // Build frames map synchronously from cached values
     const frames = nodeFramesRef.current;
+    console.log('[DevTools] Cached frames count:', frames.size);
 
     // Find deepest node containing the point
     let deepestNode: string | null = null;
@@ -814,6 +878,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         // Check if point is inside this node's frame
         if (x >= fx && x <= fx + width && y >= fy && y <= fy + height) {
           const area = width * height;
+          console.log('[DevTools] Node', node.id, 'contains point, area:', area);
           // Prefer smaller (deeper) nodes
           if (area < smallestArea) {
             smallestArea = area;
@@ -829,6 +894,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     }
 
     traverse(tree as { id: string; children: Array<{ id: string; children: unknown[] }> });
+    console.log('[DevTools] findNodeAtPosition result:', deepestNode);
     return deepestNode;
   }, []);
 
@@ -880,7 +946,9 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     // Set up event listener for node selection from DevTools tree
     const selectSubscription = eventEmitter.addListener('onSelectNode', (data: { nodeId: string }) => {
       // When user selects a node in the DevTools tree, highlight it in the UI
+      console.log('[DevTools] onSelectNode event received:', data);
       const activeEngine = engineMapRef.current.get(activeTabId);
+      console.log('[DevTools] Active engine:', activeEngine ? 'exists' : 'null', 'tabId:', activeTabId);
       measureAndHighlightNode(data.nodeId, activeEngine ?? null);
     });
 
@@ -889,7 +957,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       inspectSubscription.remove();
       selectSubscription.remove();
     };
-  }, [activeTabId]);
+  }, [activeTabId, measureAndHighlightNode, measureAllNodeFrames]);
 
   const getEngine = useCallback((tabId: string) => {
     const engine = engineMapRef.current.get(tabId);
@@ -931,18 +999,26 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
   // Handle inspect click - find the component at the clicked position
   const handleInspectClick = useCallback((x: number, y: number) => {
+    console.log('[DevTools] handleInspectClick at:', x, y);
     const activeEngine = engineMapRef.current.get(activeTabId);
-    if (!activeEngine) return;
+    if (!activeEngine) {
+      console.log('[DevTools] No active engine for Inspect click');
+      return;
+    }
 
     // Find the deepest node at the clicked position
     const nodeId = findNodeAtPosition(x, y, activeEngine);
+    console.log('[DevTools] findNodeAtPosition result:', nodeId);
 
     if (nodeId) {
+      console.log('[DevTools] Selecting node from Inspect:', nodeId);
       // Select this node in DevTools tree (triggers tree selection UI)
       DevToolsBridge?.selectNodeFromInspect?.(nodeId);
 
       // Highlight the selected node in RN UI
       measureAndHighlightNode(nodeId, activeEngine);
+    } else {
+      console.log('[DevTools] No node found at position');
     }
 
     // Exit inspect mode after click
