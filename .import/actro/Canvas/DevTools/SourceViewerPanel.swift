@@ -231,6 +231,33 @@ struct CodeViewerView: View {
         return h
     }()
 
+    // Cache highlighted results for performance
+    private static var highlightCache: [String: AttributedString] = [:]
+    private static let cacheLock = NSLock()
+
+    private func getCachedHighlight(code: String, language: String) -> AttributedString? {
+        let key = "\(language):\(code.hashValue)"
+        Self.cacheLock.lock()
+        defer { Self.cacheLock.unlock() }
+
+        if let cached = Self.highlightCache[key] {
+            return cached
+        }
+
+        guard let highlightr = Self.highlightr,
+              let highlighted = highlightr.highlight(code, as: language) else {
+            return nil
+        }
+
+        let result = AttributedString(highlighted)
+        // Limit cache size
+        if Self.highlightCache.count > 50 {
+            Self.highlightCache.removeAll()
+        }
+        Self.highlightCache[key] = result
+        return result
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -281,43 +308,36 @@ struct CodeViewerView: View {
 
     // Code font matching Chrome DevTools (Menlo 12px)
     private static let codeFont = NSFont(name: "Menlo", size: 12) ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-    private static let lineHeight: CGFloat = 18 // ~1.5x line height for readability
 
     @ViewBuilder
     private func highlightedCode(_ code: String, language: String) -> some View {
-        let lines = code.components(separatedBy: "\n")
-        let lineNumberWidth = CGFloat(String(lines.count).count) * 9 + 20
+        let lineCount = code.components(separatedBy: "\n").count
+        // Generate line numbers as single string (much faster than ForEach)
+        let lineNumbers = (1...lineCount).map { String($0) }.joined(separator: "\n")
 
         HStack(alignment: .top, spacing: 0) {
-            // Line numbers
-            VStack(alignment: .trailing, spacing: 0) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { index, _ in
-                    Text("\(index + 1)")
-                        .font(Font(Self.codeFont))
-                        .foregroundColor(.secondary.opacity(0.5))
-                        .frame(height: Self.lineHeight)
-                }
-            }
-            .frame(width: lineNumberWidth)
-            .padding(.trailing, 8)
+            // Line numbers - single Text is much faster than ForEach
+            Text(lineNumbers)
+                .font(Font(Self.codeFont))
+                .foregroundColor(.secondary.opacity(0.5))
+                .frame(width: 45, alignment: .trailing)
+                .padding(.trailing, 8)
 
             Divider()
                 .background(Color.secondary.opacity(0.2))
 
-            // Code
-            VStack(alignment: .leading, spacing: 0) {
-                if let highlightr = Self.highlightr,
-                   let highlighted = highlightr.highlight(code, as: language) {
-                    Text(AttributedString(highlighted))
-                        .textSelection(.enabled)
-                } else {
-                    Text(code)
-                        .font(Font(Self.codeFont))
-                        .foregroundColor(.green.opacity(0.9))
-                        .textSelection(.enabled)
-                }
+            // Code - highlighted (with caching)
+            if let highlighted = getCachedHighlight(code: code, language: language) {
+                Text(highlighted)
+                    .textSelection(.enabled)
+                    .padding(.leading, 8)
+            } else {
+                Text(code)
+                    .font(Font(Self.codeFont))
+                    .foregroundColor(.green.opacity(0.9))
+                    .textSelection(.enabled)
+                    .padding(.leading, 8)
             }
-            .padding(.leading, 8)
         }
     }
 }
