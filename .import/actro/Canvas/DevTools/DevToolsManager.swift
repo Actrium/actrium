@@ -448,6 +448,9 @@ class DevToolsManager: ObservableObject {
     /// Currently active tab
     @Published var activeTab: DevToolsTab = .messages
 
+    /// Custom tab order (for drag-and-drop reordering)
+    @Published var tabOrder: [DevToolsTab] = DevToolsTab.allCases
+
     // MARK: - Inspector State
 
     /// Currently inspected tab ID
@@ -1166,6 +1169,15 @@ class DevToolsManager: ObservableObject {
            let tab = DevToolsTab(rawValue: tabRaw) {
             activeTab = tab
         }
+
+        // Load custom tab order
+        if let savedOrder = UserDefaults.standard.stringArray(forKey: "devtools.tabOrder") {
+            let loadedTabs = savedOrder.compactMap { DevToolsTab(rawValue: $0) }
+            // Ensure all tabs are present (in case new tabs were added)
+            let existingTabs = Set(loadedTabs)
+            let missingTabs = DevToolsTab.allCases.filter { !existingTabs.contains($0) }
+            tabOrder = loadedTabs + missingTabs
+        }
     }
 
     func saveSettings() {
@@ -1174,6 +1186,19 @@ class DevToolsManager: ObservableObject {
         UserDefaults.standard.set(dockedHeight, forKey: "devtools.dockedHeight")
         UserDefaults.standard.set(dockedWidth, forKey: "devtools.dockedWidth")
         UserDefaults.standard.set(activeTab.rawValue, forKey: "devtools.activeTab")
+        UserDefaults.standard.set(tabOrder.map { $0.rawValue }, forKey: "devtools.tabOrder")
+    }
+
+    /// Move a tab from one position to another
+    func moveTab(from source: Int, to destination: Int) {
+        guard source != destination,
+              source >= 0 && source < tabOrder.count,
+              destination >= 0 && destination <= tabOrder.count else { return }
+
+        let tab = tabOrder.remove(at: source)
+        let adjustedDestination = destination > source ? destination - 1 : destination
+        tabOrder.insert(tab, at: adjustedDestination)
+        saveSettings()
     }
 }
 
