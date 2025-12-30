@@ -312,7 +312,10 @@ class IOSurfaceDisplayView: NSView {
 struct MultiProcessTabView: View {
     let tab: Tab
     let containerSize: CGSize
-    @ObservedObject var processManager = TabProcessManager.shared
+
+    // Don't use @ObservedObject here - it causes re-renders when processManager updates
+    // which disrupts the view lifecycle. We only need to call methods, not observe state.
+    private let processManager = TabProcessManager.shared
 
     @State private var surfaceID: UInt32 = 0
     @State private var isLoading: Bool = true
@@ -346,9 +349,11 @@ struct MultiProcessTabView: View {
             updateViewportSize(newSize)
         }
         .onAppear {
+            NSLog("MultiProcessTabView: onAppear for tab \(tabId)")
             startRenderer()
         }
         .onDisappear {
+            NSLog("MultiProcessTabView: onDisappear for tab \(tabId)")
             stopRenderer()
         }
         .onReceive(NotificationCenter.default.publisher(for: .tabSurfaceUpdated)) { notification in
@@ -362,6 +367,8 @@ struct MultiProcessTabView: View {
                 handleCrash(reason: reason)
             }
         }
+        // Use stable identity to prevent SwiftUI from recreating the view
+        .id(tab.id)
     }
 
     private var loadingView: some View {
