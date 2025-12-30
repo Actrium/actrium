@@ -209,6 +209,11 @@ struct DevToolsMonitorView: View {
                 // Secondary metrics cards (flow layout)
                 secondaryMetricsGrid(row: row)
 
+                // Task Manager section (multi-process)
+                if TabProcessManager.shared.isMultiProcessEnabled {
+                    taskManagerSection
+                }
+
                 // Expandable details
                 DisclosureGroup("Details", isExpanded: $showDetails) {
                     detailsContent(row: row)
@@ -327,6 +332,65 @@ struct DevToolsMonitorView: View {
                 compact: true
             )
         }
+    }
+
+    // MARK: - Task Manager Section
+
+    @State private var showTaskManager: Bool = true
+
+    private var taskManagerSection: some View {
+        DisclosureGroup("Task Manager", isExpanded: $showTaskManager) {
+            VStack(spacing: 0) {
+                // Header row
+                HStack(spacing: 0) {
+                    Text("Tab")
+                        .frame(width: 120, alignment: .leading)
+                    Text("PID")
+                        .frame(width: 60, alignment: .trailing)
+                    Text("Memory")
+                        .frame(width: 80, alignment: .trailing)
+                    Text("CPU")
+                        .frame(width: 60, alignment: .trailing)
+                    Text("Status")
+                        .frame(width: 80, alignment: .center)
+                    Spacer()
+                    Text("Action")
+                        .frame(width: 60, alignment: .center)
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color(nsColor: .controlBackgroundColor))
+
+                Divider()
+
+                // Process rows
+                let processes = Array(TabProcessManager.shared.processes.values)
+                if processes.isEmpty {
+                    Text("No tab processes running")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach(processes, id: \.tabId) { processInfo in
+                        TaskManagerRow(processInfo: processInfo)
+                        Divider()
+                    }
+                }
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
+        }
+        .font(.system(size: 11, weight: .medium))
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        .cornerRadius(6)
     }
 
     // MARK: - Details Content
@@ -595,6 +659,121 @@ private struct MonitorFlowLayout: Layout {
         }
 
         return (CGSize(width: maxWidth, height: totalHeight), positions)
+    }
+}
+
+// MARK: - Task Manager Row
+
+private struct TaskManagerRow: View {
+    @ObservedObject var processInfo: TabProcessInfo
+    @State private var metrics: (memory: UInt64, cpuTime: UInt64)?
+
+    private var statusText: String {
+        switch processInfo.state {
+        case .idle: return "Idle"
+        case .launching: return "Launching..."
+        case .running(let pid): return "Running"
+        case .crashed(let reason): return "Crashed"
+        case .terminated: return "Terminated"
+        }
+    }
+
+    private var statusColor: Color {
+        switch processInfo.state {
+        case .idle: return .secondary
+        case .launching: return .orange
+        case .running: return .green
+        case .crashed: return .red
+        case .terminated: return .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Tab ID (shortened)
+            Text(processInfo.tabId.uuidString.prefix(8) + "...")
+                .font(.system(size: 10, design: .monospaced))
+                .frame(width: 120, alignment: .leading)
+
+            // PID
+            if let pid = processInfo.pid {
+                Text("\(pid)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .frame(width: 60, alignment: .trailing)
+            } else {
+                Text("—")
+                    .foregroundColor(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+            }
+
+            // Memory
+            if let mem = metrics?.memory {
+                let mb = Double(mem) / 1_048_576.0
+                Text(String(format: "%.1f MB", mb))
+                    .font(.system(size: 10, design: .monospaced))
+                    .frame(width: 80, alignment: .trailing)
+            } else {
+                Text("—")
+                    .foregroundColor(.secondary)
+                    .frame(width: 80, alignment: .trailing)
+            }
+
+            // CPU Time
+            if let cpu = metrics?.cpuTime {
+                let seconds = Double(cpu) / 1_000_000_000.0
+                Text(String(format: "%.1fs", seconds))
+                    .font(.system(size: 10, design: .monospaced))
+                    .frame(width: 60, alignment: .trailing)
+            } else {
+                Text("—")
+                    .foregroundColor(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+            }
+
+            // Status
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+                Text(statusText)
+                    .font(.system(size: 10))
+            }
+            .frame(width: 80, alignment: .center)
+
+            Spacer()
+
+            // Kill button
+            if processInfo.isRunning {
+                Button(action: {
+                    TabProcessManager.shared.terminateProcess(for: processInfo.tabId)
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 60, alignment: .center)
+            } else {
+                Color.clear
+                    .frame(width: 60)
+            }
+        }
+        .font(.system(size: 10))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .onAppear {
+            updateMetrics()
+        }
+        .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+            updateMetrics()
+        }
+    }
+
+    private func updateMetrics() {
+        guard let pid = processInfo.pid else {
+            metrics = nil
+            return
+        }
+        metrics = TabProcessManager.shared.getProcessMetrics(pid: pid)
     }
 }
 
