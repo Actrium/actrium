@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import IOSurface
 import QuartzCore
+import Combine
 
 // MARK: - IOSurface Host View (SwiftUI)
 
@@ -69,22 +70,35 @@ class IOSurfaceDisplayView: NSView {
         // Create or update the surface layer
         if surfaceLayer == nil {
             let newLayer = CALayer()
-            newLayer.contentsGravity = .resizeAspect
+            newLayer.contentsGravity = .resize  // Use resize to fill the view
             newLayer.magnificationFilter = .nearest
+            newLayer.isOpaque = true
             layer?.addSublayer(newLayer)
             surfaceLayer = newLayer
         }
 
         // Set the IOSurface as the layer's contents
+        // Force update by clearing first
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        surfaceLayer?.contents = nil
         surfaceLayer?.contents = surface
         surfaceLayer?.frame = bounds
+        CATransaction.commit()
 
-        NSLog("IOSurfaceHostView: Displaying surface ID \(id), size \(IOSurfaceGetWidth(surface))x\(IOSurfaceGetHeight(surface))")
+        NSLog("IOSurfaceHostView: Displaying surface ID \(id), size \(IOSurfaceGetWidth(surface))x\(IOSurfaceGetHeight(surface)), layer frame: \(bounds)")
     }
 
     func refreshSurface() {
-        // Force the layer to redraw
-        surfaceLayer?.setNeedsDisplay()
+        // For IOSurface, we need to re-set the contents to force a redraw
+        guard currentSurfaceID != 0, let surface = IOSurfaceLookup(currentSurfaceID) else {
+            return
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        surfaceLayer?.contents = surface
+        CATransaction.commit()
     }
 
     private func showPlaceholder() {
@@ -115,6 +129,10 @@ struct MultiProcessTabView: View {
     @State private var surfaceID: UInt32 = 0
     @State private var isLoading: Bool = true
     @State private var errorMessage: String?
+    @State private var refreshTrigger: Int = 0  // Used to force view updates
+
+    // Timer for periodic refresh (IOSurface content doesn't auto-update CALayer)
+    let refreshTimer = Timer.publish(every: 1.0/30.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geometry in
@@ -125,6 +143,7 @@ struct MultiProcessTabView: View {
                         width: geometry.size.width,
                         height: geometry.size.height
                     )
+                    .id(refreshTrigger)  // Force view recreation on refresh
                 } else if isLoading {
                     loadingView
                 } else if let error = errorMessage {
@@ -146,6 +165,12 @@ struct MultiProcessTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .tabSurfaceUpdated)) { notification in
             if let notifTabId = notification.userInfo?["tabId"] as? UUID, notifTabId == tabId {
                 refreshSurface()
+            }
+        }
+        .onReceive(refreshTimer) { _ in
+            // Periodically increment to force IOSurface redraw
+            if surfaceID != 0 {
+                refreshTrigger += 1
             }
         }
     }
