@@ -1060,6 +1060,18 @@ class DevToolsManager: ObservableObject {
         consoleLogs.removeAll()
     }
 
+    /// Log from a renderer process (multi-process architecture)
+    func logFromRenderer(tabId: UUID, level: String, message: String, source: String) {
+        let logLevel: DevToolsLogEntry.LogLevel
+        switch level.lowercased() {
+        case "debug": logLevel = .debug
+        case "warn", "warning": logLevel = .warn
+        case "error": logLevel = .error
+        default: logLevel = .info
+        }
+        log(message, level: logLevel, source: "[\(tabId.uuidString.prefix(8))] \(source)")
+    }
+
     /// Clear network requests
     func clearNetwork() {
         networkRequests.removeAll()
