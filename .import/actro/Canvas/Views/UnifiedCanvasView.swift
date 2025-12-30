@@ -60,7 +60,6 @@ struct UnifiedCanvasView: View {
         GeometryReader { geometry in
             let viewportSize = geometry.size
             // DEBUG: 追踪 GeometryReader 提供的尺寸（用 print 确保可见）
-            let _ = print("[ResizeFlow] 📏 GeometryReader.size = \(Int(viewportSize.width))x\(Int(viewportSize.height))")
             // 极窄/极矮窗口时避免 0 尺寸导致矩阵奇异
             let safeViewportSize = CGSize(
                 width: max(viewportSize.width, 1),
@@ -1271,7 +1270,6 @@ private struct TabCardView: View {
             // 每个 Tab 都有独立的 RCTRootView - 实现真正的缩放
             if hasRNContent {
                 // DEBUG: 记录关键尺寸
-                let _ = print("[ResizeFlow] 📦 TabCardView: isFocused=\(isFocused), viewportSize=\(Int(viewportSize.width))x\(Int(viewportSize.height)), cardSize=\(Int(cardWidth))x\(Int(cardHeight)), rnScale=\(String(format: "%.3f", rnScaleFactor))")
 
                 // 关键修复：使用 overlay 而非 frame+scaleEffect 组合
                 // 原来的方式 scaleEffect 后用 frame 对齐会有问题，因为 SwiftUI 使用原始尺寸计算位置

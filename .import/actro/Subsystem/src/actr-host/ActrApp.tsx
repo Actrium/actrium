@@ -43,7 +43,6 @@ import { Engine } from 'rill';
 // Install console interceptor to forward logs to DevTools Console panel
 installConsoleInterceptor();
 import { hostComponents } from './BundleView';
-import { EngineMonitorOverlay } from 'askit';
 import type { ContractViolation } from 'askit/contracts';
 import { createContractViolationCollector, createHostToGuestSender } from 'askit/contracts';
 import { createEngineAdapter } from 'askit/core';
@@ -102,6 +101,7 @@ const DevToolsBridge = NativeModules.DevToolsBridge as {
   setEnginePaused?: (isPaused: boolean) => void;
   registerPauseHandler?: () => void;
   updateComponentTree?: (treeJson: string | null, tabId: string | null) => void;
+  updateEngineMonitor?: (snapshotJson: string | null) => void;
   setInspectMode?: (enabled: boolean) => void;
   setRNInspectorActive?: (active: boolean) => void;
   highlightNode?: (nodeId: string | null, frame: { x: number; y: number; width: number; height: number } | null) => void;
@@ -1175,6 +1175,69 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     };
   }, []);
 
+  // 推送引擎监控快照到原生 DevTools（用于 Monitor 面板）
+  useEffect(() => {
+    if (!DevToolsBridge?.updateEngineMonitor) return;
+
+    let cancelled = false;
+    const pollIntervalMs = 1000;
+
+    const tick = () => {
+      if (cancelled) return;
+      try {
+        const rows = monitorTabs.map((tab) => {
+          const engine = getEngine(tab.id);
+          const rawDiagnostics = engine ? (engine.getDiagnostics?.() as any) : null;
+
+          // 收敛 timeline points 体积，避免桥接 payload 过大
+          const timeline = rawDiagnostics?.activity?.timeline;
+          const points: any[] | undefined = Array.isArray(timeline?.points) ? timeline.points : undefined;
+          const diagnostics = points && points.length > 60
+            ? {
+                ...rawDiagnostics,
+                activity: {
+                  ...rawDiagnostics.activity,
+                  timeline: {
+                    ...timeline,
+                    points: points.slice(-60),
+                  },
+                },
+              }
+            : rawDiagnostics;
+
+          return {
+            tabId: tab.id,
+            title: tab.title || 'Untitled',
+            isActive: tab.id === activeTabId,
+            engineId: engine?.id ?? null,
+            status: (tab as any).status ?? null,
+            blockedReason: (tab as any).blockedReason ?? null,
+            contract: (tab as any).contract ?? null,
+            permissions: (tab as any).permissions ?? null,
+            diagnostics,
+          };
+        });
+
+        DevToolsBridge.updateEngineMonitor?.(
+          JSON.stringify({
+            timestamp: Date.now(),
+            activeTabId,
+            rows,
+          })
+        );
+      } catch {
+        // Ignore DevTools monitor update errors
+      }
+    };
+
+    tick();
+    const timer = setInterval(tick, pollIntervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeTabId, getEngine, monitorTabs]);
+
   // 使用显式尺寸替代 absoluteFill，确保容器尺寸正确
   const hasExplicitSize = containerWidth && containerWidth > 0 && containerHeight && containerHeight > 0;
 
@@ -1445,10 +1508,6 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             </View>
           );
         })}
-
-        {typeof EngineMonitorOverlay === 'function' ? (
-          <EngineMonitorOverlay tabs={monitorTabs} activeTabId={activeTabId} getEngine={getEngine} />
-        ) : null}
       </View>
 
       {/* Inspect mode overlay - like RN's InspectorOverlay */}

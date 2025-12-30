@@ -171,6 +171,8 @@ struct DevToolsContent: View {
                 DevToolsConsoleView(devTools: devTools)
             case .network:
                 NetworkSequenceView(devTools: devTools, viewModel: viewModel)
+            case .monitor:
+                DevToolsMonitorView(devTools: devTools)
             }
         }
         .onAppear {
@@ -2109,9 +2111,6 @@ struct FunctionLinkButton: View {
         if hasSourceLocation {
             // Clickable link with hover underline
             Button(action: {
-                print("🔍 [FunctionLinkButton] Clicked: \(functionName)")
-                print("   - sourceFile (from Babel): \(sourceFile ?? "nil")")
-                print("   - sourceLine (from Babel): \(sourceLine ?? 0)")
                 DevToolsManager.shared.navigateToSource(
                     functionName: functionName,
                     fileName: sourceFile,

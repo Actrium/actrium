@@ -24,6 +24,7 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
     case sources = "Sources"         // Source code viewer
     case console = "Console"         // Console logs
     case network = "Network"         // Network requests
+    case monitor = "Monitor"         // Engine monitor
 
     var id: String { rawValue }
 
@@ -34,6 +35,7 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
         case .sources: return "doc.text"
         case .console: return "terminal"
         case .network: return "network"
+        case .monitor: return "waveform.path.ecg"
         }
     }
 }
@@ -192,6 +194,181 @@ struct DevToolsNetworkRequest: Identifiable {
     }
 }
 
+// MARK: - Monitor
+
+enum DevToolsEngineMonitorTabStatus: String, Decodable {
+    case ok
+    case compat
+    case blocked
+}
+
+struct DevToolsEngineMonitorSnapshot: Decodable {
+    let timestamp: Double?
+    let activeTabId: String?
+    let rows: [DevToolsEngineMonitorRow]
+
+    var date: Date? {
+        guard let timestamp else { return nil }
+        // JS uses Date.now() (ms)
+        return Date(timeIntervalSince1970: timestamp / 1000.0)
+    }
+}
+
+struct DevToolsEngineMonitorRow: Identifiable, Decodable {
+    var id: String { tabId }
+
+    let tabId: String
+    let title: String
+    let isActive: Bool
+    let engineId: String?
+    let status: DevToolsEngineMonitorTabStatus?
+    let blockedReason: String?
+    let contract: DevToolsEngineMonitorContract?
+    let permissions: [String]?
+    let diagnostics: DevToolsEngineMonitorDiagnostics?
+}
+
+struct DevToolsEngineMonitorContract: Decodable {
+    let name: String
+    let version: Int
+}
+
+struct DevToolsEngineMonitorDiagnostics: Decodable {
+    struct Health: Decodable {
+        let loaded: Bool?
+        let destroyed: Bool?
+        let errorCount: Int?
+        let lastErrorAt: Double?
+        let receiverNodes: Int?
+        let batching: Bool?
+    }
+
+    struct Resources: Decodable {
+        let timers: Int?
+        let nodes: Int?
+        let callbacks: Int?
+    }
+
+    struct Contracts: Decodable {
+        let violations: Int?
+        let lastViolationAt: Double?
+        let lastViolation: String?
+    }
+
+    struct Activity: Decodable {
+        struct LastBatch: Decodable {
+            let batchId: Int?
+            let at: Double?
+            let totalOps: Int?
+            let applyDurationMs: Double?
+        }
+
+        struct Timeline: Decodable {
+            struct Point: Decodable {
+                let at: Double?
+                let ops: Int?
+                let batches: Int?
+                let skippedOps: Int?
+                let applyDurationMsAvg: Double?
+                let applyDurationMsMax: Double?
+            }
+
+            let windowMs: Double?
+            let bucketMs: Double?
+            let points: [Point]?
+        }
+
+        let windowMs: Double?
+        let opsPerSecond: Double?
+        let batchesPerSecond: Double?
+        let totalBatches: Int?
+        let totalOps: Int?
+        let lastBatch: LastBatch?
+        let timeline: Timeline?
+    }
+
+    struct Receiver: Decodable {
+        struct LastApply: Decodable {
+            let batchId: Int?
+            let at: Double?
+            let total: Int?
+            let applied: Int?
+            let skipped: Int?
+            let failed: Int?
+            let durationMs: Double?
+            let nodeDelta: Int?
+            let opCounts: [String: Int]?
+            let skippedOpCounts: [String: Int]?
+            let topNodeTypes: [TopNodeType]?
+            let topNodeTypesSkipped: [TopNodeType]?
+        }
+
+        struct TopNodeType: Decodable, Identifiable {
+            var id: String { type }
+            let type: String
+            let ops: Int
+        }
+
+        struct Attribution: Decodable {
+            struct WorstBatch: Decodable, Identifiable {
+                var id: String { "\(kind ?? "unknown")-\(batchId ?? -1)-\(at ?? 0)" }
+                let kind: String?
+                let batchId: Int?
+                let at: Double?
+                let total: Int?
+                let applied: Int?
+                let skipped: Int?
+                let failed: Int?
+                let durationMs: Double?
+                let nodeDelta: Int?
+            }
+
+            let windowMs: Double?
+            let sampleCount: Int?
+            let total: Int?
+            let applied: Int?
+            let skipped: Int?
+            let failed: Int?
+            let durationMs: Double?
+            let nodeDelta: Int?
+            let opCounts: [String: Int]?
+            let skippedOpCounts: [String: Int]?
+            let topNodeTypes: [TopNodeType]?
+            let topNodeTypesSkipped: [TopNodeType]?
+            let worstBatches: [WorstBatch]?
+        }
+
+        let nodeCount: Int?
+        let lastRenderAt: Double?
+        let lastRenderDurationMs: Double?
+        let lastApply: LastApply?
+        let attribution: Attribution?
+    }
+
+    struct Endpoint: Decodable {
+        let lastEventName: String?
+        let lastEventAt: Double?
+        let lastPayloadBytes: Int?
+    }
+
+    struct GuestEndpoint: Decodable {
+        let lastEventName: String?
+        let lastEventAt: Double?
+        let lastPayloadBytes: Int?
+        let sleeping: Bool?
+        let sleepingAt: Double?
+    }
+
+    let id: String?
+    let health: Health?
+    let resources: Resources?
+    let contracts: Contracts?
+    let activity: Activity?
+    let receiver: Receiver?
+    let host: Endpoint?
+    let guest: GuestEndpoint?
+}
+
 /// Component tree node for Elements inspector
 struct DevToolsComponentNode: Identifiable {
     let id: String
@@ -315,15 +492,10 @@ class DevToolsManager: ObservableObject {
     func updateGuestAppSource(path: String?, name: String?) {
         guestAppSourcePath = path
         guestAppName = name
-        print("📁 [DevToolsManager] Guest app updated: name=\(name ?? "nil"), path=\(path ?? "nil")")
     }
 
     /// Navigate to source location (switches to Sources tab)
     func navigateToSource(functionName: String, fileName: String? = nil, lineNumber: Int? = nil) {
-        print("🔍 [DevToolsManager] navigateToSource called:")
-        print("   - functionName: '\(functionName)'")
-        print("   - fileName (from Babel): \(fileName ?? "nil")")
-        print("   - lineNumber (from Babel): \(lineNumber ?? 0)")
 
         pendingSourceNavigation = SourceNavigation(
             searchText: functionName,
@@ -332,7 +504,6 @@ class DevToolsManager: ObservableObject {
         )
         activeTab = .sources
 
-        print("   - pendingSourceNavigation set, activeTab = .sources")
     }
 
     /// Clear pending navigation after it's been handled
@@ -397,6 +568,12 @@ class DevToolsManager: ObservableObject {
 
     /// Version counter for network requests (incremented on any change)
     @Published private(set) var networkRequestsVersion: Int = 0
+
+    /// Engine monitor snapshot (pushed from Host)
+    @Published private(set) var engineMonitorSnapshot: DevToolsEngineMonitorSnapshot?
+
+    /// Last decode error for engine monitor snapshot (debug aid)
+    @Published private(set) var engineMonitorDecodeError: String?
 
     /// Maximum log entries to keep
     private let maxLogEntries = 1000
@@ -591,6 +768,27 @@ class DevToolsManager: ObservableObject {
             }
 
             self.processNetworkMessage(message)
+        }
+    }
+
+    func updateEngineMonitorSnapshot(_ snapshotJson: String?) {
+        guard let snapshotJson, !snapshotJson.isEmpty else {
+            engineMonitorSnapshot = nil
+            engineMonitorDecodeError = nil
+            return
+        }
+
+        guard let data = snapshotJson.data(using: .utf8) else {
+            engineMonitorDecodeError = "Invalid UTF-8 data"
+            return
+        }
+
+        do {
+            let snapshot = try JSONDecoder().decode(DevToolsEngineMonitorSnapshot.self, from: data)
+            engineMonitorSnapshot = snapshot
+            engineMonitorDecodeError = nil
+        } catch {
+            engineMonitorDecodeError = error.localizedDescription
         }
     }
 
@@ -872,7 +1070,6 @@ class DevToolsManager: ObservableObject {
 
     /// Select a component node
     func selectNode(_ nodeId: String?) {
-        os_log("[DevToolsManager] selectNode called with: %{public}@", log: devToolsLog, type: .debug, nodeId ?? "nil")
         selectedNodeId = nodeId
         // Clear box model when deselecting
         if nodeId == nil {
@@ -881,7 +1078,6 @@ class DevToolsManager: ObservableObject {
         }
         // Notify RN to highlight the selected node
         if let nodeId = nodeId {
-            os_log("[DevToolsManager] Calling onSelectNodeFromTree callback, hasCallback: %{public}d", log: devToolsLog, type: .debug, onSelectNodeFromTree != nil ? 1 : 0)
             onSelectNodeFromTree?(nodeId)
         }
     }

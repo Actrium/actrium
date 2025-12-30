@@ -8,6 +8,7 @@ RCT_EXTERN_METHOD(logRenderOp:(NSString *)operationType :(NSString *)componentTy
 RCT_EXTERN_METHOD(setEnginePaused:(BOOL)isPaused)
 RCT_EXTERN_METHOD(registerPauseHandler)
 RCT_EXTERN_METHOD(updateComponentTree:(NSString *)treeJson :(NSString *)tabId)
+RCT_EXTERN_METHOD(updateEngineMonitor:(NSString *)snapshotJson)
 RCT_EXTERN_METHOD(setInspectMode:(BOOL)enabled)
 RCT_EXTERN_METHOD(highlightNode:(NSString *)nodeId :(NSDictionary *)frame)
 RCT_EXTERN_METHOD(clearHighlight)
