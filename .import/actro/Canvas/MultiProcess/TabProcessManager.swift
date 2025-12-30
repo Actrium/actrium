@@ -207,8 +207,8 @@ class TabProcessManager: ObservableObject {
             processInfo.surfaceID = surfaceID
 
             await MainActor.run {
-                processPool.append(processInfo)
-                logger.info("TabProcessManager: Process pool now has \(processPool.count) ready processes")
+                self.processPool.append(processInfo)
+                logger.info("TabProcessManager: Process pool now has \(self.processPool.count) ready processes")
             }
         } catch {
             logger.error("TabProcessManager: Failed to warm up process: \(error)")
@@ -218,7 +218,7 @@ class TabProcessManager: ObservableObject {
     /// Get a pre-warmed process from the pool, or spawn a new one
     func getPooledProcess(for tabId: UUID, config: TabXPCConfig) async throws -> TabProcessInfo {
         // Try to get from pool first
-        if let pooledProcess = await MainActor.run(body: { processPool.popLast() }) {
+        if let pooledProcess = await MainActor.run(body: { self.processPool.popLast() }) {
             logger.info("TabProcessManager: Using pre-warmed process from pool")
 
             // Reassign the process to the new tab
@@ -229,7 +229,7 @@ class TabProcessManager: ObservableObject {
             reassignedInfo.state = pooledProcess.state
 
             await MainActor.run {
-                processes[tabId] = reassignedInfo
+                self.processes[tabId] = reassignedInfo
             }
 
             // Warm up a replacement in the background
