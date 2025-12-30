@@ -1067,7 +1067,15 @@ struct DevToolsConsoleView: View {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(filteredLogs) { entry in
                                 DevToolsLogEntryView(entry: entry)
+                                    .id(entry.id)
                             }
+                        }
+                    }
+                    .onChange(of: devTools.consoleLogs.count) { _, _ in
+                        // Only auto-scroll if we were already near the bottom
+                        // For now, simple auto-scroll to latest
+                        if let last = filteredLogs.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }
                 }
@@ -1727,10 +1735,18 @@ struct DevToolsMessagesView: View {
                                         message: msg,
                                         isSelected: selectedMessageId == msg.id
                                     )
+                                    .id(msg.id)
                                     .onTapGesture {
                                         selectedMessageId = msg.id
                                     }
                                 }
+                            }
+                        }
+                        .onChange(of: devTools.messages.count) { _, _ in
+                            // Auto-scroll to latest if no selection or if we want to follow tail
+                            // For now, simple auto-scroll
+                            if let last = devTools.filteredMessages.last {
+                                proxy.scrollTo(last.id, anchor: .bottom)
                             }
                         }
                     }
