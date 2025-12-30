@@ -26,9 +26,18 @@ class TabProcessInfo: ObservableObject {
     var connection: NSXPCConnection?
     var process: Process?
     var renderer: TabRendererProtocol?
+    var inputPipe: Pipe?  // stdin pipe for sending events to helper
 
     init(tabId: UUID) {
         self.tabId = tabId
+    }
+
+    /// Send an event to the helper process via stdin
+    func sendEvent(_ event: TabXPCEvent) {
+        guard let pipe = inputPipe,
+              let json = event.toJSON(),
+              let data = (json + "\n").data(using: .utf8) else { return }
+        pipe.fileHandleForWriting.write(data)
     }
 
     var pid: pid_t? {
@@ -117,6 +126,11 @@ class TabProcessManager: ObservableObject {
             // Capture stdout for IOSurface ID
             let outputPipe = Pipe()
             process.standardOutput = outputPipe
+
+            // Set up stdin pipe for sending events
+            let inputPipe = Pipe()
+            process.standardInput = inputPipe
+            processInfo.inputPipe = inputPipe
 
             // Set up termination handler
             process.terminationHandler = { [weak self, weak processInfo] terminatedProcess in
@@ -338,6 +352,22 @@ class TabProcessManager: ObservableObject {
     func getIOSurfaceID(for tabId: UUID) async -> UInt32? {
         guard let processInfo = processes[tabId], processInfo.isRunning else { return nil }
         return processInfo.surfaceID != 0 ? processInfo.surfaceID : nil
+    }
+
+    /// Send an input event to a tab's renderer process via stdin
+    func sendEvent(_ event: TabXPCEvent, to tabId: UUID) {
+        guard let processInfo = processes[tabId], processInfo.isRunning else { return }
+        processInfo.sendEvent(event)
+    }
+
+    /// Create and send a mouse event to a tab
+    func sendMouseEvent(type: TabXPCEvent.EventType, location: CGPoint, to tabId: UUID) {
+        let event = TabXPCEvent(
+            eventType: type,
+            locationX: Double(location.x),
+            locationY: Double(location.y)
+        )
+        sendEvent(event, to: tabId)
     }
 }
 

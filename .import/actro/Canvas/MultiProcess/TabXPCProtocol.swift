@@ -167,6 +167,10 @@ class TabXPCEvent: NSObject, NSSecureCoding {
     let scrollDeltaX: Double
     let scrollDeltaY: Double
 
+    // View size for coordinate scaling
+    let viewWidth: Double
+    let viewHeight: Double
+
     init(
         eventType: EventType,
         locationX: Double = 0,
@@ -175,7 +179,9 @@ class TabXPCEvent: NSObject, NSSecureCoding {
         keyCode: UInt16 = 0,
         characters: String? = nil,
         scrollDeltaX: Double = 0,
-        scrollDeltaY: Double = 0
+        scrollDeltaY: Double = 0,
+        viewWidth: Double = 0,
+        viewHeight: Double = 0
     ) {
         self.eventType = eventType.rawValue
         self.locationX = locationX
@@ -185,6 +191,8 @@ class TabXPCEvent: NSObject, NSSecureCoding {
         self.characters = characters
         self.scrollDeltaX = scrollDeltaX
         self.scrollDeltaY = scrollDeltaY
+        self.viewWidth = viewWidth
+        self.viewHeight = viewHeight
         super.init()
     }
 
@@ -197,6 +205,8 @@ class TabXPCEvent: NSObject, NSSecureCoding {
         self.characters = coder.decodeObject(of: NSString.self, forKey: "characters") as String?
         self.scrollDeltaX = coder.decodeDouble(forKey: "scrollDeltaX")
         self.scrollDeltaY = coder.decodeDouble(forKey: "scrollDeltaY")
+        self.viewWidth = coder.decodeDouble(forKey: "viewWidth")
+        self.viewHeight = coder.decodeDouble(forKey: "viewHeight")
         super.init()
     }
 
@@ -209,6 +219,54 @@ class TabXPCEvent: NSObject, NSSecureCoding {
         coder.encode(characters as NSString?, forKey: "characters")
         coder.encode(scrollDeltaX, forKey: "scrollDeltaX")
         coder.encode(scrollDeltaY, forKey: "scrollDeltaY")
+        coder.encode(viewWidth, forKey: "viewWidth")
+        coder.encode(viewHeight, forKey: "viewHeight")
+    }
+
+    // MARK: - JSON Serialization for stdin communication
+
+    /// Serialize event to JSON string for pipe-based IPC
+    func toJSON() -> String? {
+        let dict: [String: Any] = [
+            "type": eventType,
+            "x": locationX,
+            "y": locationY,
+            "modifiers": modifierFlags,
+            "keyCode": keyCode,
+            "chars": characters ?? "",
+            "scrollX": scrollDeltaX,
+            "scrollY": scrollDeltaY,
+            "vw": viewWidth,
+            "vh": viewHeight
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return "EVENT:\(json)"
+    }
+
+    /// Parse event from JSON string
+    static func fromJSON(_ json: String) -> TabXPCEvent? {
+        guard let data = json.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let typeRaw = dict["type"] as? Int,
+              let type = EventType(rawValue: typeRaw) else {
+            return nil
+        }
+
+        return TabXPCEvent(
+            eventType: type,
+            locationX: dict["x"] as? Double ?? 0,
+            locationY: dict["y"] as? Double ?? 0,
+            modifierFlags: (dict["modifiers"] as? UInt) ?? 0,
+            keyCode: UInt16(dict["keyCode"] as? Int ?? 0),
+            characters: dict["chars"] as? String,
+            scrollDeltaX: dict["scrollX"] as? Double ?? 0,
+            scrollDeltaY: dict["scrollY"] as? Double ?? 0,
+            viewWidth: dict["vw"] as? Double ?? 0,
+            viewHeight: dict["vh"] as? Double ?? 0
+        )
     }
 }
 
