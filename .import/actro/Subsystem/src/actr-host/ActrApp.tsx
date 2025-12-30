@@ -1185,44 +1185,46 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     const tick = () => {
       if (cancelled) return;
       try {
-        const rows = monitorTabs.map((tab) => {
-          const engine = getEngine(tab.id);
-          const rawDiagnostics = engine ? (engine.getDiagnostics?.() as any) : null;
+        // DevTools Monitor 只针对当前 Tab（多 Tab 总览由独立 Task Manager 承载）
+        const activeTab = monitorTabs.find((t) => t.id === activeTabId) ?? monitorTabs[0];
+        if (!activeTab) return;
 
-          // 收敛 timeline points 体积，避免桥接 payload 过大
-          const timeline = rawDiagnostics?.activity?.timeline;
-          const points: any[] | undefined = Array.isArray(timeline?.points) ? timeline.points : undefined;
-          const diagnostics = points && points.length > 60
-            ? {
-                ...rawDiagnostics,
-                activity: {
-                  ...rawDiagnostics.activity,
-                  timeline: {
-                    ...timeline,
-                    points: points.slice(-60),
-                  },
+        const engine = getEngine(activeTab.id);
+        const rawDiagnostics = engine ? (engine.getDiagnostics?.() as any) : null;
+
+        // 收敛 timeline points 体积，避免桥接 payload 过大
+        const timeline = rawDiagnostics?.activity?.timeline;
+        const points: any[] | undefined = Array.isArray(timeline?.points) ? timeline.points : undefined;
+        const diagnostics = points && points.length > 60
+          ? {
+              ...rawDiagnostics,
+              activity: {
+                ...rawDiagnostics.activity,
+                timeline: {
+                  ...timeline,
+                  points: points.slice(-60),
                 },
-              }
-            : rawDiagnostics;
+              },
+            }
+          : rawDiagnostics;
 
-          return {
-            tabId: tab.id,
-            title: tab.title || 'Untitled',
-            isActive: tab.id === activeTabId,
-            engineId: engine?.id ?? null,
-            status: (tab as any).status ?? null,
-            blockedReason: (tab as any).blockedReason ?? null,
-            contract: (tab as any).contract ?? null,
-            permissions: (tab as any).permissions ?? null,
-            diagnostics,
-          };
-        });
+        const row = {
+          tabId: activeTab.id,
+          title: activeTab.title || 'Untitled',
+          isActive: true,
+          engineId: engine?.id ?? null,
+          status: (activeTab as any).status ?? null,
+          blockedReason: (activeTab as any).blockedReason ?? null,
+          contract: (activeTab as any).contract ?? null,
+          permissions: (activeTab as any).permissions ?? null,
+          diagnostics,
+        };
 
         DevToolsBridge.updateEngineMonitor?.(
           JSON.stringify({
             timestamp: Date.now(),
             activeTabId,
-            rows,
+            rows: [row],
           })
         );
       } catch {

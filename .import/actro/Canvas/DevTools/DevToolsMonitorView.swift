@@ -2,7 +2,6 @@ import SwiftUI
 import AppKit
 
 private struct DevToolsMonitorBudgets: Equatable {
-    var backgroundOpsPerSecond: Double
     var timers: Int
     var nodes: Int
     var callbacks: Int
@@ -10,7 +9,6 @@ private struct DevToolsMonitorBudgets: Equatable {
     var skippedOps: Int
 
     static let `default` = DevToolsMonitorBudgets(
-        backgroundOpsPerSecond: 0.2,
         timers: 50,
         nodes: 5000,
         callbacks: 2000,
@@ -19,28 +17,15 @@ private struct DevToolsMonitorBudgets: Equatable {
     )
 }
 
-private enum DevToolsMonitorFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case warnings = "Warnings"
-    case background = "Background"
-    case blocked = "Blocked"
-
-    var id: String { rawValue }
-}
-
 struct DevToolsMonitorView: View {
     @ObservedObject var devTools: DevToolsManager
+    @ObservedObject var viewModel: BrowserViewModel
 
-    @AppStorage("devtools.monitor.budget.backgroundOpsPerSecond") private var budgetBackgroundOpsPerSecond: Double = DevToolsMonitorBudgets.default.backgroundOpsPerSecond
     @AppStorage("devtools.monitor.budget.timers") private var budgetTimers: Int = DevToolsMonitorBudgets.default.timers
     @AppStorage("devtools.monitor.budget.nodes") private var budgetNodes: Int = DevToolsMonitorBudgets.default.nodes
     @AppStorage("devtools.monitor.budget.callbacks") private var budgetCallbacks: Int = DevToolsMonitorBudgets.default.callbacks
     @AppStorage("devtools.monitor.budget.applyDurationMsMax") private var budgetApplyDurationMsMax: Double = DevToolsMonitorBudgets.default.applyDurationMsMax
     @AppStorage("devtools.monitor.budget.skippedOps") private var budgetSkippedOps: Int = DevToolsMonitorBudgets.default.skippedOps
-
-    @State private var filter: DevToolsMonitorFilter = .all
-    @State private var searchText: String = ""
-    @State private var selectedTabId: String?
 
     @State private var isFrozen: Bool = false
     @State private var frozenSnapshot: DevToolsEngineMonitorSnapshot?
@@ -49,7 +34,6 @@ struct DevToolsMonitorView: View {
 
     private var budgets: DevToolsMonitorBudgets {
         DevToolsMonitorBudgets(
-            backgroundOpsPerSecond: budgetBackgroundOpsPerSecond,
             timers: budgetTimers,
             nodes: budgetNodes,
             callbacks: budgetCallbacks,
@@ -66,42 +50,16 @@ struct DevToolsMonitorView: View {
         snapshot?.rows ?? []
     }
 
-    private var filteredRows: [DevToolsEngineMonitorRow] {
-        rows
-            .filter { row in
-                switch filter {
-                case .all:
-                    break
-                case .warnings:
-                    if !row.monitorHasWarning(budgets: budgets) { return false }
-                case .background:
-                    if !(row.isActive == false && row.monitorOpsPerSecond > budgets.backgroundOpsPerSecond) { return false }
-                case .blocked:
-                    if row.status != .blocked { return false }
-                }
-
-                if !searchText.isEmpty {
-                    let q = searchText.lowercased()
-                    let matchesTitle = row.title.lowercased().contains(q)
-                    let matchesTabId = row.tabId.lowercased().contains(q)
-                    let matchesEngineId = row.engineId?.lowercased().contains(q) ?? false
-                    if !(matchesTitle || matchesTabId || matchesEngineId) { return false }
-                }
-
-                return true
-            }
-            .sorted { lhs, rhs in
-                let l = lhs.monitorSeverityRank(budgets: budgets)
-                let r = rhs.monitorSeverityRank(budgets: budgets)
-                if l != r { return l < r }
-                if lhs.isActive != rhs.isActive { return lhs.isActive }
-                return lhs.title < rhs.title
-            }
+    private var currentTabIdString: String? {
+        viewModel.currentTabId?.uuidString
     }
 
-    private var selectedRow: DevToolsEngineMonitorRow? {
-        guard let selectedTabId else { return nil }
-        return rows.first(where: { $0.tabId == selectedTabId })
+    private var currentRow: DevToolsEngineMonitorRow? {
+        if let currentTabIdString, let row = rows.first(where: { $0.tabId == currentTabIdString }) {
+            return row
+        }
+        // Host 侧默认只推送当前 Tab 的 row，兜底取第一个
+        return rows.first
     }
 
     var body: some View {
@@ -122,27 +80,23 @@ struct DevToolsMonitorView: View {
             if rows.isEmpty {
                 emptyState
             } else {
-                HSplitView {
-                    List(selection: $selectedTabId) {
-                        ForEach(filteredRows) { row in
-                            DevToolsMonitorRowView(row: row, budgets: budgets)
-                                .tag(row.tabId)
+                if let row = currentRow {
+                    DevToolsMonitorDetailView(row: row, budgets: budgets)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "waveform.path.ecg")
+                            .font(.system(size: 24))
+                            .foregroundColor(.secondary)
+                        Text("No monitor data for current tab")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        if let currentTabIdString {
+                            Text("currentTabId: \(currentTabIdString)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(Color(nsColor: .tertiaryLabelColor))
                         }
                     }
-                    .listStyle(.plain)
-                    .frame(minWidth: 460)
-
-                    if let row = selectedRow {
-                        DevToolsMonitorDetailView(row: row, budgets: budgets)
-                            .frame(minWidth: 320)
-                    } else {
-                        VStack {
-                            Text("Select a tab to inspect")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -154,15 +108,8 @@ struct DevToolsMonitorView: View {
                 frozenSnapshot = nil
             }
         }
-        .onChange(of: devTools.engineMonitorSnapshot?.timestamp) { _, _ in
-            // Auto-select active tab when first data arrives.
-            if selectedTabId == nil, let active = devTools.engineMonitorSnapshot?.activeTabId {
-                selectedTabId = active
-            }
-        }
         .sheet(isPresented: $showBudgets) {
             DevToolsMonitorBudgetsSheet(
-                backgroundOpsPerSecond: $budgetBackgroundOpsPerSecond,
                 timers: $budgetTimers,
                 nodes: $budgetNodes,
                 callbacks: $budgetCallbacks,
@@ -174,27 +121,9 @@ struct DevToolsMonitorView: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            Picker("", selection: $filter) {
-                ForEach(DevToolsMonitorFilter.allCases) { option in
-                    Text(option.rawValue).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 260)
-
-            HStack(spacing: 4) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                TextField("Filter", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11))
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(Color(nsColor: .textBackgroundColor))
-            .cornerRadius(4)
-            .frame(maxWidth: 220)
+            Text(viewModel.currentTab?.title ?? "Current Tab")
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
 
             Spacer()
 
@@ -239,64 +168,6 @@ struct DevToolsMonitorView: View {
                 .foregroundColor(Color(nsColor: .tertiaryLabelColor))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct DevToolsMonitorRowView: View {
-    let row: DevToolsEngineMonitorRow
-    let budgets: DevToolsMonitorBudgets
-
-    private var badge: (text: String, color: Color)? {
-        if row.status == .blocked { return ("BLOCKED", .red) }
-        if row.monitorHasWarning(budgets: budgets) { return ("WARN", .orange) }
-        return nil
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(row.isActive ? "▶" : " ")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(row.isActive ? .accentColor : .secondary)
-                        .frame(width: 10, alignment: .leading)
-
-                    Text(row.title)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-
-                    if let badge {
-                        Text(badge.text)
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(badge.color)
-                            .cornerRadius(3)
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    DevToolsMonitorMetric(label: "ops/s", value: row.monitorOpsPerSecondString)
-                    DevToolsMonitorMetric(label: "batch/s", value: row.monitorBatchesPerSecondString)
-                    DevToolsMonitorMetric(label: "nodes", value: row.monitorNodeCountString)
-                    DevToolsMonitorMetric(label: "timers", value: row.monitorTimersString)
-                    DevToolsMonitorMetric(label: "cb", value: row.monitorCallbacksString)
-                    DevToolsMonitorMetric(label: "apply", value: row.monitorApplyMsString)
-                    DevToolsMonitorMetric(label: "skip", value: row.monitorSkippedString)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            DevToolsMonitorSparklineView(points: row.monitorTimelinePoints)
-                .frame(width: 120, height: 32)
-        }
-        .padding(.vertical, 4)
-        .contextMenu {
-            Button("Copy tabId") { DevToolsClipboard.copy(row.tabId) }
-            if let engineId = row.engineId { Button("Copy engineId") { DevToolsClipboard.copy(engineId) } }
-        }
     }
 }
 
@@ -622,7 +493,6 @@ private struct DevToolsMonitorSparklineView: View {
 }
 
 private struct DevToolsMonitorBudgetsSheet: View {
-    @Binding var backgroundOpsPerSecond: Double
     @Binding var timers: Int
     @Binding var nodes: Int
     @Binding var callbacks: Int
@@ -641,10 +511,6 @@ private struct DevToolsMonitorBudgetsSheet: View {
             }
 
             Form {
-                LabeledContent("Background ops/s") {
-                    TextField("", value: $backgroundOpsPerSecond, format: .number)
-                        .frame(width: 120)
-                }
                 LabeledContent("Timers") {
                     TextField("", value: $timers, format: .number)
                         .frame(width: 120)
@@ -720,7 +586,6 @@ private extension DevToolsEngineMonitorRow {
 
     func monitorHasWarning(budgets: DevToolsMonitorBudgets) -> Bool {
         if status == .blocked { return true }
-        if !isActive && monitorOpsPerSecond > budgets.backgroundOpsPerSecond { return true }
         if monitorTimers > budgets.timers { return true }
         if monitorNodes > budgets.nodes { return true }
         if monitorCallbacks > budgets.callbacks { return true }
@@ -751,10 +616,6 @@ private extension DevToolsEngineMonitorRow {
             out.append("Blocked: \(blockedReason ?? "Unknown")")
         }
 
-        if !isActive && monitorOpsPerSecond > budgets.backgroundOpsPerSecond {
-            out.append(String(format: "Background busy: ops/s %.2f > %.2f", monitorOpsPerSecond, budgets.backgroundOpsPerSecond))
-        }
-
         if monitorTimers > budgets.timers {
             out.append("Timers over budget: \(monitorTimers) > \(budgets.timers)")
         }
@@ -778,11 +639,6 @@ private extension DevToolsEngineMonitorRow {
         let violations = diagnostics?.contracts?.violations ?? 0
         if violations > 0 {
             out.append("Contracts: violations=\(violations)")
-        }
-
-        let guestSleeping = diagnostics?.guest?.sleeping
-        if !isActive, guestSleeping == false {
-            out.append("Guest still active while tab is background (check HOST_VISIBILITY / sleep reporting)")
         }
 
         return out
