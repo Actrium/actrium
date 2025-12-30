@@ -9,11 +9,9 @@ private final class SystemMetrics: ObservableObject {
     static let shared = SystemMetrics()
 
     @Published var memoryMB: Double = 0
-    @Published var cpuPercent: Double = 0
 
     // Historical data for sparklines (last 60 samples, 1 per second)
     @Published var memoryHistory: [Double] = []
-    @Published var cpuHistory: [Double] = []
 
     private let maxHistoryCount = 60
     private var timer: Timer?
@@ -22,13 +20,6 @@ private final class SystemMetrics: ObservableObject {
         update()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.update()
-        }
-    }
-
-    private func appendHistory(_ value: Double, to history: inout [Double]) {
-        history.append(value)
-        if history.count > maxHistoryCount {
-            history.removeFirst()
         }
     }
 
@@ -43,36 +34,10 @@ private final class SystemMetrics: ObservableObject {
         }
         if result == KERN_SUCCESS {
             memoryMB = Double(info.resident_size) / 1_048_576.0
-            appendHistory(memoryMB, to: &memoryHistory)
-        }
-
-        // CPU usage (simplified - tracks thread CPU time changes)
-        var threadList: thread_act_array_t?
-        var threadCount: mach_msg_type_number_t = 0
-        let threadResult = task_threads(mach_task_self_, &threadList, &threadCount)
-
-        if threadResult == KERN_SUCCESS, let threads = threadList {
-            var totalCPU: Double = 0
-            let threadBasicInfoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
-
-            for i in 0..<Int(threadCount) {
-                var threadInfo = thread_basic_info()
-                var threadInfoCount = threadBasicInfoCount
-                let infoResult = withUnsafeMutablePointer(to: &threadInfo) {
-                    $0.withMemoryRebound(to: integer_t.self, capacity: Int(threadInfoCount)) {
-                        thread_info(threads[i], thread_flavor_t(THREAD_BASIC_INFO), $0, &threadInfoCount)
-                    }
-                }
-                if infoResult == KERN_SUCCESS && (threadInfo.flags & TH_FLAGS_IDLE) == 0 {
-                    totalCPU += Double(threadInfo.cpu_usage) / Double(TH_USAGE_SCALE) * 100.0
-                }
+            memoryHistory.append(memoryMB)
+            if memoryHistory.count > maxHistoryCount {
+                memoryHistory.removeFirst()
             }
-            cpuPercent = min(totalCPU, 100.0)
-            appendHistory(cpuPercent, to: &cpuHistory)
-
-            // Deallocate thread list
-            let size = vm_size_t(Int(threadCount) * MemoryLayout<thread_t>.size)
-            vm_deallocate(mach_task_self_, vm_address_t(bitPattern: threads), size)
         }
     }
 }
@@ -226,15 +191,14 @@ struct DevToolsMonitorView: View {
                 historyColor: .purple
             )
 
-            // CPU
+            // Apply Time (render performance for current tab)
             MonitorMetricCard(
-                icon: "cpu",
-                title: "CPU",
-                value: String(format: "%.0f", systemMetrics.cpuPercent),
-                subtitle: "%",
-                status: cpuStatus(systemMetrics.cpuPercent),
-                history: systemMetrics.cpuHistory,
-                historyColor: .orange
+                icon: "clock.arrow.circlepath",
+                title: "Apply",
+                value: row.monitorApplyMsString,
+                subtitle: "ms",
+                status: applyStatus(row.monitorApplyMs),
+                historyColor: .cyan
             )
 
             // Network pending
@@ -282,16 +246,6 @@ struct DevToolsMonitorView: View {
                 value: "\(row.monitorCallbacks)",
                 subtitle: "/ 2000",
                 status: row.monitorCallbacks > 2000 ? .error : (row.monitorCallbacks > 1500 ? .warning : .good),
-                compact: true
-            )
-
-            // Apply Time
-            MonitorMetricCard(
-                icon: "clock.arrow.circlepath",
-                title: "Apply",
-                value: row.monitorApplyMsString,
-                subtitle: "/ 50ms",
-                status: applyStatus(row.monitorApplyMs),
                 compact: true
             )
 
@@ -361,12 +315,6 @@ struct DevToolsMonitorView: View {
     private func memoryStatus(_ mb: Double) -> MonitorMetricStatus {
         if mb > 500 { return .error }
         if mb > 200 { return .warning }
-        return .good
-    }
-
-    private func cpuStatus(_ percent: Double) -> MonitorMetricStatus {
-        if percent > 80 { return .error }
-        if percent > 50 { return .warning }
         return .good
     }
 
