@@ -69,6 +69,51 @@ class TabXPCConfig: NSObject, NSSecureCoding {
         coder.encode(leftPanelVisible, forKey: "leftPanelVisible")
         coder.encode(rightPanelVisible, forKey: "rightPanelVisible")
     }
+
+    // MARK: - JSON Serialization for stdin communication
+
+    /// Serialize config to JSON string for pipe-based IPC
+    func toJSON() -> String? {
+        var dict: [String: Any] = [
+            "tabId": tabId,
+            "title": title,
+            "backgroundColor": backgroundColor,
+            "leftPanelVisible": leftPanelVisible,
+            "rightPanelVisible": rightPanelVisible
+        ]
+        if let html = htmlContent { dict["htmlContent"] = html }
+        if let unified = unifiedScript { dict["unifiedScript"] = unified }
+        if let left = leftPanelScript { dict["leftPanelScript"] = left }
+        if let right = rightPanelScript { dict["rightPanelScript"] = right }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
+    }
+
+    /// Parse config from JSON string
+    static func fromJSON(_ json: String) -> TabXPCConfig? {
+        guard let data = json.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tabId = dict["tabId"] as? String,
+              let title = dict["title"] as? String else {
+            return nil
+        }
+
+        return TabXPCConfig(
+            tabId: tabId,
+            title: title,
+            htmlContent: dict["htmlContent"] as? String,
+            unifiedScript: dict["unifiedScript"] as? String,
+            leftPanelScript: dict["leftPanelScript"] as? String,
+            rightPanelScript: dict["rightPanelScript"] as? String,
+            backgroundColor: dict["backgroundColor"] as? String ?? "#1a1a2e",
+            leftPanelVisible: dict["leftPanelVisible"] as? Bool ?? true,
+            rightPanelVisible: dict["rightPanelVisible"] as? Bool ?? false
+        )
+    }
 }
 
 // MARK: - Tab Metrics from Renderer Process

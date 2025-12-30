@@ -15,14 +15,18 @@ struct IOSurfaceHostView: NSViewRepresentable {
     let tabId: UUID
 
     func makeNSView(context: Context) -> IOSurfaceDisplayView {
-        let view = IOSurfaceDisplayView()
+        let view = IOSurfaceDisplayView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         view.tabId = tabId
+        view.surfaceWidth = width
+        view.surfaceHeight = height
         view.updateSurface(id: surfaceID, width: width, height: height)
         return view
     }
 
     func updateNSView(_ nsView: IOSurfaceDisplayView, context: Context) {
         nsView.tabId = tabId
+        nsView.surfaceWidth = width
+        nsView.surfaceHeight = height
         nsView.updateSurface(id: surfaceID, width: width, height: height)
     }
 }
@@ -37,11 +41,20 @@ class IOSurfaceDisplayView: NSView {
     /// Tab ID for event forwarding
     var tabId: UUID?
 
+    /// Expected surface dimensions for intrinsicContentSize
+    var surfaceWidth: CGFloat = 0
+    var surfaceHeight: CGFloat = 0
+
     /// Tracking area for mouse movement events
     private var trackingArea: NSTrackingArea?
 
     /// Display link for refreshing IOSurface content
     private var displayLink: CVDisplayLink?
+
+    /// Return the expected size so SwiftUI can properly size this view
+    override var intrinsicContentSize: NSSize {
+        return NSSize(width: surfaceWidth, height: surfaceHeight)
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -320,6 +333,7 @@ struct MultiProcessTabView: View {
                     height: containerSize.height,
                     tabId: activeId  // Use the actual process tabId
                 )
+                .frame(width: containerSize.width, height: containerSize.height)
             } else if isLoading {
                 loadingView
             } else if let error = errorMessage {
