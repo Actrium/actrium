@@ -3,6 +3,7 @@ import AppKit
 import IOSurface
 import QuartzCore
 import Combine
+import CoreVideo
 
 // MARK: - IOSurface Host View (SwiftUI)
 
@@ -11,14 +12,17 @@ struct IOSurfaceHostView: NSViewRepresentable {
     let surfaceID: UInt32
     let width: CGFloat
     let height: CGFloat
+    let tabId: UUID
 
     func makeNSView(context: Context) -> IOSurfaceDisplayView {
         let view = IOSurfaceDisplayView()
+        view.tabId = tabId
         view.updateSurface(id: surfaceID, width: width, height: height)
         return view
     }
 
     func updateNSView(_ nsView: IOSurfaceDisplayView, context: Context) {
+        nsView.tabId = tabId
         nsView.updateSurface(id: surfaceID, width: width, height: height)
     }
 }
@@ -30,19 +34,174 @@ class IOSurfaceDisplayView: NSView {
     private var surfaceLayer: CALayer?
     private var currentSurfaceID: UInt32 = 0
 
+    /// Tab ID for event forwarding
+    var tabId: UUID?
+
+    /// Tracking area for mouse movement events
+    private var trackingArea: NSTrackingArea?
+
+    /// Display link for refreshing IOSurface content
+    private var displayLink: CVDisplayLink?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupLayer()
+        setupTracking()
+        setupDisplayLink()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupLayer()
+        setupTracking()
+        setupDisplayLink()
+    }
+
+    deinit {
+        stopDisplayLink()
     }
 
     private func setupLayer() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
+    }
+
+    private func setupDisplayLink() {
+        var link: CVDisplayLink?
+        CVDisplayLinkCreateWithActiveCGDisplays(&link)
+        guard let displayLink = link else { return }
+
+        let callback: CVDisplayLinkOutputCallback = { _, _, _, _, _, userInfo -> CVReturn in
+            guard let userInfo = userInfo else { return kCVReturnSuccess }
+            let view = Unmanaged<IOSurfaceDisplayView>.fromOpaque(userInfo).takeUnretainedValue()
+            DispatchQueue.main.async {
+                view.refreshSurfaceContent()
+            }
+            return kCVReturnSuccess
+        }
+
+        CVDisplayLinkSetOutputCallback(displayLink, callback, Unmanaged.passUnretained(self).toOpaque())
+        CVDisplayLinkStart(displayLink)
+        self.displayLink = displayLink
+    }
+
+    private func stopDisplayLink() {
+        guard let link = displayLink else { return }
+        CVDisplayLinkStop(link)
+        displayLink = nil
+    }
+
+    private func refreshSurfaceContent() {
+        guard currentSurfaceID != 0, let surface = IOSurfaceLookup(currentSurfaceID) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        surfaceLayer?.contents = surface
+        CATransaction.commit()
+    }
+
+    private func setupTracking() {
+        trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea!)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea!)
+    }
+
+    // MARK: - Mouse Events
+
+    override func mouseDown(with event: NSEvent) {
+        forwardMouseEvent(event, type: .mouseDown)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        forwardMouseEvent(event, type: .mouseUp)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        forwardMouseEvent(event, type: .mouseMoved)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        forwardMouseEvent(event, type: .mouseDragged)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard let tabId = tabId else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        let xpcEvent = TabXPCEvent(
+            eventType: .scrollWheel,
+            locationX: Double(location.x),
+            locationY: Double(location.y),
+            modifierFlags: event.modifierFlags.rawValue,
+            scrollDeltaX: event.scrollingDeltaX,
+            scrollDeltaY: event.scrollingDeltaY,
+            viewWidth: Double(bounds.width),
+            viewHeight: Double(bounds.height)
+        )
+        TabProcessManager.shared.sendEvent(xpcEvent, to: tabId)
+    }
+
+    private func forwardMouseEvent(_ event: NSEvent, type: TabXPCEvent.EventType) {
+        guard let tabId = tabId else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        let xpcEvent = TabXPCEvent(
+            eventType: type,
+            locationX: Double(location.x),
+            locationY: Double(location.y),
+            modifierFlags: event.modifierFlags.rawValue,
+            viewWidth: Double(bounds.width),
+            viewHeight: Double(bounds.height)
+        )
+        TabProcessManager.shared.sendEvent(xpcEvent, to: tabId)
+    }
+
+    // MARK: - Keyboard Events
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        forwardKeyEvent(event, type: .keyDown)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        forwardKeyEvent(event, type: .keyUp)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        guard let tabId = tabId else { return }
+        let xpcEvent = TabXPCEvent(
+            eventType: .flagsChanged,
+            modifierFlags: event.modifierFlags.rawValue,
+            keyCode: event.keyCode
+        )
+        TabProcessManager.shared.sendEvent(xpcEvent, to: tabId)
+    }
+
+    private func forwardKeyEvent(_ event: NSEvent, type: TabXPCEvent.EventType) {
+        guard let tabId = tabId else { return }
+        let xpcEvent = TabXPCEvent(
+            eventType: type,
+            modifierFlags: event.modifierFlags.rawValue,
+            keyCode: event.keyCode,
+            characters: event.characters
+        )
+        TabProcessManager.shared.sendEvent(xpcEvent, to: tabId)
     }
 
     func updateSurface(id: UInt32, width: CGFloat, height: CGFloat) {
@@ -117,6 +276,21 @@ class IOSurfaceDisplayView: NSView {
     override var isFlipped: Bool {
         return true
     }
+
+    // MARK: - Hit Testing (Required for mouse events in SwiftUI wrapper)
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Ensure this view receives all mouse events within its bounds
+        if bounds.contains(point) {
+            return self
+        }
+        return nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        // Accept first mouse to receive mouseDown even when window is inactive
+        return true
+    }
 }
 
 // MARK: - Multi-Process Tab View
@@ -129,21 +303,18 @@ struct MultiProcessTabView: View {
     @State private var surfaceID: UInt32 = 0
     @State private var isLoading: Bool = true
     @State private var errorMessage: String?
-    @State private var refreshTrigger: Int = 0  // Used to force view updates
-
-    // Timer for periodic refresh (IOSurface content doesn't auto-update CALayer)
-    let refreshTimer = Timer.publish(every: 1.0/30.0, on: .main, in: .common).autoconnect()
+    @State private var activeTabId: UUID?  // The actual tabId used for the process
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                if surfaceID != 0 {
+                if surfaceID != 0, let activeId = activeTabId {
                     IOSurfaceHostView(
                         surfaceID: surfaceID,
                         width: geometry.size.width,
-                        height: geometry.size.height
+                        height: geometry.size.height,
+                        tabId: activeId  // Use the actual process tabId
                     )
-                    .id(refreshTrigger)  // Force view recreation on refresh
                 } else if isLoading {
                     loadingView
                 } else if let error = errorMessage {
@@ -167,12 +338,7 @@ struct MultiProcessTabView: View {
                 refreshSurface()
             }
         }
-        .onReceive(refreshTimer) { _ in
-            // Periodically increment to force IOSurface redraw
-            if surfaceID != 0 {
-                refreshTrigger += 1
-            }
-        }
+        // Refresh timer is no longer needed - IOSurface updates are handled by CALayer
     }
 
     private var loadingView: some View {
@@ -226,19 +392,24 @@ struct MultiProcessTabView: View {
         isLoading = true
         errorMessage = nil
 
+        // Use the passed tabId for this session
+        let processTabId = tabId
+
         Task {
             do {
                 let config = TabXPCConfig(
-                    tabId: tabId.uuidString,
+                    tabId: processTabId.uuidString,
                     title: "Test Tab",
                     backgroundColor: "#1a1a2e"
                 )
 
-                let processInfo = try await processManager.spawnProcess(for: tabId, config: config)
+                let processInfo = try await processManager.spawnProcess(for: processTabId, config: config)
 
                 // Get the IOSurface ID
-                if let id = await processManager.getIOSurfaceID(for: tabId) {
+                if let id = await processManager.getIOSurfaceID(for: processTabId) {
                     await MainActor.run {
+                        // Store the actual tabId used for the process
+                        activeTabId = processTabId
                         surfaceID = id
                         isLoading = false
                     }
@@ -253,13 +424,17 @@ struct MultiProcessTabView: View {
     }
 
     private func stopRenderer() {
-        processManager.terminateProcess(for: tabId)
+        if let activeId = activeTabId {
+            processManager.terminateProcess(for: activeId)
+        }
         surfaceID = 0
+        activeTabId = nil
     }
 
     private func refreshSurface() {
+        guard let activeId = activeTabId else { return }
         Task {
-            if let id = await processManager.getIOSurfaceID(for: tabId), id != surfaceID {
+            if let id = await processManager.getIOSurfaceID(for: activeId), id != surfaceID {
                 await MainActor.run {
                     surfaceID = id
                 }
@@ -268,7 +443,8 @@ struct MultiProcessTabView: View {
     }
 
     private func updateViewportSize(_ size: CGSize) {
-        processManager.updateViewport(width: size.width, height: size.height, for: tabId)
+        guard let activeId = activeTabId else { return }
+        processManager.updateViewport(width: size.width, height: size.height, for: activeId)
     }
 }
 
