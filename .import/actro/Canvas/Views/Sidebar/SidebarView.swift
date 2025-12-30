@@ -25,6 +25,15 @@ struct SidebarView: View {
             TabOutlineView(viewModel: viewModel, historyVM: historyVM)
 
             Spacer(minLength: 0)
+                .contentShape(Rectangle())
+                .contextMenu {
+                    Button(action: {
+                        AppsManagerWindowController.shared.showWindow()
+                    }) {
+                        Label("Apps Manager", systemImage: "cpu")
+                    }
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                }
 
             // Bottom section - User only
             VStack(spacing: 0) {

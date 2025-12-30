@@ -241,6 +241,16 @@ struct CanvasApp: App {
                 }
             }
 
+            // Window menu additions
+            CommandGroup(after: .windowList) {
+                Divider()
+
+                Button("Apps Manager") {
+                    AppsManagerWindowController.shared.showWindow()
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            }
+
             // DevTools menu
             CommandMenu("Developer") {
                 Button("Toggle DevTools") {
