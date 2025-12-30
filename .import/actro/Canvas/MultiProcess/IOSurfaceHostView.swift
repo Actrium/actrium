@@ -56,21 +56,26 @@ class IOSurfaceDisplayView: NSView {
         return NSSize(width: surfaceWidth, height: surfaceHeight)
     }
 
+    private static var instanceCount: Int = 0
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        IOSurfaceDisplayView.instanceCount += 1
+        NSLog("IOSurfaceDisplayView: init, total instances: \(IOSurfaceDisplayView.instanceCount)")
         setupLayer()
         setupTracking()
-        setupDisplayLink()
+        // Don't start displayLink here - wait until we have a valid surface ID
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupLayer()
         setupTracking()
-        setupDisplayLink()
+        // Don't start displayLink here - wait until we have a valid surface ID
     }
 
     deinit {
+        NSLog("IOSurfaceDisplayView: deinit called for tabId \(tabId?.uuidString ?? "nil")")
         stopDisplayLink()
     }
 
@@ -104,12 +109,30 @@ class IOSurfaceDisplayView: NSView {
         displayLink = nil
     }
 
+    private var refreshCount: UInt64 = 0
+    private var lastSetSurfaceID: UInt32 = 0
+
     private func refreshSurfaceContent() {
-        guard currentSurfaceID != 0, let surface = IOSurfaceLookup(currentSurfaceID) else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        surfaceLayer?.contents = surface
-        CATransaction.commit()
+        refreshCount += 1
+        guard currentSurfaceID != 0, let surface = IOSurfaceLookup(currentSurfaceID) else {
+            if refreshCount % 60 == 1 {
+                NSLog("🖥️ [DIAG] refreshSurfaceContent: currentSurfaceID=\(currentSurfaceID), IOSurfaceLookup failed")
+            }
+            return
+        }
+
+        // Log surface info on first frame and every ~2 seconds
+        if refreshCount == 1 || refreshCount % 120 == 0 {
+            let width = IOSurfaceGetWidth(surface)
+            let height = IOSurfaceGetHeight(surface)
+            let viewScale = window?.backingScaleFactor ?? 1.0
+            NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): surfaceID=\(currentSurfaceID), surfacePixels=\(width)x\(height), viewBounds=\(bounds), screenScale=\(viewScale)")
+        }
+
+        // DON'T re-set contents every frame - this causes flicker!
+        // IOSurface is shared memory, CALayer will see updates automatically.
+        // Just mark the layer as needing display to trigger a redraw.
+        surfaceLayer?.setNeedsDisplay()
     }
 
     private func setupTracking() {
@@ -167,12 +190,16 @@ class IOSurfaceDisplayView: NSView {
             viewWidth: Double(bounds.width),
             viewHeight: Double(bounds.height)
         )
-        TabProcessManager.shared.sendEvent(xpcEvent, to: tabId)
+        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     private func forwardMouseEvent(_ event: NSEvent, type: TabXPCEvent.EventType) {
-        guard let tabId = tabId else { return }
+        guard let tabId = tabId else {
+            NSLog("🖱️ [DIAG] forwardMouseEvent: tabId is nil!")
+            return
+        }
         let location = convert(event.locationInWindow, from: nil)
+        NSLog("🖱️ [DIAG] forwardMouseEvent: type=\(type), location=\(location), tabId=\(tabId)")
         let xpcEvent = TabXPCEvent(
             eventType: type,
             locationX: Double(location.x),
@@ -181,7 +208,7 @@ class IOSurfaceDisplayView: NSView {
             viewWidth: Double(bounds.width),
             viewHeight: Double(bounds.height)
         )
-        TabProcessManager.shared.sendEvent(xpcEvent, to: tabId)
+        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     // MARK: - Keyboard Events
@@ -203,7 +230,7 @@ class IOSurfaceDisplayView: NSView {
             modifierFlags: event.modifierFlags.rawValue,
             keyCode: event.keyCode
         )
-        TabProcessManager.shared.sendEvent(xpcEvent, to: tabId)
+        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     private func forwardKeyEvent(_ event: NSEvent, type: TabXPCEvent.EventType) {
@@ -214,22 +241,27 @@ class IOSurfaceDisplayView: NSView {
             keyCode: event.keyCode,
             characters: event.characters
         )
-        TabProcessManager.shared.sendEvent(xpcEvent, to: tabId)
+        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     func updateSurface(id: UInt32, width: CGFloat, height: CGFloat) {
+        NSLog("📐 [DIAG] IOSurfaceDisplayView.updateSurface: id=\(id), requestedSize=\(Int(width))x\(Int(height)), currentID=\(currentSurfaceID), bounds=\(bounds)")
+
         guard id != 0 else {
-            // No surface available - show placeholder
+            // No surface available - show placeholder and stop display link
+            stopDisplayLink()
             showPlaceholder()
             return
         }
 
         guard id != currentSurfaceID else {
             // Same surface, just refresh
+            NSLog("📐 [DIAG]   Same surface ID, calling refreshSurface()")
             refreshSurface()
             return
         }
 
+        NSLog("📐 [DIAG]   New surface ID! Updating from \(currentSurfaceID) to \(id)")
         currentSurfaceID = id
 
         // Look up the IOSurface by ID
@@ -239,12 +271,19 @@ class IOSurfaceDisplayView: NSView {
             return
         }
 
+        let surfacePixelWidth = IOSurfaceGetWidth(surface)
+        let surfacePixelHeight = IOSurfaceGetHeight(surface)
+        NSLog("📐 [DIAG]   IOSurface pixel size: \(surfacePixelWidth)x\(surfacePixelHeight)")
+
         // Create or update the surface layer
         if surfaceLayer == nil {
             let newLayer = CALayer()
             newLayer.contentsGravity = .resize  // Use resize to fill the view
-            newLayer.magnificationFilter = .nearest
+            newLayer.magnificationFilter = .linear  // Smoother scaling
+            newLayer.minificationFilter = .linear
             newLayer.isOpaque = true
+            // Set contentsScale for Retina
+            newLayer.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
             layer?.addSublayer(newLayer)
             surfaceLayer = newLayer
         }
@@ -258,7 +297,16 @@ class IOSurfaceDisplayView: NSView {
         surfaceLayer?.frame = bounds
         CATransaction.commit()
 
-        NSLog("IOSurfaceHostView: Displaying surface ID \(id), size \(IOSurfaceGetWidth(surface))x\(IOSurfaceGetHeight(surface)), layer frame: \(bounds)")
+        // NOTE: We no longer use displayLink on the host side.
+        // IOSurface is shared memory - once set as contents, updates from
+        // the renderer process are automatically visible without needing
+        // to re-set contents every frame (which causes flicker).
+        // The renderer's displayLink handles the 60fps rendering.
+
+        NSLog("🖥️ [DIAG] IOSurfaceHostView.updateSurface: surfaceID=\(id), surfaceSize=\(IOSurfaceGetWidth(surface))x\(IOSurfaceGetHeight(surface))")
+        NSLog("🖥️ [DIAG]   view.bounds=\(bounds), view.frame=\(frame)")
+        NSLog("🖥️ [DIAG]   surfaceLayer.frame=\(surfaceLayer?.frame ?? .zero), surfaceLayer.hidden=\(surfaceLayer?.isHidden ?? true)")
+        NSLog("🖥️ [DIAG]   layer.sublayers=\(layer?.sublayers?.count ?? 0), view.superview=\(superview != nil)")
     }
 
     func refreshSurface() {
@@ -349,12 +397,12 @@ struct MultiProcessTabView: View {
             updateViewportSize(newSize)
         }
         .onAppear {
-            NSLog("MultiProcessTabView: onAppear for tab \(tabId)")
+            NSLog("🔵 [DIAG] MultiProcessTabView.onAppear: tabId=\(tabId), surfaceID=\(surfaceID), isLoading=\(isLoading)")
             startRenderer()
         }
         .onDisappear {
-            NSLog("MultiProcessTabView: onDisappear for tab \(tabId)")
-            stopRenderer()
+            NSLog("🔴 [DIAG] MultiProcessTabView.onDisappear: tabId=\(tabId), surfaceID=\(surfaceID)")
+            // 不在消失时强行终止进程，避免 SwiftUI 视图重建导致渲染进程被提前杀掉
         }
         .onReceive(NotificationCenter.default.publisher(for: .tabSurfaceUpdated)) { notification in
             if let notifTabId = notification.userInfo?["tabId"] as? UUID, notifTabId == tabId {
@@ -373,12 +421,12 @@ struct MultiProcessTabView: View {
 
     private var loadingView: some View {
         VStack(spacing: 12) {
-            ProgressView()
-                .scaleEffect(1.5)
+            // 纯文本占位，避免 AppKitProgressView 的 min/max 约束日志
             Text("Starting renderer process...")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
+        .frame(minWidth: 180)
     }
 
     private func errorView(_ message: String) -> some View {
@@ -481,20 +529,37 @@ struct MultiProcessTabView: View {
 
         Task {
             do {
+                // 如果已有运行中的进程，直接复用，避免重复启动
+                if let existing = processManager.processes[processTabId], existing.isRunning {
+                    if let id = await processManager.getIOSurfaceID(for: processTabId), id != 0 {
+                        await MainActor.run {
+                            activeTabId = processTabId
+                            surfaceID = id
+                            isLoading = false
+                        }
+                        return
+                    }
+                }
+
                 // Build config from actual tab data
                 let config = TabXPCConfig(
                     tabId: processTabId.uuidString,
                     title: tab.title.isEmpty ? "New Tab" : tab.title,
+                    url: tab.url?.absoluteString,
                     htmlContent: tab.htmlContent,
                     unifiedScript: tab.unifiedScript,
                     leftPanelScript: tab.leftPanelScript,
                     rightPanelScript: tab.rightPanelScript,
-                    backgroundColor: tab.backgroundColor ?? "#1a1a2e",
-                    leftPanelVisible: true,
-                    rightPanelVisible: tab.rightPanelDefaultVisible
+                    backgroundColor: tab.backgroundColor,
+                    leftPanelVisible: tab.leftPanelDefaultVisible,
+                    rightPanelVisible: tab.rightPanelDefaultVisible,
+                    reloadKey: tab.reloadNonce,
+                    contractName: tab.contractName,
+                    contractVersion: tab.contractVersion,
+                    permissions: tab.permissions
                 )
 
-                let processInfo = try await processManager.spawnProcess(for: processTabId, config: config)
+                _ = try await processManager.getRenderer(for: processTabId, config: config, viewportSize: containerSize)
 
                 // Get the IOSurface ID
                 if let id = await processManager.getIOSurfaceID(for: processTabId) {
@@ -523,18 +588,32 @@ struct MultiProcessTabView: View {
     }
 
     private func refreshSurface() {
-        guard let activeId = activeTabId else { return }
+        guard let activeId = activeTabId else {
+            NSLog("📐 [DIAG] refreshSurface: activeTabId is nil, skipping")
+            return
+        }
         Task {
-            if let id = await processManager.getIOSurfaceID(for: activeId), id != surfaceID {
-                await MainActor.run {
-                    surfaceID = id
+            if let id = await processManager.getIOSurfaceID(for: activeId) {
+                if id != surfaceID {
+                    NSLog("📐 [DIAG] refreshSurface: surfaceID changed \(surfaceID) -> \(id), updating state")
+                    await MainActor.run {
+                        surfaceID = id
+                    }
+                } else {
+                    NSLog("📐 [DIAG] refreshSurface: surfaceID unchanged (\(id))")
                 }
+            } else {
+                NSLog("📐 [DIAG] refreshSurface: getIOSurfaceID returned nil")
             }
         }
     }
 
     private func updateViewportSize(_ size: CGSize) {
-        guard let activeId = activeTabId else { return }
+        guard let activeId = activeTabId else {
+            NSLog("📐 [DIAG] updateViewportSize: activeTabId is nil, skipping")
+            return
+        }
+        NSLog("📐 [DIAG] updateViewportSize: \(Int(size.width))x\(Int(size.height)) for tab \(activeId)")
         processManager.updateViewport(width: size.width, height: size.height, for: activeId)
     }
 }

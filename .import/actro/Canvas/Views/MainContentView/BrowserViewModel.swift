@@ -253,6 +253,9 @@ class BrowserViewModel: ObservableObject {
         // 删除该标签的位置映射
         tabSlotPositions.removeValue(forKey: id)
 
+        // 关闭标签时同步终止对应的渲染进程（多进程架构）
+        TabProcessManager.shared.terminateProcess(for: id)
+
         // 重新整理位置：将所有大于被删除位置的位置减1
         for tabId in tabs.map({ $0.id }) {
             if let position = tabSlotPositions[tabId], position > closedPosition {

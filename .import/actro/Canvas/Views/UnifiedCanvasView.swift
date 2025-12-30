@@ -127,10 +127,7 @@ struct UnifiedCanvasView: View {
                     currentScale: transform.scale,
                     mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
-                        viewportSize: safeViewportSize,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
+                    viewportSize: safeViewportSize,
                     onSelectTab: { tabId in
                         switchToFocus(tabId: tabId)
                     },
@@ -302,14 +299,15 @@ struct UnifiedCanvasView: View {
             }
         }
         .onAppear {
-            // 🔴 开发调试：如果设置了启动时进入 Focus 模式，直接切换
+            // 🔴 开发调试：如果设置了启动时进入 Focus 模式，延迟切换
+            // 延迟 1 秒确保渲染进程完全初始化后再切换模式
             if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
-                logger.notice("🚀 [UnifiedCanvasView] 启动时直接进入 Focus 模式")
-                DispatchQueue.main.async {
+                logger.notice("🚀 [UnifiedCanvasView] 启动时延迟进入 Focus 模式")
+                viewModel.shouldStartInFocusMode = false  // 立即重置标志防止重复
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
                         viewModel.canvasMode = .focus(tabId: tabId)
                     }
-                    viewModel.shouldStartInFocusMode = false  // 重置标志
                 }
             }
             // Note: canvasMode defaults to .overview, no need to set explicitly
@@ -578,10 +576,6 @@ private struct CanvasView: View {
     let mode: CanvasMode
     let showNewTabButton: Bool  // 是否显示 [+] 按钮（搜索过滤时隐藏）
     let viewportSize: CGSize    // 视口尺寸，用于 RN 渲染
-    // 新增：用于创建 SingleTabRootView
-    @ObservedObject var viewModel: BrowserViewModel
-    var historyVM: HistoryViewModel?
-    var bookmarkVM: BookmarkViewModel?
     let onSelectTab: (UUID) -> Void
     let onSwapPositions: (UUID?, UUID?) -> Void
     let onNewTab: () -> Void
@@ -653,9 +647,6 @@ private struct CanvasView: View {
                         isBeingDragged: isBeingDragged,
                         isHovering: isHovering,
                         isSwapping: isSwapping,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
                         viewportSize: viewportSize,
                         onSelect: {
                             onSelectTab(tab.id)
@@ -1129,10 +1120,6 @@ private struct TabCardView: View {
     let isBeingDragged: Bool
     let isHovering: Bool
     let isSwapping: Bool  // 正在交换过程中（用于淡入动画）
-    // 新增：用于创建 SingleTabRootView
-    @ObservedObject var viewModel: BrowserViewModel
-    var historyVM: HistoryViewModel?
-    var bookmarkVM: BookmarkViewModel?
     let viewportSize: CGSize  // 视口尺寸，用于 RN 渲染
     let onSelect: () -> Void
     let onDragStart: () -> NSItemProvider

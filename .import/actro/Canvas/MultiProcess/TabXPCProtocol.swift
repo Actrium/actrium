@@ -9,6 +9,7 @@ class TabXPCConfig: NSObject, NSSecureCoding {
 
     let tabId: String
     let title: String
+    let url: String?
     let htmlContent: String?
     let unifiedScript: String?
     let leftPanelScript: String?
@@ -16,20 +17,30 @@ class TabXPCConfig: NSObject, NSSecureCoding {
     let backgroundColor: String
     let leftPanelVisible: Bool
     let rightPanelVisible: Bool
+    let reloadKey: Int
+    let contractName: String?
+    let contractVersion: Int?
+    let permissions: [String]?
 
     init(
         tabId: String,
         title: String,
+        url: String? = nil,
         htmlContent: String? = nil,
         unifiedScript: String? = nil,
         leftPanelScript: String? = nil,
         rightPanelScript: String? = nil,
         backgroundColor: String = "#1a1a2e",
         leftPanelVisible: Bool = true,
-        rightPanelVisible: Bool = false
+        rightPanelVisible: Bool = false,
+        reloadKey: Int = 0,
+        contractName: String? = nil,
+        contractVersion: Int? = nil,
+        permissions: [String]? = nil
     ) {
         self.tabId = tabId
         self.title = title
+        self.url = url
         self.htmlContent = htmlContent
         self.unifiedScript = unifiedScript
         self.leftPanelScript = leftPanelScript
@@ -37,6 +48,10 @@ class TabXPCConfig: NSObject, NSSecureCoding {
         self.backgroundColor = backgroundColor
         self.leftPanelVisible = leftPanelVisible
         self.rightPanelVisible = rightPanelVisible
+        self.reloadKey = reloadKey
+        self.contractName = contractName
+        self.contractVersion = contractVersion
+        self.permissions = permissions
         super.init()
     }
 
@@ -48,6 +63,7 @@ class TabXPCConfig: NSObject, NSSecureCoding {
         }
         self.tabId = tabId
         self.title = title
+        self.url = coder.decodeObject(of: NSString.self, forKey: "url") as String?
         self.htmlContent = coder.decodeObject(of: NSString.self, forKey: "htmlContent") as String?
         self.unifiedScript = coder.decodeObject(of: NSString.self, forKey: "unifiedScript") as String?
         self.leftPanelScript = coder.decodeObject(of: NSString.self, forKey: "leftPanelScript") as String?
@@ -55,12 +71,21 @@ class TabXPCConfig: NSObject, NSSecureCoding {
         self.backgroundColor = backgroundColor
         self.leftPanelVisible = coder.decodeBool(forKey: "leftPanelVisible")
         self.rightPanelVisible = coder.decodeBool(forKey: "rightPanelVisible")
+        self.reloadKey = Int(coder.decodeInt64(forKey: "reloadKey"))
+        self.contractName = coder.decodeObject(of: NSString.self, forKey: "contractName") as String?
+        if coder.containsValue(forKey: "contractVersion") {
+            self.contractVersion = Int(coder.decodeInt64(forKey: "contractVersion"))
+        } else {
+            self.contractVersion = nil
+        }
+        self.permissions = coder.decodeObject(of: [NSArray.self, NSString.self], forKey: "permissions") as? [String]
         super.init()
     }
 
     func encode(with coder: NSCoder) {
         coder.encode(tabId as NSString, forKey: "tabId")
         coder.encode(title as NSString, forKey: "title")
+        coder.encode(url as NSString?, forKey: "url")
         coder.encode(htmlContent as NSString?, forKey: "htmlContent")
         coder.encode(unifiedScript as NSString?, forKey: "unifiedScript")
         coder.encode(leftPanelScript as NSString?, forKey: "leftPanelScript")
@@ -68,6 +93,12 @@ class TabXPCConfig: NSObject, NSSecureCoding {
         coder.encode(backgroundColor as NSString, forKey: "backgroundColor")
         coder.encode(leftPanelVisible, forKey: "leftPanelVisible")
         coder.encode(rightPanelVisible, forKey: "rightPanelVisible")
+        coder.encode(Int64(reloadKey), forKey: "reloadKey")
+        coder.encode(contractName as NSString?, forKey: "contractName")
+        if let contractVersion = contractVersion {
+            coder.encode(Int64(contractVersion), forKey: "contractVersion")
+        }
+        coder.encode(permissions as NSArray?, forKey: "permissions")
     }
 
     // MARK: - JSON Serialization for stdin communication
@@ -79,12 +110,23 @@ class TabXPCConfig: NSObject, NSSecureCoding {
             "title": title,
             "backgroundColor": backgroundColor,
             "leftPanelVisible": leftPanelVisible,
-            "rightPanelVisible": rightPanelVisible
+            "rightPanelVisible": rightPanelVisible,
+            "reloadKey": reloadKey
         ]
+        if let url = url { dict["url"] = url }
         if let html = htmlContent { dict["htmlContent"] = html }
         if let unified = unifiedScript { dict["unifiedScript"] = unified }
         if let left = leftPanelScript { dict["leftPanelScript"] = left }
         if let right = rightPanelScript { dict["rightPanelScript"] = right }
+        if let contractName = contractName, let contractVersion = contractVersion {
+            dict["contract"] = [
+                "name": contractName,
+                "version": contractVersion
+            ]
+        }
+        if let permissions = permissions {
+            dict["permissions"] = permissions
+        }
 
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let json = String(data: data, encoding: .utf8) else {
@@ -102,16 +144,39 @@ class TabXPCConfig: NSObject, NSSecureCoding {
             return nil
         }
 
+        var contractName: String?
+        var contractVersion: Int?
+        if let contract = dict["contract"] as? [String: Any] {
+            contractName = contract["name"] as? String
+            if let version = contract["version"] as? Int {
+                contractVersion = version
+            } else if let versionNumber = contract["version"] as? NSNumber {
+                contractVersion = versionNumber.intValue
+            }
+        }
+
+        var reloadKey = 0
+        if let reload = dict["reloadKey"] as? Int {
+            reloadKey = reload
+        } else if let reloadNumber = dict["reloadKey"] as? NSNumber {
+            reloadKey = reloadNumber.intValue
+        }
+
         return TabXPCConfig(
             tabId: tabId,
             title: title,
+            url: dict["url"] as? String,
             htmlContent: dict["htmlContent"] as? String,
             unifiedScript: dict["unifiedScript"] as? String,
             leftPanelScript: dict["leftPanelScript"] as? String,
             rightPanelScript: dict["rightPanelScript"] as? String,
             backgroundColor: dict["backgroundColor"] as? String ?? "#1a1a2e",
             leftPanelVisible: dict["leftPanelVisible"] as? Bool ?? true,
-            rightPanelVisible: dict["rightPanelVisible"] as? Bool ?? false
+            rightPanelVisible: dict["rightPanelVisible"] as? Bool ?? false,
+            reloadKey: reloadKey,
+            contractName: contractName,
+            contractVersion: contractVersion,
+            permissions: dict["permissions"] as? [String]
         )
     }
 }

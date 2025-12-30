@@ -14,8 +14,20 @@ actor MetroService {
     /// Asset file extensions to scan for
     private let assetExtensions = ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "ttf", "otf", "woff", "woff2", "mp3", "wav", "mp4", "json"]
 
+    private func defaultMetroPort() -> Int {
+        if let env = ProcessInfo.processInfo.environment["RCT_METRO_PORT"], let port = Int(env) {
+            return port
+        }
+        return 8081
+    }
+
+    private func metroHost(_ port: Int) -> String {
+        // 使用 127.0.0.1 避免 mDNS / localhost 解析受限
+        return "127.0.0.1:\(port)"
+    }
+
     /// Fetch source map from Metro
-    func fetchSourceMap(port: Int = 8082) async throws -> SourceMap {
+    func fetchSourceMap(port: Int? = nil) async throws -> SourceMap {
         // Return cached if still valid
         if let cached = cachedSourceMap,
            let lastFetch = lastFetchTime,
@@ -23,7 +35,9 @@ actor MetroService {
             return cached
         }
 
-        let url = URL(string: "http://localhost:\(port)/index.map?platform=macos&dev=true")!
+        let finalPort = port ?? defaultMetroPort()
+        let host = metroHost(finalPort)
+        let url = URL(string: "http://\(host)/index.map?platform=macos&dev=true")!
         let (data, _) = try await URLSession.shared.data(from: url)
         let sourceMap = try JSONDecoder().decode(SourceMap.self, from: data)
 
@@ -34,7 +48,7 @@ actor MetroService {
     }
 
     /// Get list of project source files (excluding node_modules)
-    func getProjectFiles(port: Int = 8082) async throws -> [SourceFile] {
+    func getProjectFiles(port: Int? = nil) async throws -> [SourceFile] {
         let sourceMap = try await fetchSourceMap(port: port)
         var files = sourceMap.projectFiles
 
@@ -46,7 +60,7 @@ actor MetroService {
     }
 
     /// Get source content for a specific file
-    func getSourceContent(for path: String, port: Int = 8082) async throws -> String? {
+    func getSourceContent(for path: String, port: Int? = nil) async throws -> String? {
         let sourceMap = try await fetchSourceMap(port: port)
         return sourceMap.getContent(for: path)
     }
@@ -59,7 +73,7 @@ actor MetroService {
     }
 
     /// Resolve bundle line/column to original source position using source map
-    func resolveOriginalPosition(bundleLine: Int, bundleColumn: Int, port: Int = 8082) async throws -> (source: String, line: Int, column: Int)? {
+    func resolveOriginalPosition(bundleLine: Int, bundleColumn: Int, port: Int? = nil) async throws -> (source: String, line: Int, column: Int)? {
         let sourceMap = try await fetchSourceMap(port: port)
         return sourceMap.resolveOriginalPosition(bundleLine: bundleLine, bundleColumn: bundleColumn)
     }

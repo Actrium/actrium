@@ -400,37 +400,16 @@ struct DevToolsMonitorView: View {
 
     private var processPoolStatusBar: some View {
         HStack(spacing: 12) {
-            // Pool status
+            // XPC Service status
             HStack(spacing: 4) {
-                Image(systemName: "cube.box")
+                Image(systemName: "network")
                     .font(.system(size: 10))
-                Text("Process Pool")
+                Text("XPC Service")
                     .font(.system(size: 10, weight: .medium))
             }
             .foregroundColor(.secondary)
 
-            // Pool toggle
-            Toggle("", isOn: Binding(
-                get: { TabProcessManager.shared.isPoolingEnabled },
-                set: { TabProcessManager.shared.isPoolingEnabled = $0 }
-            ))
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-
             Spacer()
-
-            // Warm up button
-            Button(action: {
-                TabProcessManager.shared.warmUpProcessPool()
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "flame")
-                    Text("Warm Up")
-                }
-                .font(.system(size: 10))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
 
             // Kill all button
             Button(action: {
