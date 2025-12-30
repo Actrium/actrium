@@ -52,6 +52,8 @@ struct DevToolsMonitorView: View {
     @State private var isFrozen: Bool = false
     @State private var frozenSnapshot: DevToolsEngineMonitorSnapshot?
     @State private var showDetails: Bool = false
+    @State private var showMultiProcessTest: Bool = false
+    @State private var testTabId: UUID = UUID()
 
     private var snapshot: DevToolsEngineMonitorSnapshot? {
         isFrozen ? frozenSnapshot : devTools.engineMonitorSnapshot
@@ -142,10 +144,52 @@ struct DevToolsMonitorView: View {
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
+
+            // Test button for multi-process rendering
+            if TabProcessManager.shared.isMultiProcessEnabled {
+                Button(action: {
+                    testTabId = UUID()
+                    showMultiProcessTest = true
+                }) {
+                    Label("Test", systemImage: "play.circle")
+                        .font(.system(size: 10))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(Color(nsColor: .controlBackgroundColor))
+        .sheet(isPresented: $showMultiProcessTest) {
+            multiProcessTestSheet
+        }
+    }
+
+    // MARK: - Multi-Process Test Sheet
+
+    private var multiProcessTestSheet: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Multi-Process Renderer Test")
+                    .font(.headline)
+                Spacer()
+                Button("Close") {
+                    showMultiProcessTest = false
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            // Content - the IOSurface view
+            MultiProcessTabView(tabId: testTabId)
+                .frame(minWidth: 600, minHeight: 400)
+        }
+        .frame(width: 700, height: 500)
     }
 
     // MARK: - Metrics Content
