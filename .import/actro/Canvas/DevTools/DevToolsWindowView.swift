@@ -2,17 +2,23 @@ import SwiftUI
 
 /// View for the detached DevTools window
 struct DevToolsWindowView: View {
+    /// ViewModel passed from focused window (may become nil when focus changes)
     var viewModel: BrowserViewModel?
     @ObservedObject private var devTools = DevToolsManager.shared
     @Environment(\.dismissWindow) private var dismissWindow
 
+    /// Effective viewModel: prefer passed viewModel, fallback to stored one
+    private var effectiveViewModel: BrowserViewModel? {
+        viewModel ?? devTools.activeBrowserViewModel
+    }
+
     var body: some View {
         Group {
-            if let viewModel = viewModel, viewModel.canvasMode.isInFocusMode {
+            if let vm = effectiveViewModel, vm.canvasMode.isInFocusMode {
                 // Normal DevTools panel when in Focus mode
                 DevToolsPanel(
                     devTools: devTools,
-                    viewModel: viewModel,
+                    viewModel: vm,
                     isDetached: true
                 )
             } else {

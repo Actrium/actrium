@@ -627,6 +627,10 @@ class DevToolsManager: ObservableObject {
     /// Reference to the detached window (for programmatic control)
     weak var detachedWindow: NSWindow?
 
+    /// Active browser viewModel for detached DevTools window
+    /// This is set when the browser window is active and used by detached DevTools
+    weak var activeBrowserViewModel: BrowserViewModel?
+
     // MARK: - Constraints
 
     static let minDockedHeight: CGFloat = 150
