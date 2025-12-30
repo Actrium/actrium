@@ -579,7 +579,7 @@ class DevToolsManager: ObservableObject {
     @Published private(set) var engineMonitorDecodeError: String?
 
     /// Maximum log entries to keep
-    private let maxLogEntries = 1000
+    private let maxLogEntries = 65535
     private let maxNetworkEntries = 1000
 
     /// Message filter (event name pattern)
@@ -1049,8 +1049,8 @@ class DevToolsManager: ObservableObject {
         )
         consoleLogs.append(entry)
 
-        // Trim if exceeds max
-        if consoleLogs.count > maxLogEntries {
+        // Trim if exceeds max, but do it in chunks to avoid frequent array shifts
+        if consoleLogs.count > maxLogEntries + 100 {
             consoleLogs.removeFirst(consoleLogs.count - maxLogEntries)
         }
     }

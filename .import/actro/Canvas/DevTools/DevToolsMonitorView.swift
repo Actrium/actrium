@@ -11,12 +11,24 @@ private final class SystemMetrics: ObservableObject {
     @Published var memoryMB: Double = 0
     @Published var cpuPercent: Double = 0
 
+    // Historical data for sparklines (last 60 samples, 1 per second)
+    @Published var memoryHistory: [Double] = []
+    @Published var cpuHistory: [Double] = []
+
+    private let maxHistoryCount = 60
     private var timer: Timer?
 
     private init() {
         update()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.update()
+        }
+    }
+
+    private func appendHistory(_ value: Double, to history: inout [Double]) {
+        history.append(value)
+        if history.count > maxHistoryCount {
+            history.removeFirst()
         }
     }
 
@@ -31,6 +43,7 @@ private final class SystemMetrics: ObservableObject {
         }
         if result == KERN_SUCCESS {
             memoryMB = Double(info.resident_size) / 1_048_576.0
+            appendHistory(memoryMB, to: &memoryHistory)
         }
 
         // CPU usage (simplified - tracks thread CPU time changes)
@@ -55,6 +68,7 @@ private final class SystemMetrics: ObservableObject {
                 }
             }
             cpuPercent = min(totalCPU, 100.0)
+            appendHistory(cpuPercent, to: &cpuHistory)
 
             // Deallocate thread list
             let size = vm_size_t(Int(threadCount) * MemoryLayout<thread_t>.size)
@@ -189,7 +203,7 @@ struct DevToolsMonitorView: View {
     // MARK: - Primary Metrics Grid
 
     private func primaryMetricsGrid(row: DevToolsEngineMonitorRow) -> some View {
-        let columns = [GridItem(.adaptive(minimum: 100, maximum: 140), spacing: 8)]
+        let columns = [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 8)]
 
         return LazyVGrid(columns: columns, spacing: 8) {
             // FPS (placeholder - using ops/s as proxy for now)
@@ -207,7 +221,9 @@ struct DevToolsMonitorView: View {
                 title: "Memory",
                 value: String(format: "%.0f", systemMetrics.memoryMB),
                 subtitle: "MB",
-                status: memoryStatus(systemMetrics.memoryMB)
+                status: memoryStatus(systemMetrics.memoryMB),
+                history: systemMetrics.memoryHistory,
+                historyColor: .purple
             )
 
             // CPU
@@ -216,7 +232,9 @@ struct DevToolsMonitorView: View {
                 title: "CPU",
                 value: String(format: "%.0f", systemMetrics.cpuPercent),
                 subtitle: "%",
-                status: cpuStatus(systemMetrics.cpuPercent)
+                status: cpuStatus(systemMetrics.cpuPercent),
+                history: systemMetrics.cpuHistory,
+                historyColor: .orange
             )
 
             // Network pending
@@ -448,6 +466,8 @@ private struct MonitorMetricCard: View {
     let subtitle: String
     let status: MonitorMetricStatus
     var compact: Bool = false
+    var history: [Double]? = nil
+    var historyColor: Color = .blue
 
     var body: some View {
         VStack(spacing: compact ? 2 : 4) {
@@ -475,10 +495,57 @@ private struct MonitorMetricCard: View {
                 }
                 Spacer()
             }
+
+            // Sparkline chart
+            if let history, history.count > 1 {
+                MonitorSparkline(data: history, color: historyColor)
+                    .frame(height: compact ? 20 : 28)
+            }
         }
         .padding(compact ? 8 : 10)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
         .cornerRadius(8)
+    }
+}
+
+// MARK: - Sparkline Chart
+
+private struct MonitorSparkline: View {
+    let data: [Double]
+    var color: Color = .blue
+    var showThreshold: Double? = nil
+
+    var body: some View {
+        GeometryReader { geo in
+            Canvas { context, size in
+                guard data.count > 1 else { return }
+
+                let minVal = data.min() ?? 0
+                let maxVal = max(data.max() ?? 1, minVal + 1)
+                let range = maxVal - minVal
+
+                let stepX = size.width / CGFloat(data.count - 1)
+
+                // Draw threshold line if provided
+                if let threshold = showThreshold {
+                    let y = size.height - CGFloat((threshold - minVal) / range) * size.height
+                    let thresholdPath = Path { p in
+                        p.move(to: CGPoint(x: 0, y: y))
+                        p.addLine(to: CGPoint(x: size.width, y: y))
+                    }
+                    context.stroke(thresholdPath, with: .color(.red.opacity(0.5)), style: StrokeStyle(lineWidth: 1, dash: [4, 2]))
+                }
+
+                // Draw bars
+                let barWidth = max(2, stepX - 1)
+                for (i, val) in data.enumerated() {
+                    let h = CGFloat((val - minVal) / range) * size.height
+                    let x = CGFloat(i) * stepX
+                    let rect = CGRect(x: x, y: size.height - h, width: barWidth, height: max(1, h))
+                    context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(color.opacity(0.7)))
+                }
+            }
+        }
     }
 }
 
