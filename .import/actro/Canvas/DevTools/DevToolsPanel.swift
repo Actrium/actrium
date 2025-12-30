@@ -1,6 +1,7 @@
 import SwiftUI
 import Highlightr
 import AppKit
+import UniformTypeIdentifiers
 
 /// Main DevTools panel view - used both for docked mode and detached window
 struct DevToolsPanel: View {
@@ -34,18 +35,29 @@ struct DevToolsToolbar: View {
     @ObservedObject var viewModel: BrowserViewModel
     var isDetached: Bool
     @Environment(\.openWindow) private var openWindow
+    @State private var draggingTab: DevToolsTab?
 
     var body: some View {
         HStack(spacing: 0) {
-            // Tab buttons
+            // Tab buttons (using custom order for drag-and-drop reordering)
             HStack(spacing: 2) {
-                ForEach(DevToolsTab.allCases) { tab in
+                ForEach(devTools.tabOrder) { tab in
                     DevToolsTabButton(
                         tab: tab,
-                        isSelected: devTools.activeTab == tab
+                        isSelected: devTools.activeTab == tab,
+                        isDragging: draggingTab == tab
                     ) {
                         devTools.activeTab = tab
                     }
+                    .onDrag {
+                        draggingTab = tab
+                        return NSItemProvider(object: tab.rawValue as NSString)
+                    }
+                    .onDrop(of: [.text], delegate: DevToolsTabDropDelegate(
+                        tab: tab,
+                        devTools: devTools,
+                        draggingTab: $draggingTab
+                    ))
                 }
             }
             .padding(.horizontal, 8)
@@ -124,6 +136,8 @@ struct DevToolsToolbar: View {
         }
         .frame(height: 32)
         .background(Color(nsColor: .controlBackgroundColor))
+        // Prevent window toolbar context menu from showing up on right click
+        .contextMenu { }
     }
 }
 
@@ -131,6 +145,7 @@ struct DevToolsToolbar: View {
 struct DevToolsTabButton: View {
     let tab: DevToolsTab
     let isSelected: Bool
+    var isDragging: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -148,8 +163,48 @@ struct DevToolsTabButton: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
             )
+            .opacity(isDragging ? 0.5 : 1.0)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Drop delegate for handling tab reordering
+struct DevToolsTabDropDelegate: DropDelegate {
+    let tab: DevToolsTab
+    let devTools: DevToolsManager
+    @Binding var draggingTab: DevToolsTab?
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingTab = nil
+        devTools.saveSettings()
+        return true
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging = draggingTab,
+              dragging != tab,
+              let fromIndex = devTools.tabOrder.firstIndex(of: dragging),
+              let toIndex = devTools.tabOrder.firstIndex(of: tab) else { return }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            devTools.tabOrder.move(
+                fromOffsets: IndexSet(integer: fromIndex),
+                toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex
+            )
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        // No action needed
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggingTab != nil
     }
 }
 
@@ -172,7 +227,7 @@ struct DevToolsContent: View {
             case .network:
                 NetworkSequenceView(devTools: devTools, viewModel: viewModel)
             case .monitor:
-                DevToolsMonitorView(devTools: devTools)
+                DevToolsMonitorView(devTools: devTools, viewModel: viewModel)
             }
         }
         .onAppear {
@@ -294,6 +349,7 @@ struct DevToolsElementsView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color(nsColor: .controlBackgroundColor))
+                .contextMenu { }
 
                 Divider()
 
