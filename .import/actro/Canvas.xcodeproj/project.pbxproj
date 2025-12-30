@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
+		B3E78A742F03A00C001F9589 /* CanvasTabRenderer.app in Embed Helper Apps */ = {isa = PBXBuildFile; fileRef = B3E78A402F039DBE001F9589 /* CanvasTabRenderer.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		C6646A8EF8C6A45E425F2542 /* libPods-Canvas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */; };
 /* End PBXBuildFile section */
@@ -35,6 +36,41 @@
 			remoteInfo = CanvasTabRenderer;
 		};
 		B3E78A592F039DBF001F9589 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3E78A3F2F039DBE001F9589;
+			remoteInfo = CanvasTabRenderer;
+		};
+		B3E78A752F03A00C001F9589 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3E78A3F2F039DBE001F9589;
+			remoteInfo = CanvasTabRenderer;
+		};
+		B3E78A772F03A01A001F9589 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3E78A3F2F039DBE001F9589;
+			remoteInfo = CanvasTabRenderer;
+		};
+		B3E78A792F03A072001F9589 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3E78A3F2F039DBE001F9589;
+			remoteInfo = CanvasTabRenderer;
+		};
+		B3E78A7C2F03A0E1001F9589 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3E78A3F2F039DBE001F9589;
+			remoteInfo = CanvasTabRenderer;
+		};
+		B3E78A7E2F03A0EC001F9589 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = B3E458982EC731A30014D74C /* Project object */;
 			proxyType = 1;
@@ -196,12 +232,18 @@
 				B3E4589C2EC731A30014D74C /* Sources */,
 				B3E4589D2EC731A30014D74C /* Frameworks */,
 				B3E4589E2EC731A30014D74C /* Resources */,
+				B3E78A802F03A100001F9589 /* Embed Helper Apps */,
 				A6274D0DD8056ADF6067F790 /* [CP] Copy Pods Resources */,
 				B00C1EAF2D3E4F5A6B7C8D9E /* Bundle ActrApp JS (actr.jsbundle) */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B3E78A762F03A00C001F9589 /* PBXTargetDependency */,
+				B3E78A782F03A01A001F9589 /* PBXTargetDependency */,
+				B3E78A7A2F03A072001F9589 /* PBXTargetDependency */,
+				B3E78A7D2F03A0E1001F9589 /* PBXTargetDependency */,
+				B3E78A7F2F03A0EC001F9589 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B3E458A22EC731A30014D74C /* Canvas */,
@@ -382,6 +424,20 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		B3E78A802F03A100001F9589 /* Embed Helper Apps */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B3E78A742F03A00C001F9589 /* CanvasTabRenderer.app in Embed Helper Apps */,
+			);
+			name = "Embed Helper Apps";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXResourcesBuildPhase section */
 		B3E4589E2EC731A30014D74C /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
@@ -559,6 +615,31 @@
 			isa = PBXTargetDependency;
 			target = B3E78A3F2F039DBE001F9589 /* CanvasTabRenderer */;
 			targetProxy = B3E78A592F039DBF001F9589 /* PBXContainerItemProxy */;
+		};
+		B3E78A762F03A00C001F9589 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3E78A3F2F039DBE001F9589 /* CanvasTabRenderer */;
+			targetProxy = B3E78A752F03A00C001F9589 /* PBXContainerItemProxy */;
+		};
+		B3E78A782F03A01A001F9589 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3E78A3F2F039DBE001F9589 /* CanvasTabRenderer */;
+			targetProxy = B3E78A772F03A01A001F9589 /* PBXContainerItemProxy */;
+		};
+		B3E78A7A2F03A072001F9589 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3E78A3F2F039DBE001F9589 /* CanvasTabRenderer */;
+			targetProxy = B3E78A792F03A072001F9589 /* PBXContainerItemProxy */;
+		};
+		B3E78A7D2F03A0E1001F9589 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3E78A3F2F039DBE001F9589 /* CanvasTabRenderer */;
+			targetProxy = B3E78A7C2F03A0E1001F9589 /* PBXContainerItemProxy */;
+		};
+		B3E78A7F2F03A0EC001F9589 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3E78A3F2F039DBE001F9589 /* CanvasTabRenderer */;
+			targetProxy = B3E78A7E2F03A0EC001F9589 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
