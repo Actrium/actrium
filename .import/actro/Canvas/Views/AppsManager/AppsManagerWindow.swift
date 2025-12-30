@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 // MARK: - Apps Manager Window Controller
 
@@ -53,10 +54,12 @@ final class AppsManagerWindowController {
 
 struct AppsManagerView: View {
     @ObservedObject private var processManager = TabProcessManager.shared
-    @State private var selectedProcessId: UUID?
-    @State private var sortOrder: [KeyPathComparator<ProcessRowData>] = [
-        .init(\.memoryMB, order: .reverse)
-    ]
+    @ObservedObject private var devTools = DevToolsManager.shared
+    @State private var selectedRowId: UUID?
+    @State private var refreshTrigger: Bool = false
+
+    // Timer for periodic refresh
+    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,12 +68,8 @@ struct AppsManagerView: View {
 
             Divider()
 
-            // Process table
-            if processManager.isMultiProcessEnabled {
-                processTable
-            } else {
-                singleProcessView
-            }
+            // Process list
+            processList
 
             Divider()
 
@@ -79,6 +78,9 @@ struct AppsManagerView: View {
         }
         .frame(minWidth: 500, minHeight: 300)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onReceive(timer) { _ in
+            refreshTrigger.toggle()
+        }
     }
 
     // MARK: - Header
@@ -94,8 +96,27 @@ struct AppsManagerView: View {
 
             Spacer()
 
+            // Multi-process mode indicator
+            if processManager.isMultiProcessEnabled {
+                Text("Multi-Process")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.8))
+                    .cornerRadius(4)
+            } else {
+                Text("Single Process")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.gray.opacity(0.3))
+                    .cornerRadius(4)
+            }
+
             // Refresh button
-            Button(action: { /* Force refresh */ }) {
+            Button(action: { refreshTrigger.toggle() }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12))
             }
@@ -107,121 +128,50 @@ struct AppsManagerView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    // MARK: - Process Table
+    // MARK: - Process List
 
-    private var processTable: some View {
+    private var processList: some View {
         let rows = buildProcessRows()
 
-        return Table(rows, selection: $selectedProcessId, sortOrder: $sortOrder) {
-            TableColumn("Process", value: \.name) { row in
-                HStack(spacing: 8) {
-                    processIcon(for: row)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(row.name)
-                            .font(.system(size: 12))
-                            .lineLimit(1)
-                        if let subtitle = row.subtitle {
-                            Text(subtitle)
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
+        return List(selection: $selectedRowId) {
+            // Header row
+            HStack(spacing: 0) {
+                Text("Process")
+                    .frame(width: 200, alignment: .leading)
+                Text("PID")
+                    .frame(width: 60, alignment: .trailing)
+                Text("Memory")
+                    .frame(width: 80, alignment: .trailing)
+                Text("CPU")
+                    .frame(width: 60, alignment: .trailing)
+                Text("Status")
+                    .frame(width: 80, alignment: .leading)
+                    .padding(.leading, 8)
             }
-            .width(min: 150, ideal: 200)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.secondary)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
 
-            TableColumn("PID", value: \.pid) { row in
-                Text(row.pid > 0 ? "\(row.pid)" : "—")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.secondary)
-            }
-            .width(60)
-
-            TableColumn("Memory", value: \.memoryMB) { row in
-                Text(formatMemory(row.memoryMB))
-                    .font(.system(size: 11, design: .monospaced))
-            }
-            .width(80)
-
-            TableColumn("CPU", value: \.cpuPercent) { row in
-                Text(String(format: "%.1f%%", row.cpuPercent))
-                    .font(.system(size: 11, design: .monospaced))
-            }
-            .width(60)
-
-            TableColumn("Status", value: \.status) { row in
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(statusColor(for: row.status))
-                        .frame(width: 6, height: 6)
-                    Text(row.status)
-                        .font(.system(size: 11))
-                }
-            }
-            .width(80)
-        }
-        .tableStyle(.inset(alternatesRowBackgrounds: true))
-    }
-
-    // MARK: - Single Process View (fallback)
-
-    private var singleProcessView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "app.dashed")
-                .font(.system(size: 40))
-                .foregroundColor(.secondary)
-
-            Text("Multi-Process Mode Disabled")
-                .font(.headline)
-
-            Text("All tabs run in the main process.\nEnable multi-process mode to see individual tab processes.")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-
-            // Show main process info
-            mainProcessInfo
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
-    }
-
-    private var mainProcessInfo: some View {
-        let pid = getpid()
-        let memory = getMainProcessMemory()
-
-        return VStack(spacing: 8) {
-            Divider()
-                .padding(.vertical, 8)
-
-            HStack(spacing: 24) {
-                VStack {
-                    Text("Main Process")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                    Text("PID \(pid)")
-                        .font(.system(size: 12, design: .monospaced))
-                }
-
-                VStack {
-                    Text("Memory")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                    Text(formatMemory(memory))
-                        .font(.system(size: 12, design: .monospaced))
-                }
+            ForEach(rows) { row in
+                ProcessRowView(row: row, isSelected: selectedRowId == row.id)
+                    .tag(row.id)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
             }
         }
+        .listStyle(.plain)
+        .id(refreshTrigger) // Force refresh
     }
 
     // MARK: - Footer
 
     private var footerView: some View {
-        HStack {
+        let rows = buildProcessRows()
+        let tabCount = rows.filter { !$0.isMainProcess }.count
+
+        return HStack {
             // Process count
-            let count = processManager.processes.count
-            Text("\(count) process\(count == 1 ? "" : "es")")
+            Text("\(tabCount) tab\(tabCount == 1 ? "" : "s")")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
 
@@ -231,7 +181,7 @@ struct AppsManagerView: View {
             Button(action: endSelectedProcess) {
                 Text("End Process")
             }
-            .disabled(selectedProcessId == nil)
+            .disabled(selectedRowId == nil || isMainProcessSelected())
             .keyboardShortcut(.delete, modifiers: [])
         }
         .padding(.horizontal, 16)
@@ -244,11 +194,12 @@ struct AppsManagerView: View {
     private func buildProcessRows() -> [ProcessRowData] {
         var rows: [ProcessRowData] = []
 
-        // Main browser process
+        // Main browser process (always first)
         let mainPid = getpid()
         let mainMemory = getMainProcessMemory()
+        let mainId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         rows.append(ProcessRowData(
-            id: UUID(),
+            id: mainId,
             name: "Browser (Main)",
             subtitle: "Canvas",
             pid: mainPid,
@@ -258,72 +209,66 @@ struct AppsManagerView: View {
             isMainProcess: true
         ))
 
-        // Tab processes
-        for (tabId, processInfo) in processManager.processes {
-            let metrics = processInfo.pid.flatMap {
-                processManager.getProcessMetrics(pid: $0)
-            }
-
-            let memoryMB = Double(metrics?.memory ?? 0) / 1_048_576.0
-            let cpuTime = Double(metrics?.cpuTime ?? 0) / 1_000_000_000.0
-
-            let statusText: String
-            switch processInfo.state {
-            case .idle: statusText = "Idle"
-            case .launching: statusText = "Starting"
-            case .running: statusText = "Running"
-            case .crashed(let reason): statusText = "Crashed"
-            case .terminated: statusText = "Ended"
-            }
-
-            rows.append(ProcessRowData(
-                id: tabId,
-                name: "Tab: \(tabId.uuidString.prefix(8))...",
-                subtitle: "Renderer Process",
-                pid: processInfo.pid ?? 0,
-                memoryMB: memoryMB,
-                cpuPercent: cpuTime, // Using CPU time as proxy
-                status: statusText,
-                isMainProcess: false
-            ))
+        // Get tabs from active BrowserViewModel
+        guard let viewModel = devTools.activeBrowserViewModel else {
+            return rows
         }
 
-        // Sort
-        return rows.sorted(using: sortOrder)
-    }
+        // Add all tabs
+        for tab in viewModel.tabs {
+            let tabId = tab.id
 
-    private func processIcon(for row: ProcessRowData) -> some View {
-        Group {
-            if row.isMainProcess {
-                Image(systemName: "app.fill")
-                    .foregroundColor(.blue)
+            // Check if we have process info for this tab
+            if processManager.isMultiProcessEnabled,
+               let processInfo = processManager.processes[tabId] {
+                // Multi-process mode with actual process data
+                let metrics = processInfo.pid.flatMap {
+                    processManager.getProcessMetrics(pid: $0)
+                }
+
+                let memoryMB = Double(metrics?.memory ?? 0) / 1_048_576.0
+                let cpuTime = Double(metrics?.cpuTime ?? 0) / 1_000_000_000.0
+
+                let statusText: String
+                switch processInfo.state {
+                case .idle: statusText = "Idle"
+                case .launching: statusText = "Starting"
+                case .running: statusText = "Running"
+                case .crashed: statusText = "Crashed"
+                case .terminated: statusText = "Ended"
+                }
+
+                rows.append(ProcessRowData(
+                    id: tabId,
+                    name: tab.title.isEmpty ? "New Tab" : tab.title,
+                    subtitle: processInfo.pid.map { "PID \($0)" } ?? "Renderer",
+                    pid: processInfo.pid ?? 0,
+                    memoryMB: memoryMB,
+                    cpuPercent: cpuTime,
+                    status: statusText,
+                    isMainProcess: false
+                ))
             } else {
-                Image(systemName: "square.split.2x1")
-                    .foregroundColor(.green)
+                // Single-process mode or no process data yet
+                rows.append(ProcessRowData(
+                    id: tabId,
+                    name: tab.title.isEmpty ? "New Tab" : tab.title,
+                    subtitle: "Shared",
+                    pid: 0,
+                    memoryMB: 0,
+                    cpuPercent: 0,
+                    status: "Running",
+                    isMainProcess: false
+                ))
             }
         }
-        .font(.system(size: 14))
-        .frame(width: 20)
+
+        return rows
     }
 
-    private func statusColor(for status: String) -> Color {
-        switch status.lowercased() {
-        case "running": return .green
-        case "starting", "launching": return .orange
-        case "crashed": return .red
-        case "ended", "terminated": return .gray
-        default: return .secondary
-        }
-    }
-
-    private func formatMemory(_ mb: Double) -> String {
-        if mb >= 1024 {
-            return String(format: "%.1f GB", mb / 1024)
-        } else if mb >= 1 {
-            return String(format: "%.1f MB", mb)
-        } else {
-            return String(format: "%.0f KB", mb * 1024)
-        }
+    private func isMainProcessSelected() -> Bool {
+        guard let selectedId = selectedRowId else { return false }
+        return selectedId == UUID(uuidString: "00000000-0000-0000-0000-000000000000")
     }
 
     private func getMainProcessMemory() -> Double {
@@ -341,19 +286,126 @@ struct AppsManagerView: View {
     }
 
     private func endSelectedProcess() {
-        guard let processId = selectedProcessId else { return }
+        guard let processId = selectedRowId,
+              !isMainProcessSelected() else { return }
 
-        // Don't allow ending main process
-        if processManager.processes[processId] != nil {
+        // Close the tab through BrowserViewModel
+        if let viewModel = devTools.activeBrowserViewModel {
+            viewModel.closeTab(id: processId)
+        }
+
+        // Also terminate process if in multi-process mode
+        if processManager.isMultiProcessEnabled,
+           processManager.processes[processId] != nil {
             processManager.terminateProcess(for: processId)
-            selectedProcessId = nil
+        }
+
+        selectedRowId = nil
+    }
+}
+
+// MARK: - Process Row View
+
+private struct ProcessRowView: View {
+    let row: ProcessRowData
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Process name & icon
+            HStack(spacing: 8) {
+                processIcon
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.name)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                    if let subtitle = row.subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .frame(width: 200, alignment: .leading)
+
+            // PID
+            Text(row.pid > 0 ? "\(row.pid)" : "—")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 60, alignment: .trailing)
+
+            // Memory
+            Text(formatMemory(row.memoryMB))
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 80, alignment: .trailing)
+
+            // CPU
+            Text(row.cpuPercent > 0 ? String(format: "%.1f%%", row.cpuPercent) : "—")
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 60, alignment: .trailing)
+
+            // Status
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(statusColor(for: row.status))
+                    .frame(width: 6, height: 6)
+                Text(row.status)
+                    .font(.system(size: 11))
+            }
+            .frame(width: 80, alignment: .leading)
+            .padding(.leading, 8)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private var processIcon: some View {
+        Group {
+            if row.isMainProcess {
+                Image(systemName: "app.fill")
+                    .foregroundColor(.blue)
+            } else {
+                Image(systemName: "doc.text")
+                    .foregroundColor(.green)
+            }
+        }
+        .font(.system(size: 14))
+        .frame(width: 20)
+    }
+
+    private func statusColor(for status: String) -> Color {
+        switch status.lowercased() {
+        case "running": return .green
+        case "starting", "launching": return .orange
+        case "crashed": return .red
+        case "ended", "terminated": return .gray
+        case "idle": return .yellow
+        default: return .secondary
+        }
+    }
+
+    private func formatMemory(_ mb: Double) -> String {
+        if mb >= 1024 {
+            return String(format: "%.1f GB", mb / 1024)
+        } else if mb >= 1 {
+            return String(format: "%.1f MB", mb)
+        } else if mb > 0 {
+            return String(format: "%.0f KB", mb * 1024)
+        } else {
+            return "—"
         }
     }
 }
 
 // MARK: - Process Row Data
 
-struct ProcessRowData: Identifiable {
+struct ProcessRowData: Identifiable, Hashable {
     let id: UUID
     let name: String
     let subtitle: String?
@@ -362,6 +414,14 @@ struct ProcessRowData: Identifiable {
     let cpuPercent: Double
     let status: String
     let isMainProcess: Bool
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: ProcessRowData, rhs: ProcessRowData) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 // MARK: - Preview
