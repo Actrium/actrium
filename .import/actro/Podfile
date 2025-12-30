@@ -26,21 +26,36 @@ target 'Canvas' do
 
   # rill native sandbox (JSI)
   pod 'RillSandboxNative', :path => 'Subsystem/node_modules/rill/native/platform'
+end
 
-  post_install do |installer|
-    # 告诉 React Native 正确的源码位置，避免 Codegen 误报
-    react_native_post_install(installer, react_native_macos_path)
+# CanvasTabRenderer - Multi-process tab renderer with React Native support
+target 'CanvasTabRenderer' do
+  platform :macos, '14.0'
 
-    # 抑制所有 Pods 项目的警告
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |config|
-        # 抑制所有警告
-        config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
-        # 抑制特定的常见警告
-        config.build_settings['CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS'] = 'NO'
-        config.build_settings['CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF'] = 'NO'
-        config.build_settings['GCC_WARN_64_TO_32_BIT_CONVERSION'] = 'NO'
-      end
+  use_react_native!(
+    path: react_native_macos_path,
+    hermes_enabled: false,
+    fabric_enabled: ENV['RCT_NEW_ARCH_ENABLED'] == '1',
+    app_path: subsystem_path
+  )
+
+  # rill native sandbox (JSI) - needed for tab content rendering
+  pod 'RillSandboxNative', :path => 'Subsystem/node_modules/rill/native/platform'
+end
+
+post_install do |installer|
+  # 告诉 React Native 正确的源码位置，避免 Codegen 误报
+  react_native_post_install(installer, react_native_macos_path)
+
+  # 抑制所有 Pods 项目的警告
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      # 抑制所有警告
+      config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+      # 抑制特定的常见警告
+      config.build_settings['CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS'] = 'NO'
+      config.build_settings['CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF'] = 'NO'
+      config.build_settings['GCC_WARN_64_TO_32_BIT_CONVERSION'] = 'NO'
     end
   end
 end
