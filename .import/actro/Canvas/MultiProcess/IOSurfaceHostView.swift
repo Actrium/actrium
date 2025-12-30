@@ -448,12 +448,6 @@ struct MultiProcessTabView: View {
     }
 
     private func startRenderer() {
-        guard processManager.isMultiProcessEnabled else {
-            errorMessage = "Multi-process mode not available"
-            isLoading = false
-            return
-        }
-
         // Clear any previous crash state
         crashReason = nil
 

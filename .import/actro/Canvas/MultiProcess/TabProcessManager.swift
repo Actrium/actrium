@@ -64,8 +64,8 @@ class TabProcessManager: ObservableObject {
     /// Active tab processes keyed by tab ID
     @Published private(set) var processes: [UUID: TabProcessInfo] = [:]
 
-    /// Whether multi-process mode is enabled
-    @Published var isMultiProcessEnabled: Bool = false
+    /// Whether multi-process mode is enabled (always true, helper app required)
+    @Published var isMultiProcessEnabled: Bool = true
 
     /// Metrics update interval in seconds
     var metricsUpdateInterval: TimeInterval = 1.0
@@ -98,15 +98,13 @@ class TabProcessManager: ObservableObject {
     private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     private init() {
-        // Check if helper app exists
+        // Verify helper app exists (required for multi-process mode)
         if let path = helperAppPath, FileManager.default.fileExists(atPath: path.path) {
             logger.info("TabProcessManager: Helper app found at \(path.path)")
-            isMultiProcessEnabled = true
-            setupMemoryPressureHandler()
         } else {
-            logger.info("TabProcessManager: Helper app not found, multi-process disabled")
-            isMultiProcessEnabled = false
+            logger.error("TabProcessManager: Helper app not found! Multi-process mode will not work.")
         }
+        setupMemoryPressureHandler()
     }
 
     // MARK: - Memory Pressure Handling
@@ -151,7 +149,7 @@ class TabProcessManager: ObservableObject {
 
     /// Warm up the process pool with ready-to-use helper processes
     func warmUpProcessPool() {
-        guard isMultiProcessEnabled && isPoolingEnabled else { return }
+        guard isPoolingEnabled else { return }
         guard processPool.count < maxPoolSize else { return }
 
         let needed = maxPoolSize - processPool.count
@@ -257,10 +255,6 @@ class TabProcessManager: ObservableObject {
 
     /// Spawn a new renderer process for a tab
     func spawnProcess(for tabId: UUID, config: TabXPCConfig) async throws -> TabProcessInfo {
-        guard isMultiProcessEnabled else {
-            throw TabProcessError.multiProcessDisabled
-        }
-
         guard let helperPath = helperAppPath else {
             throw TabProcessError.helperAppNotFound
         }

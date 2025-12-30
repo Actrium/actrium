@@ -108,21 +108,18 @@ struct AppsManagerView: View {
 
     private var processList: some View {
         let rows = buildProcessRows()
-        let showMetrics = processManager.isMultiProcessEnabled
 
         return List(selection: $selectedRowId) {
             // Header row
             HStack(spacing: 0) {
                 Text("App")
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if showMetrics {
-                    Text("PID")
-                        .frame(width: 60, alignment: .trailing)
-                    Text("Memory")
-                        .frame(width: 80, alignment: .trailing)
-                    Text("CPU")
-                        .frame(width: 60, alignment: .trailing)
-                }
+                Text("PID")
+                    .frame(width: 60, alignment: .trailing)
+                Text("Memory")
+                    .frame(width: 80, alignment: .trailing)
+                Text("CPU")
+                    .frame(width: 60, alignment: .trailing)
                 Text("Status")
                     .frame(width: 80, alignment: .center)
             }
@@ -132,7 +129,7 @@ struct AppsManagerView: View {
             .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
 
             ForEach(rows) { row in
-                ProcessRowView(row: row, isSelected: selectedRowId == row.id, showMetrics: showMetrics)
+                ProcessRowView(row: row, isSelected: selectedRowId == row.id)
                     .tag(row.id)
                     .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
             }
@@ -180,10 +177,8 @@ struct AppsManagerView: View {
         for tab in viewModel.tabs {
             let tabId = tab.id
 
-            // Check if we have process info for this tab
-            if processManager.isMultiProcessEnabled,
-               let processInfo = processManager.processes[tabId] {
-                // Multi-process mode with actual process data
+            // Get process info for this tab
+            if let processInfo = processManager.processes[tabId] {
                 let metrics = processInfo.pid.flatMap {
                     processManager.getProcessMetrics(pid: $0)
                 }
@@ -210,7 +205,7 @@ struct AppsManagerView: View {
                     status: statusText
                 ))
             } else {
-                // Single-process mode or no process data yet
+                // No process data yet (tab hasn't spawned renderer)
                 rows.append(ProcessRowData(
                     id: tabId,
                     name: tab.title.isEmpty ? "New Tab" : tab.title,
@@ -218,7 +213,7 @@ struct AppsManagerView: View {
                     pid: 0,
                     memoryMB: 0,
                     cpuPercent: 0,
-                    status: "Running"
+                    status: "Pending"
                 ))
             }
         }
@@ -229,15 +224,14 @@ struct AppsManagerView: View {
     private func endSelectedProcess() {
         guard let processId = selectedRowId else { return }
 
+        // Terminate the renderer process
+        if processManager.processes[processId] != nil {
+            processManager.terminateProcess(for: processId)
+        }
+
         // Close the tab through BrowserViewModel
         if let viewModel = devTools.activeBrowserViewModel {
             viewModel.closeTab(id: processId)
-        }
-
-        // Also terminate process if in multi-process mode
-        if processManager.isMultiProcessEnabled,
-           processManager.processes[processId] != nil {
-            processManager.terminateProcess(for: processId)
         }
 
         selectedRowId = nil
@@ -249,7 +243,6 @@ struct AppsManagerView: View {
 private struct ProcessRowView: View {
     let row: ProcessRowData
     let isSelected: Bool
-    let showMetrics: Bool
 
     var body: some View {
         HStack(spacing: 0) {
@@ -262,23 +255,21 @@ private struct ProcessRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if showMetrics {
-                // PID
-                Text(row.pid > 0 ? "\(row.pid)" : "—")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .frame(width: 60, alignment: .trailing)
+            // PID
+            Text(row.pid > 0 ? "\(row.pid)" : "—")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 60, alignment: .trailing)
 
-                // Memory
-                Text(formatMemory(row.memoryMB))
-                    .font(.system(size: 11, design: .monospaced))
-                    .frame(width: 80, alignment: .trailing)
+            // Memory
+            Text(formatMemory(row.memoryMB))
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 80, alignment: .trailing)
 
-                // CPU
-                Text(row.cpuPercent > 0 ? String(format: "%.1f%%", row.cpuPercent) : "—")
-                    .font(.system(size: 11, design: .monospaced))
-                    .frame(width: 60, alignment: .trailing)
-            }
+            // CPU
+            Text(row.cpuPercent > 0 ? String(format: "%.1f%%", row.cpuPercent) : "—")
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 60, alignment: .trailing)
 
             // Status
             HStack(spacing: 4) {
