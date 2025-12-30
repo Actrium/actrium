@@ -21,6 +21,7 @@ class TabProcessInfo: ObservableObject {
     let tabId: UUID
     @Published var state: TabProcessState = .idle
     @Published var metrics: TabXPCMetrics?
+    @Published var surfaceID: UInt32 = 0
 
     var connection: NSXPCConnection?
     var process: Process?
@@ -106,7 +107,16 @@ class TabProcessManager: ObservableObject {
             // Launch the helper app as a subprocess
             let process = Process()
             process.executableURL = helperPath.appendingPathComponent("Contents/MacOS/CanvasTabRenderer")
-            process.arguments = ["--tab-id", tabId.uuidString, "--xpc-service", xpcServiceName]
+            process.arguments = [
+                "--tab-id", tabId.uuidString,
+                "--width", "\(Int(config.leftPanelVisible ? 800 : 600))",
+                "--height", "600",
+                "--background", config.backgroundColor
+            ]
+
+            // Capture stdout for IOSurface ID
+            let outputPipe = Pipe()
+            process.standardOutput = outputPipe
 
             // Set up termination handler
             process.terminationHandler = { [weak self, weak processInfo] terminatedProcess in
@@ -130,8 +140,11 @@ class TabProcessManager: ObservableObject {
 
             logger.info("TabProcessManager: Process launched with PID \(process.processIdentifier)")
 
-            // Establish XPC connection
-            try await connectToRenderer(processInfo: processInfo, config: config)
+            // Read IOSurface ID from stdout
+            let surfaceID = try await readSurfaceID(from: outputPipe, processInfo: processInfo)
+            processInfo.surfaceID = surfaceID
+
+            logger.info("TabProcessManager: Got IOSurface ID \(surfaceID) from process")
 
             return processInfo
         } catch {
@@ -141,11 +154,60 @@ class TabProcessManager: ObservableObject {
         }
     }
 
-    /// Connect to a renderer process via XPC
-    private func connectToRenderer(processInfo: TabProcessInfo, config: TabXPCConfig) async throws {
-        // For embedded helper apps, we use anonymous XPC connections
-        // The helper app will create a listener and we connect to it via Mach service
+    /// Read the IOSurface ID from the helper process stdout
+    private func readSurfaceID(from pipe: Pipe, processInfo: TabProcessInfo) async throws -> UInt32 {
+        // Use a simple polling approach - more reliable than async notifications
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let handle = pipe.fileHandleForReading
+                var accumulatedOutput = ""
+                let startTime = Date()
+                let timeout: TimeInterval = 5.0
 
+                // Poll for data with small intervals
+                while Date().timeIntervalSince(startTime) < timeout {
+                    let data = handle.availableData
+                    if !data.isEmpty, let output = String(data: data, encoding: .utf8) {
+                        accumulatedOutput += output
+                        logger.debug("TabProcessManager: Read from helper: \(output)")
+
+                        // Check for SURFACE_ID in accumulated output
+                        for line in accumulatedOutput.components(separatedBy: "\n") {
+                            if line.hasPrefix("SURFACE_ID:") {
+                                let idString = line.replacingOccurrences(of: "SURFACE_ID:", with: "")
+                                if let id = UInt32(idString.trimmingCharacters(in: .whitespaces)) {
+                                    logger.info("TabProcessManager: Parsed surface ID: \(id)")
+                                    continuation.resume(returning: id)
+                                    return
+                                }
+                            }
+                        }
+                    }
+
+                    // Check for ERROR
+                    if accumulatedOutput.contains("ERROR:") {
+                        for line in accumulatedOutput.components(separatedBy: "\n") {
+                            if line.hasPrefix("ERROR:") {
+                                let errorMsg = line.replacingOccurrences(of: "ERROR:", with: "")
+                                continuation.resume(throwing: TabProcessError.contentLoadFailed(errorMsg))
+                                return
+                            }
+                        }
+                    }
+
+                    // Small sleep to avoid busy waiting
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+
+                // Timeout
+                logger.error("TabProcessManager: Timeout waiting for surface ID. Output: \(accumulatedOutput)")
+                continuation.resume(throwing: TabProcessError.contentLoadFailed("Timeout waiting for IOSurface ID"))
+            }
+        }
+    }
+
+    // Legacy XPC connection (kept for future use)
+    private func connectToRendererViaXPC(processInfo: TabProcessInfo, config: TabXPCConfig) async throws {
         // Create XPC connection to the service
         let connection = NSXPCConnection(serviceName: "\(xpcServiceName).\(processInfo.tabId.uuidString)")
         connection.remoteObjectInterface = TabXPCInterface.rendererInterface()
@@ -275,12 +337,7 @@ class TabProcessManager: ObservableObject {
     /// Get IOSurface ID for cross-process rendering
     func getIOSurfaceID(for tabId: UUID) async -> UInt32? {
         guard let processInfo = processes[tabId], processInfo.isRunning else { return nil }
-
-        return await withCheckedContinuation { continuation in
-            processInfo.renderer?.getIOSurfaceID { surfaceID in
-                continuation.resume(returning: surfaceID)
-            }
-        }
+        return processInfo.surfaceID != 0 ? processInfo.surfaceID : nil
     }
 }
 

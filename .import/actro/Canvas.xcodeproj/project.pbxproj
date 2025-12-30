@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		8E5B03874CCE978352975327 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
 		B3E78A742F03A00C001F9589 /* CanvasTabRenderer.app in Embed Helper Apps */ = {isa = PBXBuildFile; fileRef = B3E78A402F039DBE001F9589 /* CanvasTabRenderer.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
@@ -110,31 +111,43 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B3E458A22EC731A30014D74C /* Canvas */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = Canvas;
 			sourceTree = "<group>";
 		};
 		B3E458B22EC731A40014D74C /* CanvasTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasTests;
 			sourceTree = "<group>";
 		};
 		B3E458BC2EC731A40014D74C /* CanvasUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasUITests;
 			sourceTree = "<group>";
 		};
 		B3E78A412F039DBE001F9589 /* CanvasTabRenderer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasTabRenderer;
 			sourceTree = "<group>";
 		};
 		B3E78A512F039DBF001F9589 /* CanvasTabRendererTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasTabRendererTests;
 			sourceTree = "<group>";
 		};
 		B3E78A5B2F039DBF001F9589 /* CanvasTabRendererUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasTabRendererUITests;
 			sourceTree = "<group>";
 		};
@@ -325,8 +338,6 @@
 				B3E78A412F039DBE001F9589 /* CanvasTabRenderer */,
 			);
 			name = CanvasTabRenderer;
-			packageProductDependencies = (
-			);
 			productName = CanvasTabRenderer;
 			productReference = B3E78A402F039DBE001F9589 /* CanvasTabRenderer.app */;
 			productType = "com.apple.product-type.application";
@@ -348,8 +359,6 @@
 				B3E78A512F039DBF001F9589 /* CanvasTabRendererTests */,
 			);
 			name = CanvasTabRendererTests;
-			packageProductDependencies = (
-			);
 			productName = CanvasTabRendererTests;
 			productReference = B3E78A4E2F039DBF001F9589 /* CanvasTabRendererTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -371,8 +380,6 @@
 				B3E78A5B2F039DBF001F9589 /* CanvasTabRendererUITests */,
 			);
 			name = CanvasTabRendererUITests;
-			packageProductDependencies = (
-			);
 			productName = CanvasTabRendererUITests;
 			productReference = B3E78A582F039DBF001F9589 /* CanvasTabRendererUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -465,6 +472,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8E5B03874CCE978352975327 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -515,13 +523,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -702,7 +706,10 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = "$(inherited)  ";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					" ",
+				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
@@ -762,7 +769,10 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_LDFLAGS = "$(inherited)  ";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					" ",
+				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
