@@ -264,38 +264,31 @@ private struct DevToolsMonitorDetailView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(row.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-
-                Spacer()
-
-                Button {
-                    DevToolsClipboard.copy(row.tabId)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.borderless)
-                .help("Copy tabId")
-            }
-
-            HStack(spacing: 8) {
-                Text("tabId: \(row.tabId)")
+        HStack(spacing: 8) {
+            Text("tabId: \(row.tabId)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+                .textSelection(.enabled)
+            if let engineId = row.engineId {
+                Text("engineId: \(engineId)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)
                     .textSelection(.enabled)
-                if let engineId = row.engineId {
-                    Text("engineId: \(engineId)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .textSelection(.enabled)
-                }
             }
+
+            Spacer()
+
+            Button {
+                DevToolsClipboard.copy(row.tabId)
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .help("Copy tabId")
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(Color(nsColor: .controlBackgroundColor))
     }
 }
