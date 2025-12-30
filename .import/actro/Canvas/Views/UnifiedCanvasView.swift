@@ -261,7 +261,7 @@ struct UnifiedCanvasView: View {
                         Button(action: {
                             AppsManagerWindowController.shared.showWindow()
                         }) {
-                            Label("Apps Manager", systemImage: "cpu")
+                            Label("Task Manager", systemImage: "cpu")
                         }
                     }
                 }

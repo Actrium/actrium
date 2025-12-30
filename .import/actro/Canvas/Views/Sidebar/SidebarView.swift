@@ -30,9 +30,8 @@ struct SidebarView: View {
                     Button(action: {
                         AppsManagerWindowController.shared.showWindow()
                     }) {
-                        Label("Apps Manager", systemImage: "cpu")
+                        Label("Task Manager", systemImage: "cpu")
                     }
-                    .keyboardShortcut("m", modifiers: [.command, .shift])
                 }
 
             // Bottom section - User only
