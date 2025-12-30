@@ -170,10 +170,32 @@ struct DevToolsContent: View {
             case .console:
                 DevToolsConsoleView(devTools: devTools)
             case .network:
-                DevToolsNetworkView(devTools: devTools, viewModel: viewModel)
+                NetworkSequenceView(devTools: devTools, viewModel: viewModel)
             case .performance:
                 DevToolsPerformanceView(devTools: devTools)
             }
+        }
+        .onAppear {
+            updateGuestAppSource()
+        }
+        .onChange(of: viewModel.currentTabId) { _, _ in
+            updateGuestAppSource()
+        }
+    }
+
+    private func updateGuestAppSource() {
+        guard let tab = viewModel.currentTab else {
+            devTools.updateGuestAppSource(path: nil, name: nil)
+            return
+        }
+
+        // Get the source directory from tab's URL
+        if let url = tab.url {
+            // For file URLs, get the directory path
+            let path = url.isFileURL ? url.deletingLastPathComponent().path : url.path
+            devTools.updateGuestAppSource(path: path, name: tab.title)
+        } else {
+            devTools.updateGuestAppSource(path: nil, name: tab.title)
         }
     }
 }
@@ -939,15 +961,13 @@ struct DevToolsConsoleView: View {
         VStack(spacing: 0) {
             // Filter bar
             HStack(spacing: 8) {
-                // Level filter
-                Picker("", selection: $levelFilter) {
-                    Text("All").tag(nil as DevToolsLogEntry.LogLevel?)
-                    Label("Info", systemImage: "info.circle").tag(DevToolsLogEntry.LogLevel.info as DevToolsLogEntry.LogLevel?)
-                    Label("Warn", systemImage: "exclamationmark.triangle").tag(DevToolsLogEntry.LogLevel.warn as DevToolsLogEntry.LogLevel?)
-                    Label("Error", systemImage: "xmark.circle").tag(DevToolsLogEntry.LogLevel.error as DevToolsLogEntry.LogLevel?)
+                // Level filter buttons
+                HStack(spacing: 2) {
+                    filterButton(nil, label: "All")
+                    filterButton(.info, label: "Info")
+                    filterButton(.warn, label: "Warn")
+                    filterButton(.error, label: "Error")
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 200)
 
                 // Text search
                 HStack(spacing: 4) {
@@ -962,7 +982,7 @@ struct DevToolsConsoleView: View {
                 .padding(.vertical, 3)
                 .background(Color(nsColor: .textBackgroundColor))
                 .cornerRadius(4)
-                .frame(maxWidth: 150)
+                .frame(maxWidth: 140)
 
                 Spacer()
 
@@ -1011,6 +1031,19 @@ struct DevToolsConsoleView: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private func filterButton(_ level: DevToolsLogEntry.LogLevel?, label: String) -> some View {
+        Button(action: { levelFilter = level }) {
+            Text(label)
+                .font(.system(size: 10))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(levelFilter == level ? Color.accentColor : Color.clear)
+                .foregroundColor(levelFilter == level ? .white : .secondary)
+                .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -1072,7 +1105,7 @@ struct DevToolsLogEntryView: View {
 
 // MARK: - Network Tab
 
-private enum DevToolsNetworkFilter: String, CaseIterable, Identifiable {
+enum DevToolsNetworkFilter: String, CaseIterable, Identifiable {
     case all = "All"
     case pending = "Pending"
     case failed = "Failed"
@@ -1567,23 +1600,19 @@ struct DevToolsMessagesView: View {
         VStack(spacing: 0) {
             // Filter bar
             HStack(spacing: 8) {
-                // Category filter
-                Picker("", selection: $devTools.messageCategoryFilter) {
-                    Text("All").tag(nil as MessageCategory?)
-                    Label("Render", systemImage: "hammer").tag(MessageCategory.render as MessageCategory?)
-                    Label("App", systemImage: "envelope").tag(MessageCategory.app as MessageCategory?)
+                // Category filter buttons
+                HStack(spacing: 2) {
+                    categoryFilterButton(nil, label: "All")
+                    categoryFilterButton(.render, label: "Render")
+                    categoryFilterButton(.app, label: "App")
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 180)
 
-                // Direction filter
-                Picker("", selection: $devTools.messageDirectionFilter) {
-                    Text("All").tag(nil as MessageDirection?)
-                    Text("G ↓ H").tag(MessageDirection.guestToHost as MessageDirection?)
-                    Text("H ↑ G").tag(MessageDirection.hostToGuest as MessageDirection?)
+                // Direction filter buttons
+                HStack(spacing: 2) {
+                    directionFilterButton(nil, label: "All")
+                    directionFilterButton(.guestToHost, label: "G↓H")
+                    directionFilterButton(.hostToGuest, label: "H↑G")
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
 
                 // Search filter
                 HStack(spacing: 4) {
@@ -1598,7 +1627,7 @@ struct DevToolsMessagesView: View {
                 .padding(.vertical, 3)
                 .background(Color(nsColor: .textBackgroundColor))
                 .cornerRadius(4)
-                .frame(maxWidth: 150)
+                .frame(maxWidth: 140)
 
                 Spacer()
 
@@ -1728,6 +1757,32 @@ struct DevToolsMessagesView: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
     }
+
+    private func categoryFilterButton(_ category: MessageCategory?, label: String) -> some View {
+        Button(action: { devTools.messageCategoryFilter = category }) {
+            Text(label)
+                .font(.system(size: 10))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(devTools.messageCategoryFilter == category ? Color.accentColor : Color.clear)
+                .foregroundColor(devTools.messageCategoryFilter == category ? .white : .secondary)
+                .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func directionFilterButton(_ direction: MessageDirection?, label: String) -> some View {
+        Button(action: { devTools.messageDirectionFilter = direction }) {
+            Text(label)
+                .font(.system(size: 10))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(devTools.messageDirectionFilter == direction ? Color.accentColor : Color.clear)
+                .foregroundColor(devTools.messageDirectionFilter == direction ? .white : .secondary)
+                .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 /// Single message row view
@@ -1784,15 +1839,6 @@ struct DevToolsMessageRowView: View {
             }
 
             Spacer()
-
-            // Payload preview
-            if let payload = message.payload {
-                Text(payload.prefix(40).replacingOccurrences(of: "\n", with: " "))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(isSelected ? .white.opacity(0.7) : .secondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: 150, alignment: .trailing)
-            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)

@@ -14,7 +14,8 @@ struct SourceViewerPanel: View {
             FileTreeView(
                 nodes: viewModel.fileTree,
                 selectedFile: $viewModel.selectedFile,
-                isLoading: viewModel.isLoading
+                isLoading: viewModel.isLoading,
+                pathsToExpand: viewModel.pathsToExpand
             )
             .frame(minWidth: 180, maxWidth: 250)
 
@@ -27,16 +28,19 @@ struct SourceViewerPanel: View {
             .frame(minWidth: 300)
         }
         .task {
-            await viewModel.loadSourceMap()
-            // Check for pending navigation after load
+            await viewModel.loadSourceRoots()
             handlePendingNavigation()
         }
         .onAppear {
-            // Check for pending navigation on appear
             handlePendingNavigation()
         }
         .onChange(of: devTools.pendingSourceNavigation) { _, _ in
             handlePendingNavigation()
+        }
+        .onChange(of: devTools.guestAppSourcePath) { _, _ in
+            Task {
+                await viewModel.loadSourceRoots()
+            }
         }
     }
 
@@ -46,21 +50,15 @@ struct SourceViewerPanel: View {
         print("🔍 [SourceViewerPanel] Navigation triggered: \(nav.searchText)")
         print("   - fileName (from Babel): \(nav.fileName ?? "nil")")
         print("   - lineNumber (from Babel): \(nav.lineNumber ?? 0)")
-        print("   - files loaded: \(viewModel.files.count)")
 
         Task {
-            // If files not loaded yet, load them first
-            if viewModel.files.isEmpty {
-                print("⚠️ [SourceViewerPanel] Files not loaded, loading now...")
-                await viewModel.loadSourceMap()
+            if viewModel.fileTree.isEmpty {
+                await viewModel.loadSourceRoots()
             }
 
-            // Navigate using Babel-injected source location or search fallback
             viewModel.navigateToSource(
-                functionName: nav.searchText,
                 sourceFile: nav.fileName,
-                sourceLine: nav.lineNumber,
-                files: viewModel.files
+                sourceLine: nav.lineNumber
             )
             devTools.clearPendingSourceNavigation()
         }
@@ -71,13 +69,21 @@ struct SourceViewerPanel: View {
 
 @MainActor
 final class SourceViewerViewModel: ObservableObject {
-    @Published var files: [SourceFile] = []
     @Published var fileTree: [FileTreeNode] = []
     @Published var selectedFile: SourceFile? {
         didSet {
-            selectedContent = selectedFile?.content
-            // Clear highlight when manually selecting a file
-            if highlightLineNumber != nil {
+            if let file = selectedFile {
+                // Load content on demand
+                if file.content == nil {
+                    selectedContent = try? String(contentsOfFile: file.fullPath, encoding: .utf8)
+                } else {
+                    selectedContent = file.content
+                }
+            } else {
+                selectedContent = nil
+            }
+            // Clear highlight when manually selecting a file (not via navigation)
+            if !isNavigating && highlightLineNumber != nil {
                 highlightLineNumber = nil
             }
         }
@@ -86,153 +92,160 @@ final class SourceViewerViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var highlightLineNumber: Int?
+    /// Paths to expand in the file tree (set during navigation)
+    @Published var pathsToExpand: Set<String> = []
 
-    func loadSourceMap() async {
+    private var isNavigating = false
+
+    /// Source file extensions to include
+    private let sourceExtensions = Set(["ts", "tsx", "js", "jsx", "json", "css", "html", "md"])
+
+    /// Load two source roots: Guest app and Host
+    func loadSourceRoots() async {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            let projectFiles = try await MetroService.shared.getProjectFiles()
-            files = projectFiles
-            fileTree = FileTreeNode.buildTree(from: projectFiles)
-        } catch {
-            self.error = error.localizedDescription
+        var roots: [FileTreeNode] = []
+
+        // 1. Guest app root (from DevToolsManager)
+        if let guestPath = DevToolsManager.shared.guestAppSourcePath {
+            print("📁 [SourceViewer] Scanning guest root: Guest at \(guestPath)")
+
+            // Get the src directory if it exists, otherwise use the root
+            let srcPath = (guestPath as NSString).appendingPathComponent("src")
+            let scanPath = FileManager.default.fileExists(atPath: srcPath) ? srcPath : guestPath
+
+            if let guestNode = scanDirectory(at: scanPath, displayName: "Guest", rootPath: guestPath) {
+                roots.append(guestNode)
+            }
         }
+
+        // 2. Host root (fixed path)
+        let hostPath = DevToolsManager.hostSourcePath
+        print("📁 [SourceViewer] Scanning host root: \(hostPath)")
+        if let hostNode = scanDirectory(at: hostPath, displayName: "Host", rootPath: hostPath) {
+            roots.append(hostNode)
+        }
+
+        fileTree = roots
+        print("📁 [SourceViewer] Loaded \(roots.count) root(s)")
     }
 
-    /// Navigate to source - prefer direct file+line if available, otherwise search
-    func navigateToSource(functionName: String, sourceFile: String?, sourceLine: Int?, files: [SourceFile]) {
-        print("🔍 [SourceViewer] navigateToSource called:")
-        print("   - functionName: '\(functionName)'")
-        print("   - sourceFile: \(sourceFile ?? "nil")")
-        print("   - sourceLine: \(sourceLine ?? 0)")
-        print("   - files count: \(files.count)")
+    /// Scan a directory and build a tree node
+    private func scanDirectory(at path: String, displayName: String, rootPath: String) -> FileTreeNode? {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: path) else { return nil }
 
-        if files.isEmpty {
-            print("⚠️ [SourceViewer] No files loaded! Navigation cannot proceed.")
+        var children: [FileTreeNode] = []
+
+        if let contents = try? fm.contentsOfDirectory(atPath: path) {
+            for name in contents.sorted() {
+                // Skip hidden files and node_modules
+                if name.hasPrefix(".") || name == "node_modules" || name == "dist" || name == "build" {
+                    continue
+                }
+
+                let fullPath = (path as NSString).appendingPathComponent(name)
+                var isDir: ObjCBool = false
+                fm.fileExists(atPath: fullPath, isDirectory: &isDir)
+
+                if isDir.boolValue {
+                    // Recursively scan subdirectory
+                    if let subNode = scanDirectory(at: fullPath, displayName: name, rootPath: rootPath) {
+                        children.append(subNode)
+                    }
+                } else {
+                    // Check if it's a source file
+                    let ext = (name as NSString).pathExtension.lowercased()
+                    if sourceExtensions.contains(ext) {
+                        let relativePath = makeRelativePath(fullPath, relativeTo: rootPath, rootName: displayName)
+                        let file = SourceFile(fullPath: fullPath, content: nil)
+                        children.append(FileTreeNode(
+                            name: name,
+                            path: relativePath,
+                            isDirectory: false,
+                            children: [],
+                            file: file
+                        ))
+                    }
+                }
+            }
+        }
+
+        // Only return node if it has children (or is a root)
+        if children.isEmpty && path != rootPath {
+            return nil
+        }
+
+        let relativePath = makeRelativePath(path, relativeTo: rootPath, rootName: displayName)
+        return FileTreeNode(
+            name: displayName,
+            path: relativePath,
+            isDirectory: true,
+            children: children,
+            file: nil
+        )
+    }
+
+    /// Make a relative path for display
+    private func makeRelativePath(_ fullPath: String, relativeTo rootPath: String, rootName: String) -> String {
+        if fullPath == rootPath {
+            return rootName
+        }
+        let suffix = String(fullPath.dropFirst(rootPath.count + 1))
+        return "\(rootName)/\(suffix)"
+    }
+
+    /// Navigate to source file by path
+    func navigateToSource(sourceFile: String?, sourceLine: Int?) {
+        guard let filePath = sourceFile, let line = sourceLine else {
+            print("⚠️ [SourceViewer] No source location available")
             return
         }
 
-        // Priority 0: If we have exact file and line, navigate directly
-        if let filePath = sourceFile, let line = sourceLine {
-            // Find the file by path (match by relative path or full path)
-            for file in files {
-                if file.fullPath.hasSuffix(filePath) || file.relativePath == filePath || filePath.contains(file.name) {
-                    print("[SourceViewer] Direct navigation to \(file.relativePath):\(line)")
-                    selectedFile = file
-                    selectedContent = file.content
-                    highlightLineNumber = line
-                    return
-                }
-            }
-            print("[SourceViewer] File not found for path: \(filePath)")
+        print("🔍 [SourceViewer] navigateToSource: \(filePath):\(line)")
+
+        isNavigating = true
+        defer { isNavigating = false }
+
+        // Find the file in the tree and collect paths to expand
+        var pathsToExpandList: [String] = []
+        if let file = findFile(in: fileTree, fullPath: filePath, pathsToExpand: &pathsToExpandList) {
+            print("✅ [SourceViewer] Found file in tree, expanding \(pathsToExpandList.count) directories")
+            pathsToExpand = Set(pathsToExpandList)
+            selectedFile = file
+            highlightLineNumber = line
+            return
         }
 
-        // Fallback: Extract function name and search
-        let searchName = extractFunctionName(from: functionName) ?? functionName
-        print("🔍 [SourceViewer] Searching for function: '\(searchName)' in \(files.count) files")
-
-        // Priority 1: Search for exact function name definitions
-        for file in files {
-            guard let content = file.content else { continue }
-            let lines = content.components(separatedBy: .newlines)
-
-            for (index, line) in lines.enumerated() {
-                // Look for function definitions
-                if line.contains("function \(searchName)") ||
-                   line.contains("const \(searchName) =") ||
-                   line.contains("let \(searchName) =") ||
-                   line.contains("var \(searchName) =") ||
-                   line.contains("\(searchName) =") && line.contains("=>") ||
-                   line.contains("\(searchName): function") ||
-                   line.contains("\(searchName)(") && (line.contains("function") || line.contains("=>")) {
-                    print("✅ [SourceViewer] Found '\(searchName)' in \(file.relativePath) at line \(index + 1)")
-                    selectedFile = file
-                    selectedContent = content
-                    highlightLineNumber = index + 1
-                    return
-                }
-            }
-        }
-        print("⚠️ [SourceViewer] No exact definition found for function '\(searchName)', trying text match...")
-
-        // Priority 2: Try exact text match (for non-minified code)
-        for file in files {
-            guard let content = file.content else { continue }
-            let lines = content.components(separatedBy: .newlines)
-
-            for (index, line) in lines.enumerated() {
-                if line.contains(functionName) {
-                    selectedFile = file
-                    selectedContent = content
-                    highlightLineNumber = index + 1
-                    return
-                }
-            }
+        // Direct file system read as fallback
+        if FileManager.default.fileExists(atPath: filePath) {
+            print("✅ [SourceViewer] Direct file read: \(filePath):\(line)")
+            let directFile = SourceFile(fullPath: filePath, content: try? String(contentsOfFile: filePath, encoding: .utf8))
+            selectedFile = directFile
+            highlightLineNumber = line
+            return
         }
 
-        // Priority 3: Look for any identifiable strings in the search text
-        // Extract string literals from minified code like: y?.("蓝色按钮", ...
-        let stringLiterals = extractStringLiterals(from: functionName)
-        for literal in stringLiterals {
-            for file in files {
-                guard let content = file.content else { continue }
-                let lines = content.components(separatedBy: .newlines)
-
-                for (index, line) in lines.enumerated() {
-                    if line.contains(literal) {
-                        print("✅ [SourceViewer] Found string literal '\(literal)' in \(file.relativePath) at line \(index + 1)")
-                        selectedFile = file
-                        selectedContent = content
-                        highlightLineNumber = index + 1
-                        return
-                    }
-                }
-            }
-        }
-
-        print("❌ [SourceViewer] No match found for '\(functionName)' in any file")
+        print("❌ [SourceViewer] File not found: \(filePath)")
     }
 
-    /// Extract function name from search text
-    private func extractFunctionName(from text: String) -> String? {
-        // If it's already just a function name (no special chars except _)
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        if trimmed.range(of: "^[a-zA-Z_][a-zA-Z0-9_]*$", options: .regularExpression) != nil {
-            return trimmed
+    /// Find a file in the tree by full path, collecting directory paths along the way
+    private func findFile(in nodes: [FileTreeNode], fullPath: String, pathsToExpand: inout [String]) -> SourceFile? {
+        for node in nodes {
+            if let file = node.file, file.fullPath == fullPath {
+                return file
+            }
+            if node.isDirectory {
+                // Check if the file might be in this directory
+                if let found = findFile(in: node.children, fullPath: fullPath, pathsToExpand: &pathsToExpand) {
+                    // Found in this subtree - add this directory's path
+                    pathsToExpand.append(node.path)
+                    return found
+                }
+            }
         }
-
-        // Try to extract from patterns like "function name(" or "name =>"
-        if let match = trimmed.range(of: "function\\s+([a-zA-Z_][a-zA-Z0-9_]*)", options: .regularExpression) {
-            let funcPart = String(trimmed[match])
-            return funcPart.replacingOccurrences(of: "function ", with: "").trimmingCharacters(in: .whitespaces)
-        }
-
         return nil
-    }
-
-    /// Extract string literals from minified code
-    private func extractStringLiterals(from text: String) -> [String] {
-        var literals: [String] = []
-        // Match both single and double quoted strings
-        let patterns = ["\"([^\"]+)\"", "'([^']+)'"]
-
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern) {
-                let range = NSRange(text.startIndex..., in: text)
-                let matches = regex.matches(in: text, range: range)
-                for match in matches {
-                    if let stringRange = Range(match.range(at: 1), in: text) {
-                        let literal = String(text[stringRange])
-                        // Skip very short or Unicode escape sequences
-                        if literal.count > 2 && !literal.hasPrefix("\\u") {
-                            literals.append(literal)
-                        }
-                    }
-                }
-            }
-        }
-        return literals
     }
 }
 
@@ -242,6 +255,7 @@ struct FileTreeView: View {
     let nodes: [FileTreeNode]
     @Binding var selectedFile: SourceFile?
     let isLoading: Bool
+    let pathsToExpand: Set<String>
 
     @State private var expandedPaths: Set<String> = []
     @State private var focusedPath: String?
@@ -311,6 +325,17 @@ struct FileTreeView: View {
                             }
                         }
                     }
+                    .onChange(of: selectedFile?.fullPath) { _, newPath in
+                        // Scroll to selected file when it changes via navigation
+                        if let path = newPath,
+                           let node = findNodeByFullPath(path) {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    proxy.scrollTo(node.path, anchor: .center)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -321,6 +346,28 @@ struct FileTreeView: View {
                 expandedPaths.insert(node.path)
             }
         }
+        .onChange(of: pathsToExpand) { _, newPaths in
+            // Expand directories when navigation happens
+            if !newPaths.isEmpty {
+                expandedPaths.formUnion(newPaths)
+            }
+        }
+    }
+
+    /// Find a tree node by its file's full path
+    private func findNodeByFullPath(_ fullPath: String) -> FileTreeNode? {
+        func find(in nodes: [FileTreeNode]) -> FileTreeNode? {
+            for node in nodes {
+                if node.file?.fullPath == fullPath {
+                    return node
+                }
+                if let found = find(in: node.children) {
+                    return found
+                }
+            }
+            return nil
+        }
+        return find(in: nodes)
     }
 
     // Flattened visible nodes for navigation
@@ -917,12 +964,43 @@ class LineNumberTextView: NSTextView {
     var highlightedLine: Int? = nil
     var lastScrolledLine: Int? = nil
 
-    private let lineNumberWidth: CGFloat = 45
+    private let lineNumberWidth: CGFloat = 50
     private let lineNumberPadding: CGFloat = 8
     private let highlightColor = NSColor.orange.withAlphaComponent(0.2)
+    private var scrollObserver: NSObjectProtocol?
 
     override var textContainerOrigin: NSPoint {
         return NSPoint(x: lineNumberWidth + lineNumberPadding, y: 10)
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        setupScrollObserver()
+    }
+
+    private func setupScrollObserver() {
+        // Remove existing observer
+        if let observer = scrollObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+
+        // Observe scroll changes to redraw line numbers
+        if let scrollView = enclosingScrollView {
+            scrollObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView,
+                queue: .main
+            ) { [weak self] _ in
+                self?.needsDisplay = true
+            }
+            scrollView.contentView.postsBoundsChangedNotifications = true
+        }
+    }
+
+    deinit {
+        if let observer = scrollObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -934,8 +1012,9 @@ class LineNumberTextView: NSTextView {
 
         super.draw(dirtyRect)
 
-        // Draw line numbers on top
+        // Draw line numbers and separator on top (after super.draw to avoid being covered)
         drawLineNumbers()
+        drawSeparatorLine()
     }
 
     private func drawLineHighlight() {
@@ -1000,15 +1079,25 @@ class LineNumberTextView: NSTextView {
         // Reset clipping to draw in gutter area
         NSBezierPath(rect: bounds).setClip()
 
-        // Gutter background
+        // Gutter background - slightly darker than code background
         let gutterRect = NSRect(x: 0, y: visibleRect.origin.y, width: lineNumberWidth, height: visibleRect.height + 100)
         NSColor(red: 0.08, green: 0.08, blue: 0.1, alpha: 1.0).setFill()
         gutterRect.fill()
 
-        // Separator line
-        let separatorX = lineNumberWidth + 4
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawSeparatorLine() {
+        guard let scrollView = enclosingScrollView else { return }
+        let visibleRect = scrollView.documentVisibleRect
+
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: bounds).setClip()
+
+        // Separator line - at the right edge of gutter, bright enough to be visible
+        let separatorX = lineNumberWidth + 1
         let separatorRect = NSRect(x: separatorX, y: visibleRect.origin.y, width: 1, height: visibleRect.height + 100)
-        NSColor.separatorColor.withAlphaComponent(0.3).setFill()
+        NSColor(red: 0.4, green: 0.4, blue: 0.45, alpha: 1.0).setFill()
         separatorRect.fill()
 
         NSGraphicsContext.restoreGraphicsState()
@@ -1049,15 +1138,37 @@ class LineNumberTextView: NSTextView {
             .foregroundColor: lineNumberColor
         ]
 
+        // Highlighted line attributes (brighter)
+        let highlightedAttributes: [NSAttributedString.Key: Any] = [
+            .font: lineNumberFont,
+            .foregroundColor: NSColor.orange
+        ]
+
+        // Arrow marker for navigation target
+        let arrowAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .bold),
+            .foregroundColor: NSColor.orange
+        ]
+
         layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { [weak self] (rect, usedRect, container, range, stop) in
             guard let self = self else { return }
 
+            let isHighlighted = lineNumber == self.highlightedLine
+            let currentAttrs = isHighlighted ? highlightedAttributes : attributes
+
             let lineStr = "\(lineNumber)" as NSString
-            let size = lineStr.size(withAttributes: attributes)
+            let size = lineStr.size(withAttributes: currentAttrs)
             let y = rect.origin.y + self.textContainerOrigin.y + (rect.height - size.height) / 2
             let x = self.lineNumberWidth - size.width - 4
 
-            lineStr.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
+            // Draw arrow marker for highlighted line
+            if isHighlighted {
+                let arrow = "▶" as NSString
+                let arrowSize = arrow.size(withAttributes: arrowAttributes)
+                arrow.draw(at: NSPoint(x: 4, y: y + (size.height - arrowSize.height) / 2), withAttributes: arrowAttributes)
+            }
+
+            lineStr.draw(at: NSPoint(x: x, y: y), withAttributes: currentAttrs)
 
             // Check if this line fragment ends with newline
             let charRange = layoutManager.characterRange(forGlyphRange: range, actualGlyphRange: nil)

@@ -69,6 +69,17 @@ private class NativePerfTimer {
         }
 
         nlog("⏱️ [NativePerf] \(name): T+\(String(format: "%.0f", elapsed))ms (+\(String(format: "%.0f", delta))ms)")
+        
+        // Forward to DevTools
+        Task { @MainActor in
+            DevToolsManager.shared.logPerformance(
+                category: "Native",
+                name: name,
+                startTime: Date(),
+                duration: delta / 1000, // Duration of this step
+                details: ["totalTime": elapsed]
+            )
+        }
     }
 
     func summary() {
