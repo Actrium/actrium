@@ -256,6 +256,14 @@ struct UnifiedCanvasView: View {
                         Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        Button(action: {
+                            AppsManagerWindowController.shared.showWindow()
+                        }) {
+                            Label("Apps Manager", systemImage: "cpu")
+                        }
+                    }
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
