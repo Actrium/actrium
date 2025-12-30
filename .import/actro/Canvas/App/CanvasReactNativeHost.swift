@@ -69,17 +69,6 @@ private class NativePerfTimer {
         }
 
         nlog("⏱️ [NativePerf] \(name): T+\(String(format: "%.0f", elapsed))ms (+\(String(format: "%.0f", delta))ms)")
-        
-        // Forward to DevTools
-        Task { @MainActor in
-            DevToolsManager.shared.logPerformance(
-                category: "Native",
-                name: name,
-                startTime: Date(),
-                duration: delta / 1000, // Duration of this step
-                details: ["totalTime": elapsed]
-            )
-        }
     }
 
     func summary() {
@@ -118,7 +107,7 @@ final class CanvasReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelega
         let url = RCTBundleURLProvider.jsBundleURL(
             forBundleRoot: "index",
             packagerHost: "localhost:8082",
-            enableDev: true,
+            enableDev: true, // 保持 true 以支持热重载和调试，但我们禁用了 DevMenu UI
             enableMinification: false,
             inlineSourceMap: false
         )
@@ -228,6 +217,7 @@ final class CanvasReactNativeHost {
             // 我们用自己的 DevTools 代替
             if let devMenu = bridge.module(forName: "DevMenu") as? RCTDevMenu {
                 devMenu.hotkeysEnabled = false
+                
                 nlog("🔧 [Native] 已禁用 RN DevMenu 快捷键（使用我们的 DevTools）")
             }
             #endif
@@ -235,6 +225,9 @@ final class CanvasReactNativeHost {
             // 🔴 关键：在 macOS 上必须设置 sizeFlexibility 为 .none
             rctRootView.sizeFlexibility = .none
             rctRootView.backgroundColor = NSColor.clear
+            
+            // 禁用 RN 默认的右键菜单（Dev Menu），将右键功能还给业务应用
+            rctRootView.menu = nil
 
             nlog("🔧 [Native] 设置 sizeFlexibility = .none")
             NativePerfTimer.shared.mark("createRootView 返回")
