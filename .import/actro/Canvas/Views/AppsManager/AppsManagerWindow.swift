@@ -30,7 +30,7 @@ final class AppsManagerWindowController {
             defer: false
         )
 
-        window.title = "Apps Manager"
+        window.title = "Task Manager"
         window.contentView = hostingView
         window.center()
         window.setFrameAutosaveName("AppsManagerWindow")
@@ -91,37 +91,10 @@ struct AppsManagerView: View {
                 .font(.system(size: 16))
                 .foregroundColor(.secondary)
 
-            Text("Apps Manager")
+            Text("Task Manager")
                 .font(.system(size: 13, weight: .semibold))
 
             Spacer()
-
-            // Multi-process mode indicator
-            if processManager.isMultiProcessEnabled {
-                Text("Multi-Process")
-                    .font(.system(size: 10))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.green.opacity(0.8))
-                    .cornerRadius(4)
-            } else {
-                Text("Single Process")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.gray.opacity(0.3))
-                    .cornerRadius(4)
-            }
-
-            // Refresh button
-            Button(action: { refreshTrigger.toggle() }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12))
-            }
-            .buttonStyle(.borderless)
-            .help("Refresh")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -167,21 +140,20 @@ struct AppsManagerView: View {
 
     private var footerView: some View {
         let rows = buildProcessRows()
-        let tabCount = rows.filter { !$0.isMainProcess }.count
 
         return HStack {
-            // Process count
-            Text("\(tabCount) tab\(tabCount == 1 ? "" : "s")")
+            // Tab count
+            Text("\(rows.count) app\(rows.count == 1 ? "" : "s")")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
 
             Spacer()
 
-            // End process button
+            // End task button
             Button(action: endSelectedProcess) {
-                Text("End Process")
+                Text("End Task")
             }
-            .disabled(selectedRowId == nil || isMainProcessSelected())
+            .disabled(selectedRowId == nil)
             .keyboardShortcut(.delete, modifiers: [])
         }
         .padding(.horizontal, 16)
@@ -194,27 +166,12 @@ struct AppsManagerView: View {
     private func buildProcessRows() -> [ProcessRowData] {
         var rows: [ProcessRowData] = []
 
-        // Main browser process (always first)
-        let mainPid = getpid()
-        let mainMemory = getMainProcessMemory()
-        let mainId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        rows.append(ProcessRowData(
-            id: mainId,
-            name: "Browser (Main)",
-            subtitle: "Canvas",
-            pid: mainPid,
-            memoryMB: mainMemory,
-            cpuPercent: 0,
-            status: "Running",
-            isMainProcess: true
-        ))
-
         // Get tabs from active BrowserViewModel
         guard let viewModel = devTools.activeBrowserViewModel else {
             return rows
         }
 
-        // Add all tabs
+        // Add all tabs (Apps)
         for tab in viewModel.tabs {
             let tabId = tab.id
 
@@ -245,20 +202,18 @@ struct AppsManagerView: View {
                     pid: processInfo.pid ?? 0,
                     memoryMB: memoryMB,
                     cpuPercent: cpuTime,
-                    status: statusText,
-                    isMainProcess: false
+                    status: statusText
                 ))
             } else {
                 // Single-process mode or no process data yet
                 rows.append(ProcessRowData(
                     id: tabId,
                     name: tab.title.isEmpty ? "New Tab" : tab.title,
-                    subtitle: "Shared",
+                    subtitle: nil,
                     pid: 0,
                     memoryMB: 0,
                     cpuPercent: 0,
-                    status: "Running",
-                    isMainProcess: false
+                    status: "Running"
                 ))
             }
         }
@@ -266,28 +221,8 @@ struct AppsManagerView: View {
         return rows
     }
 
-    private func isMainProcessSelected() -> Bool {
-        guard let selectedId = selectedRowId else { return false }
-        return selectedId == UUID(uuidString: "00000000-0000-0000-0000-000000000000")
-    }
-
-    private func getMainProcessMemory() -> Double {
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
-        let result = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-            }
-        }
-        if result == KERN_SUCCESS {
-            return Double(info.resident_size) / 1_048_576.0
-        }
-        return 0
-    }
-
     private func endSelectedProcess() {
-        guard let processId = selectedRowId,
-              !isMainProcessSelected() else { return }
+        guard let processId = selectedRowId else { return }
 
         // Close the tab through BrowserViewModel
         if let viewModel = devTools.activeBrowserViewModel {
@@ -366,17 +301,10 @@ private struct ProcessRowView: View {
     }
 
     private var processIcon: some View {
-        Group {
-            if row.isMainProcess {
-                Image(systemName: "app.fill")
-                    .foregroundColor(.blue)
-            } else {
-                Image(systemName: "doc.text")
-                    .foregroundColor(.green)
-            }
-        }
-        .font(.system(size: 14))
-        .frame(width: 20)
+        Image(systemName: "app.fill")
+            .foregroundColor(.blue)
+            .font(.system(size: 14))
+            .frame(width: 20)
     }
 
     private func statusColor(for status: String) -> Color {
@@ -413,7 +341,6 @@ struct ProcessRowData: Identifiable, Hashable {
     let memoryMB: Double
     let cpuPercent: Double
     let status: String
-    let isMainProcess: Bool
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
