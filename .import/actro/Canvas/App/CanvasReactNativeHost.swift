@@ -59,11 +59,12 @@ final class CanvasReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelega
     override func bundleURL() -> URL? {
         #if DEBUG
         // 开发时强制走 Metro（支持热重载）；Debug 环境不回退到离线 actr.jsbundle（避免落到过期 bundle 导致"白屏无渲染"）
-        // 直接使用 localhost:8082，避免 RCTBundleURLProvider 返回空 hostname 的问题
-        // 端口 8082 与 Canvas/Subsystem 的 dev.ts 默认配置保持一致
+        // Metro 端口可通过环境变量 RCT_METRO_PORT 配置，默认 8081
+        let metroPort = ProcessInfo.processInfo.environment["RCT_METRO_PORT"] ?? "8081"
+        let host = "127.0.0.1:\(metroPort)"  // 避免 localhost 触发 mDNS
         let url = RCTBundleURLProvider.jsBundleURL(
             forBundleRoot: "index",
-            packagerHost: "localhost:8082",
+            packagerHost: host,
             enableDev: true, // 保持 true 以支持热重载和调试，但我们禁用了 DevMenu UI
             enableMinification: false,
             inlineSourceMap: false
