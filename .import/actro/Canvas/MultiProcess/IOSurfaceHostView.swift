@@ -297,7 +297,8 @@ class IOSurfaceDisplayView: NSView {
 
 /// A view that displays tab content from a renderer process
 struct MultiProcessTabView: View {
-    let tabId: UUID
+    let tab: Tab
+    let containerSize: CGSize
     @ObservedObject var processManager = TabProcessManager.shared
 
     @State private var surfaceID: UInt32 = 0
@@ -306,29 +307,29 @@ struct MultiProcessTabView: View {
     @State private var activeTabId: UUID?  // The actual tabId used for the process
     @State private var crashReason: String?  // Crash reason if process crashed
 
+    private var tabId: UUID { tab.id }
+
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                if let reason = crashReason {
-                    crashedView(reason: reason)
-                } else if surfaceID != 0, let activeId = activeTabId {
-                    IOSurfaceHostView(
-                        surfaceID: surfaceID,
-                        width: geometry.size.width,
-                        height: geometry.size.height,
-                        tabId: activeId  // Use the actual process tabId
-                    )
-                } else if isLoading {
-                    loadingView
-                } else if let error = errorMessage {
-                    errorView(error)
-                } else {
-                    placeholderView
-                }
+        ZStack {
+            if let reason = crashReason {
+                crashedView(reason: reason)
+            } else if surfaceID != 0, let activeId = activeTabId {
+                IOSurfaceHostView(
+                    surfaceID: surfaceID,
+                    width: containerSize.width,
+                    height: containerSize.height,
+                    tabId: activeId  // Use the actual process tabId
+                )
+            } else if isLoading {
+                loadingView
+            } else if let error = errorMessage {
+                errorView(error)
+            } else {
+                placeholderView
             }
-            .onChange(of: geometry.size) { _, newSize in
-                updateViewportSize(newSize)
-            }
+        }
+        .onChange(of: containerSize) { _, newSize in
+            updateViewportSize(newSize)
         }
         .onAppear {
             startRenderer()
@@ -459,10 +460,17 @@ struct MultiProcessTabView: View {
 
         Task {
             do {
+                // Build config from actual tab data
                 let config = TabXPCConfig(
                     tabId: processTabId.uuidString,
-                    title: "Test Tab",
-                    backgroundColor: "#1a1a2e"
+                    title: tab.title.isEmpty ? "New Tab" : tab.title,
+                    htmlContent: tab.htmlContent,
+                    unifiedScript: tab.unifiedScript,
+                    leftPanelScript: tab.leftPanelScript,
+                    rightPanelScript: tab.rightPanelScript,
+                    backgroundColor: tab.backgroundColor ?? "#1a1a2e",
+                    leftPanelVisible: true,
+                    rightPanelVisible: tab.rightPanelDefaultVisible
                 )
 
                 let processInfo = try await processManager.spawnProcess(for: processTabId, config: config)
@@ -513,6 +521,9 @@ struct MultiProcessTabView: View {
 // MARK: - Preview
 
 #Preview {
-    MultiProcessTabView(tabId: UUID())
-        .frame(width: 800, height: 600)
+    MultiProcessTabView(
+        tab: Tab(title: "Preview Tab"),
+        containerSize: CGSize(width: 800, height: 600)
+    )
+    .frame(width: 800, height: 600)
 }

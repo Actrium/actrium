@@ -53,7 +53,7 @@ struct DevToolsMonitorView: View {
     @State private var frozenSnapshot: DevToolsEngineMonitorSnapshot?
     @State private var showDetails: Bool = false
     @State private var showMultiProcessTest: Bool = false
-    @State private var testTabId: UUID = UUID()
+    @State private var testTab: Tab = Tab(title: "Test Tab")
 
     private var snapshot: DevToolsEngineMonitorSnapshot? {
         isFrozen ? frozenSnapshot : devTools.engineMonitorSnapshot
@@ -147,7 +147,7 @@ struct DevToolsMonitorView: View {
 
             // Test button for multi-process rendering
             Button(action: {
-                testTabId = UUID()
+                testTab = Tab(title: "Test Tab")
                 showMultiProcessTest = true
             }) {
                 Label("Test", systemImage: "play.circle")
@@ -184,8 +184,11 @@ struct DevToolsMonitorView: View {
             Divider()
 
             // Content - the IOSurface view
-            MultiProcessTabView(tabId: testTabId)
-                .frame(minWidth: 600, minHeight: 400)
+            MultiProcessTabView(
+                tab: testTab,
+                containerSize: CGSize(width: 600, height: 400)
+            )
+            .frame(minWidth: 600, minHeight: 400)
         }
         .frame(width: 700, height: 500)
     }
