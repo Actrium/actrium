@@ -135,28 +135,26 @@ struct DevToolsMonitorView: View {
             Divider()
                 .frame(height: 16)
 
-            // Multi-process status indicator
+            // Multi-process mode indicator
             HStack(spacing: 4) {
                 Circle()
-                    .fill(TabProcessManager.shared.isMultiProcessEnabled ? Color.green : Color.gray)
+                    .fill(Color.green)
                     .frame(width: 6, height: 6)
-                Text(TabProcessManager.shared.isMultiProcessEnabled ? "Multi-Process" : "Single-Process")
+                Text("Multi-Process")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
 
             // Test button for multi-process rendering
-            if TabProcessManager.shared.isMultiProcessEnabled {
-                Button(action: {
-                    testTabId = UUID()
-                    showMultiProcessTest = true
-                }) {
-                    Label("Test", systemImage: "play.circle")
-                        .font(.system(size: 10))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            Button(action: {
+                testTabId = UUID()
+                showMultiProcessTest = true
+            }) {
+                Label("Test", systemImage: "play.circle")
+                    .font(.system(size: 10))
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -209,10 +207,8 @@ struct DevToolsMonitorView: View {
                 // Secondary metrics cards (flow layout)
                 secondaryMetricsGrid(row: row)
 
-                // Task Manager section (multi-process)
-                if TabProcessManager.shared.isMultiProcessEnabled {
-                    taskManagerSection
-                }
+                // Task Manager section
+                taskManagerSection
 
                 // Expandable details
                 DisclosureGroup("Details", isExpanded: $showDetails) {
