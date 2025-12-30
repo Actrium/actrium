@@ -307,6 +307,9 @@ class TabProcessManager: ObservableObject {
 
             logger.info("TabProcessManager: Process launched with PID \(process.processIdentifier)")
 
+            // Send full config via stdin as JSON
+            sendConfig(config, to: inputPipe)
+
             // Read IOSurface ID from stdout
             let surfaceID = try await readSurfaceID(from: outputPipe, processInfo: processInfo)
             processInfo.surfaceID = surfaceID
@@ -318,6 +321,19 @@ class TabProcessManager: ObservableObject {
             processInfo.state = .crashed(reason: error.localizedDescription)
             processes.removeValue(forKey: tabId)
             throw error
+        }
+    }
+
+    /// Send the full config to the helper process via stdin
+    private func sendConfig(_ config: TabXPCConfig, to pipe: Pipe) {
+        guard let json = config.toJSON() else {
+            logger.error("TabProcessManager: Failed to serialize config to JSON")
+            return
+        }
+        let message = "CONFIG:\(json)\n"
+        if let data = message.data(using: .utf8) {
+            pipe.fileHandleForWriting.write(data)
+            logger.debug("TabProcessManager: Sent config to renderer (\(message.count) chars)")
         }
     }
 
