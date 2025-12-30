@@ -443,10 +443,16 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             const data = contentType.includes('application/json')
               ? await response.json()
               : await response.text();
+            // Extract response headers for DevTools
+            const responseHeaders: Record<string, string> = {};
+            response.headers.forEach((value, key) => {
+              responseHeaders[key] = value;
+            });
             const responsePayload = {
               requestId,
               ok: response.ok,
               status: response.status,
+              headers: responseHeaders,
               data,
             };
             logDevToolsMessage('hostToGuest', 'APP_FETCH_RESPONSE', responsePayload, tab.id);
