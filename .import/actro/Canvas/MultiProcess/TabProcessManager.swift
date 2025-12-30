@@ -246,7 +246,7 @@ class TabProcessManager: ObservableObject {
 
     /// Clear all pre-warmed processes from the pool
     func clearProcessPool() {
-        logger.info("TabProcessManager: Clearing process pool (\(processPool.count) processes)")
+        logger.info("TabProcessManager: Clearing process pool (\(self.processPool.count) processes)")
         for processInfo in processPool {
             processInfo.process?.terminate()
         }
