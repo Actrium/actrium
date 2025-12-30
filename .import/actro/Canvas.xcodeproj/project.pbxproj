@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000609867125B5E3CF3549A4 /* libPods-CanvasTabRenderer.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 668935376CF3B6D12F0B602F /* libPods-CanvasTabRenderer.a */; };
 		8E5B03874CCE978352975327 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
 		B3E78A742F03A00C001F9589 /* CanvasTabRenderer.app in Embed Helper Apps */ = {isa = PBXBuildFile; fileRef = B3E78A402F039DBE001F9589 /* CanvasTabRenderer.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -95,7 +96,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.debug.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.debug.xcconfig"; sourceTree = "<group>"; };
 		5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		668935376CF3B6D12F0B602F /* libPods-CanvasTabRenderer.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTabRenderer.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.release.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.release.xcconfig"; sourceTree = "<group>"; };
 		8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Canvas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		988CAD86E1193EE66F00D50D /* Pods-Canvas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.release.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.release.xcconfig"; sourceTree = "<group>"; };
 		B38A7F072ECA222600B4185F /* Gemfile */ = {isa = PBXFileReference; lastKnownFileType = text; path = Gemfile; sourceTree = "<group>"; };
@@ -181,6 +185,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				000609867125B5E3CF3549A4 /* libPods-CanvasTabRenderer.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -205,6 +210,7 @@
 			isa = PBXGroup;
 			children = (
 				8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */,
+				668935376CF3B6D12F0B602F /* libPods-CanvasTabRenderer.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -215,6 +221,8 @@
 				F75455EB7E76C1DE30CF29D2 /* Pods-Canvas.debug.xcconfig */,
 				988CAD86E1193EE66F00D50D /* Pods-Canvas.release.xcconfig */,
 				B38A7F072ECA222600B4185F /* Gemfile */,
+				2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */,
+				7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -326,9 +334,11 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = B3E78A602F039DBF001F9589 /* Build configuration list for PBXNativeTarget "CanvasTabRenderer" */;
 			buildPhases = (
+				C8AEF82AF734D456977BC244 /* [CP] Check Pods Manifest.lock */,
 				B3E78A3C2F039DBE001F9589 /* Sources */,
 				B3E78A3D2F039DBE001F9589 /* Frameworks */,
 				B3E78A3E2F039DBE001F9589 /* Resources */,
+				B8906E75E9C19D6C7116EB03 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -550,6 +560,45 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -e\n\n# 生成离线 actr.jsbundle（ActrApp）并写入 .app/Contents/Resources\n# 当 Metro 不可用时，Release 会从 actr.jsbundle 启动。\n# 注意：不要叫 main.jsbundle，避免与 RN 默认 bundling 产物重名导致 Xcode “Multiple commands produce …/main.jsbundle”。\n\nif [ \"${SKIP_ACTR_BUNDLE:-0}\" = \"1\" ]; then\n  echo \"[actr] SKIP_ACTR_BUNDLE=1，跳过 bundling\"\n  exit 0\nfi\n\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  echo \"[actr] Debug build：跳过 bundling（使用 Metro）\"\n  exit 0\nfi\n\nHOST_ROOT=\"${SRCROOT}/Subsystem\"\nENTRY_FILE=\"index.ts\"\nOUT_DIR=\"${CONFIGURATION_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nBUNDLE_OUTPUT=\"${OUT_DIR}/actr.jsbundle\"\n\nif [ ! -d \"$HOST_ROOT\" ]; then\n  echo \"error: actr-host not found: $HOST_ROOT\" >&2\n  exit 1\nfi\n\nmkdir -p \"$OUT_DIR\"\n\nDEV_FLAG=false\n\ncd \"$HOST_ROOT\"\n/usr/bin/env node ./node_modules/@react-native-community/cli/build/bin.js bundle \\\n  --platform macos \\\n  --dev $DEV_FLAG \\\n  --entry-file \"$ENTRY_FILE\" \\\n  --bundle-output \"$BUNDLE_OUTPUT\" \\\n  --assets-dest \"$OUT_DIR\"\n\necho \"[actr] Bundled ActrApp -> $BUNDLE_OUTPUT\"\n";
+			showEnvVarsInLog = 0;
+		};
+		B8906E75E9C19D6C7116EB03 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		C8AEF82AF734D456977BC244 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-CanvasTabRenderer-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -930,6 +979,7 @@
 		};
 		B3E78A612F039DBF001F9589 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -966,6 +1016,7 @@
 		};
 		B3E78A622F039DBF001F9589 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
