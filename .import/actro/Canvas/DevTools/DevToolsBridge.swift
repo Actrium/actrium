@@ -53,9 +53,7 @@ class DevToolsBridge: RCTEventEmitter {
     /// Set up the pause toggle callback from DevTools UI
     @objc
     func registerPauseHandler() {
-        print("[DevToolsBridge] registerPauseHandler called")
         DispatchQueue.main.asyncAfter(deadline: .now()) {
-            print("[DevToolsBridge] Setting up callbacks")
             DevToolsManager.shared.onTogglePause = { [weak self] in
                 self?.emitTogglePause()
             }
@@ -63,13 +61,11 @@ class DevToolsBridge: RCTEventEmitter {
                 self?.emitToggleInspect()
             }
             DevToolsManager.shared.onSelectNodeFromTree = { [weak self] nodeId in
-                print("[DevToolsBridge] onSelectNodeFromTree callback invoked for nodeId: \(nodeId)")
                 self?.emitSelectNode(nodeId)
             }
             DevToolsManager.shared.onToggleRNInspector = { [weak self] in
                 self?.emitToggleRNInspector()
             }
-            print("[DevToolsBridge] Callbacks set up complete")
         }
     }
 
@@ -97,6 +93,16 @@ class DevToolsBridge: RCTEventEmitter {
                 let tree = self.parseTreeNode(dict)
                 DevToolsManager.shared.componentTree = tree
             }
+        }
+    }
+
+    // MARK: - Engine Monitor
+
+    /// Update engine monitor snapshot (polled from Host and pushed via RN bridge)
+    @objc
+    func updateEngineMonitor(_ snapshotJson: String?) {
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
+            DevToolsManager.shared.updateEngineMonitorSnapshot(snapshotJson)
         }
     }
 
@@ -263,12 +269,9 @@ class DevToolsBridge: RCTEventEmitter {
 
     /// Emit request to select a node in RN (for Inspect click)
     private func emitSelectNode(_ nodeId: String) {
-        print("[DevToolsBridge] emitSelectNode called with nodeId: \(nodeId), hasListeners: \(hasListeners)")
         if hasListeners {
             sendEvent(withName: "onSelectNode", body: ["nodeId": nodeId])
-            print("[DevToolsBridge] Event sent successfully")
         } else {
-            print("[DevToolsBridge] No listeners, event not sent")
         }
     }
 
@@ -279,12 +282,10 @@ class DevToolsBridge: RCTEventEmitter {
     }
 
     override func startObserving() {
-        print("[DevToolsBridge] startObserving called")
         hasListeners = true
     }
 
     override func stopObserving() {
-        print("[DevToolsBridge] stopObserving called")
         hasListeners = false
     }
 

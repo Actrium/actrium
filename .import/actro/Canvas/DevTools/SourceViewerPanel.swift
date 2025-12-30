@@ -47,9 +47,6 @@ struct SourceViewerPanel: View {
     private func handlePendingNavigation() {
         guard let nav = devTools.pendingSourceNavigation else { return }
 
-        print("🔍 [SourceViewerPanel] Navigation triggered: \(nav.searchText)")
-        print("   - fileName (from Babel): \(nav.fileName ?? "nil")")
-        print("   - lineNumber (from Babel): \(nav.lineNumber ?? 0)")
 
         Task {
             if viewModel.fileTree.isEmpty {
@@ -109,7 +106,6 @@ final class SourceViewerViewModel: ObservableObject {
 
         // 1. Guest app root (from DevToolsManager)
         if let guestPath = DevToolsManager.shared.guestAppSourcePath {
-            print("📁 [SourceViewer] Scanning guest root: Guest at \(guestPath)")
 
             // Get the src directory if it exists, otherwise use the root
             let srcPath = (guestPath as NSString).appendingPathComponent("src")
@@ -122,13 +118,11 @@ final class SourceViewerViewModel: ObservableObject {
 
         // 2. Host root (fixed path)
         let hostPath = DevToolsManager.hostSourcePath
-        print("📁 [SourceViewer] Scanning host root: \(hostPath)")
         if let hostNode = scanDirectory(at: hostPath, displayName: "Host", rootPath: hostPath) {
             roots.append(hostNode)
         }
 
         fileTree = roots
-        print("📁 [SourceViewer] Loaded \(roots.count) root(s)")
     }
 
     /// Scan a directory and build a tree node
@@ -199,11 +193,9 @@ final class SourceViewerViewModel: ObservableObject {
     /// Navigate to source file by path
     func navigateToSource(sourceFile: String?, sourceLine: Int?) {
         guard let filePath = sourceFile, let line = sourceLine else {
-            print("⚠️ [SourceViewer] No source location available")
             return
         }
 
-        print("🔍 [SourceViewer] navigateToSource: \(filePath):\(line)")
 
         isNavigating = true
         defer { isNavigating = false }
@@ -211,7 +203,6 @@ final class SourceViewerViewModel: ObservableObject {
         // Find the file in the tree and collect paths to expand
         var pathsToExpandList: [String] = []
         if let file = findFile(in: fileTree, fullPath: filePath, pathsToExpand: &pathsToExpandList) {
-            print("✅ [SourceViewer] Found file in tree, expanding \(pathsToExpandList.count) directories")
             pathsToExpand = Set(pathsToExpandList)
             selectedFile = file
             highlightLineNumber = line
@@ -220,14 +211,12 @@ final class SourceViewerViewModel: ObservableObject {
 
         // Direct file system read as fallback
         if FileManager.default.fileExists(atPath: filePath) {
-            print("✅ [SourceViewer] Direct file read: \(filePath):\(line)")
             let directFile = SourceFile(fullPath: filePath, content: try? String(contentsOfFile: filePath, encoding: .utf8))
             selectedFile = directFile
             highlightLineNumber = line
             return
         }
 
-        print("❌ [SourceViewer] File not found: \(filePath)")
     }
 
     /// Find a file in the tree by full path, collecting directory paths along the way
