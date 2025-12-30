@@ -190,11 +190,10 @@ class TabProcessManager: ObservableObject {
             processInfo.inputPipe = inputPipe
 
             process.terminationHandler = { [weak self, weak processInfo] _ in
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     // Remove from pool if it terminates
-                    if let info = processInfo {
-                        self?.processPool.removeAll { $0.tabId == info.tabId }
-                    }
+                    guard let self = self, let info = processInfo else { return }
+                    self.processPool.removeAll { $0.tabId == info.tabId }
                 }
             }
 
