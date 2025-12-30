@@ -340,56 +340,116 @@ struct DevToolsMonitorView: View {
 
     private var taskManagerSection: some View {
         DisclosureGroup("Task Manager", isExpanded: $showTaskManager) {
-            VStack(spacing: 0) {
-                // Header row
-                HStack(spacing: 0) {
-                    Text("Tab")
-                        .frame(width: 120, alignment: .leading)
-                    Text("PID")
-                        .frame(width: 60, alignment: .trailing)
-                    Text("Memory")
-                        .frame(width: 80, alignment: .trailing)
-                    Text("CPU")
-                        .frame(width: 60, alignment: .trailing)
-                    Text("Status")
-                        .frame(width: 80, alignment: .center)
-                    Spacer()
-                    Text("Action")
-                        .frame(width: 60, alignment: .center)
-                }
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color(nsColor: .controlBackgroundColor))
+            VStack(spacing: 8) {
+                // Process Pool Status Bar
+                processPoolStatusBar
 
-                Divider()
+                // Process table
+                VStack(spacing: 0) {
+                    // Header row
+                    HStack(spacing: 0) {
+                        Text("Tab")
+                            .frame(width: 120, alignment: .leading)
+                        Text("PID")
+                            .frame(width: 60, alignment: .trailing)
+                        Text("Memory")
+                            .frame(width: 80, alignment: .trailing)
+                        Text("CPU")
+                            .frame(width: 60, alignment: .trailing)
+                        Text("Status")
+                            .frame(width: 80, alignment: .center)
+                        Spacer()
+                        Text("Action")
+                            .frame(width: 60, alignment: .center)
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(nsColor: .controlBackgroundColor))
 
-                // Process rows
-                let processes = Array(TabProcessManager.shared.processes.values)
-                if processes.isEmpty {
-                    Text("No tab processes running")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                } else {
-                    ForEach(processes, id: \.tabId) { processInfo in
-                        TaskManagerRow(processInfo: processInfo)
-                        Divider()
+                    Divider()
+
+                    // Process rows
+                    let processes = Array(TabProcessManager.shared.processes.values)
+                    if processes.isEmpty {
+                        Text("No tab processes running")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    } else {
+                        ForEach(processes, id: \.tabId) { processInfo in
+                            TaskManagerRow(processInfo: processInfo)
+                            Divider()
+                        }
                     }
                 }
+                .background(Color(nsColor: .textBackgroundColor))
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                )
             }
-            .background(Color(nsColor: .textBackgroundColor))
-            .cornerRadius(6)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-            )
         }
         .font(.system(size: 11, weight: .medium))
         .padding(8)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        .cornerRadius(6)
+    }
+
+    private var processPoolStatusBar: some View {
+        HStack(spacing: 12) {
+            // Pool status
+            HStack(spacing: 4) {
+                Image(systemName: "cube.box")
+                    .font(.system(size: 10))
+                Text("Process Pool")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundColor(.secondary)
+
+            // Pool toggle
+            Toggle("", isOn: Binding(
+                get: { TabProcessManager.shared.isPoolingEnabled },
+                set: { TabProcessManager.shared.isPoolingEnabled = $0 }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+
+            Spacer()
+
+            // Warm up button
+            Button(action: {
+                TabProcessManager.shared.warmUpProcessPool()
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "flame")
+                    Text("Warm Up")
+                }
+                .font(.system(size: 10))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            // Kill all button
+            Button(action: {
+                TabProcessManager.shared.terminateAllProcesses()
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "xmark.circle")
+                    Text("Kill All")
+                }
+                .font(.system(size: 10))
+                .foregroundColor(.red)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         .cornerRadius(6)
     }
 

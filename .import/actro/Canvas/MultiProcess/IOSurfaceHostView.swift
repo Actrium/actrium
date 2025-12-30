@@ -304,11 +304,14 @@ struct MultiProcessTabView: View {
     @State private var isLoading: Bool = true
     @State private var errorMessage: String?
     @State private var activeTabId: UUID?  // The actual tabId used for the process
+    @State private var crashReason: String?  // Crash reason if process crashed
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                if surfaceID != 0, let activeId = activeTabId {
+                if let reason = crashReason {
+                    crashedView(reason: reason)
+                } else if surfaceID != 0, let activeId = activeTabId {
                     IOSurfaceHostView(
                         surfaceID: surfaceID,
                         width: geometry.size.width,
@@ -338,7 +341,12 @@ struct MultiProcessTabView: View {
                 refreshSurface()
             }
         }
-        // Refresh timer is no longer needed - IOSurface updates are handled by CALayer
+        .onReceive(NotificationCenter.default.publisher(for: .tabRendererCrashed)) { notification in
+            if let notifTabId = notification.userInfo?["tabId"] as? UUID, notifTabId == activeTabId {
+                let reason = notification.userInfo?["reason"] as? String ?? "Unknown error"
+                handleCrash(reason: reason)
+            }
+        }
     }
 
     private var loadingView: some View {
@@ -382,12 +390,72 @@ struct MultiProcessTabView: View {
         }
     }
 
+    private func crashedView(reason: String) -> some View {
+        VStack(spacing: 16) {
+            // Sad tab icon
+            ZStack {
+                Circle()
+                    .fill(Color.gray.opacity(0.1))
+                    .frame(width: 80, height: 80)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(.orange)
+            }
+
+            Text("This tab has crashed")
+                .font(.system(size: 16, weight: .semibold))
+
+            Text(reason)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+                .lineLimit(3)
+
+            Button(action: {
+                reloadAfterCrash()
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Reload Tab")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+
+            Text("The renderer process terminated unexpectedly.\nReloading will restart it in a new process.")
+                .font(.system(size: 10))
+                .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func handleCrash(reason: String) {
+        crashReason = reason
+        surfaceID = 0
+        isLoading = false
+    }
+
+    private func reloadAfterCrash() {
+        crashReason = nil
+        surfaceID = 0
+        activeTabId = nil
+        startRenderer()
+    }
+
     private func startRenderer() {
         guard processManager.isMultiProcessEnabled else {
             errorMessage = "Multi-process mode not available"
             isLoading = false
             return
         }
+
+        // Clear any previous crash state
+        crashReason = nil
 
         isLoading = true
         errorMessage = nil

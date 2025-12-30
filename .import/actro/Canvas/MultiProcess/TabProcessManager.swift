@@ -83,15 +83,175 @@ class TabProcessManager: ObservableObject {
             .appendingPathComponent("CanvasTabRenderer.app")
     }
 
+    // MARK: - Process Pool
+
+    /// Pre-warmed processes ready for immediate use
+    private var processPool: [TabProcessInfo] = []
+
+    /// Maximum number of pre-warmed processes to keep
+    private let maxPoolSize: Int = 2
+
+    /// Whether process pooling is enabled
+    @Published var isPoolingEnabled: Bool = true
+
+    /// Memory pressure source for responding to low memory
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
+
     private init() {
         // Check if helper app exists
         if let path = helperAppPath, FileManager.default.fileExists(atPath: path.path) {
             logger.info("TabProcessManager: Helper app found at \(path.path)")
             isMultiProcessEnabled = true
+            setupMemoryPressureHandler()
         } else {
             logger.info("TabProcessManager: Helper app not found, multi-process disabled")
             isMultiProcessEnabled = false
         }
+    }
+
+    // MARK: - Memory Pressure Handling
+
+    private func setupMemoryPressureHandler() {
+        memoryPressureSource = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: .main
+        )
+
+        memoryPressureSource?.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            let event = self.memoryPressureSource?.data ?? []
+
+            if event.contains(.critical) {
+                logger.warning("TabProcessManager: Critical memory pressure - terminating pool and background tabs")
+                self.handleCriticalMemoryPressure()
+            } else if event.contains(.warning) {
+                logger.warning("TabProcessManager: Memory pressure warning - clearing process pool")
+                self.handleMemoryPressureWarning()
+            }
+        }
+
+        memoryPressureSource?.resume()
+    }
+
+    private func handleMemoryPressureWarning() {
+        // Clear the process pool to free memory
+        clearProcessPool()
+    }
+
+    private func handleCriticalMemoryPressure() {
+        // Clear pool
+        clearProcessPool()
+
+        // Notify that memory is critical (UI can choose to show warnings)
+        NotificationCenter.default.post(
+            name: .memoryPressureCritical,
+            object: nil
+        )
+    }
+
+    /// Warm up the process pool with ready-to-use helper processes
+    func warmUpProcessPool() {
+        guard isMultiProcessEnabled && isPoolingEnabled else { return }
+        guard processPool.count < maxPoolSize else { return }
+
+        let needed = maxPoolSize - processPool.count
+        logger.info("TabProcessManager: Warming up \(needed) processes")
+
+        for _ in 0..<needed {
+            Task {
+                await warmUpSingleProcess()
+            }
+        }
+    }
+
+    private func warmUpSingleProcess() async {
+        guard let helperPath = helperAppPath else { return }
+
+        let poolId = UUID()
+        let processInfo = TabProcessInfo(tabId: poolId)
+        processInfo.state = .launching
+
+        do {
+            let process = Process()
+            process.executableURL = helperPath.appendingPathComponent("Contents/MacOS/CanvasTabRenderer")
+            process.arguments = [
+                "--tab-id", poolId.uuidString,
+                "--width", "800",
+                "--height", "600",
+                "--background", "#1a1a2e",
+                "--pool-mode"  // Special flag indicating this is a pooled process
+            ]
+
+            let outputPipe = Pipe()
+            process.standardOutput = outputPipe
+
+            let inputPipe = Pipe()
+            process.standardInput = inputPipe
+            processInfo.inputPipe = inputPipe
+
+            process.terminationHandler = { [weak self, weak processInfo] _ in
+                DispatchQueue.main.async {
+                    // Remove from pool if it terminates
+                    if let info = processInfo {
+                        self?.processPool.removeAll { $0.tabId == info.tabId }
+                    }
+                }
+            }
+
+            try process.run()
+            processInfo.process = process
+            processInfo.state = .running(pid: process.processIdentifier)
+
+            // Read surface ID
+            let surfaceID = try await readSurfaceID(from: outputPipe, processInfo: processInfo)
+            processInfo.surfaceID = surfaceID
+
+            await MainActor.run {
+                processPool.append(processInfo)
+                logger.info("TabProcessManager: Process pool now has \(processPool.count) ready processes")
+            }
+        } catch {
+            logger.error("TabProcessManager: Failed to warm up process: \(error)")
+        }
+    }
+
+    /// Get a pre-warmed process from the pool, or spawn a new one
+    func getPooledProcess(for tabId: UUID, config: TabXPCConfig) async throws -> TabProcessInfo {
+        // Try to get from pool first
+        if let pooledProcess = await MainActor.run(body: { processPool.popLast() }) {
+            logger.info("TabProcessManager: Using pre-warmed process from pool")
+
+            // Reassign the process to the new tab
+            let reassignedInfo = TabProcessInfo(tabId: tabId)
+            reassignedInfo.process = pooledProcess.process
+            reassignedInfo.inputPipe = pooledProcess.inputPipe
+            reassignedInfo.surfaceID = pooledProcess.surfaceID
+            reassignedInfo.state = pooledProcess.state
+
+            await MainActor.run {
+                processes[tabId] = reassignedInfo
+            }
+
+            // Warm up a replacement in the background
+            Task {
+                await warmUpSingleProcess()
+            }
+
+            return reassignedInfo
+        }
+
+        // No pooled process available, spawn a new one
+        logger.info("TabProcessManager: No pooled process available, spawning new")
+        return try await spawnProcess(for: tabId, config: config)
+    }
+
+    /// Clear all pre-warmed processes from the pool
+    func clearProcessPool() {
+        logger.info("TabProcessManager: Clearing process pool (\(processPool.count) processes)")
+        for processInfo in processPool {
+            processInfo.process?.terminate()
+        }
+        processPool.removeAll()
     }
 
     // MARK: - Process Lifecycle
@@ -466,4 +626,5 @@ extension Notification.Name {
     static let tabNavigationRequest = Notification.Name("tabNavigationRequest")
     static let tabSurfaceUpdated = Notification.Name("tabSurfaceUpdated")
     static let tabRendererCrashed = Notification.Name("tabRendererCrashed")
+    static let memoryPressureCritical = Notification.Name("memoryPressureCritical")
 }
