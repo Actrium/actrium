@@ -5,13 +5,15 @@ import Combine
 // MARK: - Apps Manager Window Controller
 
 /// Manages the Apps Manager window lifecycle
-final class AppsManagerWindowController {
+final class AppsManagerWindowController: NSObject, NSWindowDelegate {
     static let shared = AppsManagerWindowController()
 
     private var window: NSWindow?
     private var hostingView: NSHostingView<AppsManagerView>?
 
-    private init() {}
+    private override init() {
+        super.init()
+    }
 
     func showWindow() {
         if let existingWindow = window, existingWindow.isVisible {
@@ -41,15 +43,23 @@ final class AppsManagerWindowController {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
+        // Set delegate for Cmd-W support
+        window.delegate = self
+
         self.window = window
         window.makeKeyAndOrderFront(nil)
-
-        // Make window key so it responds to Cmd-W
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     func closeWindow() {
         window?.close()
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowWillClose(_ notification: Notification) {
+        // Window is closing, clean up reference
+        window = nil
+        hostingView = nil
     }
 }
 
