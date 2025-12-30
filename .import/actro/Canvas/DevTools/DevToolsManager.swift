@@ -115,6 +115,25 @@ enum DevToolsNetworkRequestState {
     case failed
 }
 
+/// Network request type
+enum DevToolsNetworkRequestType: String, CaseIterable, Identifiable {
+    case http = "HTTP"
+    case websocket = "WS"
+    case webrtc = "WebRTC"
+    case other = "Other"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .http: return "arrow.up.arrow.down"
+        case .websocket: return "bolt.horizontal"
+        case .webrtc: return "video"
+        case .other: return "questionmark.circle"
+        }
+    }
+}
+
 /// Network request (APP_FETCH_* lifecycle)
 struct DevToolsNetworkRequest: Identifiable {
     let id = UUID()
@@ -122,6 +141,7 @@ struct DevToolsNetworkRequest: Identifiable {
     var tabId: String?
     var url: String
     var method: String
+    var requestType: DevToolsNetworkRequestType = .http
     var startTime: Date
     var endTime: Date?
     var status: Int?
@@ -278,10 +298,26 @@ class DevToolsManager: ObservableObject {
     /// Pending source navigation request (for jumping to source from function props)
     @Published var pendingSourceNavigation: SourceNavigation?
 
+    /// Guest app source directory (from current tab's URL)
+    @Published var guestAppSourcePath: String?
+
+    /// Guest app name (for display in file tree)
+    @Published var guestAppName: String?
+
+    /// Host source directory (fixed path)
+    static let hostSourcePath = "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/src/actr-host"
+
     struct SourceNavigation: Equatable {
         let searchText: String  // Function name for search fallback
         let fileName: String?   // Source file path (from Babel plugin)
         let lineNumber: Int?    // Source line number (from Babel plugin)
+    }
+
+    /// Update guest app source info from current tab
+    func updateGuestAppSource(path: String?, name: String?) {
+        guestAppSourcePath = path
+        guestAppName = name
+        print("📁 [DevToolsManager] Guest app updated: name=\(name ?? "nil"), path=\(path ?? "nil")")
     }
 
     /// Navigate to source location (switches to Sources tab)
@@ -363,6 +399,9 @@ class DevToolsManager: ObservableObject {
 
     /// Network requests
     @Published private(set) var networkRequests: [DevToolsNetworkRequest] = []
+
+    /// Version counter for network requests (incremented on any change)
+    @Published private(set) var networkRequestsVersion: Int = 0
 
     /// Maximum log entries to keep
     private let maxLogEntries = 1000
@@ -629,6 +668,7 @@ class DevToolsManager: ObservableObject {
             req.requestBody = requestBody ?? req.requestBody
             if req.endTime == nil { req.state = .pending }
             networkRequests[index] = req
+            networkRequestsVersion += 1
             return
         }
 
@@ -642,6 +682,7 @@ class DevToolsManager: ObservableObject {
             requestBody: requestBody
         )
         networkRequests.append(req)
+        networkRequestsVersion += 1
         trimNetworkIfNeeded()
     }
 
@@ -665,6 +706,7 @@ class DevToolsManager: ObservableObject {
             req.responseBody = responseBody ?? req.responseBody
             req.state = (error != nil || ok == false || (status ?? 0) >= 400) ? .failed : .completed
             networkRequests[index] = req
+            networkRequestsVersion += 1
             return
         }
 
@@ -684,6 +726,7 @@ class DevToolsManager: ObservableObject {
         req.responseBody = responseBody
         req.state = (error != nil || ok == false || (status ?? 0) >= 400) ? .failed : .completed
         networkRequests.append(req)
+        networkRequestsVersion += 1
         trimNetworkIfNeeded()
     }
 
@@ -919,6 +962,7 @@ class DevToolsManager: ObservableObject {
     /// Clear network requests
     func clearNetwork() {
         networkRequests.removeAll()
+        networkRequestsVersion += 1
     }
 
     // MARK: - Component Tree
