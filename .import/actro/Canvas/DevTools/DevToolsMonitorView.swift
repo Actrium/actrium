@@ -129,6 +129,19 @@ struct DevToolsMonitorView: View {
             Toggle("Freeze", isOn: $isFrozen)
                 .toggleStyle(.switch)
                 .font(.system(size: 10))
+
+            Divider()
+                .frame(height: 16)
+
+            // Multi-process status indicator
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(TabProcessManager.shared.isMultiProcessEnabled ? Color.green : Color.gray)
+                    .frame(width: 6, height: 6)
+                Text(TabProcessManager.shared.isMultiProcessEnabled ? "Multi-Process" : "Single-Process")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
