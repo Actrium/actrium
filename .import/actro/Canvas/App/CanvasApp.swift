@@ -245,7 +245,7 @@ struct CanvasApp: App {
             CommandGroup(after: .windowList) {
                 Divider()
 
-                Button("Task Manager") {
+                Button("App Manager") {
                     AppsManagerWindowController.shared.showWindow()
                 }
                 .keyboardShortcut("m", modifiers: [.command, .shift])

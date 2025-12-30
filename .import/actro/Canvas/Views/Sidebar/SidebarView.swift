@@ -30,7 +30,7 @@ struct SidebarView: View {
                     Button(action: {
                         AppsManagerWindowController.shared.showWindow()
                     }) {
-                        Label("Task Manager", systemImage: "cpu")
+                        Label("App Manager", systemImage: "square.grid.2x2")
                     }
                 }
 

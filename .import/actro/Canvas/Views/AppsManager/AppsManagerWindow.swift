@@ -30,19 +30,22 @@ final class AppsManagerWindowController {
             defer: false
         )
 
-        window.title = "Task Manager"
+        window.title = "App Manager"
         window.contentView = hostingView
         window.center()
         window.setFrameAutosaveName("AppsManagerWindow")
-        window.minSize = NSSize(width: 500, height: 300)
+        window.minSize = NSSize(width: 400, height: 250)
         window.isReleasedWhenClosed = false
 
-        // Use utility style for floating window
+        // Use floating window style
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         self.window = window
         window.makeKeyAndOrderFront(nil)
+
+        // Make window key so it responds to Cmd-W
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func closeWindow() {
@@ -87,11 +90,11 @@ struct AppsManagerView: View {
 
     private var headerView: some View {
         HStack {
-            Image(systemName: "cpu")
+            Image(systemName: "square.grid.2x2")
                 .font(.system(size: 16))
                 .foregroundColor(.secondary)
 
-            Text("Task Manager")
+            Text("App Manager")
                 .font(.system(size: 13, weight: .semibold))
 
             Spacer()
@@ -105,21 +108,23 @@ struct AppsManagerView: View {
 
     private var processList: some View {
         let rows = buildProcessRows()
+        let showMetrics = processManager.isMultiProcessEnabled
 
         return List(selection: $selectedRowId) {
             // Header row
             HStack(spacing: 0) {
-                Text("Process")
-                    .frame(width: 200, alignment: .leading)
-                Text("PID")
-                    .frame(width: 60, alignment: .trailing)
-                Text("Memory")
-                    .frame(width: 80, alignment: .trailing)
-                Text("CPU")
-                    .frame(width: 60, alignment: .trailing)
+                Text("App")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if showMetrics {
+                    Text("PID")
+                        .frame(width: 60, alignment: .trailing)
+                    Text("Memory")
+                        .frame(width: 80, alignment: .trailing)
+                    Text("CPU")
+                        .frame(width: 60, alignment: .trailing)
+                }
                 Text("Status")
-                    .frame(width: 80, alignment: .leading)
-                    .padding(.leading, 8)
+                    .frame(width: 80, alignment: .center)
             }
             .font(.system(size: 10, weight: .medium))
             .foregroundColor(.secondary)
@@ -127,7 +132,7 @@ struct AppsManagerView: View {
             .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
 
             ForEach(rows) { row in
-                ProcessRowView(row: row, isSelected: selectedRowId == row.id)
+                ProcessRowView(row: row, isSelected: selectedRowId == row.id, showMetrics: showMetrics)
                     .tag(row.id)
                     .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
             }
@@ -244,41 +249,36 @@ struct AppsManagerView: View {
 private struct ProcessRowView: View {
     let row: ProcessRowData
     let isSelected: Bool
+    let showMetrics: Bool
 
     var body: some View {
         HStack(spacing: 0) {
-            // Process name & icon
+            // App name & icon
             HStack(spacing: 8) {
                 processIcon
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(row.name)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                    if let subtitle = row.subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                }
+                Text(row.name)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
             }
-            .frame(width: 200, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            // PID
-            Text(row.pid > 0 ? "\(row.pid)" : "—")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.secondary)
-                .frame(width: 60, alignment: .trailing)
+            if showMetrics {
+                // PID
+                Text(row.pid > 0 ? "\(row.pid)" : "—")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .frame(width: 60, alignment: .trailing)
 
-            // Memory
-            Text(formatMemory(row.memoryMB))
-                .font(.system(size: 11, design: .monospaced))
-                .frame(width: 80, alignment: .trailing)
+                // Memory
+                Text(formatMemory(row.memoryMB))
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(width: 80, alignment: .trailing)
 
-            // CPU
-            Text(row.cpuPercent > 0 ? String(format: "%.1f%%", row.cpuPercent) : "—")
-                .font(.system(size: 11, design: .monospaced))
-                .frame(width: 60, alignment: .trailing)
+                // CPU
+                Text(row.cpuPercent > 0 ? String(format: "%.1f%%", row.cpuPercent) : "—")
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(width: 60, alignment: .trailing)
+            }
 
             // Status
             HStack(spacing: 4) {
@@ -288,11 +288,10 @@ private struct ProcessRowView: View {
                 Text(row.status)
                     .font(.system(size: 11))
             }
-            .frame(width: 80, alignment: .leading)
-            .padding(.leading, 8)
+            .frame(width: 80, alignment: .center)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 4)
                 .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
