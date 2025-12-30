@@ -365,6 +365,17 @@ private struct DevToolsMonitorDetailView: View {
                             DevToolsDisclosure(title: "Last Apply (skipped counts)") {
                                 DevToolsCountsView(counts: lastApply.skippedOpCounts)
                             }
+                            DevToolsDisclosure(title: "Last Apply (top types)") {
+                                DevToolsTopTypesView(types: lastApply.topNodeTypes)
+                            }
+                            DevToolsDisclosure(title: "Last Apply (top types skipped)") {
+                                DevToolsTopTypesView(types: lastApply.topNodeTypesSkipped)
+                            }
+                        }
+                        if let attribution = row.diagnostics?.receiver?.attribution {
+                            DevToolsDisclosure(title: "Attribution (worst batches)") {
+                                DevToolsWorstBatchesView(batches: attribution.worstBatches)
+                            }
                         }
                     }
 
@@ -502,6 +513,55 @@ private struct DevToolsCountsView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.secondary)
         }
+    }
+}
+
+private struct DevToolsTopTypesView: View {
+    let types: [DevToolsEngineMonitorDiagnostics.Receiver.TopNodeType]?
+
+    var body: some View {
+        if let types, !types.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(types.prefix(12)) { t in
+                    Text("\(t.type): \(t.ops)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+        } else {
+            Text("—")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+private struct DevToolsWorstBatchesView: View {
+    let batches: [DevToolsEngineMonitorDiagnostics.Receiver.Attribution.WorstBatch]?
+
+    var body: some View {
+        if let batches, !batches.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(batches.prefix(8)) { b in
+                    Text(format(b))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+        } else {
+            Text("—")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func format(_ b: DevToolsEngineMonitorDiagnostics.Receiver.Attribution.WorstBatch) -> String {
+        let kind = b.kind ?? "unknown"
+        let total = b.total.map(String.init) ?? "—"
+        let skipped = b.skipped.map(String.init) ?? "—"
+        let ms = b.durationMs.map { String(format: "%.0f", $0) } ?? "—"
+        let delta = b.nodeDelta.map(String.init) ?? "—"
+        return "\(kind) total=\(total) skipped=\(skipped) ms=\(ms) Δ=\(delta)"
     }
 }
 
@@ -739,8 +799,16 @@ private extension DevToolsEngineMonitorRow {
     }
 
     func monitorOverviewItems(budgets: DevToolsMonitorBudgets) -> [(String, String)] {
-        [
+        let loaded = diagnostics?.health?.loaded.map { $0 ? "true" : "false" } ?? "—"
+        let destroyed = diagnostics?.health?.destroyed.map { $0 ? "true" : "false" } ?? "—"
+        let batching = diagnostics?.health?.batching.map { $0 ? "true" : "false" } ?? "—"
+        let errorCount = diagnostics?.health?.errorCount.map(String.init) ?? "—"
+        return [
             ("Status", status?.rawValue ?? "—"),
+            ("loaded", loaded),
+            ("destroyed", destroyed),
+            ("batching", batching),
+            ("errors", errorCount),
             ("ops/s", monitorOpsPerSecondString),
             ("batch/s", monitorBatchesPerSecondString),
             ("Nodes", "\(monitorNodes) / \(budgets.nodes)"),
@@ -809,4 +877,3 @@ private extension DevToolsEngineMonitorRow {
         return String(format: "%.1fs", age / 1000.0)
     }
 }
-

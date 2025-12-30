@@ -26,6 +26,8 @@ struct BrowserWindowView: View {
         ContentView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
             .focusedSceneValue(\.browserViewModel, viewModel)
             .onAppear {
+                // Register with DevTools for detached window support
+                DevToolsManager.shared.activeBrowserViewModel = viewModel
                 // Check for pending group transfer
                 checkPendingGroupTransfer()
             }
