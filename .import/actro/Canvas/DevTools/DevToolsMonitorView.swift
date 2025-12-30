@@ -125,6 +125,20 @@ struct DevToolsMonitorView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
 
+            // TabId and EngineId inline
+            if let row = currentRow {
+                Text("TabId: \(row.tabId)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+                if let engineId = row.engineId {
+                    Text("EngineId: \(engineId)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
             Spacer()
 
             if let date = snapshot?.date {
@@ -196,100 +210,66 @@ private struct DevToolsMonitorDetailView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if !warnings.isEmpty {
-                        DevToolsMonitorSection(title: "Warnings") {
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(warnings, id: \.self) { w in
-                                    Text("• " + w)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundColor(.orange)
-                                }
-                            }
-                            .padding(8)
-                            .background(Color.orange.opacity(0.08))
-                            .cornerRadius(6)
-                        }
-                    }
-
-                    DevToolsMonitorSection(title: "Trend (last buckets)") {
-                        DevToolsMonitorSparklineView(points: row.monitorTimelinePoints, style: .large)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 90)
-                    }
-
-                    DevToolsMonitorSection(title: "Overview") {
-                        DevToolsKeyValueGrid(items: row.monitorOverviewItems(budgets: budgets))
-                    }
-
-                    DevToolsMonitorSection(title: "Receiver") {
-                        DevToolsKeyValueGrid(items: row.monitorReceiverItems)
-                        if let lastApply = row.diagnostics?.receiver?.lastApply {
-                            DevToolsDisclosure(title: "Last Apply (op counts)") {
-                                DevToolsCountsView(counts: lastApply.opCounts)
-                            }
-                            DevToolsDisclosure(title: "Last Apply (skipped counts)") {
-                                DevToolsCountsView(counts: lastApply.skippedOpCounts)
-                            }
-                            DevToolsDisclosure(title: "Last Apply (top types)") {
-                                DevToolsTopTypesView(types: lastApply.topNodeTypes)
-                            }
-                            DevToolsDisclosure(title: "Last Apply (top types skipped)") {
-                                DevToolsTopTypesView(types: lastApply.topNodeTypesSkipped)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if !warnings.isEmpty {
+                    DevToolsMonitorSection(title: "Warnings") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(warnings, id: \.self) { w in
+                                Text("• " + w)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.orange)
                             }
                         }
-                        if let attribution = row.diagnostics?.receiver?.attribution {
-                            DevToolsDisclosure(title: "Attribution (worst batches)") {
-                                DevToolsWorstBatchesView(batches: attribution.worstBatches)
-                            }
-                        }
-                    }
-
-                    DevToolsMonitorSection(title: "Host / Guest") {
-                        DevToolsKeyValueGrid(items: row.monitorHostGuestItems)
-                    }
-
-                    DevToolsMonitorSection(title: "Compliance") {
-                        DevToolsKeyValueGrid(items: row.monitorComplianceItems)
+                        .padding(8)
+                        .background(Color.orange.opacity(0.08))
+                        .cornerRadius(6)
                     }
                 }
-                .padding(12)
+
+                DevToolsMonitorSection(title: "Trend (last buckets)") {
+                    DevToolsMonitorSparklineView(points: row.monitorTimelinePoints, style: .large)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 90)
+                }
+
+                DevToolsMonitorSection(title: "Overview") {
+                    DevToolsKeyValueGrid(items: row.monitorOverviewItems(budgets: budgets))
+                }
+
+                DevToolsMonitorSection(title: "Receiver") {
+                    DevToolsKeyValueGrid(items: row.monitorReceiverItems)
+                    if let lastApply = row.diagnostics?.receiver?.lastApply {
+                        DevToolsDisclosure(title: "Last Apply (op counts)") {
+                            DevToolsCountsView(counts: lastApply.opCounts)
+                        }
+                        DevToolsDisclosure(title: "Last Apply (skipped counts)") {
+                            DevToolsCountsView(counts: lastApply.skippedOpCounts)
+                        }
+                        DevToolsDisclosure(title: "Last Apply (top types)") {
+                            DevToolsTopTypesView(types: lastApply.topNodeTypes)
+                        }
+                        DevToolsDisclosure(title: "Last Apply (top types skipped)") {
+                            DevToolsTopTypesView(types: lastApply.topNodeTypesSkipped)
+                        }
+                    }
+                    if let attribution = row.diagnostics?.receiver?.attribution {
+                        DevToolsDisclosure(title: "Attribution (worst batches)") {
+                            DevToolsWorstBatchesView(batches: attribution.worstBatches)
+                        }
+                    }
+                }
+
+                DevToolsMonitorSection(title: "Host / Guest") {
+                    DevToolsKeyValueGrid(items: row.monitorHostGuestItems)
+                }
+
+                DevToolsMonitorSection(title: "Compliance") {
+                    DevToolsKeyValueGrid(items: row.monitorComplianceItems)
+                }
             }
+            .padding(12)
         }
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Text("tabId: \(row.tabId)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.secondary)
-                .textSelection(.enabled)
-            if let engineId = row.engineId {
-                Text("engineId: \(engineId)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .textSelection(.enabled)
-            }
-
-            Spacer()
-
-            Button {
-                DevToolsClipboard.copy(row.tabId)
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.borderless)
-            .help("Copy tabId")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor))
     }
 }
 
