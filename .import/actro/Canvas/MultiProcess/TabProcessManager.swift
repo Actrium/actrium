@@ -262,7 +262,15 @@ class TabProcessManager: ObservableObject {
         _ = try await ipcConnection.loadContent(
             type: contentType,
             content: content,
-            backgroundColor: config.backgroundColor
+            backgroundColor: config.backgroundColor,
+            tabId: config.tabId,
+            title: config.title,
+            leftPanelVisible: config.leftPanelVisible,
+            rightPanelVisible: config.rightPanelVisible,
+            reloadKey: config.reloadKey,
+            contractName: config.contractName,
+            contractVersion: config.contractVersion,
+            permissions: config.permissions
         )
 
         processInfo.surfaceID = surfaceID

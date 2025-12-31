@@ -65,12 +65,39 @@ public class IPCConnection {
     // MARK: - Send Requests
 
     /// Load content in the Helper
-    public func loadContent(type: String, content: String, backgroundColor: String) async throws -> Bool {
+    public func loadContent(
+        type: String,
+        content: String,
+        backgroundColor: String,
+        tabId: String = "",
+        title: String = "",
+        leftPanelVisible: Bool = true,
+        rightPanelVisible: Bool = false,
+        reloadKey: Int = 0,
+        contractName: String? = nil,
+        contractVersion: Int? = nil,
+        permissions: [String]? = nil
+    ) async throws -> Bool {
         var msg = Canvas_Ipc_IPCMessage()
         msg.loadContent = Canvas_Ipc_LoadContentRequest()
         msg.loadContent.contentType = type
         msg.loadContent.content = content
         msg.loadContent.backgroundColor = backgroundColor
+        msg.loadContent.tabID = tabId
+        msg.loadContent.title = title
+        msg.loadContent.leftPanelVisible = leftPanelVisible
+        msg.loadContent.rightPanelVisible = rightPanelVisible
+        msg.loadContent.reloadKey = Int32(reloadKey)
+
+        if let name = contractName {
+            msg.loadContent.contractName = name
+        }
+        if let version = contractVersion {
+            msg.loadContent.contractVersion = Int32(version)
+        }
+        if let perms = permissions {
+            msg.loadContent.permissions = perms
+        }
 
         let response = try await sendRequest(msg)
         guard case .loadContentResponse(let resp) = response.payload else {
