@@ -278,15 +278,19 @@ class IOSurfaceDisplayView: NSView {
         // Create or update the surface layer
         if surfaceLayer == nil {
             let newLayer = CALayer()
-            newLayer.contentsGravity = .resize  // Use resize to fill the view
-            newLayer.magnificationFilter = .linear  // Smoother scaling
+            // Use resizeAspect to properly scale the IOSurface to fit the layer bounds
+            // while maintaining aspect ratio. This works better with Retina displays.
+            newLayer.contentsGravity = .resizeAspect
+            newLayer.magnificationFilter = .linear
             newLayer.minificationFilter = .linear
             newLayer.isOpaque = true
-            // Set contentsScale for Retina
-            newLayer.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
             layer?.addSublayer(newLayer)
             surfaceLayer = newLayer
         }
+
+        // Set contentsScale to 1.0 since IOSurface is already at pixel resolution
+        // and contentsGravity = .resizeAspect will handle the scaling
+        surfaceLayer?.contentsScale = 1.0
 
         // Set the IOSurface as the layer's contents
         // Force update by clearing first
@@ -294,19 +298,21 @@ class IOSurfaceDisplayView: NSView {
         CATransaction.setDisableActions(true)
         surfaceLayer?.contents = nil
         surfaceLayer?.contents = surface
+        // surfaceLayer should fill the entire view bounds
         surfaceLayer?.frame = bounds
         CATransaction.commit()
 
-        // NOTE: We no longer use displayLink on the host side.
-        // IOSurface is shared memory - once set as contents, updates from
-        // the renderer process are automatically visible without needing
-        // to re-set contents every frame (which causes flicker).
-        // The renderer's displayLink handles the 60fps rendering.
-
-        NSLog("🖥️ [DIAG] IOSurfaceHostView.updateSurface: surfaceID=\(id), surfaceSize=\(IOSurfaceGetWidth(surface))x\(IOSurfaceGetHeight(surface))")
-        NSLog("🖥️ [DIAG]   view.bounds=\(bounds), view.frame=\(frame)")
-        NSLog("🖥️ [DIAG]   surfaceLayer.frame=\(surfaceLayer?.frame ?? .zero), surfaceLayer.hidden=\(surfaceLayer?.isHidden ?? true)")
-        NSLog("🖥️ [DIAG]   layer.sublayers=\(layer?.sublayers?.count ?? 0), view.superview=\(superview != nil)")
+        // Log comprehensive diagnostic info
+        let screenScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        NSLog("🖥️ [DIAG] IOSurfaceHostView.updateSurface:")
+        NSLog("🖥️ [DIAG]   surfaceID=\(id)")
+        NSLog("🖥️ [DIAG]   IOSurface pixels: \(surfacePixelWidth)x\(surfacePixelHeight)")
+        NSLog("🖥️ [DIAG]   view.bounds (points): \(bounds)")
+        NSLog("🖥️ [DIAG]   view.frame (points): \(frame)")
+        NSLog("🖥️ [DIAG]   screenScale: \(screenScale)")
+        NSLog("🖥️ [DIAG]   surfaceLayer.contentsScale: \(surfaceLayer?.contentsScale ?? 0)")
+        NSLog("🖥️ [DIAG]   surfaceLayer.frame: \(surfaceLayer?.frame ?? .zero)")
+        NSLog("🖥️ [DIAG]   expected view pixels: \(bounds.width * screenScale)x\(bounds.height * screenScale)")
     }
 
     func refreshSurface() {
