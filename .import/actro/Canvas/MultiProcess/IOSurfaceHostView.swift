@@ -397,7 +397,8 @@ struct MultiProcessTabView: View {
                 placeholderView
             }
         }
-        .onChange(of: containerSize) { _, newSize in
+        .onChange(of: containerSize) { oldSize, newSize in
+            NSLog("📐 [SIZE-CHANGE] containerSize changed: \(Int(oldSize.width))x\(Int(oldSize.height)) -> \(Int(newSize.width))x\(Int(newSize.height)) for tab \(tabId)")
             updateViewportSize(newSize)
         }
         .onAppear {
