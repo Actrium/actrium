@@ -259,7 +259,7 @@ class TabProcessManager: ObservableObject {
             content = "<html><body></body></html>"
         }
 
-        NSLog("🔵 [DEBUG] TabProcessManager: Sending loadContent with leftPanelVisible=\(config.leftPanelVisible), rightPanelVisible=\(config.rightPanelVisible)")
+        NSLog("📤 [IPC-SEND] loadContent: leftPanelVisible=\(config.leftPanelVisible), rightPanelVisible=\(config.rightPanelVisible), tabId=\(config.tabId)")
         _ = try await ipcConnection.loadContent(
             type: contentType,
             content: content,
