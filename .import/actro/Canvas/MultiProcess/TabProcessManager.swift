@@ -1,7 +1,6 @@
 import Foundation
 import Combine
 import AppKit
-import ServiceManagement
 
 private let logger = AppLogger.app
 
@@ -25,7 +24,6 @@ class TabProcessInfo: ObservableObject {
     @Published var metrics: TabXPCMetrics?
     @Published var surfaceID: UInt32 = 0
 
-    var process: Process?
     var connection: NSXPCConnection?
     var renderer: TabRendererProtocol?
 
@@ -50,15 +48,15 @@ class TabProcessInfo: ObservableObject {
 
 // MARK: - Tab Process Manager
 
-/// Manages tab renderer processes and their XPC connections
-/// Uses XPC Broker for endpoint handshake, then direct XPC for communication
+/// Manages tab renderer processes via CanvasService (Safari Pattern)
+/// Canvas <-> CanvasService <-> CanvasTabRenderer
 class TabProcessManager: ObservableObject {
     static let shared = TabProcessManager()
 
     /// Active tab processes keyed by tab ID
     @Published private(set) var processes: [UUID: TabProcessInfo] = [:]
 
-    /// Pending endpoint continuations (waiting for broker to deliver endpoints)
+    /// Pending endpoint continuations (waiting for service to deliver endpoints)
     private var pendingEndpoints: [String: CheckedContinuation<NSXPCListenerEndpoint, Error>] = [:]
     private let pendingLock = NSLock()
 
@@ -71,131 +69,57 @@ class TabProcessManager: ObservableObject {
     private var metricsTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
-    /// Broker XPC connection
-    private var brokerConnection: NSXPCConnection?
+    /// CanvasService XPC connection
+    private var serviceConnection: NSXPCConnection?
 
     /// Memory pressure source for responding to low memory
     private var memoryPressureSource: DispatchSourceMemoryPressure?
 
-    /// Timeout for waiting for helper to register via broker
+    /// Timeout for waiting for helper to register
     private let registrationTimeout: TimeInterval = 10.0
 
     private init() {
         setupMemoryPressureHandler()
-        launchBrokerAndConnect()
+        connectToService()
     }
 
-    // MARK: - Broker Launch & Connection
+    // MARK: - Service Connection
 
-    /// Launch broker Login Item and connect
-    private func launchBrokerAndConnect() {
-        // First, launch the broker using SMAppService (Login Item)
-        launchBroker()
+    /// Connect to CanvasService
+    private func connectToService() {
+        logger.info("TabProcessManager: Connecting to CanvasService: \(CanvasServiceXPCInterface.serviceName)")
 
-        // Give the broker a moment to start up
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.connectToBroker()
-        }
-    }
+        // Connect to the CanvasService XPC Service
+        serviceConnection = NSXPCConnection(serviceName: CanvasServiceXPCInterface.serviceName)
+        serviceConnection?.remoteObjectInterface = CanvasServiceXPCInterface.serviceInterface()
+        serviceConnection?.exportedInterface = CanvasServiceXPCInterface.callbackInterface()
+        serviceConnection?.exportedObject = self
 
-    /// Broker process reference
-    private var brokerProcess: Process?
-
-    /// Launch the broker helper
-    private func launchBroker() {
-        guard let bundlePath = Bundle.main.bundlePath as String? else {
-            logger.error("TabProcessManager: Cannot find main bundle path")
-            return
-        }
-
-        // Check multiple possible locations for the broker
-        let possiblePaths = [
-            // LoginItems location (for proper Login Item setup)
-            (bundlePath as NSString).appendingPathComponent("Contents/Library/LoginItems/CanvasBroker.app/Contents/MacOS/CanvasBroker"),
-            // XPCServices location (current Xcode setup - broker is still an XPC service target)
-            (bundlePath as NSString).appendingPathComponent("Contents/XPCServices/CanvasBroker.xpc/Contents/MacOS/CanvasBroker"),
-        ]
-
-        for brokerPath in possiblePaths {
-            if FileManager.default.fileExists(atPath: brokerPath) {
-                logger.info("TabProcessManager: Launching broker from \(brokerPath)")
-
-                // Launch broker directly as a subprocess
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: brokerPath)
-
-                process.terminationHandler = { [weak self] proc in
-                    logger.info("TabProcessManager: Broker terminated with status \(proc.terminationStatus)")
-                    self?.brokerProcess = nil
-                }
-
-                do {
-                    try process.run()
-                    brokerProcess = process
-                    logger.info("TabProcessManager: Broker launched with PID \(process.processIdentifier)")
-                    return
-                } catch {
-                    logger.error("TabProcessManager: Failed to launch broker: \(error)")
-                }
-            }
-        }
-
-        logger.error("TabProcessManager: Broker not found in any expected location")
-    }
-
-    /// Connect to the broker's Mach service
-    private func connectToBroker() {
-        // Use Mach service name for connection (works across sandboxed apps with proper entitlements)
-        brokerConnection = NSXPCConnection(machServiceName: BrokerXPCInterface.serviceName)
-        brokerConnection?.remoteObjectInterface = BrokerXPCInterface.brokerInterface()
-        brokerConnection?.exportedInterface = BrokerXPCInterface.mainAppCallbackInterface()
-        brokerConnection?.exportedObject = self
-
-        brokerConnection?.interruptionHandler = { [weak self] in
-            logger.warning("TabProcessManager: Broker connection interrupted")
+        serviceConnection?.interruptionHandler = { [weak self] in
+            logger.warning("TabProcessManager: Service connection interrupted")
             // Try to reconnect after a delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self?.launchBrokerAndConnect()
+                self?.connectToService()
             }
         }
 
-        brokerConnection?.invalidationHandler = { [weak self] in
-            logger.warning("TabProcessManager: Broker connection invalidated")
-            self?.brokerConnection = nil
+        serviceConnection?.invalidationHandler = { [weak self] in
+            logger.warning("TabProcessManager: Service connection invalidated")
+            self?.serviceConnection = nil
         }
 
-        brokerConnection?.resume()
+        serviceConnection?.resume()
 
-        // Register as main app with broker
-        guard let broker = brokerConnection?.remoteObjectProxyWithErrorHandler({ error in
-            logger.error("TabProcessManager: Broker proxy error: \(error)")
-        }) as? CanvasBrokerProtocol else {
-            logger.error("TabProcessManager: Failed to get broker proxy")
+        // Register as main app with service
+        guard let service = serviceConnection?.remoteObjectProxyWithErrorHandler({ error in
+            logger.error("TabProcessManager: Service proxy error: \(error)")
+        }) as? CanvasServiceProtocol else {
+            logger.error("TabProcessManager: Failed to get service proxy")
             return
         }
 
-        broker.registerMainApp(callback: self)
-        logger.info("TabProcessManager: Registered with broker as main app via Mach service: \(BrokerXPCInterface.serviceName)")
-    }
-
-    // MARK: - Helper App Path
-
-    /// Get the path to the CanvasTabRenderer helper app
-    private var helperAppPath: String? {
-        guard let bundlePath = Bundle.main.bundlePath as String? else { return nil }
-
-        let plugInsPath = (bundlePath as NSString).appendingPathComponent("Contents/PlugIns/CanvasTabRenderer.app/Contents/MacOS/CanvasTabRenderer")
-        if FileManager.default.fileExists(atPath: plugInsPath) {
-            return plugInsPath
-        }
-
-        let resourcesPath = (bundlePath as NSString).appendingPathComponent("Contents/Resources/CanvasTabRenderer.app/Contents/MacOS/CanvasTabRenderer")
-        if FileManager.default.fileExists(atPath: resourcesPath) {
-            return resourcesPath
-        }
-
-        logger.error("TabProcessManager: Helper app not found")
-        return nil
+        service.registerMainApp(callback: self)
+        logger.info("TabProcessManager: Registered with CanvasService")
     }
 
     // MARK: - Memory Pressure Handling
@@ -225,81 +149,47 @@ class TabProcessManager: ObservableObject {
 
     // MARK: - Get Renderer
 
-    /// Get a renderer for a tab by launching a Helper App process
+    /// Get a renderer for a tab by launching via CanvasService
     func getRenderer(for tabId: UUID, config: TabXPCConfig, viewportSize: CGSize? = nil) async throws -> TabProcessInfo {
-        logger.info("TabProcessManager: Launching Helper App for tab \(tabId)")
-        return try await launchHelperApp(for: tabId, config: config, viewportSize: viewportSize)
-    }
-
-    // MARK: - Helper App Launch
-
-    private func launchHelperApp(for tabId: UUID, config: TabXPCConfig, viewportSize: CGSize? = nil) async throws -> TabProcessInfo {
-        guard let helperPath = helperAppPath else {
-            throw TabProcessError.helperAppNotFound
-        }
+        logger.info("TabProcessManager: Requesting tab \(tabId) from CanvasService")
 
         let processInfo = TabProcessInfo(tabId: tabId)
         processInfo.state = .launching
         processes[tabId] = processInfo
 
-        logger.info("TabProcessManager: Launching helper at \(helperPath)")
-
-        // Create and launch process
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: helperPath)
-
         let width = Int(viewportSize?.width ?? 800)
         let height = Int(viewportSize?.height ?? 600)
-        process.arguments = [
-            "--tab-id", tabId.uuidString,
-            "--width", String(width),
-            "--height", String(height),
-            "--background", config.backgroundColor
-        ]
 
-        // Capture stderr for logging
-        let stderrPipe = Pipe()
-        process.standardError = stderrPipe
-
-        process.terminationHandler = { [weak self, weak processInfo] proc in
-            let status = proc.terminationStatus
-            logger.info("TabProcessManager: Helper terminated with status \(status)")
-
-            DispatchQueue.main.async {
-                guard let processInfo = processInfo else { return }
-                processInfo.state = status != 0 ? .crashed(reason: "Exit code \(status)") : .terminated
-                self?.processes.removeValue(forKey: tabId)
-            }
+        // Request CanvasService to launch the helper
+        // Note: Config is passed directly to renderer via XPC later, not through service
+        guard let service = serviceConnection?.remoteObjectProxyWithErrorHandler({ error in
+            logger.error("TabProcessManager: Service proxy error: \(error)")
+        }) as? CanvasServiceProtocol else {
+            throw TabProcessError.xpcConnectionFailed
         }
 
-        do {
-            try process.run()
-        } catch {
-            logger.error("TabProcessManager: Failed to launch helper: \(error)")
-            processes.removeValue(forKey: tabId)
-            throw TabProcessError.helperLaunchFailed(error.localizedDescription)
-        }
-
-        processInfo.process = process
-        let pid = process.processIdentifier
-        logger.info("TabProcessManager: Helper started with PID \(pid)")
-
-        // Read stderr for logging
-        let stderrHandle = stderrPipe.fileHandleForReading
-        DispatchQueue.global(qos: .utility).async {
-            while true {
-                let data = stderrHandle.availableData
-                if data.isEmpty { break }
-                if let str = String(data: data, encoding: .utf8) {
-                    for line in str.split(separator: "\n") {
-                        logger.debug("TabRenderer[\(pid)]: \(line)")
-                    }
+        // Launch tab via service (config passed as empty data, actual config sent via direct XPC)
+        let success = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            service.launchTab(tabId: tabId.uuidString, config: Data(), width: width, height: height) { success, errorMessage in
+                if success {
+                    continuation.resume(returning: true)
+                } else {
+                    continuation.resume(throwing: TabProcessError.helperLaunchFailed(errorMessage ?? "Unknown error"))
                 }
             }
         }
 
-        // Wait for endpoint from broker
+        guard success else {
+            processes.removeValue(forKey: tabId)
+            throw TabProcessError.helperLaunchFailed("Service reported failure")
+        }
+
+        logger.info("TabProcessManager: Tab \(tabId) launch requested, waiting for endpoint...")
+
+        // Wait for endpoint from service
         let endpoint = try await waitForEndpoint(tabId: tabId.uuidString)
+
+        logger.info("TabProcessManager: Got endpoint for tab \(tabId), connecting directly...")
 
         // Connect directly to helper using the endpoint
         let connection = NSXPCConnection(listenerEndpoint: endpoint)
@@ -342,13 +232,12 @@ class TabProcessManager: ObservableObject {
             logger.error("TabProcessManager: Renderer proxy error: \(error)")
         }) as? TabRendererProtocol else {
             processInfo.state = .crashed(reason: "Failed to get renderer proxy")
-            process.terminate()
             processes.removeValue(forKey: tabId)
             throw TabProcessError.xpcConnectionFailed
         }
 
         processInfo.renderer = renderer
-        processInfo.state = .running(pid: pid)
+        processInfo.state = .running(pid: 0)  // We don't have PID in this architecture
 
         // Set viewport and load content
         renderer.updateViewport(width: Double(width), height: Double(height))
@@ -375,12 +264,12 @@ class TabProcessManager: ObservableObject {
         }
 
         processInfo.surfaceID = surfaceID
-        logger.info("TabProcessManager: Direct XPC ready, surfaceID=\(surfaceID), PID=\(pid)")
+        logger.info("TabProcessManager: Direct XPC ready, surfaceID=\(surfaceID)")
 
         return processInfo
     }
 
-    /// Wait for endpoint from broker
+    /// Wait for endpoint from service
     private func waitForEndpoint(tabId: String) async throws -> NSXPCListenerEndpoint {
         try await withCheckedThrowingContinuation { continuation in
             pendingLock.lock()
@@ -405,22 +294,23 @@ class TabProcessManager: ObservableObject {
 
         logger.info("TabProcessManager: Terminating process for tab \(tabId)")
 
-        processInfo.renderer?.terminate()
+        // Tell service to terminate the tab
+        (serviceConnection?.remoteObjectProxy as? CanvasServiceProtocol)?.terminateTab(tabId: tabId.uuidString)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            processInfo.connection?.invalidate()
-            if processInfo.process?.isRunning == true {
-                processInfo.process?.terminate()
-            }
-            self?.processes.removeValue(forKey: tabId)
-        }
+        processInfo.connection?.invalidate()
+        processes.removeValue(forKey: tabId)
     }
 
     func terminateAllProcesses() {
         logger.info("TabProcessManager: Terminating all processes")
-        for tabId in processes.keys {
-            terminateProcess(for: tabId)
+
+        // Tell service to terminate all tabs
+        (serviceConnection?.remoteObjectProxy as? CanvasServiceProtocol)?.terminateAllTabs()
+
+        for (_, processInfo) in processes {
+            processInfo.connection?.invalidate()
         }
+        processes.removeAll()
     }
 
     // MARK: - Metrics Collection
@@ -475,11 +365,11 @@ class TabProcessManager: ObservableObject {
     }
 }
 
-// MARK: - MainAppCallbackProtocol
+// MARK: - CanvasServiceCallbackProtocol
 
-extension TabProcessManager: MainAppCallbackProtocol {
-    func helperDidRegister(tabId: String, endpoint: NSXPCListenerEndpoint) {
-        logger.info("TabProcessManager: Received endpoint for tab \(tabId) from broker")
+extension TabProcessManager: CanvasServiceCallbackProtocol {
+    func tabDidBecomeReady(tabId: String, endpoint: NSXPCListenerEndpoint) {
+        logger.info("TabProcessManager: Received endpoint for tab \(tabId) from service")
 
         pendingLock.lock()
         if let continuation = pendingEndpoints.removeValue(forKey: tabId) {
@@ -488,8 +378,8 @@ extension TabProcessManager: MainAppCallbackProtocol {
         pendingLock.unlock()
     }
 
-    func helperDidDisconnect(tabId: String) {
-        logger.info("TabProcessManager: Helper disconnected for tab \(tabId)")
+    func tabDidTerminate(tabId: String, reason: String) {
+        logger.info("TabProcessManager: Tab \(tabId) terminated: \(reason)")
 
         if let uuid = UUID(uuidString: tabId) {
             DispatchQueue.main.async {
@@ -497,6 +387,23 @@ extension TabProcessManager: MainAppCallbackProtocol {
                     processInfo.state = .terminated
                 }
                 self.processes.removeValue(forKey: uuid)
+            }
+        }
+    }
+
+    func tabSurfaceDidUpdate(tabId: String, surfaceID: UInt32) {
+        logger.info("TabProcessManager: Tab \(tabId) surface updated: \(surfaceID)")
+
+        if let uuid = UUID(uuidString: tabId) {
+            DispatchQueue.main.async {
+                if let processInfo = self.processes[uuid] {
+                    processInfo.surfaceID = surfaceID
+                    NotificationCenter.default.post(
+                        name: .tabSurfaceUpdated,
+                        object: nil,
+                        userInfo: ["tabId": uuid, "surfaceID": surfaceID]
+                    )
+                }
             }
         }
     }
