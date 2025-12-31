@@ -10,14 +10,20 @@
 
 	<!-- App Sandbox -->
 	<key>com.apple.security.app-sandbox</key>
-	<false/>
-	
+	<true/>
+
 	<!-- Network Access -->
 	<key>com.apple.security.network.client</key>
 	<true/>
-	
+
 	<key>com.apple.security.network.server</key>
 	<true/>
+
+	<!-- Allow connecting to broker Mach service -->
+	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+	<array>
+		<string>group.chat.askaway.canvas.broker</string>
+	</array>
 	
 	<!-- Allow JIT Compilation (Required for WebKit JavaScript) -->
 	<key>com.apple.security.cs.allow-jit</key>
