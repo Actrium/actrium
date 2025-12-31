@@ -178,40 +178,41 @@ class IOSurfaceDisplayView: NSView {
 
     private var refreshCount: UInt64 = 0
     private var cachedSurface: IOSurface?  // Cache the IOSurface reference
-    private var needsRefresh: Bool = false  // Flag for event-driven refresh
+    private var lastSeed: UInt32 = 0  // Track IOSurface content changes via seed
 
     private func refreshSurfaceContent() {
         refreshCount += 1
 
         // Use cached surface
         guard let surface = cachedSurface, currentSurfaceID != 0 else {
-            if refreshCount % 60 == 1 {
-                NSLog("🖥️ [DIAG] refreshSurfaceContent: no cached surface, currentSurfaceID=\(currentSurfaceID)")
-            }
             return
         }
 
-        // Log surface info on first frame and every ~2 seconds
+        // Check if surface content actually changed using seed
+        let currentSeed = IOSurfaceGetSeed(surface)
+        guard currentSeed != lastSeed else {
+            // Content hasn't changed, skip refresh
+            return
+        }
+        lastSeed = currentSeed
+
+        // Log surface info periodically
         if refreshCount == 1 || refreshCount % 120 == 0 {
             let width = IOSurfaceGetWidth(surface)
             let height = IOSurfaceGetHeight(surface)
-            let viewScale = window?.backingScaleFactor ?? 1.0
-            NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): surfaceID=\(currentSurfaceID), surfacePixels=\(width)x\(height), viewBounds=\(bounds), screenScale=\(viewScale)")
+            NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): seed=\(currentSeed), surfacePixels=\(width)x\(height)")
         }
 
         // "Tickle" the layer to show updated IOSurface content
-        // According to Apple docs: "If you are rendering live frames you may need to tickle
-        // the layer to let the render server know the contents of the surface have changed"
-        // We do this by re-setting the contents property to the same surface
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         surfaceLayer?.contents = surface
         CATransaction.commit()
     }
 
-    /// Called when Helper notifies surface update
+    /// Called when Helper notifies surface update (deprecated - now using seed-based detection)
     func markNeedsRefresh() {
-        needsRefresh = true
+        // No longer needed - using IOSurface seed for change detection
     }
 
     private func setupTracking() {
