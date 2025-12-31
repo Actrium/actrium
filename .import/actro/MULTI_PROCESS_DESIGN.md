@@ -16,9 +16,9 @@
 | 进程间通信 | **NSXPCConnection** + **anonymous listener** | 类型安全、双向通信、Apple 原生 |
 | 像素共享 | **IOSurface** | 零拷贝、GPU 友好 |
 | 进程启动 | **Process** (NSTask) | 简单可靠 |
-| Endpoint 传递 | **stdout** | 简单、Chromium 同款方案 |
+| Endpoint 传递 | **XPC Service (Broker)** | 沙盒兼容、类型安全、launchd 管理 |
 
-### 1.3 整体架构图
+### 1.3 整体架构图 (三角 Broker 模式)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -35,126 +35,137 @@
 │          │            │            │            │                       │
 │  ┌───────┴────────────┴────────────┴────────────┴──────────────────┐   │
 │  │                      TabProcessManager                           │   │
-│  │                                                                  │   │
-│  │  - 启动 Helper 进程 (Process)                                    │   │
-│  │  - 读取 XPC Endpoint (stdout)                                    │   │
-│  │  - 管理 NSXPCConnection 生命周期                                  │   │
+│  │  - 连接 Broker，注册为 Main App                                   │   │
+│  │  - 接收 Helper 的 XPC Endpoint (via Broker)                       │   │
+│  │  - 直连 Helper，管理 NSXPCConnection 生命周期                      │   │
 │  │  - 转发事件、处理回调                                             │   │
 │  │  - 监控进程状态、处理崩溃恢复                                      │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
-│          │            │            │            │                       │
-│  ┌───────┴────────────┴────────────┴────────────┴──────────────────┐   │
-│  │                       DevToolsManager                            │   │
-│  │  - Console 日志聚合                                               │   │
-│  │  - Network 请求追踪                                               │   │
-│  │  - Host-Guest 消息记录                                            │   │
-│  │  - Engine Monitor 数据展示                                        │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
-          │              │              │              │
-          │ XPC          │ XPC          │ XPC          │ XPC
-          │ Connection   │ Connection   │ Connection   │ Connection
-          │              │              │              │
-          ▼              ▼              ▼              ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│CanvasTab     │ │CanvasTab     │ │CanvasTab     │ │CanvasTab     │
-│Renderer      │ │Renderer      │ │Renderer      │ │Renderer      │
-│(Helper 1)    │ │(Helper 2)    │ │(Helper 3)    │ │(Helper N)    │
-│              │ │              │ │              │ │              │
-│ NSXPCListener│ │ NSXPCListener│ │ NSXPCListener│ │ NSXPCListener│
-│ .anonymous() │ │ .anonymous() │ │ .anonymous() │ │ .anonymous() │
-│              │ │              │ │              │ │              │
-│ NSApplication│ │ NSApplication│ │ NSApplication│ │ NSApplication│
-│   .run()     │ │   .run()     │ │   .run()     │ │   .run()     │
-│              │ │              │ │              │ │              │
-│ React Native │ │ React Native │ │ React Native │ │ React Native │
-│ + IOSurface  │ │ + IOSurface  │ │ + IOSurface  │ │ + IOSurface  │
-└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
-  独立进程 ✓       独立进程 ✓       独立进程 ✓       独立进程 ✓
+          │                                                    │
+          │ XPC (Broker)                                       │ XPC (直连)
+          ▼                                                    ▼
+┌──────────────────────┐                         ┌──────────────────────────┐
+│   CanvasBroker       │                         │    CanvasTabRenderer     │
+│   (XPC Service)      │                         │    (Helper App)          │
+│                      │                         │                          │
+│  - launchd 管理       │  <── XPC 注册 ───       │  NSXPCListener.anonymous()│
+│  - 转发 Endpoint     │                         │                          │
+│  - 沙盒合规          │                         │  NSApplication.run()     │
+│                      │                         │  React Native + IOSurface │
+└──────────────────────┘                         └──────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════
+                              三角架构工作流程
+═══════════════════════════════════════════════════════════════════════════
+
+Phase 1: 握手 (通过 Broker)
+┌─────────┐         ┌─────────────┐         ┌────────────────┐
+│  Canvas │◀───────▶│CanvasBroker │◀───────▶│CanvasTabRenderer│
+│  (Main) │   XPC   │(XPC Service)│   XPC   │    (Helper)     │
+└─────────┘         └─────────────┘         └────────────────┘
+    │                     │                        │
+    │  registerMainApp()  │                        │
+    │────────────────────>│                        │
+    │                     │                        │
+    │                     │  registerHelper(endpoint)
+    │                     │<───────────────────────│
+    │                     │                        │
+    │  helperDidRegister  │                        │
+    │  (endpoint)         │                        │
+    │<────────────────────│                        │
+
+Phase 2: 直连 (Broker 退场)
+┌─────────┐                                  ┌────────────────┐
+│  Canvas │◀════════════════════════════════▶│CanvasTabRenderer│
+│  (Main) │      直接 XPC 连接 (via endpoint) │    (Helper)     │
+└─────────┘                                  └────────────────┘
 ```
 
 ---
 
-## 二、启动流程
+## 二、启动流程 (三角 Broker 模式)
 
 ### 2.1 时序图
 
 ```
-Canvas.app                                    CanvasTabRenderer
-    │                                                │
-    │  1. Process() 启动                              │
-    │     args: [tabId]                              │
-    │     stdout → Pipe                              │
-    │     stderr → Pipe (日志)                        │
-    │─────────────────────────────────────────────────>│
-    │                                                │
-    │                                2. 初始化 NSApplication
-    │                                   setActivationPolicy(.prohibited)
-    │                                                │
-    │                                3. 创建 NSXPCListener.anonymous()
-    │                                   设置 delegate
-    │                                                │
-    │                                4. 序列化 endpoint
-    │                                   NSKeyedArchiver
-    │                                                │
-    │  5. stdout: [4字节长度][endpoint数据]            │
-    │<─────────────────────────────────────────────────│
-    │                                                │
-    │  6. 反序列化 endpoint                           │
-    │     NSKeyedUnarchiver                          │
-    │                                                │
-    │                                7. listener.resume()
-    │                                   NSApplication.run()
-    │                                                │
-    │  8. NSXPCConnection(listenerEndpoint:)         │
-    │     设置 interfaces                             │
-    │     connection.resume()                        │
-    │─────────────────────────────────────────────────>│
-    │                                                │
-    │                                9. shouldAcceptNewConnection
-    │                                   设置 exportedObject
-    │                                   connection.resume()
-    │                                                │
-    │  10. XPC 双向通信建立 ✓                          │
-    │<────────────────────────────────────────────────>│
-    │                                                │
-    │  11. renderer.loadContent(config)              │
-    │─────────────────────────────────────────────────>│
-    │                                                │
-    │                                12. 初始化 React Native
-    │                                    创建 IOSurface
-    │                                    开始渲染
-    │                                                │
-    │  13. reply(success, nil)                       │
-    │<─────────────────────────────────────────────────│
-    │                                                │
-    │  14. renderer.getIOSurfaceID()                 │
-    │─────────────────────────────────────────────────>│
-    │                                                │
-    │  15. reply(surfaceID)                          │
-    │<─────────────────────────────────────────────────│
-    │                                                │
-    │  16. IOSurfaceLookupFromMachPort(surfaceID)    │
-    │      绑定到 CALayer 显示                        │
-    │                                                │
+Canvas.app              CanvasBroker                CanvasTabRenderer
+    │                   (XPC Service)                      │
+    │                        │                             │
+    │  1. 启动时连接 Broker   │                             │
+    │     serviceName:       │                             │
+    │     "chat.askaway.     │                             │
+    │      canvas.CanvasBroker"                            │
+    │───────────────────────>│                             │
+    │                        │                             │
+    │  2. registerMainApp()  │                             │
+    │───────────────────────>│                             │
+    │                        │                             │
+    │  3. Process() 启动     │                             │
+    │     args: [tabId]      │                             │
+    │─────────────────────────────────────────────────────>│
+    │                        │                             │
+    │                        │        4. 初始化 NSApplication
+    │                        │           setActivationPolicy(.prohibited)
+    │                        │                             │
+    │                        │        5. 创建 NSXPCListener.anonymous()
+    │                        │           listener.resume()
+    │                        │                             │
+    │                        │  6. 连接 Broker              │
+    │                        │<────────────────────────────│
+    │                        │                             │
+    │                        │  7. registerHelper(tabId, endpoint)
+    │                        │<────────────────────────────│
+    │                        │                             │
+    │  8. helperDidRegister  │                             │
+    │     (tabId, endpoint)  │                             │
+    │<───────────────────────│                             │
+    │                        │                             │
+    │  9. reply(success)     │                             │
+    │                        │────────────────────────────>│
+    │                        │                             │
+    │                        │        10. NSApplication.run()
+    │                        │            等待直接连接
+    │                        │                             │
+    │  11. NSXPCConnection(listenerEndpoint:)             │
+    │      设置 interfaces                                 │
+    │      connection.resume()                            │
+    │─────────────────────────────────────────────────────>│
+    │                        │                             │
+    │                        │        12. shouldAcceptNewConnection
+    │                        │            设置 exportedObject
+    │                        │            connection.resume()
+    │                        │                             │
+    │  13. 直接 XPC 双向通信建立 ✓ (Broker 不再参与)        │
+    │<════════════════════════════════════════════════════>│
+    │                        │                             │
+    │  14. renderer.loadContent(config)                   │
+    │─────────────────────────────────────────────────────>│
+    │                        │                             │
+    │                        │        15. 初始化 React Native
+    │                        │            创建 IOSurface
+    │                        │                             │
+    │  16. reply(success, nil)                            │
+    │<─────────────────────────────────────────────────────│
+    │                        │                             │
+    │  17. renderer.getIOSurfaceID()                      │
+    │─────────────────────────────────────────────────────>│
+    │                        │                             │
+    │  18. reply(surfaceID)                               │
+    │<─────────────────────────────────────────────────────│
+    │                        │                             │
+    │  19. IOSurfaceLookup(surfaceID)                     │
+    │      绑定到 CALayer 显示                             │
+    │                        │                             │
 ```
 
-### 2.2 Endpoint 传输协议
+### 2.2 Endpoint 传输协议 (通过 XPC Service)
 
-```
-┌──────────────────────────────────────────┐
-│              stdout 数据格式              │
-├──────────────┬───────────────────────────┤
-│  4 bytes     │  N bytes                  │
-│  (BigEndian) │  (NSKeyedArchiver data)   │
-│  Length = N  │  NSXPCListenerEndpoint    │
-└──────────────┴───────────────────────────┘
-```
-
-**为什么用 stdout：**
-- 简单可靠，无需额外 IPC 机制
-- Chromium 也用类似方式传递初始化数据
-- 避免文件系统竞争条件
+**为什么用 XPC Service 作为 Broker：**
+- `NSXPCListenerEndpoint` 只能通过 XPC 连接传递（不能用 NSKeyedArchiver）
+- XPC Service 是 launchd 管理的，可在沙盒内合法注册 Mach 服务
+- 握手完成后 Broker 退场，Main ↔ Helper 直连，无中间人开销
+- 保留 XPC 的类型安全和编程体验
 
 ---
 
@@ -767,11 +778,14 @@ log stream --predicate 'subsystem == "chat.askaway.CanvasTabRenderer"'
 
 ## 十三、FAQ
 
-**Q: 为什么不用 XPC Service？**
-A: XPC Service 的 `xpc_main()` 会接管主线程事件循环，与 `NSApplication.run()` 冲突，导致无法正常创建 AppKit/React Native UI 组件。
+**Q: 为什么需要 XPC Service 作为 Broker？**
+A:
+1. `NSXPCListenerEndpoint` 只能通过 XPC 连接传递，不能用 `NSKeyedArchiver` 序列化
+2. XPC Service 是 launchd 管理的，可在沙盒内合法注册 Mach 服务
+3. 握手完成后 Broker 退场，Main ↔ Helper 直连，无中间人开销
 
-**Q: 为什么不用 Mach ports 传递 endpoint？**
-A: 需要先建立 Mach port 连接才能传递 endpoint，鸡生蛋问题。stdout 是最简单的 bootstrap 通道。
+**Q: 为什么不直接用 XPC Service 做渲染？**
+A: XPC Service 的 `xpc_main()` 会接管主线程事件循环，与 `NSApplication.run()` 冲突，导致无法正常创建 AppKit/React Native UI 组件。所以渲染必须在独立的 Helper App 中进行。
 
 **Q: Helper 崩溃会影响主 App 吗？**
 A: 不会。Helper 是独立进程，崩溃只会导致对应 Tab 显示错误页面，主 App 和其他 Tab 不受影响。
@@ -781,3 +795,6 @@ A: IOSurface ID 是系统全局唯一的，由内核分配，不会重复。
 
 **Q: 如何调试 Helper 进程？**
 A: Xcode > Debug > Attach to Process，或者在 Scheme 中配置直接启动 Helper。
+
+**Q: 三角架构有性能开销吗？**
+A: 几乎没有。Broker 只参与初始握手（传递 endpoint），之后 Main ↔ Helper 是直连的 XPC 通信，Broker 不再介入。
