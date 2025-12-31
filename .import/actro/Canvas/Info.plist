@@ -7,5 +7,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>MachServices</key>
+	<dict>
+		<key>group.chat.askaway.canvas.broker</key>
+		<true/>
+	</dict>
 </dict>
 </plist>
