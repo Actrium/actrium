@@ -59,7 +59,6 @@ struct UnifiedCanvasView: View {
     var body: some View {
         GeometryReader { geometry in
             let viewportSize = geometry.size
-            // DEBUG: 追踪 GeometryReader 提供的尺寸（用 print 确保可见）
             // 极窄/极矮窗口时避免 0 尺寸导致矩阵奇异
             let safeViewportSize = CGSize(
                 width: max(viewportSize.width, 1),
