@@ -290,23 +290,32 @@ class IOSurfaceDisplayView: NSView {
 
     private var surfaceUpdateCount: UInt64 = 0
 
+    private var lookupFailCount: UInt64 = 0
+    private var lastSuccessfulSurfaceID: UInt32 = 0
+
     /// Direct update from notification - fast path that bypasses SwiftUI
     private func directUpdateSurface(id: UInt32) {
         surfaceUpdateCount += 1
 
         guard id != 0 else { return }
 
-        // Skip if same surface (shouldn't happen with double buffering, but just in case)
-        // Actually, with double buffering we DO want to update even if same ID comes back
         currentSurfaceID = id
 
         // Look up the IOSurface by ID
         guard let surface = IOSurfaceLookup(id) else {
-            if surfaceUpdateCount % 120 == 1 {
-                NSLog("🖥️ [DIAG] directUpdateSurface: IOSurfaceLookup FAILED for id=\(id)")
+            lookupFailCount += 1
+            if lookupFailCount <= 5 || lookupFailCount % 60 == 0 {
+                NSLog("🖥️ [DIAG] directUpdateSurface: IOSurfaceLookup FAILED for id=\(id), failCount=\(lookupFailCount)")
             }
             return
         }
+
+        // Reset fail count on success
+        if lookupFailCount > 0 {
+            NSLog("🖥️ [DIAG] directUpdateSurface: IOSurfaceLookup succeeded after \(lookupFailCount) failures")
+            lookupFailCount = 0
+        }
+        lastSuccessfulSurfaceID = id
 
         cachedSurface = surface
 
