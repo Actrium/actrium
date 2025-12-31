@@ -8,6 +8,7 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
+import Foundation
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -518,7 +519,26 @@ fileprivate let _protobuf_package = "canvas.ipc"
 
 extension Canvas_Ipc_IPCMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".IPCMessage"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{4}\u{9}load_content\0\u{3}update_viewport\0\u{3}input_event\0\u{3}execute_js\0\u{3}get_metrics\0\u{3}get_surface_id\0\u{1}terminate\0\u{2}\"ready\0\u{3}surface_updated\0\u{3}title_changed\0\u{3}navigation_request\0\u{3}console_log\0\u{3}crash_report\0\u{3}metrics_response\0\u{3}surface_id_response\0\u{3}load_content_response\0\u{3}execute_js_response\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "id"),
+    10: .standard(proto: "load_content"),
+    11: .standard(proto: "update_viewport"),
+    12: .standard(proto: "input_event"),
+    13: .standard(proto: "execute_js"),
+    14: .standard(proto: "get_metrics"),
+    15: .standard(proto: "get_surface_id"),
+    16: .same(proto: "terminate"),
+    50: .same(proto: "ready"),
+    51: .standard(proto: "surface_updated"),
+    52: .standard(proto: "title_changed"),
+    53: .standard(proto: "navigation_request"),
+    54: .standard(proto: "console_log"),
+    55: .standard(proto: "crash_report"),
+    56: .standard(proto: "metrics_response"),
+    57: .standard(proto: "surface_id_response"),
+    58: .standard(proto: "load_content_response"),
+    59: .standard(proto: "execute_js_response"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -845,7 +865,11 @@ extension Canvas_Ipc_IPCMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 extension Canvas_Ipc_LoadContentRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".LoadContentRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}content_type\0\u{1}content\0\u{3}background_color\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "content_type"),
+    2: .same(proto: "content"),
+    3: .standard(proto: "background_color"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -885,7 +909,10 @@ extension Canvas_Ipc_LoadContentRequest: SwiftProtobuf.Message, SwiftProtobuf._M
 
 extension Canvas_Ipc_UpdateViewportRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".UpdateViewportRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}width\0\u{1}height\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "width"),
+    2: .same(proto: "height"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -920,7 +947,17 @@ extension Canvas_Ipc_UpdateViewportRequest: SwiftProtobuf.Message, SwiftProtobuf
 
 extension Canvas_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".InputEvent"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}x\0\u{1}y\0\u{3}scroll_delta_x\0\u{3}scroll_delta_y\0\u{1}button\0\u{1}modifiers\0\u{3}key_code\0\u{1}characters\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "type"),
+    2: .same(proto: "x"),
+    3: .same(proto: "y"),
+    4: .standard(proto: "scroll_delta_x"),
+    5: .standard(proto: "scroll_delta_y"),
+    6: .same(proto: "button"),
+    7: .same(proto: "modifiers"),
+    8: .standard(proto: "key_code"),
+    9: .same(proto: "characters"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -989,12 +1026,23 @@ extension Canvas_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 }
 
 extension Canvas_Ipc_InputEvent.EventType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MOUSE_MOVE\0\u{1}MOUSE_DOWN\0\u{1}MOUSE_UP\0\u{1}MOUSE_ENTERED\0\u{1}MOUSE_EXITED\0\u{1}SCROLL\0\u{1}KEY_DOWN\0\u{1}KEY_UP\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "MOUSE_MOVE"),
+    1: .same(proto: "MOUSE_DOWN"),
+    2: .same(proto: "MOUSE_UP"),
+    3: .same(proto: "MOUSE_ENTERED"),
+    4: .same(proto: "MOUSE_EXITED"),
+    5: .same(proto: "SCROLL"),
+    6: .same(proto: "KEY_DOWN"),
+    7: .same(proto: "KEY_UP"),
+  ]
 }
 
 extension Canvas_Ipc_ExecuteJSRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ExecuteJSRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}code\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "code"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1062,7 +1110,9 @@ extension Canvas_Ipc_GetSurfaceIDRequest: SwiftProtobuf.Message, SwiftProtobuf._
 
 extension Canvas_Ipc_TerminateRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TerminateRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reason\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "reason"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1092,7 +1142,11 @@ extension Canvas_Ipc_TerminateRequest: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 extension Canvas_Ipc_ReadyResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ReadyResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}surface_id\0\u{1}width\0\u{1}height\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "surface_id"),
+    2: .same(proto: "width"),
+    3: .same(proto: "height"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1132,7 +1186,9 @@ extension Canvas_Ipc_ReadyResponse: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 extension Canvas_Ipc_SurfaceUpdated: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SurfaceUpdated"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}surface_id\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "surface_id"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1162,7 +1218,9 @@ extension Canvas_Ipc_SurfaceUpdated: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 extension Canvas_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TitleChanged"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "title"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1192,7 +1250,10 @@ extension Canvas_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._Message
 
 extension Canvas_Ipc_NavigationRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".NavigationRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}url\0\u{3}new_tab\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "url"),
+    2: .standard(proto: "new_tab"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1227,7 +1288,11 @@ extension Canvas_Ipc_NavigationRequest: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 extension Canvas_Ipc_ConsoleLog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ConsoleLog"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}level\0\u{1}message\0\u{1}source\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "level"),
+    2: .same(proto: "message"),
+    3: .same(proto: "source"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1267,7 +1332,9 @@ extension Canvas_Ipc_ConsoleLog: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 extension Canvas_Ipc_CrashReport: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CrashReport"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reason\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "reason"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1297,7 +1364,13 @@ extension Canvas_Ipc_CrashReport: SwiftProtobuf.Message, SwiftProtobuf._MessageI
 
 extension Canvas_Ipc_MetricsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".MetricsResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}memory_usage\0\u{3}cpu_usage\0\u{3}frame_count\0\u{1}fps\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "request_id"),
+    2: .standard(proto: "memory_usage"),
+    3: .standard(proto: "cpu_usage"),
+    4: .standard(proto: "frame_count"),
+    5: .same(proto: "fps"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1347,7 +1420,10 @@ extension Canvas_Ipc_MetricsResponse: SwiftProtobuf.Message, SwiftProtobuf._Mess
 
 extension Canvas_Ipc_SurfaceIDResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SurfaceIDResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}surface_id\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "request_id"),
+    2: .standard(proto: "surface_id"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1382,7 +1458,11 @@ extension Canvas_Ipc_SurfaceIDResponse: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 extension Canvas_Ipc_LoadContentResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".LoadContentResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}success\0\u{3}error_message\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "request_id"),
+    2: .same(proto: "success"),
+    3: .standard(proto: "error_message"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1422,7 +1502,12 @@ extension Canvas_Ipc_LoadContentResponse: SwiftProtobuf.Message, SwiftProtobuf._
 
 extension Canvas_Ipc_ExecuteJSResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ExecuteJSResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}success\0\u{1}result\0\u{3}error_message\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "request_id"),
+    2: .same(proto: "success"),
+    3: .same(proto: "result"),
+    4: .standard(proto: "error_message"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
