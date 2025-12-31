@@ -619,6 +619,7 @@ struct MultiProcessTabView: View {
                 }
 
                 // Build config from actual tab data
+                NSLog("🔵 [DEBUG] MultiProcessTabView: Creating config with leftPanelDefaultVisible=\(tab.leftPanelDefaultVisible), rightPanelDefaultVisible=\(tab.rightPanelDefaultVisible)")
                 let config = TabXPCConfig(
                     tabId: processTabId.uuidString,
                     title: tab.title.isEmpty ? "New Tab" : tab.title,
