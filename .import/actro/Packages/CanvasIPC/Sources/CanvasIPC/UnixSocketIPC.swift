@@ -310,15 +310,25 @@ private func sendFrame(to fd: Int32, data: Data) throws {
     }
 }
 
+/// Read exactly `count` bytes from fd, handling short reads
+private func readExactly(from fd: Int32, buffer: UnsafeMutableRawPointer, count: Int) throws {
+    var totalRead = 0
+    while totalRead < count {
+        let bytesRead = read(fd, buffer.advanced(by: totalRead), count - totalRead)
+        if bytesRead <= 0 {
+            // 0 = EOF, -1 = error
+            throw IPCError.connectionClosed
+        }
+        totalRead += bytesRead
+    }
+}
+
 /// Read a length-prefixed frame
 private func readFrame(from fd: Int32) throws -> Data {
     // Read length (4 bytes, big-endian)
     var lengthBE: UInt32 = 0
-    let lengthRead = withUnsafeMutableBytes(of: &lengthBE) { ptr in
-        read(fd, ptr.baseAddress!, 4)
-    }
-    guard lengthRead == 4 else {
-        throw IPCError.connectionClosed
+    try withUnsafeMutableBytes(of: &lengthBE) { ptr in
+        try readExactly(from: fd, buffer: ptr.baseAddress!, count: 4)
     }
 
     let length = Int(UInt32(bigEndian: lengthBE))
@@ -328,11 +338,8 @@ private func readFrame(from fd: Int32) throws -> Data {
 
     // Read data
     var data = Data(count: length)
-    let dataRead = data.withUnsafeMutableBytes { ptr in
-        read(fd, ptr.baseAddress!, length)
-    }
-    guard dataRead == length else {
-        throw IPCError.connectionClosed
+    try data.withUnsafeMutableBytes { ptr in
+        try readExactly(from: fd, buffer: ptr.baseAddress!, count: length)
     }
 
     return data

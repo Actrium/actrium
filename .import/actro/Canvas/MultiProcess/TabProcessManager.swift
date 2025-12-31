@@ -240,17 +240,20 @@ class TabProcessManager: ObservableObject {
         try ipcConnection.updateViewport(width: Double(width), height: Double(height))
 
         // Determine content type and load
+        // Priority: unifiedScript > leftPanelScript/rightPanelScript > htmlContent > url
+        // Note: url field in Tab is often used to track the source directory, not as content to load
         let contentType: String
         let content: String
-        if let url = config.url {
-            contentType = "url"
-            content = url
+        if let script = config.unifiedScript {
+            contentType = "javascript"
+            content = script
+            NSLog("🔵 [DEBUG] TabProcessManager: Loading unifiedScript (\(script.count) bytes)")
         } else if let html = config.htmlContent {
             contentType = "html"
             content = html
-        } else if let script = config.unifiedScript {
-            contentType = "javascript"
-            content = script
+        } else if let url = config.url {
+            contentType = "url"
+            content = url
         } else {
             contentType = "html"
             content = "<html><body></body></html>"

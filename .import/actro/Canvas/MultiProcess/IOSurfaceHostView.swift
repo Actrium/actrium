@@ -110,28 +110,31 @@ class IOSurfaceDisplayView: NSView {
     }
 
     private var refreshCount: UInt64 = 0
-    private var lastSetSurfaceID: UInt32 = 0
+    private var cachedSurface: IOSurface?  // Cache the IOSurface reference
 
     private func refreshSurfaceContent() {
         refreshCount += 1
-        guard currentSurfaceID != 0, let surface = IOSurfaceLookup(currentSurfaceID) else {
+
+        // Use cached surface, only lookup if not cached or ID changed
+        if cachedSurface == nil || currentSurfaceID == 0 {
             if refreshCount % 60 == 1 {
-                NSLog("🖥️ [DIAG] refreshSurfaceContent: currentSurfaceID=\(currentSurfaceID), IOSurfaceLookup failed")
+                NSLog("🖥️ [DIAG] refreshSurfaceContent: no cached surface, currentSurfaceID=\(currentSurfaceID)")
             }
             return
         }
 
         // Log surface info on first frame and every ~2 seconds
         if refreshCount == 1 || refreshCount % 120 == 0 {
-            let width = IOSurfaceGetWidth(surface)
-            let height = IOSurfaceGetHeight(surface)
-            let viewScale = window?.backingScaleFactor ?? 1.0
-            NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): surfaceID=\(currentSurfaceID), surfacePixels=\(width)x\(height), viewBounds=\(bounds), screenScale=\(viewScale)")
+            if let surface = cachedSurface {
+                let width = IOSurfaceGetWidth(surface)
+                let height = IOSurfaceGetHeight(surface)
+                let viewScale = window?.backingScaleFactor ?? 1.0
+                NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): surfaceID=\(currentSurfaceID), surfacePixels=\(width)x\(height), viewBounds=\(bounds), screenScale=\(viewScale)")
+            }
         }
 
-        // DON'T re-set contents every frame - this causes flicker!
-        // IOSurface is shared memory, CALayer will see updates automatically.
-        // Just mark the layer as needing display to trigger a redraw.
+        // IOSurface is shared memory - CALayer sees updates automatically
+        // Just mark as needing display to trigger redraw
         surfaceLayer?.setNeedsDisplay()
     }
 
@@ -250,26 +253,30 @@ class IOSurfaceDisplayView: NSView {
         guard id != 0 else {
             // No surface available - show placeholder and stop display link
             stopDisplayLink()
+            cachedSurface = nil
             showPlaceholder()
             return
         }
 
         guard id != currentSurfaceID else {
-            // Same surface, just refresh
-            NSLog("📐 [DIAG]   Same surface ID, calling refreshSurface()")
-            refreshSurface()
+            // Same surface, just mark as needing display
+            NSLog("📐 [DIAG]   Same surface ID, marking for redisplay")
+            surfaceLayer?.setNeedsDisplay()
             return
         }
 
         NSLog("📐 [DIAG]   New surface ID! Updating from \(currentSurfaceID) to \(id)")
         currentSurfaceID = id
 
-        // Look up the IOSurface by ID
+        // Look up the IOSurface by ID and cache it
         guard let surface = IOSurfaceLookup(id) else {
             NSLog("IOSurfaceHostView: Failed to lookup surface with ID \(id)")
+            cachedSurface = nil
             showPlaceholder()
             return
         }
+
+        cachedSurface = surface  // Cache the surface reference
 
         let surfacePixelWidth = IOSurfaceGetWidth(surface)
         let surfacePixelHeight = IOSurfaceGetHeight(surface)
@@ -291,15 +298,17 @@ class IOSurfaceDisplayView: NSView {
         let screenScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
         surfaceLayer?.contentsScale = screenScale
 
-        // Set the IOSurface as the layer's contents
-        // Force update by clearing first
+        // Set the IOSurface as the layer's contents (without clearing first to avoid flicker)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        surfaceLayer?.contents = nil
         surfaceLayer?.contents = surface
-        // surfaceLayer should fill the entire view bounds
         surfaceLayer?.frame = bounds
         CATransaction.commit()
+
+        // Start display link for continuous refresh if not already running
+        if displayLink == nil {
+            setupDisplayLink()
+        }
 
         // Log comprehensive diagnostic info
         NSLog("🖥️ [DIAG] IOSurfaceHostView.updateSurface:")
@@ -314,19 +323,13 @@ class IOSurfaceDisplayView: NSView {
     }
 
     func refreshSurface() {
-        // For IOSurface, we need to re-set the contents to force a redraw
-        guard currentSurfaceID != 0, let surface = IOSurfaceLookup(currentSurfaceID) else {
-            return
-        }
-
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        surfaceLayer?.contents = surface
-        CATransaction.commit()
+        // Just mark layer for redisplay - IOSurface content is automatically visible
+        surfaceLayer?.setNeedsDisplay()
     }
 
     private func showPlaceholder() {
         currentSurfaceID = 0
+        cachedSurface = nil
         surfaceLayer?.contents = nil
 
         // Show a placeholder color
