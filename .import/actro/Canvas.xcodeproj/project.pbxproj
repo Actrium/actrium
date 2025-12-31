@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		000609867125B5E3CF3549A4 /* libPods-CanvasTabRenderer.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 668935376CF3B6D12F0B602F /* libPods-CanvasTabRenderer.a */; };
+		000609867125B5E3CF3549A4 /* BuildFile in Frameworks */ = {isa = PBXBuildFile; };
 		8E5B03874CCE978352975327 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		B34F77E82F042239002AF804 /* CanvasTabRendererXPC.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B34F77DD2F042239002AF804 /* CanvasTabRendererXPC.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
@@ -15,6 +15,7 @@
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		C6646A8EF8C6A45E425F2542 /* libPods-Canvas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */; };
 		D3F07ECDCA5F250307EE7E5B /* libPods-CanvasTabRendererXPC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 032CB00D54CCD5C8F71BABB3 /* libPods-CanvasTabRendererXPC.a */; };
+		F306880CEA71C467403F7E06 /* libPods-CanvasTabRenderer.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,6 +118,7 @@
 
 /* Begin PBXFileReference section */
 		032CB00D54CCD5C8F71BABB3 /* libPods-CanvasTabRendererXPC.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTabRendererXPC.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTabRenderer.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.debug.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.debug.xcconfig"; sourceTree = "<group>"; };
 		5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.release.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.release.xcconfig"; sourceTree = "<group>"; };
@@ -234,7 +236,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				000609867125B5E3CF3549A4 /* libPods-CanvasTabRenderer.a in Frameworks */,
+				000609867125B5E3CF3549A4 /* BuildFile in Frameworks */,
+				F306880CEA71C467403F7E06 /* libPods-CanvasTabRenderer.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -260,6 +263,7 @@
 			children = (
 				8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */,
 				032CB00D54CCD5C8F71BABB3 /* libPods-CanvasTabRendererXPC.a */,
+				18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";

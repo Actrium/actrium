@@ -382,6 +382,19 @@ class TabXPCEvent: NSObject, NSSecureCoding {
 
 // MARK: - XPC Protocols
 
+/// Protocol for the XPC Broker (main app as server, helpers connect to register)
+/// This enables the "reverse connection" pattern where helpers connect first
+@objc(TabBrokerProtocol)
+protocol TabBrokerProtocol {
+    /// Helper registers itself with its anonymous endpoint
+    /// - Parameters:
+    ///   - tabId: The tab ID this helper is serving
+    ///   - endpoint: The helper's anonymous XPC listener endpoint
+    ///   - pid: The helper's process ID
+    ///   - reply: Callback with success status and optional error message
+    func registerHelper(tabId: String, endpoint: NSXPCListenerEndpoint, pid: Int32, reply: @escaping (Bool, String?) -> Void)
+}
+
 /// Protocol for the Tab Renderer process (called by main app)
 @objc(TabRendererProtocol)
 protocol TabRendererProtocol {
@@ -430,6 +443,16 @@ protocol TabRendererCallbackProtocol {
 
 /// Factory for creating XPC interfaces with proper allowed classes
 enum TabXPCInterface {
+    /// Fixed Mach service name for the broker (using App Group)
+    static let brokerServiceName = "group.chat.askaway.canvas.broker"
+
+    /// Create the broker protocol interface
+    static func brokerInterface() -> NSXPCInterface {
+        let interface = NSXPCInterface(with: TabBrokerProtocol.self)
+        // NSXPCListenerEndpoint is automatically allowed as it's a system type
+        return interface
+    }
+
     /// Create the renderer protocol interface
     static func rendererInterface() -> NSXPCInterface {
         let interface = NSXPCInterface(with: TabRendererProtocol.self)
