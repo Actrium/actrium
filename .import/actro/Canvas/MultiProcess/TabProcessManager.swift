@@ -233,10 +233,10 @@ class TabProcessManager: ObservableObject {
 
         logger.info("TabProcessManager: Tab \(tabId) helper launched, waiting for connection...")
 
-        // Wait for helper to connect and send ready message
-        let surfaceID = try await waitForHelperReady(processInfo: processInfo, timeout: connectionTimeout)
+        // Wait for helper to connect (just the connection, not surface ID yet)
+        try await waitForHelperConnection(processInfo: processInfo, timeout: connectionTimeout)
 
-        // Update viewport and load content
+        // Update viewport and load content FIRST (this creates the IOSurface)
         try ipcConnection.updateViewport(width: Double(width), height: Double(height))
 
         // Determine content type and load
@@ -273,30 +273,35 @@ class TabProcessManager: ObservableObject {
             permissions: config.permissions
         )
 
+        // NOW wait for a valid surface ID (after loadContent has created the surface)
+        let surfaceID = try await waitForValidSurfaceID(processInfo: processInfo, timeout: connectionTimeout)
+
         processInfo.surfaceID = surfaceID
         logger.info("TabProcessManager: IPC ready, surfaceID=\(surfaceID)")
 
         return processInfo
     }
 
-    /// Wait for helper to connect and send ready message
-    private func waitForHelperReady(processInfo: TabProcessInfo, timeout: TimeInterval) async throws -> UInt32 {
-        try await withCheckedThrowingContinuation { continuation in
+    /// Wait for helper to connect and send any ready message (connection only, not surface)
+    private func waitForHelperConnection(processInfo: TabProcessInfo, timeout: TimeInterval) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             var didResume = false
             let lock = NSLock()
 
-            // Set up surface update handler to capture initial surface ID
+            // Set up surface update handler to detect connection (ready message)
             let originalHandler = processInfo.ipcConnection?.onSurfaceUpdated
             processInfo.ipcConnection?.onSurfaceUpdated = { surfaceID in
                 lock.lock()
+                // Resume on ANY surface update (including 0), meaning helper is connected
                 if !didResume {
                     didResume = true
                     lock.unlock()
-                    continuation.resume(returning: surfaceID)
+                    NSLog("🔵 [DEBUG] waitForHelperConnection: Helper connected, initial surfaceID=\(surfaceID)")
+                    continuation.resume()
                 } else {
                     lock.unlock()
                 }
-                // Call original handler for future updates
+                // Call original handler for all updates
                 originalHandler?(surfaceID)
             }
 
@@ -306,6 +311,53 @@ class TabProcessManager: ObservableObject {
                 if !didResume {
                     didResume = true
                     lock.unlock()
+                    continuation.resume(throwing: TabProcessError.connectionTimeout)
+                } else {
+                    lock.unlock()
+                }
+            }
+        }
+    }
+
+    /// Wait for a valid (non-zero) surface ID after loadContent
+    private func waitForValidSurfaceID(processInfo: TabProcessInfo, timeout: TimeInterval) async throws -> UInt32 {
+        // Check if we already have a valid surface ID
+        if processInfo.surfaceID != 0 {
+            NSLog("🔵 [DEBUG] waitForValidSurfaceID: Already have valid surfaceID=\(processInfo.surfaceID)")
+            return processInfo.surfaceID
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            var didResume = false
+            let lock = NSLock()
+
+            // Set up surface update handler to capture valid surface ID
+            let originalHandler = processInfo.ipcConnection?.onSurfaceUpdated
+            processInfo.ipcConnection?.onSurfaceUpdated = { surfaceID in
+                lock.lock()
+                // Only resume when we get a valid (non-zero) surface ID
+                if !didResume && surfaceID != 0 {
+                    didResume = true
+                    lock.unlock()
+                    NSLog("🔵 [DEBUG] waitForValidSurfaceID: Got valid surfaceID=\(surfaceID)")
+                    continuation.resume(returning: surfaceID)
+                } else {
+                    lock.unlock()
+                    if surfaceID == 0 && !didResume {
+                        NSLog("🔵 [DEBUG] waitForValidSurfaceID: Ignoring surfaceID=0")
+                    }
+                }
+                // Call original handler for all updates
+                originalHandler?(surfaceID)
+            }
+
+            // Set up timeout
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                lock.lock()
+                if !didResume {
+                    didResume = true
+                    lock.unlock()
+                    NSLog("🔴 [DEBUG] waitForValidSurfaceID: Timeout waiting for surface ID")
                     continuation.resume(throwing: TabProcessError.connectionTimeout)
                 } else {
                     lock.unlock()

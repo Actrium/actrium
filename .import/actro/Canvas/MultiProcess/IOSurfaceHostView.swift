@@ -39,7 +39,14 @@ class IOSurfaceDisplayView: NSView {
     private var currentSurfaceID: UInt32 = 0
 
     /// Tab ID for event forwarding
-    var tabId: UUID?
+    var tabId: UUID? {
+        didSet {
+            // When tabId changes, update notification observer
+            if oldValue != tabId {
+                setupNotificationObserver()
+            }
+        }
+    }
 
     /// Expected surface dimensions for intrinsicContentSize
     var surfaceWidth: CGFloat = 0
@@ -50,6 +57,9 @@ class IOSurfaceDisplayView: NSView {
 
     /// Display link for refreshing IOSurface content
     private var displayLink: CVDisplayLink?
+
+    /// Notification observer for direct surface updates (bypasses SwiftUI)
+    private var surfaceObserver: NSObjectProtocol?
 
     /// Return the expected size so SwiftUI can properly size this view
     override var intrinsicContentSize: NSSize {
@@ -64,19 +74,46 @@ class IOSurfaceDisplayView: NSView {
         NSLog("IOSurfaceDisplayView: init, total instances: \(IOSurfaceDisplayView.instanceCount)")
         setupLayer()
         setupTracking()
-        // Don't start displayLink here - wait until we have a valid surface ID
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupLayer()
         setupTracking()
-        // Don't start displayLink here - wait until we have a valid surface ID
     }
 
     deinit {
         NSLog("IOSurfaceDisplayView: deinit called for tabId \(tabId?.uuidString ?? "nil")")
         stopDisplayLink()
+        if let observer = surfaceObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    /// Set up direct notification observer for surface updates (bypasses SwiftUI state)
+    private func setupNotificationObserver() {
+        // Remove old observer
+        if let observer = surfaceObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+
+        guard let tabId = tabId else { return }
+
+        // Listen directly to surface update notifications
+        surfaceObserver = NotificationCenter.default.addObserver(
+            forName: .tabSurfaceUpdated,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            guard let notifTabId = notification.userInfo?["tabId"] as? UUID,
+                  notifTabId == tabId,
+                  let newSurfaceID = notification.userInfo?["surfaceID"] as? UInt32,
+                  newSurfaceID != 0 else { return }
+
+            // Directly update the layer without going through SwiftUI
+            self.directUpdateSurface(id: newSurfaceID)
+        }
     }
 
     private func setupLayer() {
@@ -251,79 +288,79 @@ class IOSurfaceDisplayView: NSView {
         TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
-    func updateSurface(id: UInt32, width: CGFloat, height: CGFloat) {
-        NSLog("📐 [DIAG] IOSurfaceDisplayView.updateSurface: id=\(id), requestedSize=\(Int(width))x\(Int(height)), currentID=\(currentSurfaceID), bounds=\(bounds)")
+    private var surfaceUpdateCount: UInt64 = 0
 
-        guard id != 0 else {
-            // No surface available - show placeholder and stop display link
-            stopDisplayLink()
-            cachedSurface = nil
-            showPlaceholder()
-            return
-        }
+    /// Direct update from notification - fast path that bypasses SwiftUI
+    private func directUpdateSurface(id: UInt32) {
+        surfaceUpdateCount += 1
 
-        guard id != currentSurfaceID else {
-            // Same surface, just mark as needing display
-            NSLog("📐 [DIAG]   Same surface ID, marking for redisplay")
-            surfaceLayer?.setNeedsDisplay()
-            return
-        }
+        guard id != 0 else { return }
 
-        NSLog("📐 [DIAG]   New surface ID! Updating from \(currentSurfaceID) to \(id)")
+        // Skip if same surface (shouldn't happen with double buffering, but just in case)
+        // Actually, with double buffering we DO want to update even if same ID comes back
         currentSurfaceID = id
 
-        // Look up the IOSurface by ID and cache it
+        // Look up the IOSurface by ID
         guard let surface = IOSurfaceLookup(id) else {
-            NSLog("IOSurfaceHostView: Failed to lookup surface with ID \(id)")
-            cachedSurface = nil
-            showPlaceholder()
+            if surfaceUpdateCount % 120 == 1 {
+                NSLog("🖥️ [DIAG] directUpdateSurface: IOSurfaceLookup FAILED for id=\(id)")
+            }
             return
         }
 
-        cachedSurface = surface  // Cache the surface reference
+        cachedSurface = surface
 
-        let surfacePixelWidth = IOSurfaceGetWidth(surface)
-        let surfacePixelHeight = IOSurfaceGetHeight(surface)
-        NSLog("📐 [DIAG]   IOSurface pixel size: \(surfacePixelWidth)x\(surfacePixelHeight)")
+        // Ensure layer exists
+        ensureSurfaceLayerExists()
 
-        // Create or update the surface layer
-        if surfaceLayer == nil {
-            let newLayer = CALayer()
-            // Use resize gravity to fill the entire layer bounds
-            newLayer.contentsGravity = .resize
-            newLayer.magnificationFilter = .linear
-            newLayer.minificationFilter = .linear
-            newLayer.isOpaque = true
-            layer?.addSublayer(newLayer)
-            surfaceLayer = newLayer
-        }
-
-        // contentsScale should match screen scale since IOSurface is at pixel resolution
-        let screenScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
-        surfaceLayer?.contentsScale = screenScale
-
-        // Set the IOSurface as the layer's contents (without clearing first to avoid flicker)
+        // Update layer contents directly - no animations
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         surfaceLayer?.contents = surface
-        surfaceLayer?.frame = bounds
+        // Use current bounds, fallback to expected size
+        let currentBounds = bounds.width > 0 ? bounds : NSRect(x: 0, y: 0, width: surfaceWidth, height: surfaceHeight)
+        surfaceLayer?.frame = currentBounds
         CATransaction.commit()
 
-        // Start display link for continuous refresh if not already running
-        if displayLink == nil {
-            setupDisplayLink()
+        // Log periodically
+        if surfaceUpdateCount == 1 || surfaceUpdateCount % 120 == 0 {
+            let surfacePixelWidth = IOSurfaceGetWidth(surface)
+            let surfacePixelHeight = IOSurfaceGetHeight(surface)
+            NSLog("🖥️ [DIAG] directUpdateSurface #\(surfaceUpdateCount): id=\(id), pixels=\(surfacePixelWidth)x\(surfacePixelHeight), bounds=\(currentBounds)")
+        }
+    }
+
+    /// Ensure the surface layer exists
+    private func ensureSurfaceLayerExists() {
+        guard surfaceLayer == nil else { return }
+
+        let newLayer = CALayer()
+        newLayer.contentsGravity = .resize
+        newLayer.magnificationFilter = .linear
+        newLayer.minificationFilter = .linear
+        newLayer.isOpaque = true
+        layer?.addSublayer(newLayer)
+        surfaceLayer = newLayer
+
+        let screenScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        newLayer.contentsScale = screenScale
+        NSLog("🖥️ [DIAG] Created surfaceLayer with contentsScale=\(screenScale)")
+    }
+
+    /// Called from SwiftUI - just sets up initial state, actual updates come via notification
+    func updateSurface(id: UInt32, width: CGFloat, height: CGFloat) {
+        guard id != 0 else {
+            // No surface available - show placeholder
+            cachedSurface = nil
+            showPlaceholder()
+            return
         }
 
-        // Log comprehensive diagnostic info
-        NSLog("🖥️ [DIAG] IOSurfaceHostView.updateSurface:")
-        NSLog("🖥️ [DIAG]   surfaceID=\(id)")
-        NSLog("🖥️ [DIAG]   IOSurface pixels: \(surfacePixelWidth)x\(surfacePixelHeight)")
-        NSLog("🖥️ [DIAG]   view.bounds (points): \(bounds)")
-        NSLog("🖥️ [DIAG]   view.frame (points): \(frame)")
-        NSLog("🖥️ [DIAG]   screenScale: \(screenScale)")
-        NSLog("🖥️ [DIAG]   surfaceLayer.contentsScale: \(surfaceLayer?.contentsScale ?? 0)")
-        NSLog("🖥️ [DIAG]   surfaceLayer.frame: \(surfaceLayer?.frame ?? .zero)")
-        NSLog("🖥️ [DIAG]   expected view pixels: \(bounds.width * screenScale)x\(bounds.height * screenScale)")
+        // Just update the initial surface if we don't have one yet
+        // Subsequent updates come directly via notification observer
+        if currentSurfaceID == 0 {
+            directUpdateSurface(id: id)
+        }
     }
 
     func refreshSurface() {
@@ -418,16 +455,17 @@ struct MultiProcessTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .tabSurfaceUpdated)) { notification in
             if let notifTabId = notification.userInfo?["tabId"] as? UUID, notifTabId == tabId,
-               let newSurfaceID = notification.userInfo?["surfaceID"] as? UInt32 {
-                NSLog("📐 [DIAG] tabSurfaceUpdated notification: tabId=\(tabId), surfaceID=\(newSurfaceID)")
-                // Set activeTabId if not yet set (handles race condition during startup)
-                if activeTabId == nil {
+               let newSurfaceID = notification.userInfo?["surfaceID"] as? UInt32,
+               newSurfaceID != 0 {
+                // Only update SwiftUI state once to show the view
+                // Actual frame updates go directly to IOSurfaceDisplayView via its own observer
+                if surfaceID == 0 {
+                    NSLog("📐 [DIAG] First valid surfaceID received: \(newSurfaceID)")
                     activeTabId = tabId
-                }
-                if newSurfaceID != surfaceID {
                     surfaceID = newSurfaceID
                     isLoading = false
                 }
+                // Don't update surfaceID for subsequent frames - IOSurfaceDisplayView handles those directly
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .tabRendererCrashed)) { notification in
