@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		000609867125B5E3CF3549A4 /* BuildFile in Frameworks */ = {isa = PBXBuildFile; };
+		1A2B3C4D5E6F7890ABCD0001 /* CanvasIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0002 /* CanvasIPC */; };
+		1A2B3C4D5E6F7890ABCD0003 /* CanvasIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0004 /* CanvasIPC */; };
 		8E5B03874CCE978352975327 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		B31C6D492F04BC2500E7FEF4 /* CanvasBroker.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B31C6D3E2F04BC2500E7FEF4 /* CanvasBroker.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
@@ -231,6 +233,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A2B3C4D5E6F7890ABCD0001 /* CanvasIPC in Frameworks */,
 				B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */,
 				C6646A8EF8C6A45E425F2542 /* libPods-Canvas.a in Frameworks */,
 			);
@@ -254,6 +257,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A2B3C4D5E6F7890ABCD0003 /* CanvasIPC in Frameworks */,
 				000609867125B5E3CF3549A4 /* BuildFile in Frameworks */,
 				F306880CEA71C467403F7E06 /* libPods-CanvasTabRenderer.a in Frameworks */,
 			);
@@ -560,6 +564,7 @@
 			mainGroup = B3E458972EC731A30014D74C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "Packages/CanvasIPC" */,
 				B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -1289,7 +1294,7 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -1326,7 +1331,7 @@
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -1511,6 +1516,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "Packages/CanvasIPC" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/CanvasIPC;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -1523,6 +1535,14 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		1A2B3C4D5E6F7890ABCD0002 /* CanvasIPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CanvasIPC;
+		};
+		1A2B3C4D5E6F7890ABCD0004 /* CanvasIPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CanvasIPC;
+		};
 		B3E78A282F02AFD7001F9589 /* Highlightr */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */;
