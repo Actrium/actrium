@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import ServiceManagement
 
 private let logger = AppLogger.app
 
@@ -81,19 +82,81 @@ class TabProcessManager: ObservableObject {
 
     private init() {
         setupMemoryPressureHandler()
-        connectToBroker()
+        launchBrokerAndConnect()
     }
 
-    // MARK: - Broker Connection
+    // MARK: - Broker Launch & Connection
 
+    /// Launch broker Login Item and connect
+    private func launchBrokerAndConnect() {
+        // First, launch the broker using SMAppService (Login Item)
+        launchBroker()
+
+        // Give the broker a moment to start up
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.connectToBroker()
+        }
+    }
+
+    /// Broker process reference
+    private var brokerProcess: Process?
+
+    /// Launch the broker helper
+    private func launchBroker() {
+        guard let bundlePath = Bundle.main.bundlePath as String? else {
+            logger.error("TabProcessManager: Cannot find main bundle path")
+            return
+        }
+
+        // Check multiple possible locations for the broker
+        let possiblePaths = [
+            // LoginItems location (for proper Login Item setup)
+            (bundlePath as NSString).appendingPathComponent("Contents/Library/LoginItems/CanvasBroker.app/Contents/MacOS/CanvasBroker"),
+            // XPCServices location (current Xcode setup - broker is still an XPC service target)
+            (bundlePath as NSString).appendingPathComponent("Contents/XPCServices/CanvasBroker.xpc/Contents/MacOS/CanvasBroker"),
+        ]
+
+        for brokerPath in possiblePaths {
+            if FileManager.default.fileExists(atPath: brokerPath) {
+                logger.info("TabProcessManager: Launching broker from \(brokerPath)")
+
+                // Launch broker directly as a subprocess
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: brokerPath)
+
+                process.terminationHandler = { [weak self] proc in
+                    logger.info("TabProcessManager: Broker terminated with status \(proc.terminationStatus)")
+                    self?.brokerProcess = nil
+                }
+
+                do {
+                    try process.run()
+                    brokerProcess = process
+                    logger.info("TabProcessManager: Broker launched with PID \(process.processIdentifier)")
+                    return
+                } catch {
+                    logger.error("TabProcessManager: Failed to launch broker: \(error)")
+                }
+            }
+        }
+
+        logger.error("TabProcessManager: Broker not found in any expected location")
+    }
+
+    /// Connect to the broker's Mach service
     private func connectToBroker() {
-        brokerConnection = NSXPCConnection(serviceName: BrokerXPCInterface.serviceName)
+        // Use Mach service name for connection (works across sandboxed apps with proper entitlements)
+        brokerConnection = NSXPCConnection(machServiceName: BrokerXPCInterface.serviceName)
         brokerConnection?.remoteObjectInterface = BrokerXPCInterface.brokerInterface()
         brokerConnection?.exportedInterface = BrokerXPCInterface.mainAppCallbackInterface()
         brokerConnection?.exportedObject = self
 
-        brokerConnection?.interruptionHandler = {
+        brokerConnection?.interruptionHandler = { [weak self] in
             logger.warning("TabProcessManager: Broker connection interrupted")
+            // Try to reconnect after a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self?.launchBrokerAndConnect()
+            }
         }
 
         brokerConnection?.invalidationHandler = { [weak self] in
@@ -112,7 +175,7 @@ class TabProcessManager: ObservableObject {
         }
 
         broker.registerMainApp(callback: self)
-        logger.info("TabProcessManager: Registered with broker as main app")
+        logger.info("TabProcessManager: Registered with broker as main app via Mach service: \(BrokerXPCInterface.serviceName)")
     }
 
     // MARK: - Helper App Path
