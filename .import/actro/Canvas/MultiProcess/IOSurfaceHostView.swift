@@ -90,16 +90,22 @@ class IOSurfaceDisplayView: NSView {
         }
     }
 
-    /// Set up direct notification observer for surface updates (bypasses SwiftUI state)
+    /// Set up notification observer for surface ID changes (only for initial setup or viewport resize)
     private func setupNotificationObserver() {
         // Remove old observer
         if let observer = surfaceObserver {
             NotificationCenter.default.removeObserver(observer)
+            surfaceObserver = nil
         }
 
-        guard let tabId = tabId else { return }
+        guard let tabId = tabId else {
+            NSLog("🖥️ [DIAG] setupNotificationObserver: tabId is nil, skipping")
+            return
+        }
 
-        // Listen directly to surface update notifications
+        NSLog("🖥️ [DIAG] setupNotificationObserver: Setting up observer for tabId=\(tabId)")
+
+        // Listen for surface ID changes (only happens on initial setup or viewport resize now)
         surfaceObserver = NotificationCenter.default.addObserver(
             forName: .tabSurfaceUpdated,
             object: nil,
@@ -111,8 +117,25 @@ class IOSurfaceDisplayView: NSView {
                   let newSurfaceID = notification.userInfo?["surfaceID"] as? UInt32,
                   newSurfaceID != 0 else { return }
 
-            // Directly update the layer without going through SwiftUI
-            self.directUpdateSurface(id: newSurfaceID)
+            // If surface ID changed, update the cached surface
+            if newSurfaceID != self.currentSurfaceID {
+                NSLog("🖥️ [DIAG] Surface ID changed via notification: \(self.currentSurfaceID) -> \(newSurfaceID)")
+                self.currentSurfaceID = newSurfaceID
+
+                if let surface = IOSurfaceLookup(newSurfaceID) {
+                    self.cachedSurface = surface
+                    self.ensureSurfaceLayerExists()
+
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    self.surfaceLayer?.contents = surface
+                    self.surfaceLayer?.frame = self.bounds
+                    CATransaction.commit()
+
+                    // Ensure displayLink is running
+                    self.startDisplayLink()
+                }
+            }
         }
     }
 
@@ -121,10 +144,15 @@ class IOSurfaceDisplayView: NSView {
         layer?.backgroundColor = NSColor.black.cgColor
     }
 
-    private func setupDisplayLink() {
+    private func startDisplayLink() {
+        // If displayLink already exists and running, do nothing
+        if displayLink != nil {
+            return
+        }
+
         var link: CVDisplayLink?
         CVDisplayLinkCreateWithActiveCGDisplays(&link)
-        guard let displayLink = link else { return }
+        guard let newLink = link else { return }
 
         let callback: CVDisplayLinkOutputCallback = { _, _, _, _, _, userInfo -> CVReturn in
             guard let userInfo = userInfo else { return kCVReturnSuccess }
@@ -135,15 +163,17 @@ class IOSurfaceDisplayView: NSView {
             return kCVReturnSuccess
         }
 
-        CVDisplayLinkSetOutputCallback(displayLink, callback, Unmanaged.passUnretained(self).toOpaque())
-        CVDisplayLinkStart(displayLink)
-        self.displayLink = displayLink
+        CVDisplayLinkSetOutputCallback(newLink, callback, Unmanaged.passUnretained(self).toOpaque())
+        CVDisplayLinkStart(newLink)
+        self.displayLink = newLink
+        NSLog("🖥️ [DIAG] DisplayLink started")
     }
 
     private func stopDisplayLink() {
         guard let link = displayLink else { return }
         CVDisplayLinkStop(link)
         displayLink = nil
+        NSLog("🖥️ [DIAG] DisplayLink stopped")
     }
 
     private var refreshCount: UInt64 = 0
@@ -153,7 +183,7 @@ class IOSurfaceDisplayView: NSView {
     private func refreshSurfaceContent() {
         refreshCount += 1
 
-        // Use cached surface, only lookup if not cached or ID changed
+        // Use cached surface
         guard let surface = cachedSurface, currentSurfaceID != 0 else {
             if refreshCount % 60 == 1 {
                 NSLog("🖥️ [DIAG] refreshSurfaceContent: no cached surface, currentSurfaceID=\(currentSurfaceID)")
@@ -169,9 +199,14 @@ class IOSurfaceDisplayView: NSView {
             NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): surfaceID=\(currentSurfaceID), surfacePixels=\(width)x\(height), viewBounds=\(bounds), screenScale=\(viewScale)")
         }
 
-        // Only mark layer for redisplay - CALayer will read IOSurface when compositing
-        // This is less aggressive and reduces flicker
-        surfaceLayer?.setNeedsDisplay()
+        // "Tickle" the layer to show updated IOSurface content
+        // According to Apple docs: "If you are rendering live frames you may need to tickle
+        // the layer to let the render server know the contents of the surface have changed"
+        // We do this by re-setting the contents property to the same surface
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        surfaceLayer?.contents = surface
+        CATransaction.commit()
     }
 
     /// Called when Helper notifies surface update
@@ -290,55 +325,6 @@ class IOSurfaceDisplayView: NSView {
 
     private var surfaceUpdateCount: UInt64 = 0
 
-    private var lookupFailCount: UInt64 = 0
-    private var lastSuccessfulSurfaceID: UInt32 = 0
-
-    /// Direct update from notification - fast path that bypasses SwiftUI
-    private func directUpdateSurface(id: UInt32) {
-        surfaceUpdateCount += 1
-
-        guard id != 0 else { return }
-
-        currentSurfaceID = id
-
-        // Look up the IOSurface by ID
-        guard let surface = IOSurfaceLookup(id) else {
-            lookupFailCount += 1
-            if lookupFailCount <= 5 || lookupFailCount % 60 == 0 {
-                NSLog("🖥️ [DIAG] directUpdateSurface: IOSurfaceLookup FAILED for id=\(id), failCount=\(lookupFailCount)")
-            }
-            return
-        }
-
-        // Reset fail count on success
-        if lookupFailCount > 0 {
-            NSLog("🖥️ [DIAG] directUpdateSurface: IOSurfaceLookup succeeded after \(lookupFailCount) failures")
-            lookupFailCount = 0
-        }
-        lastSuccessfulSurfaceID = id
-
-        cachedSurface = surface
-
-        // Ensure layer exists
-        ensureSurfaceLayerExists()
-
-        // Update layer contents directly - no animations
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        surfaceLayer?.contents = surface
-        // Use current bounds, fallback to expected size
-        let currentBounds = bounds.width > 0 ? bounds : NSRect(x: 0, y: 0, width: surfaceWidth, height: surfaceHeight)
-        surfaceLayer?.frame = currentBounds
-        CATransaction.commit()
-
-        // Log periodically
-        if surfaceUpdateCount == 1 || surfaceUpdateCount % 120 == 0 {
-            let surfacePixelWidth = IOSurfaceGetWidth(surface)
-            let surfacePixelHeight = IOSurfaceGetHeight(surface)
-            NSLog("🖥️ [DIAG] directUpdateSurface #\(surfaceUpdateCount): id=\(id), pixels=\(surfacePixelWidth)x\(surfacePixelHeight), bounds=\(currentBounds)")
-        }
-    }
-
     /// Ensure the surface layer exists
     private func ensureSurfaceLayerExists() {
         guard surfaceLayer == nil else { return }
@@ -356,19 +342,41 @@ class IOSurfaceDisplayView: NSView {
         NSLog("🖥️ [DIAG] Created surfaceLayer with contentsScale=\(screenScale)")
     }
 
-    /// Called from SwiftUI - just sets up initial state, actual updates come via notification
+    /// Called from SwiftUI - sets up the surface and starts displayLink for continuous refresh
     func updateSurface(id: UInt32, width: CGFloat, height: CGFloat) {
         guard id != 0 else {
             // No surface available - show placeholder
+            stopDisplayLink()
             cachedSurface = nil
             showPlaceholder()
             return
         }
 
-        // Just update the initial surface if we don't have one yet
-        // Subsequent updates come directly via notification observer
-        if currentSurfaceID == 0 {
-            directUpdateSurface(id: id)
+        // If surface ID changed (e.g., viewport resize), update it
+        if id != currentSurfaceID {
+            currentSurfaceID = id
+
+            // Look up the IOSurface
+            guard let surface = IOSurfaceLookup(id) else {
+                NSLog("🖥️ [DIAG] updateSurface: IOSurfaceLookup FAILED for id=\(id)")
+                return
+            }
+
+            cachedSurface = surface
+            ensureSurfaceLayerExists()
+
+            // Set initial contents
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            surfaceLayer?.contents = surface
+            let currentBounds = bounds.width > 0 ? bounds : NSRect(x: 0, y: 0, width: surfaceWidth, height: surfaceHeight)
+            surfaceLayer?.frame = currentBounds
+            CATransaction.commit()
+
+            NSLog("🖥️ [DIAG] updateSurface: Set up surface id=\(id), starting displayLink for refresh")
+
+            // Start displayLink for continuous refresh of IOSurface content
+            startDisplayLink()
         }
     }
 
