@@ -87,6 +87,7 @@ class TabProcessManager: ObservableObject {
 
     /// Connect to CanvasService
     private func connectToService() {
+        NSLog("🔵 [DEBUG] TabProcessManager.connectToService: serviceName=\(CanvasServiceXPCInterface.serviceName)")
         logger.info("TabProcessManager: Connecting to CanvasService: \(CanvasServiceXPCInterface.serviceName)")
 
         // Connect to the CanvasService XPC Service
@@ -151,6 +152,7 @@ class TabProcessManager: ObservableObject {
 
     /// Get a renderer for a tab by launching via CanvasService
     func getRenderer(for tabId: UUID, config: TabXPCConfig, viewportSize: CGSize? = nil) async throws -> TabProcessInfo {
+        NSLog("🔵 [DEBUG] TabProcessManager.getRenderer: tabId=\(tabId), isMultiProcessEnabled=\(isMultiProcessEnabled)")
         logger.info("TabProcessManager: Requesting tab \(tabId) from CanvasService")
 
         let processInfo = TabProcessInfo(tabId: tabId)
@@ -162,15 +164,21 @@ class TabProcessManager: ObservableObject {
 
         // Request CanvasService to launch the helper
         // Note: Config is passed directly to renderer via XPC later, not through service
+        NSLog("🔵 [DEBUG] TabProcessManager: Getting service proxy, serviceConnection=\(String(describing: serviceConnection))")
         guard let service = serviceConnection?.remoteObjectProxyWithErrorHandler({ error in
+            NSLog("🔴 [DEBUG] TabProcessManager: Service proxy error: \(error)")
             logger.error("TabProcessManager: Service proxy error: \(error)")
         }) as? CanvasServiceProtocol else {
+            NSLog("🔴 [DEBUG] TabProcessManager: Failed to get service proxy")
             throw TabProcessError.xpcConnectionFailed
         }
+        NSLog("🔵 [DEBUG] TabProcessManager: Got service proxy, calling launchTab...")
 
         // Launch tab via service (config passed as empty data, actual config sent via direct XPC)
         let success = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            NSLog("🔵 [DEBUG] TabProcessManager: Inside continuation, calling launchTab")
             service.launchTab(tabId: tabId.uuidString, config: Data(), width: width, height: height) { success, errorMessage in
+                NSLog("🔵 [DEBUG] TabProcessManager: launchTab reply: success=\(success), error=\(errorMessage ?? "nil")")
                 if success {
                     continuation.resume(returning: true)
                 } else {
