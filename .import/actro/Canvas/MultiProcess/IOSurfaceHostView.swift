@@ -405,8 +405,17 @@ struct MultiProcessTabView: View {
             // 不在消失时强行终止进程，避免 SwiftUI 视图重建导致渲染进程被提前杀掉
         }
         .onReceive(NotificationCenter.default.publisher(for: .tabSurfaceUpdated)) { notification in
-            if let notifTabId = notification.userInfo?["tabId"] as? UUID, notifTabId == tabId {
-                refreshSurface()
+            if let notifTabId = notification.userInfo?["tabId"] as? UUID, notifTabId == tabId,
+               let newSurfaceID = notification.userInfo?["surfaceID"] as? UInt32 {
+                NSLog("📐 [DIAG] tabSurfaceUpdated notification: tabId=\(tabId), surfaceID=\(newSurfaceID)")
+                // Set activeTabId if not yet set (handles race condition during startup)
+                if activeTabId == nil {
+                    activeTabId = tabId
+                }
+                if newSurfaceID != surfaceID {
+                    surfaceID = newSurfaceID
+                    isLoading = false
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .tabRendererCrashed)) { notification in
