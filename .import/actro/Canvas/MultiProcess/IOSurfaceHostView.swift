@@ -278,9 +278,8 @@ class IOSurfaceDisplayView: NSView {
         // Create or update the surface layer
         if surfaceLayer == nil {
             let newLayer = CALayer()
-            // Use resizeAspect to properly scale the IOSurface to fit the layer bounds
-            // while maintaining aspect ratio. This works better with Retina displays.
-            newLayer.contentsGravity = .resizeAspect
+            // Use resize gravity to fill the entire layer bounds
+            newLayer.contentsGravity = .resize
             newLayer.magnificationFilter = .linear
             newLayer.minificationFilter = .linear
             newLayer.isOpaque = true
@@ -288,9 +287,9 @@ class IOSurfaceDisplayView: NSView {
             surfaceLayer = newLayer
         }
 
-        // Set contentsScale to 1.0 since IOSurface is already at pixel resolution
-        // and contentsGravity = .resizeAspect will handle the scaling
-        surfaceLayer?.contentsScale = 1.0
+        // contentsScale should match screen scale since IOSurface is at pixel resolution
+        let screenScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        surfaceLayer?.contentsScale = screenScale
 
         // Set the IOSurface as the layer's contents
         // Force update by clearing first
@@ -303,7 +302,6 @@ class IOSurfaceDisplayView: NSView {
         CATransaction.commit()
 
         // Log comprehensive diagnostic info
-        let screenScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
         NSLog("🖥️ [DIAG] IOSurfaceHostView.updateSurface:")
         NSLog("🖥️ [DIAG]   surfaceID=\(id)")
         NSLog("🖥️ [DIAG]   IOSurface pixels: \(surfacePixelWidth)x\(surfacePixelHeight)")
