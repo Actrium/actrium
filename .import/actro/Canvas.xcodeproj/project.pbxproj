@@ -564,7 +564,7 @@
 			mainGroup = B3E458972EC731A30014D74C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "Packages/CanvasIPC" */,
+				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "CanvasIPC" */,
 				B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -1517,7 +1517,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "Packages/CanvasIPC" */ = {
+		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "CanvasIPC" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/CanvasIPC;
 		};

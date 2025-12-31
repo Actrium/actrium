@@ -166,8 +166,7 @@ struct CanvasApp: App {
         logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
         #endif
 
-        // Initialize TabProcessManager early to start the broker
-        // This ensures XPC broker is running before any tab rendering is needed
+        // Initialize TabProcessManager early
         _ = TabProcessManager.shared
     }
 
