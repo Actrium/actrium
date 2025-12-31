@@ -116,7 +116,7 @@ class IOSurfaceDisplayView: NSView {
         refreshCount += 1
 
         // Use cached surface, only lookup if not cached or ID changed
-        if cachedSurface == nil || currentSurfaceID == 0 {
+        guard let surface = cachedSurface, currentSurfaceID != 0 else {
             if refreshCount % 60 == 1 {
                 NSLog("🖥️ [DIAG] refreshSurfaceContent: no cached surface, currentSurfaceID=\(currentSurfaceID)")
             }
@@ -125,17 +125,19 @@ class IOSurfaceDisplayView: NSView {
 
         // Log surface info on first frame and every ~2 seconds
         if refreshCount == 1 || refreshCount % 120 == 0 {
-            if let surface = cachedSurface {
-                let width = IOSurfaceGetWidth(surface)
-                let height = IOSurfaceGetHeight(surface)
-                let viewScale = window?.backingScaleFactor ?? 1.0
-                NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): surfaceID=\(currentSurfaceID), surfacePixels=\(width)x\(height), viewBounds=\(bounds), screenScale=\(viewScale)")
-            }
+            let width = IOSurfaceGetWidth(surface)
+            let height = IOSurfaceGetHeight(surface)
+            let viewScale = window?.backingScaleFactor ?? 1.0
+            NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): surfaceID=\(currentSurfaceID), surfacePixels=\(width)x\(height), viewBounds=\(bounds), screenScale=\(viewScale)")
         }
 
         // IOSurface is shared memory - CALayer sees updates automatically
-        // Just mark as needing display to trigger redraw
-        surfaceLayer?.setNeedsDisplay()
+        // Re-set contents periodically to ensure display updates
+        // This is more reliable than setNeedsDisplay for IOSurface
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        surfaceLayer?.contents = surface
+        CATransaction.commit()
     }
 
     private func setupTracking() {
