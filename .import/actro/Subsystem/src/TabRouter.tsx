@@ -26,6 +26,16 @@ const LoadingFallback = () => (
 );
 
 export const TabRouter: React.FC<TabRouterProps> = (props) => {
+  // Debug: Log panel visibility props
+  console.log('[TabRouter] props:', JSON.stringify({
+    singleTabMode: props?.singleTabMode,
+    isLeftPanelVisible: props?.isLeftPanelVisible,
+    isRightPanelVisible: props?.isRightPanelVisible,
+    tabId: props?.tab?.id,
+    hasUnifiedScript: !!props?.tab?.unifiedScript,
+    rightPanelDefaultVisible: props?.tab?.rightPanelDefaultVisible,
+  }));
+
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
@@ -56,6 +66,9 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
     // 避免显式 width/height 触发不必要的 re-render
     const containerStyle = styles.container;
 
+    // Debug overlay
+    const debugInfo = `L:${isLeftPanelVisible} R:${isRightPanelVisible} hasScript:${!!tab.unifiedScript}`;
+
     return (
       <View style={containerStyle} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
         <React.Suspense fallback={<LoadingFallback />}>
@@ -68,6 +81,10 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
             containerHeight={containerHeight}
           />
         </React.Suspense>
+        {/* Debug overlay */}
+        <View style={{ position: 'absolute', top: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.7)', padding: 4, borderRadius: 4 }}>
+          <Text style={{ color: '#0f0', fontSize: 10 }}>{debugInfo}</Text>
+        </View>
       </View>
     );
   }
