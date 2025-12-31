@@ -25,8 +25,8 @@ class TabProcessInfo: ObservableObject {
     @Published var surfaceID: UInt32 = 0
 
     var process: Process?
-    var stdinPipe: Pipe?
-    var stdoutPipe: Pipe?
+    var connection: NSXPCConnection?
+    var renderer: TabRendererProtocol?
 
     init(tabId: UUID) {
         self.tabId = tabId
@@ -45,31 +45,21 @@ class TabProcessInfo: ObservableObject {
         }
         return false
     }
-
-    /// Send a message to the helper process via stdin
-    func sendMessage(_ message: HelperMessage) {
-        guard let data = XPCBroker.encodeMessage(message),
-              let stdinHandle = stdinPipe?.fileHandleForWriting else {
-            return
-        }
-
-        do {
-            try stdinHandle.write(contentsOf: data)
-        } catch {
-            logger.error("TabProcessInfo: Failed to send message: \(error)")
-        }
-    }
 }
 
 // MARK: - Tab Process Manager
 
 /// Manages tab renderer processes and their XPC connections
-/// Uses Helper App with XPC Broker pattern for cross-process communication
+/// Uses XPC Broker for endpoint handshake, then direct XPC for communication
 class TabProcessManager: ObservableObject {
     static let shared = TabProcessManager()
 
     /// Active tab processes keyed by tab ID
     @Published private(set) var processes: [UUID: TabProcessInfo] = [:]
+
+    /// Pending endpoint continuations (waiting for broker to deliver endpoints)
+    private var pendingEndpoints: [String: CheckedContinuation<NSXPCListenerEndpoint, Error>] = [:]
+    private let pendingLock = NSLock()
 
     /// Whether multi-process mode is enabled
     @Published var isMultiProcessEnabled: Bool = true
@@ -80,6 +70,9 @@ class TabProcessManager: ObservableObject {
     private var metricsTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
+    /// Broker XPC connection
+    private var brokerConnection: NSXPCConnection?
+
     /// Memory pressure source for responding to low memory
     private var memoryPressureSource: DispatchSourceMemoryPressure?
 
@@ -88,30 +81,57 @@ class TabProcessManager: ObservableObject {
 
     private init() {
         setupMemoryPressureHandler()
-        // Start the XPC broker
-        XPCBroker.shared.start()
+        connectToBroker()
+    }
+
+    // MARK: - Broker Connection
+
+    private func connectToBroker() {
+        brokerConnection = NSXPCConnection(serviceName: BrokerXPCInterface.serviceName)
+        brokerConnection?.remoteObjectInterface = BrokerXPCInterface.brokerInterface()
+        brokerConnection?.exportedInterface = BrokerXPCInterface.mainAppCallbackInterface()
+        brokerConnection?.exportedObject = self
+
+        brokerConnection?.interruptionHandler = {
+            logger.warning("TabProcessManager: Broker connection interrupted")
+        }
+
+        brokerConnection?.invalidationHandler = { [weak self] in
+            logger.warning("TabProcessManager: Broker connection invalidated")
+            self?.brokerConnection = nil
+        }
+
+        brokerConnection?.resume()
+
+        // Register as main app with broker
+        guard let broker = brokerConnection?.remoteObjectProxyWithErrorHandler({ error in
+            logger.error("TabProcessManager: Broker proxy error: \(error)")
+        }) as? CanvasBrokerProtocol else {
+            logger.error("TabProcessManager: Failed to get broker proxy")
+            return
+        }
+
+        broker.registerMainApp(callback: self)
+        logger.info("TabProcessManager: Registered with broker as main app")
     }
 
     // MARK: - Helper App Path
 
     /// Get the path to the CanvasTabRenderer helper app
     private var helperAppPath: String? {
-        // Helper app is embedded in main app bundle: Canvas.app/Contents/PlugIns/CanvasTabRenderer.app
         guard let bundlePath = Bundle.main.bundlePath as String? else { return nil }
 
-        // Primary location: PlugIns directory
         let plugInsPath = (bundlePath as NSString).appendingPathComponent("Contents/PlugIns/CanvasTabRenderer.app/Contents/MacOS/CanvasTabRenderer")
         if FileManager.default.fileExists(atPath: plugInsPath) {
             return plugInsPath
         }
 
-        // Fallback: Resources directory
         let resourcesPath = (bundlePath as NSString).appendingPathComponent("Contents/Resources/CanvasTabRenderer.app/Contents/MacOS/CanvasTabRenderer")
         if FileManager.default.fileExists(atPath: resourcesPath) {
             return resourcesPath
         }
 
-        logger.error("TabProcessManager: Helper app not found at PlugIns or Resources")
+        logger.error("TabProcessManager: Helper app not found")
         return nil
     }
 
@@ -130,8 +150,6 @@ class TabProcessManager: ObservableObject {
             if event.contains(.critical) {
                 logger.warning("TabProcessManager: Critical memory pressure")
                 self.handleCriticalMemoryPressure()
-            } else if event.contains(.warning) {
-                logger.warning("TabProcessManager: Memory pressure warning")
             }
         }
 
@@ -139,12 +157,10 @@ class TabProcessManager: ObservableObject {
     }
 
     private func handleCriticalMemoryPressure() {
-        // Notify that memory is critical (UI can choose to show warnings)
-        NotificationCenter.default.post(
-            name: .memoryPressureCritical,
-            object: nil
-        )
+        NotificationCenter.default.post(name: .memoryPressureCritical, object: nil)
     }
+
+    // MARK: - Get Renderer
 
     /// Get a renderer for a tab by launching a Helper App process
     func getRenderer(for tabId: UUID, config: TabXPCConfig, viewportSize: CGSize? = nil) async throws -> TabProcessInfo {
@@ -152,9 +168,8 @@ class TabProcessManager: ObservableObject {
         return try await launchHelperApp(for: tabId, config: config, viewportSize: viewportSize)
     }
 
-    // MARK: - Helper App Launch and JSON-based IPC
+    // MARK: - Helper App Launch
 
-    /// Launch a Helper App process and establish JSON-based communication
     private func launchHelperApp(for tabId: UUID, config: TabXPCConfig, viewportSize: CGSize? = nil) async throws -> TabProcessInfo {
         guard let helperPath = helperAppPath else {
             throw TabProcessError.helperAppNotFound
@@ -166,11 +181,10 @@ class TabProcessManager: ObservableObject {
 
         logger.info("TabProcessManager: Launching helper at \(helperPath)")
 
-        // Create process
+        // Create and launch process
         let process = Process()
         process.executableURL = URL(fileURLWithPath: helperPath)
 
-        // Pass arguments
         let width = Int(viewportSize?.width ?? 800)
         let height = Int(viewportSize?.height ?? 600)
         process.arguments = [
@@ -180,37 +194,21 @@ class TabProcessManager: ObservableObject {
             "--background", config.backgroundColor
         ]
 
-        // Set up pipes for stdin/stdout (JSON IPC) and stderr (logs)
-        let stdinPipe = Pipe()
-        let stdoutPipe = Pipe()
+        // Capture stderr for logging
         let stderrPipe = Pipe()
-
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        processInfo.stdinPipe = stdinPipe
-        processInfo.stdoutPipe = stdoutPipe
-
-        // Handle process termination
         process.terminationHandler = { [weak self, weak processInfo] proc in
             let status = proc.terminationStatus
-            let reason = proc.terminationReason
-            logger.info("TabProcessManager: Helper process terminated with status \(status), reason \(reason.rawValue)")
+            logger.info("TabProcessManager: Helper terminated with status \(status)")
 
             DispatchQueue.main.async {
                 guard let processInfo = processInfo else { return }
-                if status != 0 {
-                    processInfo.state = .crashed(reason: "Exit code \(status)")
-                } else {
-                    processInfo.state = .terminated
-                }
+                processInfo.state = status != 0 ? .crashed(reason: "Exit code \(status)") : .terminated
                 self?.processes.removeValue(forKey: tabId)
-                XPCBroker.shared.unregisterMessageHandler(tabId: tabId.uuidString)
             }
         }
 
-        // Start the process
         do {
             try process.run()
         } catch {
@@ -221,9 +219,9 @@ class TabProcessManager: ObservableObject {
 
         processInfo.process = process
         let pid = process.processIdentifier
-        logger.info("TabProcessManager: Helper process started with PID \(pid)")
+        logger.info("TabProcessManager: Helper started with PID \(pid)")
 
-        // Read stderr in background for logging
+        // Read stderr for logging
         let stderrHandle = stderrPipe.fileHandleForReading
         DispatchQueue.global(qos: .utility).async {
             while true {
@@ -237,167 +235,124 @@ class TabProcessManager: ObservableObject {
             }
         }
 
-        // Set up stdout reader for JSON messages
-        let stdoutHandle = stdoutPipe.fileHandleForReading
-        setupStdoutReader(handle: stdoutHandle, tabId: tabId, pid: pid)
+        // Wait for endpoint from broker
+        let endpoint = try await waitForEndpoint(tabId: tabId.uuidString)
 
-        // Register message handler for this tab
-        XPCBroker.shared.registerMessageHandler(tabId: tabId.uuidString) { [weak processInfo] message in
-            self.handleHelperMessage(message, processInfo: processInfo)
+        // Connect directly to helper using the endpoint
+        let connection = NSXPCConnection(listenerEndpoint: endpoint)
+        connection.remoteObjectInterface = TabXPCInterface.rendererInterface()
+        connection.exportedInterface = TabXPCInterface.callbackInterface()
+
+        let callbackHandler = TabRendererCallbackHandler(tabId: tabId)
+        callbackHandler.onSurfaceUpdate = { [weak processInfo] in
+            processInfo?.renderer?.getIOSurfaceID { newId in
+                DispatchQueue.main.async {
+                    guard let info = processInfo, newId != info.surfaceID else { return }
+                    logger.info("TabProcessManager: Surface ID updated: \(info.surfaceID) -> \(newId)")
+                    info.surfaceID = newId
+                    NotificationCenter.default.post(
+                        name: .tabSurfaceUpdated,
+                        object: nil,
+                        userInfo: ["tabId": tabId, "surfaceID": newId]
+                    )
+                }
+            }
+        }
+        connection.exportedObject = callbackHandler
+
+        connection.interruptionHandler = {
+            logger.warning("TabProcessManager: Direct XPC connection interrupted for tab \(tabId)")
         }
 
-        // Wait for helper to send surfaceReady message
-        let surfaceID = try await waitForSurfaceReady(tabId: tabId, config: config)
+        connection.invalidationHandler = { [weak self, weak processInfo] in
+            logger.warning("TabProcessManager: Direct XPC connection invalidated for tab \(tabId)")
+            DispatchQueue.main.async {
+                processInfo?.state = .terminated
+                self?.processes.removeValue(forKey: tabId)
+            }
+        }
 
-        processInfo.surfaceID = surfaceID
+        connection.resume()
+        processInfo.connection = connection
+
+        guard let renderer = connection.remoteObjectProxyWithErrorHandler({ error in
+            logger.error("TabProcessManager: Renderer proxy error: \(error)")
+        }) as? TabRendererProtocol else {
+            processInfo.state = .crashed(reason: "Failed to get renderer proxy")
+            process.terminate()
+            processes.removeValue(forKey: tabId)
+            throw TabProcessError.xpcConnectionFailed
+        }
+
+        processInfo.renderer = renderer
         processInfo.state = .running(pid: pid)
 
-        logger.info("TabProcessManager: Helper ready, surfaceID=\(surfaceID), PID=\(pid)")
+        // Set viewport and load content
+        renderer.updateViewport(width: Double(width), height: Double(height))
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            renderer.loadContent(config) { success, errorMessage in
+                if success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: TabProcessError.contentLoadFailed(errorMessage ?? "Unknown"))
+                }
+            }
+        }
+
+        // Get initial IOSurface ID
+        let surfaceID = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UInt32, Error>) in
+            renderer.getIOSurfaceID { id in
+                if id != 0 {
+                    continuation.resume(returning: id)
+                } else {
+                    continuation.resume(throwing: TabProcessError.contentLoadFailed("No IOSurface ID"))
+                }
+            }
+        }
+
+        processInfo.surfaceID = surfaceID
+        logger.info("TabProcessManager: Direct XPC ready, surfaceID=\(surfaceID), PID=\(pid)")
 
         return processInfo
     }
 
-    /// Set up stdout reader to parse JSON messages from helper
-    private func setupStdoutReader(handle: FileHandle, tabId: UUID, pid: pid_t) {
-        var buffer = Data()
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            while true {
-                let data = handle.availableData
-                if data.isEmpty { break }
-
-                buffer.append(data)
-
-                // Process complete messages (newline-delimited JSON)
-                while let newlineIndex = buffer.firstIndex(of: 0x0A) {
-                    let messageData = buffer[..<newlineIndex]
-                    buffer = buffer[(newlineIndex + 1)...]
-
-                    if let message = XPCBroker.decodeMessage(Data(messageData)) {
-                        DispatchQueue.main.async {
-                            XPCBroker.shared.processMessage(message)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Handle messages from helper
-    private func handleHelperMessage(_ message: HelperMessage, processInfo: TabProcessInfo?) {
-        guard let processInfo = processInfo else { return }
-        let tabId = processInfo.tabId
-
-        switch message.type {
-        case .surfaceUpdated:
-            if let newSurfaceId = message.surfaceId, newSurfaceId != processInfo.surfaceID {
-                logger.info("TabProcessManager: Surface ID updated: \(processInfo.surfaceID) -> \(newSurfaceId)")
-                processInfo.surfaceID = newSurfaceId
-            }
-            NotificationCenter.default.post(
-                name: .tabSurfaceUpdated,
-                object: nil,
-                userInfo: ["tabId": tabId, "surfaceID": processInfo.surfaceID]
-            )
-
-        case .consoleLog:
-            DevToolsManager.shared.logFromRenderer(
-                tabId: tabId,
-                level: message.logLevel ?? "log",
-                message: message.logMessage ?? "",
-                source: message.logSource ?? ""
-            )
-
-        case .titleChanged:
-            if let title = message.title {
-                NotificationCenter.default.post(
-                    name: .tabTitleChanged,
-                    object: nil,
-                    userInfo: ["tabId": tabId, "title": title]
-                )
-            }
-
-        case .metrics:
-            // Metrics are collected via OS-level APIs in collectMetrics()
-            // This message is just an acknowledgment from the helper
-            break
-
-        case .error:
-            logger.error("TabProcessManager: Helper error for \(tabId): \(message.error ?? "unknown")")
-            processInfo.state = .crashed(reason: message.error ?? "Unknown error")
-            NotificationCenter.default.post(
-                name: .tabRendererCrashed,
-                object: nil,
-                userInfo: ["tabId": tabId, "reason": message.error ?? "Unknown"]
-            )
-
-        default:
-            break
-        }
-    }
-
-    /// Wait for helper to send surfaceReady message
-    private func waitForSurfaceReady(tabId: UUID, config: TabXPCConfig) async throws -> UInt32 {
-        // Send loadContent message to helper
-        if let processInfo = processes[tabId] {
-            let message = HelperMessage.withConfig(.loadContent, tabId: tabId.uuidString, config: config)
-            processInfo.sendMessage(message)
-        }
-
-        return try await withCheckedThrowingContinuation { continuation in
-            var hasResumed = false
-            let resumeLock = NSLock()
+    /// Wait for endpoint from broker
+    private func waitForEndpoint(tabId: String) async throws -> NSXPCListenerEndpoint {
+        try await withCheckedThrowingContinuation { continuation in
+            pendingLock.lock()
+            pendingEndpoints[tabId] = continuation
+            pendingLock.unlock()
 
             // Set up timeout
-            DispatchQueue.global().asyncAfter(deadline: .now() + registrationTimeout) {
-                resumeLock.lock()
-                defer { resumeLock.unlock() }
-                if !hasResumed {
-                    hasResumed = true
-                    XPCBroker.shared.cancelWait(tabId: tabId.uuidString)
-                    continuation.resume(throwing: TabProcessError.endpointTimeout)
+            DispatchQueue.global().asyncAfter(deadline: .now() + registrationTimeout) { [weak self] in
+                self?.pendingLock.lock()
+                if let pending = self?.pendingEndpoints.removeValue(forKey: tabId) {
+                    pending.resume(throwing: TabProcessError.endpointTimeout)
                 }
-            }
-
-            // Wait for surfaceReady from broker
-            XPCBroker.shared.waitForRegistration(tabId: tabId.uuidString) { surfaceId, pid in
-                resumeLock.lock()
-                defer { resumeLock.unlock() }
-                if !hasResumed {
-                    hasResumed = true
-                    logger.info("TabProcessManager: Surface ready for tab \(tabId), surfaceID=\(surfaceId)")
-                    continuation.resume(returning: surfaceId)
-                }
+                self?.pendingLock.unlock()
             }
         }
     }
 
-    /// Terminate a tab's renderer process
+    // MARK: - Process Management
+
     func terminateProcess(for tabId: UUID) {
         guard let processInfo = processes[tabId] else { return }
 
         logger.info("TabProcessManager: Terminating process for tab \(tabId)")
 
-        // Send terminate command via JSON message
-        let message = HelperMessage(type: .terminate, tabId: tabId.uuidString)
-        processInfo.sendMessage(message)
+        processInfo.renderer?.terminate()
 
-        // Give it a moment to terminate gracefully, then force terminate if needed
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            // Close pipes
-            try? processInfo.stdinPipe?.fileHandleForWriting.close()
-
-            // Force terminate the process if still running
+            processInfo.connection?.invalidate()
             if processInfo.process?.isRunning == true {
                 processInfo.process?.terminate()
             }
-
-            XPCBroker.shared.unregisterMessageHandler(tabId: tabId.uuidString)
             self?.processes.removeValue(forKey: tabId)
         }
     }
 
-    /// Terminate all renderer processes
     func terminateAllProcesses() {
         logger.info("TabProcessManager: Terminating all processes")
         for tabId in processes.keys {
@@ -407,35 +362,23 @@ class TabProcessManager: ObservableObject {
 
     // MARK: - Metrics Collection
 
-    /// Start collecting metrics from all running processes
     func startMetricsCollection() {
         guard metricsTimer == nil else { return }
-
         metricsTimer = Timer.scheduledTimer(withTimeInterval: metricsUpdateInterval, repeats: true) { [weak self] _ in
             self?.collectMetrics()
         }
     }
 
-    /// Stop collecting metrics
     func stopMetricsCollection() {
         metricsTimer?.invalidate()
         metricsTimer = nil
     }
 
     private func collectMetrics() {
-        for (tabId, processInfo) in processes where processInfo.isRunning {
-            guard let pid = processInfo.pid else { continue }
-
-            // Collect metrics using OS-level APIs
-            if let (memory, cpuTime) = getProcessMetrics(pid: pid) {
-                let metrics = TabXPCMetrics(
-                    tabId: tabId.uuidString,
-                    pid: pid,
-                    memoryBytes: memory,
-                    cpuTimeNanoseconds: cpuTime
-                )
+        for (_, processInfo) in processes where processInfo.isRunning {
+            processInfo.renderer?.getMetrics { [weak processInfo] metrics in
                 DispatchQueue.main.async {
-                    processInfo.metrics = metrics
+                    processInfo?.metrics = metrics
                 }
             }
         }
@@ -443,36 +386,21 @@ class TabProcessManager: ObservableObject {
 
     // MARK: - Event Forwarding
 
-    /// Forward an input event to a tab's renderer via JSON message
     func forwardEvent(_ event: TabXPCEvent, to tabId: UUID) {
         guard let processInfo = processes[tabId], processInfo.isRunning else { return }
-
-        let message = HelperMessage.withEvent(.handleEvent, tabId: tabId.uuidString, event: event)
-        processInfo.sendMessage(message)
+        processInfo.renderer?.handleEvent(event)
     }
 
-    /// Update viewport size for a tab via JSON message
     func updateViewport(width: Double, height: Double, for tabId: UUID) {
         guard let processInfo = processes[tabId], processInfo.isRunning else { return }
-
-        NSLog("📐 [DIAG] updateViewport: \(Int(width))x\(Int(height)) for tab \(tabId)")
-
-        let message = HelperMessage(
-            type: .updateViewport,
-            tabId: tabId.uuidString,
-            width: width,
-            height: height
-        )
-        processInfo.sendMessage(message)
+        processInfo.renderer?.updateViewport(width: width, height: height)
     }
 
-    /// Get IOSurface ID for cross-process rendering
     func getIOSurfaceID(for tabId: UUID) async -> UInt32? {
         guard let processInfo = processes[tabId], processInfo.isRunning else { return nil }
         return processInfo.surfaceID != 0 ? processInfo.surfaceID : nil
     }
 
-    /// Get metrics for a specific process using OS APIs
     func getProcessMetrics(pid: pid_t) -> (memory: UInt64, cpuTime: UInt64)? {
         var info = rusage_info_current()
         let result = withUnsafeMutablePointer(to: &info) { ptr in
@@ -480,21 +408,41 @@ class TabProcessManager: ObservableObject {
                 proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, rusagePtr)
             }
         }
+        return result == 0 ? (info.ri_phys_footprint, info.ri_user_time + info.ri_system_time) : nil
+    }
+}
 
-        if result == 0 {
-            return (info.ri_phys_footprint, info.ri_user_time + info.ri_system_time)
+// MARK: - MainAppCallbackProtocol
+
+extension TabProcessManager: MainAppCallbackProtocol {
+    func helperDidRegister(tabId: String, endpoint: NSXPCListenerEndpoint) {
+        logger.info("TabProcessManager: Received endpoint for tab \(tabId) from broker")
+
+        pendingLock.lock()
+        if let continuation = pendingEndpoints.removeValue(forKey: tabId) {
+            continuation.resume(returning: endpoint)
         }
-        return nil
+        pendingLock.unlock()
+    }
+
+    func helperDidDisconnect(tabId: String) {
+        logger.info("TabProcessManager: Helper disconnected for tab \(tabId)")
+
+        if let uuid = UUID(uuidString: tabId) {
+            DispatchQueue.main.async {
+                if let processInfo = self.processes[uuid] {
+                    processInfo.state = .terminated
+                }
+                self.processes.removeValue(forKey: uuid)
+            }
+        }
     }
 }
 
 // MARK: - Callback Handler
 
-/// Handles callbacks from renderer processes
 class TabRendererCallbackHandler: NSObject, TabRendererCallbackProtocol {
     let tabId: UUID
-
-    /// Closure called when surface is updated (for XPC mode to fetch new surface ID)
     var onSurfaceUpdate: (() -> Void)?
 
     init(tabId: UUID) {
@@ -503,61 +451,38 @@ class TabRendererCallbackHandler: NSObject, TabRendererCallbackProtocol {
     }
 
     func consoleLog(level: String, message: String, source: String) {
-        // Forward to DevTools console
         DispatchQueue.main.async {
             DevToolsManager.shared.logFromRenderer(tabId: self.tabId, level: level, message: message, source: source)
         }
     }
 
     func titleChanged(_ newTitle: String) {
-        // Post notification for title update
         DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .tabTitleChanged,
-                object: nil,
-                userInfo: ["tabId": self.tabId, "title": newTitle]
-            )
+            NotificationCenter.default.post(name: .tabTitleChanged, object: nil, userInfo: ["tabId": self.tabId, "title": newTitle])
         }
     }
 
     func navigationRequest(url: String, newTab: Bool) {
-        // Handle navigation request from renderer
         DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .tabNavigationRequest,
-                object: nil,
-                userInfo: ["tabId": self.tabId, "url": url, "newTab": newTab]
-            )
+            NotificationCenter.default.post(name: .tabNavigationRequest, object: nil, userInfo: ["tabId": self.tabId, "url": url, "newTab": newTab])
         }
     }
 
     func surfaceDidUpdate() {
-        // Signal that the IOSurface content has been updated
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-
-            // Call closure if set (XPC mode uses this to fetch new surface ID)
-            self.onSurfaceUpdate?()
-
-            NotificationCenter.default.post(
-                name: .tabSurfaceUpdated,
-                object: nil,
-                userInfo: ["tabId": self.tabId]
-            )
+            self?.onSurfaceUpdate?()
+            if let tabId = self?.tabId {
+                NotificationCenter.default.post(name: .tabSurfaceUpdated, object: nil, userInfo: ["tabId": tabId])
+            }
         }
     }
 
     func rendererDidCrash(reason: String) {
-        logger.error("TabProcessManager: Renderer crashed for tab \(self.tabId): \(reason)")
         DispatchQueue.main.async {
             if let processInfo = TabProcessManager.shared.processes[self.tabId] {
                 processInfo.state = .crashed(reason: reason)
             }
-            NotificationCenter.default.post(
-                name: .tabRendererCrashed,
-                object: nil,
-                userInfo: ["tabId": self.tabId, "reason": reason]
-            )
+            NotificationCenter.default.post(name: .tabRendererCrashed, object: nil, userInfo: ["tabId": self.tabId, "reason": reason])
         }
     }
 }
@@ -575,20 +500,13 @@ enum TabProcessError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .multiProcessDisabled:
-            return "Multi-process mode is disabled"
-        case .helperAppNotFound:
-            return "Helper app (CanvasTabRenderer) not found in bundle"
-        case .helperLaunchFailed(let reason):
-            return "Failed to launch helper app: \(reason)"
-        case .endpointTimeout:
-            return "Timeout waiting for XPC endpoint from helper"
-        case .endpointDeserializationFailed:
-            return "Failed to deserialize XPC endpoint"
-        case .xpcConnectionFailed:
-            return "Failed to establish XPC connection"
-        case .contentLoadFailed(let message):
-            return "Failed to load content: \(message)"
+        case .multiProcessDisabled: return "Multi-process mode is disabled"
+        case .helperAppNotFound: return "Helper app not found"
+        case .helperLaunchFailed(let reason): return "Failed to launch helper: \(reason)"
+        case .endpointTimeout: return "Timeout waiting for endpoint"
+        case .endpointDeserializationFailed: return "Failed to deserialize endpoint"
+        case .xpcConnectionFailed: return "XPC connection failed"
+        case .contentLoadFailed(let message): return "Content load failed: \(message)"
         }
     }
 }
