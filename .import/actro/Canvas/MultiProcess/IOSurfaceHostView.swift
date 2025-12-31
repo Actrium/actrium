@@ -111,6 +111,7 @@ class IOSurfaceDisplayView: NSView {
 
     private var refreshCount: UInt64 = 0
     private var cachedSurface: IOSurface?  // Cache the IOSurface reference
+    private var needsRefresh: Bool = false  // Flag for event-driven refresh
 
     private func refreshSurfaceContent() {
         refreshCount += 1
@@ -131,13 +132,14 @@ class IOSurfaceDisplayView: NSView {
             NSLog("🖥️ [DIAG] refreshSurfaceContent #\(refreshCount): surfaceID=\(currentSurfaceID), surfacePixels=\(width)x\(height), viewBounds=\(bounds), screenScale=\(viewScale)")
         }
 
-        // IOSurface is shared memory - CALayer sees updates automatically
-        // Re-set contents periodically to ensure display updates
-        // This is more reliable than setNeedsDisplay for IOSurface
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        surfaceLayer?.contents = surface
-        CATransaction.commit()
+        // Only mark layer for redisplay - CALayer will read IOSurface when compositing
+        // This is less aggressive and reduces flicker
+        surfaceLayer?.setNeedsDisplay()
+    }
+
+    /// Called when Helper notifies surface update
+    func markNeedsRefresh() {
+        needsRefresh = true
     }
 
     private func setupTracking() {

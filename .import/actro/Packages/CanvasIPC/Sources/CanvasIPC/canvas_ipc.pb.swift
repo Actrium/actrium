@@ -211,6 +211,18 @@ public struct Canvas_Ipc_LoadContentRequest: Sendable {
 
   public var backgroundColor: String = String()
 
+  // Tab configuration for React Native
+  public var tabID: String = String()
+  public var title: String = String()
+  public var leftPanelVisible: Bool = false
+  public var rightPanelVisible: Bool = false
+  public var reloadKey: Int32 = 0
+
+  // Contract info
+  public var contractName: String = String()
+  public var contractVersion: Int32 = 0
+  public var permissions: [String] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}

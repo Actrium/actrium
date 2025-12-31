@@ -42,6 +42,18 @@ message LoadContentRequest {
     string content_type = 1;  // "url", "html", "javascript"
     string content = 2;       // URL or content string
     string background_color = 3;
+
+    // Tab configuration for React Native
+    string tab_id = 10;
+    string title = 11;
+    bool left_panel_visible = 12;
+    bool right_panel_visible = 13;
+    int32 reload_key = 14;
+
+    // Contract info
+    string contract_name = 20;
+    int32 contract_version = 21;
+    repeated string permissions = 22;
 }
 
 message UpdateViewportRequest {
