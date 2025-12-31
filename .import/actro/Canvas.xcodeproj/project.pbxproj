@@ -10,12 +10,10 @@
 		000609867125B5E3CF3549A4 /* BuildFile in Frameworks */ = {isa = PBXBuildFile; };
 		8E5B03874CCE978352975327 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		B31C6D492F04BC2500E7FEF4 /* CanvasBroker.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B31C6D3E2F04BC2500E7FEF4 /* CanvasBroker.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		B34F77E82F042239002AF804 /* CanvasTabRendererXPC.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B34F77DD2F042239002AF804 /* CanvasTabRendererXPC.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
 		B3E78A742F03A00C001F9589 /* CanvasTabRenderer.app in Embed Helper Apps */ = {isa = PBXBuildFile; fileRef = B3E78A402F039DBE001F9589 /* CanvasTabRenderer.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		C6646A8EF8C6A45E425F2542 /* libPods-Canvas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */; };
-		D3F07ECDCA5F250307EE7E5B /* libPods-CanvasTabRendererXPC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 032CB00D54CCD5C8F71BABB3 /* libPods-CanvasTabRendererXPC.a */; };
 		F306880CEA71C467403F7E06 /* libPods-CanvasTabRenderer.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */; };
 /* End PBXBuildFile section */
 
@@ -26,13 +24,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = B31C6D3D2F04BC2500E7FEF4;
 			remoteInfo = CanvasBroker;
-		};
-		B34F77E62F042239002AF804 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = B3E458982EC731A30014D74C /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = B34F77DC2F042239002AF804;
-			remoteInfo = CanvasTabRendererXPC;
 		};
 		B3E458B02EC731A40014D74C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -125,15 +116,12 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		032CB00D54CCD5C8F71BABB3 /* libPods-CanvasTabRendererXPC.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTabRendererXPC.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTabRenderer.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.debug.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.debug.xcconfig"; sourceTree = "<group>"; };
 		5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.release.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.release.xcconfig"; sourceTree = "<group>"; };
 		8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Canvas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		988CAD86E1193EE66F00D50D /* Pods-Canvas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.release.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.release.xcconfig"; sourceTree = "<group>"; };
-		AA8505EB2783F03CBCD2B524 /* Pods-CanvasTabRendererXPC.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRendererXPC.release.xcconfig"; path = "Target Support Files/Pods-CanvasTabRendererXPC/Pods-CanvasTabRendererXPC.release.xcconfig"; sourceTree = "<group>"; };
-		B1A97D4AEE6D9E0F81E376DD /* Pods-CanvasTabRendererXPC.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRendererXPC.debug.xcconfig"; path = "Target Support Files/Pods-CanvasTabRendererXPC/Pods-CanvasTabRendererXPC.debug.xcconfig"; sourceTree = "<group>"; };
 		B31C6D3E2F04BC2500E7FEF4 /* CanvasBroker.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasBroker.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		B34F77DD2F042239002AF804 /* CanvasTabRendererXPC.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasTabRendererXPC.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		B38A7F072ECA222600B4185F /* Gemfile */ = {isa = PBXFileReference; lastKnownFileType = text; path = Gemfile; sourceTree = "<group>"; };
@@ -236,7 +224,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D3F07ECDCA5F250307EE7E5B /* libPods-CanvasTabRendererXPC.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,7 +280,6 @@
 			isa = PBXGroup;
 			children = (
 				8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */,
-				032CB00D54CCD5C8F71BABB3 /* libPods-CanvasTabRendererXPC.a */,
 				18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */,
 			);
 			name = Frameworks;
@@ -307,8 +293,6 @@
 				B38A7F072ECA222600B4185F /* Gemfile */,
 				2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */,
 				7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */,
-				B1A97D4AEE6D9E0F81E376DD /* Pods-CanvasTabRendererXPC.debug.xcconfig */,
-				AA8505EB2783F03CBCD2B524 /* Pods-CanvasTabRendererXPC.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -373,11 +357,9 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = B34F77ED2F042239002AF804 /* Build configuration list for PBXNativeTarget "CanvasTabRendererXPC" */;
 			buildPhases = (
-				546D808766C6C3F1CFE50873 /* [CP] Check Pods Manifest.lock */,
 				B34F77D92F042239002AF804 /* Sources */,
 				B34F77DA2F042239002AF804 /* Frameworks */,
 				B34F77DB2F042239002AF804 /* Resources */,
-				60ACD066A42D8CA3B1B48216 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -681,45 +663,6 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		546D808766C6C3F1CFE50873 /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-CanvasTabRendererXPC-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		60ACD066A42D8CA3B1B48216 /* [CP] Copy Pods Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-CanvasTabRendererXPC/Pods-CanvasTabRendererXPC-resources-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Copy Pods Resources";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-CanvasTabRendererXPC/Pods-CanvasTabRendererXPC-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-CanvasTabRendererXPC/Pods-CanvasTabRendererXPC-resources.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
 		A6274D0DD8056ADF6067F790 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -863,11 +806,6 @@
 			target = B31C6D3D2F04BC2500E7FEF4 /* CanvasBroker */;
 			targetProxy = B31C6D472F04BC2500E7FEF4 /* PBXContainerItemProxy */;
 		};
-		B34F77E72F042239002AF804 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = B34F77DC2F042239002AF804 /* CanvasTabRendererXPC */;
-			targetProxy = B34F77E62F042239002AF804 /* PBXContainerItemProxy */;
-		};
 		B3E458B12EC731A40014D74C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B3E4589F2EC731A30014D74C /* Canvas */;
@@ -979,7 +917,6 @@
 		};
 		B34F77EA2F042239002AF804 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = B1A97D4AEE6D9E0F81E376DD /* Pods-CanvasTabRendererXPC.debug.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_ENTITLEMENTS = CanvasTabRendererXPC/CanvasTabRendererXPC.entitlements;
@@ -1012,7 +949,6 @@
 		};
 		B34F77EB2F042239002AF804 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = AA8505EB2783F03CBCD2B524 /* Pods-CanvasTabRendererXPC.release.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_ENTITLEMENTS = CanvasTabRendererXPC/CanvasTabRendererXPC.entitlements;
