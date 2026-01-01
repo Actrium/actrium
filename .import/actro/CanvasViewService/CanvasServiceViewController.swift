@@ -12,6 +12,35 @@ import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
 
+// MARK: - Debug Logging
+
+private let debugLogPath: String = {
+    let tempDir = NSTemporaryDirectory()
+    return (tempDir as NSString).appendingPathComponent("canvas-xpc-service.log")
+}()
+
+private func debugLog(_ message: String) {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let logMessage = "[\(timestamp)] \(message)\n"
+
+    // Write to stderr (visible in console)
+    fputs("[CanvasViewService] \(message)\n", stderr)
+    fflush(stderr)
+
+    // Also append to log file in container
+    if let data = logMessage.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: debugLogPath) {
+            if let handle = FileHandle(forWritingAtPath: debugLogPath) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        } else {
+            try? data.write(to: URL(fileURLWithPath: debugLogPath))
+        }
+    }
+}
+
 // MARK: - React Native Host for XPC Service
 
 private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegate {
@@ -37,10 +66,13 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
             enableMinification: false,
             inlineSourceMap: false
         )
+        debugLog("bundleURL() called, returning: \(url?.absoluteString ?? "nil")")
         return url
         #else
         // Use offline bundle in release
-        return Bundle.main.url(forResource: "actr", withExtension: "jsbundle")
+        let url = Bundle.main.url(forResource: "actr", withExtension: "jsbundle")
+        debugLog("bundleURL() called (release), returning: \(url?.absoluteString ?? "nil")")
+        return url
         #endif
     }
 
@@ -57,7 +89,7 @@ private class ServiceReactNativeHost {
     private var rootView: RCTRootView?
 
     private init() {
-        NSLog("CanvasViewService: Initializing React Native host")
+        debugLog("Initializing React Native host")
 
         #if DEBUG
         RCTRedBoxSetEnabled(false)
@@ -65,11 +97,11 @@ private class ServiceReactNativeHost {
 
         factoryDelegate = ServiceReactNativeFactoryDelegate()
         factory = RCTReactNativeFactory(delegate: factoryDelegate)
-        NSLog("CanvasViewService: React Native factory created")
+        debugLog("React Native factory created")
     }
 
     func createRootView(initialProperties: [String: Any]) -> NSView {
-        NSLog("CanvasViewService: Creating RCTRootView with module: ActrApp")
+        debugLog("Creating RCTRootView with module: ActrApp")
 
         let view = factory.rootViewFactory.view(
             withModuleName: "ActrApp",
@@ -81,7 +113,9 @@ private class ServiceReactNativeHost {
             self.rootView = rctRootView
             rctRootView.sizeFlexibility = .none
             rctRootView.backgroundColor = NSColor.clear
-            NSLog("CanvasViewService: RCTRootView created successfully")
+            debugLog("RCTRootView created successfully")
+        } else {
+            debugLog("WARNING: View is not RCTRootView, type: \(type(of: view))")
         }
 
         return view
@@ -97,47 +131,52 @@ private class ServiceReactNativeHost {
 /// Register CanvasServiceViewController as a subclass of NSServiceViewController at runtime
 @_cdecl("registerCanvasServiceViewController")
 public func registerCanvasServiceViewController() {
-    NSLog("CanvasServiceViewController: Registering class...")
+    debugLog("Registering class...")
 
     // Load ViewBridge framework
     let frameworkPath = "/System/Library/PrivateFrameworks/ViewBridge.framework/ViewBridge"
     guard dlopen(frameworkPath, RTLD_NOW) != nil else {
-        NSLog("CanvasServiceViewController: Failed to load ViewBridge")
+        debugLog("Failed to load ViewBridge")
         return
     }
 
     // Get NSServiceViewController class
     guard let superclass = NSClassFromString("NSServiceViewController") else {
-        NSLog("CanvasServiceViewController: NSServiceViewController not found")
+        debugLog("NSServiceViewController not found")
         return
     }
 
     // Check if already registered
     if NSClassFromString("CanvasServiceViewController") != nil {
-        NSLog("CanvasServiceViewController: Already registered")
+        debugLog("Already registered")
         return
     }
 
     // Create new class as subclass of NSServiceViewController
     guard let newClass = objc_allocateClassPair(superclass, "CanvasServiceViewController", 0) else {
-        NSLog("CanvasServiceViewController: Failed to allocate class pair")
+        debugLog("Failed to allocate class pair")
         return
     }
 
     // Add loadView method - creates React Native view
     let loadViewBlock: @convention(block) (AnyObject) -> Void = { (self_) in
-        NSLog("CanvasServiceViewController: loadView called")
+        debugLog("loadView called")
 
-        // Create container view
+        // Create container view with flexible sizing
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         containerView.wantsLayer = true
         containerView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        // Enable auto-resizing to fill parent view
+        containerView.autoresizingMask = [.width, .height]
 
         // Set as view using KVC
         self_.setValue(containerView, forKey: "view")
 
-        // Initialize React Native asynchronously to avoid blocking ViewBridge
-        DispatchQueue.main.async {
+        debugLog("Container view set, frame: \(containerView.frame)")
+
+        // Wait for the view to be properly sized by ViewBridge before adding RN content
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            debugLog("Delayed setup, container frame: \(containerView.frame), bounds: \(containerView.bounds)")
             setupReactNativeContent(in: containerView)
         }
     }
@@ -146,13 +185,13 @@ public func registerCanvasServiceViewController() {
 
     // Register the class
     objc_registerClassPair(newClass)
-    NSLog("CanvasServiceViewController: Class registered successfully")
+    debugLog("Class registered successfully")
 }
 
 // MARK: - React Native Content Setup
 
 private func setupReactNativeContent(in containerView: NSView) {
-    NSLog("CanvasServiceViewController: Setting up React Native content")
+    debugLog("Setting up React Native content")
 
     // Show loading indicator first
     let loadingLabel = NSTextField(labelWithString: "Starting React Native...")
@@ -207,24 +246,24 @@ private func setupReactNativeContent(in containerView: NSView) {
         Thread.sleep(forTimeInterval: 0.5)
 
         DispatchQueue.main.async {
-            NSLog("CanvasServiceViewController: Creating React Native root view")
+            debugLog("Creating React Native root view")
 
             // Remove loading indicator
             loadingLabel.removeFromSuperview()
 
             // Create and add React Native view
             let rnView = ServiceReactNativeHost.shared.createRootView(initialProperties: testProperties)
-            rnView.translatesAutoresizingMaskIntoConstraints = false
+
+            // Use frame-based layout instead of Auto Layout (RCTRootView may not work well with Auto Layout)
+            rnView.frame = containerView.bounds
+            rnView.autoresizingMask = [.width, .height]
             containerView.addSubview(rnView)
 
-            NSLayoutConstraint.activate([
-                rnView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-                rnView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-                rnView.topAnchor.constraint(equalTo: containerView.topAnchor),
-                rnView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
-            ])
+            debugLog("React Native view added to container, rnView.frame: \(rnView.frame), container.bounds: \(containerView.bounds)")
 
-            NSLog("CanvasServiceViewController: React Native view added to container")
+            // Force layout update
+            rnView.needsLayout = true
+            containerView.needsLayout = true
         }
     }
 }
