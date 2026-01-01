@@ -41,6 +41,12 @@ private func debugLog(_ message: String) {
     }
 }
 
+// MARK: - Current Content Size Tracking
+
+/// Tracks the current content size for the XPC service
+/// Used by remoteViewSize getter to return dynamic value
+private var currentServiceContentSize: CGSize = CGSize(width: 1280, height: 720)
+
 // MARK: - Resizable Container View
 
 /// Container view that monitors resize events and updates RN view accordingly
@@ -259,15 +265,18 @@ public func registerCanvasServiceViewController() {
     let loadViewImp = imp_implementationWithBlock(loadViewBlock)
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
 
-    // Add remoteViewSizeDidChange: method - called by ViewBridge when host resizes
+    // Add remoteViewSizeDidChange: method - called by ViewBridge when host requests resize
     let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { (self_, size) in
         debugLog("remoteViewSizeDidChange -> \(size)")
 
-        // Filter unreasonable sizes
-        if size.width > 2560 || size.height > 1600 || size.width < 100 || size.height < 100 {
+        // Filter unreasonable sizes (scaleEffect or invalid)
+        if size.width > 4096 || size.height > 4096 || size.width < 100 || size.height < 100 {
             debugLog("Ignoring unreasonable remoteViewSize: \(size)")
             return
         }
+
+        // Update tracked size
+        currentServiceContentSize = size
 
         if let view = self_.value(forKey: "view") as? NSView {
             view.setFrameSize(size)
@@ -295,11 +304,10 @@ public func registerCanvasServiceViewController() {
     let makesExplicitImp = imp_implementationWithBlock(makesExplicitBlock)
     class_addMethod(newClass, NSSelectorFromString("makesExplicitResizeRequests"), makesExplicitImp, "B@:")
 
-    // Add remoteViewSize getter - return our fixed size
+    // Add remoteViewSize getter - return current tracked size
     let remoteViewSizeBlock: @convention(block) (AnyObject) -> CGSize = { _ in
-        let fixedSize = CGSize(width: 1280, height: 720)
-        debugLog("remoteViewSize called -> \(fixedSize)")
-        return fixedSize
+        debugLog("remoteViewSize called -> \(currentServiceContentSize)")
+        return currentServiceContentSize
     }
     let remoteViewSizeImp = imp_implementationWithBlock(remoteViewSizeBlock)
     class_addMethod(newClass, NSSelectorFromString("remoteViewSize"), remoteViewSizeImp, "{CGSize=dd}@:")
