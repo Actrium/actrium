@@ -51,6 +51,7 @@
     "node_modules",
     "dist",
     "coverage",
+    "src/cli",
     "**/__tests__",
     "**/*.test.ts",
     "**/*.test.tsx",
