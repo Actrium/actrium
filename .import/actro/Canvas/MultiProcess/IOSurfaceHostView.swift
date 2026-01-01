@@ -133,7 +133,20 @@ class CALayerHostDisplayView: NSView {
         let sublayerCount = hostLayer.sublayers?.count ?? 0
         let contextId = hostLayer.value(forKey: "contextId") as? UInt32 ?? 0
 
+        // Check additional CALayerHost properties
+        let needsDisplay = hostLayer.needsDisplay()
+        let isHidden = hostLayer.isHidden
+        let opacity = hostLayer.opacity
+        let position = hostLayer.position
+        let zPosition = hostLayer.zPosition
+
         NSLog("🔍 [LAYER-CHECK] contextId=\(contextId), frame=\(hostLayer.frame), hasContents=\(hasContents), sublayers=\(sublayerCount)")
+        NSLog("🔍 [LAYER-CHECK]   needsDisplay=\(needsDisplay), isHidden=\(isHidden), opacity=\(opacity), position=\(position), zPosition=\(zPosition)")
+
+        // Check parent layer
+        if let parentLayer = layer {
+            NSLog("🔍 [LAYER-CHECK]   parent.isHidden=\(parentLayer.isHidden), parent.sublayers=\(parentLayer.sublayers?.count ?? 0)")
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -250,16 +263,24 @@ class CALayerHostDisplayView: NSView {
             return
         }
 
-        // Set the context ID using KVC (private API)
-        newHostLayer.setValue(contextId, forKey: "contextId")
-
-        // Configure the layer
+        // Configure the layer BEFORE setting contextId (Chromium's approach)
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+
+        // Chromium sets anchorPoint to zero
+        newHostLayer.anchorPoint = CGPoint.zero
         newHostLayer.frame = bounds
         newHostLayer.contentsScale = scale
 
         // Match geometry flipping from renderer
         newHostLayer.isGeometryFlipped = true
+
+        // Additional properties that might be needed
+        newHostLayer.isOpaque = true
+        newHostLayer.masksToBounds = false
+
+        // Set the context ID using KVC (private API)
+        // This must be done after other properties are set
+        newHostLayer.setValue(contextId, forKey: "contextId")
 
         // Add to our layer (which should also be geometry flipped)
         if let parentLayer = layer {
@@ -272,6 +293,7 @@ class CALayerHostDisplayView: NSView {
             NSLog("🖥️ [DIAG]   scale = \(scale)")
             NSLog("🖥️ [DIAG]   window = \(window?.frame.debugDescription ?? "nil")")
             NSLog("🖥️ [DIAG]   parent.sublayers = \(parentLayer.sublayers?.count ?? 0)")
+            NSLog("🖥️ [DIAG]   anchorPoint = \(newHostLayer.anchorPoint)")
         } else {
             NSLog("🖥️ [ERROR] No parent layer available for CALayerHost")
         }
