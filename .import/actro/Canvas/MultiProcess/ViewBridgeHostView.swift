@@ -30,6 +30,41 @@ public class ViewBridgeHostView: NSView {
     private var loadingIndicator: NSProgressIndicator?
     private var statusLabel: NSTextField?
 
+    /// Last stable size - prevents animation-induced size changes from propagating
+    private var lastStableSize: CGSize = .zero
+
+    /// Reasonable size limits (prevents scaleEffect animation from causing extreme sizes)
+    private let maxReasonableWidth: CGFloat = 2560
+    private let maxReasonableHeight: CGFloat = 1600
+    private let minReasonableWidth: CGFloat = 100
+    private let minReasonableHeight: CGFloat = 100
+
+    // MARK: - Frame Size Control
+
+    /// Override setFrameSize to prevent unreasonable sizes from propagating to XPC service
+    /// This is critical for preventing scaleEffect animation from causing resize storms
+    public override func setFrameSize(_ newSize: NSSize) {
+        // Ignore unreasonable sizes (likely from scaleEffect animation)
+        if newSize.width > maxReasonableWidth || newSize.height > maxReasonableHeight {
+            NSLog("ViewBridgeHostView: Ignoring too large size: \(newSize)")
+            return
+        }
+
+        if newSize.width < minReasonableWidth || newSize.height < minReasonableHeight {
+            NSLog("ViewBridgeHostView: Ignoring too small size: \(newSize)")
+            return
+        }
+
+        // Only update if size actually changed significantly (> 5px difference)
+        let sizeDiff = abs(newSize.width - lastStableSize.width) + abs(newSize.height - lastStableSize.height)
+        if sizeDiff < 5 && lastStableSize != .zero {
+            return  // Ignore minor fluctuations
+        }
+
+        lastStableSize = newSize
+        super.setFrameSize(newSize)
+    }
+
     // MARK: - Initialization
 
     /// Initialize with service configuration
@@ -229,6 +264,26 @@ public class ViewBridgeHostView: NSView {
     deinit {
         disconnect()
     }
+
+    // MARK: - Snapshot
+
+    /// Capture a snapshot of the current view content
+    public func captureSnapshot() -> NSImage? {
+        guard let layer = layer else { return nil }
+
+        let size = bounds.size
+        guard size.width > 0 && size.height > 0 else { return nil }
+
+        let image = NSImage(size: size)
+        image.lockFocus()
+        if let context = NSGraphicsContext.current?.cgContext {
+            layer.render(in: context)
+        }
+        image.unlockFocus()
+
+        NSLog("ViewBridgeHostView: Captured snapshot \(size)")
+        return image
+    }
 }
 
 // MARK: - ViewBridge Availability Check
@@ -249,18 +304,30 @@ extension ViewBridgeHostView {
 
 import SwiftUI
 
+/// Coordinator that holds reference to ViewBridgeHostView for snapshot access
+class ViewBridgeCoordinator {
+    weak var hostView: ViewBridgeHostView?
+
+    func captureSnapshot() -> NSImage? {
+        return hostView?.captureSnapshot()
+    }
+}
+
 /// SwiftUI wrapper for ViewBridgeHostView
 struct ViewBridgeTabView: NSViewRepresentable {
     let tabId: UUID
+    let coordinator: ViewBridgeCoordinator
 
     func makeNSView(context: Context) -> ViewBridgeHostView {
         NSLog("ViewBridgeTabView: Creating ViewBridgeHostView for tab \(tabId)")
         let view = ViewBridgeHostView()
+        coordinator.hostView = view
         return view
     }
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
         // ViewBridge handles updates automatically
+        coordinator.hostView = nsView
     }
 
     static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
@@ -272,21 +339,31 @@ struct ViewBridgeTabView: NSViewRepresentable {
 // MARK: - ViewBridge Multi-Process Tab View
 
 /// A view that displays tab content via ViewBridge XPC service
+/// Supports snapshot-based animation during mode transitions
 struct ViewBridgeMultiProcessTabView: View {
     let tab: Tab
     let containerSize: CGSize
+    var isAnimating: Bool = false  // True during mode transition animation
+    var onSnapshotRequest: ((ViewBridgeCoordinator) -> Void)? = nil
 
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var coordinator = ViewBridgeCoordinator()
 
     var body: some View {
         ZStack {
             if ViewBridgeHostView.isAvailable {
-                ViewBridgeTabView(tabId: tab.id)
-                    .frame(width: containerSize.width, height: containerSize.height)
-                    .onAppear {
-                        isLoading = false
-                    }
+                // During animation, completely remove ViewBridge from hierarchy
+                // to prevent scaleEffect from affecting its frame
+                if !isAnimating {
+                    ViewBridgeTabView(tabId: tab.id, coordinator: coordinator)
+                        .frame(width: containerSize.width, height: containerSize.height)
+                        .onAppear {
+                            isLoading = false
+                            // Provide coordinator to parent for snapshot capture
+                            onSnapshotRequest?(coordinator)
+                        }
+                }
             } else {
                 unavailableView
             }
@@ -297,6 +374,14 @@ struct ViewBridgeMultiProcessTabView: View {
 
             if let error = errorMessage {
                 errorView(error)
+            }
+        }
+        .onChange(of: isAnimating) { _, newValue in
+            if newValue {
+                // Animation starting - parent should capture snapshot before this
+                NSLog("ViewBridgeMultiProcessTabView: Animation started, removing live view")
+            } else {
+                NSLog("ViewBridgeMultiProcessTabView: Animation ended, restoring live view")
             }
         }
     }

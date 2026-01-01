@@ -109,32 +109,13 @@ struct UnifiedCanvasView: View {
                 }
             }()
 
-            // 获取当前 Focus 模式的 tab
-            let focusedTab: Tab? = {
-                if case .focus(let tabId) = viewModel.canvasMode {
-                    return viewModel.tabs.first { $0.id == tabId }
-                }
-                return nil
-            }()
-
             ZStack(alignment: .topTrailing) {
                 // 背景
                 Color(nsColor: NSColor(white: 0.1, alpha: 0.95))
                     .ignoresSafeArea()
 
-                // Focus 模式：ViewBridge 直接渲染，使用完全独立的视图层级
-                // 通过延迟显示确保不受 scaleEffect 动画影响
-                if let tab = focusedTab, hasRNContentForTab(tab) {
-                    FocusModeViewBridgeContainer(
-                        tab: tab,
-                        containerSize: safeViewportSize
-                    )
-                    .id("focus-\(tab.id)")  // 使用不同的 ID 确保是新实例
-                    .zIndex(100)  // 确保在 Canvas 之上
-                }
-
-                // Canvas 视图 - Overview 模式或 Focus 模式的背景
-                // Focus 模式时，Canvas 仍然渲染但会被上层 ViewBridge 遮挡
+                // Canvas 视图 - 包含所有 Tab 卡片
+                // ViewBridge 始终在 Canvas 内部，通过快照实现平滑动画
                 CanvasView(
                     tabs: filteredTabs,
                     tabSlotPositions: filteredTabPositions,
@@ -1158,6 +1139,15 @@ private struct TabCardView: View {
     // 悬浮标题栏高度（固定值，Overview 模式下显示在卡片上方）
     private let floatingTitleBarHeight: CGFloat = 24
 
+    // Snapshot animation state
+    @State private var snapshot: NSImage? = nil
+    @State private var isAnimatingTransition: Bool = false
+    @State private var viewBridgeCoordinator: ViewBridgeCoordinator? = nil
+    @State private var previousIsFocused: Bool? = nil
+
+    // Animation duration matches the spring animation in UnifiedCanvasView
+    private let animationDuration: TimeInterval = 0.4
+
     var body: some View {
         let _ = NSLog("🔄 [TABCARD-BODY] TabCardView.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
         // 使用 ZStack 允许标题栏悬浮在卡片上方
@@ -1197,6 +1187,35 @@ private struct TabCardView: View {
         } preview: {
             // 自定义拖动预览：整个卡片内容
             dragPreviewView
+        }
+        // Detect mode changes and trigger snapshot animation
+        .onChange(of: isFocused) { oldValue, newValue in
+            // Only trigger snapshot animation when mode actually changes
+            guard oldValue != newValue else { return }
+
+            NSLog("TabCardView: Mode changed from \(oldValue) to \(newValue) for tab \(tab.id)")
+
+            // Capture snapshot before animation starts
+            if let coordinator = viewBridgeCoordinator {
+                snapshot = coordinator.captureSnapshot()
+                NSLog("TabCardView: Captured snapshot: \(snapshot != nil ? "success" : "nil")")
+            }
+
+            // Start animation phase
+            isAnimatingTransition = true
+
+            // End animation phase after duration
+            DispatchQueue.main.asyncAfter(deadline: .now() + animationDuration) {
+                isAnimatingTransition = false
+                NSLog("TabCardView: Animation ended, clearing snapshot")
+                // Clear snapshot after animation to free memory
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    snapshot = nil
+                }
+            }
+        }
+        .onAppear {
+            previousIsFocused = isFocused
         }
     }
 
@@ -1275,32 +1294,41 @@ private struct TabCardView: View {
     // 内容区域视图
     private var contentView: some View {
         ZStack {
-            let _ = NSLog("🔄 [PARENT-BODY] contentView evaluated: hasRNContent=%d, tabId=%@, isFocused=%d, scale=%.3f",
-                         hasRNContent ? 1 : 0, tab.id.uuidString, isFocused ? 1 : 0, currentScale)
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
             // 每个 Tab 都有独立的渲染进程 - 多进程架构 (ViewBridge)
-            // Focus 模式：ViewBridge 在外层直接渲染（高分辨率），这里只显示占位背景
-            // Overview 模式：ViewBridge 在 Canvas 内渲染（缩略图）
-            if hasRNContent && !isFocused {
-                // Overview 模式：使用 ViewBridge 渲染缩略图
+            // ViewBridge 始终在 Canvas 内渲染，通过快照实现平滑缩放动画
+            if hasRNContent {
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     containerSize: CGSize(
                         width: max(cardContentSize.width, 1),
                         height: max(cardContentSize.height, 1)
-                    )
+                    ),
+                    isAnimating: isAnimatingTransition,
+                    onSnapshotRequest: { coordinator in
+                        // Store coordinator reference for snapshot capture
+                        viewBridgeCoordinator = coordinator
+                    }
                 )
                 .id(tab.id)  // Stable identity to prevent view recreation
                 .frame(
                     width: max(cardContentSize.width, 1),
                     height: max(cardContentSize.height, 1)
                 )
-            } else if hasRNContent && isFocused {
-                // Focus 模式：外层已渲染高分辨率 ViewBridge，这里显示透明占位
-                // 不渲染任何内容，让外层 ViewBridge 可见
-                Color.clear
+
+                // Snapshot overlay during animation - can be smoothly scaled by scaleEffect
+                if isAnimatingTransition, let snapshotImage = snapshot {
+                    Image(nsImage: snapshotImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(
+                            width: max(cardContentSize.width, 1),
+                            height: max(cardContentSize.height, 1)
+                        )
+                        .clipped()
+                }
             } else if let _ = tab.htmlContent {
                 // 有 htmlContent，显示网页内容（暂时用占位）
                 Image(systemName: "doc.text")
@@ -1378,40 +1406,6 @@ private struct NewTabCardView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             onTap?()
-        }
-    }
-}
-
-// MARK: - Focus Mode ViewBridge Container
-
-/// 延迟渲染 ViewBridge 以避免 Canvas scaleEffect 动画的干扰
-private struct FocusModeViewBridgeContainer: View {
-    let tab: Tab
-    let containerSize: CGSize
-
-    @State private var isReady = false
-
-    var body: some View {
-        ZStack {
-            if isReady {
-                ViewBridgeMultiProcessTabView(
-                    tab: tab,
-                    containerSize: containerSize
-                )
-                .frame(width: containerSize.width, height: containerSize.height)
-                .clipped()  // 防止溢出
-            } else {
-                // 动画期间显示背景色
-                Color(hslString: tab.backgroundColor)
-                    .frame(width: containerSize.width, height: containerSize.height)
-            }
-        }
-        .frame(width: containerSize.width, height: containerSize.height)
-        .onAppear {
-            // 延迟渲染 ViewBridge，等待 scaleEffect 动画完成（约 350ms）
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                isReady = true
-            }
         }
     }
 }
