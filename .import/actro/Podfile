@@ -8,24 +8,32 @@ require File.join(subsystem_path, 'node_modules', 'react-native-macos', 'scripts
 
 prepare_react_native_project!
 
-target 'Canvas' do
-  platform :macos, '14.0'
-
+# Shared React Native configuration
+def use_canvas_react_native
   # 根据环境变量决定是否启用新架构 / Fabric
   flags = get_default_flags()
 
-  # NOTE: deprecated - no longer depend on react-native-jsc-sandbox / react-native-quickjs
-
   use_react_native!(
-    path: react_native_macos_path,
+    path: 'Subsystem/node_modules/react-native-macos',
     hermes_enabled: false,
     fabric_enabled: ENV['RCT_NEW_ARCH_ENABLED'] == '1',
     # React Native JS 工程所在目录（包含 package.json）
-    app_path: subsystem_path
+    app_path: File.join(__dir__, 'Subsystem')
   )
 
   # rill native sandbox (JSI)
   pod 'RillSandboxNative', :path => 'Subsystem/node_modules/rill/native/platform'
+end
+
+target 'Canvas' do
+  platform :macos, '14.0'
+  use_canvas_react_native
+end
+
+# ViewBridge XPC service with React Native
+target 'CanvasViewService' do
+  platform :macos, '14.0'
+  use_canvas_react_native
 end
 
 post_install do |installer|

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0598D56EFEC8808740A9695B /* libPods-CanvasViewService.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 52FE8881EF533F65E9BE8AEC /* libPods-CanvasViewService.a */; };
 		1A2B3C4D5E6F7890ABCD0001 /* CanvasIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0002 /* CanvasIPC */; };
 		B3312B262F066DB70018A0B4 /* CanvasViewService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
@@ -100,6 +101,7 @@
 /* Begin PBXFileReference section */
 		18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTabRenderer.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.debug.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.debug.xcconfig"; sourceTree = "<group>"; };
+		52FE8881EF533F65E9BE8AEC /* libPods-CanvasViewService.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasViewService.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.release.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.release.xcconfig"; sourceTree = "<group>"; };
 		8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Canvas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -109,6 +111,8 @@
 		B3E458A02EC731A30014D74C /* Canvas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Canvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B3E458AF2EC731A40014D74C /* CanvasTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B3E458B92EC731A40014D74C /* CanvasUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		EA6D3FCD880A6135F2FEC821 /* Pods-CanvasViewService.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasViewService.debug.xcconfig"; path = "Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService.debug.xcconfig"; sourceTree = "<group>"; };
+		F1C6C8F4CB35C6799FCF3D80 /* Pods-CanvasViewService.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasViewService.release.xcconfig"; path = "Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService.release.xcconfig"; sourceTree = "<group>"; };
 		F75455EB7E76C1DE30CF29D2 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -159,6 +163,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0598D56EFEC8808740A9695B /* libPods-CanvasViewService.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -194,6 +199,7 @@
 			children = (
 				8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */,
 				18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */,
+				52FE8881EF533F65E9BE8AEC /* libPods-CanvasViewService.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -206,6 +212,8 @@
 				B38A7F072ECA222600B4185F /* Gemfile */,
 				2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */,
 				7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */,
+				EA6D3FCD880A6135F2FEC821 /* Pods-CanvasViewService.debug.xcconfig */,
+				F1C6C8F4CB35C6799FCF3D80 /* Pods-CanvasViewService.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -242,9 +250,11 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = B3312B282F066DB70018A0B4 /* Build configuration list for PBXNativeTarget "CanvasViewService" */;
 			buildPhases = (
+				CCBE62BF17A9A575DEF45F78 /* [CP] Check Pods Manifest.lock */,
 				B3312B172F066DB70018A0B4 /* Sources */,
 				B3312B182F066DB70018A0B4 /* Frameworks */,
 				B3312B192F066DB70018A0B4 /* Resources */,
+				795A595AC6301A86DB610CFE /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -438,6 +448,23 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
+		795A595AC6301A86DB610CFE /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
 		A6274D0DD8056ADF6067F790 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -473,6 +500,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -e\n\n# 生成离线 actr.jsbundle（ActrApp）并写入 .app/Contents/Resources\n# 当 Metro 不可用时，Release 会从 actr.jsbundle 启动。\n# 注意：不要叫 main.jsbundle，避免与 RN 默认 bundling 产物重名导致 Xcode “Multiple commands produce …/main.jsbundle”。\n\nif [ \"${SKIP_ACTR_BUNDLE:-0}\" = \"1\" ]; then\n  echo \"[actr] SKIP_ACTR_BUNDLE=1，跳过 bundling\"\n  exit 0\nfi\n\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  echo \"[actr] Debug build：跳过 bundling（使用 Metro）\"\n  exit 0\nfi\n\nHOST_ROOT=\"${SRCROOT}/Subsystem\"\nENTRY_FILE=\"index.ts\"\nOUT_DIR=\"${CONFIGURATION_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nBUNDLE_OUTPUT=\"${OUT_DIR}/actr.jsbundle\"\n\nif [ ! -d \"$HOST_ROOT\" ]; then\n  echo \"error: actr-host not found: $HOST_ROOT\" >&2\n  exit 1\nfi\n\nmkdir -p \"$OUT_DIR\"\n\nDEV_FLAG=false\n\ncd \"$HOST_ROOT\"\n/usr/bin/env node ./node_modules/@react-native-community/cli/build/bin.js bundle \\\n  --platform macos \\\n  --dev $DEV_FLAG \\\n  --entry-file \"$ENTRY_FILE\" \\\n  --bundle-output \"$BUNDLE_OUTPUT\" \\\n  --assets-dest \"$OUT_DIR\"\n\necho \"[actr] Bundled ActrApp -> $BUNDLE_OUTPUT\"\n";
+			showEnvVarsInLog = 0;
+		};
+		CCBE62BF17A9A575DEF45F78 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-CanvasViewService-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -550,6 +599,7 @@
 /* Begin XCBuildConfiguration section */
 		B3312B292F066DB70018A0B4 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = EA6D3FCD880A6135F2FEC821 /* Pods-CanvasViewService.debug.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_STYLE = Automatic;
@@ -580,6 +630,7 @@
 		};
 		B3312B2A2F066DB70018A0B4 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = F1C6C8F4CB35C6799FCF3D80 /* Pods-CanvasViewService.release.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_STYLE = Automatic;

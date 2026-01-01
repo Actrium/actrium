@@ -2,17 +2,99 @@
 //  CanvasServiceViewController.swift
 //  CanvasViewService
 //
-//  NSServiceViewController subclass that hosts content for ViewBridge.
+//  NSServiceViewController subclass that hosts React Native content for ViewBridge.
 //  Uses Objective-C runtime to properly inherit from private NSServiceViewController.
 //
 
 import Cocoa
 import ObjectiveC
+import React
+import React_RCTAppDelegate
+import ReactAppDependencyProvider
+
+// MARK: - React Native Host for XPC Service
+
+private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegate {
+    override init() {
+        super.init()
+        self.dependencyProvider = RCTAppDependencyProvider()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func bundleURL() -> URL? {
+        #if DEBUG
+        // Connect to Metro bundler in development
+        let metroPort = ProcessInfo.processInfo.environment["RCT_METRO_PORT"] ?? "8081"
+        let host = "127.0.0.1:\(metroPort)"
+        let url = RCTBundleURLProvider.jsBundleURL(
+            forBundleRoot: "index",
+            packagerHost: host,
+            enableDev: true,
+            enableMinification: false,
+            inlineSourceMap: false
+        )
+        return url
+        #else
+        // Use offline bundle in release
+        return Bundle.main.url(forResource: "actr", withExtension: "jsbundle")
+        #endif
+    }
+
+    override func sourceURL(for bridge: RCTBridge) -> URL? {
+        return bundleURL()
+    }
+}
+
+private class ServiceReactNativeHost {
+    static let shared = ServiceReactNativeHost()
+
+    private let factoryDelegate: ServiceReactNativeFactoryDelegate
+    private let factory: RCTReactNativeFactory
+    private var rootView: RCTRootView?
+
+    private init() {
+        NSLog("CanvasViewService: Initializing React Native host")
+
+        #if DEBUG
+        RCTRedBoxSetEnabled(false)
+        #endif
+
+        factoryDelegate = ServiceReactNativeFactoryDelegate()
+        factory = RCTReactNativeFactory(delegate: factoryDelegate)
+        NSLog("CanvasViewService: React Native factory created")
+    }
+
+    func createRootView(initialProperties: [String: Any]) -> NSView {
+        NSLog("CanvasViewService: Creating RCTRootView with module: ActrApp")
+
+        let view = factory.rootViewFactory.view(
+            withModuleName: "ActrApp",
+            initialProperties: initialProperties,
+            launchOptions: nil
+        )
+
+        if let rctRootView = view as? RCTRootView {
+            self.rootView = rctRootView
+            rctRootView.sizeFlexibility = .none
+            rctRootView.backgroundColor = NSColor.clear
+            NSLog("CanvasViewService: RCTRootView created successfully")
+        }
+
+        return view
+    }
+
+    func updateProperties(_ properties: [String: Any]) {
+        rootView?.appProperties = properties
+    }
+}
 
 // MARK: - Dynamic Class Registration
 
 /// Register CanvasServiceViewController as a subclass of NSServiceViewController at runtime
-/// This must be called before ViewBridge tries to instantiate the class
 @_cdecl("registerCanvasServiceViewController")
 public func registerCanvasServiceViewController() {
     NSLog("CanvasServiceViewController: Registering class...")
@@ -42,133 +124,113 @@ public func registerCanvasServiceViewController() {
         return
     }
 
-    // Add instance variable for content view
-    class_addIvar(newClass, "_contentView", MemoryLayout<AnyObject>.size, UInt8(log2(Double(MemoryLayout<AnyObject>.alignment))), "@")
-
-    // Add loadView method
+    // Add loadView method - creates React Native view
     let loadViewBlock: @convention(block) (AnyObject) -> Void = { (self_) in
         NSLog("CanvasServiceViewController: loadView called")
 
-        // Create root view
-        let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        rootView.wantsLayer = true
-        rootView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        // Create container view
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        containerView.wantsLayer = true
+        containerView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
         // Set as view using KVC
-        self_.setValue(rootView, forKey: "view")
+        self_.setValue(containerView, forKey: "view")
 
-        // Setup content
-        setupContent(in: rootView)
+        // Initialize React Native asynchronously to avoid blocking ViewBridge
+        DispatchQueue.main.async {
+            setupReactNativeContent(in: containerView)
+        }
     }
     let loadViewImp = imp_implementationWithBlock(loadViewBlock)
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
-
-    // Add viewDidAppear method
-    let viewDidAppearBlock: @convention(block) (AnyObject) -> Void = { (self_) in
-        NSLog("CanvasServiceViewController: viewDidAppear")
-
-        // Call super
-        if let superclass = class_getSuperclass(object_getClass(self_)) {
-            let selector = #selector(NSViewController.viewDidAppear)
-            if let superMethod = class_getInstanceMethod(superclass, selector) {
-                let superImp = method_getImplementation(superMethod)
-                typealias SuperFunc = @convention(c) (AnyObject, Selector) -> Void
-                let superCall = unsafeBitCast(superImp, to: SuperFunc.self)
-                superCall(self_, selector)
-            }
-        }
-
-        // Show test content after delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            if let view = self_.value(forKey: "view") as? NSView {
-                showTestContent(in: view)
-            }
-        }
-    }
-    let viewDidAppearImp = imp_implementationWithBlock(viewDidAppearBlock)
-    class_addMethod(newClass, #selector(NSViewController.viewDidAppear), viewDidAppearImp, "v@:")
 
     // Register the class
     objc_registerClassPair(newClass)
     NSLog("CanvasServiceViewController: Class registered successfully")
 }
 
-// MARK: - Content Setup
+// MARK: - React Native Content Setup
 
-private func setupContent(in view: NSView) {
-    let contentView = NSView(frame: view.bounds)
-    contentView.wantsLayer = true
-    contentView.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-    contentView.autoresizingMask = [.width, .height]
+private func setupReactNativeContent(in containerView: NSView) {
+    NSLog("CanvasServiceViewController: Setting up React Native content")
 
-    // Loading indicator
-    let label = NSTextField(labelWithString: "Loading ViewBridge content...")
-    label.font = NSFont.systemFont(ofSize: 14)
-    label.textColor = NSColor.secondaryLabelColor
-    label.alignment = .center
-    label.sizeToFit()
-    label.frame.origin = NSPoint(
-        x: (contentView.bounds.width - label.bounds.width) / 2,
-        y: (contentView.bounds.height - label.bounds.height) / 2
-    )
-    label.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+    // Show loading indicator first
+    let loadingLabel = NSTextField(labelWithString: "Starting React Native...")
+    loadingLabel.font = NSFont.systemFont(ofSize: 14)
+    loadingLabel.textColor = NSColor.secondaryLabelColor
+    loadingLabel.alignment = .center
+    loadingLabel.translatesAutoresizingMaskIntoConstraints = false
+    containerView.addSubview(loadingLabel)
 
-    contentView.addSubview(label)
-    view.addSubview(contentView)
-}
+    NSLayoutConstraint.activate([
+        loadingLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+        loadingLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor)
+    ])
 
-private func showTestContent(in view: NSView) {
-    NSLog("CanvasServiceViewController: Showing test content")
+    // Create React Native view with test properties
+    // TODO: Get actual tab config from host via IPC
+    let testProperties: [String: Any] = [
+        "tabs": [
+            [
+                "id": UUID().uuidString,
+                "title": "ViewBridge Test",
+                "backgroundColor": "#1a4a3c",
+                "unifiedScript": """
+                // Simple test app rendered in XPC service
+                const { View, Text } = require('react-native');
+                module.exports = function TestApp() {
+                    return React.createElement(View, {
+                        style: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a4a3c' }
+                    }, [
+                        React.createElement(Text, {
+                            key: 'title',
+                            style: { fontSize: 24, fontWeight: 'bold', color: 'white' }
+                        }, 'React Native in XPC Service!'),
+                        React.createElement(Text, {
+                            key: 'subtitle',
+                            style: { fontSize: 14, color: 'rgba(255,255,255,0.7)', marginTop: 10 }
+                        }, 'Running in CanvasViewService process')
+                    ]);
+                };
+                """,
+                "rightPanelDefaultVisible": false
+            ]
+        ],
+        "currentTabId": UUID().uuidString,
+        "isLeftPanelVisible": false,
+        "isRightPanelVisible": false
+    ]
 
-    // Clear existing content
-    view.subviews.forEach { $0.removeFromSuperview() }
+    // Create RN view in background to not block
+    DispatchQueue.global(qos: .userInitiated).async {
+        // Small delay to let ViewBridge connection stabilize
+        Thread.sleep(forTimeInterval: 0.5)
 
-    // Create success view
-    let contentView = NSView(frame: view.bounds)
-    contentView.wantsLayer = true
-    contentView.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.2).cgColor
-    contentView.autoresizingMask = [.width, .height]
+        DispatchQueue.main.async {
+            NSLog("CanvasServiceViewController: Creating React Native root view")
 
-    // Success label
-    let label = NSTextField(labelWithString: "ViewBridge Working!")
-    label.font = NSFont.boldSystemFont(ofSize: 28)
-    label.textColor = NSColor.labelColor
-    label.backgroundColor = .clear
-    label.isBezeled = false
-    label.isEditable = false
-    label.alignment = .center
-    label.sizeToFit()
-    label.frame.origin = NSPoint(
-        x: (contentView.bounds.width - label.bounds.width) / 2,
-        y: (contentView.bounds.height - label.bounds.height) / 2 + 20
-    )
-    label.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+            // Remove loading indicator
+            loadingLabel.removeFromSuperview()
 
-    // Info label
-    let infoLabel = NSTextField(labelWithString: "Cross-process view from XPC service")
-    infoLabel.font = NSFont.systemFont(ofSize: 14)
-    infoLabel.textColor = NSColor.secondaryLabelColor
-    infoLabel.backgroundColor = .clear
-    infoLabel.isBezeled = false
-    infoLabel.isEditable = false
-    infoLabel.alignment = .center
-    infoLabel.sizeToFit()
-    infoLabel.frame.origin = NSPoint(
-        x: (contentView.bounds.width - infoLabel.bounds.width) / 2,
-        y: (contentView.bounds.height - infoLabel.bounds.height) / 2 - 20
-    )
-    infoLabel.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+            // Create and add React Native view
+            let rnView = ServiceReactNativeHost.shared.createRootView(initialProperties: testProperties)
+            rnView.translatesAutoresizingMaskIntoConstraints = false
+            containerView.addSubview(rnView)
 
-    contentView.addSubview(label)
-    contentView.addSubview(infoLabel)
-    view.addSubview(contentView)
+            NSLayoutConstraint.activate([
+                rnView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+                rnView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+                rnView.topAnchor.constraint(equalTo: containerView.topAnchor),
+                rnView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
+            ])
 
-    NSLog("CanvasServiceViewController: Test content displayed successfully")
+            NSLog("CanvasServiceViewController: React Native view added to container")
+        }
+    }
 }
 
 // MARK: - Module Initialization
 
-/// Called when the module is loaded - register our class
 @_cdecl("CanvasViewServiceModuleInit")
 public func moduleInit() {
     registerCanvasServiceViewController()
