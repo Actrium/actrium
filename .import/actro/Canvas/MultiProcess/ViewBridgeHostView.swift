@@ -30,41 +30,6 @@ public class ViewBridgeHostView: NSView {
     private var loadingIndicator: NSProgressIndicator?
     private var statusLabel: NSTextField?
 
-    /// Last stable size - prevents animation-induced size changes from propagating
-    private var lastStableSize: CGSize = .zero
-
-    /// Reasonable size limits (prevents scaleEffect animation from causing extreme sizes)
-    private let maxReasonableWidth: CGFloat = 2560
-    private let maxReasonableHeight: CGFloat = 1600
-    private let minReasonableWidth: CGFloat = 100
-    private let minReasonableHeight: CGFloat = 100
-
-    // MARK: - Frame Size Control
-
-    /// Override setFrameSize to prevent unreasonable sizes from propagating to XPC service
-    /// This is critical for preventing scaleEffect animation from causing resize storms
-    public override func setFrameSize(_ newSize: NSSize) {
-        // Ignore unreasonable sizes (likely from scaleEffect animation)
-        if newSize.width > maxReasonableWidth || newSize.height > maxReasonableHeight {
-            NSLog("ViewBridgeHostView: Ignoring too large size: \(newSize)")
-            return
-        }
-
-        if newSize.width < minReasonableWidth || newSize.height < minReasonableHeight {
-            NSLog("ViewBridgeHostView: Ignoring too small size: \(newSize)")
-            return
-        }
-
-        // Only update if size actually changed significantly (> 5px difference)
-        let sizeDiff = abs(newSize.width - lastStableSize.width) + abs(newSize.height - lastStableSize.height)
-        if sizeDiff < 5 && lastStableSize != .zero {
-            return  // Ignore minor fluctuations
-        }
-
-        lastStableSize = newSize
-        super.setFrameSize(newSize)
-    }
-
     // MARK: - Initialization
 
     /// Initialize with service configuration
@@ -126,6 +91,27 @@ public class ViewBridgeHostView: NSView {
         statusLabel = label
 
         NSLog("ViewBridgeHostView: Initialized for service \(serviceBundleIdentifier)")
+    }
+
+    // MARK: - Frame Change Tracking
+
+    private var lastFrameSize: CGSize = .zero
+    private var hasLoggedCallStack = false
+
+    public override func setFrameSize(_ newSize: NSSize) {
+        // Log call stack once to understand who's calling
+        if !hasLoggedCallStack && lastFrameSize != .zero && newSize != lastFrameSize {
+            hasLoggedCallStack = true
+            let callStack = Thread.callStackSymbols.prefix(15).joined(separator: "\n")
+            NSLog("ViewBridgeHostView: === setFrameSize call stack ===\n\(callStack)")
+        }
+
+        if lastFrameSize != newSize {
+            NSLog("ViewBridgeHostView: Frame changed from \(lastFrameSize) to \(newSize)")
+            lastFrameSize = newSize
+        }
+
+        super.setFrameSize(newSize)
     }
 
     // MARK: - View Lifecycle
@@ -221,15 +207,28 @@ public class ViewBridgeHostView: NSView {
         remoteViewController = vc
 
         let remoteView = vc.view
+
+        // 🔒 方案2: 锁定 NSRemoteView 的尺寸，防止 scaleEffect 动画导致的 resize storms
+        // NSRemoteView 默认 translatesAutoresizingMaskIntoConstraints = YES
+        // 我们需要关闭它并添加固定尺寸约束
         remoteView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(remoteView)
 
+        // 使用固定尺寸约束而不是绑定到父视图边界
+        // 这样无论 SwiftUI 的 scaleEffect 怎么变化，NSRemoteView 始终保持固定尺寸
+        let fixedWidth: CGFloat = 1280
+        let fixedHeight: CGFloat = 720
+
         NSLayoutConstraint.activate([
+            // 固定宽高 - 阻止 resize 传递到 XPC Service
+            remoteView.widthAnchor.constraint(equalToConstant: fixedWidth),
+            remoteView.heightAnchor.constraint(equalToConstant: fixedHeight),
+            // 左上角对齐
             remoteView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            remoteView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            remoteView.topAnchor.constraint(equalTo: topAnchor),
-            remoteView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            remoteView.topAnchor.constraint(equalTo: topAnchor)
         ])
+
+        NSLog("ViewBridgeHostView: Locked NSRemoteView size to \(fixedWidth)x\(fixedHeight)")
 
         NSLog("ViewBridgeHostView: Remote view embedded successfully")
     }
@@ -353,17 +352,14 @@ struct ViewBridgeMultiProcessTabView: View {
     var body: some View {
         ZStack {
             if ViewBridgeHostView.isAvailable {
-                // During animation, completely remove ViewBridge from hierarchy
-                // to prevent scaleEffect from affecting its frame
-                if !isAnimating {
-                    ViewBridgeTabView(tabId: tab.id, coordinator: coordinator)
-                        .frame(width: containerSize.width, height: containerSize.height)
-                        .onAppear {
-                            isLoading = false
-                            // Provide coordinator to parent for snapshot capture
-                            onSnapshotRequest?(coordinator)
-                        }
-                }
+                // Always show ViewBridge - let host-side frame filtering handle resize storms
+                ViewBridgeTabView(tabId: tab.id, coordinator: coordinator)
+                    .frame(width: containerSize.width, height: containerSize.height)
+                    .onAppear {
+                        isLoading = false
+                        // Provide coordinator to parent for snapshot capture
+                        onSnapshotRequest?(coordinator)
+                    }
             } else {
                 unavailableView
             }
@@ -374,14 +370,6 @@ struct ViewBridgeMultiProcessTabView: View {
 
             if let error = errorMessage {
                 errorView(error)
-            }
-        }
-        .onChange(of: isAnimating) { _, newValue in
-            if newValue {
-                // Animation starting - parent should capture snapshot before this
-                NSLog("ViewBridgeMultiProcessTabView: Animation started, removing live view")
-            } else {
-                NSLog("ViewBridgeMultiProcessTabView: Animation ended, restoring live view")
             }
         }
     }
