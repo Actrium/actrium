@@ -602,6 +602,7 @@
 			baseConfigurationReference = EA6D3FCD880A6135F2FEC821 /* Pods-CanvasViewService.debug.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = CanvasViewService/CanvasViewService.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -633,6 +634,7 @@
 			baseConfigurationReference = F1C6C8F4CB35C6799FCF3D80 /* Pods-CanvasViewService.release.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = CanvasViewService/CanvasViewService.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;

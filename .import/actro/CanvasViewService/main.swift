@@ -9,6 +9,36 @@
 import Foundation
 import Cocoa
 
+// Early startup logging - write to stderr which always works
+fputs("[XPC Service Starting]\n", stderr)
+fputs("Time: \(Date())\n", stderr)
+fputs("PID: \(ProcessInfo.processInfo.processIdentifier)\n", stderr)
+fputs("Bundle: \(Bundle.main.bundlePath)\n", stderr)
+fflush(stderr)
+
+// Also try to write to temp file
+let tempDir = NSTemporaryDirectory()
+let logPath = (tempDir as NSString).appendingPathComponent("canvas-xpc-service.log")
+fputs("TempDir: \(tempDir)\n", stderr)
+fputs("LogPath: \(logPath)\n", stderr)
+fflush(stderr)
+
+let startupLog = """
+[XPC Service Starting]
+Time: \(Date())
+PID: \(ProcessInfo.processInfo.processIdentifier)
+Bundle: \(Bundle.main.bundlePath)
+TempDir: \(tempDir)
+
+"""
+do {
+    try startupLog.write(toFile: logPath, atomically: true, encoding: .utf8)
+    fputs("Log file written successfully to: \(logPath)\n", stderr)
+} catch {
+    fputs("Failed to write log file: \(error)\n", stderr)
+}
+fflush(stderr)
+
 // Register our view controller class before starting the service
 registerCanvasServiceViewController()
 
