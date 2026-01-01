@@ -172,7 +172,7 @@ struct CanvasApp: App {
 
     var body: some Scene {
         // Main window group - each window gets its own BrowserViewModel
-        WindowGroup(id: "browser") {
+        WindowGroup("Canvas0", id: "browser") {
             BrowserWindowView(historyVM: historyVM, bookmarkVM: bookmarkVM)
                 .onReceive(NotificationCenter.default.publisher(for: .openNewWindowWithGroup)) { _ in
                     openWindow(id: "browser")
