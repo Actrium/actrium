@@ -1260,21 +1260,19 @@ private struct TabCardView: View {
 
     // 内容区域视图
     private var contentView: some View {
-        // 计算 ViewBridge 渲染尺寸和缩放比例
-        // ViewBridge 始终以 Focus 模式的视口尺寸渲染，然后通过 scaleEffect 适配卡片尺寸
-        let renderSize = viewportSize  // Focus 模式下的实际渲染尺寸
-        let scaleFactor = cardWidth / max(renderSize.width, 1)  // Overview 模式缩放比例
+        // 纯 AppKit 模式：ViewBridge 始终以 viewportSize 渲染
+        // 不使用任何 transform/scaleFactor
+        let renderSize = viewportSize
 
-        let _ = NSLog("📐 [TabCard] viewportSize=%.1fx%.1f, cardSize=%.1fx%.1f, scaleFactor=%.3f, isFocused=%d",
-                      viewportSize.width, viewportSize.height, cardWidth, cardHeight, scaleFactor, isFocused ? 1 : 0)
+        let _ = NSLog("📐 [TabCard] viewportSize=%.1fx%.1f, cardSize=%.1fx%.1f, isFocused=%d",
+                      viewportSize.width, viewportSize.height, cardWidth, cardHeight, isFocused ? 1 : 0)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
-            // 每个 Tab 都有独立的渲染进程 - 多进程架构 (ViewBridge)
-            // ViewBridge 始终以 viewportSize 渲染，frame 固定为 viewportSize
-            // 缩放通过 ViewBridgeHostView 内部的 CALayer transform 实现，不会触发 resize
+            // 纯 AppKit 模式：ViewBridge 始终以 viewportSize 渲染
+            // ViewBridgeHostView 内部忽略外部 frame 设置，完全截断 SwiftUI 布局干预
             if hasRNContent {
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
@@ -1282,13 +1280,13 @@ private struct TabCardView: View {
                         width: max(renderSize.width, 1),
                         height: max(renderSize.height, 1)
                     ),
-                    scaleFactor: scaleFactor  // 传递缩放比例给 ViewBridge 用 CALayer transform 实现
+                    scaleFactor: 1.0  // 不使用，保留参数兼容性
                 )
-                .id(tab.id)  // Stable identity to prevent view recreation
-                // frame 固定为卡片尺寸，内部 ViewBridge 用 transform 缩放
+                .id(tab.id)
+                // frame 设置为 viewportSize，但 ViewBridgeHostView 内部会忽略
                 .frame(
-                    width: max(cardContentSize.width, 1),
-                    height: max(cardContentSize.height, 1),
+                    width: max(renderSize.width, 1),
+                    height: max(renderSize.height, 1),
                     alignment: .topLeading
                 )
                 .clipped()
