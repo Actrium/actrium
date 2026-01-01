@@ -1139,15 +1139,6 @@ private struct TabCardView: View {
     // 悬浮标题栏高度（固定值，Overview 模式下显示在卡片上方）
     private let floatingTitleBarHeight: CGFloat = 24
 
-    // Snapshot animation state
-    @State private var snapshot: NSImage? = nil
-    @State private var isAnimatingTransition: Bool = false
-    @State private var viewBridgeCoordinator: ViewBridgeCoordinator? = nil
-    @State private var previousIsFocused: Bool? = nil
-
-    // Animation duration matches the spring animation in UnifiedCanvasView
-    private let animationDuration: TimeInterval = 0.4
-
     var body: some View {
         let _ = NSLog("🔄 [TABCARD-BODY] TabCardView.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
         // 使用 ZStack 允许标题栏悬浮在卡片上方
@@ -1187,35 +1178,6 @@ private struct TabCardView: View {
         } preview: {
             // 自定义拖动预览：整个卡片内容
             dragPreviewView
-        }
-        // Detect mode changes and trigger snapshot animation
-        .onChange(of: isFocused) { oldValue, newValue in
-            // Only trigger snapshot animation when mode actually changes
-            guard oldValue != newValue else { return }
-
-            NSLog("TabCardView: Mode changed from \(oldValue) to \(newValue) for tab \(tab.id)")
-
-            // Capture snapshot before animation starts
-            if let coordinator = viewBridgeCoordinator {
-                snapshot = coordinator.captureSnapshot()
-                NSLog("TabCardView: Captured snapshot: \(snapshot != nil ? "success" : "nil")")
-            }
-
-            // Start animation phase
-            isAnimatingTransition = true
-
-            // End animation phase after duration
-            DispatchQueue.main.asyncAfter(deadline: .now() + animationDuration) {
-                isAnimatingTransition = false
-                NSLog("TabCardView: Animation ended, clearing snapshot")
-                // Clear snapshot after animation to free memory
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    snapshot = nil
-                }
-            }
-        }
-        .onAppear {
-            previousIsFocused = isFocused
         }
     }
 
@@ -1293,42 +1255,40 @@ private struct TabCardView: View {
 
     // 内容区域视图
     private var contentView: some View {
-        ZStack {
+        // 计算 ViewBridge 渲染尺寸和缩放比例
+        // ViewBridge 始终以 Focus 模式的视口尺寸渲染，然后通过 scaleEffect 适配卡片尺寸
+        let renderSize = viewportSize  // Focus 模式下的实际渲染尺寸
+        let scaleFactor = cardWidth / max(renderSize.width, 1)  // Overview 模式缩放比例
+
+        return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
             // 每个 Tab 都有独立的渲染进程 - 多进程架构 (ViewBridge)
-            // ViewBridge 始终在 Canvas 内渲染，通过快照实现平滑缩放动画
+            // ViewBridge 始终以 viewportSize 渲染，通过 scaleEffect 适配 Overview 模式的卡片尺寸
             if hasRNContent {
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     containerSize: CGSize(
-                        width: max(cardContentSize.width, 1),
-                        height: max(cardContentSize.height, 1)
-                    ),
-                    isAnimating: isAnimatingTransition,
-                    onSnapshotRequest: { coordinator in
-                        // Store coordinator reference for snapshot capture
-                        viewBridgeCoordinator = coordinator
-                    }
+                        width: max(renderSize.width, 1),
+                        height: max(renderSize.height, 1)
+                    )
                 )
                 .id(tab.id)  // Stable identity to prevent view recreation
                 .frame(
-                    width: max(cardContentSize.width, 1),
-                    height: max(cardContentSize.height, 1)
+                    width: max(renderSize.width, 1),
+                    height: max(renderSize.height, 1)
                 )
-
-                // Snapshot overlay during animation - can be smoothly scaled by scaleEffect
-                if isAnimatingTransition, let snapshotImage = snapshot {
-                    Image(nsImage: snapshotImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(
-                            width: max(cardContentSize.width, 1),
-                            height: max(cardContentSize.height, 1)
-                        )
-                        .clipped()
-                }
+                // scaleEffect 将 viewportSize 渲染的内容缩放到 cardWidth
+                // Focus 模式下 scaleFactor ≈ 1.0，Overview 模式下 < 1.0
+                .scaleEffect(scaleFactor, anchor: .topLeading)
+                // 外层 frame 限制显示区域为卡片尺寸
+                .frame(
+                    width: max(cardContentSize.width, 1),
+                    height: max(cardContentSize.height, 1),
+                    alignment: .topLeading
+                )
+                .clipped()
             } else if let _ = tab.htmlContent {
                 // 有 htmlContent，显示网页内容（暂时用占位）
                 Image(systemName: "doc.text")

@@ -366,15 +366,17 @@ struct ViewBridgeTabView: NSViewRepresentable {
         NSLog("ViewBridgeTabView: Creating ViewBridgeHostView for tab \(tabId), size: \(contentSize)")
         let view = ViewBridgeHostView()
         coordinator.hostView = view
-        // Set initial content size
-        view.updateContentSize(contentSize)
+        // Don't call updateContentSize here - constraints not ready yet
+        // Size will be set when handleConnectionResult creates the constraints
         return view
     }
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
         coordinator.hostView = nsView
-        // Update content size when it changes
-        nsView.updateContentSize(contentSize)
+        // Only update if size is valid (> 0)
+        if contentSize.width > 0 && contentSize.height > 0 {
+            nsView.updateContentSize(contentSize)
+        }
     }
 
     static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
@@ -386,12 +388,10 @@ struct ViewBridgeTabView: NSViewRepresentable {
 // MARK: - ViewBridge Multi-Process Tab View
 
 /// A view that displays tab content via ViewBridge XPC service
-/// Supports snapshot-based animation during mode transitions
+/// ViewBridge renders at fixed containerSize, parent uses scaleEffect for visual scaling
 struct ViewBridgeMultiProcessTabView: View {
     let tab: Tab
     let containerSize: CGSize
-    var isAnimating: Bool = false  // True during mode transition animation
-    var onSnapshotRequest: ((ViewBridgeCoordinator) -> Void)? = nil
 
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -400,8 +400,8 @@ struct ViewBridgeMultiProcessTabView: View {
     var body: some View {
         ZStack {
             if ViewBridgeHostView.isAvailable {
-                // ViewBridge renders at containerSize, displayed with .frame()
-                // scaleEffect in parent handles visual scaling without resize
+                // ViewBridge renders at containerSize (viewport size)
+                // Parent uses scaleEffect for visual scaling without triggering resize
                 ViewBridgeTabView(
                     tabId: tab.id,
                     contentSize: containerSize,
@@ -410,8 +410,6 @@ struct ViewBridgeMultiProcessTabView: View {
                 .frame(width: containerSize.width, height: containerSize.height)
                 .onAppear {
                     isLoading = false
-                    // Provide coordinator to parent for snapshot capture
-                    onSnapshotRequest?(coordinator)
                 }
             } else {
                 unavailableView
