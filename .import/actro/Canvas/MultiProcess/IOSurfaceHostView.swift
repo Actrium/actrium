@@ -131,22 +131,10 @@ class CALayerHostDisplayView: NSView {
 
         let hasContents = hostLayer.contents != nil
         let sublayerCount = hostLayer.sublayers?.count ?? 0
-        let contextId = hostLayer.value(forKey: "contextId") as? UInt32 ?? 0
+        let contextId = currentContextId
 
-        // Check additional CALayerHost properties
-        let needsDisplay = hostLayer.needsDisplay()
-        let isHidden = hostLayer.isHidden
-        let opacity = hostLayer.opacity
-        let position = hostLayer.position
-        let zPosition = hostLayer.zPosition
-
-        NSLog("🔍 [LAYER-CHECK] contextId=\(contextId), frame=\(hostLayer.frame), hasContents=\(hasContents), sublayers=\(sublayerCount)")
-        NSLog("🔍 [LAYER-CHECK]   needsDisplay=\(needsDisplay), isHidden=\(isHidden), opacity=\(opacity), position=\(position), zPosition=\(zPosition)")
-
-        // Check parent layer
-        if let parentLayer = layer {
-            NSLog("🔍 [LAYER-CHECK]   parent.isHidden=\(parentLayer.isHidden), parent.sublayers=\(parentLayer.sublayers?.count ?? 0)")
-        }
+        // For CALayerHost, check if it has valid content
+        NSLog("🔍 [LAYER-CHECK] contextId=\(contextId), hasContents=\(hasContents), sublayers=\(sublayerCount), frame=\(hostLayer.frame)")
     }
 
     required init?(coder: NSCoder) {
@@ -256,33 +244,43 @@ class CALayerHostDisplayView: NSView {
         hostLayer?.removeFromSuperlayer()
         hostLayer = nil
 
-        // Create CALayerHost using runtime
-        guard let hostClass = Self.layerHostClass,
-              let newHostLayer = (hostClass as? CALayer.Type)?.init() else {
+        // Create CALayerHost using private API
+        guard let layerHostClass = CALayerHostDisplayView.layerHostClass else {
             NSLog("🖥️ [ERROR] CALayerHost class not available")
             return
         }
 
-        // Configure the layer BEFORE setting contextId (Chromium's approach)
+        guard let newHostLayer = layerHostClass.alloc() as? CALayer else {
+            NSLog("🖥️ [ERROR] Failed to allocate CALayerHost")
+            return
+        }
+
+        // Initialize the CALayerHost
+        _ = newHostLayer.perform(NSSelectorFromString("init"))
+
+        // Set the contextId to connect to the remote CAContext
+        newHostLayer.setValue(NSNumber(value: contextId), forKey: "contextId")
+
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
 
-        // Chromium sets anchorPoint to zero
+        // Configure the layer
         newHostLayer.anchorPoint = CGPoint.zero
         newHostLayer.frame = bounds
         newHostLayer.contentsScale = scale
 
-        // Match geometry flipping from renderer
-        newHostLayer.isGeometryFlipped = true
+        // Disable implicit animations on the host layer
+        newHostLayer.actions = [
+            "bounds": NSNull(),
+            "position": NSNull(),
+            "contents": NSNull(),
+            "sublayers": NSNull(),
+            "transform": NSNull()
+        ]
 
-        // Additional properties that might be needed
         newHostLayer.isOpaque = true
         newHostLayer.masksToBounds = false
 
-        // Set the context ID using KVC (private API)
-        // This must be done after other properties are set
-        newHostLayer.setValue(contextId, forKey: "contextId")
-
-        // Add to our layer (which should also be geometry flipped)
+        // Add to our layer
         if let parentLayer = layer {
             parentLayer.addSublayer(newHostLayer)
 
@@ -291,11 +289,8 @@ class CALayerHostDisplayView: NSView {
             NSLog("🖥️ [DIAG]   frame = \(newHostLayer.frame)")
             NSLog("🖥️ [DIAG]   bounds = \(bounds)")
             NSLog("🖥️ [DIAG]   scale = \(scale)")
-            NSLog("🖥️ [DIAG]   window = \(window?.frame.debugDescription ?? "nil")")
-            NSLog("🖥️ [DIAG]   parent.sublayers = \(parentLayer.sublayers?.count ?? 0)")
-            NSLog("🖥️ [DIAG]   anchorPoint = \(newHostLayer.anchorPoint)")
         } else {
-            NSLog("🖥️ [ERROR] No parent layer available for CALayerHost")
+            NSLog("🖥️ [ERROR] No parent layer available")
         }
 
         hostLayer = newHostLayer
