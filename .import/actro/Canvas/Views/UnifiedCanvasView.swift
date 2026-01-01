@@ -57,6 +57,7 @@ struct UnifiedCanvasView: View {
     }
 
     var body: some View {
+        let _ = NSLog("🔄 [UNIFIED-BODY] UnifiedCanvasView.body: mode=%@, tabs=%d", String(describing: viewModel.canvasMode), viewModel.tabs.count)
         GeometryReader { geometry in
             let viewportSize = geometry.size
             // 极窄/极矮窗口时避免 0 尺寸导致矩阵奇异
@@ -299,11 +300,13 @@ struct UnifiedCanvasView: View {
         }
         .onAppear {
             // 🔴 开发调试：如果设置了启动时进入 Focus 模式，延迟切换
-            // 延迟 1 秒确保渲染进程完全初始化后再切换模式
+            // 延迟切换确保渲染进程完全初始化后再切换模式
+            // 注意：不要在这里立即修改 @Published 属性，否则会触发视图重建
             if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
                 logger.notice("🚀 [UnifiedCanvasView] 启动时延迟进入 Focus 模式")
-                viewModel.shouldStartInFocusMode = false  // 立即重置标志防止重复
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                // 使用本地变量捕获标志，延迟后再重置，避免立即触发视图重建
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    viewModel.shouldStartInFocusMode = false  // 延迟重置，与 canvasMode 一起变化
                     withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
                         viewModel.canvasMode = .focus(tabId: tabId)
                     }
@@ -615,6 +618,7 @@ private struct CanvasView: View {
 
 
     var body: some View {
+        let _ = NSLog("🔄 [CANVAS-BODY] CanvasView.body evaluated: tabs=%d, mode=%@", tabs.count, String(describing: mode))
         ZStack(alignment: .topLeading) {
             // 画布背景
             Color.clear
@@ -1128,6 +1132,7 @@ private struct TabCardView: View {
     private let floatingTitleBarHeight: CGFloat = 24
 
     var body: some View {
+        let _ = NSLog("🔄 [TABCARD-BODY] TabCardView.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
         // 使用 ZStack 允许标题栏悬浮在卡片上方
         ZStack(alignment: .top) {
             // 卡片主体（纯内容）
@@ -1258,12 +1263,14 @@ private struct TabCardView: View {
     // 内容区域视图
     private var contentView: some View {
         ZStack {
+            let _ = NSLog("🔄 [PARENT-BODY] contentView evaluated: hasRNContent=%d, tabId=%@", hasRNContent ? 1 : 0, tab.id.uuidString)
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
             // 每个 Tab 都有独立的渲染进程 - 多进程架构
             if hasRNContent {
                 // 使用多进程渲染 - 每个 Tab 在独立进程中渲染
+                // 使用 tab.id 作为稳定标识符，防止视图因父级重渲染而被销毁重建
                 Color.clear
                     .frame(width: cardContentSize.width, height: cardContentSize.height)
                     .overlay(alignment: .topLeading) {
@@ -1274,6 +1281,7 @@ private struct TabCardView: View {
                                 height: max(rnRenderSize.height, 1)
                             )
                         )
+                        .id(tab.id)  // Stable identity to prevent view recreation
                         .frame(
                             width: max(rnRenderSize.width, 1),
                             height: max(rnRenderSize.height, 1)
