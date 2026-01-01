@@ -8,7 +8,7 @@
 //  纯 AppKit 实现：完全截断 SwiftUI 的布局干预
 //  - 忽略外部 setFrameSize 调用
 //  - 内部固定使用 contentSize
-//  - 不使用任何 CALayer transform
+//  - 使用节流防止 resize storm
 //
 
 import Cocoa
@@ -35,11 +35,15 @@ public class ViewBridgeHostView: NSView {
     private var loadingIndicator: NSProgressIndicator?
     private var statusLabel: NSTextField?
 
-    /// Current content size (viewport size) - 这是实际渲染尺寸，不受 SwiftUI 影响
+    /// Current content size (viewport size) - 真正的视口渲染尺寸
     private var currentContentSize: CGSize = CGSize(width: 1280, height: 720)
 
-    /// 是否已锁定尺寸（首次设置后锁定）
-    private var sizeLocked: Bool = false
+    /// 节流：上次更新时间
+    private var lastResizeTime: Date = .distantPast
+    /// 节流：待处理的尺寸更新
+    private var pendingResize: CGSize?
+    /// 节流：定时器
+    private var resizeThrottleTimer: Timer?
 
     // MARK: - Initialization
 
@@ -218,33 +222,60 @@ public class ViewBridgeHostView: NSView {
         // 通知 XPC Service 端使用正确的尺寸
         vc.preferredContentSize = currentContentSize
 
-        // 锁定尺寸
-        sizeLocked = true
-
         NSLog("ViewBridgeHostView: Remote view embedded, size=\(currentContentSize)")
     }
 
     // MARK: - Content Size Management
 
-    /// Update the content size (viewport size)
-    /// 只有在尺寸未锁定时才能更新
-    public func updateContentSize(_ newSize: CGSize) {
-        // 如果已锁定，忽略更新
-        if sizeLocked {
-            return
-        }
+    /// 节流间隔（毫秒）- 防止 resize storm
+    private static let resizeThrottleInterval: TimeInterval = 0.1  // 100ms
 
+    /// Update the content size (viewport size)
+    /// 使用节流机制防止 resize storm
+    public func updateContentSize(_ newSize: CGSize) {
         // Validate reasonable size
         guard newSize.width >= 100 && newSize.height >= 100 &&
               newSize.width <= 4096 && newSize.height <= 4096 else {
             return
         }
 
-        // Ignore small changes
+        // Ignore small changes (< 2px)
         let sizeDiff = abs(newSize.width - currentContentSize.width) + abs(newSize.height - currentContentSize.height)
-        guard sizeDiff >= 1 else { return }
+        guard sizeDiff >= 2 else { return }
 
-        NSLog("ViewBridgeHostView: Setting content size to \(newSize)")
+        // 节流：如果距离上次更新时间太短，延迟处理
+        let now = Date()
+        let timeSinceLastResize = now.timeIntervalSince(lastResizeTime)
+
+        if timeSinceLastResize < Self.resizeThrottleInterval {
+            // 记录待处理的尺寸，稍后处理
+            pendingResize = newSize
+            scheduleThrottledResize()
+            return
+        }
+
+        // 立即应用尺寸更新
+        applyContentSize(newSize)
+    }
+
+    /// 调度节流后的 resize
+    private func scheduleThrottledResize() {
+        // 如果已有定时器，不重复创建
+        guard resizeThrottleTimer == nil else { return }
+
+        resizeThrottleTimer = Timer.scheduledTimer(withTimeInterval: Self.resizeThrottleInterval, repeats: false) { [weak self] _ in
+            guard let self = self, let pendingSize = self.pendingResize else { return }
+            self.resizeThrottleTimer = nil
+            self.pendingResize = nil
+            self.applyContentSize(pendingSize)
+        }
+    }
+
+    /// 实际应用尺寸更新
+    private func applyContentSize(_ newSize: CGSize) {
+        lastResizeTime = Date()
+
+        NSLog("ViewBridgeHostView: Applying content size \(newSize)")
         currentContentSize = newSize
 
         // 强制更新自身 frame
@@ -292,6 +323,8 @@ public class ViewBridgeHostView: NSView {
     }
 
     deinit {
+        resizeThrottleTimer?.invalidate()
+        resizeThrottleTimer = nil
         disconnect()
     }
 
