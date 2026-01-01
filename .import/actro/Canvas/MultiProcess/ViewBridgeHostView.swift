@@ -285,7 +285,6 @@ struct ViewBridgeMultiProcessTabView: View {
                 ViewBridgeTabView(tabId: tab.id)
                     .frame(width: containerSize.width, height: containerSize.height)
                     .onAppear {
-                        NSLog("ViewBridgeMultiProcessTabView: ViewBridge view appeared for tab \(tab.id)")
                         isLoading = false
                     }
             } else {

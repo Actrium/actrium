@@ -41,6 +41,44 @@ private func debugLog(_ message: String) {
     }
 }
 
+// MARK: - Resizable Container View
+
+/// Container view that monitors resize events and updates RN view accordingly
+private class ResizableContainerView: NSView {
+    private var lastKnownSize: CGSize = .zero
+    private var rnView: NSView?
+
+    // 合理的最大尺寸限制（防止 scaleEffect 动画导致的过大尺寸）
+    private let maxReasonableWidth: CGFloat = 2560  // 5K display width
+    private let maxReasonableHeight: CGFloat = 1600 // 5K display height
+
+    override func setFrameSize(_ newSize: NSSize) {
+        // 忽略不合理的大尺寸（可能来自 scaleEffect 动画）
+        if newSize.width > maxReasonableWidth || newSize.height > maxReasonableHeight {
+            debugLog("Ignoring unreasonable size: \(newSize) (max: \(maxReasonableWidth)x\(maxReasonableHeight))")
+            return
+        }
+
+        super.setFrameSize(newSize)
+
+        // Only log and update if size actually changed
+        if lastKnownSize != newSize {
+            debugLog("Container resized from \(lastKnownSize) to \(newSize)")
+            lastKnownSize = newSize
+
+            // Update RN view frame to match container
+            if let rnView = rnView {
+                rnView.frame = bounds
+                rnView.needsLayout = true
+            }
+        }
+    }
+
+    func setRNView(_ view: NSView) {
+        self.rnView = view
+    }
+}
+
 // MARK: - React Native Host for XPC Service
 
 private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegate {
@@ -162,8 +200,14 @@ public func registerCanvasServiceViewController() {
     let loadViewBlock: @convention(block) (AnyObject) -> Void = { (self_) in
         debugLog("loadView called")
 
-        // Create container view with flexible sizing
-        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        // Get the main screen size for a reasonable initial container size
+        // This ensures the XPC view starts at a size that matches typical viewport dimensions
+        let screenSize = NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080)
+        let initialWidth = min(screenSize.width, 2560)  // Cap at 5K width
+        let initialHeight = min(screenSize.height, 1600) // Cap at reasonable height
+        debugLog("Using screen-based initial size: \(initialWidth)x\(initialHeight)")
+
+        let containerView = ResizableContainerView(frame: NSRect(x: 0, y: 0, width: initialWidth, height: initialHeight))
         containerView.wantsLayer = true
         containerView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         // Enable auto-resizing to fill parent view
@@ -174,8 +218,9 @@ public func registerCanvasServiceViewController() {
 
         debugLog("Container view set, frame: \(containerView.frame)")
 
-        // Wait for the view to be properly sized by ViewBridge before adding RN content
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // Set up RN content immediately with initial size
+        // The ResizableContainerView will handle resize events and update RN view
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             debugLog("Delayed setup, container frame: \(containerView.frame), bounds: \(containerView.bounds)")
             setupReactNativeContent(in: containerView)
         }
@@ -259,6 +304,11 @@ private func setupReactNativeContent(in containerView: NSView) {
             rnView.frame = containerView.bounds
             rnView.autoresizingMask = [.width, .height]
             containerView.addSubview(rnView)
+
+            // Register RN view with ResizableContainerView for resize handling
+            if let resizableContainer = containerView as? ResizableContainerView {
+                resizableContainer.setRNView(rnView)
+            }
 
             debugLog("React Native view added to container, rnView.frame: \(rnView.frame), container.bounds: \(containerView.bounds)")
 
