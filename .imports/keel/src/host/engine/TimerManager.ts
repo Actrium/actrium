@@ -186,10 +186,7 @@ export class TimerManager {
       callback();
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
-      this.options.logger.error(
-        `[rill:${this.options.engineId}] ${source} callback error:`,
-        error
-      );
+      this.options.logger.error(`[rill:${this.options.engineId}] ${source} callback error:`, error);
       this.options.onError?.(error);
     }
   }
