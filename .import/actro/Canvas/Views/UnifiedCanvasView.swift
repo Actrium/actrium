@@ -1267,14 +1267,14 @@ private struct TabCardView: View {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
-            // 每个 Tab 都有独立的渲染进程 - 多进程架构
+            // 每个 Tab 都有独立的渲染进程 - 多进程架构 (ViewBridge)
             if hasRNContent {
-                // 使用多进程渲染 - 每个 Tab 在独立进程中渲染
+                // 使用 ViewBridge 多进程渲染 - XPC service 自动管理进程
                 // 使用 tab.id 作为稳定标识符，防止视图因父级重渲染而被销毁重建
                 Color.clear
                     .frame(width: cardContentSize.width, height: cardContentSize.height)
                     .overlay(alignment: .topLeading) {
-                        MultiProcessTabView(
+                        ViewBridgeMultiProcessTabView(
                             tab: tab,
                             containerSize: CGSize(
                                 width: max(rnRenderSize.width, 1),

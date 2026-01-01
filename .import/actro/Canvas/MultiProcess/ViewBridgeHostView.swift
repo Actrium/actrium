@@ -244,3 +244,106 @@ extension ViewBridgeHostView {
         return NSClassFromString("NSRemoteViewController") != nil
     }
 }
+
+// MARK: - SwiftUI Wrapper
+
+import SwiftUI
+
+/// SwiftUI wrapper for ViewBridgeHostView
+struct ViewBridgeTabView: NSViewRepresentable {
+    let tabId: UUID
+
+    func makeNSView(context: Context) -> ViewBridgeHostView {
+        NSLog("ViewBridgeTabView: Creating ViewBridgeHostView for tab \(tabId)")
+        let view = ViewBridgeHostView()
+        return view
+    }
+
+    func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
+        // ViewBridge handles updates automatically
+    }
+
+    static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
+        NSLog("ViewBridgeTabView: Disconnecting ViewBridgeHostView")
+        nsView.disconnect()
+    }
+}
+
+// MARK: - ViewBridge Multi-Process Tab View
+
+/// A view that displays tab content via ViewBridge XPC service
+struct ViewBridgeMultiProcessTabView: View {
+    let tab: Tab
+    let containerSize: CGSize
+
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ZStack {
+            if ViewBridgeHostView.isAvailable {
+                ViewBridgeTabView(tabId: tab.id)
+                    .frame(width: containerSize.width, height: containerSize.height)
+                    .onAppear {
+                        NSLog("ViewBridgeMultiProcessTabView: ViewBridge view appeared for tab \(tab.id)")
+                        isLoading = false
+                    }
+            } else {
+                unavailableView
+            }
+
+            if isLoading {
+                loadingView
+            }
+
+            if let error = errorMessage {
+                errorView(error)
+            }
+        }
+    }
+
+    private var loadingView: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .scaleEffect(0.8)
+            Text("Connecting to ViewBridge service...")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+    }
+
+    private var unavailableView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "xmark.circle")
+                .font(.system(size: 48))
+                .foregroundColor(.red)
+            Text("ViewBridge Not Available")
+                .font(.headline)
+            Text("The ViewBridge framework is not available on this system.")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func errorView(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 32))
+                .foregroundColor(.orange)
+            Text("Connection Error")
+                .font(.headline)
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
