@@ -109,13 +109,32 @@ struct UnifiedCanvasView: View {
                 }
             }()
 
+            // 获取当前 Focus 模式的 tab
+            let focusedTab: Tab? = {
+                if case .focus(let tabId) = viewModel.canvasMode {
+                    return viewModel.tabs.first { $0.id == tabId }
+                }
+                return nil
+            }()
+
             ZStack(alignment: .topTrailing) {
                 // 背景
                 Color(nsColor: NSColor(white: 0.1, alpha: 0.95))
                     .ignoresSafeArea()
 
-                // 统一渲染 Canvas（Overview 和 Focus 共用同一个视图，通过 transform 动画切换）
-                // 每个 Tab 卡片包含独立的 RCTRootView，实现真正的缩放
+                // Focus 模式：ViewBridge 直接渲染，使用完全独立的视图层级
+                // 通过延迟显示确保不受 scaleEffect 动画影响
+                if let tab = focusedTab, hasRNContentForTab(tab) {
+                    FocusModeViewBridgeContainer(
+                        tab: tab,
+                        containerSize: safeViewportSize
+                    )
+                    .id("focus-\(tab.id)")  // 使用不同的 ID 确保是新实例
+                    .zIndex(100)  // 确保在 Canvas 之上
+                }
+
+                // Canvas 视图 - Overview 模式或 Focus 模式的背景
+                // Focus 模式时，Canvas 仍然渲染但会被上层 ViewBridge 遮挡
                 CanvasView(
                     tabs: filteredTabs,
                     tabSlotPositions: filteredTabPositions,
@@ -377,6 +396,14 @@ struct UnifiedCanvasView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
             viewModel.canvasMode = .focus(tabId: tabId)
         }
+    }
+
+    // 判断 Tab 是否有需要 ViewBridge 渲染的内容
+    private func hasRNContentForTab(_ tab: Tab) -> Bool {
+        tab.systemTabType != nil ||
+        tab.unifiedScript != nil ||
+        tab.leftPanelScript != nil ||
+        tab.guestScript != nil
     }
 
     // MARK: - Transform Calculations
@@ -1232,7 +1259,7 @@ private struct TabCardView: View {
         }
     }
 
-    // 卡片内容区域尺寸（现在等于完整卡片尺寸，因为标题栏悬浮在外部）
+    // 卡片内容区域尺寸（画布坐标系中的尺寸）
     private var cardContentSize: CGSize {
         CGSize(width: cardWidth, height: cardHeight)
     }
@@ -1248,15 +1275,16 @@ private struct TabCardView: View {
     // 内容区域视图
     private var contentView: some View {
         ZStack {
-            let _ = NSLog("🔄 [PARENT-BODY] contentView evaluated: hasRNContent=%d, tabId=%@", hasRNContent ? 1 : 0, tab.id.uuidString)
+            let _ = NSLog("🔄 [PARENT-BODY] contentView evaluated: hasRNContent=%d, tabId=%@, isFocused=%d, scale=%.3f",
+                         hasRNContent ? 1 : 0, tab.id.uuidString, isFocused ? 1 : 0, currentScale)
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
             // 每个 Tab 都有独立的渲染进程 - 多进程架构 (ViewBridge)
-            if hasRNContent {
-                // 使用 ViewBridge 多进程渲染 - XPC service 自动管理进程
-                // 直接使用 cardContentSize 渲染，避免 scaleEffect 与 NSViewRepresentable 的兼容性问题
-                // Focus 模式下，外层 Canvas 缩放会自然放大 ViewBridge 视图
+            // Focus 模式：ViewBridge 在外层直接渲染（高分辨率），这里只显示占位背景
+            // Overview 模式：ViewBridge 在 Canvas 内渲染（缩略图）
+            if hasRNContent && !isFocused {
+                // Overview 模式：使用 ViewBridge 渲染缩略图
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     containerSize: CGSize(
@@ -1269,6 +1297,10 @@ private struct TabCardView: View {
                     width: max(cardContentSize.width, 1),
                     height: max(cardContentSize.height, 1)
                 )
+            } else if hasRNContent && isFocused {
+                // Focus 模式：外层已渲染高分辨率 ViewBridge，这里显示透明占位
+                // 不渲染任何内容，让外层 ViewBridge 可见
+                Color.clear
             } else if let _ = tab.htmlContent {
                 // 有 htmlContent，显示网页内容（暂时用占位）
                 Image(systemName: "doc.text")
@@ -1346,6 +1378,40 @@ private struct NewTabCardView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             onTap?()
+        }
+    }
+}
+
+// MARK: - Focus Mode ViewBridge Container
+
+/// 延迟渲染 ViewBridge 以避免 Canvas scaleEffect 动画的干扰
+private struct FocusModeViewBridgeContainer: View {
+    let tab: Tab
+    let containerSize: CGSize
+
+    @State private var isReady = false
+
+    var body: some View {
+        ZStack {
+            if isReady {
+                ViewBridgeMultiProcessTabView(
+                    tab: tab,
+                    containerSize: containerSize
+                )
+                .frame(width: containerSize.width, height: containerSize.height)
+                .clipped()  // 防止溢出
+            } else {
+                // 动画期间显示背景色
+                Color(hslString: tab.backgroundColor)
+                    .frame(width: containerSize.width, height: containerSize.height)
+            }
+        }
+        .frame(width: containerSize.width, height: containerSize.height)
+        .onAppear {
+            // 延迟渲染 ViewBridge，等待 scaleEffect 动画完成（约 350ms）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                isReady = true
+            }
         }
     }
 }
