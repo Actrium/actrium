@@ -2,27 +2,35 @@
 //  main.swift
 //  CanvasViewService
 //
-//  ViewBridge XPC service entry point for cross-process React Native rendering.
+//  ViewBridge XPC service entry point.
+//  Uses NSViewServiceApplicationMain instead of standard XPC listener.
 //
 
 import Foundation
+import Cocoa
 
-// Load ViewBridge framework and start the view service application
+// Register our view controller class before starting the service
+registerCanvasServiceViewController()
+
+// Load ViewBridge framework
 let frameworkPath = "/System/Library/PrivateFrameworks/ViewBridge.framework/ViewBridge"
 
 guard let handle = dlopen(frameworkPath, RTLD_NOW) else {
-    let error = String(cString: dlerror())
-    NSLog("CanvasViewService: Failed to load ViewBridge: \(error)")
+    let error = dlerror().map { String(cString: $0) } ?? "Unknown error"
+    NSLog("CanvasViewService: Failed to load ViewBridge framework: \(error)")
     exit(1)
 }
 
+NSLog("CanvasViewService: ViewBridge framework loaded")
+
+// Get NSViewServiceApplicationMain function
 guard let symbol = dlsym(handle, "NSViewServiceApplicationMain") else {
-    NSLog("CanvasViewService: NSViewServiceApplicationMain not found")
+    NSLog("CanvasViewService: NSViewServiceApplicationMain symbol not found")
     exit(1)
 }
 
 typealias MainFunc = @convention(c) () -> Int32
-let mainFunc = unsafeBitCast(symbol, to: MainFunc.self)
+let viewServiceMain = unsafeBitCast(symbol, to: MainFunc.self)
 
-NSLog("CanvasViewService: Starting view service")
-exit(mainFunc())
+NSLog("CanvasViewService: Starting view service...")
+exit(viewServiceMain())
