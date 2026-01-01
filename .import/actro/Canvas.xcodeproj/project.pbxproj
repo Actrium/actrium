@@ -154,13 +154,6 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		B31C6D4C2F04BC2500E7FEF4 /* Exceptions for "CanvasBroker" folder in "CanvasBroker" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = B31C6D3D2F04BC2500E7FEF4 /* CanvasBroker */;
-		};
 		B3312B272F066DB70018A0B4 /* Exceptions for "CanvasViewService" folder in "CanvasViewService" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -168,21 +161,11 @@
 			);
 			target = B3312B1A2F066DB70018A0B4 /* CanvasViewService */;
 		};
-		B34F77EC2F042239002AF804 /* Exceptions for "CanvasTabRendererXPC" folder in "CanvasTabRendererXPC" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = B34F77DC2F042239002AF804 /* CanvasTabRendererXPC */;
-		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B31C6D3F2F04BC2500E7FEF4 /* CanvasBroker */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				B31C6D4C2F04BC2500E7FEF4 /* Exceptions for "CanvasBroker" folder in "CanvasBroker" target */,
-			);
 			path = CanvasBroker;
 			sourceTree = "<group>";
 		};
@@ -196,9 +179,6 @@
 		};
 		B34F77DE2F042239002AF804 /* CanvasTabRendererXPC */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				B34F77EC2F042239002AF804 /* Exceptions for "CanvasTabRendererXPC" folder in "CanvasTabRendererXPC" target */,
-			);
 			path = CanvasTabRendererXPC;
 			sourceTree = "<group>";
 		};
