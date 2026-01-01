@@ -234,33 +234,26 @@ public func registerCanvasServiceViewController() {
 
         // Try to request a fixed size from host using requestResize:animation:completion:
         let requestResizeSelector = NSSelectorFromString("requestResize:animation:completion:")
-        debugLog("Calling requestResize to lock size at \(initialWidth)x\(initialHeight)")
+        debugLog("Step 1: Calling requestResize to lock size at \(initialWidth)x\(initialHeight)")
 
-        // Use NSInvocation to call requestResize:animation:completion:
+        debugLog("Step 2: Creating targetSize")
         let targetSize = NSSize(width: initialWidth, height: initialHeight)
-        let invocation = NSObject.perform(NSSelectorFromString("invocationWithMethodSignature:"))
+        debugLog("Step 3: targetSize created")
 
         // Simpler approach: use setValue for preferredContentSize
+        debugLog("Step 4: Checking preferredContentSize")
         let preferredSizeSelector = NSSelectorFromString("setPreferredContentSize:")
         if self_.responds(to: preferredSizeSelector) {
-            debugLog("Setting preferredContentSize to \(targetSize)")
+            debugLog("Step 5: Setting preferredContentSize to \(targetSize)")
             self_.setValue(NSValue(size: targetSize), forKey: "preferredContentSize")
-            debugLog("preferredContentSize set")
+            debugLog("Step 6: preferredContentSize set")
+        } else {
+            debugLog("Step 5b: preferredContentSize not supported")
         }
 
-        // Also try direct message send using NSObject extension
-        let obj = self_ as AnyObject
-        if obj.responds(to: requestResizeSelector) {
-            debugLog("Attempting requestResize via performSelector...")
-            // Can't use performSelector with struct argument, need NSValue
-            // Let's try a different approach - override the getter for remoteViewSize
-        }
-
-        // Set up RN content immediately with initial size
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            debugLog("Delayed setup, container frame: \(containerView.frame), bounds: \(containerView.bounds)")
-            setupReactNativeContent(in: containerView)
-        }
+        debugLog("Step 7: About to call setupReactNativeContent...")
+        setupReactNativeContent(in: containerView)
+        debugLog("Step 8: setupReactNativeContent returned")
     }
     let loadViewImp = imp_implementationWithBlock(loadViewBlock)
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
