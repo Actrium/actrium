@@ -131,10 +131,20 @@ class CALayerHostDisplayView: NSView {
 
         let hasContents = hostLayer.contents != nil
         let sublayerCount = hostLayer.sublayers?.count ?? 0
-        let contextId = currentContextId
 
-        // For CALayerHost, check if it has valid content
-        NSLog("🔍 [LAYER-CHECK] contextId=\(contextId), hasContents=\(hasContents), sublayers=\(sublayerCount), frame=\(hostLayer.frame)")
+        // Get CALayerHost-specific properties via KVC
+        let actualContextId = hostLayer.value(forKey: "contextId") as? UInt32 ?? 0
+        let connected = hostLayer.value(forKey: "connected") as? Bool
+
+        // Check layer class name
+        let className = String(describing: type(of: hostLayer))
+
+        NSLog("🔍 [LAYER-CHECK] class=\(className), contextId=\(actualContextId), connected=\(connected ?? false), hasContents=\(hasContents), sublayers=\(sublayerCount)")
+
+        // Log layer hierarchy
+        if let parentLayer = layer {
+            NSLog("🔍 [LAYER-CHECK] parent.sublayers=\(parentLayer.sublayers?.count ?? 0), parent.isHidden=\(parentLayer.isHidden)")
+        }
     }
 
     required init?(coder: NSCoder) {
