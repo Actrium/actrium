@@ -39,7 +39,9 @@ export const View = React.forwardRef<React.ComponentRef<typeof RNView>, ViewProp
   ) => {
     // Sanitize layout event to only pass serializable data
     const handleLayout = onLayout
-      ? (event: { nativeEvent: { layout: { x: number; y: number; width: number; height: number } } }) => {
+      ? (event: {
+          nativeEvent: { layout: { x: number; y: number; width: number; height: number } };
+        }) => {
           onLayout({
             nativeEvent: {
               layout: {

@@ -1384,9 +1384,7 @@ export class Engine implements IEngine {
     // Flush queued events
     const queuedEvents = this._eventQueue.splice(0);
     if (queuedEvents.length > 0 && this.options.debug) {
-      this.options.logger.log(
-        `[rill:${this.id}] Flushing ${queuedEvents.length} queued events`
-      );
+      this.options.logger.log(`[rill:${this.id}] Flushing ${queuedEvents.length} queued events`);
     }
     for (const event of queuedEvents) {
       this._sendEventInternal(event.eventName, event.payload);

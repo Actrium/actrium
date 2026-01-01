@@ -6,7 +6,11 @@
  */
 
 import React from 'react';
-import { ActivityIndicator as RNActivityIndicator, type ViewStyle, View as RNView } from 'react-native';
+import {
+  ActivityIndicator as RNActivityIndicator,
+  View as RNView,
+  type ViewStyle,
+} from 'react-native';
 
 export interface ActivityIndicatorProps {
   animating?: boolean;
@@ -20,7 +24,10 @@ export interface ActivityIndicatorProps {
 }
 
 // Wrap in View to support ref (ActivityIndicator may not support ref directly on all platforms)
-export const ActivityIndicator = React.forwardRef<React.ComponentRef<typeof RNView>, ActivityIndicatorProps>(
+export const ActivityIndicator = React.forwardRef<
+  React.ComponentRef<typeof RNView>,
+  ActivityIndicatorProps
+>(
   (
     {
       animating = true,

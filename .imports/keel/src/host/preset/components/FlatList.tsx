@@ -63,7 +63,7 @@ function FlatListInner<T = unknown>(
     accessible,
     accessibilityLabel,
   }: FlatListProps<T>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: forwardRef requires any for generic components
   ref: React.ForwardedRef<any>
 ): React.ReactElement {
   // Wrap callbacks to not pass event info to Guest
@@ -103,7 +103,7 @@ function FlatListInner<T = unknown>(
 
 // Use type assertion to maintain generic signature while supporting forwardRef
 export const FlatList = React.forwardRef(FlatListInner) as <T = unknown>(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: forwardRef requires any for generic components
   props: FlatListProps<T> & { ref?: React.ForwardedRef<any> }
 ) => React.ReactElement;
 

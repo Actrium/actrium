@@ -4,9 +4,10 @@
  * Bun-based guest bundler
  */
 
+import * as babel from '@babel/core';
+import type { BunPlugin } from 'bun';
 import fs from 'fs';
 import path from 'path';
-import * as babel from '@babel/core';
 
 /**
  * Build options
@@ -214,8 +215,59 @@ const EXTERNALS: Record<string, string> = {
   'react/jsx-runtime': 'ReactJSXRuntime',
   'react/jsx-dev-runtime': 'ReactJSXDevRuntime',
   'react-native': 'ReactNative',
-  '@rill/let': 'RillLet',
+  'rill/sdk': 'RillSDK',
+  '@rill/let': 'RillLet', // deprecated alias
 };
+
+/**
+ * Create Bun plugin for pre-bundle Babel transforms (dev mode source location injection)
+ */
+async function createBabelPlugin(): Promise<BunPlugin> {
+  const functionSourceLocationPlugin = (await import('./babel-plugin-function-source-location'))
+    .default;
+
+  return {
+    name: 'babel-source-location',
+    setup(build) {
+      // Only process source files (tsx, ts, jsx, js)
+      build.onLoad({ filter: /\.(tsx?|jsx?)$/ }, async (args) => {
+        const contents = await Bun.file(args.path).text();
+
+        try {
+          const result = await babel.transformAsync(contents, {
+            filename: args.path, // Use original file path!
+            plugins: [functionSourceLocationPlugin],
+            parserOpts: {
+              sourceType: 'module',
+              plugins: ['typescript', 'jsx'],
+            },
+            generatorOpts: {
+              retainLines: true, // Preserve line numbers
+            },
+          });
+
+          if (result?.code) {
+            return {
+              contents: result.code,
+              loader: args.path.endsWith('.tsx')
+                ? 'tsx'
+                : args.path.endsWith('.ts')
+                  ? 'ts'
+                  : args.path.endsWith('.jsx')
+                    ? 'jsx'
+                    : 'js',
+            };
+          }
+        } catch (err) {
+          // If Babel fails, return original content
+          console.warn(`[babel] Transform failed for ${args.path}:`, (err as Error).message);
+        }
+
+        return undefined; // Let Bun handle it normally
+      });
+    },
+  };
+}
 
 /**
  * Alias shim for externals that Bun may rename (e.g., __React)
@@ -258,6 +310,15 @@ export async function build(options: BuildOptions): Promise<void> {
     return;
   }
 
+  // Create plugins array
+  const plugins: BunPlugin[] = [];
+
+  // In dev mode, add Babel plugin for source location injection
+  if (options.dev) {
+    console.log('Dev mode: enabling source location injection...');
+    plugins.push(await createBabelPlugin());
+  }
+
   // Build with Bun
   const result = await Bun.build({
     entrypoints: [entryPath],
@@ -268,6 +329,7 @@ export async function build(options: BuildOptions): Promise<void> {
     minify,
     sourcemap: sourcemap ? 'external' : 'none',
     external: Object.keys(EXTERNALS),
+    plugins,
     define: {
       'process.env.NODE_ENV': '"production"',
       __DEV__: 'false',
@@ -286,29 +348,8 @@ export async function build(options: BuildOptions): Promise<void> {
   const targetPath = path.join(outDir, outFileName);
   let bundleCode = await Bun.file(result.outputs[0]!.path).text();
 
-  // Dev mode: inject source locations into JSX function props using Babel
-  if (options.dev) {
-    console.log('\nApplying dev mode transforms (source location injection)...');
-    const functionSourceLocationPlugin = (await import('./babel-plugin-function-source-location')).default;
-
-    const babelResult = await babel.transformAsync(bundleCode, {
-      filename: outFileName,
-      plugins: [functionSourceLocationPlugin],
-      parserOpts: {
-        sourceType: 'script',
-      },
-      generatorOpts: {
-        retainLines: false,
-      },
-    });
-
-    if (babelResult?.code) {
-      bundleCode = babelResult.code;
-      console.log('  ✓ Source location injection complete');
-    } else {
-      console.warn('  ⚠ Babel transform returned no code');
-    }
-  }
+  // Note: Dev mode source location injection is now done via Bun plugin (pre-bundle)
+  // This ensures __sourceFile contains original file path, not bundle path
 
   // Analyze JSX props for JSI optimization
   console.log('\nAnalyzing JSX props for JSI optimization...');
@@ -416,6 +457,20 @@ ${footerCode}
       ReactJSXDevRuntime: { jsx: () => ({}), jsxs: () => ({}) },
       ReactNative: {},
       RillReconciler: { render: () => {}, unmount: () => {} },
+      RillLet: {
+        View: 'View',
+        Text: 'Text',
+        useHostEvent: () => {},
+        useConfig: () => ({}),
+        useSendToHost: () => () => {},
+      },
+      RillSDK: {
+        View: 'View',
+        Text: 'Text',
+        useHostEvent: () => {},
+        useConfig: () => ({}),
+        useSendToHost: () => () => {},
+      },
       module: { exports: mockExports },
       exports: mockExports,
       __React: null,
@@ -435,6 +490,7 @@ ${footerCode}
       if (name === 'react/jsx-runtime') return mockGlobals.ReactJSXRuntime;
       if (name === 'react/jsx-dev-runtime') return mockGlobals.ReactJSXDevRuntime;
       if (name === 'react-native') return mockGlobals.ReactNative;
+      if (name === 'rill/sdk') return mockGlobals.RillSDK;
       if (name === '@rill/let') return mockGlobals.RillLet;
       return {};
     };

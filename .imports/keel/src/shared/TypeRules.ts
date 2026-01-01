@@ -198,6 +198,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       }
       if (__sourceFile) {
         proxyWithMeta.__sourceFile = __sourceFile;
+        console.log('[TypeRules] Decode: attached __sourceFile to proxy:', __sourceFile);
       }
       if (__sourceLine !== undefined) {
         proxyWithMeta.__sourceLine = __sourceLine;
@@ -228,12 +229,20 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
 
       // Source location is injected by Babel plugin at compile time
       // via __sourceFile and __sourceLine properties on the function
+      const sourceFile = fnWithMeta.__sourceFile;
+      const sourceLine = fnWithMeta.__sourceLine;
+
+      // Debug: log when encoding functions with source info
+      if (sourceFile || sourceLine) {
+        console.log('[TypeRules] Encoding function with source:', fnName, sourceFile, sourceLine);
+      }
+
       return {
         __type: 'function',
         __fnId: fnId,
         __name: fnName,
-        __sourceFile: fnWithMeta.__sourceFile,
-        __sourceLine: fnWithMeta.__sourceLine,
+        __sourceFile: sourceFile,
+        __sourceLine: sourceLine,
       } as SerializedFunction;
     },
     strategy: 'proxy',

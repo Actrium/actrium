@@ -3,7 +3,7 @@
  * Collects operations during render phase, sends all during commit phase
  */
 
-import type { SendToHost, SerializedOperation, SerializedOperationBatch } from '../types';
+import type { SendToHost, SerializedOperation, SerializedOperationBatch } from '../../let/types';
 
 export class OperationCollector {
   private operations: SerializedOperation[] = [];

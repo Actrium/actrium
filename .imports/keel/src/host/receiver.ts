@@ -896,6 +896,18 @@ export class Receiver {
         };
         const fnName = fnMeta.__name || (value as { name?: string }).name || 'anonymous';
 
+        // Debug: log function metadata and all own properties
+        const fnProps = Object.getOwnPropertyNames(value);
+        console.log('[receiver:buildTreeNode] Function prop:', key, {
+          name: fnName,
+          hasSourceFile: !!fnMeta.__sourceFile,
+          sourceFile: fnMeta.__sourceFile,
+          sourceLine: fnMeta.__sourceLine,
+          ownProperties: fnProps,
+          // Check if __sourceFile exists at all
+          hasOwnSourceFile: Object.hasOwn(value, '__sourceFile'),
+        });
+
         serializableProps[key] = {
           __type: 'function',
           __name: fnName,

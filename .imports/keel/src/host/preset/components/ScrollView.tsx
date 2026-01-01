@@ -42,7 +42,10 @@ export interface ScrollViewProps {
   onMomentumScrollEnd?: (event: ScrollEvent) => void;
 }
 
-export const ScrollView = React.forwardRef<React.ComponentRef<typeof RNScrollView>, ScrollViewProps>(
+export const ScrollView = React.forwardRef<
+  React.ComponentRef<typeof RNScrollView>,
+  ScrollViewProps
+>(
   (
     {
       style,

@@ -15,7 +15,7 @@
  * and transforms function props in the same way.
  */
 
-import type { PluginObj, types as t, NodePath } from '@babel/core';
+import type { PluginObj } from '@babel/core';
 
 interface PluginState {
   filename?: string;
