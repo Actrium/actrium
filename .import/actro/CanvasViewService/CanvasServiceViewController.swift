@@ -53,32 +53,50 @@ private var currentServiceContentSize: CGSize = CGSize(width: 1280, height: 720)
 private class ResizableContainerView: NSView {
     private var lastKnownSize: CGSize = .zero
     private var rnView: NSView?
-
-    // 合理的最大尺寸限制（防止 scaleEffect 动画导致的过大尺寸）
-    private let maxReasonableWidth: CGFloat = 2560  // 5K display width
-    private let maxReasonableHeight: CGFloat = 1600 // 5K display height
-
-    private var hasLoggedCallStack = false
+    private var resizeCount = 0
+    private var targetSizeSet = false  // 是否已接收到 Host 端的目标尺寸
 
     override func setFrameSize(_ newSize: NSSize) {
-        // Log call stack once to understand who's calling
-        if !hasLoggedCallStack && lastKnownSize != .zero && newSize != lastKnownSize {
-            hasLoggedCallStack = true
-            let callStack = Thread.callStackSymbols.prefix(15).joined(separator: "\n")
-            debugLog("=== setFrameSize call stack ===\n\(callStack)")
+        resizeCount += 1
+
+        // 只接受合理范围内的尺寸（100-2000），防止 resize storm
+        guard newSize.width >= 100 && newSize.height >= 100 &&
+              newSize.width <= 2000 && newSize.height <= 1500 else {
+            debugLog("[\(resizeCount)] Ignoring out-of-range size: \(newSize)")
+            return
         }
 
-        // 忽略不合理的大尺寸（可能来自 scaleEffect 动画）
-        if newSize.width > maxReasonableWidth || newSize.height > maxReasonableHeight {
-            debugLog("Ignoring unreasonable size: \(newSize) (max: \(maxReasonableWidth)x\(maxReasonableHeight))")
-            return
+        // 第一次收到非默认尺寸时，将其作为目标尺寸
+        // Host 端的目标尺寸（如 1011x848）会在初始化后很快发送过来
+        if !targetSizeSet && lastKnownSize.width > 0 {
+            // 检查这是否是一个来自 Host 端的目标尺寸
+            // 目标尺寸通常是整数或接近整数的小数
+            let isLikelyTargetSize = (abs(newSize.width - round(newSize.width)) < 1 &&
+                                       abs(newSize.height - round(newSize.height)) < 1)
+            if isLikelyTargetSize && newSize != lastKnownSize {
+                debugLog("[\(resizeCount)] Setting target size: \(newSize)")
+                currentServiceContentSize = newSize
+                targetSizeSet = true
+            }
+        }
+
+        // 锁定到目标尺寸 - 拒绝与目标尺寸差异较大的尺寸
+        if targetSizeSet {
+            let targetSize = currentServiceContentSize
+            let sizeDiff = abs(newSize.width - targetSize.width) + abs(newSize.height - targetSize.height)
+            if sizeDiff > 5 {
+                debugLog("[\(resizeCount)] Locking: \(newSize) -> \(targetSize)")
+                super.setFrameSize(targetSize)
+                return
+            }
         }
 
         super.setFrameSize(newSize)
 
-        // Only log and update if size actually changed
-        if lastKnownSize != newSize {
-            debugLog("Container resized from \(lastKnownSize) to \(newSize)")
+        // Only log and update if size actually changed significantly
+        let changeDiff = abs(newSize.width - lastKnownSize.width) + abs(newSize.height - lastKnownSize.height)
+        if changeDiff > 1 {
+            debugLog("[\(resizeCount)] Container: \(lastKnownSize) -> \(newSize)")
             lastKnownSize = newSize
 
             // Update RN view frame to match container
@@ -269,22 +287,28 @@ public func registerCanvasServiceViewController() {
         }
 
         // Update tracked size
+        let oldSize = currentServiceContentSize
         currentServiceContentSize = size
 
         if let view = self_.value(forKey: "view") as? NSView {
+            // 使用 CATransaction 禁用动画
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             view.setFrameSize(size)
             view.needsLayout = true
-            debugLog("Updated view size to: \(size)")
+            CATransaction.commit()
+            debugLog("Updated view size from \(oldSize) to: \(size)")
         }
     }
     let sizeDidChangeImp = imp_implementationWithBlock(sizeDidChangeBlock)
     // Signature: v = void, @ = self, : = selector, {CGSize=dd} = CGSize with two doubles
     class_addMethod(newClass, NSSelectorFromString("remoteViewSizeDidChange:"), sizeDidChangeImp, "v@:{CGSize=dd}")
 
-    // Add allowsImplicitResizeRequests - return NO to block host-initiated resizes
+    // Add allowsImplicitResizeRequests - return YES to accept host-initiated resizes
+    // 这样 Host 端的约束变化会传递到 Service 端
     let allowsImplicitBlock: @convention(block) (AnyObject) -> Bool = { _ in
-        debugLog("allowsImplicitResizeRequests called -> NO")
-        return false  // Block implicit resize from host
+        debugLog("allowsImplicitResizeRequests called -> YES")
+        return true  // Accept implicit resize from host
     }
     let allowsImplicitImp = imp_implementationWithBlock(allowsImplicitBlock)
     class_addMethod(newClass, NSSelectorFromString("allowsImplicitResizeRequests"), allowsImplicitImp, "B@:")
@@ -296,6 +320,32 @@ public func registerCanvasServiceViewController() {
     }
     let makesExplicitImp = imp_implementationWithBlock(makesExplicitBlock)
     class_addMethod(newClass, NSSelectorFromString("makesExplicitResizeRequests"), makesExplicitImp, "B@:")
+
+    // Override setPreferredContentSize: to capture size changes from host
+    let setPreferredSizeBlock: @convention(block) (AnyObject, NSSize) -> Void = { (self_, size) in
+        debugLog("setPreferredContentSize -> \(size)")
+
+        // Filter unreasonable sizes
+        if size.width > 4096 || size.height > 4096 || size.width < 100 || size.height < 100 {
+            debugLog("Ignoring unreasonable preferredContentSize: \(size)")
+            return
+        }
+
+        // Update tracked size
+        currentServiceContentSize = size
+
+        // Update view size
+        if let view = self_.value(forKey: "view") as? NSView {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            view.setFrameSize(size)
+            view.needsLayout = true
+            CATransaction.commit()
+            debugLog("Updated view from setPreferredContentSize to: \(size)")
+        }
+    }
+    let setPreferredSizeImp = imp_implementationWithBlock(setPreferredSizeBlock)
+    class_addMethod(newClass, NSSelectorFromString("setPreferredContentSize:"), setPreferredSizeImp, "v@:{CGSize=dd}")
 
     // Add remoteViewSize getter - return current tracked size
     let remoteViewSizeBlock: @convention(block) (AnyObject) -> CGSize = { _ in
