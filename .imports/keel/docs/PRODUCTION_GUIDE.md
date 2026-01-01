@@ -6,7 +6,7 @@ This guide summarizes recommended settings and operational practices to run Rill
 
 - Require whitelist
   - Pass `requireWhitelist` in EngineOptions when creating Engine. Only these modules can be `require()`ed by the guest bundle.
-  - Default whitelist: `react`, `react-native`, `react/jsx-runtime`, `rill/sdk`.
+  - Default whitelist: `react`, `react-native`, `react/jsx-runtime`, `rill/let`.
 - Execution timeout
   - Use `timeout` option (default 5000ms). QuickJS `eval` is synchronous and cannot be forcibly interrupted; this timeout is "best-effort". Consider worker/thread isolation if strict CPU time slicing is required.
 - Error classification
@@ -107,7 +107,7 @@ Programmatic (options):
 ```ts
 import { analyze } from 'rill/cli';
 await analyze('dist/bundle.js', {
-  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/sdk'],
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/let'],
   failOnViolation: true,
   treatEvalAsViolation: true,
   treatDynamicNonLiteralAsViolation: true,

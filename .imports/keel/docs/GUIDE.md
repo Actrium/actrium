@@ -35,7 +35,7 @@ npm install rill
 
 ```tsx
 // src/guest.tsx
-import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/sdk';
+import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/let';
 
 interface Config {
   title: string;
@@ -151,7 +151,7 @@ my-guest/
 Virtual components are string identifiers that are transformed into operation instructions during build:
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/sdk';
+import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/let';
 
 function MyComponent() {
   return (
@@ -176,7 +176,7 @@ function MyComponent() {
 #### useConfig - Get Configuration
 
 ```tsx
-import { useConfig } from 'rill/sdk';
+import { useConfig } from 'rill/let';
 
 interface Config {
   userId: string;
@@ -200,7 +200,7 @@ function Guest() {
 
 ```tsx
 import { useState } from 'react';
-import { View, Text, useHostEvent } from 'rill/sdk';
+import { View, Text, useHostEvent } from 'rill/let';
 
 function Guest() {
   const [refreshCount, setRefreshCount] = useState(0);
@@ -219,7 +219,7 @@ function Guest() {
 #### useSendToHost - Send Events to Host
 
 ```tsx
-import { TouchableOpacity, Text, useSendToHost } from 'rill/sdk';
+import { TouchableOpacity, Text, useSendToHost } from 'rill/let';
 
 function Guest() {
   const sendToHost = useSendToHost();
@@ -241,7 +241,7 @@ function Guest() {
 Call methods on host component instances (like `focus()`, `scrollTo()`):
 
 ```tsx
-import { useRemoteRef, View, TextInput, TouchableOpacity, Text, TextInputRef } from 'rill/sdk';
+import { useRemoteRef, View, TextInput, TouchableOpacity, Text, TextInputRef } from 'rill/let';
 
 function Guest() {
   const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
@@ -311,7 +311,7 @@ Use FlatList for rendering long lists:
 
 ```tsx
 import { useState } from 'react';
-import { View, Text, FlatList } from 'rill/sdk';
+import { View, Text, FlatList } from 'rill/let';
 
 interface Item {
   id: string;

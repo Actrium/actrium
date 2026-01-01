@@ -6,12 +6,14 @@ The Bridge layer provides unified serialization and communication between Guest 
 
 ```
 src/shared/
-├── types.ts          # Authoritative type definitions
-├── serializer.ts     # Shared serialization utilities
-├── TypeRules.ts      # Type validation rules
-├── PromiseManager.ts # Promise lifecycle management
-├── Bridge.ts         # Core communication layer
-└── index.ts          # Public exports
+├── types.ts              # Authoritative type definitions
+├── serialization.ts      # Shared serialization utilities
+├── TypeRules.ts          # Type validation rules
+├── CallbackRegistry.ts   # Callback lifecycle management
+├── bridge/               # Bridge layer
+│   ├── Bridge.ts         # Core communication layer
+│   └── PromiseManager.ts # Promise lifecycle management
+└── index.ts              # Public exports
 ```
 
 ## Type Flow
@@ -19,16 +21,14 @@ src/shared/
 ```
 shared/types.ts (authoritative source)
        ↓
-host/types.ts (re-export)
+guest/let/types.ts (re-export + Guest-specific types)
        ↓
-sdk/types.ts (re-export)
-       ↓
-guest/reconciler/index.ts (consumer)
+guest/runtime/reconciler/index.ts (consumer)
 ```
 
 ## Key Components
 
-### serializer.ts
+### serialization.ts
 
 Shared utilities for cross-boundary data transfer:
 

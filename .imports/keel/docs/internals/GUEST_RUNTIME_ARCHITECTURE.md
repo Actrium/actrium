@@ -32,37 +32,41 @@ Rill uses a **two-phase architecture** to run guest code in a sandboxed environm
 
 ```
 src/
-├── guest-bundle/              # Guest runtime bundle
+├── guest-bundle/              # Guest runtime bundle (auto-build)
 │   ├── entry.ts               # Bundle entry point (source)
-│   ├── init.ts                # Environment initialization (source)
-│   ├── reconciler/            # React reconciler implementation (source)
-│   │   ├── index.ts           # Public API (render, unmount, etc.)
-│   │   ├── host-config.ts     # react-reconciler host configuration
-│   │   ├── reconciler-manager.ts  # Reconciler instance management
-│   │   ├── operation-collector.ts # Operation batching
-│   │   ├── element-transform.ts   # Guest element transformation
-│   │   ├── guest-encoder.ts   # Props serialization
-│   │   ├── devtools.ts        # DevTools integration
-│   │   └── types.ts           # Reconciler types
 │   └── build/
 │       └── bundle.ts          # Auto-generated build output (DO NOT EDIT)
 │
-├── sdk/                       # User-facing SDK (rill/sdk)
-│   ├── index.ts               # Public exports (View, Text, hooks)
-│   ├── sdk.ts                 # Components and hooks implementation
-│   └── types.ts               # User-facing types
+├── guest/                     # Guest-side code
+│   ├── let/                   # User-facing SDK (rill/let)
+│   │   ├── index.ts           # Public exports (View, Text, hooks)
+│   │   ├── sdk.ts             # Components and hooks implementation
+│   │   └── types.ts           # User-facing types
+│   ├── runtime/               # Guest runtime
+│   │   ├── init.ts            # Environment initialization
+│   │   └── reconciler/        # React reconciler implementation
+│   │       ├── index.ts       # Public API (render, unmount, etc.)
+│   │       ├── host-config.ts # react-reconciler host configuration
+│   │       ├── reconciler-manager.ts  # Reconciler instance management
+│   │       ├── operation-collector.ts # Operation batching
+│   │       ├── element-transform.ts   # Guest element transformation
+│   │       ├── guest-encoder.ts   # Props serialization
+│   │       ├── devtools.ts    # DevTools integration
+│   │       └── types.ts       # Reconciler types
+│   └── build/                 # Built runtime output
 │
 ├── shared/                    # Shared protocol layer
 │   ├── index.ts               # Protocol exports
 │   ├── types.ts               # Operation and message types
 │   ├── TypeRules.ts           # Serialization rules
 │   ├── serialization.ts       # Encoder/decoder utilities
+│   ├── bridge/                # Bridge layer
+│   │   └── Bridge.ts          # Core communication
 │   └── CallbackRegistry.ts    # Cross-boundary function management
 │
 └── host/                      # Host runtime
     ├── Engine.ts              # Engine (loads and executes guest)
-    ├── receiver/              # Receives operations, renders UI
-    └── bridge/Bridge.ts       # Host-side serialization
+    └── receiver/              # Receives operations, renders UI
 ```
 
 ## Build Phase
@@ -232,9 +236,9 @@ Original function in user component
 - **`src/sdk/`**: User-facing API - what developers import in their guest code
 - **`src/guest/`**: Runtime internals - bundled and injected by the engine
 
-Users import from `rill/sdk`:
+Users import from `rill/let`:
 ```tsx
-import { View, Text, useHostEvent } from 'rill/sdk';
+import { View, Text, useHostEvent } from 'rill/let';
 ```
 
 They never directly use `render()`, `CallbackRegistry`, etc. - those are runtime internals.
