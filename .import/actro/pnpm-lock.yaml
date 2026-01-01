@@ -1436,8 +1436,11 @@ packages:
     peerDependencies:
       react: '>=18.0.0'
       react-native: '>=0.70.0'
+      react-native-web: '>=0.19.0'
     peerDependenciesMeta:
       react-native:
+        optional: true
+      react-native-web:
         optional: true
 
   rimraf@3.0.2:
