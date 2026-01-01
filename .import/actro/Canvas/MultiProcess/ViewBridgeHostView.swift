@@ -30,6 +30,13 @@ public class ViewBridgeHostView: NSView {
     private var loadingIndicator: NSProgressIndicator?
     private var statusLabel: NSTextField?
 
+    /// Content size constraints - stored for dynamic updates
+    private var widthConstraint: NSLayoutConstraint?
+    private var heightConstraint: NSLayoutConstraint?
+
+    /// Current content size (viewport size in Focus mode)
+    private var currentContentSize: CGSize = CGSize(width: 1280, height: 720)
+
     // MARK: - Initialization
 
     /// Initialize with service configuration
@@ -208,29 +215,62 @@ public class ViewBridgeHostView: NSView {
 
         let remoteView = vc.view
 
-        // 🔒 方案2: 锁定 NSRemoteView 的尺寸，防止 scaleEffect 动画导致的 resize storms
+        // 🔒 锁定 NSRemoteView 的尺寸，防止 scaleEffect 动画导致的 resize storms
         // NSRemoteView 默认 translatesAutoresizingMaskIntoConstraints = YES
         // 我们需要关闭它并添加固定尺寸约束
         remoteView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(remoteView)
 
-        // 使用固定尺寸约束而不是绑定到父视图边界
-        // 这样无论 SwiftUI 的 scaleEffect 怎么变化，NSRemoteView 始终保持固定尺寸
-        let fixedWidth: CGFloat = 1280
-        let fixedHeight: CGFloat = 720
+        // 使用固定尺寸约束 - 保存引用以便动态更新
+        let wc = remoteView.widthAnchor.constraint(equalToConstant: currentContentSize.width)
+        let hc = remoteView.heightAnchor.constraint(equalToConstant: currentContentSize.height)
+        widthConstraint = wc
+        heightConstraint = hc
 
         NSLayoutConstraint.activate([
-            // 固定宽高 - 阻止 resize 传递到 XPC Service
-            remoteView.widthAnchor.constraint(equalToConstant: fixedWidth),
-            remoteView.heightAnchor.constraint(equalToConstant: fixedHeight),
+            wc, hc,
             // 左上角对齐
             remoteView.leadingAnchor.constraint(equalTo: leadingAnchor),
             remoteView.topAnchor.constraint(equalTo: topAnchor)
         ])
 
-        NSLog("ViewBridgeHostView: Locked NSRemoteView size to \(fixedWidth)x\(fixedHeight)")
+        NSLog("ViewBridgeHostView: Set NSRemoteView size to \(currentContentSize)")
 
         NSLog("ViewBridgeHostView: Remote view embedded successfully")
+    }
+
+    // MARK: - Content Size Management
+
+    /// Update the content size (viewport size)
+    /// This updates the fixed constraints and notifies the XPC service
+    public func updateContentSize(_ newSize: CGSize) {
+        // Ignore if size hasn't changed significantly (< 1px)
+        let sizeDiff = abs(newSize.width - currentContentSize.width) + abs(newSize.height - currentContentSize.height)
+        guard sizeDiff >= 1 else { return }
+
+        // Validate reasonable size
+        guard newSize.width >= 100 && newSize.height >= 100 &&
+              newSize.width <= 4096 && newSize.height <= 4096 else {
+            NSLog("ViewBridgeHostView: Ignoring unreasonable size \(newSize)")
+            return
+        }
+
+        NSLog("ViewBridgeHostView: Updating content size from \(currentContentSize) to \(newSize)")
+        currentContentSize = newSize
+
+        // Update constraints
+        widthConstraint?.constant = newSize.width
+        heightConstraint?.constant = newSize.height
+
+        // Notify XPC service via requestResize if available
+        if let vc = remoteViewController {
+            let selector = NSSelectorFromString("requestResize:animation:completion:")
+            if vc.responds(to: selector) {
+                // Use NSInvocation alternative - set preferred content size
+                vc.preferredContentSize = newSize
+                NSLog("ViewBridgeHostView: Requested resize to \(newSize)")
+            }
+        }
     }
 
     private func handleError(_ message: String) {
@@ -310,23 +350,31 @@ class ViewBridgeCoordinator {
     func captureSnapshot() -> NSImage? {
         return hostView?.captureSnapshot()
     }
+
+    func updateContentSize(_ size: CGSize) {
+        hostView?.updateContentSize(size)
+    }
 }
 
 /// SwiftUI wrapper for ViewBridgeHostView
 struct ViewBridgeTabView: NSViewRepresentable {
     let tabId: UUID
+    let contentSize: CGSize  // Viewport size for rendering
     let coordinator: ViewBridgeCoordinator
 
     func makeNSView(context: Context) -> ViewBridgeHostView {
-        NSLog("ViewBridgeTabView: Creating ViewBridgeHostView for tab \(tabId)")
+        NSLog("ViewBridgeTabView: Creating ViewBridgeHostView for tab \(tabId), size: \(contentSize)")
         let view = ViewBridgeHostView()
         coordinator.hostView = view
+        // Set initial content size
+        view.updateContentSize(contentSize)
         return view
     }
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
-        // ViewBridge handles updates automatically
         coordinator.hostView = nsView
+        // Update content size when it changes
+        nsView.updateContentSize(contentSize)
     }
 
     static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
@@ -352,14 +400,19 @@ struct ViewBridgeMultiProcessTabView: View {
     var body: some View {
         ZStack {
             if ViewBridgeHostView.isAvailable {
-                // Always show ViewBridge - let host-side frame filtering handle resize storms
-                ViewBridgeTabView(tabId: tab.id, coordinator: coordinator)
-                    .frame(width: containerSize.width, height: containerSize.height)
-                    .onAppear {
-                        isLoading = false
-                        // Provide coordinator to parent for snapshot capture
-                        onSnapshotRequest?(coordinator)
-                    }
+                // ViewBridge renders at containerSize, displayed with .frame()
+                // scaleEffect in parent handles visual scaling without resize
+                ViewBridgeTabView(
+                    tabId: tab.id,
+                    contentSize: containerSize,
+                    coordinator: coordinator
+                )
+                .frame(width: containerSize.width, height: containerSize.height)
+                .onAppear {
+                    isLoading = false
+                    // Provide coordinator to parent for snapshot capture
+                    onSnapshotRequest?(coordinator)
+                }
             } else {
                 unavailableView
             }
