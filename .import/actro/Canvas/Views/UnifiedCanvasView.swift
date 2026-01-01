@@ -1237,21 +1237,6 @@ private struct TabCardView: View {
         CGSize(width: cardWidth, height: cardHeight)
     }
 
-    // RN 渲染尺寸（使用视口尺寸，宽高比与 cardContentSize 匹配）
-    private var rnRenderSize: CGSize {
-        CGSize(width: viewportSize.width, height: viewportSize.height)
-    }
-
-    // RN 视图需要缩放的比例
-    // RN 始终按 viewportSize 渲染（保持高清），然后缩放到 cardContentSize
-    // 在 Focus 模式下，外层 canvas scale 会把卡片放大回 viewportSize
-    // 最终效果：RN 内容以 1:1 比例显示
-    private var rnScaleFactor: CGFloat {
-        guard currentScale > 0 else { return 1 }
-        let baseScale = cardContentSize.width / max(viewportSize.width, 1)
-        return baseScale
-    }
-
     // 判断 Tab 是否有 RN 内容需要渲染
     private var hasRNContent: Bool {
         tab.systemTabType != nil ||
@@ -1270,25 +1255,20 @@ private struct TabCardView: View {
             // 每个 Tab 都有独立的渲染进程 - 多进程架构 (ViewBridge)
             if hasRNContent {
                 // 使用 ViewBridge 多进程渲染 - XPC service 自动管理进程
-                // 使用 tab.id 作为稳定标识符，防止视图因父级重渲染而被销毁重建
-                Color.clear
-                    .frame(width: cardContentSize.width, height: cardContentSize.height)
-                    .overlay(alignment: .topLeading) {
-                        ViewBridgeMultiProcessTabView(
-                            tab: tab,
-                            containerSize: CGSize(
-                                width: max(rnRenderSize.width, 1),
-                                height: max(rnRenderSize.height, 1)
-                            )
-                        )
-                        .id(tab.id)  // Stable identity to prevent view recreation
-                        .frame(
-                            width: max(rnRenderSize.width, 1),
-                            height: max(rnRenderSize.height, 1)
-                        )
-                        .scaleEffect(rnScaleFactor, anchor: .topLeading)
-                    }
-                    .clipped()
+                // 直接使用 cardContentSize 渲染，避免 scaleEffect 与 NSViewRepresentable 的兼容性问题
+                // Focus 模式下，外层 Canvas 缩放会自然放大 ViewBridge 视图
+                ViewBridgeMultiProcessTabView(
+                    tab: tab,
+                    containerSize: CGSize(
+                        width: max(cardContentSize.width, 1),
+                        height: max(cardContentSize.height, 1)
+                    )
+                )
+                .id(tab.id)  // Stable identity to prevent view recreation
+                .frame(
+                    width: max(cardContentSize.width, 1),
+                    height: max(cardContentSize.height, 1)
+                )
             } else if let _ = tab.htmlContent {
                 // 有 htmlContent，显示网页内容（暂时用占位）
                 Image(systemName: "doc.text")
