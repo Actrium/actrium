@@ -1260,19 +1260,21 @@ private struct TabCardView: View {
 
     // 内容区域视图
     private var contentView: some View {
-        // 纯 AppKit 模式：ViewBridge 始终以 viewportSize 渲染
-        // 不使用任何 transform/scaleFactor
+        // ViewBridge 始终以 viewportSize 渲染
+        // 在 Overview 模式下用 scaleEffect 缩小显示
         let renderSize = viewportSize
+        // 计算缩放比例：卡片宽度 / 视口宽度
+        let displayScale = cardWidth / max(renderSize.width, 1)
 
-        let _ = NSLog("📐 [TabCard] viewportSize=%.1fx%.1f, cardSize=%.1fx%.1f, isFocused=%d",
-                      viewportSize.width, viewportSize.height, cardWidth, cardHeight, isFocused ? 1 : 0)
+        let _ = NSLog("📐 [TabCard] viewportSize=%.1fx%.1f, cardSize=%.1fx%.1f, displayScale=%.3f, isFocused=%d",
+                      viewportSize.width, viewportSize.height, cardWidth, cardHeight, displayScale, isFocused ? 1 : 0)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
-            // 纯 AppKit 模式：ViewBridge 始终以 viewportSize 渲染
-            // ViewBridgeHostView 内部忽略外部 frame 设置，完全截断 SwiftUI 布局干预
+            // ViewBridge 以 viewportSize 渲染，用 scaleEffect 缩放显示
+            // ViewBridgeHostView 内部忽略外部 frame 变化，保持 viewportSize 渲染
             if hasRNContent {
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
@@ -1283,10 +1285,18 @@ private struct TabCardView: View {
                     scaleFactor: 1.0  // 不使用，保留参数兼容性
                 )
                 .id(tab.id)
-                // frame 设置为 viewportSize，但 ViewBridgeHostView 内部会忽略
+                // frame 固定为 viewportSize
                 .frame(
                     width: max(renderSize.width, 1),
                     height: max(renderSize.height, 1),
+                    alignment: .topLeading
+                )
+                // 用 scaleEffect 缩放显示，anchor 在左上角
+                .scaleEffect(displayScale, anchor: .topLeading)
+                // 缩放后的实际显示尺寸
+                .frame(
+                    width: max(cardWidth, 1),
+                    height: max(cardHeight, 1),
                     alignment: .topLeading
                 )
                 .clipped()
