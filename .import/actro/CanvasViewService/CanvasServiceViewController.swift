@@ -52,7 +52,16 @@ private class ResizableContainerView: NSView {
     private let maxReasonableWidth: CGFloat = 2560  // 5K display width
     private let maxReasonableHeight: CGFloat = 1600 // 5K display height
 
+    private var hasLoggedCallStack = false
+
     override func setFrameSize(_ newSize: NSSize) {
+        // Log call stack once to understand who's calling
+        if !hasLoggedCallStack && lastKnownSize != .zero && newSize != lastKnownSize {
+            hasLoggedCallStack = true
+            let callStack = Thread.callStackSymbols.prefix(15).joined(separator: "\n")
+            debugLog("=== setFrameSize call stack ===\n\(callStack)")
+        }
+
         // 忽略不合理的大尺寸（可能来自 scaleEffect 动画）
         if newSize.width > maxReasonableWidth || newSize.height > maxReasonableHeight {
             debugLog("Ignoring unreasonable size: \(newSize) (max: \(maxReasonableWidth)x\(maxReasonableHeight))")
@@ -200,26 +209,48 @@ public func registerCanvasServiceViewController() {
     let loadViewBlock: @convention(block) (AnyObject) -> Void = { (self_) in
         debugLog("loadView called")
 
-        // Get the main screen size for a reasonable initial container size
-        // This ensures the XPC view starts at a size that matches typical viewport dimensions
-        let screenSize = NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080)
-        let initialWidth = min(screenSize.width, 2560)  // Cap at 5K width
-        let initialHeight = min(screenSize.height, 1600) // Cap at reasonable height
-        debugLog("Using screen-based initial size: \(initialWidth)x\(initialHeight)")
+        // Use a reasonable default size instead of screen size
+        // This prevents oversized initial frames
+        let initialWidth: CGFloat = 1280
+        let initialHeight: CGFloat = 720
+        debugLog("Using default initial size: \(initialWidth)x\(initialHeight)")
 
         let containerView = ResizableContainerView(frame: NSRect(x: 0, y: 0, width: initialWidth, height: initialHeight))
         containerView.wantsLayer = true
         containerView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        // Enable auto-resizing to fill parent view
-        containerView.autoresizingMask = [.width, .height]
+        // Disable auto-resizing - we control size via remoteViewSizeDidChange
+        containerView.autoresizingMask = []
 
         // Set as view using KVC
         self_.setValue(containerView, forKey: "view")
 
         debugLog("Container view set, frame: \(containerView.frame)")
 
+        // Try to request a fixed size from host using requestResize:animation:completion:
+        let requestResizeSelector = NSSelectorFromString("requestResize:animation:completion:")
+        debugLog("Calling requestResize to lock size at \(initialWidth)x\(initialHeight)")
+
+        // Use NSInvocation to call requestResize:animation:completion:
+        let targetSize = NSSize(width: initialWidth, height: initialHeight)
+        let invocation = NSObject.perform(NSSelectorFromString("invocationWithMethodSignature:"))
+
+        // Simpler approach: use setValue for preferredContentSize
+        let preferredSizeSelector = NSSelectorFromString("setPreferredContentSize:")
+        if self_.responds(to: preferredSizeSelector) {
+            debugLog("Setting preferredContentSize to \(targetSize)")
+            self_.setValue(NSValue(size: targetSize), forKey: "preferredContentSize")
+            debugLog("preferredContentSize set")
+        }
+
+        // Also try direct message send using NSObject extension
+        let obj = self_ as AnyObject
+        if obj.responds(to: requestResizeSelector) {
+            debugLog("Attempting requestResize via performSelector...")
+            // Can't use performSelector with struct argument, need NSValue
+            // Let's try a different approach - override the getter for remoteViewSize
+        }
+
         // Set up RN content immediately with initial size
-        // The ResizableContainerView will handle resize events and update RN view
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             debugLog("Delayed setup, container frame: \(containerView.frame), bounds: \(containerView.bounds)")
             setupReactNativeContent(in: containerView)
@@ -227,6 +258,51 @@ public func registerCanvasServiceViewController() {
     }
     let loadViewImp = imp_implementationWithBlock(loadViewBlock)
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
+
+    // Add remoteViewSizeDidChange: method - called by ViewBridge when host resizes
+    let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { (self_, size) in
+        debugLog("remoteViewSizeDidChange -> \(size)")
+
+        // Filter unreasonable sizes
+        if size.width > 2560 || size.height > 1600 || size.width < 100 || size.height < 100 {
+            debugLog("Ignoring unreasonable remoteViewSize: \(size)")
+            return
+        }
+
+        if let view = self_.value(forKey: "view") as? NSView {
+            view.setFrameSize(size)
+            view.needsLayout = true
+            debugLog("Updated view size to: \(size)")
+        }
+    }
+    let sizeDidChangeImp = imp_implementationWithBlock(sizeDidChangeBlock)
+    // Signature: v = void, @ = self, : = selector, {CGSize=dd} = CGSize with two doubles
+    class_addMethod(newClass, NSSelectorFromString("remoteViewSizeDidChange:"), sizeDidChangeImp, "v@:{CGSize=dd}")
+
+    // Add allowsImplicitResizeRequests - return NO to block host-initiated resizes
+    let allowsImplicitBlock: @convention(block) (AnyObject) -> Bool = { _ in
+        debugLog("allowsImplicitResizeRequests called -> NO")
+        return false  // Block implicit resize from host
+    }
+    let allowsImplicitImp = imp_implementationWithBlock(allowsImplicitBlock)
+    class_addMethod(newClass, NSSelectorFromString("allowsImplicitResizeRequests"), allowsImplicitImp, "B@:")
+
+    // Add makesExplicitResizeRequests - return YES (we control our size)
+    let makesExplicitBlock: @convention(block) (AnyObject) -> Bool = { _ in
+        debugLog("makesExplicitResizeRequests called -> YES")
+        return true  // We make explicit resize requests
+    }
+    let makesExplicitImp = imp_implementationWithBlock(makesExplicitBlock)
+    class_addMethod(newClass, NSSelectorFromString("makesExplicitResizeRequests"), makesExplicitImp, "B@:")
+
+    // Add remoteViewSize getter - return our fixed size
+    let remoteViewSizeBlock: @convention(block) (AnyObject) -> CGSize = { _ in
+        let fixedSize = CGSize(width: 1280, height: 720)
+        debugLog("remoteViewSize called -> \(fixedSize)")
+        return fixedSize
+    }
+    let remoteViewSizeImp = imp_implementationWithBlock(remoteViewSizeBlock)
+    class_addMethod(newClass, NSSelectorFromString("remoteViewSize"), remoteViewSizeImp, "{CGSize=dd}@:")
 
     // Register the class
     objc_registerClassPair(newClass)
