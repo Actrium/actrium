@@ -32,37 +32,41 @@ Rill 采用**两阶段架构**在沙箱环境中运行 Guest 代码：
 
 ```
 src/
-├── guest-bundle/              # Guest 运行时包
+├── guest-bundle/              # Guest 运行时包（自动构建）
 │   ├── entry.ts               # 打包入口（源码）
-│   ├── init.ts                # 环境初始化（源码）
-│   ├── reconciler/            # React Reconciler 实现（源码）
-│   │   ├── index.ts           # 公共 API (render, unmount 等)
-│   │   ├── host-config.ts     # react-reconciler 主机配置
-│   │   ├── reconciler-manager.ts  # Reconciler 实例管理
-│   │   ├── operation-collector.ts # 操作批处理
-│   │   ├── element-transform.ts   # Guest 元素转换
-│   │   ├── guest-encoder.ts   # Props 序列化
-│   │   ├── devtools.ts        # DevTools 集成
-│   │   └── types.ts           # Reconciler 类型
 │   └── build/
 │       └── bundle.ts          # 自动生成的构建产物（勿手动编辑）
 │
-├── sdk/                       # 用户 API (rill/sdk)
-│   ├── index.ts               # 公共导出 (View, Text, hooks)
-│   ├── sdk.ts                 # 组件和 Hooks 实现
-│   └── types.ts               # 用户类型
+├── guest/                     # Guest 端代码
+│   ├── let/                   # 用户 API (rill/let)
+│   │   ├── index.ts           # 公共导出 (View, Text, hooks)
+│   │   ├── sdk.ts             # 组件和 Hooks 实现
+│   │   └── types.ts           # 用户类型
+│   ├── runtime/               # Guest 运行时
+│   │   ├── init.ts            # 环境初始化
+│   │   └── reconciler/        # React Reconciler 实现
+│   │       ├── index.ts       # 公共 API (render, unmount 等)
+│   │       ├── host-config.ts # react-reconciler 主机配置
+│   │       ├── reconciler-manager.ts  # Reconciler 实例管理
+│   │       ├── operation-collector.ts # 操作批处理
+│   │       ├── element-transform.ts   # Guest 元素转换
+│   │       ├── guest-encoder.ts   # Props 序列化
+│   │       ├── devtools.ts    # DevTools 集成
+│   │       └── types.ts       # Reconciler 类型
+│   └── build/                 # 构建后的运行时输出
 │
 ├── shared/                    # 共享协议层
 │   ├── index.ts               # 协议导出
 │   ├── types.ts               # 操作和消息类型
 │   ├── TypeRules.ts           # 序列化规则
 │   ├── serialization.ts       # 编解码工具
+│   ├── bridge/                # Bridge 层
+│   │   └── Bridge.ts          # 核心通信
 │   └── CallbackRegistry.ts    # 跨边界函数管理
 │
 └── host/                      # Host 运行时
     ├── Engine.ts              # Engine（加载和执行 Guest）
-    ├── receiver/              # 接收操作，渲染 UI
-    └── bridge/Bridge.ts       # Host 端序列化
+    └── receiver/              # 接收操作，渲染 UI
 ```
 
 ## 构建阶段
@@ -232,9 +236,9 @@ CallbackRegistry.invoke(fnId, args)
 - **`src/sdk/`**：用户 API —— 开发者在 Guest 代码中导入的内容
 - **`src/guest/`**：运行时内部 —— 由 Engine 打包并注入
 
-用户从 `rill/sdk` 导入：
+用户从 `rill/let` 导入：
 ```tsx
-import { View, Text, useHostEvent } from 'rill/sdk';
+import { View, Text, useHostEvent } from 'rill/let';
 ```
 
 他们不会直接使用 `render()`、`CallbackRegistry` 等 —— 那些是运行时内部实现。

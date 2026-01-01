@@ -69,39 +69,40 @@ rill/
 │   │   ├── Engine.ts      # Engine main class
 │   │   ├── receiver/      # Operation receiver
 │   │   ├── registry.ts    # Component registry
-│   │   ├── bridge/        # Runtime bridge layer
-│   │   └── engine/        # Engine internal modules
+│   │   ├── engine/        # Engine internal modules
+│   │   └── preset/        # Default component presets
 │   │
-│   ├── sdk/               # Guest SDK
-│   │   ├── index.ts       # SDK exports
-│   │   ├── sdk.ts         # Hooks implementation
-│   │   └── types.ts       # Type definitions
+│   ├── guest/             # Guest-side code
+│   │   ├── let/           # Guest SDK (rill/let)
+│   │   │   ├── index.ts   # SDK exports
+│   │   │   ├── sdk.ts     # Hooks implementation
+│   │   │   └── types.ts   # Type definitions
+│   │   ├── runtime/       # Guest runtime
+│   │   │   └── reconciler/  # Custom reconciler
+│   │   └── build/         # Built runtime bundle
 │   │
-│   ├── guest/             # Guest runtime (sandbox code)
-│   │   ├── reconciler/    # Custom reconciler
-│   │   ├── shims/         # React/JSX shims
-│   │   └── build/         # Built bundle output
+│   ├── guest-bundle/      # Guest bundle entry
+│   │   ├── entry.ts       # Bundle entry point
+│   │   └── build/         # Auto-generated bundle output
 │   │
 │   ├── shared/            # Shared utilities
 │   │   ├── index.ts       # Exports
 │   │   ├── types.ts       # Type definitions
 │   │   ├── TypeRules.ts   # Serialization rules
+│   │   ├── bridge/        # Bridge layer
 │   │   └── CallbackRegistry.ts
 │   │
 │   ├── sandbox/           # Sandbox providers
 │   │   ├── types/         # Provider interfaces
 │   │   ├── providers/     # VM, JSC, QuickJS providers
 │   │   ├── native/        # Native JSI bindings
+│   │   ├── wasm/          # WASM QuickJS sandbox
 │   │   └── web/           # Web Worker sandbox
 │   │
 │   ├── cli/               # CLI build tools
-│   │   ├── build.ts       # Bun-based bundler
-│   │   └── oxcAdapter.ts  # AST analysis
+│   │   └── build.ts       # Bun-based bundler
 │   │
-│   ├── devtools/          # Development tools
-│   └── presets/           # Platform presets
-│       ├── react-native/
-│       └── react-web/
+│   └── devtools/          # Development tools
 ```
 
 ---
@@ -269,7 +270,7 @@ engine.destroy();
 
 ```typescript
 // src/sdk/index.ts - Guest SDK exports
-import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/sdk';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/let';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -330,7 +331,7 @@ export async function build(options: BuildOptions): Promise<void> {
     target: 'browser',
     format: 'cjs',
     minify,
-    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/sdk'],
+    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/let'],
     define: {
       'process.env.NODE_ENV': '"production"',
       __DEV__: 'false',

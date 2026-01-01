@@ -69,39 +69,40 @@ rill/
 │   │   ├── Engine.ts      # Engine 主类
 │   │   ├── receiver/      # 指令接收器
 │   │   ├── registry.ts    # 组件注册表
-│   │   ├── bridge/        # 运行时桥接层
-│   │   └── engine/        # Engine 内部模块
+│   │   ├── engine/        # Engine 内部模块
+│   │   └── preset/        # 默认组件预设
 │   │
-│   ├── sdk/               # Guest SDK
-│   │   ├── index.ts       # SDK 导出
-│   │   ├── sdk.ts         # Hooks 实现
-│   │   └── types.ts       # 类型定义
+│   ├── guest/             # Guest 端代码
+│   │   ├── let/           # Guest SDK (rill/let)
+│   │   │   ├── index.ts   # SDK 导出
+│   │   │   ├── sdk.ts     # Hooks 实现
+│   │   │   └── types.ts   # 类型定义
+│   │   ├── runtime/       # Guest 运行时
+│   │   │   └── reconciler/  # 自定义渲染器
+│   │   └── build/         # 构建后的运行时
 │   │
-│   ├── guest/             # Guest 运行时（沙箱代码）
-│   │   ├── reconciler/    # 自定义渲染器
-│   │   ├── shims/         # React/JSX shims
-│   │   └── build/         # 构建输出
+│   ├── guest-bundle/      # Guest bundle 入口
+│   │   ├── entry.ts       # Bundle 入口点
+│   │   └── build/         # 自动生成的 bundle 输出
 │   │
 │   ├── shared/            # 共享工具
 │   │   ├── index.ts       # 导出
 │   │   ├── types.ts       # 类型定义
 │   │   ├── TypeRules.ts   # 序列化规则
+│   │   ├── bridge/        # Bridge 层
 │   │   └── CallbackRegistry.ts
 │   │
 │   ├── sandbox/           # 沙箱提供者
 │   │   ├── types/         # Provider 接口
 │   │   ├── providers/     # VM, JSC, QuickJS 提供者
 │   │   ├── native/        # 原生 JSI 绑定
+│   │   ├── wasm/          # WASM QuickJS 沙箱
 │   │   └── web/           # Web Worker 沙箱
 │   │
 │   ├── cli/               # CLI 构建工具
-│   │   ├── build.ts       # Bun 打包器
-│   │   └── oxcAdapter.ts  # AST 分析
+│   │   └── build.ts       # Bun 打包器
 │   │
-│   ├── devtools/          # 开发者工具
-│   └── presets/           # 平台预设
-│       ├── react-native/
-│       └── react-web/
+│   └── devtools/          # 开发者工具
 ```
 
 ---
@@ -269,7 +270,7 @@ engine.destroy();
 
 ```typescript
 // src/sdk/index.ts - Guest SDK 导出
-import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/sdk';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/let';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -330,7 +331,7 @@ export async function build(options: BuildOptions): Promise<void> {
     target: 'browser',
     format: 'cjs',
     minify,
-    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/sdk'],
+    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/let'],
     define: {
       'process.env.NODE_ENV': '"production"',
       __DEV__: 'false',

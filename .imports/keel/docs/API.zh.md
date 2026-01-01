@@ -17,11 +17,10 @@ rill/
 └── /cli             # CLI 构建工具
 ```
 
-> 注意：`rill/let` 是 `rill/sdk` 的已弃用别名。
 
 ---
 
-## Guest SDK (rill/sdk)
+## Guest SDK (rill/let)
 
 Guest 开发者使用的 SDK，在沙箱环境中运行。
 
@@ -30,7 +29,7 @@ Guest 开发者使用的 SDK，在沙箱环境中运行。
 虚组件是字符串标识符，在打包时被 JSX 转换为操作指令。
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, Button, Switch, ActivityIndicator } from 'rill/sdk';
+import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, Button, Switch, ActivityIndicator } from 'rill/let';
 ```
 
 #### View
@@ -216,7 +215,7 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 监听宿主事件。
 
 ```tsx
-import { useHostEvent } from 'rill/sdk';
+import { useHostEvent } from 'rill/let';
 
 function Guest() {
   useHostEvent<{ force: boolean }>('REFRESH', (payload) => {
@@ -237,7 +236,7 @@ function Guest() {
 获取初始配置。
 
 ```tsx
-import { useConfig } from 'rill/sdk';
+import { useConfig } from 'rill/let';
 
 interface Config {
   theme: 'light' | 'dark';
@@ -260,7 +259,7 @@ function Guest() {
 向宿主发送事件。
 
 ```tsx
-import { useSendToHost } from 'rill/sdk';
+import { useSendToHost } from 'rill/let';
 
 function Guest() {
   const sendToHost = useSendToHost();
@@ -282,7 +281,7 @@ function Guest() {
 创建远程引用，用于调用 Host 组件实例方法。
 
 ```tsx
-import { useRemoteRef, TextInput, TextInputRef } from 'rill/sdk';
+import { useRemoteRef, TextInput, TextInputRef } from 'rill/let';
 
 function Guest() {
   const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
@@ -328,7 +327,7 @@ function Guest() {
 Guest 端错误边界组件，捕获渲染错误。
 
 ```tsx
-import { RillErrorBoundary, View, Text } from 'rill/sdk';
+import { RillErrorBoundary, View, Text } from 'rill/let';
 
 function App() {
   return (
@@ -580,7 +579,7 @@ await build({
 });
 
 await analyze('dist/bundle.js', {
-  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/sdk'],
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/let'],
   failOnViolation: true,
 });
 ```
