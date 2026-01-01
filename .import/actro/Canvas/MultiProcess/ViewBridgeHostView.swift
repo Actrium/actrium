@@ -37,6 +37,9 @@ public class ViewBridgeHostView: NSView {
     /// Current content size (viewport size in Focus mode)
     private var currentContentSize: CGSize = CGSize(width: 1280, height: 720)
 
+    /// Current scale factor for CALayer transform (visual scaling without resize)
+    private var currentScaleFactor: CGFloat = 1.0
+
     // MARK: - Initialization
 
     /// Initialize with service configuration
@@ -61,6 +64,21 @@ public class ViewBridgeHostView: NSView {
         )
     }
 
+    /// Convenience initializer with initial content size and scale factor
+    public convenience init(initialContentSize: CGSize, scaleFactor: CGFloat = 1.0) {
+        self.init()
+        self.currentContentSize = initialContentSize
+        self.currentScaleFactor = scaleFactor
+        NSLog("ViewBridgeHostView: init with initialContentSize=%.1fx%.1f, scaleFactor=%.3f", initialContentSize.width, initialContentSize.height, scaleFactor)
+        // Write to file for debugging - use app support directory
+        let logMsg = "[ViewBridgeHostView] init with initialContentSize=\(initialContentSize), scaleFactor=\(scaleFactor)\n"
+        if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let logPath = appSupport.appendingPathComponent("Canvas/viewbridge_host.log")
+            try? FileManager.default.createDirectory(at: appSupport.appendingPathComponent("Canvas"), withIntermediateDirectories: true)
+            try? logMsg.data(using: .utf8)?.write(to: logPath)
+        }
+    }
+
     required init?(coder: NSCoder) {
         self.serviceBundleIdentifier = "com.anthropic.Canvas.CanvasViewService"
         self.serviceViewControllerClassName = "CanvasServiceViewController"
@@ -73,6 +91,18 @@ public class ViewBridgeHostView: NSView {
     private func setupView() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        // 禁用自动调整大小，防止 scaleEffect 影响 frame
+        translatesAutoresizingMaskIntoConstraints = true
+        autoresizingMask = []
+
+        // Set anchor point to top-left for proper scaling
+        layer?.anchorPoint = CGPoint(x: 0, y: 0)
+
+        // Apply initial scale factor if not 1.0
+        if currentScaleFactor != 1.0 {
+            layer?.transform = CATransform3DMakeScale(currentScaleFactor, currentScaleFactor, 1.0)
+        }
 
         // Add loading indicator
         let indicator = NSProgressIndicator()
@@ -106,16 +136,27 @@ public class ViewBridgeHostView: NSView {
     private var hasLoggedCallStack = false
 
     public override func setFrameSize(_ newSize: NSSize) {
-        // Log call stack once to understand who's calling
-        if !hasLoggedCallStack && lastFrameSize != .zero && newSize != lastFrameSize {
-            hasLoggedCallStack = true
-            let callStack = Thread.callStackSymbols.prefix(15).joined(separator: "\n")
-            NSLog("ViewBridgeHostView: === setFrameSize call stack ===\n\(callStack)")
+        // 只接受与 currentContentSize 匹配的尺寸，忽略其他尺寸变化
+        // 这样可以防止 scaleEffect 动画导致的 resize
+        let targetSize = currentContentSize
+        let sizeDiff = abs(newSize.width - targetSize.width) + abs(newSize.height - targetSize.height)
+
+        // 写日志到文件
+        let logMsg = "[setFrameSize] newSize=\(newSize), targetSize=\(targetSize), sizeDiff=\(sizeDiff)\n"
+        if let data = logMsg.data(using: .utf8),
+           let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let logPath = appSupport.appendingPathComponent("Canvas/viewbridge_host.log").path
+            if let handle = FileHandle(forWritingAtPath: logPath) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
         }
 
-        if lastFrameSize != newSize {
-            NSLog("ViewBridgeHostView: Frame changed from \(lastFrameSize) to \(newSize)")
-            lastFrameSize = newSize
+        if sizeDiff > 2 {
+            // 强制使用目标尺寸
+            super.setFrameSize(targetSize)
+            return
         }
 
         super.setFrameSize(newSize)
@@ -219,22 +260,80 @@ public class ViewBridgeHostView: NSView {
         // NSRemoteView 默认 translatesAutoresizingMaskIntoConstraints = YES
         // 我们需要关闭它并添加固定尺寸约束
         remoteView.translatesAutoresizingMaskIntoConstraints = false
+
+        // 移除 NSRemoteView 的现有约束（可能包含默认的 1280 宽度约束）
+        for constraint in remoteView.constraints {
+            if constraint.firstAttribute == .width || constraint.firstAttribute == .height {
+                NSLog("ViewBridgeHostView: Removing existing constraint: \(constraint)")
+                remoteView.removeConstraint(constraint)
+            }
+        }
+
         addSubview(remoteView)
 
+        // 直接设置 frame（绕过约束系统）
+        remoteView.frame = CGRect(origin: .zero, size: currentContentSize)
+        NSLog("ViewBridgeHostView: Set remoteView.frame to \(remoteView.frame)")
+
         // 使用固定尺寸约束 - 保存引用以便动态更新
+        // 设置最高优先级，防止被其他约束覆盖
         let wc = remoteView.widthAnchor.constraint(equalToConstant: currentContentSize.width)
         let hc = remoteView.heightAnchor.constraint(equalToConstant: currentContentSize.height)
+        wc.priority = .required
+        hc.priority = .required
         widthConstraint = wc
         heightConstraint = hc
 
-        NSLayoutConstraint.activate([
-            wc, hc,
-            // 左上角对齐
-            remoteView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            remoteView.topAnchor.constraint(equalTo: topAnchor)
-        ])
+        let leading = remoteView.leadingAnchor.constraint(equalTo: leadingAnchor)
+        let top = remoteView.topAnchor.constraint(equalTo: topAnchor)
+        leading.priority = .required
+        top.priority = .required
 
-        NSLog("ViewBridgeHostView: Set NSRemoteView size to \(currentContentSize)")
+        NSLayoutConstraint.activate([wc, hc, leading, top])
+
+        NSLog("ViewBridgeHostView: Set NSRemoteView size to \(currentContentSize), self.frame=\(frame)")
+        // Write to file for debugging
+        let logMsg = "[handleConnectionResult] Set NSRemoteView size to \(currentContentSize), self.frame=\(frame)\n"
+        if let data = logMsg.data(using: .utf8),
+           let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let logPath = appSupport.appendingPathComponent("Canvas/viewbridge_host.log").path
+            if let handle = FileHandle(forWritingAtPath: logPath) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        }
+
+        // 通知 XPC Service 端使用正确的尺寸
+        // 调用 requestResize:animation:completion: 方法
+        let requestResizeSelector = NSSelectorFromString("requestResize:animation:completion:")
+        if vc.responds(to: requestResizeSelector) {
+            // Use performSelector with NSValue-wrapped size
+            let targetSize = currentContentSize
+            let sizeValue = NSValue(size: targetSize)
+            // requestResize:animation:completion: requires more complex invocation
+            // Fall back to preferredContentSize
+            vc.preferredContentSize = currentContentSize
+            NSLog("ViewBridgeHostView: Set preferredContentSize to \(currentContentSize)")
+        } else {
+            vc.preferredContentSize = currentContentSize
+            NSLog("ViewBridgeHostView: Set preferredContentSize to \(currentContentSize) (requestResize not available)")
+        }
+
+        // 强制更新 remote view 的 frame
+        let vcView = vc.view.superview ?? vc.view
+        let oldFrame = vcView.frame
+        vcView.setFrameSize(currentContentSize)
+        NSLog("ViewBridgeHostView: Set vcView frame from \(oldFrame) to \(vcView.frame)")
+
+        // 应用初始 scale factor
+        if currentScaleFactor != 1.0 {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer?.transform = CATransform3DMakeScale(currentScaleFactor, currentScaleFactor, 1.0)
+            CATransaction.commit()
+            NSLog("ViewBridgeHostView: Applied initial scaleFactor %.3f", currentScaleFactor)
+        }
 
         NSLog("ViewBridgeHostView: Remote view embedded successfully")
     }
@@ -271,6 +370,27 @@ public class ViewBridgeHostView: NSView {
                 NSLog("ViewBridgeHostView: Requested resize to \(newSize)")
             }
         }
+    }
+
+    /// Update the scale factor for visual scaling via CALayer transform
+    /// This does NOT trigger resize - only visual scaling
+    public func updateScaleFactor(_ scaleFactor: CGFloat) {
+        // Ignore if scale hasn't changed significantly
+        let scaleDiff = abs(scaleFactor - currentScaleFactor)
+        guard scaleDiff >= 0.001 else { return }
+
+        currentScaleFactor = scaleFactor
+
+        // Apply CALayer transform for visual scaling
+        // This scales the view visually without changing its frame
+        // so it won't trigger resize storms to the XPC service
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)  // Disable implicit animations
+        layer?.transform = CATransform3DMakeScale(scaleFactor, scaleFactor, 1.0)
+        layer?.anchorPoint = CGPoint(x: 0, y: 0)  // Anchor at top-left
+        CATransaction.commit()
+
+        NSLog("ViewBridgeHostView: Updated scaleFactor to %.3f", scaleFactor)
     }
 
     private func handleError(_ message: String) {
@@ -360,14 +480,13 @@ class ViewBridgeCoordinator {
 struct ViewBridgeTabView: NSViewRepresentable {
     let tabId: UUID
     let contentSize: CGSize  // Viewport size for rendering
+    let scaleFactor: CGFloat  // 缩放比例（CALayer transform 实现）
     let coordinator: ViewBridgeCoordinator
 
     func makeNSView(context: Context) -> ViewBridgeHostView {
-        NSLog("ViewBridgeTabView: Creating ViewBridgeHostView for tab \(tabId), size: \(contentSize)")
-        let view = ViewBridgeHostView()
+        NSLog("ViewBridgeTabView: Creating ViewBridgeHostView for tab \(tabId), size: \(contentSize), scale: \(scaleFactor)")
+        let view = ViewBridgeHostView(initialContentSize: contentSize, scaleFactor: scaleFactor)
         coordinator.hostView = view
-        // Don't call updateContentSize here - constraints not ready yet
-        // Size will be set when handleConnectionResult creates the constraints
         return view
     }
 
@@ -377,6 +496,8 @@ struct ViewBridgeTabView: NSViewRepresentable {
         if contentSize.width > 0 && contentSize.height > 0 {
             nsView.updateContentSize(contentSize)
         }
+        // Update scale factor for CALayer transform
+        nsView.updateScaleFactor(scaleFactor)
     }
 
     static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
@@ -388,10 +509,11 @@ struct ViewBridgeTabView: NSViewRepresentable {
 // MARK: - ViewBridge Multi-Process Tab View
 
 /// A view that displays tab content via ViewBridge XPC service
-/// ViewBridge renders at fixed containerSize, parent uses scaleEffect for visual scaling
+/// ViewBridge renders at fixed containerSize, uses CALayer transform for visual scaling
 struct ViewBridgeMultiProcessTabView: View {
     let tab: Tab
     let containerSize: CGSize
+    let scaleFactor: CGFloat  // 缩放比例（CALayer transform 实现，不触发 resize）
 
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -401,13 +523,14 @@ struct ViewBridgeMultiProcessTabView: View {
         ZStack {
             if ViewBridgeHostView.isAvailable {
                 // ViewBridge renders at containerSize (viewport size)
-                // Parent uses scaleEffect for visual scaling without triggering resize
+                // Uses CALayer transform for visual scaling without triggering resize
                 ViewBridgeTabView(
                     tabId: tab.id,
                     contentSize: containerSize,
+                    scaleFactor: scaleFactor,
                     coordinator: coordinator
                 )
-                .frame(width: containerSize.width, height: containerSize.height)
+                .frame(width: containerSize.width * scaleFactor, height: containerSize.height * scaleFactor)
                 .onAppear {
                     isLoading = false
                 }

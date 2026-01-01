@@ -57,9 +57,12 @@ struct UnifiedCanvasView: View {
     }
 
     var body: some View {
-        let _ = NSLog("🔄 [UNIFIED-BODY] UnifiedCanvasView.body: mode=%@, tabs=%d", String(describing: viewModel.canvasMode), viewModel.tabs.count)
         GeometryReader { geometry in
             let viewportSize = geometry.size
+            let _ = {
+                NSLog("📐 [VIEWPORT] geometry.size=%.1fx%.1f, mode=%@",
+                      viewportSize.width, viewportSize.height, String(describing: viewModel.canvasMode))
+            }()
             // 极窄/极矮窗口时避免 0 尺寸导致矩阵奇异
             let safeViewportSize = CGSize(
                 width: max(viewportSize.width, 1),
@@ -452,6 +455,8 @@ struct UnifiedCanvasView: View {
 
         // 缩放：让卡片内容区域宽度 = 视口宽度
         let scale = max(viewportSize.width / cardContentRect.width, 0.001)
+        NSLog("📐 [FOCUS] viewportSize=%.1fx%.1f, cardRect=%.1fx%.1f, scale=%.3f",
+              viewportSize.width, viewportSize.height, cardContentRect.width, cardContentRect.height, scale)
 
         // 偏移：对齐左上角
         let offsetX = -cardContentRect.origin.x * scale
@@ -1260,29 +1265,27 @@ private struct TabCardView: View {
         let renderSize = viewportSize  // Focus 模式下的实际渲染尺寸
         let scaleFactor = cardWidth / max(renderSize.width, 1)  // Overview 模式缩放比例
 
+        let _ = NSLog("📐 [TabCard] viewportSize=%.1fx%.1f, cardSize=%.1fx%.1f, scaleFactor=%.3f, isFocused=%d",
+                      viewportSize.width, viewportSize.height, cardWidth, cardHeight, scaleFactor, isFocused ? 1 : 0)
+
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
             // 每个 Tab 都有独立的渲染进程 - 多进程架构 (ViewBridge)
-            // ViewBridge 始终以 viewportSize 渲染，通过 scaleEffect 适配 Overview 模式的卡片尺寸
+            // ViewBridge 始终以 viewportSize 渲染，frame 固定为 viewportSize
+            // 缩放通过 ViewBridgeHostView 内部的 CALayer transform 实现，不会触发 resize
             if hasRNContent {
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     containerSize: CGSize(
                         width: max(renderSize.width, 1),
                         height: max(renderSize.height, 1)
-                    )
+                    ),
+                    scaleFactor: scaleFactor  // 传递缩放比例给 ViewBridge 用 CALayer transform 实现
                 )
                 .id(tab.id)  // Stable identity to prevent view recreation
-                .frame(
-                    width: max(renderSize.width, 1),
-                    height: max(renderSize.height, 1)
-                )
-                // scaleEffect 将 viewportSize 渲染的内容缩放到 cardWidth
-                // Focus 模式下 scaleFactor ≈ 1.0，Overview 模式下 < 1.0
-                .scaleEffect(scaleFactor, anchor: .topLeading)
-                // 外层 frame 限制显示区域为卡片尺寸
+                // frame 固定为卡片尺寸，内部 ViewBridge 用 transform 缩放
                 .frame(
                     width: max(cardContentSize.width, 1),
                     height: max(cardContentSize.height, 1),
