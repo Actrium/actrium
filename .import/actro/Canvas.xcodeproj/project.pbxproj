@@ -12,6 +12,7 @@
 		1A2B3C4D5E6F7890ABCD0003 /* CanvasIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0004 /* CanvasIPC */; };
 		8E5B03874CCE978352975327 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		B31C6D492F04BC2500E7FEF4 /* CanvasBroker.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B31C6D3E2F04BC2500E7FEF4 /* CanvasBroker.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B3312B262F066DB70018A0B4 /* CanvasViewService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
 		B3E78A742F03A00C001F9589 /* CanvasTabRenderer.app in Embed Helper Apps */ = {isa = PBXBuildFile; fileRef = B3E78A402F039DBE001F9589 /* CanvasTabRenderer.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
@@ -26,6 +27,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = B31C6D3D2F04BC2500E7FEF4;
 			remoteInfo = CanvasBroker;
+		};
+		B3312B242F066DB70018A0B4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3312B1A2F066DB70018A0B4;
+			remoteInfo = CanvasViewService;
+		};
+		B3312B2E2F066DF40018A0B4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3312B1A2F066DB70018A0B4;
+			remoteInfo = CanvasViewService;
 		};
 		B3E458B02EC731A40014D74C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -99,6 +114,7 @@
 			dstPath = "$(CONTENTS_FOLDER_PATH)/XPCServices";
 			dstSubfolderSpec = 16;
 			files = (
+				B3312B262F066DB70018A0B4 /* CanvasViewService.xpc in Embed XPC Services */,
 				B31C6D492F04BC2500E7FEF4 /* CanvasBroker.xpc in Embed XPC Services */,
 			);
 			name = "Embed XPC Services";
@@ -125,6 +141,7 @@
 		8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Canvas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		988CAD86E1193EE66F00D50D /* Pods-Canvas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.release.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.release.xcconfig"; sourceTree = "<group>"; };
 		B31C6D3E2F04BC2500E7FEF4 /* CanvasBroker.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasBroker.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
+		B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasViewService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		B34F77DD2F042239002AF804 /* CanvasTabRendererXPC.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasTabRendererXPC.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		B38A7F072ECA222600B4185F /* Gemfile */ = {isa = PBXFileReference; lastKnownFileType = text; path = Gemfile; sourceTree = "<group>"; };
 		B3E458A02EC731A30014D74C /* Canvas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Canvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -144,6 +161,13 @@
 			);
 			target = B31C6D3D2F04BC2500E7FEF4 /* CanvasBroker */;
 		};
+		B3312B272F066DB70018A0B4 /* Exceptions for "CanvasViewService" folder in "CanvasViewService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = B3312B1A2F066DB70018A0B4 /* CanvasViewService */;
+		};
 		B34F77EC2F042239002AF804 /* Exceptions for "CanvasTabRendererXPC" folder in "CanvasTabRendererXPC" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -160,6 +184,14 @@
 				B31C6D4C2F04BC2500E7FEF4 /* Exceptions for "CanvasBroker" folder in "CanvasBroker" target */,
 			);
 			path = CanvasBroker;
+			sourceTree = "<group>";
+		};
+		B3312B1C2F066DB70018A0B4 /* CanvasViewService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B3312B272F066DB70018A0B4 /* Exceptions for "CanvasViewService" folder in "CanvasViewService" target */,
+			);
+			path = CanvasViewService;
 			sourceTree = "<group>";
 		};
 		B34F77DE2F042239002AF804 /* CanvasTabRendererXPC */ = {
@@ -204,6 +236,13 @@
 
 /* Begin PBXFrameworksBuildPhase section */
 		B31C6D3B2F04BC2500E7FEF4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3312B182F066DB70018A0B4 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -300,6 +339,7 @@
 				B3E78A5B2F039DBF001F9589 /* CanvasTabRendererUITests */,
 				B34F77DE2F042239002AF804 /* CanvasTabRendererXPC */,
 				B31C6D3F2F04BC2500E7FEF4 /* CanvasBroker */,
+				B3312B1C2F066DB70018A0B4 /* CanvasViewService */,
 				B3E458A12EC731A30014D74C /* Products */,
 				5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */,
 				50AD95B7B3434865B5C8389F /* Pods */,
@@ -318,6 +358,7 @@
 				B3E78A582F039DBF001F9589 /* CanvasTabRendererUITests.xctest */,
 				B34F77DD2F042239002AF804 /* CanvasTabRendererXPC.xpc */,
 				B31C6D3E2F04BC2500E7FEF4 /* CanvasBroker.xpc */,
+				B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -343,6 +384,28 @@
 			name = CanvasBroker;
 			productName = CanvasBroker;
 			productReference = B31C6D3E2F04BC2500E7FEF4 /* CanvasBroker.xpc */;
+			productType = "com.apple.product-type.xpc-service";
+		};
+		B3312B1A2F066DB70018A0B4 /* CanvasViewService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B3312B282F066DB70018A0B4 /* Build configuration list for PBXNativeTarget "CanvasViewService" */;
+			buildPhases = (
+				B3312B172F066DB70018A0B4 /* Sources */,
+				B3312B182F066DB70018A0B4 /* Frameworks */,
+				B3312B192F066DB70018A0B4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B3312B1C2F066DB70018A0B4 /* CanvasViewService */,
+			);
+			name = CanvasViewService;
+			packageProductDependencies = (
+			);
+			productName = CanvasViewService;
+			productReference = B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */;
 			productType = "com.apple.product-type.xpc-service";
 		};
 		B34F77DC2F042239002AF804 /* CanvasTabRendererXPC */ = {
@@ -387,6 +450,8 @@
 				B3E78A7D2F03A0E1001F9589 /* PBXTargetDependency */,
 				B3E78A7F2F03A0EC001F9589 /* PBXTargetDependency */,
 				B31C6D482F04BC2500E7FEF4 /* PBXTargetDependency */,
+				B3312B252F066DB70018A0B4 /* PBXTargetDependency */,
+				B3312B2F2F066DF40018A0B4 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B3E458A22EC731A30014D74C /* Canvas */,
@@ -515,6 +580,9 @@
 					B31C6D3D2F04BC2500E7FEF4 = {
 						CreatedOnToolsVersion = 26.2;
 					};
+					B3312B1A2F066DB70018A0B4 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					B34F77DC2F042239002AF804 = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -568,12 +636,20 @@
 				B3E78A572F039DBF001F9589 /* CanvasTabRendererUITests */,
 				B34F77DC2F042239002AF804 /* CanvasTabRendererXPC */,
 				B31C6D3D2F04BC2500E7FEF4 /* CanvasBroker */,
+				B3312B1A2F066DB70018A0B4 /* CanvasViewService */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		B31C6D3C2F04BC2500E7FEF4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3312B192F066DB70018A0B4 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -750,6 +826,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B3312B172F066DB70018A0B4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B34F77D92F042239002AF804 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -806,6 +889,16 @@
 			isa = PBXTargetDependency;
 			target = B31C6D3D2F04BC2500E7FEF4 /* CanvasBroker */;
 			targetProxy = B31C6D472F04BC2500E7FEF4 /* PBXContainerItemProxy */;
+		};
+		B3312B252F066DB70018A0B4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3312B1A2F066DB70018A0B4 /* CanvasViewService */;
+			targetProxy = B3312B242F066DB70018A0B4 /* PBXContainerItemProxy */;
+		};
+		B3312B2F2F066DF40018A0B4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3312B1A2F066DB70018A0B4 /* CanvasViewService */;
+			targetProxy = B3312B2E2F066DF40018A0B4 /* PBXContainerItemProxy */;
 		};
 		B3E458B12EC731A40014D74C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -905,6 +998,65 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.CanvasService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B3312B292F066DB70018A0B4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CanvasViewService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CanvasViewService;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.CanvasViewService.CanvasViewService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B3312B2A2F066DB70018A0B4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CanvasViewService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CanvasViewService;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.CanvasViewService.CanvasViewService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SKIP_INSTALL = YES;
@@ -1428,6 +1580,15 @@
 			buildConfigurations = (
 				B31C6D4A2F04BC2500E7FEF4 /* Debug */,
 				B31C6D4B2F04BC2500E7FEF4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B3312B282F066DB70018A0B4 /* Build configuration list for PBXNativeTarget "CanvasViewService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B3312B292F066DB70018A0B4 /* Debug */,
+				B3312B2A2F066DB70018A0B4 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

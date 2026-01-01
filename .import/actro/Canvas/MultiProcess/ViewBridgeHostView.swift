@@ -49,14 +49,14 @@ public class ViewBridgeHostView: NSView {
     /// Convenience initializer with default Canvas service
     public convenience init() {
         self.init(
-            serviceBundleIdentifier: "com.anthropic.Canvas.CanvasViewService",
-            viewControllerClassName: "CanvasViewService.CanvasServiceViewController"
+            serviceBundleIdentifier: "chat.askaway.CanvasViewService.CanvasViewService",
+            viewControllerClassName: "CanvasServiceViewController"  // No module prefix - dynamically registered
         )
     }
 
     required init?(coder: NSCoder) {
         self.serviceBundleIdentifier = "com.anthropic.Canvas.CanvasViewService"
-        self.serviceViewControllerClassName = "CanvasViewService.CanvasServiceViewController"
+        self.serviceViewControllerClassName = "CanvasServiceViewController"
         super.init(coder: coder)
         setupView()
     }
