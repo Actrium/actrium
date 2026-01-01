@@ -3,6 +3,39 @@ import AppKit
 import QuartzCore
 import Combine
 
+// MARK: - View Cache
+
+/// Cache for CALayerHostDisplayView instances to persist across SwiftUI view recreations
+/// This prevents the NSView from being destroyed when parent views re-render
+private class CALayerHostViewCache {
+    static let shared = CALayerHostViewCache()
+
+    private var cache: [UUID: CALayerHostDisplayView] = [:]
+    private let lock = NSLock()
+
+    func getOrCreate(for tabId: UUID, frame: NSRect) -> CALayerHostDisplayView {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let existing = cache[tabId] {
+            NSLog("🖥️ [CACHE] Reusing existing CALayerHostDisplayView for tabId=\(tabId)")
+            return existing
+        }
+
+        let view = CALayerHostDisplayView(frame: frame)
+        cache[tabId] = view
+        NSLog("🖥️ [CACHE] Created new CALayerHostDisplayView for tabId=\(tabId)")
+        return view
+    }
+
+    func remove(for tabId: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        cache.removeValue(forKey: tabId)
+        NSLog("🖥️ [CACHE] Removed CALayerHostDisplayView for tabId=\(tabId)")
+    }
+}
+
 // MARK: - CALayerHost View (SwiftUI)
 
 /// SwiftUI wrapper for displaying remote CALayer content via CALayerHost
@@ -13,7 +46,11 @@ struct IOSurfaceHostView: NSViewRepresentable {
     let tabId: UUID
 
     func makeNSView(context: Context) -> CALayerHostDisplayView {
-        let view = CALayerHostDisplayView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        // Use cached view to persist across parent view recreations
+        let view = CALayerHostViewCache.shared.getOrCreate(
+            for: tabId,
+            frame: NSRect(x: 0, y: 0, width: width, height: height)
+        )
         view.tabId = tabId
         view.surfaceWidth = width
         view.surfaceHeight = height
@@ -26,6 +63,12 @@ struct IOSurfaceHostView: NSViewRepresentable {
         nsView.surfaceWidth = width
         nsView.surfaceHeight = height
         nsView.updateContext(id: surfaceID)
+    }
+
+    static func dismantleNSView(_ nsView: CALayerHostDisplayView, coordinator: ()) {
+        // Don't remove from cache immediately - let the view persist
+        // The cache entry will be cleaned up when the tab is closed
+        NSLog("🖥️ [CACHE] dismantleNSView called for tabId=\(nsView.tabId?.uuidString ?? "nil"), keeping in cache")
     }
 }
 
@@ -62,6 +105,7 @@ class CALayerHostDisplayView: NSView {
 
     private static var instanceCount: Int = 0
     private static let layerHostClass: AnyClass? = NSClassFromString("CALayerHost")
+    private var diagnosticTimer: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -69,6 +113,27 @@ class CALayerHostDisplayView: NSView {
         NSLog("CALayerHostDisplayView: init, total instances: \(CALayerHostDisplayView.instanceCount)")
         setupLayer()
         setupTracking()
+        startDiagnosticTimer()
+    }
+
+    private func startDiagnosticTimer() {
+        // Log layer state every 2 seconds for debugging
+        diagnosticTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.logLayerState()
+        }
+    }
+
+    private func logLayerState() {
+        guard let hostLayer = hostLayer else {
+            NSLog("🔍 [LAYER-CHECK] No hostLayer")
+            return
+        }
+
+        let hasContents = hostLayer.contents != nil
+        let sublayerCount = hostLayer.sublayers?.count ?? 0
+        let contextId = hostLayer.value(forKey: "contextId") as? UInt32 ?? 0
+
+        NSLog("🔍 [LAYER-CHECK] contextId=\(contextId), frame=\(hostLayer.frame), hasContents=\(hasContents), sublayers=\(sublayerCount)")
     }
 
     required init?(coder: NSCoder) {
@@ -79,8 +144,21 @@ class CALayerHostDisplayView: NSView {
 
     deinit {
         NSLog("CALayerHostDisplayView: deinit called for tabId \(tabId?.uuidString ?? "nil")")
+        diagnosticTimer?.invalidate()
+        diagnosticTimer = nil
         if let observer = contextObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NSLog("🖥️ [DIAG] viewDidMoveToWindow: window=\(window?.frame.debugDescription ?? "nil"), bounds=\(bounds)")
+
+        // Re-setup the host layer when we get attached to a window
+        // This ensures proper configuration after view hierarchy changes
+        if window != nil && currentContextId != 0 {
+            setupHostLayer(contextId: currentContextId)
         }
     }
 
@@ -172,18 +250,33 @@ class CALayerHostDisplayView: NSView {
             return
         }
 
-        // Set the context ID
+        // Set the context ID using KVC (private API)
         newHostLayer.setValue(contextId, forKey: "contextId")
 
         // Configure the layer
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
         newHostLayer.frame = bounds
-        newHostLayer.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        newHostLayer.contentsScale = scale
 
-        // Add to our layer
-        layer?.addSublayer(newHostLayer)
+        // Match geometry flipping from renderer
+        newHostLayer.isGeometryFlipped = true
+
+        // Add to our layer (which should also be geometry flipped)
+        if let parentLayer = layer {
+            parentLayer.addSublayer(newHostLayer)
+
+            NSLog("🖥️ [DIAG] CALayerHost setup:")
+            NSLog("🖥️ [DIAG]   contextId = \(contextId)")
+            NSLog("🖥️ [DIAG]   frame = \(newHostLayer.frame)")
+            NSLog("🖥️ [DIAG]   bounds = \(bounds)")
+            NSLog("🖥️ [DIAG]   scale = \(scale)")
+            NSLog("🖥️ [DIAG]   window = \(window?.frame.debugDescription ?? "nil")")
+            NSLog("🖥️ [DIAG]   parent.sublayers = \(parentLayer.sublayers?.count ?? 0)")
+        } else {
+            NSLog("🖥️ [ERROR] No parent layer available for CALayerHost")
+        }
+
         hostLayer = newHostLayer
-
-        NSLog("🖥️ [DIAG] CALayerHost created with contextId=\(contextId), frame=\(bounds)")
     }
 
     private func showPlaceholder() {
@@ -302,6 +395,60 @@ class CALayerHostDisplayView: NSView {
     }
 }
 
+// MARK: - Renderer Startup Tracker
+
+/// Tracks which tabs have started or are starting their renderers (persists across view recreations)
+private class RendererStartupTracker {
+    static let shared = RendererStartupTracker()
+
+    private var startingTabs: Set<UUID> = []
+    private var startedTabs: Set<UUID> = []
+    private let lock = NSLock()
+
+    func markStarting(_ tabId: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        // If already starting or started, don't start again
+        if startingTabs.contains(tabId) || startedTabs.contains(tabId) {
+            NSLog("🟡 [TRACKER] Tab \(tabId) already starting/started, skipping")
+            return false
+        }
+
+        startingTabs.insert(tabId)
+        NSLog("🟢 [TRACKER] Tab \(tabId) marked as starting")
+        return true
+    }
+
+    func markStarted(_ tabId: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        startingTabs.remove(tabId)
+        startedTabs.insert(tabId)
+        NSLog("🟢 [TRACKER] Tab \(tabId) marked as started")
+    }
+
+    func markFailed(_ tabId: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        startingTabs.remove(tabId)
+        NSLog("🔴 [TRACKER] Tab \(tabId) marked as failed")
+    }
+
+    func isStartedOrStarting(_ tabId: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return startingTabs.contains(tabId) || startedTabs.contains(tabId)
+    }
+
+    func reset(_ tabId: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        startingTabs.remove(tabId)
+        startedTabs.remove(tabId)
+    }
+}
+
 // MARK: - Multi-Process Tab View
 
 /// A view that displays tab content from a renderer process
@@ -320,6 +467,7 @@ struct MultiProcessTabView: View {
     private var tabId: UUID { tab.id }
 
     var body: some View {
+        let _ = NSLog("🔄 [BODY] MultiProcessTabView.body: surfaceID=%u, activeTabId=%@, isLoading=%d, crashReason=%@", surfaceID, activeTabId?.uuidString ?? "nil", isLoading ? 1 : 0, crashReason ?? "nil")
         ZStack {
             if let reason = crashReason {
                 crashedView(reason: reason)
@@ -330,6 +478,7 @@ struct MultiProcessTabView: View {
                     height: containerSize.height,
                     tabId: activeId
                 )
+                .id("\(activeId)-\(surfaceID)")  // Stable identity based on tab and surface
                 .frame(width: containerSize.width, height: containerSize.height)
             } else if isLoading {
                 loadingView
@@ -344,11 +493,11 @@ struct MultiProcessTabView: View {
             updateViewportSize(newSize)
         }
         .onAppear {
-            NSLog("🔵 [DIAG] MultiProcessTabView.onAppear: tabId=\(tabId), contextId=\(surfaceID), isLoading=\(isLoading)")
+            NSLog("🔵 [DIAG] MultiProcessTabView.onAppear: tabId=%@, contextId=%u, isLoading=%d", tabId.uuidString, surfaceID, isLoading ? 1 : 0)
             startRenderer()
         }
         .onDisappear {
-            NSLog("🔴 [DIAG] MultiProcessTabView.onDisappear: tabId=\(tabId), contextId=\(surfaceID)")
+            NSLog("🔴 [DIAG] MultiProcessTabView.onDisappear: tabId=%@, contextId=%u", tabId.uuidString, surfaceID)
         }
         .onReceive(NotificationCenter.default.publisher(for: .tabSurfaceUpdated)) { notification in
             if let notifTabId = notification.userInfo?["tabId"] as? UUID, notifTabId == tabId,
@@ -464,15 +613,28 @@ struct MultiProcessTabView: View {
         crashReason = nil
         surfaceID = 0
         activeTabId = nil
+        // Reset the tracker so we can start fresh
+        RendererStartupTracker.shared.reset(tabId)
         startRenderer()
     }
 
     private func startRenderer() {
+        let processTabId = tabId
+
+        // Use static tracker to prevent multiple starts (persists across view recreations)
+        guard RendererStartupTracker.shared.markStarting(processTabId) else {
+            // Already starting or started - just update local state from existing process
+            if let existing = processManager.processes[processTabId], existing.isRunning, existing.surfaceID != 0 {
+                activeTabId = processTabId
+                surfaceID = existing.surfaceID
+                isLoading = false
+            }
+            return
+        }
+
         crashReason = nil
         isLoading = true
         errorMessage = nil
-
-        let processTabId = tabId
 
         Task {
             do {
@@ -483,6 +645,7 @@ struct MultiProcessTabView: View {
                             surfaceID = id
                             isLoading = false
                         }
+                        RendererStartupTracker.shared.markStarted(processTabId)
                         return
                     }
                 }
@@ -507,14 +670,24 @@ struct MultiProcessTabView: View {
 
                 _ = try await processManager.getRenderer(for: processTabId, config: config, viewportSize: containerSize)
 
+                // Only update state if notification handler hasn't already set it
+                // This prevents redundant state updates that cause view recreation
                 if let id = await processManager.getIOSurfaceID(for: processTabId) {
                     await MainActor.run {
-                        activeTabId = processTabId
-                        surfaceID = id
-                        isLoading = false
+                        if self.surfaceID == 0 {
+                            NSLog("🔵 [DIAG] startRenderer: Setting state from getIOSurfaceID (contextId=\(id))")
+                            activeTabId = processTabId
+                            surfaceID = id
+                            isLoading = false
+                        } else {
+                            NSLog("🟡 [DIAG] startRenderer: State already set by notification (current=\(self.surfaceID)), skipping")
+                        }
                     }
                 }
+
+                RendererStartupTracker.shared.markStarted(processTabId)
             } catch {
+                RendererStartupTracker.shared.markFailed(processTabId)
                 await MainActor.run {
                     errorMessage = error.localizedDescription
                     isLoading = false
