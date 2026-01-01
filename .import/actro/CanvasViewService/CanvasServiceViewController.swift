@@ -208,10 +208,11 @@ private func setupReactNativeContent(in containerView: NSView) {
 
     // Create React Native view with test properties
     // TODO: Get actual tab config from host via IPC
+    let testTabId = UUID().uuidString  // Use same ID for tab and currentTabId
     let testProperties: [String: Any] = [
         "tabs": [
             [
-                "id": UUID().uuidString,
+                "id": testTabId,
                 "title": "ViewBridge Test",
                 "backgroundColor": "#1a4a3c",
                 "unifiedScript": """
@@ -232,12 +233,12 @@ private func setupReactNativeContent(in containerView: NSView) {
                     ]);
                 };
                 """,
-                "rightPanelDefaultVisible": false
+                "rightPanelDefaultVisible": true
             ]
         ],
-        "currentTabId": UUID().uuidString,
-        "isLeftPanelVisible": false,
-        "isRightPanelVisible": false
+        "currentTabId": testTabId,  // Same as tab id
+        "isLeftPanelVisible": true,
+        "isRightPanelVisible": true
     ]
 
     // Create RN view in background to not block

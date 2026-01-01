@@ -336,7 +336,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     isActiveRef.current = isActive;
   }, [isActive]);
 
-  const showRightPanel = isRightPanelVisible && rightPanel;
+  // 显示右侧面板：用户开启可见性即显示（即使内容为空也显示占位）
+  const showRightPanel = isRightPanelVisible;
 
   // 优化：使用固定宽度 + flexShrink，让 Yoga 自动处理收缩
   // 不再依赖 propsContainerWidth 计算，避免 re-render
@@ -660,7 +661,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             },
           ]}
         >
-          {leftPanel}
+          {leftPanel || (
+            <View style={{ flex: 1, padding: 12, backgroundColor: '#1a1a2a' }}>
+              <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>📁 左侧面板</Text>
+              <Text style={{ color: '#666', fontSize: 11 }}>等待 Engine 内容...</Text>
+            </View>
+          )}
         </View>
       )}
 
@@ -766,7 +772,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             },
           ]}
         >
-          {rightPanel}
+          {rightPanel || (
+            <View style={{ flex: 1, padding: 12, backgroundColor: '#1a2a1a' }}>
+              <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>📊 右侧面板</Text>
+              <Text style={{ color: '#666', fontSize: 11 }}>等待 Engine 内容...</Text>
+            </View>
+          )}
         </View>
       )}
     </View>
