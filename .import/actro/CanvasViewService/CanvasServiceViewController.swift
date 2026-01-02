@@ -41,69 +41,21 @@ private func debugLog(_ message: String) {
     }
 }
 
-// MARK: - Current Content Size Tracking
-
-/// Tracks the current content size for the XPC service
-/// Used by remoteViewSize getter to return dynamic value
-private var currentServiceContentSize: CGSize = CGSize(width: 1280, height: 720)
-
 // MARK: - Resizable Container View
 
-/// Container view that monitors resize events and updates RN view accordingly
+/// Container view - 直接使用 ViewBridge 传来的尺寸（remoteViewSize）
+/// ViewBridge 会自动将 Host 端 NSRemoteView 的 frame 同步到这里
 private class ResizableContainerView: NSView {
-    private var lastKnownSize: CGSize = .zero
     private var rnView: NSView?
-    private var resizeCount = 0
-    private var targetSizeSet = false  // 是否已接收到 Host 端的目标尺寸
 
     override func setFrameSize(_ newSize: NSSize) {
-        resizeCount += 1
-
-        // 只接受合理范围内的尺寸（100-2000），防止 resize storm
-        guard newSize.width >= 100 && newSize.height >= 100 &&
-              newSize.width <= 2000 && newSize.height <= 1500 else {
-            debugLog("[\(resizeCount)] Ignoring out-of-range size: \(newSize)")
-            return
-        }
-
-        // 第一次收到非默认尺寸时，将其作为目标尺寸
-        // Host 端的目标尺寸（如 1011x848）会在初始化后很快发送过来
-        if !targetSizeSet && lastKnownSize.width > 0 {
-            // 检查这是否是一个来自 Host 端的目标尺寸
-            // 目标尺寸通常是整数或接近整数的小数
-            let isLikelyTargetSize = (abs(newSize.width - round(newSize.width)) < 1 &&
-                                       abs(newSize.height - round(newSize.height)) < 1)
-            if isLikelyTargetSize && newSize != lastKnownSize {
-                debugLog("[\(resizeCount)] Setting target size: \(newSize)")
-                currentServiceContentSize = newSize
-                targetSizeSet = true
-            }
-        }
-
-        // 锁定到目标尺寸 - 拒绝与目标尺寸差异较大的尺寸
-        if targetSizeSet {
-            let targetSize = currentServiceContentSize
-            let sizeDiff = abs(newSize.width - targetSize.width) + abs(newSize.height - targetSize.height)
-            if sizeDiff > 5 {
-                debugLog("[\(resizeCount)] Locking: \(newSize) -> \(targetSize)")
-                super.setFrameSize(targetSize)
-                return
-            }
-        }
-
+        // 直接使用 ViewBridge 传来的尺寸，无需任何过滤或锁定
+        debugLog("Container setFrameSize: \(newSize)")
         super.setFrameSize(newSize)
 
-        // Only log and update if size actually changed significantly
-        let changeDiff = abs(newSize.width - lastKnownSize.width) + abs(newSize.height - lastKnownSize.height)
-        if changeDiff > 1 {
-            debugLog("[\(resizeCount)] Container: \(lastKnownSize) -> \(newSize)")
-            lastKnownSize = newSize
-
-            // Update RN view frame to match container
-            if let rnView = rnView {
-                rnView.frame = bounds
-                rnView.needsLayout = true
-            }
+        // 更新 RN view 尺寸
+        if let rnView = rnView {
+            rnView.frame = bounds
         }
     }
 
@@ -277,27 +229,17 @@ public func registerCanvasServiceViewController() {
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
 
     // Add remoteViewSizeDidChange: method - called by ViewBridge when host requests resize
+    // ViewBridge 自动同步 Host 端 NSRemoteView 的尺寸，直接使用无需过滤
     let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { (self_, size) in
         debugLog("remoteViewSizeDidChange -> \(size)")
 
-        // Filter unreasonable sizes (scaleEffect or invalid)
-        if size.width > 4096 || size.height > 4096 || size.width < 100 || size.height < 100 {
-            debugLog("Ignoring unreasonable remoteViewSize: \(size)")
-            return
-        }
-
-        // Update tracked size
-        let oldSize = currentServiceContentSize
-        currentServiceContentSize = size
-
         if let view = self_.value(forKey: "view") as? NSView {
-            // 使用 CATransaction 禁用动画
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             view.setFrameSize(size)
             view.needsLayout = true
             CATransaction.commit()
-            debugLog("Updated view size from \(oldSize) to: \(size)")
+            debugLog("Updated view size to: \(size)")
         }
     }
     let sizeDidChangeImp = imp_implementationWithBlock(sizeDidChangeBlock)
@@ -322,19 +264,10 @@ public func registerCanvasServiceViewController() {
     class_addMethod(newClass, NSSelectorFromString("makesExplicitResizeRequests"), makesExplicitImp, "B@:")
 
     // Override setPreferredContentSize: to capture size changes from host
+    // 直接使用 Host 传来的尺寸，无需过滤
     let setPreferredSizeBlock: @convention(block) (AnyObject, NSSize) -> Void = { (self_, size) in
         debugLog("setPreferredContentSize -> \(size)")
 
-        // Filter unreasonable sizes
-        if size.width > 4096 || size.height > 4096 || size.width < 100 || size.height < 100 {
-            debugLog("Ignoring unreasonable preferredContentSize: \(size)")
-            return
-        }
-
-        // Update tracked size
-        currentServiceContentSize = size
-
-        // Update view size
         if let view = self_.value(forKey: "view") as? NSView {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -347,10 +280,16 @@ public func registerCanvasServiceViewController() {
     let setPreferredSizeImp = imp_implementationWithBlock(setPreferredSizeBlock)
     class_addMethod(newClass, NSSelectorFromString("setPreferredContentSize:"), setPreferredSizeImp, "v@:{CGSize=dd}")
 
-    // Add remoteViewSize getter - return current tracked size
-    let remoteViewSizeBlock: @convention(block) (AnyObject) -> CGSize = { _ in
-        debugLog("remoteViewSize called -> \(currentServiceContentSize)")
-        return currentServiceContentSize
+    // Add remoteViewSize getter - return actual view size
+    let remoteViewSizeBlock: @convention(block) (AnyObject) -> CGSize = { self_ in
+        let size: CGSize
+        if let view = self_.value(forKey: "view") as? NSView {
+            size = view.frame.size
+        } else {
+            size = .zero
+        }
+        debugLog("remoteViewSize called -> \(size)")
+        return size
     }
     let remoteViewSizeImp = imp_implementationWithBlock(remoteViewSizeBlock)
     class_addMethod(newClass, NSSelectorFromString("remoteViewSize"), remoteViewSizeImp, "{CGSize=dd}@:")

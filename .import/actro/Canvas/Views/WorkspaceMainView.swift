@@ -13,13 +13,13 @@ import UniformTypeIdentifiers
 /// - Overview 模式：缩小画布，显示所有卡片网格
 /// - Focus 模式：放大画布，让目标卡片填满屏幕
 /// - 只通过 scale + offset 变换实现模式切换
-struct UnifiedCanvasView: View {
+struct WorkspaceMainView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
 
-    // Mode is stored in viewModel.canvasMode to survive view recreation
-    // (e.g., when DevTools layout changes from docked to detached)
+    // Viewport size from WorkspaceMainViewport (via Environment)
+    @Environment(\.viewportSize) private var viewportSize
 
     @State private var isACTRDropTarget: Bool = false
     @State private var showingBookmarkSheet: Bool = false
@@ -57,33 +57,21 @@ struct UnifiedCanvasView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            let viewportSize = geometry.size
-            let _ = {
-                NSLog("📐 [VIEWPORT] geometry.size=%.1fx%.1f, mode=%@",
-                      viewportSize.width, viewportSize.height, String(describing: viewModel.canvasMode))
-            }()
-            // 极窄/极矮窗口时避免 0 尺寸导致矩阵奇异
-            let safeViewportSize = CGSize(
-                width: max(viewportSize.width, 1),
-                height: max(viewportSize.height, 1)
-            )
+        // viewportSize comes from Environment (set by WorkspaceMainViewport)
+        let _ = {
+            NSLog("📐 [VIEWPORT] viewportSize=%.1fx%.1f, mode=%@",
+                  viewportSize.width, viewportSize.height, String(describing: viewModel.canvasMode))
+        }()
 
-            // 通过 NSWindow 计算真实的 toolbar 高度
-            let measuredToolbarHeight: CGFloat = {
-                guard let window = NSApp.keyWindow ?? NSApp.windows.first,
-                      let contentView = window.contentView else {
-                    return 52 // 默认值
-                }
-                let windowContentHeight = contentView.frame.height
-                let calculated = windowContentHeight - viewportSize.height
-                // 合理范围检查
-                return (calculated > 30 && calculated < 100) ? calculated : 52
-            }()
+        // Safe viewport size (avoid zero dimensions)
+        let safeViewportSize = CGSize(
+            width: max(viewportSize.width, 1),
+            height: max(viewportSize.height, 1)
+        )
 
-            // 使用测量的 toolbar 高度
-            let toolbarHeight = measuredToolbarHeight
-            let contentSize = safeViewportSize
+        // Toolbar height estimation (for grid layout calculations)
+        let toolbarHeight: CGFloat = 52
+        let contentSize = safeViewportSize
             // 标题栏已移除，卡片比例 = 视口比例
             let titleBarRatio: CGFloat = 0
             let cardAspectRatio = safeViewportSize.width / safeViewportSize.height
@@ -119,7 +107,7 @@ struct UnifiedCanvasView: View {
 
                 // Canvas 视图 - 包含所有 Tab 卡片
                 // ViewBridge 始终在 Canvas 内部，通过快照实现平滑动画
-                CanvasView(
+                TabGridView(
                     tabs: filteredTabs,
                     tabSlotPositions: filteredTabPositions,
                     positions: gridResult.positions,
@@ -187,7 +175,7 @@ struct UnifiedCanvasView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // 注意：RN 内容层已移至每个 TabCardView 内部
+                // 注意：RN 内容层已移至每个 TabPanel 内部
                 // 每个 Tab 都有独立的 RCTRootView，实现真正的缩放
 
                 // Search Tabs 搜索框 - 仅在 Overview 模式显示
@@ -212,7 +200,7 @@ struct UnifiedCanvasView: View {
             }
             .toolbar {
                 ToolbarItemGroup(placement: .principal) {
-                    let totalWidth = geometry.size.width
+                    let totalWidth = viewportSize.width
                     let addressBarContainerWidth = totalWidth * 0.5
 
                     HStack {
@@ -287,7 +275,6 @@ struct UnifiedCanvasView: View {
                     .help("标签总览")
                 }
             }
-        }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 进入 Overview 模式时自动聚焦搜索框
             if case .overview = newValue {
@@ -306,7 +293,7 @@ struct UnifiedCanvasView: View {
             // 延迟切换确保渲染进程完全初始化后再切换模式
             // 注意：不要在这里立即修改 @Published 属性，否则会触发视图重建
             if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
-                logger.notice("🚀 [UnifiedCanvasView] 启动时延迟进入 Focus 模式")
+                logger.notice("🚀 [WorkspaceMainView] 启动时延迟进入 Focus 模式")
                 // 使用本地变量捕获标志，延迟后再重置，避免立即触发视图重建
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     viewModel.shouldStartInFocusMode = false  // 延迟重置，与 canvasMode 一起变化
@@ -579,7 +566,7 @@ struct UnifiedCanvasView: View {
 
 // MARK: - Canvas View
 
-private struct CanvasView: View {
+private struct TabGridView: View {
     let tabs: [Tab]
     let tabSlotPositions: [UUID: Int]
     let positions: [CGPoint]
@@ -631,7 +618,7 @@ private struct CanvasView: View {
 
 
     var body: some View {
-        let _ = NSLog("🔄 [CANVAS-BODY] CanvasView.body evaluated: tabs=%d, mode=%@", tabs.count, String(describing: mode))
+        let _ = NSLog("🔄 [CANVAS-BODY] TabGridView.body evaluated: tabs=%d, mode=%@", tabs.count, String(describing: mode))
         ZStack(alignment: .topLeading) {
             // 画布背景
             Color.clear
@@ -647,7 +634,7 @@ private struct CanvasView: View {
                     let isHovering = hoveringOverTabId == tab.id
                     let isSwapping = swappingTabId == tab.id
 
-                    TabCardView(
+                    TabPanel(
                         tab: tab,
                         cardWidth: cardWidth,
                         cardHeight: cardHeight,
@@ -716,7 +703,7 @@ private struct CanvasView: View {
                     )
 
                 case .newTabButton:
-                    NewTabCardView(
+                    NewTabPanel(
                         cardWidth: cardWidth,
                         cardHeight: cardHeight,
                         onTap: onNewTab
@@ -1125,7 +1112,7 @@ private struct FocusableTextField: NSViewRepresentable {
 
 // MARK: - Tab Card View
 
-private struct TabCardView: View {
+private struct TabPanel: View {
     let tab: Tab
     let cardWidth: CGFloat
     let cardHeight: CGFloat
@@ -1145,7 +1132,7 @@ private struct TabCardView: View {
     private let floatingTitleBarHeight: CGFloat = 24
 
     var body: some View {
-        let _ = NSLog("🔄 [TABCARD-BODY] TabCardView.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
+        let _ = NSLog("🔄 [TABCARD-BODY] TabPanel.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
         // 使用 ZStack 允许标题栏悬浮在卡片上方
         ZStack(alignment: .top) {
             // 卡片主体（纯内容）
@@ -1353,7 +1340,7 @@ private struct CloseButtonView: View {
 
 // MARK: - New Tab Card View
 
-private struct NewTabCardView: View {
+private struct NewTabPanel: View {
     let cardWidth: CGFloat
     let cardHeight: CGFloat
     var onTap: (() -> Void)? = nil
@@ -1382,5 +1369,5 @@ private struct NewTabCardView: View {
 }
 
 #Preview {
-    UnifiedCanvasView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel())
+    WorkspaceMainView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel())
 }

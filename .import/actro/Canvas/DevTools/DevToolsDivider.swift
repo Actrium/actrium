@@ -1,5 +1,34 @@
 import SwiftUI
 
+// MARK: - Viewport Size Environment
+
+private struct ViewportSizeKey: EnvironmentKey {
+    static let defaultValue: CGSize = .zero
+}
+
+extension EnvironmentValues {
+    var viewportSize: CGSize {
+        get { self[ViewportSizeKey.self] }
+        set { self[ViewportSizeKey.self] = newValue }
+    }
+}
+
+// MARK: - Workspace Main Viewport
+
+/// The main viewport container - measures actual size and provides it via Environment
+struct WorkspaceMainViewport<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        GeometryReader { geometry in
+            content()
+                .environment(\.viewportSize, geometry.size)
+        }
+    }
+}
+
+// MARK: - DevTools Divider
+
 /// Draggable divider for resizing the DevTools panel
 struct DevToolsDivider: View {
     @Binding var size: CGFloat
@@ -57,9 +86,9 @@ struct DevToolsDivider: View {
     }
 }
 
-/// Container view that wraps content with a DevTools panel
+/// Workspace layout: main content area + optional docked DevTools panel
 /// Uses ZStack-based layout to prevent content recreation when toggling DevTools
-struct DevToolsContainer<Content: View>: View {
+struct WorkspaceView<Content: View>: View {
     @ObservedObject var devTools: DevToolsManager
     @ObservedObject var viewModel: BrowserViewModel
     let content: Content
@@ -107,11 +136,12 @@ struct DevToolsContainer<Content: View>: View {
 
             // Use ZStack with explicit positioning to keep view hierarchy stable
             ZStack(alignment: .topLeading) {
-                // Main content - always at top-left, size varies
-                // Use stable id to prevent SwiftUI from recreating the view
-                content
-                    .frame(width: contentWidth, height: contentHeight)
-                    .id("devtools-container-content")
+                // Main content wrapped in viewport - provides viewportSize via Environment
+                WorkspaceMainViewport {
+                    content
+                }
+                .frame(width: contentWidth, height: contentHeight)
+                .id("workspace-main-viewport")
 
                 // DevTools panel - positioned based on dock position
                 if shouldShowDevTools {

@@ -15,9 +15,9 @@ struct ContentView: View {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
             } detail: {
-                // Wrap the main canvas in DevToolsContainer for docked panel support
-                DevToolsContainer(devTools: devTools, viewModel: viewModel) {
-                    UnifiedCanvasView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                // Workspace: main canvas + optional docked DevTools panel
+                WorkspaceView(devTools: devTools, viewModel: viewModel) {
+                    WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                 }
             }
             // 顶层兜底：拖入 .actr 或目录时创建新标签
