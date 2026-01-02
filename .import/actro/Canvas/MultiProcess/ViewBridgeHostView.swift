@@ -113,12 +113,39 @@ public class ViewBridgeHostView: NSView {
         NSLog("ViewBridgeHostView: Initialized for service \(serviceBundleIdentifier)")
     }
 
-    // MARK: - 纯 AppKit: 完全忽略外部 frame 设置
+    // MARK: - Size Control
 
+    /// 返回固定的 intrinsicContentSize，告诉 SwiftUI 我们需要的尺寸
+    public override var intrinsicContentSize: NSSize {
+        return currentContentSize
+    }
+
+    /// 覆盖 setFrameSize，确保始终使用 currentContentSize
+    /// 这样可以防止 SwiftUI 的 scaleEffect 干扰
     public override func setFrameSize(_ newSize: NSSize) {
-        // 完全忽略 SwiftUI 传来的尺寸，始终使用 contentSize
-        // 这样可以截断 scaleEffect 对 NSRemoteView 的影响
-        super.setFrameSize(currentContentSize)
+        // 只接受与 currentContentSize 匹配的尺寸，或者来自 applyContentSize 的更新
+        let targetSize = currentContentSize
+        if abs(newSize.width - targetSize.width) < 1 && abs(newSize.height - targetSize.height) < 1 {
+            super.setFrameSize(targetSize)
+        } else {
+            // 忽略不匹配的尺寸（可能来自 scaleEffect）
+            NSLog("ViewBridgeHostView: Ignoring setFrameSize(%.1fx%.1f), keeping %.1fx%.1f",
+                  newSize.width, newSize.height, targetSize.width, targetSize.height)
+            super.setFrameSize(targetSize)
+        }
+    }
+
+    /// 确保子视图也使用正确的尺寸
+    public override func layout() {
+        super.layout()
+        // 强制 NSRemoteView 填满整个容器
+        if let vc = remoteViewController {
+            let targetFrame = CGRect(origin: .zero, size: currentContentSize)
+            if vc.view.frame != targetFrame {
+                vc.view.frame = targetFrame
+                NSLog("ViewBridgeHostView: layout() set remoteView.frame to \(targetFrame)")
+            }
+        }
     }
 
     // MARK: - View Lifecycle
@@ -215,12 +242,15 @@ public class ViewBridgeHostView: NSView {
 
         let remoteView = vc.view
 
-        // 纯 AppKit: 直接设置 frame，不使用约束
-        addSubview(remoteView)
+        // 设置 NSRemoteView 的尺寸为 currentContentSize（视口尺寸）
+        remoteView.translatesAutoresizingMaskIntoConstraints = true
+        remoteView.autoresizingMask = []  // 禁用自动调整，由 layout() 控制
         remoteView.frame = CGRect(origin: .zero, size: currentContentSize)
 
-        // 通知 XPC Service 端使用正确的尺寸
-        vc.preferredContentSize = currentContentSize
+        addSubview(remoteView)
+
+        // 确保 ViewBridgeHostView 自身也使用正确的尺寸
+        super.setFrameSize(currentContentSize)
 
         NSLog("ViewBridgeHostView: Remote view embedded, size=\(currentContentSize)")
     }
@@ -233,6 +263,8 @@ public class ViewBridgeHostView: NSView {
     /// Update the content size (viewport size)
     /// 使用节流机制防止 resize storm
     public func updateContentSize(_ newSize: CGSize) {
+        fputs("🔍 ViewBridgeHostView.updateContentSize: newSize=\(newSize.width)x\(newSize.height), current=\(currentContentSize.width)x\(currentContentSize.height)\n", stderr)
+
         // Validate reasonable size
         guard newSize.width >= 100 && newSize.height >= 100 &&
               newSize.width <= 4096 && newSize.height <= 4096 else {
@@ -241,7 +273,9 @@ public class ViewBridgeHostView: NSView {
 
         // Ignore small changes (< 2px)
         let sizeDiff = abs(newSize.width - currentContentSize.width) + abs(newSize.height - currentContentSize.height)
-        guard sizeDiff >= 2 else { return }
+        guard sizeDiff >= 2 else {
+            return
+        }
 
         // 节流：如果距离上次更新时间太短，延迟处理
         let now = Date()
@@ -278,14 +312,16 @@ public class ViewBridgeHostView: NSView {
         NSLog("ViewBridgeHostView: Applying content size \(newSize)")
         currentContentSize = newSize
 
-        // 强制更新自身 frame
+        // 更新自身 frame
         super.setFrameSize(newSize)
 
-        // Update remote view if exists
+        // 更新 NSRemoteView 的 frame
         if let vc = remoteViewController {
             vc.view.frame = CGRect(origin: .zero, size: newSize)
-            vc.preferredContentSize = newSize
         }
+
+        // 通知 intrinsicContentSize 变化
+        invalidateIntrinsicContentSize()
     }
 
     /// 纯 AppKit 模式：不使用 scaleFactor
@@ -377,10 +413,10 @@ class ViewBridgeCoordinator {
 }
 
 /// SwiftUI wrapper for ViewBridgeHostView
-/// 纯 AppKit 包装：不传递 frame 变化给 NSView
+/// 纯 AppKit 包装：锁定尺寸，不接受 SwiftUI 的尺寸变化
 struct ViewBridgeTabView: NSViewRepresentable {
     let tabId: UUID
-    let contentSize: CGSize  // Viewport size for rendering (首次设置后锁定)
+    let contentSize: CGSize  // Viewport size for rendering（只在 makeNSView 时使用）
     let coordinator: ViewBridgeCoordinator
 
     func makeNSView(context: Context) -> ViewBridgeHostView {
@@ -391,12 +427,11 @@ struct ViewBridgeTabView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
+        fputs("🔍 ViewBridgeTabView.updateNSView: contentSize=\(contentSize.width)x\(contentSize.height)\n", stderr)
         coordinator.hostView = nsView
-        // 纯 AppKit 模式：首次设置后锁定，不再更新尺寸
-        // 尺寸由 ViewBridgeHostView 内部管理，不受 SwiftUI 影响
-        if contentSize.width > 0 && contentSize.height > 0 {
-            nsView.updateContentSize(contentSize)
-        }
+        // 当 viewport 尺寸变化时更新 ViewBridge（例如窗口调整大小）
+        // ViewBridgeHostView 内部有节流机制，会过滤 scaleEffect 引起的虚假尺寸变化
+        nsView.updateContentSize(contentSize)
     }
 
     static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
@@ -419,6 +454,9 @@ struct ViewBridgeMultiProcessTabView: View {
     @State private var coordinator = ViewBridgeCoordinator()
 
     var body: some View {
+        let _ = {
+            fputs("🔍 ViewBridgeMultiProcessTabView.body: containerSize=\(containerSize.width)x\(containerSize.height)\n", stderr)
+        }()
         ZStack {
             if ViewBridgeHostView.isAvailable {
                 // 纯 AppKit: ViewBridge 以 containerSize 渲染
