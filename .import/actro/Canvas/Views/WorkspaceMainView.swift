@@ -283,6 +283,10 @@ struct WorkspaceMainView: View {
             // Update surface manager with new viewport size for rendering
             surfaceManager.updateViewportSize(newValue)
         }
+        .task(id: viewportSize) {
+            // Also update on initial appear (onChange doesn't fire for initial value)
+            surfaceManager.updateViewportSize(viewportSize)
+        }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 进入 Overview 模式时自动聚焦搜索框
             if case .overview = newValue {
