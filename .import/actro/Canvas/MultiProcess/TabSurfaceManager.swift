@@ -248,3 +248,31 @@ class TabSurfaceManager: ObservableObject {
     }
 }
 
+// MARK: - CALayerHost View Cache (moved here for access)
+
+/// Cache for CALayerHostDisplayView instances
+class CALayerHostViewCache {
+    static let shared = CALayerHostViewCache()
+
+    private var cache: [UUID: CALayerHostDisplayView] = [:]
+    private let lock = NSLock()
+
+    func getOrCreate(for tabId: UUID, frame: NSRect) -> CALayerHostDisplayView {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let existing = cache[tabId] {
+            return existing
+        }
+
+        let view = CALayerHostDisplayView(frame: frame)
+        cache[tabId] = view
+        return view
+    }
+
+    func remove(for tabId: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        cache.removeValue(forKey: tabId)
+    }
+}

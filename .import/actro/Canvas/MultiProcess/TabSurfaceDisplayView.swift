@@ -265,3 +265,97 @@ class TabSurfaceDisplayNSView: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
+
+// MARK: - Tab Surface Content View
+
+/// High-level SwiftUI view for displaying tab content via surface manager.
+/// Combines TabSurfaceDisplayView with loading/error states.
+struct TabSurfaceContentView: View {
+    let tab: Tab
+    let displaySize: CGSize  // Size to display at (may be scaled)
+    @ObservedObject var surfaceManager: TabSurfaceManager
+
+    var body: some View {
+        let contextId = surfaceManager.contextId(for: tab.id)
+        let isLoading = surfaceManager.isLoading(for: tab.id)
+        let crashReason = surfaceManager.crashReason(for: tab.id)
+
+        ZStack {
+            if let reason = crashReason {
+                crashedView(reason: reason)
+            } else if contextId != 0 {
+                // Display the surface at viewport size, then scale to display size
+                TabSurfaceDisplayView(
+                    tabId: tab.id,
+                    contextId: contextId,
+                    width: surfaceManager.viewportSize.width,
+                    height: surfaceManager.viewportSize.height
+                )
+                .frame(
+                    width: surfaceManager.viewportSize.width,
+                    height: surfaceManager.viewportSize.height
+                )
+                .scaleEffect(
+                    displaySize.width / max(surfaceManager.viewportSize.width, 1),
+                    anchor: .topLeading
+                )
+                .frame(width: displaySize.width, height: displaySize.height)
+                .clipped()
+            } else if isLoading {
+                loadingView
+            } else {
+                placeholderView
+            }
+        }
+        .onAppear {
+            surfaceManager.ensureRendering(tab: tab)
+        }
+    }
+
+    private var loadingView: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .scaleEffect(0.8)
+            Text("Loading...")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+    }
+
+    private var placeholderView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "rectangle.dashed")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary)
+            Text("No content")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func crashedView(reason: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 36))
+                .foregroundColor(.orange)
+
+            Text("This tab has crashed")
+                .font(.system(size: 16, weight: .semibold))
+
+            Text(reason)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+
+            Button("Reload") {
+                surfaceManager.reloadCrashedTab(tab)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}

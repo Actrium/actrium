@@ -3,40 +3,9 @@ import AppKit
 import QuartzCore
 import Combine
 
-// MARK: - View Cache
-
-/// Cache for CALayerHostDisplayView instances to persist across SwiftUI view recreations
-/// This prevents the NSView from being destroyed when parent views re-render
-class CALayerHostViewCache {
-    static let shared = CALayerHostViewCache()
-
-    private var cache: [UUID: CALayerHostDisplayView] = [:]
-    private let lock = NSLock()
-
-    func getOrCreate(for tabId: UUID, frame: NSRect) -> CALayerHostDisplayView {
-        lock.lock()
-        defer { lock.unlock() }
-
-        if let existing = cache[tabId] {
-            NSLog("🖥️ [CACHE] Reusing existing CALayerHostDisplayView for tabId=\(tabId)")
-            return existing
-        }
-
-        let view = CALayerHostDisplayView(frame: frame)
-        cache[tabId] = view
-        NSLog("🖥️ [CACHE] Created new CALayerHostDisplayView for tabId=\(tabId)")
-        return view
-    }
-
-    func remove(for tabId: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        cache.removeValue(forKey: tabId)
-        NSLog("🖥️ [CACHE] Removed CALayerHostDisplayView for tabId=\(tabId)")
-    }
-}
-
 // MARK: - CALayerHost View (SwiftUI)
+
+// Note: CALayerHostViewCache is defined in TabSurfaceManager.swift
 
 /// SwiftUI wrapper for displaying remote CALayer content via CALayerHost
 struct IOSurfaceHostView: NSViewRepresentable {
