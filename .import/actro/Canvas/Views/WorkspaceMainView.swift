@@ -1133,12 +1133,17 @@ private struct TabPanel: View {
 
     var body: some View {
         let _ = NSLog("🔄 [TABCARD-BODY] TabPanel.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
+
+        // 外层尺寸：Focus 模式用 viewportSize，Overview 模式用 cardWidth/cardHeight
+        let panelWidth = isFocused ? viewportSize.width : cardWidth
+        let panelHeight = isFocused ? viewportSize.height : cardHeight
+
         // 使用 ZStack 允许标题栏悬浮在卡片上方
         ZStack(alignment: .top) {
             // 卡片主体（纯内容）
             // 圆角仅 Overview 模式显示，Focus 模式不要圆角
             contentView
-                .frame(width: cardWidth, height: cardHeight)
+                .frame(width: panelWidth, height: panelHeight)
                 .cornerRadius(isFocused ? 0 : 10)
                 .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
 
@@ -1248,10 +1253,18 @@ private struct TabPanel: View {
     // 内容区域视图
     private var contentView: some View {
         // ViewBridge 始终以 viewportSize 渲染
-        // 在 Overview 模式下用 scaleEffect 缩小显示
         let renderSize = viewportSize
-        // 计算缩放比例：卡片宽度 / 视口宽度
-        let displayScale = cardWidth / max(renderSize.width, 1)
+
+        // 缩放比例：
+        // - Focus 模式：1:1 精确显示，不缩放
+        // - Overview/过渡：按卡片尺寸缩放
+        let displayScale = isFocused ? 1.0 : (cardWidth / max(renderSize.width, 1))
+
+        // 实际显示尺寸：
+        // - Focus 模式：等于 viewportSize
+        // - Overview/过渡：等于 cardWidth/cardHeight
+        let displayWidth = isFocused ? renderSize.width : cardWidth
+        let displayHeight = isFocused ? renderSize.height : cardHeight
 
         let _ = NSLog("📐 [TabCard] viewportSize=%.1fx%.1f, cardSize=%.1fx%.1f, displayScale=%.3f, isFocused=%d",
                       viewportSize.width, viewportSize.height, cardWidth, cardHeight, displayScale, isFocused ? 1 : 0)
@@ -1282,8 +1295,8 @@ private struct TabPanel: View {
                 .scaleEffect(displayScale, anchor: .topLeading)
                 // 缩放后的实际显示尺寸
                 .frame(
-                    width: max(cardWidth, 1),
-                    height: max(cardHeight, 1),
+                    width: max(displayWidth, 1),
+                    height: max(displayHeight, 1),
                     alignment: .topLeading
                 )
                 .clipped()
