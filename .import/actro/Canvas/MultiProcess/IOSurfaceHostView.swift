@@ -7,7 +7,7 @@ import Combine
 
 /// Cache for CALayerHostDisplayView instances to persist across SwiftUI view recreations
 /// This prevents the NSView from being destroyed when parent views re-render
-private class CALayerHostViewCache {
+class CALayerHostViewCache {
     static let shared = CALayerHostViewCache()
 
     private var cache: [UUID: CALayerHostDisplayView] = [:]
@@ -425,7 +425,7 @@ class CALayerHostDisplayView: NSView {
 // MARK: - Renderer Startup Tracker
 
 /// Tracks which tabs have started or are starting their renderers (persists across view recreations)
-private class RendererStartupTracker {
+class RendererStartupTracker {
     static let shared = RendererStartupTracker()
 
     private var startingTabs: Set<UUID> = []
