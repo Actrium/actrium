@@ -11,6 +11,9 @@ struct DevToolsPanel: View {
     /// Whether this panel is in detached window mode
     var isDetached: Bool = false
 
+    /// Whether the DevTools is active (false when in Overview mode)
+    var isActive: Bool = true
+
     var body: some View {
         VStack(spacing: 0) {
             // Toolbar
@@ -22,9 +25,33 @@ struct DevToolsPanel: View {
 
             Divider()
 
-            // Content based on active tab
-            DevToolsContent(devTools: devTools, viewModel: viewModel)
+            if isActive {
+                // Content based on active tab
+                DevToolsContent(devTools: devTools, viewModel: viewModel)
+            } else {
+                // Inactive placeholder
+                DevToolsInactivePlaceholder()
+            }
         }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+/// Placeholder view shown when DevTools is not active (e.g., in Overview mode)
+private struct DevToolsInactivePlaceholder: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary.opacity(0.5))
+            Text("DevTools unavailable in Overview mode")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+            Text("Switch to a tab to use DevTools")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 }
