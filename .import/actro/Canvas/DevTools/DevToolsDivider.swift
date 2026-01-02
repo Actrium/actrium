@@ -105,17 +105,17 @@ struct WorkspaceView<Content: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            // Determine if DevTools should be visible
+            // Determine if DevTools panel should occupy space (regardless of mode)
             let shouldShowDevTools: Bool = {
                 if devTools.displayMode == .hidden || devTools.displayMode == .detached {
                     return false
                 }
-                // Hide docked DevTools when not in Focus mode
-                if !viewModel.canvasMode.isInFocusMode {
-                    return false
-                }
+                // Always show docked panel to keep viewport stable
                 return true
             }()
+
+            // Determine if DevTools content is active (only in Focus mode)
+            let isDevToolsActive = viewModel.canvasMode.isInFocusMode
 
             let isDockedBottom = devTools.dockPosition == .bottom
 
@@ -157,7 +157,7 @@ struct WorkspaceView<Content: View>: View {
                                 axis: .vertical
                             )
 
-                            DevToolsPanel(devTools: devTools, viewModel: viewModel)
+                            DevToolsPanel(devTools: devTools, viewModel: viewModel, isActive: isDevToolsActive)
                                 .frame(width: geometry.size.width, height: devTools.dockedHeight)
                         }
                     } else {
@@ -172,7 +172,7 @@ struct WorkspaceView<Content: View>: View {
                                 axis: .horizontal
                             )
 
-                            DevToolsPanel(devTools: devTools, viewModel: viewModel)
+                            DevToolsPanel(devTools: devTools, viewModel: viewModel, isActive: isDevToolsActive)
                                 .frame(width: devTools.dockedWidth, height: geometry.size.height)
                         }
                     }
