@@ -21,6 +21,9 @@ struct WorkspaceMainView: View {
     // Viewport size from WorkspaceMainViewport (via Environment)
     @Environment(\.viewportSize) private var viewportSize
 
+    // Surface manager for decoupled rendering (rendering at viewportSize, display at any scale)
+    @StateObject private var surfaceManager = TabSurfaceManager()
+
     @State private var isACTRDropTarget: Bool = false
     @State private var showingBookmarkSheet: Bool = false
 
@@ -119,6 +122,7 @@ struct WorkspaceMainView: View {
                     mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
                     viewportSize: safeViewportSize,
+                    surfaceManager: surfaceManager,
                     onSelectTab: { tabId in
                         switchToFocus(tabId: tabId)
                     },
@@ -275,6 +279,10 @@ struct WorkspaceMainView: View {
                     .help("标签总览")
                 }
             }
+        .onChange(of: viewportSize) { oldValue, newValue in
+            // Update surface manager with new viewport size for rendering
+            surfaceManager.updateViewportSize(newValue)
+        }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 进入 Overview 模式时自动聚焦搜索框
             if case .overview = newValue {
@@ -578,6 +586,7 @@ private struct TabGridView: View {
     let mode: CanvasMode
     let showNewTabButton: Bool  // 是否显示 [+] 按钮（搜索过滤时隐藏）
     let viewportSize: CGSize    // 视口尺寸，用于 RN 渲染
+    @ObservedObject var surfaceManager: TabSurfaceManager  // 渲染管理器
     let onSelectTab: (UUID) -> Void
     let onSwapPositions: (UUID?, UUID?) -> Void
     let onNewTab: () -> Void
@@ -651,6 +660,7 @@ private struct TabGridView: View {
                         isHovering: isHovering,
                         isSwapping: isSwapping,
                         viewportSize: viewportSize,
+                        surfaceManager: surfaceManager,
                         onSelect: {
                             onSelectTab(tab.id)
                         },
@@ -1124,6 +1134,7 @@ private struct TabPanel: View {
     let isHovering: Bool
     let isSwapping: Bool  // 正在交换过程中（用于淡入动画）
     let viewportSize: CGSize  // 视口尺寸，用于 RN 渲染
+    @ObservedObject var surfaceManager: TabSurfaceManager  // 渲染管理器
     let onSelect: () -> Void
     let onDragStart: () -> NSItemProvider
     let onClose: () -> Void
@@ -1247,46 +1258,71 @@ private struct TabPanel: View {
 
     // 内容区域视图
     private var contentView: some View {
-        // ViewBridge 始终以 viewportSize 渲染
-        // 在 Overview 模式下用 scaleEffect 缩小显示
-        let renderSize = viewportSize
+        // 渲染尺寸来自 surfaceManager（固定的 viewportSize）
+        let renderSize = surfaceManager.viewportSize
         // 计算缩放比例：卡片宽度 / 视口宽度
         let displayScale = cardWidth / max(renderSize.width, 1)
+        let contextId = surfaceManager.contextId(for: tab.id)
 
-        let _ = NSLog("📐 [TabCard] viewportSize=%.1fx%.1f, cardSize=%.1fx%.1f, displayScale=%.3f, isFocused=%d",
-                      viewportSize.width, viewportSize.height, cardWidth, cardHeight, displayScale, isFocused ? 1 : 0)
+        let _ = NSLog("📐 [TabCard] renderSize=%.1fx%.1f, cardSize=%.1fx%.1f, displayScale=%.3f, contextId=%u",
+                      renderSize.width, renderSize.height, cardWidth, cardHeight, displayScale, contextId)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
-            // ViewBridge 以 viewportSize 渲染，用 scaleEffect 缩放显示
-            // ViewBridgeHostView 内部忽略外部 frame 变化，保持 viewportSize 渲染
+            // 使用 TabSurfaceManager 管理的渲染结果
+            // Surface 以固定的 viewportSize 渲染，用 scaleEffect 缩放显示
             if hasRNContent {
-                ViewBridgeMultiProcessTabView(
-                    tab: tab,
-                    containerSize: CGSize(
+                if contextId != 0 {
+                    // 有效的渲染结果 - 显示 CALayerHost
+                    TabSurfaceDisplayView(
+                        tabId: tab.id,
+                        contextId: contextId,
                         width: max(renderSize.width, 1),
                         height: max(renderSize.height, 1)
-                    ),
-                    scaleFactor: 1.0  // 不使用，保留参数兼容性
-                )
-                .id(tab.id)
-                // frame 固定为 viewportSize
-                .frame(
-                    width: max(renderSize.width, 1),
-                    height: max(renderSize.height, 1),
-                    alignment: .topLeading
-                )
-                // 用 scaleEffect 缩放显示，anchor 在左上角
-                .scaleEffect(displayScale, anchor: .topLeading)
-                // 缩放后的实际显示尺寸
-                .frame(
-                    width: max(cardWidth, 1),
-                    height: max(cardHeight, 1),
-                    alignment: .topLeading
-                )
-                .clipped()
+                    )
+                    .id("\(tab.id)-\(contextId)")
+                    // frame 固定为 viewportSize
+                    .frame(
+                        width: max(renderSize.width, 1),
+                        height: max(renderSize.height, 1),
+                        alignment: .topLeading
+                    )
+                    // 用 scaleEffect 缩放显示，anchor 在左上角
+                    .scaleEffect(displayScale, anchor: .topLeading)
+                    // 缩放后的实际显示尺寸
+                    .frame(
+                        width: max(cardWidth, 1),
+                        height: max(cardHeight, 1),
+                        alignment: .topLeading
+                    )
+                    .clipped()
+                } else if surfaceManager.isLoading(for: tab.id) {
+                    // 加载中
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else if let reason = surfaceManager.crashReason(for: tab.id) {
+                    // 崩溃状态
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.orange)
+                        Text("Crashed")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        Button("Reload") {
+                            surfaceManager.reloadCrashedTab(tab)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                } else {
+                    // 等待渲染
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white.opacity(0.3))
+                }
             } else if let _ = tab.htmlContent {
                 // 有 htmlContent，显示网页内容（暂时用占位）
                 Image(systemName: "doc.text")
@@ -1303,6 +1339,10 @@ private struct TabPanel: View {
         .contentShape(Rectangle())
         .onTapGesture {
             onSelect()
+        }
+        .onAppear {
+            // 确保渲染器已启动
+            surfaceManager.ensureRendering(tab: tab)
         }
     }
 }
