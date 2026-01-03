@@ -226,6 +226,46 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
+    func reload() { webView.reload() }
+
+    // MARK: - Print
+
+    /// Print the current web page
+    func print() {
+        let printInfo = NSPrintInfo.shared
+        printInfo.horizontalPagination = .fit
+        printInfo.verticalPagination = .automatic
+
+        let printOperation = webView.printOperation(with: printInfo)
+        printOperation.showsPrintPanel = true
+        printOperation.showsProgressPanel = true
+        printOperation.run()
+    }
+
+    // MARK: - Zoom
+
+    /// Current page zoom level (1.0 = 100%)
+    var zoomLevel: Double {
+        get { webView.pageZoom }
+        set { webView.pageZoom = newValue }
+    }
+
+    /// Zoom in (increase by 10%)
+    func zoomIn() {
+        let newZoom = min(webView.pageZoom + 0.1, 3.0)  // Max 300%
+        webView.pageZoom = newZoom
+    }
+
+    /// Zoom out (decrease by 10%)
+    func zoomOut() {
+        let newZoom = max(webView.pageZoom - 0.1, 0.5)  // Min 50%
+        webView.pageZoom = newZoom
+    }
+
+    /// Reset zoom to 100%
+    func resetZoom() {
+        webView.pageZoom = 1.0
+    }
 
     // MARK: - Snapshot
 
