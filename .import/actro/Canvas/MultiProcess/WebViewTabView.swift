@@ -125,20 +125,28 @@ struct WebViewMultiProcessTabView: View {
 
     var body: some View {
         ZStack {
-            // Overview 模式：显示占位符（实际 web 内容由 FocusedWebOverlay 在 Focus 时渲染）
-            // 这样只有一个 WebView 实例（在 FocusedWebOverlay 中）
+            // Overview 模式：显示截图或占位符
             Color(nsColor: .windowBackgroundColor)
 
-            // 显示 URL 作为预览
             if !isFocused {
-                VStack {
-                    Image(systemName: "globe")
-                        .font(.system(size: 40))
-                        .foregroundColor(.secondary)
-                    Text(url.host ?? url.absoluteString)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+                // Try to show cached snapshot first
+                if let snapshot = WebViewHolderManager.shared.snapshot(for: tab.id) {
+                    Image(nsImage: snapshot)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: containerSize.width, height: containerSize.height)
+                        .clipped()
+                } else {
+                    // Fallback to placeholder if no snapshot available
+                    VStack {
+                        Image(systemName: "globe")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text(url.host ?? url.absoluteString)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
@@ -170,6 +178,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Current loading state
     private(set) var isLoading: Bool = false
+
+    /// Cached snapshot for Overview mode
+    private(set) var snapshot: NSImage?
 
     /// Canvas User-Agent string
     /// Format follows standard browser convention: Mozilla/5.0 (Platform) Engine/Version (Compatibility) Browser/Version Engine/Version
@@ -212,6 +223,25 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
+
+    // MARK: - Snapshot
+
+    /// Take a snapshot of the current web content for Overview mode
+    @MainActor
+    func takeSnapshot() async {
+        // Only take snapshot if webView has content
+        guard webView.url != nil else { return }
+
+        do {
+            let config = WKSnapshotConfiguration()
+            // Use the webView's current size for the snapshot
+            let image = try await webView.takeSnapshot(configuration: config)
+            self.snapshot = image
+            NSLog("📸 WebViewHolder: Snapshot captured")
+        } catch {
+            NSLog("📸 WebViewHolder: Failed to capture snapshot - \(error.localizedDescription)")
+        }
+    }
 
     // MARK: - WKNavigationDelegate
 
@@ -272,6 +302,16 @@ final class WebViewHolderManager {
     func remove(tabId: UUID) {
         holders.removeValue(forKey: tabId)
         NSLog("🌐 WebViewHolderManager: Removed holder for tab \(tabId.uuidString.prefix(8))")
+    }
+
+    /// Get cached snapshot for a tab
+    func snapshot(for tabId: UUID) -> NSImage? {
+        holders[tabId]?.snapshot
+    }
+
+    /// Take a snapshot for a specific tab
+    func takeSnapshot(for tabId: UUID) async {
+        await holders[tabId]?.takeSnapshot()
     }
 }
 

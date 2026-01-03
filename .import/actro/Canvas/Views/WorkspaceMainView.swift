@@ -167,6 +167,11 @@ struct WorkspaceMainView: View {
                                     historyVM.recordVisit(tab: tab)
                                 }
                             }
+                            // Update snapshot for Overview mode (delayed to allow rendering)
+                            Task {
+                                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay
+                                await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
+                            }
                         },
                         onLoadingStateChanged: { loading in
                             isWebLoading = loading
@@ -363,6 +368,17 @@ struct WorkspaceMainView: View {
                 }
             }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
+            // 从 Focus 切换到 Overview 时，先截图当前页面
+            if case .focus(let focusedTabId) = oldValue, case .overview = newValue {
+                // 检查是否为 web tab
+                if let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
+                   case .web = tab.contentType {
+                    Task {
+                        await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
+                    }
+                }
+            }
+
             // 进入 Overview 模式时自动聚焦搜索框
             if case .overview = newValue {
                 // 延迟一帧，确保搜索框已渲染
