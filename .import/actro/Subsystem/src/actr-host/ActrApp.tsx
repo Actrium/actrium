@@ -278,6 +278,7 @@ type ActrTabViewProps = {
   isActive: boolean;
   isLeftPanelVisible: boolean;
   containerWidth?: number;
+  containerHeight?: number;
   onEngineChange?: (tabId: string, engine: Engine | null) => void;
   onContractViolation?: (tabId: string, violation: ContractViolation) => void;
 };
@@ -310,6 +311,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   isActive,
   isLeftPanelVisible,
   containerWidth: propsContainerWidth,
+  containerHeight: propsContainerHeight,
   onContractViolation,
   onEngineChange,
 }) => {
@@ -577,9 +579,13 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       try {
         loadedUnifiedScriptRef.current = script;
         eng.createReceiver(handleUpdate);
+        // Pass tab config to Engine so Guest can access via __getConfig()
         await eng.loadBundle(script, {
-          containerHeight: 977,
-          containerWidth: 1400,
+          tabId: tab.id,
+          title: tab.title,
+          backgroundColor: tab.backgroundColor,
+          containerWidth: propsContainerWidth ?? 1400,
+          containerHeight: propsContainerHeight ?? 977,
         });
 
         // 确保面板提取
@@ -1515,6 +1521,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                 isActive={isActive}
                 isLeftPanelVisible={isLeftPanelVisible}
                 containerWidth={containerWidth}
+                containerHeight={containerHeight}
                 onContractViolation={recordContractViolation}
                 onEngineChange={handleEngineChange}
               />

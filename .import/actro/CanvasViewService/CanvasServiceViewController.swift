@@ -441,7 +441,10 @@ public func registerCanvasServiceViewController() {
 
         let containerView = ResizableContainerView(frame: NSRect(x: 0, y: 0, width: initialWidth, height: initialHeight))
         containerView.wantsLayer = true
-        containerView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        // 🔴 DEBUG: 使用红色背景以便调试视图层级
+        containerView.layer?.backgroundColor = NSColor.systemRed.cgColor
+        containerView.layer?.borderColor = NSColor.yellow.cgColor
+        containerView.layer?.borderWidth = 3
         // Disable auto-resizing - we control size via remoteViewSizeDidChange
         containerView.autoresizingMask = []
 
