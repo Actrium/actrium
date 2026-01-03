@@ -159,6 +159,11 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
     }
 }
 
+// MARK: - Single-Process React Native Host
+//
+// 简化架构：每个 XPC service 进程只处理一个 tab
+// 进程池由 Host app 的 XPCServicePool 管理
+
 private class ServiceReactNativeHost {
     static let shared = ServiceReactNativeHost()
 
@@ -286,7 +291,7 @@ private class ServiceReactNativeHost {
     }
 
     func createRootView(initialProperties: [String: Any], containerSize: CGSize) -> NSView {
-        debugLog("Creating RCTRootView with module: ActrApp, containerSize: \(containerSize)")
+        debugLog("Creating RCTRootView, containerSize: \(containerSize)")
 
         // Merge container size into initial properties
         var properties = initialProperties
@@ -305,11 +310,11 @@ private class ServiceReactNativeHost {
             self.rootView = rctRootView
             rctRootView.sizeFlexibility = .none
             rctRootView.backgroundColor = NSColor.clear
-            debugLog("RCTRootView created successfully with containerSize in props")
+            debugLog("RCTRootView created successfully")
 
             // 应用缓存的 tab config（如果有）
             if let pending = pendingTabConfig {
-                debugLog("📥 Applying pending tab config now that RN is ready")
+                debugLog("📥 Applying pending tab config")
                 pendingTabConfig = nil
                 // 稍微延迟以确保 RN bridge 就绪
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
@@ -432,54 +437,38 @@ public func registerCanvasServiceViewController() {
     }
 
     // Add loadView method - creates React Native view
+    // 简化架构：每个 XPC service 进程只处理一个 tab
     let loadViewBlock: @convention(block) (AnyObject) -> Void = { (self_) in
-        debugLog("loadView called")
+        debugLog("🔵 loadView called")
 
-        // 🔴 重要：立即初始化 ServiceReactNativeHost 以设置 tab config 监听器
-        // 这样在 Host 发送 tab config 通知时，监听器已就绪
+        // 初始化 ServiceReactNativeHost（单例，包含 tab config 监听器）
         _ = ServiceReactNativeHost.shared
-        debugLog("ServiceReactNativeHost initialized (tab config listener ready)")
+        debugLog("ServiceReactNativeHost initialized")
 
         // Use a reasonable default size instead of screen size
-        // This prevents oversized initial frames
         let initialWidth: CGFloat = 1280
         let initialHeight: CGFloat = 720
         debugLog("Using default initial size: \(initialWidth)x\(initialHeight)")
 
         let containerView = ResizableContainerView(frame: NSRect(x: 0, y: 0, width: initialWidth, height: initialHeight))
         containerView.wantsLayer = true
-        // Use transparent background - RN content will fill this
         containerView.layer?.backgroundColor = NSColor.clear.cgColor
-        // Disable auto-resizing - we control size via remoteViewSizeDidChange
         containerView.autoresizingMask = []
 
         // Set as view using KVC
         self_.setValue(containerView, forKey: "view")
-
         debugLog("Container view set, frame: \(containerView.frame)")
 
-        // Try to request a fixed size from host using requestResize:animation:completion:
-        let requestResizeSelector = NSSelectorFromString("requestResize:animation:completion:")
-        debugLog("Step 1: Calling requestResize to lock size at \(initialWidth)x\(initialHeight)")
-
-        debugLog("Step 2: Creating targetSize")
         let targetSize = NSSize(width: initialWidth, height: initialHeight)
-        debugLog("Step 3: targetSize created")
-
-        // Simpler approach: use setValue for preferredContentSize
-        debugLog("Step 4: Checking preferredContentSize")
         let preferredSizeSelector = NSSelectorFromString("setPreferredContentSize:")
         if self_.responds(to: preferredSizeSelector) {
-            debugLog("Step 5: Setting preferredContentSize to \(targetSize)")
             self_.setValue(NSValue(size: targetSize), forKey: "preferredContentSize")
-            debugLog("Step 6: preferredContentSize set")
-        } else {
-            debugLog("Step 5b: preferredContentSize not supported")
+            debugLog("preferredContentSize set to \(targetSize)")
         }
 
-        debugLog("Step 7: About to call setupReactNativeContent...")
+        debugLog("Setting up React Native content...")
         setupReactNativeContent(in: containerView)
-        debugLog("Step 8: setupReactNativeContent returned")
+        debugLog("React Native content setup complete")
     }
     let loadViewImp = imp_implementationWithBlock(loadViewBlock)
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
@@ -557,8 +546,10 @@ public func registerCanvasServiceViewController() {
 
 // MARK: - React Native Content Setup
 
+/// 简化版 - 每个 XPC service 进程只处理一个 tab
+/// 使用 ServiceReactNativeHost.shared 单例
 private func setupReactNativeContent(in containerView: NSView) {
-    debugLog("Setting up React Native content")
+    debugLog("Setting up React Native content (single-process mode)")
 
     // Show loading indicator first
     let loadingLabel = NSTextField(labelWithString: "Starting React Native...")
@@ -575,7 +566,7 @@ private func setupReactNativeContent(in containerView: NSView) {
 
     // Initial properties - will be updated when host sends tab config via IPC
     // Show a simple "XPC Ready" state initially (minimal script to verify RN works)
-    let initialTabId = UUID().uuidString
+    let initialTabId = UUID().uuidString  // 临时 ID，会被 Host 发送的 tab config 覆盖
     let initialTab: [String: Any] = [
         "id": initialTabId,
         "title": "XPC Service Ready",
@@ -612,7 +603,7 @@ private func setupReactNativeContent(in containerView: NSView) {
         Thread.sleep(forTimeInterval: 0.5)
 
         DispatchQueue.main.async {
-            debugLog("Creating React Native root view")
+            debugLog("Creating React Native root view (single-process mode)")
 
             // Remove loading indicator
             loadingLabel.removeFromSuperview()
@@ -622,7 +613,7 @@ private func setupReactNativeContent(in containerView: NSView) {
             debugLog("Creating RN view with containerSize: \(containerSize)")
 
             // Create and add React Native view with initial properties
-            // Actual tab config will be sent via DistributedNotificationCenter
+            // 使用进程单例 ServiceReactNativeHost.shared
             let rnView = ServiceReactNativeHost.shared.createRootView(
                 initialProperties: initialProperties,
                 containerSize: containerSize
@@ -638,6 +629,7 @@ private func setupReactNativeContent(in containerView: NSView) {
                 resizableContainer.setRNView(rnView)
 
                 // Connect size change callback to update React Native container size
+                // 使用进程单例 ServiceReactNativeHost.shared
                 resizableContainer.onSizeChanged = { newSize in
                     debugLog("onSizeChanged callback: \(newSize)")
                     ServiceReactNativeHost.shared.updateContainerSize(to: newSize)
