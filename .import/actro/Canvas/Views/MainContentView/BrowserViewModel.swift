@@ -685,6 +685,32 @@ class BrowserViewModel: ObservableObject {
         closeTab(id: id)
     }
 
+    // MARK: - Web Navigation
+
+    /// Check if current web tab can go back
+    var canGoBack: Bool {
+        guard let tabId = currentTabId else { return false }
+        return WebViewHolderManager.shared.existingHolder(for: tabId)?.canGoBack ?? false
+    }
+
+    /// Check if current web tab can go forward
+    var canGoForward: Bool {
+        guard let tabId = currentTabId else { return false }
+        return WebViewHolderManager.shared.existingHolder(for: tabId)?.canGoForward ?? false
+    }
+
+    /// Navigate back in web history
+    func goBack() {
+        guard let tabId = currentTabId else { return }
+        WebViewHolderManager.shared.existingHolder(for: tabId)?.goBack()
+    }
+
+    /// Navigate forward in web history
+    func goForward() {
+        guard let tabId = currentTabId else { return }
+        WebViewHolderManager.shared.existingHolder(for: tabId)?.goForward()
+    }
+
     /// Reload the current tab by re-reading its source .actr package
     func reloadCurrentTab() {
         guard let id = currentTabId,

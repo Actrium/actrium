@@ -191,6 +191,14 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
     }
 
+    // MARK: - Navigation
+
+    var canGoBack: Bool { webView.canGoBack }
+    var canGoForward: Bool { webView.canGoForward }
+
+    func goBack() { webView.goBack() }
+    func goForward() { webView.goForward() }
+
     // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -224,6 +232,11 @@ final class WebViewHolderManager {
         holders[tabId] = new
         NSLog("🌐 WebViewHolderManager: Created holder for tab \(tabId.uuidString.prefix(8))")
         return new
+    }
+
+    /// Get existing holder without creating a new one
+    func existingHolder(for tabId: UUID) -> WebViewHolder? {
+        holders[tabId]
     }
 
     func remove(tabId: UUID) {
