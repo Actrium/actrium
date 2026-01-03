@@ -1225,7 +1225,8 @@ private struct AddressBarContainer: View {
                         .onTapGesture {
                             if !isEditing {
                                 isEditing = true
-                                inputText = ""
+                                // 保留当前标题内容，进入编辑后会自动选中
+                                inputText = titleText
                                 DispatchQueue.main.async {
                                     isFirstResponder = true
                                 }
@@ -1330,6 +1331,12 @@ private struct FocusableTextField: NSViewRepresentable {
            let window = nsView.window,
            window.firstResponder != nsView.currentEditor() {
             window.makeFirstResponder(nsView)
+            // 选中所有文本
+            DispatchQueue.main.async {
+                if let editor = nsView.currentEditor() {
+                    editor.selectAll(nil)
+                }
+            }
         }
     }
 
