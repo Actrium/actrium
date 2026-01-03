@@ -72,8 +72,6 @@ private struct WindowAccessor: NSViewRepresentable {
             if let window = view.window {
                 // 透明标题栏，让背景颜色通栏
                 window.titlebarAppearsTransparent = true
-                // 移除标题栏分隔线
-                window.titlebarSeparatorStyle = .none
                 // 让内容延伸到标题栏区域
                 window.styleMask.insert(.fullSizeContentView)
             }
