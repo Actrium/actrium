@@ -546,6 +546,27 @@ struct PersistentWebView: NSViewRepresentable {
     }
 }
 
+// MARK: - Custom Menu Item with Closure
+
+/// Menu item that executes a closure when selected
+private class ClosureMenuItem: NSMenuItem {
+    private var actionClosure: (() -> Void)?
+
+    init(title: String, closure: @escaping () -> Void) {
+        self.actionClosure = closure
+        super.init(title: title, action: #selector(performAction), keyEquivalent: "")
+        self.target = self
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func performAction() {
+        actionClosure?()
+    }
+}
+
 // MARK: - Custom WebView with Context Menu
 
 /// Custom WKWebView subclass that adds download options to context menu
@@ -553,20 +574,22 @@ class DownloadableWebView: WKWebView {
     /// Store the detected element info for context menu
     private var contextMenuImageURL: URL?
     private var contextMenuLinkURL: URL?
-    private var pendingContextMenuPoint: CGPoint?
 
-    /// Pre-detect element on right mouse down
+    /// Pre-detect element on right mouse down using synchronous approach
     override func rightMouseDown(with event: NSEvent) {
         let locationInView = convert(event.locationInWindow, from: nil)
-        pendingContextMenuPoint = locationInView
 
-        // Pre-detect element at click position
-        detectElementAt(point: locationInView)
+        // Reset previous values
+        contextMenuImageURL = nil
+        contextMenuLinkURL = nil
+
+        // Detect element synchronously
+        detectElementSynchronously(at: locationInView)
 
         super.rightMouseDown(with: event)
     }
 
-    private func detectElementAt(point: CGPoint) {
+    private func detectElementSynchronously(at point: CGPoint) {
         let js = """
         (function() {
             var x = \(point.x);
@@ -606,120 +629,83 @@ class DownloadableWebView: WKWebView {
         })();
         """
 
-        evaluateJavaScript(js) { [weak self] result, error in
-            guard let self = self else { return }
+        // Use RunLoop to wait for async JS evaluation
+        var completed = false
+        var detectedImageURL: URL?
+        var detectedLinkURL: URL?
 
-            self.contextMenuImageURL = nil
-            self.contextMenuLinkURL = nil
-
+        evaluateJavaScript(js) { result, error in
             if let jsonString = result as? String,
                let data = jsonString.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
 
                 if let imageURLString = json["imageURL"] as? String {
-                    self.contextMenuImageURL = URL(string: imageURLString)
+                    detectedImageURL = URL(string: imageURLString)
                 }
                 if let linkURLString = json["linkURL"] as? String {
-                    self.contextMenuLinkURL = URL(string: linkURLString)
+                    detectedLinkURL = URL(string: linkURLString)
                 }
             }
+            completed = true
         }
+
+        // Wait for completion with a short timeout (100ms max)
+        let deadline = Date().addingTimeInterval(0.1)
+        while !completed && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+        }
+
+        contextMenuImageURL = detectedImageURL
+        contextMenuLinkURL = detectedLinkURL
     }
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
 
-        // Small delay to ensure JS detection has completed
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak menu] in
-            guard let self = self, let menu = menu else { return }
-            self.addDownloadMenuItems(to: menu)
-        }
+        // Add menu items synchronously - URLs should already be detected
+        addDownloadMenuItems(to: menu)
     }
 
     private func addDownloadMenuItems(to menu: NSMenu) {
         var addedSeparator = false
 
         if let imageURL = contextMenuImageURL {
-            NSLog("📥 DownloadableWebView: Adding Download Image menu item for \(imageURL)")
+            NSLog("📥 DownloadableWebView: Adding Download Image for %@", imageURL.absoluteString)
 
             if !addedSeparator {
                 menu.addItem(NSMenuItem.separator())
                 addedSeparator = true
             }
 
-            // Create menu item with closure-based action to avoid target issues
-            let downloadImageItem = NSMenuItem(
-                title: "Download Image",
-                action: nil,
-                keyEquivalent: ""
-            )
-            // Store URL directly and use a helper to handle the action
-            downloadImageItem.representedObject = ["type": "image", "url": imageURL] as [String: Any]
-            downloadImageItem.target = self
-            downloadImageItem.action = #selector(handleDownloadMenuItem(_:))
+            // Use closure-based menu item to ensure action fires
+            let downloadImageItem = ClosureMenuItem(title: "Download Image") { [weak self] in
+                NSLog("📥 DownloadableWebView: Download Image clicked!")
+                self?.startDownload(url: imageURL)
+            }
             menu.addItem(downloadImageItem)
         }
 
         if let linkURL = contextMenuLinkURL, linkURL != contextMenuImageURL {
-            NSLog("📥 DownloadableWebView: Adding Download Linked File menu item for \(linkURL)")
+            NSLog("📥 DownloadableWebView: Adding Download Linked File for %@", linkURL.absoluteString)
 
             if !addedSeparator {
                 menu.addItem(NSMenuItem.separator())
-                addedSeparator = true
             }
 
-            let downloadLinkItem = NSMenuItem(
-                title: "Download Linked File",
-                action: nil,
-                keyEquivalent: ""
-            )
-            downloadLinkItem.representedObject = ["type": "link", "url": linkURL] as [String: Any]
-            downloadLinkItem.target = self
-            downloadLinkItem.action = #selector(handleDownloadMenuItem(_:))
+            let downloadLinkItem = ClosureMenuItem(title: "Download Linked File") { [weak self] in
+                NSLog("📥 DownloadableWebView: Download Linked File clicked!")
+                self?.startDownload(url: linkURL)
+            }
             menu.addItem(downloadLinkItem)
         }
     }
 
-    @objc private func handleDownloadMenuItem(_ sender: NSMenuItem) {
-        NSLog("📥 DownloadableWebView: handleDownloadMenuItem called")
-
-        guard let info = sender.representedObject as? [String: Any],
-              let url = info["url"] as? URL else {
-            NSLog("📥 DownloadableWebView: Failed to extract URL from menu item")
-            return
-        }
-
-        NSLog("📥 DownloadableWebView: Downloading from menu: \(url)")
-        startDownload(url: url)
-    }
-
-    @objc private func downloadImage(_ sender: NSMenuItem) {
-        NSLog("📥 DownloadableWebView: downloadImage called")
-        NSLog("📥 DownloadableWebView: sender.representedObject = \(String(describing: sender.representedObject))")
-        NSLog("📥 DownloadableWebView: contextMenuImageURL = \(String(describing: contextMenuImageURL))")
-
-        guard let url = sender.representedObject as? URL ?? contextMenuImageURL else {
-            NSLog("📥 DownloadableWebView: No URL found for image download!")
-            return
-        }
-        startDownload(url: url)
-    }
-
-    @objc private func downloadLinkedFile(_ sender: NSMenuItem) {
-        NSLog("📥 DownloadableWebView: downloadLinkedFile called")
-        guard let url = sender.representedObject as? URL ?? contextMenuLinkURL else {
-            NSLog("📥 DownloadableWebView: No URL found for link download!")
-            return
-        }
-        startDownload(url: url)
-    }
-
     private func startDownload(url: URL) {
-        NSLog("📥 DownloadableWebView: startDownload called with URL: \(url)")
+        NSLog("📥 DownloadableWebView: startDownload - %@", url.absoluteString)
 
         // Check if URL is valid for download
         guard url.scheme == "http" || url.scheme == "https" else {
-            NSLog("📥 DownloadableWebView: Invalid URL scheme: \(url.scheme ?? "nil")")
+            NSLog("📥 DownloadableWebView: Invalid URL scheme: %@", url.scheme ?? "nil")
             return
         }
 
@@ -734,11 +720,11 @@ class DownloadableWebView: WKWebView {
             }
         }
 
-        NSLog("📥 DownloadableWebView: Starting download with filename: \(filename)")
+        NSLog("📥 DownloadableWebView: Starting download: %@", filename)
 
         Task { @MainActor in
             let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: url)
-            NSLog("📥 DownloadableWebView: Created download item, calling URLSessionDownloader")
+            NSLog("📥 DownloadableWebView: Created item, starting URLSession download")
             URLSessionDownloader.shared.startDownload(url: url, item: item)
         }
     }
