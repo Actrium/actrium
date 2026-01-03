@@ -46,80 +46,32 @@ class BrowserViewModel: ObservableObject {
     }
 
     init() {
-        // 🔴 开发调试：优先加载 counterapp 开发目录作为启动 tab (Focus 模式)
-        let counterAppDevPath = "/Users/leo/XData/Starbucks/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp"
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
-            logger.debug("🔄 [BrowserViewModel] 启动时直接加载 counterapp 开发目录 (Focus 模式)")
-            // Initialize slot positions
-            initializeSlotPositions()
-            // 🔴 Focus 模式：启动时直接进入全屏 Focus 模式
-            shouldStartInFocusMode = true
+        // 开发调试：加载默认示例应用
+        let sampleAppsBasePath = "/Users/leo/XData/Starbucks/GoAskAway/Canvas/Subsystem/actr-app-examples"
+        let defaultApps = ["debugapp", "counterapp"]  // 默认加载的应用列表
 
-            // 延迟加载开发目录，避免在 SwiftUI 初始化期间阻塞主线程
-            let url = URL(fileURLWithPath: counterAppDevPath)
-            Task { @MainActor [weak self] in
-                self?.loadFromDevDirectory(url)
-            }
-            return
-        }
-
-        // 如果没有 todoapp.actr，创建默认的 HTML 标签页
-        let defaultTab = Tab(
-            title: "human in loop - coding for ever",
-            htmlContent: """
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="utf-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                            padding: 40px;
-                            color: #ffffff;
-                            margin: 0;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
-                        }
-                        .container {
-                            max-width: 800px;
-                            text-align: center;
-                        }
-                        h1 {
-                            color: #61afef;
-                            font-size: 2.5em;
-                            margin-bottom: 20px;
-                        }
-                        p {
-                            line-height: 1.8;
-                            font-size: 1.2em;
-                            color: #abb2bf;
-                        }
-                        .highlight {
-                            color: #98c379;
-                            font-weight: bold;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>🚀 Welcome to Your Browser</h1>
-                        <p>Human in loop - <span class="highlight">coding forever</span></p>
-                        <p>Click the + button to create a new tab, or explore the bookmarks in the left panel.</p>
-                    </div>
-                </body>
-                </html>
-                """
-        )
-        tabs.append(defaultTab)
-        currentTabId = defaultTab.id
-
-        // Initialize slot positions
+        // Initialize slot positions first
         initializeSlotPositions()
+
+        // 延迟加载开发目录，避免在 SwiftUI 初始化期间阻塞主线程
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+
+            for appName in defaultApps {
+                let appPath = "\(sampleAppsBasePath)/\(appName)"
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: appPath, isDirectory: &isDirectory), isDirectory.boolValue {
+                    let url = URL(fileURLWithPath: appPath)
+                    logger.debug("🔄 [BrowserViewModel] 加载默认应用: \(appName)")
+                    self.loadFromDevDirectory(url)
+                }
+            }
+
+            // 默认选中第一个 tab
+            if let firstTab = self.tabs.first {
+                self.currentTabId = firstTab.id
+            }
+        }
     }
     
     @discardableResult
