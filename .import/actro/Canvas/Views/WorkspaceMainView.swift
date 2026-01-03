@@ -29,10 +29,6 @@ struct WorkspaceMainView: View {
     @State private var isAddressBarEditing: Bool = false
     @State private var isAddressBarFirstResponder: Bool = false
     @State private var keyEventMonitor: Any?
-    @State private var magnifyEventMonitor: Any?
-    @State private var gestureEventTap: CFMachPort?
-    @State private var gestureRunLoopSource: CFRunLoopSource?
-    @State private var cumulativeMagnification: CGFloat = 0
 
     // Search Tabs 状态
     @State private var searchTabsText: String = ""
@@ -323,67 +319,22 @@ struct WorkspaceMainView: View {
                 }
                 return event
             }
-
-            // 监听双指捏合手势（在 Window 级别捕获，绕过 NSRemoteView）
-            magnifyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.magnify, .beginGesture, .endGesture]) { event in
-                // 只在 Focus 模式下响应
-                guard case .focus = viewModel.canvasMode else {
-                    cumulativeMagnification = 0
-                    return event
-                }
-
-                switch event.type {
-                case .beginGesture:
-                    cumulativeMagnification = 0
-                    fputs("🤏 beginGesture\n", stderr)
-                case .magnify:
-                    cumulativeMagnification += event.magnification
-                    fputs("🤏 magnify: delta=\(event.magnification), cumulative=\(cumulativeMagnification)\n", stderr)
-                    // 捏合缩小超过阈值，触发切换
-                    if cumulativeMagnification < -0.3 {
-                        fputs("🤏 Triggering exitToOverview!\n", stderr)
-                        cumulativeMagnification = 0
-                        exitToOverview()
-                        return nil  // 消费事件
-                    }
-                case .endGesture:
-                    fputs("🤏 endGesture, final cumulative=\(cumulativeMagnification)\n", stderr)
-                    cumulativeMagnification = 0
-                default:
-                    break
-                }
-                return event
-            }
-            fputs("🤏 Magnify event monitor installed\n", stderr)
-
-            // 尝试在窗口 contentView 上添加手势识别器
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if let window = NSApplication.shared.mainWindow,
-                   let contentView = window.contentView {
-                    let recognizer = NSMagnificationGestureRecognizer(target: MagnifyGestureHandler.shared, action: #selector(MagnifyGestureHandler.handleMagnify(_:)))
-                    contentView.addGestureRecognizer(recognizer)
-                    MagnifyGestureHandler.shared.onPinchOut = { [weak viewModel] in
-                        guard let vm = viewModel, case .focus = vm.canvasMode else { return }
-                        exitToOverview()
-                    }
-                    fputs("🤏 NSMagnificationGestureRecognizer added to window.contentView\n", stderr)
-                }
-            }
+            // 注意：双指捏合手势在 CanvasViewService 端处理
+            // 通过 DistributedNotificationCenter 发送 "com.canvas.pinchToOverview" 通知
         }
         .onDisappear {
             // 清理事件监听
             if let monitor = keyEventMonitor {
                 NSEvent.removeMonitor(monitor)
             }
-            if let monitor = magnifyEventMonitor {
-                NSEvent.removeMonitor(monitor)
-            }
         }
-        // 响应 NSWindow.sendEvent 拦截器发出的 pinch 通知
-        .onReceive(NotificationCenter.default.publisher(for: .pinchToOverview)) { _ in
+        // 响应 CanvasViewService 发出的 pinch 分布式通知
+        .onReceive(
+            DistributedNotificationCenter.default().publisher(for: Notification.Name("com.canvas.pinchToOverview"))
+        ) { _ in
             // 只在 Focus 模式下响应
             guard case .focus = viewModel.canvasMode else { return }
-            fputs("🤏 Received pinchToOverview notification, exiting to overview\n", stderr)
+            fputs("🤏 Received distributed pinchToOverview from service, exiting to overview\n", stderr)
             exitToOverview()
         }
         .sheet(isPresented: $showingBookmarkSheet) {
@@ -1495,46 +1446,6 @@ private struct NewTabPanel: View {
         .contentShape(Rectangle())
         .onTapGesture {
             onTap?()
-        }
-    }
-}
-
-// MARK: - Magnify Gesture Handler (Window Level)
-
-/// 窗口级别的捏合手势处理器
-/// 用于捕获 NSRemoteView 无法捕获的 magnify 手势
-final class MagnifyGestureHandler: NSObject {
-    static let shared = MagnifyGestureHandler()
-
-    var onPinchOut: (() -> Void)?
-    private var cumulativeMagnification: CGFloat = 0
-
-    private override init() {
-        super.init()
-    }
-
-    @objc func handleMagnify(_ recognizer: NSMagnificationGestureRecognizer) {
-        switch recognizer.state {
-        case .began:
-            cumulativeMagnification = 0
-            fputs("🤏 [WindowGesture] began\n", stderr)
-        case .changed:
-            cumulativeMagnification += recognizer.magnification
-            recognizer.magnification = 0  // 重置增量
-            fputs("🤏 [WindowGesture] cumulative=\(cumulativeMagnification)\n", stderr)
-
-            // 捏合缩小超过阈值
-            if cumulativeMagnification < -0.3 {
-                fputs("🤏 [WindowGesture] Triggering onPinchOut!\n", stderr)
-                cumulativeMagnification = 0
-                recognizer.state = .cancelled
-                onPinchOut?()
-            }
-        case .ended, .cancelled:
-            fputs("🤏 [WindowGesture] ended/cancelled\n", stderr)
-            cumulativeMagnification = 0
-        default:
-            break
         }
     }
 }

@@ -50,6 +50,11 @@ private class ResizableContainerView: NSView {
     /// Callback to notify React Native of size changes
     var onSizeChanged: ((CGSize) -> Void)?
 
+    /// 累积的捏合手势值（用于检测 pinch-out）
+    private var cumulativeMagnification: CGFloat = 0
+
+    override var acceptsFirstResponder: Bool { true }
+
     override func setFrameSize(_ newSize: NSSize) {
         // 直接使用 ViewBridge 传来的尺寸，无需任何过滤或锁定
         debugLog("Container setFrameSize: \(newSize)")
@@ -69,6 +74,39 @@ private class ResizableContainerView: NSView {
 
     func setRNView(_ view: NSView) {
         self.rnView = view
+    }
+
+    // MARK: - Magnify Gesture Handling (捏合手势)
+
+    override func magnify(with event: NSEvent) {
+        debugLog("🤏 [Service] magnify: phase=\(event.phase.rawValue), delta=\(event.magnification), cumulative=\(cumulativeMagnification)")
+
+        switch event.phase {
+        case .began:
+            cumulativeMagnification = 0
+        case .changed:
+            cumulativeMagnification += event.magnification
+
+            // 捏合缩小超过阈值，通知 Host 端
+            if cumulativeMagnification < -0.3 {
+                debugLog("🤏 [Service] Threshold reached! Sending notification to host")
+                cumulativeMagnification = 0
+
+                // 使用 DistributedNotificationCenter 通知 Host 端
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name("com.canvas.pinchToOverview"),
+                    object: nil,
+                    userInfo: nil,
+                    deliverImmediately: true
+                )
+            }
+        case .ended, .cancelled:
+            cumulativeMagnification = 0
+        default:
+            break
+        }
+
+        // 不调用 super，消费事件
     }
 }
 
