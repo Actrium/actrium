@@ -30,24 +30,24 @@
 
 ---
 
-## 3. 下载功能 ✅ 已实现
+## 3. 下载功能 ✅ 已实现 (Safari 同款)
 
 ### 实现方案
-- 实现 `WKDownloadDelegate` 协议
-- 通过 `WKNavigationDelegate.webView(_:decidePolicyFor:)` 检测下载
+- 实现 `DownloadManager` 集中管理所有下载
+- 实现 `DownloadItem` 跟踪单个下载的进度和状态
+- `DownloadPopoverView` Safari 风格下拉面板
+- `DownloadToolbarButton` 工具栏按钮（有活跃下载时显示指示器）
 - 检测条件：
   - `Content-Disposition: attachment` 响应头
-  - 不可渲染的 MIME 类型（zip, dmg, pdf 等）
+  - 链接带有 `download` 属性
+  - 不可渲染的 MIME 类型（zip, dmg, etc.）
 - 下载保存到 `~/Downloads`，自动处理重名文件
-- 下载完成后自动在 Finder 中显示
+- 双击打开文件，支持在 Finder 中显示
 
 ### 代码位置
-- `WebViewTabView.swift:WebViewHolder` (WKDownloadDelegate 实现)
-
-### 待改进
-- [ ] 下载进度 UI
-- [ ] 下载管理器窗口
-- [ ] 下载历史记录
+- `Downloads/DownloadManager.swift`
+- `Downloads/DownloadPopoverView.swift`
+- `WebViewTabView.swift:WebViewHolder`
 
 ---
 
@@ -69,7 +69,46 @@
 
 ---
 
-## 5. 浏览器功能完整性评估
+## 5. 打印功能 ✅ 已实现
+
+### 实现方案
+- 使用 `WKWebView.printOperation()` API
+- 快捷键: `Cmd+P`
+- 原生打印对话框
+
+### 代码位置
+- `WebViewTabView.swift:WebViewHolder.print()`
+- `CanvasApp.swift:printCurrentPage()`
+
+---
+
+## 6. 缩放功能 ✅ 已实现
+
+### 实现方案
+- 使用 `WKWebView.pageZoom` 属性
+- 快捷键：
+  - `Cmd++`: 放大 (最大 300%)
+  - `Cmd+-`: 缩小 (最小 50%)
+  - `Cmd+0`: 实际大小 (100%)
+
+### 代码位置
+- `WebViewTabView.swift:WebViewHolder.zoomIn/zoomOut/resetZoom()`
+- `CanvasApp.swift:zoomIn/zoomOut/resetZoom()`
+
+---
+
+## 7. 全屏模式 ✅ 已实现
+
+### 实现方案
+- 使用 `NSWindow.toggleFullScreen()`
+- 快捷键: `Ctrl+Cmd+F`
+
+### 代码位置
+- `CanvasApp.swift:toggleFullScreen()`
+
+---
+
+## 8. 浏览器功能完整性评估
 
 ### 已实现功能 ✅
 - 多标签页管理
@@ -82,24 +121,23 @@
 - 开发者工具（DevTools）
 - **Sidebar Favicon（带缓存）**
 - **Tab Overview 页面截图**
-- **下载功能（基础）**
+- **下载管理器（Safari 风格）**
 - **查找功能 (Cmd+F)**
+- **打印功能 (Cmd+P)**
+- **缩放功能 (Cmd+/Cmd-/Cmd+0)**
+- **全屏模式 (Ctrl+Cmd+F)**
 
 ### 待实现功能
 | 功能 | 优先级 | 复杂度 |
 |------|--------|--------|
-| 下载管理器 UI | 中 | 中 |
-| 打印功能 | 中 | 低 |
-| 缩放功能 | 中 | 低 |
 | Cookie 管理 | 中 | 中 |
 | 密码管理 | 低 | 高 |
 | 扩展系统 | 低 | 高 |
 | 阅读模式 | 低 | 中 |
-| 全屏模式 | 低 | 低 |
 
 ---
 
-## 6. 多进程模型对比
+## 9. 多进程模型对比
 
 ### 当前 Canvas 实现
 ```
