@@ -59,6 +59,8 @@ struct ContentView: View {
             }
             // 配置窗口：透明标题栏，让背景通栏
             .background(WindowAccessor())
+            // 强制清空窗口标题
+            .navigationTitle("")
         }
     }
 }
