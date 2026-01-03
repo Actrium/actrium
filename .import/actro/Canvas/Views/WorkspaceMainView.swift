@@ -379,6 +379,9 @@ struct WorkspaceMainView: View {
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
+                    // Downloads button
+                    DownloadToolbarButton()
+
                     Button(action: {}) {
                         Image(systemName: "square.and.arrow.up")
                     }
