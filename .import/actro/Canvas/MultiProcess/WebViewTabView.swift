@@ -124,25 +124,21 @@ struct WebViewMultiProcessTabView: View {
 
     var body: some View {
         ZStack {
-            // Focus 模式：显示占位符（实际内容由 FocusedWebOverlay 渲染）
-            // Overview 模式：显示实际 web 内容
-            if isFocused {
-                // 占位符 - 实际内容在 FocusedWebOverlay 层
-                Color(nsColor: .windowBackgroundColor)
-            } else {
-                WebViewTabView(
-                    url: url,
-                    containerSize: containerSize,
-                    title: $webTitle,
-                    isLoading: $isLoading
-                )
-            }
+            // Overview 模式：显示占位符（实际 web 内容由 FocusedWebOverlay 在 Focus 时渲染）
+            // 这样只有一个 WebView 实例（在 FocusedWebOverlay 中）
+            Color(nsColor: .windowBackgroundColor)
 
-            if isLoading && !isFocused {
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.3))
+            // 显示 URL 作为预览
+            if !isFocused {
+                VStack {
+                    Image(systemName: "globe")
+                        .font(.system(size: 40))
+                        .foregroundColor(.secondary)
+                    Text(url.host ?? url.absoluteString)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .frame(width: containerSize.width, height: containerSize.height)
