@@ -497,15 +497,17 @@ struct ViewBridgeMultiProcessTabView: View {
     let tab: Tab
     let containerSize: CGSize  // TabPanel 实际尺寸
     let coordinator: ViewBridgeCoordinator
+    var isFocused: Bool = false  // 是否当前 focused（只有 focused 的 tab 才发送配置）
 
     @State private var isLoading = true
     @State private var errorMessage: String?
 
-    init(tab: Tab, containerSize: CGSize, coordinator: ViewBridgeCoordinator) {
+    init(tab: Tab, containerSize: CGSize, coordinator: ViewBridgeCoordinator, isFocused: Bool = false) {
         self.tab = tab
         self.containerSize = containerSize
         self.coordinator = coordinator
-        fputs("🔵 ViewBridgeMultiProcessTabView.init: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize)\n", stderr)
+        self.isFocused = isFocused
+        fputs("🔵 ViewBridgeMultiProcessTabView.init: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), isFocused=\(isFocused)\n", stderr)
         fflush(stderr)
     }
 
@@ -524,12 +526,23 @@ struct ViewBridgeMultiProcessTabView: View {
                 .clipped()
                 .onAppear {
                     isLoading = false
-                    // Send tab config to service via DistributedNotificationCenter
-                    sendTabConfigToService()
+                    // 只有 focused 的 tab 才发送配置到 XPC service
+                    if isFocused {
+                        sendTabConfigToService()
+                    }
+                }
+                .onChange(of: isFocused) { _, newValue in
+                    // 当 tab 变成 focused 时，发送配置
+                    if newValue {
+                        fputs("📤 Tab became focused, sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
+                        sendTabConfigToService()
+                    }
                 }
                 .onChange(of: tab.unifiedScript) { _, _ in
-                    // Re-send config when script changes (e.g., reload)
-                    sendTabConfigToService()
+                    // Re-send config when script changes (e.g., reload), only if focused
+                    if isFocused {
+                        sendTabConfigToService()
+                    }
                 }
             } else {
                 unavailableView

@@ -1381,10 +1381,12 @@ private struct TabPanel: View {
 
             if hasRNContent {
                 // Remote view 尺寸 = TabPanel 实际尺寸
+                // 只有 focused 的 tab 才发送配置到 XPC service（解决多 tab 串台问题）
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     containerSize: CGSize(width: max(panelWidth, 1), height: max(panelHeight, 1)),
-                    coordinator: viewBridgeCoordinator
+                    coordinator: viewBridgeCoordinator,
+                    isFocused: isFocused
                 )
             } else if let _ = tab.htmlContent {
                 // 有 htmlContent，显示网页内容（暂时用占位）
