@@ -366,6 +366,42 @@ struct CanvasApp: App {
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(focusedViewModel == nil)
+
+                Divider()
+
+                Button("打印...") {
+                    printCurrentPage()
+                }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(focusedViewModel == nil)
+            }
+
+            // View menu - Zoom controls
+            CommandGroup(after: .toolbar) {
+                Button("放大") {
+                    zoomIn()
+                }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(focusedViewModel == nil)
+
+                Button("缩小") {
+                    zoomOut()
+                }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(focusedViewModel == nil)
+
+                Button("实际大小") {
+                    resetZoom()
+                }
+                .keyboardShortcut("0", modifiers: .command)
+                .disabled(focusedViewModel == nil)
+
+                Divider()
+
+                Button("进入全屏") {
+                    toggleFullScreen()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .control])
             }
 
             // Tab switching shortcuts
@@ -439,6 +475,57 @@ struct CanvasApp: App {
                 historyVM.recordVisit(tab: tab)
             }
         }
+    }
+
+    // MARK: - Print
+
+    private func printCurrentPage() {
+        guard let vm = focusedViewModel,
+              let tab = vm.currentTab,
+              case .web = tab.contentType,
+              let holder = WebViewHolderManager.shared.existingHolder(for: tab.id) else {
+            return
+        }
+        holder.print()
+    }
+
+    // MARK: - Zoom
+
+    private func zoomIn() {
+        guard let vm = focusedViewModel,
+              let tab = vm.currentTab,
+              case .web = tab.contentType,
+              let holder = WebViewHolderManager.shared.existingHolder(for: tab.id) else {
+            return
+        }
+        holder.zoomIn()
+    }
+
+    private func zoomOut() {
+        guard let vm = focusedViewModel,
+              let tab = vm.currentTab,
+              case .web = tab.contentType,
+              let holder = WebViewHolderManager.shared.existingHolder(for: tab.id) else {
+            return
+        }
+        holder.zoomOut()
+    }
+
+    private func resetZoom() {
+        guard let vm = focusedViewModel,
+              let tab = vm.currentTab,
+              case .web = tab.contentType,
+              let holder = WebViewHolderManager.shared.existingHolder(for: tab.id) else {
+            return
+        }
+        holder.resetZoom()
+    }
+
+    // MARK: - Fullscreen
+
+    private func toggleFullScreen() {
+        guard let window = NSApp.keyWindow else { return }
+        window.toggleFullScreen(nil)
     }
 }
 
