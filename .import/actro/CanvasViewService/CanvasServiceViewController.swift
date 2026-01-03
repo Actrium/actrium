@@ -264,9 +264,10 @@ private class ServiceReactNativeHost {
             currentContainerSize = CGSize(width: width, height: height)
         }
 
-        // Build full properties
+        // Build full properties using single tab mode (matching SingleTabRootView.swift)
         let properties: [String: Any] = [
-            "tabs": [tabDict],
+            "singleTabMode": true,
+            "tab": tabDict,
             "currentTabId": tabId,
             "isLeftPanelVisible": true,
             "isRightPanelVisible": true,
@@ -575,31 +576,31 @@ private func setupReactNativeContent(in containerView: NSView) {
     // Initial properties - will be updated when host sends tab config via IPC
     // Show a simple "XPC Ready" state initially (minimal script to verify RN works)
     let initialTabId = UUID().uuidString
+    let initialTab: [String: Any] = [
+        "id": initialTabId,
+        "title": "XPC Service Ready",
+        "backgroundColor": "#1e40af",  // 深蓝色背景，易于区分
+        "unifiedScript": """
+        const { View, Text } = require('react-native');
+        module.exports = function XPCReady() {
+            return React.createElement(View, {
+                style: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1e40af' }
+            }, [
+                React.createElement(Text, {
+                    key: 't1',
+                    style: { fontSize: 20, fontWeight: 'bold', color: '#fff' }
+                }, 'XPC Service Ready'),
+                React.createElement(Text, {
+                    key: 't2',
+                    style: { fontSize: 12, color: '#93c5fd', marginTop: 8 }
+                }, 'Waiting for tab config from host...')
+            ]);
+        };
+        """
+    ]
     let initialProperties: [String: Any] = [
-        "tabs": [
-            [
-                "id": initialTabId,
-                "title": "XPC Service Ready",
-                "backgroundColor": "#1e40af",  // 深蓝色背景，易于区分
-                "unifiedScript": """
-                const { View, Text } = require('react-native');
-                module.exports = function XPCReady() {
-                    return React.createElement(View, {
-                        style: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1e40af' }
-                    }, [
-                        React.createElement(Text, {
-                            key: 't1',
-                            style: { fontSize: 20, fontWeight: 'bold', color: '#fff' }
-                        }, 'XPC Service Ready'),
-                        React.createElement(Text, {
-                            key: 't2',
-                            style: { fontSize: 12, color: '#93c5fd', marginTop: 8 }
-                        }, 'Waiting for tab config from host...')
-                    ]);
-                };
-                """
-            ]
-        ],
+        "singleTabMode": true,
+        "tab": initialTab,
         "currentTabId": initialTabId,
         "isLeftPanelVisible": true,
         "isRightPanelVisible": true
