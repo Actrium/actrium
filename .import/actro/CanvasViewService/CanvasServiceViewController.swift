@@ -76,10 +76,20 @@ private class ResizableContainerView: NSView {
         self.rnView = view
     }
 
-    // MARK: - Magnify Gesture Handling (捏合手势)
+    // MARK: - Magnify Gesture Handling (Mode Switching Trigger #4)
+    //
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 双指捏合手势处理 - Focus → Overview 退出                              │
+    // ├─────────────────────────────────────────────────────────────────────┤
+    // │ 架构说明:                                                            │
+    // │ - NSRemoteView 会将事件直接路由到 Service 进程                         │
+    // │ - 无需 Accessibility 权限（区别于 CGEventTap 方案）                    │
+    // │ - 通过 DistributedNotificationCenter 通知 Host 端                     │
+    // │ - Host 端在 WorkspaceMainView 中监听并调用 exitToOverview()           │
+    // └─────────────────────────────────────────────────────────────────────┘
 
     override func magnify(with event: NSEvent) {
-        debugLog("🤏 [Service] magnify: phase=\(event.phase.rawValue), delta=\(event.magnification), cumulative=\(cumulativeMagnification)")
+        debugLog("🤏 magnify: phase=\(event.phase.rawValue), delta=\(event.magnification), cumulative=\(cumulativeMagnification)")
 
         switch event.phase {
         case .began:
@@ -87,12 +97,11 @@ private class ResizableContainerView: NSView {
         case .changed:
             cumulativeMagnification += event.magnification
 
-            // 捏合缩小超过阈值，通知 Host 端
+            // 捏合缩小超过阈值 (-0.3)，通知 Host 端
             if cumulativeMagnification < -0.3 {
-                debugLog("🤏 [Service] Threshold reached! Sending notification to host")
+                debugLog("🤏 Threshold reached → posting pinchToOverview")
                 cumulativeMagnification = 0
 
-                // 使用 DistributedNotificationCenter 通知 Host 端
                 DistributedNotificationCenter.default().postNotificationName(
                     NSNotification.Name("com.canvas.pinchToOverview"),
                     object: nil,
@@ -105,8 +114,6 @@ private class ResizableContainerView: NSView {
         default:
             break
         }
-
-        // 不调用 super，消费事件
     }
 }
 
