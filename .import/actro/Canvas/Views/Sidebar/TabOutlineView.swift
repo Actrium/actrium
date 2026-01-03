@@ -862,96 +862,15 @@ struct TabOutlineView: NSViewRepresentable {
         }
 
         private func makeTabRowView(tab: Tab, group: TabGroup?, outlineView: NSOutlineView) -> NSView {
-            let identifier = NSUserInterfaceItemIdentifier("TabRow")
-
-            // Always create a new view to avoid reuse issues
-            let rowView = NSView()
-            rowView.identifier = identifier
-
-            // Group color bar (if in a group) - spans full height for continuous line effect
-            let colorBarWidth: CGFloat = group != nil ? 2 : 0
-            let colorBarLeading: CGFloat = 4
-
-            if let group = group {
-                let colorBar = NSView()
-                colorBar.wantsLayer = true
-                colorBar.layer?.backgroundColor = group.color.nsColor.cgColor
-                colorBar.translatesAutoresizingMaskIntoConstraints = false
-                rowView.addSubview(colorBar)
-                NSLayoutConstraint.activate([
-                    colorBar.leadingAnchor.constraint(equalTo: rowView.leadingAnchor, constant: colorBarLeading),
-                    colorBar.widthAnchor.constraint(equalToConstant: colorBarWidth),
-                    colorBar.topAnchor.constraint(equalTo: rowView.topAnchor),
-                    colorBar.bottomAnchor.constraint(equalTo: rowView.bottomAnchor)
-                ])
-            }
-
-            let stackView = NSStackView()
-            stackView.orientation = .horizontal
-            stackView.spacing = 8
-            stackView.alignment = .centerY
-            stackView.translatesAutoresizingMaskIntoConstraints = false
-
-            // Icon - show favicon for web tabs, default icon for others
             let isSelected = viewModel.currentTabId == tab.id
-            let iconView = NSImageView()
-            iconView.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                iconView.widthAnchor.constraint(equalToConstant: 16),
-                iconView.heightAnchor.constraint(equalToConstant: 16)
-            ])
 
-            // Set default icon first
-            iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
-            iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
-
-            // Load favicon for web tabs (with caching)
-            if case .web(let url) = tab.contentType,
-               let host = url.host {
-                Task {
-                    // Check cache first
-                    if let cachedImage = await FaviconCache.shared.get(host) {
-                        await MainActor.run {
-                            iconView.image = cachedImage
-                            iconView.contentTintColor = nil
-                        }
-                        return
-                    }
-
-                    // Fetch from network
-                    guard let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32") else { return }
-                    do {
-                        let (data, _) = try await URLSession.shared.data(from: faviconURL)
-                        if let image = NSImage(data: data) {
-                            await FaviconCache.shared.set(host, image: image)
-                            await MainActor.run {
-                                iconView.image = image
-                                iconView.contentTintColor = nil
-                            }
-                        }
-                    } catch {
-                        // Keep default icon on failure
-                    }
-                }
-            }
-
-            // Title
-            let titleLabel = NSTextField(labelWithString: tab.title)
-            titleLabel.font = NSFont.systemFont(ofSize: 13, weight: isSelected ? .medium : .regular)
-            titleLabel.textColor = .labelColor
-            titleLabel.lineBreakMode = .byTruncatingTail
-
-            stackView.addArrangedSubview(iconView)
-            stackView.addArrangedSubview(titleLabel)
-
-            rowView.addSubview(stackView)
-            // Adjust leading constraint to account for color bar
-            let stackLeading: CGFloat = group != nil ? (colorBarLeading + colorBarWidth + 8) : 4
-            NSLayoutConstraint.activate([
-                stackView.leadingAnchor.constraint(equalTo: rowView.leadingAnchor, constant: stackLeading),
-                stackView.trailingAnchor.constraint(equalTo: rowView.trailingAnchor, constant: -8),
-                stackView.centerYAnchor.constraint(equalTo: rowView.centerYAnchor)
-            ])
+            // Use custom TabRowView for hover tracking and close button
+            let rowView = TabRowView(
+                tab: tab,
+                group: group,
+                isSelected: isSelected,
+                viewModel: viewModel
+            )
 
             return rowView
         }
@@ -1385,6 +1304,170 @@ private class ColorCircleView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         NSCursor.pop()
+    }
+}
+
+// MARK: - Tab Row View with Hover Close Button
+
+private class TabRowView: NSView {
+    private let tab: Tab
+    private let group: TabGroup?
+    private let isSelected: Bool
+    private weak var viewModel: BrowserViewModel?
+
+    private var closeButton: NSButton!
+    private var isHovering = false {
+        didSet {
+            updateCloseButtonVisibility()
+        }
+    }
+
+    init(tab: Tab, group: TabGroup?, isSelected: Bool, viewModel: BrowserViewModel) {
+        self.tab = tab
+        self.group = group
+        self.isSelected = isSelected
+        self.viewModel = viewModel
+        super.init(frame: .zero)
+        setupViews()
+        setupTrackingArea()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupViews() {
+        // Group color bar (if in a group)
+        let colorBarWidth: CGFloat = group != nil ? 2 : 0
+        let colorBarLeading: CGFloat = 4
+
+        if let group = group {
+            let colorBar = NSView()
+            colorBar.wantsLayer = true
+            colorBar.layer?.backgroundColor = group.color.nsColor.cgColor
+            colorBar.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(colorBar)
+            NSLayoutConstraint.activate([
+                colorBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: colorBarLeading),
+                colorBar.widthAnchor.constraint(equalToConstant: colorBarWidth),
+                colorBar.topAnchor.constraint(equalTo: topAnchor),
+                colorBar.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+        }
+
+        let stackView = NSStackView()
+        stackView.orientation = .horizontal
+        stackView.spacing = 8
+        stackView.alignment = .centerY
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+
+        // Icon - show favicon for web tabs, default icon for others
+        let iconView = NSImageView()
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16)
+        ])
+
+        // Set default icon first
+        iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
+        iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+
+        // Load favicon for web tabs (with caching)
+        if case .web(let url) = tab.contentType,
+           let host = url.host {
+            Task {
+                // Check cache first
+                if let cachedImage = await FaviconCache.shared.get(host) {
+                    await MainActor.run {
+                        iconView.image = cachedImage
+                        iconView.contentTintColor = nil
+                    }
+                    return
+                }
+
+                // Fetch from network
+                guard let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32") else { return }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: faviconURL)
+                    if let image = NSImage(data: data) {
+                        await FaviconCache.shared.set(host, image: image)
+                        await MainActor.run {
+                            iconView.image = image
+                            iconView.contentTintColor = nil
+                        }
+                    }
+                } catch {
+                    // Keep default icon on failure
+                }
+            }
+        }
+
+        // Title
+        let titleLabel = NSTextField(labelWithString: tab.title)
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: isSelected ? .medium : .regular)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        stackView.addArrangedSubview(iconView)
+        stackView.addArrangedSubview(titleLabel)
+
+        addSubview(stackView)
+
+        // Close button - Safari style (x mark in circle)
+        closeButton = NSButton(frame: .zero)
+        closeButton.bezelStyle = .inline
+        closeButton.isBordered = false
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close tab")
+        closeButton.imageScaling = .scaleProportionallyUpOrDown
+        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.target = self
+        closeButton.action = #selector(closeTabClicked)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.isHidden = !isSelected  // Show only when selected or hovering
+        addSubview(closeButton)
+
+        // Adjust leading constraint to account for color bar
+        let stackLeading: CGFloat = group != nil ? (colorBarLeading + colorBarWidth + 8) : 4
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: stackLeading),
+            stackView.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+            stackView.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 16),
+            closeButton.heightAnchor.constraint(equalToConstant: 16)
+        ])
+    }
+
+    private func setupTrackingArea() {
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+    }
+
+    private func updateCloseButtonVisibility() {
+        closeButton.isHidden = !(isSelected || isHovering)
+    }
+
+    @objc private func closeTabClicked() {
+        viewModel?.closeTab(id: tab.id)
+    }
+
+    // MARK: - Mouse Tracking
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
     }
 }
 
