@@ -70,8 +70,8 @@ private struct WindowAccessor: NSViewRepresentable {
         let view = NSView()
         DispatchQueue.main.async {
             if let window = view.window {
-                // 透明标题栏，让背景颜色通栏
-                window.titlebarAppearsTransparent = true
+                // 设置窗口背景色（影响 sidebar 顶栏区域）
+                window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
             }
         }
         return view
