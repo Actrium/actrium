@@ -409,61 +409,102 @@ struct CanvasApp: App {
     }
 }
 
-// MARK: - Magnify Event Interceptor (NSWindow.sendEvent Swizzling)
+// MARK: - Magnify Event Interceptor (CGEventTap - Quartz Level)
 
-/// 通过 method swizzling 在 NSWindow.sendEvent 层面拦截 magnify 手势
-/// 这是最底层的拦截方式，在事件分发到任何视图之前捕获
+/// 通过 CGEventTap 在 Quartz 层面拦截手势事件
+/// 这是最底层的拦截方式，在事件到达任何窗口之前捕获
 final class MagnifyEventInterceptor {
     static var isInstalled = false
     static var cumulativeMagnification: CGFloat = 0
+    static var eventTap: CFMachPort?
+    static var runLoopSource: CFRunLoopSource?
 
     /// 安装拦截器（只能调用一次）
     static func install() {
         guard !isInstalled else { return }
         isInstalled = true
 
-        let originalSelector = #selector(NSWindow.sendEvent(_:))
-        let swizzledSelector = #selector(NSWindow.canvas_sendEvent(_:))
+        // 创建 CGEventTap 来监听手势事件
+        // 使用 .cghidEventTap 位置，这是在 HID 系统之后、窗口系统之前
+        let eventMask: CGEventMask = (1 << CGEventType.gesture.rawValue)
 
-        guard let originalMethod = class_getInstanceMethod(NSWindow.self, originalSelector),
-              let swizzledMethod = class_getInstanceMethod(NSWindow.self, swizzledSelector) else {
-            fputs("❌ MagnifyEventInterceptor: Failed to get methods\n", stderr)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cghidEventTap,  // 在 HID 系统级别拦截
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
+                return MagnifyEventInterceptor.handleEvent(proxy: proxy, type: type, event: event)
+            },
+            userInfo: nil
+        ) else {
+            fputs("❌ MagnifyEventInterceptor: Failed to create CGEventTap (need Accessibility permissions?)\n", stderr)
             return
         }
 
-        method_exchangeImplementations(originalMethod, swizzledMethod)
-        fputs("🤏 MagnifyEventInterceptor: NSWindow.sendEvent swizzled\n", stderr)
+        eventTap = tap
+        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+
+        if let source = runLoopSource {
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            fputs("🤏 MagnifyEventInterceptor: CGEventTap installed at HID level\n", stderr)
+        }
     }
-}
 
-extension NSWindow {
-    /// Swizzled sendEvent - 拦截 magnify 事件
-    @objc func canvas_sendEvent(_ event: NSEvent) {
-        // 检测 magnify 事件
-        if event.type == .magnify || event.type == .beginGesture || event.type == .endGesture {
-            fputs("🤏 [sendEvent] type=\(event.type.rawValue), magnification=\(event.type == .magnify ? event.magnification : 0)\n", stderr)
+    /// 处理 CGEvent
+    static func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        // 获取手势子类型
+        let subtype = event.getIntegerValueField(.gestureType)
 
-            // 处理 magnify 事件
-            if event.type == .beginGesture {
-                MagnifyEventInterceptor.cumulativeMagnification = 0
-            } else if event.type == .magnify {
-                MagnifyEventInterceptor.cumulativeMagnification += event.magnification
+        // 子类型 8 = magnify (缩放手势)
+        // 子类型 6 = rotate (旋转手势)
+        // 子类型 1 = swipe (滑动手势)
+        if subtype == 8 {  // magnify
+            let magnification = event.getDoubleValueField(.gestureZoomValue)
+            fputs("🤏 [CGEventTap] magnify: \(magnification), cumulative: \(cumulativeMagnification)\n", stderr)
 
-                // 捏合缩小超过阈值
-                if MagnifyEventInterceptor.cumulativeMagnification < -0.3 {
-                    fputs("🤏 [sendEvent] Threshold reached! Posting notification\n", stderr)
-                    MagnifyEventInterceptor.cumulativeMagnification = 0
-                    // 发送通知让 WorkspaceMainView 处理
+            cumulativeMagnification += magnification
+
+            // 捏合缩小超过阈值
+            if cumulativeMagnification < -0.3 {
+                fputs("🤏 [CGEventTap] Threshold reached! Posting notification\n", stderr)
+                cumulativeMagnification = 0
+
+                // 在主线程发送通知
+                DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .pinchToOverview, object: nil)
-                    return  // 消费事件，不传递给视图
                 }
-            } else if event.type == .endGesture {
-                MagnifyEventInterceptor.cumulativeMagnification = 0
+
+                // 返回 nil 消费事件，阻止传递
+                return nil
             }
+        } else if subtype == 61 {  // gesture begin
+            fputs("🤏 [CGEventTap] gesture begin\n", stderr)
+            cumulativeMagnification = 0
+        } else if subtype == 62 {  // gesture end
+            fputs("🤏 [CGEventTap] gesture end\n", stderr)
+            cumulativeMagnification = 0
+        } else {
+            // 其他手势类型，记录一下
+            fputs("🤏 [CGEventTap] gesture subtype=\(subtype)\n", stderr)
         }
 
-        // 调用原始实现（由于 swizzling，这实际上调用的是原始的 sendEvent）
-        canvas_sendEvent(event)
+        // 继续传递事件
+        return Unmanaged.passRetained(event)
+    }
+
+    /// 清理
+    static func uninstall() {
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+        }
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        eventTap = nil
+        runLoopSource = nil
+        isInstalled = false
     }
 }
 
