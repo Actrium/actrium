@@ -553,38 +553,51 @@ class DownloadableWebView: WKWebView {
     /// Store the detected element info for context menu
     private var contextMenuImageURL: URL?
     private var contextMenuLinkURL: URL?
+    private var pendingContextMenuPoint: CGPoint?
 
-    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-        super.willOpenMenu(menu, with: event)
-
-        // Get click location in view coordinates
+    /// Pre-detect element on right mouse down
+    override func rightMouseDown(with event: NSEvent) {
         let locationInView = convert(event.locationInWindow, from: nil)
+        pendingContextMenuPoint = locationInView
 
-        // Convert to web content coordinates (flip Y axis for web)
-        let webX = locationInView.x
-        let webY = bounds.height - locationInView.y
+        // Pre-detect element at click position
+        detectElementAt(point: locationInView)
 
-        // Use synchronous JavaScript to detect element at click position
+        super.rightMouseDown(with: event)
+    }
+
+    private func detectElementAt(point: CGPoint) {
         let js = """
         (function() {
-            var x = \(webX);
-            var y = \(webY);
+            var x = \(point.x);
+            var y = \(point.y);
             var element = document.elementFromPoint(x, y);
             var result = { imageURL: null, linkURL: null };
 
-            // Check for image
             if (element) {
+                // Check for image
                 if (element.tagName === 'IMG' && element.src) {
                     result.imageURL = element.src;
                 }
-                // Check for background image
-                var bgImage = window.getComputedStyle(element).backgroundImage;
-                if (bgImage && bgImage !== 'none' && bgImage.startsWith('url(')) {
-                    var url = bgImage.slice(5, -2);
-                    if (!result.imageURL) result.imageURL = url;
+
+                // Check parent if current is not IMG
+                if (!result.imageURL) {
+                    var img = element.querySelector && element.querySelector('img');
+                    if (img && img.src) {
+                        result.imageURL = img.src;
+                    }
                 }
+
+                // Check for background image
+                if (!result.imageURL) {
+                    var bgImage = window.getComputedStyle(element).backgroundImage;
+                    if (bgImage && bgImage !== 'none' && bgImage.startsWith('url(')) {
+                        result.imageURL = bgImage.slice(5, -2).replace(/['"]/g, '');
+                    }
+                }
+
                 // Check for link
-                var linkElement = element.closest('a');
+                var linkElement = element.closest ? element.closest('a') : null;
                 if (linkElement && linkElement.href) {
                     result.linkURL = linkElement.href;
                 }
@@ -593,36 +606,40 @@ class DownloadableWebView: WKWebView {
         })();
         """
 
-        // Run JavaScript synchronously using a semaphore
-        var detectedImageURL: URL?
-        var detectedLinkURL: URL?
+        evaluateJavaScript(js) { [weak self] result, error in
+            guard let self = self else { return }
 
-        let semaphore = DispatchSemaphore(value: 0)
-        evaluateJavaScript(js) { result, error in
+            self.contextMenuImageURL = nil
+            self.contextMenuLinkURL = nil
+
             if let jsonString = result as? String,
                let data = jsonString.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+
                 if let imageURLString = json["imageURL"] as? String {
-                    detectedImageURL = URL(string: imageURLString)
+                    self.contextMenuImageURL = URL(string: imageURLString)
                 }
                 if let linkURLString = json["linkURL"] as? String {
-                    detectedLinkURL = URL(string: linkURLString)
+                    self.contextMenuLinkURL = URL(string: linkURLString)
                 }
             }
-            semaphore.signal()
         }
+    }
 
-        // Wait briefly for JavaScript to complete (with timeout)
-        _ = semaphore.wait(timeout: .now() + 0.1)
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
 
-        // Store for later use
-        contextMenuImageURL = detectedImageURL
-        contextMenuLinkURL = detectedLinkURL
+        // Small delay to ensure JS detection has completed
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak menu] in
+            guard let self = self, let menu = menu else { return }
+            self.addDownloadMenuItems(to: menu)
+        }
+    }
 
-        // Add download menu items
+    private func addDownloadMenuItems(to menu: NSMenu) {
         var addedSeparator = false
 
-        if let imageURL = detectedImageURL {
+        if let imageURL = contextMenuImageURL {
             if !addedSeparator {
                 menu.addItem(NSMenuItem.separator())
                 addedSeparator = true
@@ -638,7 +655,7 @@ class DownloadableWebView: WKWebView {
             menu.addItem(downloadImageItem)
         }
 
-        if let linkURL = detectedLinkURL, linkURL != detectedImageURL {
+        if let linkURL = contextMenuLinkURL, linkURL != contextMenuImageURL {
             if !addedSeparator {
                 menu.addItem(NSMenuItem.separator())
                 addedSeparator = true
