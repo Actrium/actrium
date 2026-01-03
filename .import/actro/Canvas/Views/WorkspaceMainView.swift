@@ -170,6 +170,13 @@ struct WorkspaceMainView: View {
                         },
                         onLoadingStateChanged: { loading in
                             isWebLoading = loading
+                        },
+                        onOpenNewWindow: { newURL in
+                            // Open target="_blank" links in a new tab
+                            let newTab = viewModel.addNewTab()
+                            viewModel.navigateCurrentTab(to: newURL.absoluteString)
+                            // Enter focus mode for the new tab
+                            enterFocus(tabId: newTab.id)
                         }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
