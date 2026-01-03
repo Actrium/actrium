@@ -168,6 +168,9 @@ struct CanvasApp: App {
 
         // Initialize TabProcessManager early
         _ = TabProcessManager.shared
+
+        // Swizzle NSWindow.sendEvent to intercept magnify gestures
+        MagnifyEventInterceptor.install()
     }
 
     var body: some Scene {
@@ -404,4 +407,66 @@ struct CanvasApp: App {
             }
         }
     }
+}
+
+// MARK: - Magnify Event Interceptor (NSWindow.sendEvent Swizzling)
+
+/// 通过 method swizzling 在 NSWindow.sendEvent 层面拦截 magnify 手势
+/// 这是最底层的拦截方式，在事件分发到任何视图之前捕获
+final class MagnifyEventInterceptor {
+    static var isInstalled = false
+    static var cumulativeMagnification: CGFloat = 0
+
+    /// 安装拦截器（只能调用一次）
+    static func install() {
+        guard !isInstalled else { return }
+        isInstalled = true
+
+        let originalSelector = #selector(NSWindow.sendEvent(_:))
+        let swizzledSelector = #selector(NSWindow.canvas_sendEvent(_:))
+
+        guard let originalMethod = class_getInstanceMethod(NSWindow.self, originalSelector),
+              let swizzledMethod = class_getInstanceMethod(NSWindow.self, swizzledSelector) else {
+            fputs("❌ MagnifyEventInterceptor: Failed to get methods\n", stderr)
+            return
+        }
+
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+        fputs("🤏 MagnifyEventInterceptor: NSWindow.sendEvent swizzled\n", stderr)
+    }
+}
+
+extension NSWindow {
+    /// Swizzled sendEvent - 拦截 magnify 事件
+    @objc func canvas_sendEvent(_ event: NSEvent) {
+        // 检测 magnify 事件
+        if event.type == .magnify || event.type == .beginGesture || event.type == .endGesture {
+            fputs("🤏 [sendEvent] type=\(event.type.rawValue), magnification=\(event.type == .magnify ? event.magnification : 0)\n", stderr)
+
+            // 处理 magnify 事件
+            if event.type == .beginGesture {
+                MagnifyEventInterceptor.cumulativeMagnification = 0
+            } else if event.type == .magnify {
+                MagnifyEventInterceptor.cumulativeMagnification += event.magnification
+
+                // 捏合缩小超过阈值
+                if MagnifyEventInterceptor.cumulativeMagnification < -0.3 {
+                    fputs("🤏 [sendEvent] Threshold reached! Posting notification\n", stderr)
+                    MagnifyEventInterceptor.cumulativeMagnification = 0
+                    // 发送通知让 WorkspaceMainView 处理
+                    NotificationCenter.default.post(name: .pinchToOverview, object: nil)
+                    return  // 消费事件，不传递给视图
+                }
+            } else if event.type == .endGesture {
+                MagnifyEventInterceptor.cumulativeMagnification = 0
+            }
+        }
+
+        // 调用原始实现（由于 swizzling，这实际上调用的是原始的 sendEvent）
+        canvas_sendEvent(event)
+    }
+}
+
+extension Notification.Name {
+    static let pinchToOverview = Notification.Name("pinchToOverview")
 }
