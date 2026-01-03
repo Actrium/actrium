@@ -38,6 +38,7 @@ struct WebViewTabView: NSViewRepresentable {
         webView.allowsBackForwardNavigationGestures = true
 
         // 加载 URL
+        context.coordinator.loadedURL = url
         let request = URLRequest(url: url)
         webView.load(request)
 
@@ -47,8 +48,10 @@ struct WebViewTabView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        // 如果 URL 变化，重新加载
-        if webView.url != url {
+        // 只有当请求的 URL 真正变化时才重新加载
+        // 使用 coordinator 跟踪，避免 webView.url 在加载中为 nil 导致的重复加载
+        if context.coordinator.loadedURL != url {
+            context.coordinator.loadedURL = url
             let request = URLRequest(url: url)
             webView.load(request)
             fputs("🌐 WebViewTabView: URL changed, reloading \(url.absoluteString)\n", stderr)
@@ -59,6 +62,7 @@ struct WebViewTabView: NSViewRepresentable {
 
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var parent: WebViewTabView
+        var loadedURL: URL?
 
         init(_ parent: WebViewTabView) {
             self.parent = parent
