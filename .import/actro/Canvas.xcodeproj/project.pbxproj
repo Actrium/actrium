@@ -137,16 +137,22 @@
 		};
 		B3E458A22EC731A30014D74C /* Canvas */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = Canvas;
 			sourceTree = "<group>";
 		};
 		B3E458B22EC731A40014D74C /* CanvasTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasTests;
 			sourceTree = "<group>";
 		};
 		B3E458BC2EC731A40014D74C /* CanvasUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasUITests;
 			sourceTree = "<group>";
 		};
@@ -371,7 +377,7 @@
 			mainGroup = B3E458972EC731A30014D74C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "Packages/CanvasIPC" */,
+				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "CanvasIPC" */,
 				B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -450,13 +456,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -471,13 +473,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -720,7 +718,10 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = "$(inherited)  ";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					" ",
+				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
@@ -780,7 +781,10 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_LDFLAGS = "$(inherited)  ";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					" ",
+				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -987,7 +991,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "Packages/CanvasIPC" */ = {
+		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "CanvasIPC" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/CanvasIPC;
 		};
