@@ -789,15 +789,18 @@ struct WorkspaceMainView: View {
     private let floatingTitleBarHeight: CGFloat = 24
 
     /// 计算间距（卡片之间）和垂直边距
-    /// - 间距 = windowWidth / (卡片数 × 7)，下限 16px
-    /// - 垂直间距 = 水平间距 + 悬浮标题栏高度（为标题栏留出空间）
-    /// - 垂直边距 = 间距 × 1.25 + 悬浮标题栏高度
+    /// - 水平间距 = windowWidth / (卡片数 × 3) × 2.5，下限 40px（2.5x 原值）
+    /// - 垂直间距 = 基础间距 + 悬浮标题栏高度（为标题栏留出空间）
+    /// - 垂直边距 = 基础间距 × 1.25 + 悬浮标题栏高度
     private func calculateSpacing(windowWidth: CGFloat, totalCards: Int) -> (hSpacing: CGFloat, vSpacing: CGFloat, verticalMargin: CGFloat) {
         let effectiveCards = max(totalCards, 4)
+        // 基础间距用于垂直方向和边距计算
         let baseSpacing = max(16, windowWidth / (CGFloat(effectiveCards) * 7))
+        // 水平间距增加到 2.5 倍
+        let hSpacing = max(40, baseSpacing * 2.5)
         let vSpacing = baseSpacing + floatingTitleBarHeight  // 纵向间距包含标题栏高度
         let verticalMargin = baseSpacing * 1.25 + floatingTitleBarHeight  // 顶部边距也要留空间给第一行标题栏
-        return (baseSpacing, vSpacing, verticalMargin)
+        return (hSpacing, vSpacing, verticalMargin)
     }
 
     /// 网格布局计算
