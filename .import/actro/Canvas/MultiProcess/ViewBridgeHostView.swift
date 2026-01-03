@@ -654,7 +654,7 @@ struct ViewBridgeMultiProcessTabView: View {
         var tabConfig: [String: Any] = [
             "tabId": tab.id.uuidString,
             "title": tab.title,
-            "backgroundColor": tab.backgroundColor ?? "#1a1a2e",
+            "backgroundColor": tab.backgroundColor,
             "containerWidth": containerSize.width,
             "containerHeight": containerSize.height
         ]
