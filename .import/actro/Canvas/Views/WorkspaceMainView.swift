@@ -1205,10 +1205,10 @@ private struct AddressBarContainer: View {
     var body: some View {
         Group {
             if isEditing {
-                // 编辑状态：放大镜 + 输入框
+                // 编辑状态：放大镜 + 输入框 + 右侧按钮
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(Color.white.opacity(0.85))
+                        .foregroundStyle(Color.white.opacity(0.7))
                         .frame(width: 16, height: 16)
 
                     FocusableTextField(
@@ -1219,6 +1219,21 @@ private struct AddressBarContainer: View {
                             onNavigate?(text)
                         }
                     )
+
+                    // 保留右侧按钮
+                    Button(action: toggleBookmark) {
+                        Image(systemName: isBookmarked ? "star.fill" : "star")
+                            .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
+                    }
+                    .buttonStyle(.borderless)
+                    .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
+
+                    Button(action: refreshAction) {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .buttonStyle(.borderless)
+                    .help("刷新")
                 }
             } else {
                 // 非编辑状态：左图标 + 中间标题 + 右图标
