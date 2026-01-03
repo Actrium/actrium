@@ -1,6 +1,22 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Favicon Cache
+
+/// Simple in-memory cache for favicons to avoid repeated network requests
+private actor FaviconCache {
+    static let shared = FaviconCache()
+    private var cache: [String: NSImage] = [:]
+
+    func get(_ host: String) -> NSImage? {
+        cache[host]
+    }
+
+    func set(_ host: String, image: NSImage) {
+        cache[host] = image
+    }
+}
+
 // MARK: - Notification Names
 
 extension Notification.Name {
@@ -889,18 +905,28 @@ struct TabOutlineView: NSViewRepresentable {
             iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
             iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
 
-            // Load favicon for web tabs
+            // Load favicon for web tabs (with caching)
             if case .web(let url) = tab.contentType,
-               let host = url.host,
-               let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32") {
-                // Async load favicon
+               let host = url.host {
                 Task {
+                    // Check cache first
+                    if let cachedImage = await FaviconCache.shared.get(host) {
+                        await MainActor.run {
+                            iconView.image = cachedImage
+                            iconView.contentTintColor = nil
+                        }
+                        return
+                    }
+
+                    // Fetch from network
+                    guard let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32") else { return }
                     do {
                         let (data, _) = try await URLSession.shared.data(from: faviconURL)
                         if let image = NSImage(data: data) {
+                            await FaviconCache.shared.set(host, image: image)
                             await MainActor.run {
                                 iconView.image = image
-                                iconView.contentTintColor = nil  // Use original colors
+                                iconView.contentTintColor = nil
                             }
                         }
                     } catch {
