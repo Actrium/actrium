@@ -28,7 +28,7 @@ struct WorkspaceMainView: View {
     @State private var addressInputText: String = ""
     @State private var isAddressBarEditing: Bool = false
     @State private var isAddressBarFirstResponder: Bool = false
-    @State private var eventMonitor: Any?
+    @State private var keyEventMonitor: Any?
 
     // Search Tabs 状态
     @State private var searchTabsText: String = ""
@@ -147,16 +147,6 @@ struct WorkspaceMainView: View {
                         isAddressBarFirstResponder = false
                     }
                 }
-                // 双指捏合：Focus 模式下缩小 → Overview
-                .gesture(
-                    MagnificationGesture()
-                        .onEnded { value in
-                            // 只在 Focus 模式下响应，且捏合缩小到阈值以下
-                            if case .focus = viewModel.canvasMode, value < 0.7 {
-                                exitToOverview()
-                            }
-                        }
-                )
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
@@ -320,7 +310,7 @@ struct WorkspaceMainView: View {
             // Note: canvasMode defaults to .overview, no need to set explicitly
 
             // 监听键盘快捷键：Cmd+Shift+\ toggle Focus <-> Overview (和 Safari 一致)
-            eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 // Cmd+Shift+\ (keyCode 42 = \)：Toggle Focus <-> Overview
                 let cmdShift: NSEvent.ModifierFlags = [.command, .shift]
                 if event.keyCode == 42 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(cmdShift) {
@@ -332,7 +322,7 @@ struct WorkspaceMainView: View {
         }
         .onDisappear {
             // 清理事件监听
-            if let monitor = eventMonitor {
+            if let monitor = keyEventMonitor {
                 NSEvent.removeMonitor(monitor)
             }
         }
