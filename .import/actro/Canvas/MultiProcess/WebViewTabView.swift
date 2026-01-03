@@ -200,7 +200,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         config.processPool = sharedProcessPool
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
-        self.webView = WKWebView(frame: .zero, configuration: config)
+        // Use custom DownloadableWebView for context menu download support
+        self.webView = DownloadableWebView(frame: .zero, configuration: config)
         super.init()
 
         webView.allowsBackForwardNavigationGestures = true
@@ -375,7 +376,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// Handle navigation action with download attribute
+    /// Handle navigation action with download attribute or Option+click
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         // Check for download attribute on links
         if navigationAction.shouldPerformDownload {
@@ -383,6 +384,22 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             NSLog("📥 WebViewHolder: Link has download attribute")
             return
         }
+
+        // Safari-style: Option+click to force download any link
+        if navigationAction.modifierFlags.contains(.option),
+           let url = navigationAction.request.url,
+           url.scheme == "http" || url.scheme == "https" {
+            // Use URLSession to download directly (bypass WKDownload restrictions)
+            let filename = url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent
+            Task { @MainActor in
+                let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: url)
+                URLSessionDownloader.shared.startDownload(url: url, item: item)
+            }
+            decisionHandler(.cancel)
+            NSLog("📥 WebViewHolder: Option+click download - \(url.lastPathComponent)")
+            return
+        }
+
         decisionHandler(.allow)
     }
 
@@ -500,7 +517,7 @@ struct PersistentWebView: NSViewRepresentable {
         }
     }
 
-    // Coordinator 只处理 UIDelegate（target=_blank 链接）
+    // Coordinator 处理 UIDelegate（target=_blank 链接、上下文菜单）
     class Coordinator: NSObject, WKUIDelegate {
         let holder: WebViewHolder
 
@@ -520,6 +537,112 @@ struct PersistentWebView: NSViewRepresentable {
                 }
             }
             return nil
+        }
+
+        // macOS: Customize context menu with download options
+        func webView(_ webView: WKWebView, willPerformClientRedirectTo URL: URL, delay: TimeInterval) {
+            // Not used, but required for protocol conformance
+        }
+    }
+}
+
+// MARK: - Custom WebView with Context Menu
+
+/// Custom WKWebView subclass that adds download options to context menu
+class DownloadableWebView: WKWebView {
+    private var lastContextMenuURL: URL?
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+
+        // Find the URL from the context menu (look for "Open Link" or similar items)
+        var linkURL: URL?
+        var imageURL: URL?
+
+        for item in menu.items {
+            if let url = extractURL(from: item) {
+                if item.title.contains("Image") || item.title.contains("图") {
+                    imageURL = url
+                } else {
+                    linkURL = url
+                }
+            }
+        }
+
+        // Add "Download Link" option if we found a link
+        if let url = linkURL ?? imageURL {
+            lastContextMenuURL = url
+
+            let separator = NSMenuItem.separator()
+            menu.addItem(separator)
+
+            let downloadItem = NSMenuItem(
+                title: imageURL != nil ? "Download Image" : "Download Linked File",
+                action: #selector(downloadLinkedFile(_:)),
+                keyEquivalent: ""
+            )
+            downloadItem.target = self
+            downloadItem.representedObject = url
+            menu.addItem(downloadItem)
+        }
+
+        // Add "Download Image" for images specifically
+        if imageURL == nil {
+            // Try to detect if right-clicked on an image via JavaScript
+            let point = convert(event.locationInWindow, from: nil)
+            detectImageAtPoint(point) { [weak self] detectedImageURL in
+                guard let imageURL = detectedImageURL else { return }
+
+                DispatchQueue.main.async {
+                    // Menu might already be closed, but try to add item
+                    self?.lastContextMenuURL = imageURL
+                }
+            }
+        }
+    }
+
+    private func extractURL(from menuItem: NSMenuItem) -> URL? {
+        // Try to get URL from represented object
+        if let url = menuItem.representedObject as? URL {
+            return url
+        }
+        // Try to parse URL from title (fallback)
+        if let urlString = menuItem.title.components(separatedBy: " ").last,
+           let url = URL(string: urlString) {
+            return url
+        }
+        return nil
+    }
+
+    private func detectImageAtPoint(_ point: CGPoint, completion: @escaping (URL?) -> Void) {
+        let js = """
+        (function() {
+            var element = document.elementFromPoint(\(point.x), \(point.y));
+            if (element && element.tagName === 'IMG' && element.src) {
+                return element.src;
+            }
+            return null;
+        })();
+        """
+
+        evaluateJavaScript(js) { result, error in
+            if let urlString = result as? String, let url = URL(string: urlString) {
+                completion(url)
+            } else {
+                completion(nil)
+            }
+        }
+    }
+
+    @objc private func downloadLinkedFile(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL ?? lastContextMenuURL else { return }
+
+        let filename = url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent
+
+        Task { @MainActor in
+            let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: url)
+            URLSessionDownloader.shared.startDownload(url: url, item: item)
+            NSLog("📥 DownloadableWebView: Context menu download - \(filename)")
         }
     }
 }
