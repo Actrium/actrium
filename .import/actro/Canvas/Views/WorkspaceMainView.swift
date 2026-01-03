@@ -276,8 +276,15 @@ struct WorkspaceMainView: View {
                                 }
                             }()
 
+                            // Get URL string for edit mode
+                            let currentURLString: String = {
+                                guard let tab = viewModel.currentTab else { return "" }
+                                return tab.url?.absoluteString ?? ""
+                            }()
+
                             AddressBarContainer(
                                 titleText: .constant(viewModel.currentTab?.title ?? "New Tab"),
+                                urlText: currentURLString,
                                 inputText: $addressInputText,
                                 isEditing: $isAddressBarEditing,
                                 isFirstResponder: $isAddressBarFirstResponder,
@@ -1180,6 +1187,7 @@ private struct AddressBarLeftIcon: View {
 
 private struct AddressBarContainer: View {
     @Binding var titleText: String
+    var urlText: String  // URL for edit mode
     @Binding var inputText: String
     @Binding var isEditing: Bool
     @Binding var isFirstResponder: Bool
@@ -1225,8 +1233,8 @@ private struct AddressBarContainer: View {
                         .onTapGesture {
                             if !isEditing {
                                 isEditing = true
-                                // 保留当前标题内容，进入编辑后会自动选中
-                                inputText = titleText
+                                // 使用 URL（非标题），进入编辑后会自动选中
+                                inputText = urlText
                                 DispatchQueue.main.async {
                                     isFirstResponder = true
                                 }
