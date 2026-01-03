@@ -145,28 +145,107 @@ struct WebViewMultiProcessTabView: View {
     }
 }
 
+// MARK: - Persistent WebView Holder
+
+/// 持久化 WKWebView 实例，避免 SwiftUI 视图重建导致的重复加载
+final class WebViewHolder: ObservableObject {
+    let webView: WKWebView
+    private var loadedURL: URL?
+
+    @Published var title: String = ""
+    @Published var isLoading: Bool = true
+
+    init() {
+        let config = WKWebViewConfiguration()
+        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+
+        self.webView = WKWebView(frame: .zero, configuration: config)
+        webView.allowsBackForwardNavigationGestures = true
+    }
+
+    func loadIfNeeded(_ url: URL) {
+        // 只有 URL 真正变化时才重新加载
+        if loadedURL != url {
+            loadedURL = url
+            isLoading = true
+            let request = URLRequest(url: url)
+            webView.load(request)
+            fputs("🌐 WebViewHolder: Loading \(url.absoluteString)\n", stderr)
+        }
+    }
+}
+
+// MARK: - Persistent WebView Representable
+
+struct PersistentWebView: NSViewRepresentable {
+    @ObservedObject var holder: WebViewHolder
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(holder: holder)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        holder.webView.navigationDelegate = context.coordinator
+        holder.webView.uiDelegate = context.coordinator
+        return holder.webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        // WebViewHolder 负责加载逻辑，这里不做任何事
+    }
+
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let holder: WebViewHolder
+
+        init(holder: WebViewHolder) {
+            self.holder = holder
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            holder.isLoading = true
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            holder.isLoading = false
+            if let title = webView.title, !title.isEmpty {
+                holder.title = title
+            }
+            fputs("🌐 WebViewHolder: Finished loading, title: \(webView.title ?? "nil")\n", stderr)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            holder.isLoading = false
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            holder.isLoading = false
+        }
+
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if navigationAction.targetFrame == nil {
+                holder.webView.load(navigationAction.request)
+            }
+            return nil
+        }
+    }
+}
+
 // MARK: - Focused Web Overlay
 
 /// Focus 模式下的全屏 Web 内容层
-/// 在 canvas 变换之外独立渲染，避免 NSViewRepresentable 缩放问题
+/// 使用 @StateObject 持久化 WebView，避免重复加载
 struct FocusedWebOverlay: View {
     let tab: Tab
     let url: URL
     let viewportSize: CGSize
 
-    @State private var webTitle: String = ""
-    @State private var isLoading: Bool = true
+    @StateObject private var holder = WebViewHolder()
 
     var body: some View {
         ZStack {
-            WebViewTabView(
-                url: url,
-                containerSize: viewportSize,
-                title: $webTitle,
-                isLoading: $isLoading
-            )
+            PersistentWebView(holder: holder)
 
-            if isLoading {
+            if holder.isLoading {
                 ProgressView()
                     .scaleEffect(0.8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -174,5 +253,11 @@ struct FocusedWebOverlay: View {
             }
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
+        .onAppear {
+            holder.loadIfNeeded(url)
+        }
+        .onChange(of: url) { newURL in
+            holder.loadIfNeeded(newURL)
+        }
     }
 }
