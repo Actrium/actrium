@@ -876,16 +876,38 @@ struct TabOutlineView: NSViewRepresentable {
             stackView.alignment = .centerY
             stackView.translatesAutoresizingMaskIntoConstraints = false
 
-            // Icon
+            // Icon - show favicon for web tabs, default icon for others
             let isSelected = viewModel.currentTabId == tab.id
             let iconView = NSImageView()
-            iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
-            iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
             iconView.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 iconView.widthAnchor.constraint(equalToConstant: 16),
                 iconView.heightAnchor.constraint(equalToConstant: 16)
             ])
+
+            // Set default icon first
+            iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
+            iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+
+            // Load favicon for web tabs
+            if case .web(let url) = tab.contentType,
+               let host = url.host,
+               let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32") {
+                // Async load favicon
+                Task {
+                    do {
+                        let (data, _) = try await URLSession.shared.data(from: faviconURL)
+                        if let image = NSImage(data: data) {
+                            await MainActor.run {
+                                iconView.image = image
+                                iconView.contentTintColor = nil  // Use original colors
+                            }
+                        }
+                    } catch {
+                        // Keep default icon on failure
+                    }
+                }
+            }
 
             // Title
             let titleLabel = NSTextField(labelWithString: tab.title)
