@@ -101,9 +101,8 @@ struct WorkspaceMainView: View {
             }()
 
             ZStack(alignment: .topTrailing) {
-                // Safari 风格：深灰色内容区域背景
+                // Safari 风格：深灰色内容区域背景（不延伸到 toolbar）
                 Color(nsColor: NSColor(white: 0.12, alpha: 1.0))
-                    .ignoresSafeArea()
 
                 // Canvas 视图 - 包含所有 Tab 卡片
                 // ViewBridge 始终在 Canvas 内部，通过快照实现平滑动画
