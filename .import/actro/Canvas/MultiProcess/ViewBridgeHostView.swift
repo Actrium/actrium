@@ -483,14 +483,11 @@ struct ViewBridgeTabView: NSViewRepresentable {
     let coordinator: ViewBridgeCoordinator
     let serviceBundleIdentifier: String  // 从进程池分配的 bundle id
 
-    init(tabId: UUID, contentSize: CGSize, coordinator: ViewBridgeCoordinator, serviceBundleIdentifier: String? = nil) {
+    init(tabId: UUID, contentSize: CGSize, coordinator: ViewBridgeCoordinator, serviceBundleIdentifier: String) {
         self.tabId = tabId
         self.contentSize = contentSize
         self.coordinator = coordinator
-        // 如果未指定，从进程池分配
         self.serviceBundleIdentifier = serviceBundleIdentifier
-            ?? XPCServicePool.shared.allocateService(for: tabId)
-            ?? "chat.askaway.CanvasViewService.CanvasViewService"  // fallback
     }
 
     func makeNSView(context: Context) -> ViewBridgeHostView {
@@ -521,12 +518,13 @@ struct ViewBridgeTabView: NSViewRepresentable {
 /// A view that displays tab content via ViewBridge XPC service
 /// Remote view size 跟随 TabPanel 实际尺寸，RN 自适应
 ///
-/// 多进程架构：每个 tab 独占一个 XPC service 进程
-/// - 从 XPCServicePool 分配独立的 service bundle
-/// - 每个进程有独立的 RN 运行时
-/// - 真正的进程级隔离
+/// 多进程架构：基于应用指纹分配进程
+/// - 相同应用（fingerprint 相同）= 共享同一个 RCTViewService 进程
+/// - 不同应用 = 分配不同的 RCTViewService 进程
+/// - 最多同时运行 4 个不同的 RN 应用
 struct ViewBridgeMultiProcessTabView: View {
     let tab: Tab
+    let fingerprint: String  // 应用指纹
     let containerSize: CGSize  // TabPanel 实际尺寸
     let coordinator: ViewBridgeCoordinator
     var isFocused: Bool = false  // 是否当前 focused
@@ -536,19 +534,20 @@ struct ViewBridgeMultiProcessTabView: View {
     @State private var hasConnection = false  // 是否已建立 ViewBridge 连接
     @State private var allocatedServiceId: String?  // 从进程池分配的 service bundle id
 
-    init(tab: Tab, containerSize: CGSize, coordinator: ViewBridgeCoordinator, isFocused: Bool = false) {
+    init(tab: Tab, fingerprint: String, containerSize: CGSize, coordinator: ViewBridgeCoordinator, isFocused: Bool = false) {
         self.tab = tab
+        self.fingerprint = fingerprint
         self.containerSize = containerSize
         self.coordinator = coordinator
         self.isFocused = isFocused
-        fputs("🔵 ViewBridgeMultiProcessTabView.init: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), isFocused=\(isFocused)\n", stderr)
+        fputs("🔵 ViewBridgeMultiProcessTabView.init: tab=\(tab.id.uuidString.prefix(8)), fingerprint=\(fingerprint.prefix(16)), containerSize=\(containerSize)\n", stderr)
         fflush(stderr)
     }
 
     var body: some View {
         let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), isFocused=\(isFocused)\n", stderr)
         ZStack(alignment: .topLeading) {
-            // 多进程架构：每个 tab 从进程池获取独立的 XPC service
+            // 多进程架构：基于应用指纹分配进程
             if ViewBridgeHostView.isAvailable, let serviceId = allocatedServiceId {
                 ViewBridgeTabView(
                     tabId: tab.id,
@@ -563,7 +562,7 @@ struct ViewBridgeMultiProcessTabView: View {
                 .onAppear {
                     isLoading = false
                     hasConnection = true
-                    fputs("📤 ViewBridgeTabView appeared with service \(serviceId.components(separatedBy: ".").last ?? ""), sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
+                    fputs("📤 ViewBridgeTabView appeared with service \(serviceId.components(separatedBy: ".").last ?? ""), fingerprint: \(fingerprint.prefix(16))\n", stderr)
                     sendTabConfigToService()
                 }
                 .onChange(of: tab.unifiedScript) { _, _ in
@@ -577,27 +576,22 @@ struct ViewBridgeMultiProcessTabView: View {
                 }
             } else if !ViewBridgeHostView.isAvailable {
                 unavailableView
+            } else if errorMessage != nil {
+                // 显示错误（如进程池已满）
+                errorView(errorMessage!)
             } else {
                 // 等待进程池分配
                 ProgressView("Allocating process...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            if isLoading && allocatedServiceId != nil {
+            if isLoading && allocatedServiceId != nil && errorMessage == nil {
                 loadingView
-            }
-
-            if let error = errorMessage {
-                errorView(error)
             }
         }
         .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
         .onAppear {
-            // 从进程池分配 service
-            if allocatedServiceId == nil {
-                allocatedServiceId = XPCServicePool.shared.allocateService(for: tab.id)
-                fputs("📦 Tab \(tab.id.uuidString.prefix(8)) allocated service: \(allocatedServiceId ?? "FAILED")\n", stderr)
-            }
+            allocateServiceIfNeeded()
         }
         .onDisappear {
             // 释放进程池资源
@@ -605,6 +599,22 @@ struct ViewBridgeMultiProcessTabView: View {
                 XPCServicePool.shared.releaseService(for: tab.id)
                 fputs("📦 Tab \(tab.id.uuidString.prefix(8)) released service\n", stderr)
             }
+        }
+    }
+
+    /// 从进程池分配 service
+    private func allocateServiceIfNeeded() {
+        guard allocatedServiceId == nil else { return }
+
+        do {
+            allocatedServiceId = try XPCServicePool.shared.allocateService(for: tab.id, fingerprint: fingerprint)
+            fputs("📦 Tab \(tab.id.uuidString.prefix(8)) allocated service: \(allocatedServiceId ?? "nil") for fingerprint: \(fingerprint.prefix(16))\n", stderr)
+        } catch let error as XPCServicePoolError {
+            errorMessage = error.localizedDescription
+            fputs("❌ Tab \(tab.id.uuidString.prefix(8)) allocation failed: \(error.localizedDescription)\n", stderr)
+        } catch {
+            errorMessage = "Failed to allocate RN process: \(error.localizedDescription)"
+            fputs("❌ Tab \(tab.id.uuidString.prefix(8)) allocation failed: \(error.localizedDescription)\n", stderr)
         }
     }
 

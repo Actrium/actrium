@@ -637,6 +637,55 @@ class BrowserViewModel: ObservableObject {
         tabs[index].title = title
     }
 
+    /// 导航当前 Tab 到指定 URL 或应用 ID
+    /// - 如果输入是 http/https URL，作为 Web 内容加载
+    /// - 否则作为 app id 处理（暂不实现）
+    func navigateCurrentTab(to input: String) {
+        guard let currentTabId = currentTabId,
+              let index = tabs.firstIndex(where: { $0.id == currentTabId }) else {
+            logger.warning("⚠️ [navigateCurrentTab] 无当前 tab")
+            return
+        }
+
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 检查是否为 URL
+        if let url = parseURL(trimmed) {
+            logger.notice("🌐 [navigateCurrentTab] 导航到 URL: \(url.absoluteString)")
+            // 更新 Tab 为 Web 内容
+            tabs[index].url = url
+            tabs[index].title = url.host ?? url.absoluteString
+            // 清除 RN 相关内容
+            tabs[index].unifiedScript = nil
+            tabs[index].leftPanelScript = nil
+            tabs[index].rightPanelScript = nil
+            tabs[index].guestScript = nil
+            tabs[index].systemTabType = nil
+            tabs[index].contractName = nil
+            objectWillChange.send()
+        } else {
+            // TODO: 处理 app id（从书签或应用库加载）
+            logger.notice("📱 [navigateCurrentTab] 输入不是有效 URL，可能是 app id: \(trimmed)")
+        }
+    }
+
+    /// 解析 URL 字符串
+    /// - 如果是 http/https，直接解析
+    /// - 如果看起来像域名（包含 .），添加 https:// 前缀
+    private func parseURL(_ input: String) -> URL? {
+        // 已经是完整 URL
+        if input.hasPrefix("http://") || input.hasPrefix("https://") {
+            return URL(string: input)
+        }
+
+        // 看起来像域名（包含 . 且不包含空格）
+        if input.contains(".") && !input.contains(" ") {
+            return URL(string: "https://\(input)")
+        }
+
+        return nil
+    }
+
     func closeCurrentTab() {
         guard let id = currentTabId else { return }
         closeTab(id: id)
