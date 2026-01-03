@@ -119,6 +119,7 @@ struct WorkspaceMainView: View {
                     mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
                     viewportSize: safeViewportSize,
+                    // ━━━━ Mode Switching Trigger #3: 卡片点击 ━━━━
                     onSelectTab: { tabId in
                         enterFocus(tabId: tabId)
                     },
@@ -166,7 +167,7 @@ struct WorkspaceMainView: View {
                                 }
                             }
 
-                            // 导入完成后自动切换到新 Tab 的 Focus 模式
+                            // ━━━━ Mode Switching Trigger #5: 导入 ACTR ━━━━
                             if let newTabId = viewModel.currentTabId {
                                 enterFocus(tabId: newTabId)
                             }
@@ -269,10 +270,11 @@ struct WorkspaceMainView: View {
                     }
                     .help("新建标签页")
 
+                    // ━━━━ Mode Switching Trigger #2: Toolbar 按钮 ━━━━
                     Button(action: toggleFocusOverview) {
                         Image(systemName: "square.grid.2x2")
                     }
-                    .help("标签总览")
+                    .help("标签总览 (⌘⇧\\)")
                 }
             }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
@@ -309,9 +311,10 @@ struct WorkspaceMainView: View {
             }
             // Note: canvasMode defaults to .overview, no need to set explicitly
 
-            // 监听键盘快捷键：Cmd+Shift+\ toggle Focus <-> Overview (和 Safari 一致)
+            // ━━━━ Mode Switching Trigger #1: 键盘快捷键 ━━━━
+            // Cmd+Shift+\ (keyCode 42) → toggleFocusOverview()
+            // 参见 MARK: - Mode Switching (统一入口)
             keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                // Cmd+Shift+\ (keyCode 42 = \)：Toggle Focus <-> Overview
                 let cmdShift: NSEvent.ModifierFlags = [.command, .shift]
                 if event.keyCode == 42 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(cmdShift) {
                     toggleFocusOverview()
@@ -319,8 +322,10 @@ struct WorkspaceMainView: View {
                 }
                 return event
             }
-            // 注意：双指捏合手势在 CanvasViewService 端处理
+            // ━━━━ Mode Switching Trigger #4: 双指捏合 ━━━━
+            // 捏合手势在 CanvasViewService 端处理 (ResizableContainerView.magnify)
             // 通过 DistributedNotificationCenter 发送 "com.canvas.pinchToOverview" 通知
+            // 监听在下方 .onReceive(DistributedNotificationCenter...)
         }
         .onDisappear {
             // 清理事件监听
@@ -328,13 +333,13 @@ struct WorkspaceMainView: View {
                 NSEvent.removeMonitor(monitor)
             }
         }
-        // 响应 CanvasViewService 发出的 pinch 分布式通知
+        // ━━━━ Mode Switching Trigger #4: 双指捏合 (分布式通知监听) ━━━━
+        // 参见 MARK: - Mode Switching (统一入口)
         .onReceive(
             DistributedNotificationCenter.default().publisher(for: Notification.Name("com.canvas.pinchToOverview"))
         ) { _ in
-            // 只在 Focus 模式下响应
             guard case .focus = viewModel.canvasMode else { return }
-            fputs("🤏 Received distributed pinchToOverview from service, exiting to overview\n", stderr)
+            fputs("🤏 Received pinchToOverview → exitToOverview()\n", stderr)
             exitToOverview()
         }
         .sheet(isPresented: $showingBookmarkSheet) {
@@ -351,12 +356,24 @@ struct WorkspaceMainView: View {
 
     // MARK: - Mode Switching (统一入口)
     //
-    // 所有模式切换都必须通过以下三个函数之一：
-    // - toggleFocusOverview(): Toggle 切换（toolbar 按钮、快捷键）
-    // - enterFocus(tabId:): 进入 Focus 模式（点击卡片、导入后、初始化）
-    // - exitToOverview(): 退出到 Overview 模式
-    //
-    // 这些函数统一处理：防抖、动画、lastFocusedTabId 记录、日志
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │                   Focus ↔ Overview 模式切换架构                       │
+    // ├─────────────────────────────────────────────────────────────────────┤
+    // │ 触发方式:                                                            │
+    // │   1. Cmd+Shift+\    - 快捷键，Toggle 切换                            │
+    // │   2. Toolbar 按钮    - 点击网格图标，Toggle 切换                       │
+    // │   3. 卡片点击        - Overview 模式下点击卡片进入 Focus               │
+    // │   4. 双指捏合        - Focus 模式下捏合手势退出到 Overview              │
+    // │                      (由 CanvasViewService 端处理并发送分布式通知)     │
+    // │   5. 导入 ACTR       - 导入后自动进入 Focus 模式                       │
+    // ├─────────────────────────────────────────────────────────────────────┤
+    // │ 核心函数 (所有切换必须通过以下之一):                                    │
+    // │   - toggleFocusOverview() : Toggle 切换                              │
+    // │   - enterFocus(tabId:)    : 进入 Focus 模式                          │
+    // │   - exitToOverview()      : 退出到 Overview 模式                      │
+    // ├─────────────────────────────────────────────────────────────────────┤
+    // │ 统一处理: 防抖(0.5s)、动画、lastFocusedTabId 记录、日志                │
+    // └─────────────────────────────────────────────────────────────────────┘
 
     /// 上次 mode 切换时间，用于防抖
     @State private var lastModeChangeTime: Date = .distantPast
