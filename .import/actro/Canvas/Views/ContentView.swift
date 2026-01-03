@@ -74,6 +74,8 @@ private struct WindowAccessor: NSViewRepresentable {
                 window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
                 // 显示 toolbar 下边线
                 window.titlebarSeparatorStyle = .line
+                // 隐藏窗口标题文字
+                window.titleVisibility = .hidden
             }
         }
         return view
