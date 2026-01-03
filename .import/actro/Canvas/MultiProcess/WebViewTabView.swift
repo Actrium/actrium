@@ -43,7 +43,7 @@ struct WebViewTabView: NSViewRepresentable {
         let request = URLRequest(url: url)
         webView.load(request)
 
-        fputs("🌐 WebViewTabView: Loading \(url.absoluteString)\n", stderr)
+        NSLog("🌐 WebViewTabView: Loading \(url.absoluteString)")
 
         return webView
     }
@@ -55,7 +55,7 @@ struct WebViewTabView: NSViewRepresentable {
             context.coordinator.loadedURL = url
             let request = URLRequest(url: url)
             webView.load(request)
-            fputs("🌐 WebViewTabView: URL changed, reloading \(url.absoluteString)\n", stderr)
+            NSLog("🌐 WebViewTabView: URL changed, reloading \(url.absoluteString)")
         }
     }
 
@@ -80,17 +80,17 @@ struct WebViewTabView: NSViewRepresentable {
             if let title = webView.title, !title.isEmpty {
                 parent.title = title
             }
-            fputs("🌐 WebViewTabView: Finished loading, title: \(webView.title ?? "nil")\n", stderr)
+            NSLog("🌐 WebViewTabView: Finished loading, title: \(webView.title ?? "nil")")
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             parent.isLoading = false
-            fputs("🌐 WebViewTabView: Navigation failed: \(error.localizedDescription)\n", stderr)
+            NSLog("🌐 WebViewTabView: Navigation failed: \(error.localizedDescription)")
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             parent.isLoading = false
-            fputs("🌐 WebViewTabView: Provisional navigation failed: \(error.localizedDescription)\n", stderr)
+            NSLog("🌐 WebViewTabView: Provisional navigation failed: \(error.localizedDescription)")
         }
 
         // MARK: - WKUIDelegate
@@ -149,12 +149,10 @@ struct WebViewMultiProcessTabView: View {
 // MARK: - Persistent WebView Holder
 
 /// 持久化 WKWebView 实例，避免 SwiftUI 视图重建导致的重复加载
-final class WebViewHolder: ObservableObject {
+/// 注意：不使用 @Published 来跟踪 isLoading，避免 SwiftUI 更新循环
+final class WebViewHolder {
     let webView: WKWebView
     private var loadedURL: URL?
-
-    @Published var title: String = ""
-    @Published var isLoading: Bool = true
 
     init() {
         let config = WKWebViewConfiguration()
@@ -167,32 +165,88 @@ final class WebViewHolder: ObservableObject {
     func loadIfNeeded(_ url: URL) {
         // 只有 URL 真正变化时才重新加载
         if loadedURL != url {
+            NSLog("🌐 WebViewHolder: loadIfNeeded - URL changed from \(loadedURL?.absoluteString ?? "nil") to \(url.absoluteString)")
             loadedURL = url
-            isLoading = true
             let request = URLRequest(url: url)
             webView.load(request)
-            fputs("🌐 WebViewHolder: Loading \(url.absoluteString)\n", stderr)
+        } else {
+            NSLog("🌐 WebViewHolder: loadIfNeeded - URL unchanged: \(url.absoluteString)")
         }
+    }
+}
+
+// MARK: - Global WebView Manager
+
+/// 全局管理 WebViewHolder，避免视图重建时丢失
+@MainActor
+final class WebViewHolderManager {
+    static let shared = WebViewHolderManager()
+    private var holders: [UUID: WebViewHolder] = [:]
+
+    private init() {}
+
+    func holder(for tabId: UUID) -> WebViewHolder {
+        if let existing = holders[tabId] {
+            return existing
+        }
+        let new = WebViewHolder()
+        holders[tabId] = new
+        NSLog("🌐 WebViewHolderManager: Created holder for tab \(tabId.uuidString.prefix(8))")
+        return new
+    }
+
+    func remove(tabId: UUID) {
+        holders.removeValue(forKey: tabId)
+        NSLog("🌐 WebViewHolderManager: Removed holder for tab \(tabId.uuidString.prefix(8))")
     }
 }
 
 // MARK: - Persistent WebView Representable
 
 struct PersistentWebView: NSViewRepresentable {
-    @ObservedObject var holder: WebViewHolder
+    let holder: WebViewHolder
+    let size: CGSize  // 显式传入尺寸
 
     func makeCoordinator() -> Coordinator {
         Coordinator(holder: holder)
     }
 
-    func makeNSView(context: Context) -> WKWebView {
-        holder.webView.navigationDelegate = context.coordinator
-        holder.webView.uiDelegate = context.coordinator
-        return holder.webView
+    func makeNSView(context: Context) -> NSView {
+        // 使用容器视图来确保正确的布局
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        let webView = holder.webView
+
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.frame = container.bounds
+        webView.autoresizingMask = [.width, .height]
+
+        container.addSubview(webView)
+
+        NSLog("🌐 PersistentWebView: makeNSView, container.frame=\(container.frame), webView.frame=\(webView.frame)")
+        return container
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {
-        // WebViewHolder 负责加载逻辑，这里不做任何事
+    func updateNSView(_ container: NSView, context: Context) {
+        // 使用传入的 size 而不是 container.bounds
+        // 因为 SwiftUI 可能会暂时给容器 0 大小
+        guard size.width > 0 && size.height > 0 else {
+            NSLog("🌐 PersistentWebView: updateNSView SKIPPED, size=\(size) (zero size)")
+            return
+        }
+
+        // 确保容器和 webView 都有正确的 frame
+        let targetFrame = NSRect(origin: .zero, size: size)
+        if container.frame != targetFrame {
+            container.frame = targetFrame
+        }
+
+        if let webView = container.subviews.first as? WKWebView {
+            if webView.frame != targetFrame {
+                webView.frame = targetFrame
+                NSLog("🌐 PersistentWebView: updateNSView, size=\(size), webView.frame=\(webView.frame)")
+            }
+        }
     }
 
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
@@ -202,26 +256,22 @@ struct PersistentWebView: NSViewRepresentable {
             self.holder = holder
         }
 
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            holder.isLoading = true
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            holder.isLoading = false
-            if let title = webView.title, !title.isEmpty {
-                holder.title = title
-            }
-            fputs("🌐 WebViewHolder: Finished loading, title: \(webView.title ?? "nil")\n", stderr)
-        }
+        // 使用 KVO 观察 isLoading，不需要这些代理方法来跟踪加载状态
+        // 只保留错误处理和 UI 代理
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            holder.isLoading = false
+            NSLog("🌐 WebViewHolder: Navigation failed: \(error.localizedDescription)")
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            holder.isLoading = false
+            // 忽略取消错误（用户导航到新页面时会触发）
+            let nsError = error as NSError
+            if nsError.code != NSURLErrorCancelled {
+                NSLog("🌐 WebViewHolder: Provisional navigation failed: \(error.localizedDescription)")
+            }
         }
 
+        // 处理 target="_blank" 链接
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if navigationAction.targetFrame == nil {
                 holder.webView.load(navigationAction.request)
@@ -234,31 +284,35 @@ struct PersistentWebView: NSViewRepresentable {
 // MARK: - Focused Web Overlay
 
 /// Focus 模式下的全屏 Web 内容层
-/// 使用 @StateObject 持久化 WebView，避免重复加载
+/// 使用 WebViewHolderManager 全局管理 WebView，避免视图重建导致的重复加载
 struct FocusedWebOverlay: View {
     let tab: Tab
     let url: URL
     let viewportSize: CGSize
 
-    @StateObject private var holder = WebViewHolder()
+    /// 从全局 Manager 获取持久化的 WebViewHolder
+    private let holder: WebViewHolder
+
+    init(tab: Tab, url: URL, viewportSize: CGSize) {
+        self.tab = tab
+        self.url = url
+        self.viewportSize = viewportSize
+        self.holder = WebViewHolderManager.shared.holder(for: tab.id)
+    }
 
     var body: some View {
-        ZStack {
-            PersistentWebView(holder: holder)
-
-            if holder.isLoading {
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.3))
+        // 不使用任何 @Published/@ObservedObject，避免 SwiftUI 更新循环
+        // WKWebView 自己会显示加载状态
+        PersistentWebView(holder: holder, size: viewportSize)
+            .id(tab.id)
+            .frame(width: viewportSize.width, height: viewportSize.height)
+            .onAppear {
+                NSLog("🌐 FocusedWebOverlay: onAppear, url=\(url.absoluteString), size=\(viewportSize)")
+                holder.loadIfNeeded(url)
             }
-        }
-        .frame(width: viewportSize.width, height: viewportSize.height)
-        .onAppear {
-            holder.loadIfNeeded(url)
-        }
-        .onChange(of: url) { _, newURL in
-            holder.loadIfNeeded(newURL)
-        }
+            .onChange(of: url) { oldURL, newURL in
+                NSLog("🌐 FocusedWebOverlay: onChange url \(oldURL.absoluteString) -> \(newURL.absoluteString)")
+                holder.loadIfNeeded(newURL)
+            }
     }
 }

@@ -21,6 +21,7 @@ struct BrowserWindowView: View {
     @StateObject private var viewModel = BrowserViewModel()
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
+    @State private var hasHandledLaunchURL = false
 
     var body: some View {
         ContentView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
@@ -30,6 +31,8 @@ struct BrowserWindowView: View {
                 DevToolsManager.shared.activeBrowserViewModel = viewModel
                 // Check for pending group transfer
                 checkPendingGroupTransfer()
+                // Handle launch URL (only once)
+                handleLaunchURLIfNeeded()
             }
             // Handle bookmark open from RN
             .onReceive(NotificationCenter.default.publisher(for: .openBookmarkFromRN)) { notification in
@@ -89,6 +92,27 @@ struct BrowserWindowView: View {
             .onReceive(NotificationCenter.default.publisher(for: .clearHistoryFromRN)) { _ in
                 historyVM.clearHistory()
             }
+    }
+
+    private func handleLaunchURLIfNeeded() {
+        guard !hasHandledLaunchURL,
+              let launchURL = CanvasApp.launchURL else { return }
+        hasHandledLaunchURL = true
+
+        NSLog("🚀 Canvas: Opening launch URL in new tab: %@", launchURL.absoluteString)
+
+        // Create a new tab, navigate to the URL, and enter focus mode
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let tab = self.viewModel.addNewTab()
+            self.viewModel.navigateCurrentTab(to: launchURL.absoluteString)
+            NSLog("🚀 Canvas: Tab created: %@, contentType: %@", tab.id.uuidString, String(describing: tab.contentType))
+
+            // Auto enter focus mode
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.viewModel.canvasMode = .focus(tabId: tab.id)
+                NSLog("🚀 Canvas: Entered focus mode for tab %@", tab.id.uuidString)
+            }
+        }
     }
 
     private func checkPendingGroupTransfer() {
@@ -157,6 +181,22 @@ struct CanvasApp: App {
 
     // The focused window's viewModel
     @FocusedValue(\.browserViewModel) private var focusedViewModel
+
+    /// 从命令行参数解析的启动 URL
+    static var launchURL: URL? = {
+        // 支持 --url https://example.com 或 -url https://example.com
+        let args = CommandLine.arguments
+        NSLog("🚀 Canvas: Command line args: \(args)")
+        if let urlIndex = args.firstIndex(where: { $0 == "--url" || $0 == "-url" }),
+           urlIndex + 1 < args.count {
+            let urlString = args[urlIndex + 1]
+            if let url = URL(string: urlString) {
+                NSLog("🚀 Canvas: Launch URL from command line: \(urlString)")
+                return url
+            }
+        }
+        return nil
+    }()
 
     init() {
         // Suppress common system warnings in development
