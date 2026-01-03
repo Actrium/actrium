@@ -29,6 +29,7 @@ struct WorkspaceMainView: View {
     @State private var isAddressBarEditing: Bool = false
     @State private var isAddressBarFirstResponder: Bool = false
     @State private var keyEventMonitor: Any?
+    @State private var mouseEventMonitor: Any?
 
     // Search Tabs 状态
     @State private var searchTabsText: String = ""
@@ -330,6 +331,19 @@ struct WorkspaceMainView: View {
                 }
                 return event
             }
+
+            // 点击主窗口区域时退出地址栏编辑状态
+            mouseEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+                if isAddressBarEditing {
+                    // 延迟执行，让系统先处理点击事件
+                    DispatchQueue.main.async {
+                        isAddressBarEditing = false
+                        isAddressBarFirstResponder = false
+                    }
+                }
+                return event
+            }
+
             // ━━━━ Mode Switching Trigger #4: 双指捏合 ━━━━
             // 捏合手势在 CanvasViewService 端处理 (ResizableContainerView.magnify)
             // 通过 DistributedNotificationCenter 发送 "com.canvas.pinchToOverview" 通知
@@ -338,6 +352,9 @@ struct WorkspaceMainView: View {
         .onDisappear {
             // 清理事件监听
             if let monitor = keyEventMonitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            if let monitor = mouseEventMonitor {
                 NSEvent.removeMonitor(monitor)
             }
         }
