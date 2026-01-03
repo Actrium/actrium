@@ -29,6 +29,8 @@ struct WorkspaceMainView: View {
     @State private var isAddressBarEditing: Bool = false
     @State private var isAddressBarFirstResponder: Bool = false
     @State private var keyEventMonitor: Any?
+    @State private var magnifyEventMonitor: Any?
+    @State private var cumulativeMagnification: CGFloat = 0
 
     // Search Tabs 状态
     @State private var searchTabsText: String = ""
@@ -319,10 +321,45 @@ struct WorkspaceMainView: View {
                 }
                 return event
             }
+
+            // 监听双指捏合手势（在 Window 级别捕获，绕过 NSRemoteView）
+            magnifyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.magnify, .beginGesture, .endGesture]) { event in
+                // 只在 Focus 模式下响应
+                guard case .focus = viewModel.canvasMode else {
+                    cumulativeMagnification = 0
+                    return event
+                }
+
+                switch event.type {
+                case .beginGesture:
+                    cumulativeMagnification = 0
+                    fputs("🤏 beginGesture\n", stderr)
+                case .magnify:
+                    cumulativeMagnification += event.magnification
+                    fputs("🤏 magnify: delta=\(event.magnification), cumulative=\(cumulativeMagnification)\n", stderr)
+                    // 捏合缩小超过阈值，触发切换
+                    if cumulativeMagnification < -0.3 {
+                        fputs("🤏 Triggering exitToOverview!\n", stderr)
+                        cumulativeMagnification = 0
+                        exitToOverview()
+                        return nil  // 消费事件
+                    }
+                case .endGesture:
+                    fputs("🤏 endGesture, final cumulative=\(cumulativeMagnification)\n", stderr)
+                    cumulativeMagnification = 0
+                default:
+                    break
+                }
+                return event
+            }
+            fputs("🤏 Magnify event monitor installed\n", stderr)
         }
         .onDisappear {
             // 清理事件监听
             if let monitor = keyEventMonitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            if let monitor = magnifyEventMonitor {
                 NSEvent.removeMonitor(monitor)
             }
         }
