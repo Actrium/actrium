@@ -46,32 +46,26 @@ class BrowserViewModel: ObservableObject {
     }
 
     init() {
-        // 开发调试：加载默认示例应用
-        let sampleAppsBasePath = "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples"
-        let defaultApps = ["debugapp", "counterapp"]  // 默认加载的应用列表
-
         // Initialize slot positions first
         initializeSlotPositions()
 
-        // 延迟加载开发目录，避免在 SwiftUI 初始化期间阻塞主线程
-        Task { @MainActor [weak self] in
-            guard let self = self else { return }
-
-            for appName in defaultApps {
-                let appPath = "\(sampleAppsBasePath)/\(appName)"
-                var isDirectory: ObjCBool = false
-                if FileManager.default.fileExists(atPath: appPath, isDirectory: &isDirectory), isDirectory.boolValue {
-                    let url = URL(fileURLWithPath: appPath)
-                    logger.debug("🔄 [BrowserViewModel] 加载默认应用: \(appName)")
-                    self.loadFromDevDirectory(url)
-                }
-            }
-
-            // 默认选中第一个 tab
-            if let firstTab = self.tabs.first {
-                self.currentTabId = firstTab.id
-            }
-        }
+        // TODO: 临时禁用 RN 示例应用自动加载，专注 Web 开发
+        // let sampleAppsBasePath = "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples"
+        // let defaultApps = ["debugapp", "counterapp"]
+        // Task { @MainActor [weak self] in
+        //     guard let self = self else { return }
+        //     for appName in defaultApps {
+        //         let appPath = "\(sampleAppsBasePath)/\(appName)"
+        //         var isDirectory: ObjCBool = false
+        //         if FileManager.default.fileExists(atPath: appPath, isDirectory: &isDirectory), isDirectory.boolValue {
+        //             let url = URL(fileURLWithPath: appPath)
+        //             self.loadFromDevDirectory(url)
+        //         }
+        //     }
+        //     if let firstTab = self.tabs.first {
+        //         self.currentTabId = firstTab.id
+        //     }
+        // }
     }
     
     @discardableResult
