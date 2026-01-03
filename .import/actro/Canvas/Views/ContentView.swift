@@ -69,29 +69,50 @@ struct ContentView: View {
 
 private struct WindowAccessor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            Self.configureWindow(view.window)
-        }
+        let view = WindowObserverView()
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        // 确保窗口配置在每次更新时都生效
-        DispatchQueue.main.async {
-            Self.configureWindow(nsView.window)
+        if let observer = nsView as? WindowObserverView {
+            observer.configureWindow()
+        }
+    }
+}
+
+/// 监听窗口并持续隐藏标题
+private class WindowObserverView: NSView {
+    private var titleObserver: NSKeyValueObservation?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        configureWindow()
+        setupTitleObserver()
+    }
+
+    func configureWindow() {
+        guard let window = window else { return }
+        window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
+        window.titlebarSeparatorStyle = .line
+        window.titleVisibility = .hidden
+        window.title = ""
+    }
+
+    private func setupTitleObserver() {
+        guard let window = window else { return }
+        // 监听标题变化，立即重置为空
+        titleObserver = window.observe(\.title, options: [.new]) { [weak self] window, _ in
+            if !window.title.isEmpty {
+                DispatchQueue.main.async {
+                    window.title = ""
+                    window.titleVisibility = .hidden
+                }
+            }
         }
     }
 
-    private static func configureWindow(_ window: NSWindow?) {
-        guard let window = window else { return }
-        // 设置窗口背景色（影响 sidebar 顶栏区域）
-        window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
-        // 显示 toolbar 下边线
-        window.titlebarSeparatorStyle = .line
-        // 隐藏窗口标题文字
-        window.titleVisibility = .hidden
-        window.title = ""
+    deinit {
+        titleObserver?.invalidate()
     }
 }
 
