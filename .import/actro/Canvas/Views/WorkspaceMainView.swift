@@ -147,6 +147,16 @@ struct WorkspaceMainView: View {
                         isAddressBarFirstResponder = false
                     }
                 }
+                // 双指捏合：Focus 模式下缩小 → Overview
+                .gesture(
+                    MagnificationGesture()
+                        .onEnded { value in
+                            // 只在 Focus 模式下响应，且捏合缩小到阈值以下
+                            if case .focus = viewModel.canvasMode, value < 0.7 {
+                                exitToOverview()
+                            }
+                        }
+                )
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
