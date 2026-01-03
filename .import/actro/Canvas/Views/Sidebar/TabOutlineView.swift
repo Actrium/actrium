@@ -1329,11 +1329,28 @@ private class TabRowView: NSView {
         self.viewModel = viewModel
         super.init(frame: .zero)
         setupViews()
-        setupTrackingArea()
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        // Remove existing tracking areas
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+
+        // Add new tracking area with current bounds
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
     }
 
     private func setupViews() {
@@ -1440,16 +1457,6 @@ private class TabRowView: NSView {
             closeButton.widthAnchor.constraint(equalToConstant: 16),
             closeButton.heightAnchor.constraint(equalToConstant: 16)
         ])
-    }
-
-    private func setupTrackingArea() {
-        let trackingArea = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(trackingArea)
     }
 
     private func updateCloseButtonVisibility() {
