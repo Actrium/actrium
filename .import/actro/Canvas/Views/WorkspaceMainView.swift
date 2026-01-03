@@ -240,6 +240,13 @@ struct WorkspaceMainView: View {
                                 },
                                 refreshAction: {
                                     viewModel.reloadCurrentTab()
+                                },
+                                onNavigate: { input in
+                                    // 导航到 URL 或 app id
+                                    viewModel.navigateCurrentTab(to: input)
+                                    // 退出编辑状态
+                                    isAddressBarEditing = false
+                                    addressInputText = ""
                                 }
                             )
                             .frame(width: addressBarContainerWidth)
@@ -1071,8 +1078,9 @@ private struct AddressBarContainer: View {
     var toggleLeftPanel: () -> Void
     var toggleBookmark: () -> Void
     var refreshAction: () -> Void
+    var onNavigate: ((String) -> Void)?  // URL 导航回调
 
-    private let placeholder = "Search from bookmark or enter app id"
+    private let placeholder = "Enter URL (http/https) or app id"
     @State private var focusRingScale: CGFloat = 1.0
     @State private var focusRingOpacity: Double = 0.0
 
@@ -1088,7 +1096,10 @@ private struct AddressBarContainer: View {
                     FocusableTextField(
                         text: $inputText,
                         placeholder: placeholder,
-                        isFirstResponder: $isFirstResponder
+                        isFirstResponder: $isFirstResponder,
+                        onSubmit: { text in
+                            onNavigate?(text)
+                        }
                     )
                 }
             } else {
@@ -1179,6 +1190,7 @@ private struct FocusableTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     @Binding var isFirstResponder: Bool
+    var onSubmit: ((String) -> Void)?  // 回车键提交回调
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -1197,6 +1209,9 @@ private struct FocusableTextField: NSViewRepresentable {
         field.maximumNumberOfLines = 1
         field.cell?.wraps = false
         field.cell?.isScrollable = true
+        // 设置 action 以接收回车键
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.handleAction(_:))
         return field
     }
 
@@ -1234,6 +1249,14 @@ private struct FocusableTextField: NSViewRepresentable {
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
+            parent.isFirstResponder = false
+        }
+
+        @objc func handleAction(_ sender: NSTextField) {
+            let text = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                parent.onSubmit?(text)
+            }
             parent.isFirstResponder = false
         }
     }
@@ -1372,51 +1395,54 @@ private struct TabPanel: View {
         CGSize(width: cardWidth, height: cardHeight)
     }
 
-    // 判断 Tab 是否有 RN 内容需要渲染
-    private var hasRNContent: Bool {
-        let result = tab.systemTabType != nil ||
-            tab.unifiedScript != nil ||
-            tab.leftPanelScript != nil ||
-            tab.guestScript != nil
-        fputs("🔍 hasRNContent: \(result) (system=\(tab.systemTabType != nil), unified=\(tab.unifiedScript != nil), left=\(tab.leftPanelScript != nil), guest=\(tab.guestScript != nil))\n", stderr)
-        return result
-    }
-
-    // 内容区域视图
+    // 内容区域视图 - 多态容器
+    // 根据 Tab.contentType 决定使用 ViewBridge (RN) 还是 WKWebView (Web)
     private var contentView: some View {
         // 新架构：Remote view size 跟随 TabPanel 实际尺寸
-        // - Focus 模式：TabPanel 尺寸 ≈ viewportSize，RN 以全屏尺寸渲染
-        // - Overview 模式：TabPanel 尺寸 = cardSize，RN 以卡片尺寸渲染
-        // - 动画过程：尺寸平滑过渡，RN 自适应
+        // - Focus 模式：TabPanel 尺寸 ≈ viewportSize
+        // - Overview 模式：TabPanel 尺寸 = cardSize
         let panelWidth = isFocused ? viewportSize.width : cardWidth
         let panelHeight = isFocused ? viewportSize.height : cardHeight
+        let panelSize = CGSize(width: max(panelWidth, 1), height: max(panelHeight, 1))
 
-        let _ = NSLog("📐 TabPanel.contentView: isFocused=%d, panelSize=%.0fx%.0f, viewportSize=%.0fx%.0f, cardSize=%.0fx%.0f",
-                      isFocused ? 1 : 0, panelWidth, panelHeight, viewportSize.width, viewportSize.height, cardWidth, cardHeight)
+        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, panelSize=%.0fx%.0f",
+                      String(describing: tab.contentType), isFocused ? 1 : 0, panelWidth, panelHeight)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
-            if hasRNContent {
-                // Remote view 尺寸 = TabPanel 实际尺寸
-                // 只有 focused 的 tab 才发送配置到 XPC service（解决多 tab 串台问题）
+            // 多态渲染：根据 contentType 选择渲染引擎
+            switch tab.contentType {
+            case .reactNative(let fingerprint):
+                // React Native 应用 - 使用 ViewBridge XPC
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
-                    containerSize: CGSize(width: max(panelWidth, 1), height: max(panelHeight, 1)),
+                    fingerprint: fingerprint,
+                    containerSize: panelSize,
                     coordinator: viewBridgeCoordinator,
                     isFocused: isFocused
                 )
-            } else if let _ = tab.htmlContent {
-                // 有 htmlContent，显示网页内容（暂时用占位）
-                Image(systemName: "doc.text")
-                    .font(.system(size: 32))
-                    .foregroundColor(.white.opacity(0.3))
-            } else {
+
+            case .web(let url):
+                // Web 内容 - 使用 WKWebView
+                WebViewMultiProcessTabView(
+                    tab: tab,
+                    url: url,
+                    containerSize: panelSize,
+                    isFocused: isFocused
+                )
+
+            case .empty:
                 // 空白 Tab
-                Image(systemName: "globe")
-                    .font(.system(size: 32))
-                    .foregroundColor(.white.opacity(0.3))
+                VStack(spacing: 12) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 48))
+                        .foregroundColor(.white.opacity(0.3))
+                    Text("Enter a URL or drop an app")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.4))
+                }
             }
         }
         .frame(maxHeight: .infinity)

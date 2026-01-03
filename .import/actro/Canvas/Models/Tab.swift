@@ -1,6 +1,34 @@
 import Foundation
+import CryptoKit
 
 private let logger = AppLogger.app
+
+// MARK: - String Hash Extension
+
+extension String {
+    /// 计算稳定的 hash 值（用于 bundle fingerprint）
+    /// 使用 SHA256 前 16 字符
+    var stableHash: String {
+        let data = Data(self.utf8)
+        let hash = SHA256.hash(data: data)
+        return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// MARK: - Tab Content Type
+
+/// Tab 内容类型：决定使用哪种渲染引擎
+enum TabContentType: Equatable {
+    /// React Native 应用
+    /// - bundleFingerprint: 应用指纹（相同指纹 = 相同应用 = 共享进程）
+    case reactNative(bundleFingerprint: String)
+
+    /// Web 内容（使用 WKWebView）
+    case web(url: URL)
+
+    /// 空白 Tab（无内容）
+    case empty
+}
 
 /// System tab types for built-in pages (like Chrome's chrome://history)
 enum SystemTabType: String, Codable {
@@ -102,6 +130,51 @@ struct Tab: Identifiable {
         self.leftPanelDefaultVisible = leftPanelDefaultVisible
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
         self.backgroundColor = backgroundColor ?? Self.generateRandomColor()
+    }
+
+    // MARK: - Content Type Detection
+
+    /// 计算 Tab 的内容类型
+    /// 优先级：Web URL > RN 应用 > 空白
+    var contentType: TabContentType {
+        // 1. 检查是否为 Web URL (http/https)
+        if let url = url, url.scheme == "http" || url.scheme == "https" {
+            return .web(url: url)
+        }
+
+        // 2. 检查是否为 RN 应用（有脚本内容）
+        if let fingerprint = bundleFingerprint {
+            return .reactNative(bundleFingerprint: fingerprint)
+        }
+
+        // 3. 系统 Tab 也使用 RN 渲染
+        if let systemType = systemTabType {
+            return .reactNative(bundleFingerprint: "system.\(systemType.rawValue)")
+        }
+
+        // 4. 空白 Tab
+        return .empty
+    }
+
+    /// RN 应用的 bundle 指纹
+    /// 用于标识同一应用（相同指纹 = 相同应用 = 共享 XPC 进程）
+    var bundleFingerprint: String? {
+        // 优先使用 contractName（应用标识）
+        if let name = contractName {
+            return "contract.\(name)"
+        }
+
+        // 使用 unifiedScript 的 hash 作为指纹
+        if let script = unifiedScript {
+            return "script.\(script.stableHash)"
+        }
+
+        // Legacy: 使用 leftPanelScript 或 guestScript
+        if let script = leftPanelScript ?? guestScript {
+            return "legacy.\(script.stableHash)"
+        }
+
+        return nil
     }
 
     /// 生成随机的十六进制颜色字符串（深色调）
