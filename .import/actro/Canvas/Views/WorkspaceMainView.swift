@@ -1134,14 +1134,14 @@ private struct LoadingIndicator: View {
     var body: some View {
         ZStack {
             if isLoading {
-                // Spinning progress ring
+                // Spinning progress ring - white color, smaller stroke
                 Circle()
                     .trim(from: 0, to: 0.7)
                     .stroke(
-                        Color.accentColor,
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                        Color.white.opacity(0.85),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
                     )
-                    .frame(width: size, height: size)
+                    .frame(width: size - 4, height: size - 4)
                     .rotationEffect(.degrees(rotation))
                     .onAppear {
                         withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
@@ -1151,7 +1151,6 @@ private struct LoadingIndicator: View {
             } else {
                 // Default icon
                 Image(systemName: "list.bullet")
-                    .frame(width: size, height: size)
                     .foregroundColor(.white.opacity(0.85))
             }
         }
