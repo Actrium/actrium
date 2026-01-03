@@ -1287,9 +1287,11 @@ private struct TabPanel: View {
     var body: some View {
         let _ = NSLog("🔄 [TABCARD-BODY] TabPanel.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
 
-        // 外层尺寸：Focus 模式用 viewportSize，Overview 模式用 cardWidth/cardHeight
-        let panelWidth = isFocused ? viewportSize.width : cardWidth
-        let panelHeight = isFocused ? viewportSize.height : cardHeight
+        // 外层尺寸：始终使用 cardWidth/cardHeight
+        // Canvas 变换负责在 Focus 模式下缩放到 viewportSize
+        // 如果这里使用 viewportSize，会与 canvas scale 叠加导致过度放大
+        let panelWidth = cardWidth
+        let panelHeight = cardHeight
 
         // 使用 ZStack 允许标题栏悬浮在卡片上方
         ZStack(alignment: .top) {
@@ -1398,15 +1400,12 @@ private struct TabPanel: View {
     // 内容区域视图 - 多态容器
     // 根据 Tab.contentType 决定使用 ViewBridge (RN) 还是 WKWebView (Web)
     private var contentView: some View {
-        // 新架构：Remote view size 跟随 TabPanel 实际尺寸
-        // - Focus 模式：TabPanel 尺寸 ≈ viewportSize
-        // - Overview 模式：TabPanel 尺寸 = cardSize
-        let panelWidth = isFocused ? viewportSize.width : cardWidth
-        let panelHeight = isFocused ? viewportSize.height : cardHeight
-        let panelSize = CGSize(width: max(panelWidth, 1), height: max(panelHeight, 1))
+        // 始终使用 cardSize - Canvas 变换负责缩放
+        // 这确保内容尺寸与 canvas 变换计算一致，避免过度放大
+        let panelSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
 
         let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, panelSize=%.0fx%.0f",
-                      String(describing: tab.contentType), isFocused ? 1 : 0, panelWidth, panelHeight)
+                      String(describing: tab.contentType), isFocused ? 1 : 0, cardWidth, cardHeight)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
