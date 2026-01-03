@@ -159,6 +159,16 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     private var loadedURL: URL?
 
+    /// Canvas User-Agent string
+    /// Format follows standard browser convention: Mozilla/5.0 (Platform) Engine/Version (Compatibility) Browser/Version Engine/Version
+    private static let userAgent: String = {
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+        let osVersionString = "\(osVersion.majorVersion)_\(osVersion.minorVersion)_\(osVersion.patchVersion)"
+        // WebKit version from macOS (605.1.15 is standard for Safari/WebKit on macOS)
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X \(osVersionString)) AppleWebKit/605.1.15 (KHTML, like Gecko) Canvas/\(appVersion) Safari/605.1.15"
+    }()
+
     override init() {
         let config = WKWebViewConfiguration()
         config.processPool = sharedProcessPool
@@ -169,9 +179,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
-
-        // Set standard Safari User-Agent to avoid website detection issues
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        webView.customUserAgent = Self.userAgent
     }
 
     func loadIfNeeded(_ url: URL) {
