@@ -20,14 +20,16 @@ private let debugLogPath: String = {
 }()
 
 private func debugLog(_ message: String) {
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-    let logMessage = "[\(timestamp)] \(message)\n"
+    // Use NSLog for reliable logging in XPC service
+    NSLog("[CanvasViewService] %@", message)
 
-    // Write to stderr (visible in console)
+    // Also write to stderr
     fputs("[CanvasViewService] \(message)\n", stderr)
     fflush(stderr)
 
-    // Also append to log file in container
+    // Also append to log file
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let logMessage = "[\(timestamp)] \(message)\n"
     if let data = logMessage.data(using: .utf8) {
         if FileManager.default.fileExists(atPath: debugLogPath) {
             if let handle = FileHandle(forWritingAtPath: debugLogPath) {
@@ -167,6 +169,9 @@ private class ServiceReactNativeHost {
     private var currentContainerSize: CGSize = .zero
     private var tabConfigObserver: NSObjectProtocol?
 
+    /// 缓存的 tab config，用于在 RN 就绪前收到的配置
+    private var pendingTabConfig: [String: Any]?
+
     private init() {
         debugLog("Initializing React Native host")
 
@@ -213,6 +218,17 @@ private class ServiceReactNativeHost {
     func updateTabConfig(_ config: [String: Any]) {
         debugLog("📥 updateTabConfig: \(config["title"] ?? "?")")
 
+        // 如果 RN rootView 还未就绪，缓存配置
+        if rootView == nil {
+            debugLog("📥 RN not ready, caching tab config for later")
+            pendingTabConfig = config
+            return
+        }
+
+        applyTabConfig(config)
+    }
+
+    private func applyTabConfig(_ config: [String: Any]) {
         // Build React Native tabs array from config
         let tabId = config["tabId"] as? String ?? UUID().uuidString
         var tabDict: [String: Any] = [
@@ -224,6 +240,7 @@ private class ServiceReactNativeHost {
         // Copy scripts
         if let unifiedScript = config["unifiedScript"] as? String {
             tabDict["unifiedScript"] = unifiedScript
+            debugLog("📥 Tab has unifiedScript: \(unifiedScript.prefix(100))...")
         }
         if let leftPanelScript = config["leftPanelScript"] as? String {
             tabDict["leftPanelScript"] = leftPanelScript
@@ -236,13 +253,13 @@ private class ServiceReactNativeHost {
         }
 
         // Update container size if provided
-        if let width = config["containerWidth"] as? CGFloat,
-           let height = config["containerHeight"] as? CGFloat {
+        if let width = config["containerWidth"] as? Double,
+           let height = config["containerHeight"] as? Double {
             currentContainerSize = CGSize(width: width, height: height)
         }
 
         // Build full properties
-        var properties: [String: Any] = [
+        let properties: [String: Any] = [
             "tabs": [tabDict],
             "currentTabId": tabId,
             "isLeftPanelVisible": true,
@@ -252,7 +269,7 @@ private class ServiceReactNativeHost {
         ]
 
         currentProperties = properties
-        debugLog("📥 Updating RN props with tab config")
+        debugLog("📥 Applying tab config to RN: \(config["title"] ?? "?")")
 
         // Update React Native
         rootView?.appProperties = properties
@@ -282,6 +299,16 @@ private class ServiceReactNativeHost {
             rctRootView.sizeFlexibility = .none
             rctRootView.backgroundColor = NSColor.clear
             debugLog("RCTRootView created successfully with containerSize in props")
+
+            // 应用缓存的 tab config（如果有）
+            if let pending = pendingTabConfig {
+                debugLog("📥 Applying pending tab config now that RN is ready")
+                pendingTabConfig = nil
+                // 稍微延迟以确保 RN bridge 就绪
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.applyTabConfig(pending)
+                }
+            }
         } else {
             debugLog("WARNING: View is not RCTRootView, type: \(type(of: view))")
         }
@@ -400,6 +427,11 @@ public func registerCanvasServiceViewController() {
     // Add loadView method - creates React Native view
     let loadViewBlock: @convention(block) (AnyObject) -> Void = { (self_) in
         debugLog("loadView called")
+
+        // 🔴 重要：立即初始化 ServiceReactNativeHost 以设置 tab config 监听器
+        // 这样在 Host 发送 tab config 通知时，监听器已就绪
+        _ = ServiceReactNativeHost.shared
+        debugLog("ServiceReactNativeHost initialized (tab config listener ready)")
 
         // Use a reasonable default size instead of screen size
         // This prevents oversized initial frames
@@ -534,34 +566,28 @@ private func setupReactNativeContent(in containerView: NSView) {
     ])
 
     // Initial properties - will be updated when host sends tab config via IPC
-    // Show a "waiting for config" state initially
+    // Show a simple "XPC Ready" state initially (minimal script to verify RN works)
     let initialTabId = UUID().uuidString
     let initialProperties: [String: Any] = [
         "tabs": [
             [
                 "id": initialTabId,
-                "title": "Waiting for Tab Config...",
-                "backgroundColor": "#1a1a2e",
+                "title": "XPC Service Ready",
+                "backgroundColor": "#1e40af",  // 深蓝色背景，易于区分
                 "unifiedScript": """
-                // Initial placeholder - waiting for host to send tab config
-                const { View, Text, ActivityIndicator } = require('react-native');
-                module.exports = function WaitingApp() {
+                const { View, Text } = require('react-native');
+                module.exports = function XPCReady() {
                     return React.createElement(View, {
-                        style: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e' }
+                        style: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1e40af' }
                     }, [
-                        React.createElement(ActivityIndicator, {
-                            key: 'spinner',
-                            size: 'large',
-                            color: '#4ade80'
-                        }),
                         React.createElement(Text, {
-                            key: 'title',
-                            style: { fontSize: 16, color: 'rgba(255,255,255,0.7)', marginTop: 16 }
-                        }, 'Waiting for tab configuration...'),
+                            key: 't1',
+                            style: { fontSize: 20, fontWeight: 'bold', color: '#fff' }
+                        }, 'XPC Service Ready'),
                         React.createElement(Text, {
-                            key: 'subtitle',
-                            style: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 8 }
-                        }, 'CanvasViewService XPC Process')
+                            key: 't2',
+                            style: { fontSize: 12, color: '#93c5fd', marginTop: 8 }
+                        }, 'Waiting for tab config from host...')
                     ]);
                 };
                 """
