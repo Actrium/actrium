@@ -104,6 +104,11 @@ struct WebViewTabView: NSViewRepresentable {
 
 /// Web 内容的多进程 Tab 视图
 /// WKWebView 由系统自动管理 WebContent 进程
+///
+/// 渲染策略：
+/// - Overview 模式：在 TabPanel 内显示 cardSize 的 web 预览
+/// - Focus 模式：由 FocusedWebOverlay 在 canvas 外独立渲染
+///   (因为 scaleEffect 对 NSViewRepresentable 不生效)
 struct WebViewMultiProcessTabView: View {
     let tab: Tab
     let url: URL
@@ -115,9 +120,48 @@ struct WebViewMultiProcessTabView: View {
 
     var body: some View {
         ZStack {
+            // Focus 模式：显示占位符（实际内容由 FocusedWebOverlay 渲染）
+            // Overview 模式：显示实际 web 内容
+            if isFocused {
+                // 占位符 - 实际内容在 FocusedWebOverlay 层
+                Color(nsColor: .windowBackgroundColor)
+            } else {
+                WebViewTabView(
+                    url: url,
+                    containerSize: containerSize,
+                    title: $webTitle,
+                    isLoading: $isLoading
+                )
+            }
+
+            if isLoading && !isFocused {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.3))
+            }
+        }
+        .frame(width: containerSize.width, height: containerSize.height)
+    }
+}
+
+// MARK: - Focused Web Overlay
+
+/// Focus 模式下的全屏 Web 内容层
+/// 在 canvas 变换之外独立渲染，避免 NSViewRepresentable 缩放问题
+struct FocusedWebOverlay: View {
+    let tab: Tab
+    let url: URL
+    let viewportSize: CGSize
+
+    @State private var webTitle: String = ""
+    @State private var isLoading: Bool = true
+
+    var body: some View {
+        ZStack {
             WebViewTabView(
                 url: url,
-                containerSize: containerSize,
+                containerSize: viewportSize,
                 title: $webTitle,
                 isLoading: $isLoading
             )
@@ -129,6 +173,6 @@ struct WebViewMultiProcessTabView: View {
                     .background(Color.black.opacity(0.3))
             }
         }
-        .frame(width: containerSize.width, height: containerSize.height)
+        .frame(width: viewportSize.width, height: viewportSize.height)
     }
 }

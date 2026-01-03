@@ -143,6 +143,19 @@ struct WorkspaceMainView: View {
                 .contentShape(Rectangle())
                 // 地址栏退出焦点已由全局鼠标事件监听处理（mouseEventMonitor）
 
+                // Focus 模式下的 Web 内容层（canvas 变换之外）
+                // scaleEffect 对 NSViewRepresentable 不生效，所以 Web 内容需要独立渲染
+                if case .focus(let focusedTabId) = viewModel.canvasMode,
+                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
+                   case .web(let url) = focusedTab.contentType {
+                    FocusedWebOverlay(
+                        tab: focusedTab,
+                        url: url,
+                        viewportSize: safeViewportSize
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
                     onDropACTR: { url in
@@ -1425,6 +1438,7 @@ private struct TabPanel: View {
 
             case .web(let url):
                 // Web 内容 - 使用 WKWebView
+                // Focus 模式由 FocusedWebOverlay 独立渲染（canvas 变换外）
                 WebViewMultiProcessTabView(
                     tab: tab,
                     url: url,
