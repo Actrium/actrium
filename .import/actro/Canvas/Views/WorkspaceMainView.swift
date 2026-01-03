@@ -105,6 +105,15 @@ struct WorkspaceMainView: View {
                 Color(nsColor: NSColor(white: 0.12, alpha: 1.0))
                     .ignoresSafeArea()
 
+                // Toolbar 底部分隔线
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .fill(Color(nsColor: NSColor.separatorColor))
+                        .frame(height: 1)
+                    Spacer()
+                }
+                .ignoresSafeArea()
+
                 // Canvas 视图 - 包含所有 Tab 卡片
                 // ViewBridge 始终在 Canvas 内部，通过快照实现平滑动画
                 TabGridView(
