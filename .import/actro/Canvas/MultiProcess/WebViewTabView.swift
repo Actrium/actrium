@@ -8,6 +8,7 @@
 
 import SwiftUI
 import WebKit
+import Combine
 
 // MARK: - WebView Tab View
 
@@ -256,7 +257,7 @@ struct FocusedWebOverlay: View {
         .onAppear {
             holder.loadIfNeeded(url)
         }
-        .onChange(of: url) { newURL in
+        .onChange(of: url) { _, newURL in
             holder.loadIfNeeded(newURL)
         }
     }
