@@ -263,11 +263,17 @@ struct WorkspaceMainView: View {
                             Color.clear
                                 .frame(width: addressBarContainerWidth, height: 28)
                         } else {
-                            // Show loading spinner only for web tabs
-                            let showLoading: Bool = {
-                                guard let tab = viewModel.currentTab,
-                                      case .web = tab.contentType else { return false }
-                                return isWebLoading
+                            // Determine left icon state based on tab type
+                            let leftIconState: AddressBarLeftIconState = {
+                                guard let tab = viewModel.currentTab else { return .none }
+                                switch tab.contentType {
+                                case .reactNative:
+                                    return .menu  // RN app shows menu icon
+                                case .web:
+                                    return isWebLoading ? .loading : .none  // Web shows loading or nothing
+                                case .empty:
+                                    return .none
+                                }
                             }()
 
                             AddressBarContainer(
@@ -276,7 +282,7 @@ struct WorkspaceMainView: View {
                                 isEditing: $isAddressBarEditing,
                                 isFirstResponder: $isAddressBarFirstResponder,
                                 isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
-                                isLoading: showLoading,
+                                leftIconState: leftIconState,
                                 toggleLeftPanel: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         viewModel.toggleLeftPanelForCurrentTab()
@@ -1122,17 +1128,29 @@ private struct CancelDragDropDelegate: DropDelegate {
     // 这会导致状态被错误清空
 }
 
-// MARK: - Loading Indicator
+// MARK: - Address Bar Left Icon State
 
-/// Displays a loading spinner or default icon - matches toolbar icon style
-private struct LoadingIndicator: View {
-    let isLoading: Bool
+/// State for address bar left icon
+private enum AddressBarLeftIconState {
+    case none      // No icon (web tab not loading)
+    case loading   // Loading spinner (web tab loading)
+    case menu      // Menu icon (RN app tab)
+}
+
+/// Left icon view for address bar
+private struct AddressBarLeftIcon: View {
+    let state: AddressBarLeftIconState
+    let action: () -> Void
 
     @State private var rotation: Double = 0
 
     var body: some View {
-        if isLoading {
-            // Spinning progress ring - match other toolbar icons
+        switch state {
+        case .none:
+            // Empty space to maintain layout
+            Color.clear.frame(width: 16, height: 16)
+        case .loading:
+            // Spinning progress ring
             Circle()
                 .trim(from: 0, to: 0.7)
                 .stroke(
@@ -1146,10 +1164,14 @@ private struct LoadingIndicator: View {
                         rotation = 360
                     }
                 }
-        } else {
-            // Default icon - same style as other toolbar icons
-            Image(systemName: "list.bullet")
-                .foregroundColor(.white.opacity(0.7))
+        case .menu:
+            // Menu button for RN apps
+            Button(action: action) {
+                Image(systemName: "list.bullet")
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .buttonStyle(.borderless)
+            .help("切换左侧面板")
         }
     }
 }
@@ -1162,7 +1184,7 @@ private struct AddressBarContainer: View {
     @Binding var isEditing: Bool
     @Binding var isFirstResponder: Bool
     var isBookmarked: Bool
-    var isLoading: Bool       // Loading state for spinner
+    var leftIconState: AddressBarLeftIconState
     var toggleLeftPanel: () -> Void
     var toggleBookmark: () -> Void
     var refreshAction: () -> Void
@@ -1191,13 +1213,9 @@ private struct AddressBarContainer: View {
                     )
                 }
             } else {
-                // 非编辑状态：左右图标 + 中间标题
+                // 非编辑状态：左图标 + 中间标题 + 右图标
                 HStack(spacing: 10) {
-                    Button(action: toggleLeftPanel) {
-                        LoadingIndicator(isLoading: isLoading)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("切换左侧面板")
+                    AddressBarLeftIcon(state: leftIconState, action: toggleLeftPanel)
 
                     Text(titleText)
                         .foregroundColor(.white)
