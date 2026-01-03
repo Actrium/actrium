@@ -120,7 +120,7 @@ struct WorkspaceMainView: View {
                     showNewTabButton: searchTabsText.isEmpty,
                     viewportSize: safeViewportSize,
                     onSelectTab: { tabId in
-                        switchToFocus(tabId: tabId)
+                        enterFocus(tabId: tabId)
                     },
                     onSwapPositions: { tabId1, tabId2 in
                         viewModel.swapSlotPositions(tabId1: tabId1, tabId2: tabId2)
@@ -168,7 +168,7 @@ struct WorkspaceMainView: View {
 
                             // 导入完成后自动切换到新 Tab 的 Focus 模式
                             if let newTabId = viewModel.currentTabId {
-                                switchToFocus(tabId: newTabId)
+                                enterFocus(tabId: newTabId)
                             }
                         }
                     }
@@ -269,7 +269,7 @@ struct WorkspaceMainView: View {
                     }
                     .help("新建标签页")
 
-                    Button(action: toggleMode) {
+                    Button(action: toggleFocusOverview) {
                         Image(systemName: "square.grid.2x2")
                     }
                     .help("标签总览")
@@ -301,12 +301,10 @@ struct WorkspaceMainView: View {
                 fflush(stderr)
                 // 使用本地变量捕获标志，延迟后再重置，避免立即触发视图重建
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    fputs("🟡 onAppear delayed: setting focus mode now\n", stderr)
+                    fputs("🟡 onAppear delayed: entering focus mode now\n", stderr)
                     fflush(stderr)
-                    viewModel.shouldStartInFocusMode = false  // 延迟重置，与 canvasMode 一起变化
-                    withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                        viewModel.canvasMode = .focus(tabId: tabId)
-                    }
+                    viewModel.shouldStartInFocusMode = false
+                    enterFocus(tabId: tabId, skipDebounce: true)
                 }
             }
             // Note: canvasMode defaults to .overview, no need to set explicitly
@@ -316,20 +314,9 @@ struct WorkspaceMainView: View {
                 // Cmd+Shift+\ (keyCode 42 = \)：Toggle Focus <-> Overview
                 let cmdShift: NSEvent.ModifierFlags = [.command, .shift]
                 if event.keyCode == 42 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(cmdShift) {
-                    if case .focus(let tabId) = viewModel.canvasMode {
-                        // Focus -> Overview：记住当前 tab
-                        lastFocusedTabId = tabId
-                        switchToOverview()
-                        return nil
-                    } else if case .overview = viewModel.canvasMode {
-                        // Overview -> Focus：需要有明确目标
-                        if let targetTabId = determineFocusTarget() {
-                            switchToFocus(tabId: targetTabId)
-                            return nil
-                        }
-                    }
+                    toggleFocusOverview()
+                    return nil
                 }
-
                 return event
             }
         }
@@ -351,59 +338,84 @@ struct WorkspaceMainView: View {
         }
     }
 
-    // MARK: - Mode Switching
-
-    private func toggleMode() {
-        if case .overview = viewModel.canvasMode {
-            // 从 Overview 切换到第一个 Tab
-            if let firstTab = viewModel.tabs.first {
-                switchToFocus(tabId: firstTab.id)
-            }
-        } else {
-            // 从 Focus 切换到 Overview
-            switchToOverview()
-        }
-    }
+    // MARK: - Mode Switching (统一入口)
+    //
+    // 所有模式切换都必须通过以下三个函数之一：
+    // - toggleFocusOverview(): Toggle 切换（toolbar 按钮、快捷键）
+    // - enterFocus(tabId:): 进入 Focus 模式（点击卡片、导入后、初始化）
+    // - exitToOverview(): 退出到 Overview 模式
+    //
+    // 这些函数统一处理：防抖、动画、lastFocusedTabId 记录、日志
 
     /// 上次 mode 切换时间，用于防抖
     @State private var lastModeChangeTime: Date = .distantPast
 
-    /// 上次 focused 的 tab ID，用于 Enter 键快速返回
+    /// 上次 focused 的 tab ID，用于快速返回
     @State private var lastFocusedTabId: UUID?
 
-    private func switchToOverview() {
-        guard case .focus = viewModel.canvasMode else { return }
-
-        // 防抖：忽略 0.5 秒内的重复切换
-        let now = Date()
-        guard now.timeIntervalSince(lastModeChangeTime) > 0.5 else {
-            fputs("🔴 switchToOverview() DEBOUNCED (too fast)\n", stderr)
-            return
-        }
-        lastModeChangeTime = now
-
-        fputs("🔴 switchToOverview() called\n", stderr)
-
-        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-            viewModel.canvasMode = .overview
+    /// Toggle 切换 Focus <-> Overview 模式
+    /// - 从 Focus → Overview：记住当前 tab，切换到 Overview
+    /// - 从 Overview → Focus：切换到 determineFocusTarget() 确定的 tab
+    private func toggleFocusOverview() {
+        switch viewModel.canvasMode {
+        case .focus:
+            exitToOverview()
+        case .overview:
+            if let targetTabId = determineFocusTarget() {
+                enterFocus(tabId: targetTabId)
+            }
         }
     }
 
-    private func switchToFocus(tabId: UUID) {
+    /// 进入 Focus 模式
+    /// - Parameter tabId: 要 focus 的 tab ID
+    /// - Parameter skipDebounce: 是否跳过防抖（仅用于初始化）
+    private func enterFocus(tabId: UUID, skipDebounce: Bool = false) {
+        // 已经在目标 Focus 状态，无需切换
         guard viewModel.canvasMode != .focus(tabId: tabId) else { return }
+
+        // 防抖：忽略 0.5 秒内的重复切换
+        if !skipDebounce {
+            let now = Date()
+            guard now.timeIntervalSince(lastModeChangeTime) > 0.5 else {
+                fputs("🟢 enterFocus() DEBOUNCED (too fast)\n", stderr)
+                return
+            }
+            lastModeChangeTime = now
+        }
+
+        fputs("🟢 enterFocus(\(tabId.uuidString.prefix(8)))\n", stderr)
+
+        // 记录为上次 focused 的 tab
+        lastFocusedTabId = tabId
+
+        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+            viewModel.canvasMode = .focus(tabId: tabId)
+        }
+    }
+
+    /// 退出到 Overview 模式
+    private func exitToOverview() {
+        // 记住当前 focused 的 tab（在切换前）
+        if case .focus(let currentTabId) = viewModel.canvasMode {
+            lastFocusedTabId = currentTabId
+        } else {
+            // 已经在 Overview 模式
+            return
+        }
 
         // 防抖：忽略 0.5 秒内的重复切换
         let now = Date()
         guard now.timeIntervalSince(lastModeChangeTime) > 0.5 else {
-            fputs("🟢 switchToFocus() DEBOUNCED (too fast)\n", stderr)
+            fputs("🔴 exitToOverview() DEBOUNCED (too fast)\n", stderr)
             return
         }
         lastModeChangeTime = now
 
-        fputs("🟢 switchToFocus(\(tabId.uuidString.prefix(8))) called\n", stderr)
+        fputs("🔴 exitToOverview()\n", stderr)
 
         withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-            viewModel.canvasMode = .focus(tabId: tabId)
+            viewModel.canvasMode = .overview
         }
     }
 
