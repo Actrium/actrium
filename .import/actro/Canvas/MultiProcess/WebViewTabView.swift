@@ -640,22 +640,29 @@ class DownloadableWebView: WKWebView {
         var addedSeparator = false
 
         if let imageURL = contextMenuImageURL {
+            NSLog("📥 DownloadableWebView: Adding Download Image menu item for \(imageURL)")
+
             if !addedSeparator {
                 menu.addItem(NSMenuItem.separator())
                 addedSeparator = true
             }
 
+            // Create menu item with closure-based action to avoid target issues
             let downloadImageItem = NSMenuItem(
                 title: "Download Image",
-                action: #selector(downloadImage(_:)),
+                action: nil,
                 keyEquivalent: ""
             )
+            // Store URL directly and use a helper to handle the action
+            downloadImageItem.representedObject = ["type": "image", "url": imageURL] as [String: Any]
             downloadImageItem.target = self
-            downloadImageItem.representedObject = imageURL
+            downloadImageItem.action = #selector(handleDownloadMenuItem(_:))
             menu.addItem(downloadImageItem)
         }
 
         if let linkURL = contextMenuLinkURL, linkURL != contextMenuImageURL {
+            NSLog("📥 DownloadableWebView: Adding Download Linked File menu item for \(linkURL)")
+
             if !addedSeparator {
                 menu.addItem(NSMenuItem.separator())
                 addedSeparator = true
@@ -663,26 +670,59 @@ class DownloadableWebView: WKWebView {
 
             let downloadLinkItem = NSMenuItem(
                 title: "Download Linked File",
-                action: #selector(downloadLinkedFile(_:)),
+                action: nil,
                 keyEquivalent: ""
             )
+            downloadLinkItem.representedObject = ["type": "link", "url": linkURL] as [String: Any]
             downloadLinkItem.target = self
-            downloadLinkItem.representedObject = linkURL
+            downloadLinkItem.action = #selector(handleDownloadMenuItem(_:))
             menu.addItem(downloadLinkItem)
         }
     }
 
+    @objc private func handleDownloadMenuItem(_ sender: NSMenuItem) {
+        NSLog("📥 DownloadableWebView: handleDownloadMenuItem called")
+
+        guard let info = sender.representedObject as? [String: Any],
+              let url = info["url"] as? URL else {
+            NSLog("📥 DownloadableWebView: Failed to extract URL from menu item")
+            return
+        }
+
+        NSLog("📥 DownloadableWebView: Downloading from menu: \(url)")
+        startDownload(url: url)
+    }
+
     @objc private func downloadImage(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL ?? contextMenuImageURL else { return }
+        NSLog("📥 DownloadableWebView: downloadImage called")
+        NSLog("📥 DownloadableWebView: sender.representedObject = \(String(describing: sender.representedObject))")
+        NSLog("📥 DownloadableWebView: contextMenuImageURL = \(String(describing: contextMenuImageURL))")
+
+        guard let url = sender.representedObject as? URL ?? contextMenuImageURL else {
+            NSLog("📥 DownloadableWebView: No URL found for image download!")
+            return
+        }
         startDownload(url: url)
     }
 
     @objc private func downloadLinkedFile(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL ?? contextMenuLinkURL else { return }
+        NSLog("📥 DownloadableWebView: downloadLinkedFile called")
+        guard let url = sender.representedObject as? URL ?? contextMenuLinkURL else {
+            NSLog("📥 DownloadableWebView: No URL found for link download!")
+            return
+        }
         startDownload(url: url)
     }
 
     private func startDownload(url: URL) {
+        NSLog("📥 DownloadableWebView: startDownload called with URL: \(url)")
+
+        // Check if URL is valid for download
+        guard url.scheme == "http" || url.scheme == "https" else {
+            NSLog("📥 DownloadableWebView: Invalid URL scheme: \(url.scheme ?? "nil")")
+            return
+        }
+
         var filename = url.lastPathComponent
 
         // If filename is empty or has no extension, try to get a better name
@@ -694,10 +734,12 @@ class DownloadableWebView: WKWebView {
             }
         }
 
+        NSLog("📥 DownloadableWebView: Starting download with filename: \(filename)")
+
         Task { @MainActor in
             let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: url)
+            NSLog("📥 DownloadableWebView: Created download item, calling URLSessionDownloader")
             URLSessionDownloader.shared.startDownload(url: url, item: item)
-            NSLog("📥 DownloadableWebView: Context menu download - \(filename) from \(url)")
         }
     }
 }
