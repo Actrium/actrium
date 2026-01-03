@@ -47,6 +47,8 @@ private func debugLog(_ message: String) {
 /// ViewBridge 会自动将 Host 端 NSRemoteView 的 frame 同步到这里
 private class ResizableContainerView: NSView {
     private var rnView: NSView?
+    /// Callback to notify React Native of size changes
+    var onSizeChanged: ((CGSize) -> Void)?
 
     override func setFrameSize(_ newSize: NSSize) {
         // 直接使用 ViewBridge 传来的尺寸，无需任何过滤或锁定
@@ -56,6 +58,12 @@ private class ResizableContainerView: NSView {
         // 更新 RN view 尺寸
         if let rnView = rnView {
             rnView.frame = bounds
+            debugLog("Updated RN view frame to: \(bounds)")
+        }
+
+        // 通知 React Native 尺寸变化
+        if newSize.width > 0 && newSize.height > 0 {
+            onSizeChanged?(newSize)
         }
     }
 
@@ -110,6 +118,8 @@ private class ServiceReactNativeHost {
     private let factoryDelegate: ServiceReactNativeFactoryDelegate
     private let factory: RCTReactNativeFactory
     private var rootView: RCTRootView?
+    private var currentProperties: [String: Any] = [:]
+    private var currentContainerSize: CGSize = .zero
 
     private init() {
         debugLog("Initializing React Native host")
@@ -123,12 +133,19 @@ private class ServiceReactNativeHost {
         debugLog("React Native factory created")
     }
 
-    func createRootView(initialProperties: [String: Any]) -> NSView {
-        debugLog("Creating RCTRootView with module: ActrApp")
+    func createRootView(initialProperties: [String: Any], containerSize: CGSize) -> NSView {
+        debugLog("Creating RCTRootView with module: ActrApp, containerSize: \(containerSize)")
+
+        // Merge container size into initial properties
+        var properties = initialProperties
+        properties["containerWidth"] = containerSize.width
+        properties["containerHeight"] = containerSize.height
+        self.currentProperties = properties
+        self.currentContainerSize = containerSize
 
         let view = factory.rootViewFactory.view(
             withModuleName: "ActrApp",
-            initialProperties: initialProperties,
+            initialProperties: properties,
             launchOptions: nil
         )
 
@@ -136,7 +153,7 @@ private class ServiceReactNativeHost {
             self.rootView = rctRootView
             rctRootView.sizeFlexibility = .none
             rctRootView.backgroundColor = NSColor.clear
-            debugLog("RCTRootView created successfully")
+            debugLog("RCTRootView created successfully with containerSize in props")
         } else {
             debugLog("WARNING: View is not RCTRootView, type: \(type(of: view))")
         }
@@ -145,7 +162,78 @@ private class ServiceReactNativeHost {
     }
 
     func updateProperties(_ properties: [String: Any]) {
-        rootView?.appProperties = properties
+        var mergedProps = properties
+        // Preserve container size
+        mergedProps["containerWidth"] = currentContainerSize.width
+        mergedProps["containerHeight"] = currentContainerSize.height
+        currentProperties = mergedProps
+        rootView?.appProperties = mergedProps
+    }
+
+    /// Update container size - this is the critical method for XPC service
+    /// Since RCTKeyWindow() returns nil in XPC, we pass container size via props
+    func updateContainerSize(to size: CGSize) {
+        guard size.width > 0 && size.height > 0 else {
+            debugLog("updateContainerSize: Invalid size \(size), skipping")
+            return
+        }
+
+        debugLog("updateContainerSize: \(currentContainerSize) -> \(size)")
+
+        // Update stored size
+        currentContainerSize = size
+
+        // Update React Native props with new container size
+        var properties = currentProperties
+        properties["containerWidth"] = size.width
+        properties["containerHeight"] = size.height
+        currentProperties = properties
+
+        if let rootView = rootView {
+            rootView.appProperties = properties
+            debugLog("updateContainerSize: Updated appProperties with new size")
+        } else {
+            debugLog("updateContainerSize: rootView not ready, size will be applied when created")
+        }
+
+        // Also try to update RN Dimensions via bridge event
+        updateDimensionsViaEvent(to: size)
+    }
+
+    /// Update React Native Dimensions via event
+    private func updateDimensionsViaEvent(to size: CGSize) {
+        guard let bridge = rootView?.bridge else {
+            debugLog("updateDimensionsViaEvent: No bridge available")
+            return
+        }
+
+        debugLog("updateDimensionsViaEvent: Sending size \(size) to React Native")
+
+        // Create dimensions object matching RCTDeviceInfo format
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let screenDims: [String: Any] = [
+            "width": size.width,
+            "height": size.height,
+            "scale": scale,
+            "fontScale": 1.0
+        ]
+
+        let windowDims: [String: Any] = [
+            "width": size.width,
+            "height": size.height,
+            "scale": scale,
+            "fontScale": 1.0
+        ]
+
+        let dimensions: [String: Any] = [
+            "window": windowDims,
+            "screen": screenDims
+        ]
+
+        // Send didUpdateDimensions event through the bridge
+        bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["didUpdateDimensions", dimensions], completion: nil)
+
+        debugLog("updateDimensionsViaEvent: Event sent successfully")
     }
 }
 
@@ -363,8 +451,15 @@ private func setupReactNativeContent(in containerView: NSView) {
             // Remove loading indicator
             loadingLabel.removeFromSuperview()
 
-            // Create and add React Native view
-            let rnView = ServiceReactNativeHost.shared.createRootView(initialProperties: testProperties)
+            // Get container size for React Native
+            let containerSize = containerView.bounds.size
+            debugLog("Creating RN view with containerSize: \(containerSize)")
+
+            // Create and add React Native view with container size
+            let rnView = ServiceReactNativeHost.shared.createRootView(
+                initialProperties: testProperties,
+                containerSize: containerSize
+            )
 
             // Use frame-based layout instead of Auto Layout (RCTRootView may not work well with Auto Layout)
             rnView.frame = containerView.bounds
@@ -374,6 +469,22 @@ private func setupReactNativeContent(in containerView: NSView) {
             // Register RN view with ResizableContainerView for resize handling
             if let resizableContainer = containerView as? ResizableContainerView {
                 resizableContainer.setRNView(rnView)
+
+                // Connect size change callback to update React Native container size
+                resizableContainer.onSizeChanged = { newSize in
+                    debugLog("onSizeChanged callback: \(newSize)")
+                    ServiceReactNativeHost.shared.updateContainerSize(to: newSize)
+                }
+
+                // Send initial dimensions to React Native (as backup)
+                // Note: containerSize is already passed during createRootView
+                let initialSize = containerView.bounds.size
+                if initialSize.width > 0 && initialSize.height > 0 {
+                    // Delay slightly to ensure bridge is ready, then send again
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        ServiceReactNativeHost.shared.updateContainerSize(to: initialSize)
+                    }
+                }
             }
 
             debugLog("React Native view added to container, rnView.frame: \(rnView.frame), container.bounds: \(containerView.bounds)")

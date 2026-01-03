@@ -289,13 +289,20 @@ struct WorkspaceMainView: View {
             }
         }
         .onAppear {
+            fputs("🟡 onAppear: shouldStartInFocusMode=\(viewModel.shouldStartInFocusMode), currentTabId=\(viewModel.currentTabId?.uuidString.prefix(8) ?? "nil")\n", stderr)
+            fflush(stderr)
+
             // 🔴 开发调试：如果设置了启动时进入 Focus 模式，延迟切换
             // 延迟切换确保渲染进程完全初始化后再切换模式
             // 注意：不要在这里立即修改 @Published 属性，否则会触发视图重建
             if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
                 logger.notice("🚀 [WorkspaceMainView] 启动时延迟进入 Focus 模式")
+                fputs("🟡 onAppear: scheduling focus mode after 1.5s\n", stderr)
+                fflush(stderr)
                 // 使用本地变量捕获标志，延迟后再重置，避免立即触发视图重建
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    fputs("🟡 onAppear delayed: setting focus mode now\n", stderr)
+                    fflush(stderr)
                     viewModel.shouldStartInFocusMode = false  // 延迟重置，与 canvasMode 一起变化
                     withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
                         viewModel.canvasMode = .focus(tabId: tabId)
@@ -304,20 +311,25 @@ struct WorkspaceMainView: View {
             }
             // Note: canvasMode defaults to .overview, no need to set explicitly
 
-            // 监听 ESC 键
+            // 监听键盘快捷键：Cmd+Shift+O toggle Focus <-> Overview
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                if event.keyCode == 53 { // ESC key code
-                    if case .overview = viewModel.canvasMode {
-                        switchToFocus(tabId: viewModel.currentTabId ?? viewModel.tabs.first!.id)
+                // Cmd+Shift+O (keyCode 31 = O)：Toggle Focus <-> Overview
+                let cmdShift: NSEvent.ModifierFlags = [.command, .shift]
+                if event.keyCode == 31 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(cmdShift) {
+                    if case .focus(let tabId) = viewModel.canvasMode {
+                        // Focus -> Overview：记住当前 tab
+                        lastFocusedTabId = tabId
+                        switchToOverview()
                         return nil
-                    }
-
-                    if isAddressBarEditing {
-                        isAddressBarEditing = false
-                        isAddressBarFirstResponder = false
-                        return nil
+                    } else if case .overview = viewModel.canvasMode {
+                        // Overview -> Focus：需要有明确目标
+                        if let targetTabId = determineFocusTarget() {
+                            switchToFocus(tabId: targetTabId)
+                            return nil
+                        }
                     }
                 }
+
                 return event
             }
         }
@@ -353,8 +365,24 @@ struct WorkspaceMainView: View {
         }
     }
 
+    /// 上次 mode 切换时间，用于防抖
+    @State private var lastModeChangeTime: Date = .distantPast
+
+    /// 上次 focused 的 tab ID，用于 Enter 键快速返回
+    @State private var lastFocusedTabId: UUID?
+
     private func switchToOverview() {
         guard case .focus = viewModel.canvasMode else { return }
+
+        // 防抖：忽略 0.5 秒内的重复切换
+        let now = Date()
+        guard now.timeIntervalSince(lastModeChangeTime) > 0.5 else {
+            fputs("🔴 switchToOverview() DEBOUNCED (too fast)\n", stderr)
+            return
+        }
+        lastModeChangeTime = now
+
+        fputs("🔴 switchToOverview() called\n", stderr)
 
         withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
             viewModel.canvasMode = .overview
@@ -364,9 +392,47 @@ struct WorkspaceMainView: View {
     private func switchToFocus(tabId: UUID) {
         guard viewModel.canvasMode != .focus(tabId: tabId) else { return }
 
+        // 防抖：忽略 0.5 秒内的重复切换
+        let now = Date()
+        guard now.timeIntervalSince(lastModeChangeTime) > 0.5 else {
+            fputs("🟢 switchToFocus() DEBOUNCED (too fast)\n", stderr)
+            return
+        }
+        lastModeChangeTime = now
+
+        fputs("🟢 switchToFocus(\(tabId.uuidString.prefix(8))) called\n", stderr)
+
         withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
             viewModel.canvasMode = .focus(tabId: tabId)
         }
+    }
+
+    /// 确定 Focus 目标 tab
+    /// 优先级：上次 focused 的 tab > 当前选中的 tab > 唯一的 tab
+    /// 如果没有明确目标（多个 tab 但无法确定选哪个），返回 nil
+    private func determineFocusTarget() -> UUID? {
+        let tabs = viewModel.tabs
+
+        // 没有 tab，无法 focus
+        guard !tabs.isEmpty else { return nil }
+
+        // 只有一个 tab，直接 focus 它
+        if tabs.count == 1 {
+            return tabs.first?.id
+        }
+
+        // 上次 focused 的 tab 仍然存在，返回它
+        if let lastId = lastFocusedTabId, tabs.contains(where: { $0.id == lastId }) {
+            return lastId
+        }
+
+        // 当前选中的 tab 存在，返回它
+        if let currentId = viewModel.currentTabId, tabs.contains(where: { $0.id == currentId }) {
+            return currentId
+        }
+
+        // 多个 tab 但没有明确目标，不自动 focus
+        return nil
     }
 
     // 判断 Tab 是否有需要 ViewBridge 渲染的内容
@@ -591,6 +657,9 @@ private struct TabGridView: View {
     @State private var dragSourceSlotIndexFixed: Int?  // 拖动源槽位 a
     @State private var dropTargetSlotIndexFixed: Int?  // 目标槽位 b
 
+    // ViewBridge coordinators 管理器：确保在 mode 切换时不会被重建
+    @StateObject private var coordinatorManager = ViewBridgeCoordinatorManager()
+
     // 构建显示项列表（按位置排序）
     // [+] 按钮紧随最后一个 tab（位置 = tabs.count）
     // 2×2 布局示例（1 tab）：Tab 在位置 0，[+] 在位置 1，位置 2-3 为空
@@ -651,6 +720,7 @@ private struct TabGridView: View {
                         isHovering: isHovering,
                         isSwapping: isSwapping,
                         viewportSize: viewportSize,
+                        viewBridgeCoordinator: coordinatorManager.coordinator(for: tab.id),
                         onSelect: {
                             onSelectTab(tab.id)
                         },
@@ -1124,6 +1194,7 @@ private struct TabPanel: View {
     let isHovering: Bool
     let isSwapping: Bool  // 正在交换过程中（用于淡入动画）
     let viewportSize: CGSize  // 视口尺寸，用于 RN 渲染
+    let viewBridgeCoordinator: ViewBridgeCoordinator  // 从外部传入，确保稳定
     let onSelect: () -> Void
     let onDragStart: () -> NSItemProvider
     let onClose: () -> Void
@@ -1244,62 +1315,37 @@ private struct TabPanel: View {
 
     // 判断 Tab 是否有 RN 内容需要渲染
     private var hasRNContent: Bool {
-        tab.systemTabType != nil ||
-        tab.unifiedScript != nil ||
-        tab.leftPanelScript != nil ||
-        tab.guestScript != nil
+        let result = tab.systemTabType != nil ||
+            tab.unifiedScript != nil ||
+            tab.leftPanelScript != nil ||
+            tab.guestScript != nil
+        fputs("🔍 hasRNContent: \(result) (system=\(tab.systemTabType != nil), unified=\(tab.unifiedScript != nil), left=\(tab.leftPanelScript != nil), guest=\(tab.guestScript != nil))\n", stderr)
+        return result
     }
 
     // 内容区域视图
     private var contentView: some View {
-        // ViewBridge 始终以 viewportSize 渲染
-        let renderSize = viewportSize
+        // 新架构：Remote view size 跟随 TabPanel 实际尺寸
+        // - Focus 模式：TabPanel 尺寸 ≈ viewportSize，RN 以全屏尺寸渲染
+        // - Overview 模式：TabPanel 尺寸 = cardSize，RN 以卡片尺寸渲染
+        // - 动画过程：尺寸平滑过渡，RN 自适应
+        let panelWidth = isFocused ? viewportSize.width : cardWidth
+        let panelHeight = isFocused ? viewportSize.height : cardHeight
 
-        // 缩放比例：
-        // - Focus 模式：1:1 精确显示，不缩放
-        // - Overview/过渡：按卡片尺寸缩放
-        let displayScale = isFocused ? 1.0 : (cardWidth / max(renderSize.width, 1))
-
-        // 实际显示尺寸：
-        // - Focus 模式：等于 viewportSize
-        // - Overview/过渡：等于 cardWidth/cardHeight
-        let displayWidth = isFocused ? renderSize.width : cardWidth
-        let displayHeight = isFocused ? renderSize.height : cardHeight
-
-        let _ = NSLog("📐 [TabCard] viewportSize=%.1fx%.1f, cardSize=%.1fx%.1f, displayScale=%.3f, isFocused=%d",
-                      viewportSize.width, viewportSize.height, cardWidth, cardHeight, displayScale, isFocused ? 1 : 0)
+        let _ = NSLog("📐 TabPanel.contentView: isFocused=%d, panelSize=%.0fx%.0f, viewportSize=%.0fx%.0f, cardSize=%.0fx%.0f",
+                      isFocused ? 1 : 0, panelWidth, panelHeight, viewportSize.width, viewportSize.height, cardWidth, cardHeight)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
-            // ViewBridge 以 viewportSize 渲染，用 scaleEffect 缩放显示
-            // ViewBridgeHostView 内部忽略外部 frame 变化，保持 viewportSize 渲染
             if hasRNContent {
+                // Remote view 尺寸 = TabPanel 实际尺寸
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
-                    containerSize: CGSize(
-                        width: max(renderSize.width, 1),
-                        height: max(renderSize.height, 1)
-                    ),
-                    scaleFactor: 1.0  // 不使用，保留参数兼容性
+                    containerSize: CGSize(width: max(panelWidth, 1), height: max(panelHeight, 1)),
+                    coordinator: viewBridgeCoordinator
                 )
-                .id(tab.id)
-                // frame 固定为 viewportSize
-                .frame(
-                    width: max(renderSize.width, 1),
-                    height: max(renderSize.height, 1),
-                    alignment: .topLeading
-                )
-                // 用 scaleEffect 缩放显示，anchor 在左上角
-                .scaleEffect(displayScale, anchor: .topLeading)
-                // 缩放后的实际显示尺寸
-                .frame(
-                    width: max(displayWidth, 1),
-                    height: max(displayHeight, 1),
-                    alignment: .topLeading
-                )
-                .clipped()
             } else if let _ = tab.htmlContent {
                 // 有 htmlContent，显示网页内容（暂时用占位）
                 Image(systemName: "doc.text")

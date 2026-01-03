@@ -134,6 +134,10 @@ struct WorkspaceView<Content: View>: View {
                 return geometry.size.height
             }()
 
+            let _ = NSLog("📐 [WorkspaceView] geometry=%.1fx%.1f, shouldShowDevTools=%d, displayMode=%@, contentSize=%.1fx%.1f",
+                          geometry.size.width, geometry.size.height, shouldShowDevTools ? 1 : 0,
+                          String(describing: devTools.displayMode), contentWidth, contentHeight)
+
             // Use ZStack with explicit positioning to keep view hierarchy stable
             ZStack(alignment: .topLeading) {
                 // Main content wrapped in viewport - provides viewportSize via Environment
