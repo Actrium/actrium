@@ -30,6 +30,8 @@ struct WorkspaceMainView: View {
     @State private var isAddressBarFirstResponder: Bool = false
     @State private var keyEventMonitor: Any?
     @State private var magnifyEventMonitor: Any?
+    @State private var gestureEventTap: CFMachPort?
+    @State private var gestureRunLoopSource: CFRunLoopSource?
     @State private var cumulativeMagnification: CGFloat = 0
 
     // Search Tabs 状态
@@ -353,6 +355,20 @@ struct WorkspaceMainView: View {
                 return event
             }
             fputs("🤏 Magnify event monitor installed\n", stderr)
+
+            // 尝试在窗口 contentView 上添加手势识别器
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let window = NSApplication.shared.mainWindow,
+                   let contentView = window.contentView {
+                    let recognizer = NSMagnificationGestureRecognizer(target: MagnifyGestureHandler.shared, action: #selector(MagnifyGestureHandler.handleMagnify(_:)))
+                    contentView.addGestureRecognizer(recognizer)
+                    MagnifyGestureHandler.shared.onPinchOut = { [weak viewModel] in
+                        guard let vm = viewModel, case .focus = vm.canvasMode else { return }
+                        exitToOverview()
+                    }
+                    fputs("🤏 NSMagnificationGestureRecognizer added to window.contentView\n", stderr)
+                }
+            }
         }
         .onDisappear {
             // 清理事件监听
@@ -1472,6 +1488,46 @@ private struct NewTabPanel: View {
         .contentShape(Rectangle())
         .onTapGesture {
             onTap?()
+        }
+    }
+}
+
+// MARK: - Magnify Gesture Handler (Window Level)
+
+/// 窗口级别的捏合手势处理器
+/// 用于捕获 NSRemoteView 无法捕获的 magnify 手势
+final class MagnifyGestureHandler: NSObject {
+    static let shared = MagnifyGestureHandler()
+
+    var onPinchOut: (() -> Void)?
+    private var cumulativeMagnification: CGFloat = 0
+
+    private override init() {
+        super.init()
+    }
+
+    @objc func handleMagnify(_ recognizer: NSMagnificationGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            cumulativeMagnification = 0
+            fputs("🤏 [WindowGesture] began\n", stderr)
+        case .changed:
+            cumulativeMagnification += recognizer.magnification
+            recognizer.magnification = 0  // 重置增量
+            fputs("🤏 [WindowGesture] cumulative=\(cumulativeMagnification)\n", stderr)
+
+            // 捏合缩小超过阈值
+            if cumulativeMagnification < -0.3 {
+                fputs("🤏 [WindowGesture] Triggering onPinchOut!\n", stderr)
+                cumulativeMagnification = 0
+                recognizer.state = .cancelled
+                onPinchOut?()
+            }
+        case .ended, .cancelled:
+            fputs("🤏 [WindowGesture] ended/cancelled\n", stderr)
+            cumulativeMagnification = 0
+        default:
+            break
         }
     }
 }
