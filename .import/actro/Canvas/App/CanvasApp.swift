@@ -419,6 +419,13 @@ final class MagnifyEventInterceptor {
     static var eventTap: CFMachPort?
     static var runLoopSource: CFRunLoopSource?
 
+    // 私有 CGEvent 常量（Apple 未公开）
+    // kCGEventGesture = 29
+    private static let kCGEventGesture: CGEventType = CGEventType(rawValue: 29)!
+    // kCGGestureEventMagnify 的字段 ID
+    private static let kCGGestureTypeField: CGEventField = CGEventField(rawValue: 110)!
+    private static let kCGGestureZoomValueField: CGEventField = CGEventField(rawValue: 113)!
+
     /// 安装拦截器（只能调用一次）
     static func install() {
         guard !isInstalled else { return }
@@ -426,7 +433,8 @@ final class MagnifyEventInterceptor {
 
         // 创建 CGEventTap 来监听手势事件
         // 使用 .cghidEventTap 位置，这是在 HID 系统之后、窗口系统之前
-        let eventMask: CGEventMask = (1 << CGEventType.gesture.rawValue)
+        // kCGEventGesture = 29
+        let eventMask: CGEventMask = (1 << 29)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cghidEventTap,  // 在 HID 系统级别拦截
@@ -454,14 +462,15 @@ final class MagnifyEventInterceptor {
 
     /// 处理 CGEvent
     static func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        // 获取手势子类型
-        let subtype = event.getIntegerValueField(.gestureType)
+        // 获取手势子类型 (field 110)
+        let subtype = event.getIntegerValueField(kCGGestureTypeField)
 
         // 子类型 8 = magnify (缩放手势)
-        // 子类型 6 = rotate (旋转手势)
+        // 子类型 5 = rotate (旋转手势)
         // 子类型 1 = swipe (滑动手势)
         if subtype == 8 {  // magnify
-            let magnification = event.getDoubleValueField(.gestureZoomValue)
+            // 获取缩放值 (field 113)
+            let magnification = event.getDoubleValueField(kCGGestureZoomValueField)
             fputs("🤏 [CGEventTap] magnify: \(magnification), cumulative: \(cumulativeMagnification)\n", stderr)
 
             cumulativeMagnification += magnification
@@ -485,8 +494,8 @@ final class MagnifyEventInterceptor {
         } else if subtype == 62 {  // gesture end
             fputs("🤏 [CGEventTap] gesture end\n", stderr)
             cumulativeMagnification = 0
-        } else {
-            // 其他手势类型，记录一下
+        } else if subtype != 0 {
+            // 其他手势类型，记录一下（忽略 0）
             fputs("🤏 [CGEventTap] gesture subtype=\(subtype)\n", stderr)
         }
 
