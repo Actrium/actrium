@@ -141,13 +141,7 @@ struct WorkspaceMainView: View {
                 .offset(x: transform.offset.x, y: transform.offset.y)
                 .animation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0), value: viewModel.canvasMode)
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    // Focus 模式下点击内容区域取消地址栏编辑
-                    if case .focus = viewModel.canvasMode, isAddressBarEditing {
-                        isAddressBarEditing = false
-                        isAddressBarFirstResponder = false
-                    }
-                }
+                // 地址栏退出焦点已由全局鼠标事件监听处理（mouseEventMonitor）
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
