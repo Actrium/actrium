@@ -631,6 +631,18 @@ class BrowserViewModel: ObservableObject {
         tabs[index].title = title
     }
 
+    /// Update title for a specific tab
+    func updateTabTitle(for tabId: UUID, title: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        tabs[index].title = title
+    }
+
+    /// Update URL for a specific tab (for web navigation)
+    func updateTabURL(for tabId: UUID, url: URL) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        tabs[index].url = url
+    }
+
     /// 导航当前 Tab 到指定 URL 或应用 ID
     /// - 如果输入是 http/https URL，作为 Web 内容加载
     /// - 否则作为 app id 处理（暂不实现）

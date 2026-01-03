@@ -151,7 +151,20 @@ struct WorkspaceMainView: View {
                     FocusedWebOverlay(
                         tab: focusedTab,
                         url: url,
-                        viewportSize: safeViewportSize
+                        viewportSize: safeViewportSize,
+                        onNavigationFinished: { title, newURL in
+                            // Update tab title and record history
+                            if let title = title, !title.isEmpty {
+                                viewModel.updateTabTitle(for: focusedTabId, title: title)
+                            }
+                            if let newURL = newURL {
+                                viewModel.updateTabURL(for: focusedTabId, url: newURL)
+                                // Record to history
+                                if let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }) {
+                                    historyVM.recordVisit(tab: tab)
+                                }
+                            }
+                        }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }

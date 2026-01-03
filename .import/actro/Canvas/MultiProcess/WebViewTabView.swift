@@ -159,6 +159,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     private var loadedURL: URL?
 
+    /// Callback when navigation finishes with title and URL
+    var onNavigationFinished: ((String?, URL?) -> Void)?
+
     /// Canvas User-Agent string
     /// Format follows standard browser convention: Mozilla/5.0 (Platform) Engine/Version (Compatibility) Browser/Version Engine/Version
     private static let userAgent: String = {
@@ -195,11 +198,18 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     var canGoBack: Bool { webView.canGoBack }
     var canGoForward: Bool { webView.canGoForward }
+    var currentURL: URL? { webView.url }
+    var currentTitle: String? { webView.title }
 
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
 
     // MARK: - WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Notify with title and URL when navigation completes
+        onNavigationFinished?(webView.title, webView.url)
+    }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         NSLog("🌐 WebViewHolder: Navigation failed - \(error.localizedDescription)")
@@ -312,14 +322,17 @@ struct FocusedWebOverlay: View {
     let tab: Tab
     let url: URL
     let viewportSize: CGSize
+    /// Callback when navigation finishes (title, url)
+    var onNavigationFinished: ((String?, URL?) -> Void)?
 
     /// 从全局 Manager 获取持久化的 WebViewHolder
     private let holder: WebViewHolder
 
-    init(tab: Tab, url: URL, viewportSize: CGSize) {
+    init(tab: Tab, url: URL, viewportSize: CGSize, onNavigationFinished: ((String?, URL?) -> Void)? = nil) {
         self.tab = tab
         self.url = url
         self.viewportSize = viewportSize
+        self.onNavigationFinished = onNavigationFinished
         self.holder = WebViewHolderManager.shared.holder(for: tab.id)
     }
 
@@ -330,6 +343,7 @@ struct FocusedWebOverlay: View {
             .id(tab.id)
             .frame(width: viewportSize.width, height: viewportSize.height)
             .onAppear {
+                holder.onNavigationFinished = onNavigationFinished
                 holder.loadIfNeeded(url)
             }
             .onChange(of: url) { _, newURL in
