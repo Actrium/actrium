@@ -20,8 +20,8 @@ struct ContentView: View {
                     WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                 }
             }
-            // 让 toolbar 背景使用深色（与 sidebar 一致）
-            .toolbarBackground(.hidden, for: .windowToolbar)
+            // Safari 风格：toolbar 背景可见（浅灰色，与 sidebar 一致）
+            .toolbarBackground(.visible, for: .windowToolbar)
             // 顶层兜底：拖入 .actr 或目录时创建新标签
             .dropDestination(for: URL.self) { urls, location in
                 guard let url = urls.first else {
