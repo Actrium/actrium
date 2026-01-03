@@ -550,100 +550,144 @@ struct PersistentWebView: NSViewRepresentable {
 
 /// Custom WKWebView subclass that adds download options to context menu
 class DownloadableWebView: WKWebView {
-    private var lastContextMenuURL: URL?
+    /// Store the detected element info for context menu
+    private var contextMenuImageURL: URL?
+    private var contextMenuLinkURL: URL?
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
 
-        // Find the URL from the context menu (look for "Open Link" or similar items)
-        var linkURL: URL?
-        var imageURL: URL?
+        // Get click location in view coordinates
+        let locationInView = convert(event.locationInWindow, from: nil)
 
-        for item in menu.items {
-            if let url = extractURL(from: item) {
-                if item.title.contains("Image") || item.title.contains("图") {
-                    imageURL = url
-                } else {
-                    linkURL = url
-                }
-            }
-        }
+        // Convert to web content coordinates (flip Y axis for web)
+        let webX = locationInView.x
+        let webY = bounds.height - locationInView.y
 
-        // Add "Download Link" option if we found a link
-        if let url = linkURL ?? imageURL {
-            lastContextMenuURL = url
-
-            let separator = NSMenuItem.separator()
-            menu.addItem(separator)
-
-            let downloadItem = NSMenuItem(
-                title: imageURL != nil ? "Download Image" : "Download Linked File",
-                action: #selector(downloadLinkedFile(_:)),
-                keyEquivalent: ""
-            )
-            downloadItem.target = self
-            downloadItem.representedObject = url
-            menu.addItem(downloadItem)
-        }
-
-        // Add "Download Image" for images specifically
-        if imageURL == nil {
-            // Try to detect if right-clicked on an image via JavaScript
-            let point = convert(event.locationInWindow, from: nil)
-            detectImageAtPoint(point) { [weak self] detectedImageURL in
-                guard let imageURL = detectedImageURL else { return }
-
-                DispatchQueue.main.async {
-                    // Menu might already be closed, but try to add item
-                    self?.lastContextMenuURL = imageURL
-                }
-            }
-        }
-    }
-
-    private func extractURL(from menuItem: NSMenuItem) -> URL? {
-        // Try to get URL from represented object
-        if let url = menuItem.representedObject as? URL {
-            return url
-        }
-        // Try to parse URL from title (fallback)
-        if let urlString = menuItem.title.components(separatedBy: " ").last,
-           let url = URL(string: urlString) {
-            return url
-        }
-        return nil
-    }
-
-    private func detectImageAtPoint(_ point: CGPoint, completion: @escaping (URL?) -> Void) {
+        // Use synchronous JavaScript to detect element at click position
         let js = """
         (function() {
-            var element = document.elementFromPoint(\(point.x), \(point.y));
-            if (element && element.tagName === 'IMG' && element.src) {
-                return element.src;
+            var x = \(webX);
+            var y = \(webY);
+            var element = document.elementFromPoint(x, y);
+            var result = { imageURL: null, linkURL: null };
+
+            // Check for image
+            if (element) {
+                if (element.tagName === 'IMG' && element.src) {
+                    result.imageURL = element.src;
+                }
+                // Check for background image
+                var bgImage = window.getComputedStyle(element).backgroundImage;
+                if (bgImage && bgImage !== 'none' && bgImage.startsWith('url(')) {
+                    var url = bgImage.slice(5, -2);
+                    if (!result.imageURL) result.imageURL = url;
+                }
+                // Check for link
+                var linkElement = element.closest('a');
+                if (linkElement && linkElement.href) {
+                    result.linkURL = linkElement.href;
+                }
             }
-            return null;
+            return JSON.stringify(result);
         })();
         """
 
+        // Run JavaScript synchronously using a semaphore
+        var detectedImageURL: URL?
+        var detectedLinkURL: URL?
+
+        let semaphore = DispatchSemaphore(value: 0)
         evaluateJavaScript(js) { result, error in
-            if let urlString = result as? String, let url = URL(string: urlString) {
-                completion(url)
-            } else {
-                completion(nil)
+            if let jsonString = result as? String,
+               let data = jsonString.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let imageURLString = json["imageURL"] as? String {
+                    detectedImageURL = URL(string: imageURLString)
+                }
+                if let linkURLString = json["linkURL"] as? String {
+                    detectedLinkURL = URL(string: linkURLString)
+                }
             }
+            semaphore.signal()
+        }
+
+        // Wait briefly for JavaScript to complete (with timeout)
+        _ = semaphore.wait(timeout: .now() + 0.1)
+
+        // Store for later use
+        contextMenuImageURL = detectedImageURL
+        contextMenuLinkURL = detectedLinkURL
+
+        // Add download menu items
+        var addedSeparator = false
+
+        if let imageURL = detectedImageURL {
+            if !addedSeparator {
+                menu.addItem(NSMenuItem.separator())
+                addedSeparator = true
+            }
+
+            let downloadImageItem = NSMenuItem(
+                title: "Download Image",
+                action: #selector(downloadImage(_:)),
+                keyEquivalent: ""
+            )
+            downloadImageItem.target = self
+            downloadImageItem.representedObject = imageURL
+            menu.addItem(downloadImageItem)
+        }
+
+        if let linkURL = detectedLinkURL, linkURL != detectedImageURL {
+            if !addedSeparator {
+                menu.addItem(NSMenuItem.separator())
+                addedSeparator = true
+            }
+
+            let downloadLinkItem = NSMenuItem(
+                title: "Download Linked File",
+                action: #selector(downloadLinkedFile(_:)),
+                keyEquivalent: ""
+            )
+            downloadLinkItem.target = self
+            downloadLinkItem.representedObject = linkURL
+            menu.addItem(downloadLinkItem)
         }
     }
 
-    @objc private func downloadLinkedFile(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL ?? lastContextMenuURL else { return }
+    @objc private func downloadImage(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL ?? contextMenuImageURL else { return }
+        startDownload(url: url)
+    }
 
-        let filename = url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent
+    @objc private func downloadLinkedFile(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL ?? contextMenuLinkURL else { return }
+        startDownload(url: url)
+    }
+
+    private func startDownload(url: URL) {
+        var filename = url.lastPathComponent
+
+        // If filename is empty or has no extension, try to get a better name
+        if filename.isEmpty || !filename.contains(".") {
+            filename = "download"
+            // Try to guess extension from URL path
+            if let ext = url.pathExtension.nilIfEmpty {
+                filename = "download.\(ext)"
+            }
+        }
 
         Task { @MainActor in
             let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: url)
             URLSessionDownloader.shared.startDownload(url: url, item: item)
-            NSLog("📥 DownloadableWebView: Context menu download - \(filename)")
+            NSLog("📥 DownloadableWebView: Context menu download - \(filename) from \(url)")
         }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 
