@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 private let logger = AppLogger.ui
 import AppKit
@@ -37,6 +38,13 @@ struct WorkspaceMainView: View {
     // Search Tabs 状态
     @State private var searchTabsText: String = ""
     @FocusState private var isSearchTabsFocused: Bool
+
+    // Find in Page 状态
+    @State private var showFindBar: Bool = false
+    @State private var findText: String = ""
+    @State private var findResultCount: Int = 0
+    @State private var findCurrentIndex: Int = 0
+    @FocusState private var isFindBarFocused: Bool
 
     // 根据搜索文本过滤 tabs
     private var filteredTabs: [Tab] {
@@ -185,6 +193,31 @@ struct WorkspaceMainView: View {
                         }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                    // Find in Page Bar
+                    if showFindBar {
+                        FindInPageBar(
+                            findText: $findText,
+                            resultCount: findResultCount,
+                            currentIndex: findCurrentIndex,
+                            isFocused: $isFindBarFocused,
+                            onFind: { text in
+                                performFind(text: text, forward: true)
+                            },
+                            onFindNext: {
+                                performFind(text: findText, forward: true)
+                            },
+                            onFindPrevious: {
+                                performFind(text: findText, forward: false)
+                            },
+                            onClose: {
+                                showFindBar = false
+                                findText = ""
+                                clearFindHighlights()
+                            }
+                        )
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
@@ -421,6 +454,39 @@ struct WorkspaceMainView: View {
                     toggleFocusOverview()
                     return nil
                 }
+
+                // Cmd+F → Toggle find bar (only in Focus mode with web tab)
+                if event.keyCode == 3 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+                    if case .focus(let tabId) = viewModel.canvasMode,
+                       let tab = viewModel.tabs.first(where: { $0.id == tabId }),
+                       case .web = tab.contentType {
+                        showFindBar.toggle()
+                        if showFindBar {
+                            isFindBarFocused = true
+                        } else {
+                            findText = ""
+                            // Clear find highlights
+                            if let holder = WebViewHolderManager.shared.existingHolder(for: tabId) {
+                                holder.webView.evaluateJavaScript("window.getSelection().removeAllRanges()")
+                            }
+                        }
+                        return nil
+                    }
+                }
+
+                // Escape → Close find bar
+                if event.keyCode == 53 && showFindBar {
+                    showFindBar = false
+                    findText = ""
+                    // Clear find highlights
+                    if case .focus(let tabId) = viewModel.canvasMode {
+                        if let holder = WebViewHolderManager.shared.existingHolder(for: tabId) {
+                            holder.webView.evaluateJavaScript("window.getSelection().removeAllRanges()")
+                        }
+                    }
+                    return nil
+                }
+
                 return event
             }
 
@@ -590,6 +656,41 @@ struct WorkspaceMainView: View {
 
         // 多个 tab 但没有明确目标，不自动 focus
         return nil
+    }
+
+    // MARK: - Find in Page
+
+    /// Perform find in current web page
+    private func performFind(text: String, forward: Bool) {
+        guard !text.isEmpty,
+              case .focus(let tabId) = viewModel.canvasMode,
+              let holder = WebViewHolderManager.shared.existingHolder(for: tabId) else {
+            return
+        }
+
+        // Use WKWebView's find API
+        let config = WKFindConfiguration()
+        config.backwards = !forward
+        config.wraps = true
+
+        holder.webView.find(text, configuration: config) { [self] result in
+            Task { @MainActor in
+                self.findResultCount = result.matchFound ? 1 : 0  // WKFindResult doesn't expose count
+                // Note: WKWebView's find API doesn't expose the match count or current index
+                // For a more complete implementation, JavaScript-based find would be needed
+            }
+        }
+    }
+
+    /// Clear find highlights
+    private func clearFindHighlights() {
+        guard case .focus(let tabId) = viewModel.canvasMode,
+              let holder = WebViewHolderManager.shared.existingHolder(for: tabId) else {
+            return
+        }
+
+        // Clear selection
+        holder.webView.evaluateJavaScript("window.getSelection().removeAllRanges()")
     }
 
     // 判断 Tab 是否有需要 ViewBridge 渲染的内容
@@ -1669,6 +1770,92 @@ private struct NewTabPanel: View {
         .onTapGesture {
             onTap?()
         }
+    }
+}
+
+// MARK: - Find in Page Bar
+
+private struct FindInPageBar: View {
+    @Binding var findText: String
+    let resultCount: Int
+    let currentIndex: Int
+    var isFocused: FocusState<Bool>.Binding
+    let onFind: (String) -> Void
+    let onFindNext: () -> Void
+    let onFindPrevious: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Search field
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+
+                TextField("Find in page", text: $findText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .focused(isFocused)
+                    .onSubmit {
+                        onFind(findText)
+                    }
+                    .onChange(of: findText) { _, newValue in
+                        if !newValue.isEmpty {
+                            onFind(newValue)
+                        }
+                    }
+
+                if !findText.isEmpty {
+                    Button(action: {
+                        findText = ""
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(6)
+            .frame(width: 220)
+
+            // Navigation buttons
+            Button(action: onFindPrevious) {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.borderless)
+            .disabled(findText.isEmpty)
+
+            Button(action: onFindNext) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.borderless)
+            .disabled(findText.isEmpty)
+
+            Spacer()
+
+            // Close button
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 }
 
