@@ -95,22 +95,24 @@ struct BrowserWindowView: View {
     }
 
     private func handleLaunchURLIfNeeded() {
+        fputs("🚀 handleLaunchURLIfNeeded called, hasHandled=\(hasHandledLaunchURL), launchURL=\(CanvasApp.launchURL?.absoluteString ?? "nil")\n", stderr)
         guard !hasHandledLaunchURL,
               let launchURL = CanvasApp.launchURL else { return }
         hasHandledLaunchURL = true
 
-        NSLog("🚀 Canvas: Opening launch URL in new tab: %@", launchURL.absoluteString)
+        fputs("🚀 Canvas: Opening launch URL in new tab: \(launchURL.absoluteString)\n", stderr)
 
         // Create a new tab, navigate to the URL, and enter focus mode
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            fputs("🚀 Creating tab...\n", stderr)
             let tab = self.viewModel.addNewTab()
             self.viewModel.navigateCurrentTab(to: launchURL.absoluteString)
-            NSLog("🚀 Canvas: Tab created: %@, contentType: %@", tab.id.uuidString, String(describing: tab.contentType))
+            fputs("🚀 Tab created: \(tab.id.uuidString), navigating to \(launchURL.absoluteString)\n", stderr)
 
             // Auto enter focus mode
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 self.viewModel.canvasMode = .focus(tabId: tab.id)
-                NSLog("🚀 Canvas: Entered focus mode for tab %@", tab.id.uuidString)
+                fputs("🚀 Entered focus mode for tab \(tab.id.uuidString)\n", stderr)
             }
         }
     }
