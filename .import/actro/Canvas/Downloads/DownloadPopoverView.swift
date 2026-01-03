@@ -14,55 +14,42 @@ struct DownloadPopoverView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header - Safari style: centered title, Clear button on right
+            // Header with Clear button
             HStack {
-                Spacer()
                 Text("Downloads")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .font(.headline)
+
                 Spacer()
-            }
-            .overlay(alignment: .trailing) {
-                if !manager.downloads.isEmpty {
+
+                if manager.downloads.contains(where: { $0.state == .completed || $0.state == .failed || $0.state == .cancelled }) {
                     Button("Clear") {
                         manager.clearCompleted()
                     }
-                    .font(.system(size: 12))
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.primary.opacity(0.1))
-                    .cornerRadius(4)
+                    .buttonStyle(.borderless)
+                    .font(.subheadline)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
+            Divider()
 
             // Download list
-            if manager.downloads.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 32))
-                        .foregroundColor(.secondary)
-                    Text("No Downloads")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 80)
-                .padding()
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(manager.downloads) { item in
-                            DownloadItemRow(item: item)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(manager.downloads) { item in
+                        DownloadItemRow(item: item)
+                        if item.id != manager.downloads.last?.id {
+                            Divider()
+                                .padding(.leading, 52)
                         }
                     }
                 }
-                .frame(maxHeight: 300)
             }
+            .frame(maxHeight: 280)
         }
-        .frame(width: 340)
-        .background(Color(nsColor: NSColor(white: 0.2, alpha: 0.95)))
+        .frame(width: 300)
     }
 }
 
@@ -73,113 +60,41 @@ struct DownloadItemRow: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            // File icon - Safari style with download badge
-            ZStack(alignment: .bottomTrailing) {
-                fileIcon
-                    .frame(width: 32, height: 40)
-
-                // Download badge for active downloads
-                if item.state == .downloading || item.state == .waiting {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.accentColor)
-                        .background(Circle().fill(Color(nsColor: .windowBackgroundColor)).frame(width: 14, height: 14))
-                }
-            }
+        HStack(spacing: 10) {
+            // File icon
+            fileIcon
+                .frame(width: 32, height: 32)
 
             // File info
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.filename)
-                    .font(.system(size: 13))
-                    .foregroundColor(.primary)
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
 
-                // Progress or status - Safari style
-                switch item.state {
-                case .waiting:
-                    Text("Waiting for permission")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-
-                case .downloading:
-                    HStack(spacing: 4) {
-                        Text(item.progressText)
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                    }
-
-                case .completed:
-                    Text("Completed")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-
-                case .failed:
-                    Text(item.error ?? "Download failed")
-                        .font(.system(size: 11))
-                        .foregroundColor(.red)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                case .cancelled:
-                    Text("Cancelled")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
+                // Status text
+                statusText
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
 
                 // Progress bar for active downloads
                 if item.state == .downloading {
                     ProgressView(value: item.progress)
                         .progressViewStyle(.linear)
-                        .tint(.accentColor)
+                        .controlSize(.small)
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            // Action buttons - Safari style
-            HStack(spacing: 6) {
-                if item.state == .failed {
-                    // Retry button (orange circle arrow)
-                    Button(action: { item.retry() }) {
-                        Image(systemName: "arrow.clockwise.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.orange)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Retry")
-                }
-
-                if item.state == .downloading || item.state == .waiting {
-                    // Cancel button
-                    Button(action: { item.cancel() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Cancel")
-                }
-
-                // Show in Finder button (always visible for completed/failed)
-                if item.state == .completed || item.state == .failed {
-                    Button(action: { DownloadManager.shared.revealInFinder(item) }) {
-                        Image(systemName: "magnifyingglass.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Show in Finder")
-                }
-            }
+            // Action button
+            actionButton
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(isHovering ? Color.white.opacity(0.05) : Color.clear)
-        .onHover { hovering in
-            isHovering = hovering
-        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(isHovering ? Color.primary.opacity(0.05) : Color.clear)
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
         .onTapGesture(count: 2) {
             if item.state == .completed {
                 DownloadManager.shared.openFile(item)
@@ -187,39 +102,87 @@ struct DownloadItemRow: View {
         }
     }
 
+    @ViewBuilder
+    private var statusText: some View {
+        switch item.state {
+        case .waiting:
+            Text("Waiting...")
+        case .downloading:
+            Text(item.progressText)
+        case .completed:
+            Text("Completed")
+        case .failed:
+            Text(item.error ?? "Failed")
+                .foregroundColor(.red)
+        case .cancelled:
+            Text("Cancelled")
+        }
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        switch item.state {
+        case .downloading, .waiting:
+            Button(action: { item.cancel() }) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Cancel")
+
+        case .failed:
+            Button(action: { item.retry() }) {
+                Image(systemName: "arrow.clockwise.circle.fill")
+                    .foregroundColor(.orange)
+            }
+            .buttonStyle(.plain)
+            .help("Retry")
+
+        case .completed:
+            Button(action: { DownloadManager.shared.revealInFinder(item) }) {
+                Image(systemName: "magnifyingglass.circle.fill")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Show in Finder")
+
+        case .cancelled:
+            EmptyView()
+        }
+    }
+
     private var fileIcon: some View {
         let ext = (item.filename as NSString).pathExtension.lowercased()
 
-        // Use system file icon representation
         return Group {
             switch ext {
             case "dmg", "pkg":
                 Image(systemName: "externaldrive.badge.arrow.down")
-                    .font(.system(size: 28))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 20))
+                    .foregroundColor(.purple)
             case "zip", "rar", "7z", "tar", "gz":
                 Image(systemName: "doc.zipper")
-                    .font(.system(size: 28))
+                    .font(.system(size: 20))
                     .foregroundColor(.secondary)
             case "pdf":
                 Image(systemName: "doc.richtext")
-                    .font(.system(size: 28))
+                    .font(.system(size: 20))
                     .foregroundColor(.red)
-            case "jpg", "jpeg", "png", "gif", "webp", "heic":
+            case "jpg", "jpeg", "png", "gif", "webp", "heic", "svg":
                 Image(systemName: "photo")
-                    .font(.system(size: 28))
-                    .foregroundColor(.secondary)
-            case "mp4", "mov", "avi", "mkv":
+                    .font(.system(size: 20))
+                    .foregroundColor(.cyan)
+            case "mp4", "mov", "avi", "mkv", "webm":
                 Image(systemName: "film")
-                    .font(.system(size: 28))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 20))
+                    .foregroundColor(.pink)
             case "mp3", "wav", "aac", "flac", "m4a":
                 Image(systemName: "music.note")
-                    .font(.system(size: 28))
+                    .font(.system(size: 20))
                     .foregroundColor(.pink)
             default:
                 Image(systemName: "doc.fill")
-                    .font(.system(size: 28))
+                    .font(.system(size: 20))
                     .foregroundColor(.secondary)
             }
         }
@@ -233,16 +196,16 @@ struct DownloadToolbarButton: View {
     @State private var showPopover = false
 
     var body: some View {
-        Button(action: { showPopover.toggle() }) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 16))
-                .foregroundColor(manager.hasActiveDownloads ? .accentColor : .primary.opacity(0.7))
+        // Only show when there are downloads (active or recent)
+        if !manager.downloads.isEmpty {
+            Button(action: { showPopover.toggle() }) {
+                Image(systemName: manager.hasActiveDownloads ? "arrow.down.circle.fill" : "arrow.down.circle")
+            }
+            .popover(isPresented: $showPopover, arrowEdge: .bottom) {
+                DownloadPopoverView()
+            }
+            .help("Downloads")
         }
-        .buttonStyle(.plain)
-        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
-            DownloadPopoverView()
-        }
-        .help("Downloads")
     }
 }
 
