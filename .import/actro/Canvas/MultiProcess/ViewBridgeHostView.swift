@@ -74,6 +74,18 @@ public class ViewBridgeHostView: NSView {
         NSLog("ViewBridgeHostView: init with contentSize=%.1fx%.1f", initialContentSize.width, initialContentSize.height)
     }
 
+    /// Convenience initializer with custom bundle identifier and content size
+    /// Used by XPC service pool for multi-process isolation
+    public convenience init(serviceBundleIdentifier: String, initialContentSize: CGSize) {
+        self.init(
+            serviceBundleIdentifier: serviceBundleIdentifier,
+            viewControllerClassName: "CanvasServiceViewController"
+        )
+        self.currentContentSize = initialContentSize
+        NSLog("ViewBridgeHostView: init with bundleId=%@, contentSize=%.1fx%.1f",
+              serviceBundleIdentifier, initialContentSize.width, initialContentSize.height)
+    }
+
     required init?(coder: NSCoder) {
         self.serviceBundleIdentifier = "com.anthropic.Canvas.CanvasViewService"
         self.serviceViewControllerClassName = "CanvasServiceViewController"
@@ -464,20 +476,34 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
 
 /// SwiftUI wrapper for ViewBridgeHostView
 /// Remote view size 跟随 TabPanel 实际尺寸
+/// 支持从进程池分配独立的 XPC service
 struct ViewBridgeTabView: NSViewRepresentable {
     let tabId: UUID
     let contentSize: CGSize  // TabPanel 实际尺寸
     let coordinator: ViewBridgeCoordinator
+    let serviceBundleIdentifier: String  // 从进程池分配的 bundle id
+
+    init(tabId: UUID, contentSize: CGSize, coordinator: ViewBridgeCoordinator, serviceBundleIdentifier: String? = nil) {
+        self.tabId = tabId
+        self.contentSize = contentSize
+        self.coordinator = coordinator
+        // 如果未指定，从进程池分配
+        self.serviceBundleIdentifier = serviceBundleIdentifier
+            ?? XPCServicePool.shared.allocateService(for: tabId)
+            ?? "chat.askaway.CanvasViewService.CanvasViewService"  // fallback
+    }
 
     func makeNSView(context: Context) -> ViewBridgeHostView {
-        NSLog("🆕 ViewBridgeTabView.makeNSView: tab=%@, size=%.0fx%.0f", String(tabId.uuidString.prefix(8)), contentSize.width, contentSize.height)
-        let view = ViewBridgeHostView(initialContentSize: contentSize)
+        NSLog("🆕 ViewBridgeTabView.makeNSView: tab=%@, service=%@, size=%.0fx%.0f",
+              String(tabId.uuidString.prefix(8)),
+              serviceBundleIdentifier.components(separatedBy: ".").last ?? "",
+              contentSize.width, contentSize.height)
+        let view = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: contentSize)
         coordinator.hostView = view
         return view
     }
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
-        // 输出每次尺寸更新到 stderr
         fputs("📐 ViewBridgeTabView.updateNSView: contentSize=\(contentSize)\n", stderr)
         coordinator.hostView = nsView
         nsView.updateContentSize(contentSize)
@@ -486,6 +512,7 @@ struct ViewBridgeTabView: NSViewRepresentable {
     static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
         NSLog("❌ ViewBridgeTabView.dismantleNSView: DISCONNECTING!")
         nsView.disconnect()
+        // Note: 进程池释放由 ViewBridgeMultiProcessTabView 的 onDisappear 处理
     }
 }
 
@@ -493,14 +520,21 @@ struct ViewBridgeTabView: NSViewRepresentable {
 
 /// A view that displays tab content via ViewBridge XPC service
 /// Remote view size 跟随 TabPanel 实际尺寸，RN 自适应
+///
+/// 多进程架构：每个 tab 独占一个 XPC service 进程
+/// - 从 XPCServicePool 分配独立的 service bundle
+/// - 每个进程有独立的 RN 运行时
+/// - 真正的进程级隔离
 struct ViewBridgeMultiProcessTabView: View {
     let tab: Tab
     let containerSize: CGSize  // TabPanel 实际尺寸
     let coordinator: ViewBridgeCoordinator
-    var isFocused: Bool = false  // 是否当前 focused（只有 focused 的 tab 才发送配置）
+    var isFocused: Bool = false  // 是否当前 focused
 
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var hasConnection = false  // 是否已建立 ViewBridge 连接
+    @State private var allocatedServiceId: String?  // 从进程池分配的 service bundle id
 
     init(tab: Tab, containerSize: CGSize, coordinator: ViewBridgeCoordinator, isFocused: Bool = false) {
         self.tab = tab
@@ -512,15 +546,15 @@ struct ViewBridgeMultiProcessTabView: View {
     }
 
     var body: some View {
-        let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: containerSize=\(containerSize), isFocused=\(isFocused)\n", stderr)
+        let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), isFocused=\(isFocused)\n", stderr)
         ZStack(alignment: .topLeading) {
-            // 关键修复：只有 focused 的 tab 才渲染 ViewBridgeTabView
-            // 这确保了只有一个 tab 连接到 XPC service，避免串台
-            if isFocused && ViewBridgeHostView.isAvailable {
+            // 多进程架构：每个 tab 从进程池获取独立的 XPC service
+            if ViewBridgeHostView.isAvailable, let serviceId = allocatedServiceId {
                 ViewBridgeTabView(
                     tabId: tab.id,
                     contentSize: containerSize,
-                    coordinator: coordinator
+                    coordinator: coordinator,
+                    serviceBundleIdentifier: serviceId
                 )
                 // 稳定的 id 确保 View 不会因为 containerSize 变化而被重建
                 .id(tab.id)
@@ -528,22 +562,28 @@ struct ViewBridgeMultiProcessTabView: View {
                 .clipped()
                 .onAppear {
                     isLoading = false
-                    // focused 时立即发送配置
-                    fputs("📤 ViewBridgeTabView appeared (focused), sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
+                    hasConnection = true
+                    fputs("📤 ViewBridgeTabView appeared with service \(serviceId.components(separatedBy: ".").last ?? ""), sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
                     sendTabConfigToService()
                 }
                 .onChange(of: tab.unifiedScript) { _, _ in
-                    // Re-send config when script changes (e.g., reload)
                     sendTabConfigToService()
+                }
+                .onChange(of: isFocused) { _, newValue in
+                    if newValue && hasConnection {
+                        fputs("📤 Tab became focused, re-sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
+                        sendTabConfigToService()
+                    }
                 }
             } else if !ViewBridgeHostView.isAvailable {
                 unavailableView
             } else {
-                // 非 focused 状态：显示占位符背景
-                Color.clear
+                // 等待进程池分配
+                ProgressView("Allocating process...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            if isLoading {
+            if isLoading && allocatedServiceId != nil {
                 loadingView
             }
 
@@ -552,6 +592,20 @@ struct ViewBridgeMultiProcessTabView: View {
             }
         }
         .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
+        .onAppear {
+            // 从进程池分配 service
+            if allocatedServiceId == nil {
+                allocatedServiceId = XPCServicePool.shared.allocateService(for: tab.id)
+                fputs("📦 Tab \(tab.id.uuidString.prefix(8)) allocated service: \(allocatedServiceId ?? "FAILED")\n", stderr)
+            }
+        }
+        .onDisappear {
+            // 释放进程池资源
+            if allocatedServiceId != nil {
+                XPCServicePool.shared.releaseService(for: tab.id)
+                fputs("📦 Tab \(tab.id.uuidString.prefix(8)) released service\n", stderr)
+            }
+        }
     }
 
     private var loadingView: some View {
