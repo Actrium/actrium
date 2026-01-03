@@ -10,17 +10,6 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Tab count header
-            HStack {
-                Text("\(viewModel.tabs.count) Tab\(viewModel.tabs.count == 1 ? "" : "s")")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-
             // NSOutlineView for tabs and groups
             TabOutlineView(viewModel: viewModel, historyVM: historyVM)
 

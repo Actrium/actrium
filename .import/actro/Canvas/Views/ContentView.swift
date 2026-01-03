@@ -20,8 +20,8 @@ struct ContentView: View {
                     WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                 }
             }
-            // 使用深色主题统一 toolbar 区域（包括 sidebar 顶部）
-            .toolbarColorScheme(.dark, for: .windowToolbar)
+            // 让 toolbar 背景通栏化（覆盖 sidebar 区域）
+            .toolbarBackground(.visible, for: .windowToolbar)
             // 顶层兜底：拖入 .actr 或目录时创建新标签
             .dropDestination(for: URL.self) { urls, location in
                 guard let url = urls.first else {
