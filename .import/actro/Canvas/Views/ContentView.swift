@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 struct ContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
@@ -20,8 +21,8 @@ struct ContentView: View {
                     WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                 }
             }
-            // Safari 风格：toolbar 背景可见（浅灰色，与 sidebar 一致）
-            .toolbarBackground(.visible, for: .windowToolbar)
+            // 让 toolbar 背景透明，内容区域背景通栏
+            .toolbarBackground(.hidden, for: .windowToolbar)
             // 顶层兜底：拖入 .actr 或目录时创建新标签
             .dropDestination(for: URL.self) { urls, location in
                 guard let url = urls.first else {
@@ -56,10 +57,32 @@ struct ContentView: View {
             } isTargeted: { isTargeted in
                 isACTRDropTarget = isTargeted
             }
+            // 配置窗口：透明标题栏，让背景通栏
+            .background(WindowAccessor())
         }
     }
 }
 
+// MARK: - Window Accessor (配置 NSWindow 透明标题栏)
+
+private struct WindowAccessor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            if let window = view.window {
+                // 透明标题栏，让背景颜色通栏
+                window.titlebarAppearsTransparent = true
+                // 移除标题栏分隔线
+                window.titlebarSeparatorStyle = .none
+                // 让内容延伸到标题栏区域
+                window.styleMask.insert(.fullSizeContentView)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
 
 #Preview {
     ContentView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel())
