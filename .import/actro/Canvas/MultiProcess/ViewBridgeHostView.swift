@@ -512,9 +512,11 @@ struct ViewBridgeMultiProcessTabView: View {
     }
 
     var body: some View {
-        let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: containerSize=\(containerSize)\n", stderr)
+        let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: containerSize=\(containerSize), isFocused=\(isFocused)\n", stderr)
         ZStack(alignment: .topLeading) {
-            if ViewBridgeHostView.isAvailable {
+            // 关键修复：只有 focused 的 tab 才渲染 ViewBridgeTabView
+            // 这确保了只有一个 tab 连接到 XPC service，避免串台
+            if isFocused && ViewBridgeHostView.isAvailable {
                 ViewBridgeTabView(
                     tabId: tab.id,
                     contentSize: containerSize,
@@ -526,26 +528,19 @@ struct ViewBridgeMultiProcessTabView: View {
                 .clipped()
                 .onAppear {
                     isLoading = false
-                    // 只有 focused 的 tab 才发送配置到 XPC service
-                    if isFocused {
-                        sendTabConfigToService()
-                    }
-                }
-                .onChange(of: isFocused) { _, newValue in
-                    // 当 tab 变成 focused 时，发送配置
-                    if newValue {
-                        fputs("📤 Tab became focused, sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
-                        sendTabConfigToService()
-                    }
+                    // focused 时立即发送配置
+                    fputs("📤 ViewBridgeTabView appeared (focused), sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
+                    sendTabConfigToService()
                 }
                 .onChange(of: tab.unifiedScript) { _, _ in
-                    // Re-send config when script changes (e.g., reload), only if focused
-                    if isFocused {
-                        sendTabConfigToService()
-                    }
+                    // Re-send config when script changes (e.g., reload)
+                    sendTabConfigToService()
                 }
-            } else {
+            } else if !ViewBridgeHostView.isAvailable {
                 unavailableView
+            } else {
+                // 非 focused 状态：显示占位符背景
+                Color.clear
             }
 
             if isLoading {
