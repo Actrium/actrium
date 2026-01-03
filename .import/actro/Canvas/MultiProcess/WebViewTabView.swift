@@ -165,6 +165,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Callback when loading state changes
     var onLoadingStateChanged: ((Bool) -> Void)?
 
+    /// Callback when a new window should be opened (target="_blank")
+    var onOpenNewWindow: ((URL) -> Void)?
+
     /// Current loading state
     private(set) var isLoading: Bool = false
 
@@ -321,10 +324,16 @@ struct PersistentWebView: NSViewRepresentable {
             self.holder = holder
         }
 
-        // 处理 target="_blank" 链接
+        // 处理 target="_blank" 链接 - 在新窗口打开
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if navigationAction.targetFrame == nil {
-                holder.webView.load(navigationAction.request)
+            if navigationAction.targetFrame == nil,
+               let url = navigationAction.request.url {
+                // 如果有回调，在新窗口打开；否则在当前窗口打开
+                if let onOpenNewWindow = holder.onOpenNewWindow {
+                    onOpenNewWindow(url)
+                } else {
+                    holder.webView.load(navigationAction.request)
+                }
             }
             return nil
         }
@@ -343,18 +352,22 @@ struct FocusedWebOverlay: View {
     var onNavigationFinished: ((String?, URL?) -> Void)?
     /// Callback when loading state changes
     var onLoadingStateChanged: ((Bool) -> Void)?
+    /// Callback when a new window should be opened (target="_blank")
+    var onOpenNewWindow: ((URL) -> Void)?
 
     /// 从全局 Manager 获取持久化的 WebViewHolder
     private let holder: WebViewHolder
 
     init(tab: Tab, url: URL, viewportSize: CGSize,
          onNavigationFinished: ((String?, URL?) -> Void)? = nil,
-         onLoadingStateChanged: ((Bool) -> Void)? = nil) {
+         onLoadingStateChanged: ((Bool) -> Void)? = nil,
+         onOpenNewWindow: ((URL) -> Void)? = nil) {
         self.tab = tab
         self.url = url
         self.viewportSize = viewportSize
         self.onNavigationFinished = onNavigationFinished
         self.onLoadingStateChanged = onLoadingStateChanged
+        self.onOpenNewWindow = onOpenNewWindow
         self.holder = WebViewHolderManager.shared.holder(for: tab.id)
     }
 
@@ -367,6 +380,7 @@ struct FocusedWebOverlay: View {
             .onAppear {
                 holder.onNavigationFinished = onNavigationFinished
                 holder.onLoadingStateChanged = onLoadingStateChanged
+                holder.onOpenNewWindow = onOpenNewWindow
                 holder.loadIfNeeded(url)
             }
             .onChange(of: url) { _, newURL in
