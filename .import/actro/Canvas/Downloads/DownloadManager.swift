@@ -50,7 +50,17 @@ class DownloadItem: ObservableObject, Identifiable {
 
     func cancel() {
         download?.cancel()
+        URLSessionDownloader.shared.cancelDownload(for: self)
         state = .cancelled
+    }
+
+    func retry() {
+        guard let url = sourceURL else { return }
+        bytesReceived = 0
+        totalBytes = 0
+        error = nil
+        state = .downloading
+        URLSessionDownloader.shared.startDownload(url: url, item: self)
     }
 }
 
@@ -135,11 +145,123 @@ class DownloadManager: ObservableObject {
     }
 }
 
-// MARK: - Download Delegate Handler
+// MARK: - URLSession-Based Download Task
 
-/// 下载代理处理器 - 独立于 WebViewHolder，可跟踪下载状态
+/// URLSession 下载任务管理器 - 避免 WKDownload 的权限限制
+class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
+    private var session: URLSession!
+    private var downloadTasks: [URLSessionDownloadTask: DownloadItem] = [:]
+
+    static let shared = URLSessionDownloader()
+
+    override init() {
+        super.init()
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForResource = 3600 // 1 hour max
+        session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+    }
+
+    /// Start a download using URLSession
+    func startDownload(url: URL, item: DownloadItem) {
+        var request = URLRequest(url: url)
+        // Use Safari-like user agent to avoid blocks
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+
+        let task = session.downloadTask(with: request)
+        downloadTasks[task] = item
+
+        Task { @MainActor in
+            item.state = .downloading
+        }
+
+        task.resume()
+        NSLog("📥 URLSessionDownloader: Started download - \(url.lastPathComponent)")
+    }
+
+    /// Cancel a download
+    func cancelDownload(for item: DownloadItem) {
+        if let task = downloadTasks.first(where: { $0.value === item })?.key {
+            task.cancel()
+            downloadTasks.removeValue(forKey: task)
+        }
+    }
+
+    // MARK: - URLSessionDownloadDelegate
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        guard let item = downloadTasks[downloadTask] else { return }
+
+        // Generate destination path
+        let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+        var destinationURL = downloadsURL.appendingPathComponent(item.filename)
+
+        // Handle duplicate filenames
+        var counter = 1
+        let fileManager = FileManager.default
+        let baseName = (item.filename as NSString).deletingPathExtension
+        let ext = (item.filename as NSString).pathExtension
+
+        while fileManager.fileExists(atPath: destinationURL.path) {
+            let newName = ext.isEmpty ? "\(baseName) (\(counter))" : "\(baseName) (\(counter)).\(ext)"
+            destinationURL = downloadsURL.appendingPathComponent(newName)
+            counter += 1
+        }
+
+        do {
+            try fileManager.moveItem(at: location, to: destinationURL)
+
+            Task { @MainActor in
+                item.destinationURL = destinationURL
+                DownloadManager.shared.updateItem(item, state: .completed)
+                NSLog("📥 URLSessionDownloader: Download completed - \(item.filename) -> \(destinationURL.path)")
+            }
+        } catch {
+            Task { @MainActor in
+                item.error = error.localizedDescription
+                DownloadManager.shared.updateItem(item, state: .failed)
+                NSLog("📥 URLSessionDownloader: Failed to move file - \(error.localizedDescription)")
+            }
+        }
+
+        downloadTasks.removeValue(forKey: downloadTask)
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard let item = downloadTasks[downloadTask] else { return }
+
+        Task { @MainActor in
+            DownloadManager.shared.updateProgress(item, bytesReceived: totalBytesWritten, totalBytes: totalBytesExpectedToWrite)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let downloadTask = task as? URLSessionDownloadTask,
+              let item = downloadTasks[downloadTask],
+              let error = error else { return }
+
+        // Don't report cancellation as error
+        if (error as NSError).code == NSURLErrorCancelled {
+            Task { @MainActor in
+                DownloadManager.shared.updateItem(item, state: .cancelled)
+            }
+        } else {
+            Task { @MainActor in
+                item.error = error.localizedDescription
+                DownloadManager.shared.updateItem(item, state: .failed)
+                NSLog("📥 URLSessionDownloader: Download failed - \(item.filename): \(error.localizedDescription)")
+            }
+        }
+
+        downloadTasks.removeValue(forKey: downloadTask)
+    }
+}
+
+// MARK: - Download Delegate Handler (WKDownload fallback)
+
+/// 下载代理处理器 - 用于 WKDownload，但会自动切换到 URLSession
 class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
     weak var item: DownloadItem?
+    private var hasTriedURLSessionFallback = false
 
     init(item: DownloadItem) {
         self.item = item
@@ -193,7 +315,27 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         Task { @MainActor [weak self] in
-            guard let item = self?.item else { return }
+            guard let self = self, let item = self.item else { return }
+
+            // If WKDownload fails with permission error, try URLSession fallback
+            let nsError = error as NSError
+            if (nsError.domain == NSPOSIXErrorDomain && nsError.code == 1) ||
+               error.localizedDescription.contains("Operation not permitted") ||
+               error.localizedDescription.contains("不允许的操作") {
+
+                if !self.hasTriedURLSessionFallback, let sourceURL = item.sourceURL {
+                    self.hasTriedURLSessionFallback = true
+                    NSLog("📥 DownloadManager: WKDownload permission denied, falling back to URLSession")
+
+                    // Reset item state and try URLSession
+                    item.bytesReceived = 0
+                    item.totalBytes = 0
+                    item.error = nil
+                    URLSessionDownloader.shared.startDownload(url: sourceURL, item: item)
+                    return
+                }
+            }
+
             item.error = error.localizedDescription
             DownloadManager.shared.updateItem(item, state: .failed)
             NSLog("📥 DownloadManager: Download failed - \(item.filename): \(error.localizedDescription)")

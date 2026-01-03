@@ -232,14 +232,25 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Print the current web page
     func print() {
-        let printInfo = NSPrintInfo.shared
+        // WKWebView requires the print operation to be run on the main thread
+        // and the view must have a proper window context
+        guard let window = webView.window else {
+            NSLog("🖨️ WebViewHolder: Cannot print - webView has no window")
+            return
+        }
+
+        let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
         printInfo.horizontalPagination = .fit
         printInfo.verticalPagination = .automatic
+        printInfo.isHorizontallyCentered = true
+        printInfo.isVerticallyCentered = true
 
         let printOperation = webView.printOperation(with: printInfo)
         printOperation.showsPrintPanel = true
         printOperation.showsProgressPanel = true
-        printOperation.run()
+
+        // Run the print operation attached to the window to avoid the frame initialization issue
+        printOperation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
     }
 
     // MARK: - Zoom
@@ -298,6 +309,13 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         onLoadingStateChanged?(false)
         // Notify with title and URL when navigation completes
         onNavigationFinished?(webView.title, webView.url)
+
+        // Safari-style: Take snapshot immediately after page load for Overview mode
+        // Use a short delay to allow page rendering to complete
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s delay
+            await self?.takeSnapshot()
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
