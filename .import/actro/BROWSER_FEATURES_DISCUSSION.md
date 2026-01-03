@@ -1,5 +1,18 @@
 # Canvas 浏览器功能讨论
 
+## 1. Sidebar Favicon ✅ 已实现
+
+### 实现方案
+- Web tabs 使用 Google Favicon 服务加载图标
+- 使用 actor-based `FaviconCache` 进行线程安全的内存缓存
+- 非 Web tabs 显示默认 doc.text 图标
+
+### 代码位置
+- `TabOutlineView.swift:makeTabRowView()`
+- `FaviconCache` actor
+
+---
+
 ## 2. Tab Overview 页面截图
 
 ### 当前状态
@@ -65,6 +78,7 @@
 - `target="_blank"` 新标签页
 - 自定义 User-Agent
 - 开发者工具（DevTools）
+- **Sidebar Favicon（带缓存）**
 
 ### 缺失的核心功能 ❌
 | 功能 | 优先级 | 复杂度 |
