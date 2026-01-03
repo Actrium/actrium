@@ -311,11 +311,11 @@ struct WorkspaceMainView: View {
             }
             // Note: canvasMode defaults to .overview, no need to set explicitly
 
-            // 监听键盘快捷键：Cmd+Shift+O toggle Focus <-> Overview
+            // 监听键盘快捷键：Cmd+Shift+\ toggle Focus <-> Overview (和 Safari 一致)
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                // Cmd+Shift+O (keyCode 31 = O)：Toggle Focus <-> Overview
+                // Cmd+Shift+\ (keyCode 42 = \)：Toggle Focus <-> Overview
                 let cmdShift: NSEvent.ModifierFlags = [.command, .shift]
-                if event.keyCode == 31 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(cmdShift) {
+                if event.keyCode == 42 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(cmdShift) {
                     if case .focus(let tabId) = viewModel.canvasMode {
                         // Focus -> Overview：记住当前 tab
                         lastFocusedTabId = tabId
