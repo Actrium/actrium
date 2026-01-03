@@ -165,6 +165,7 @@ private class ServiceReactNativeHost {
     private var rootView: RCTRootView?
     private var currentProperties: [String: Any] = [:]
     private var currentContainerSize: CGSize = .zero
+    private var tabConfigObserver: NSObjectProtocol?
 
     private init() {
         debugLog("Initializing React Native host")
@@ -176,6 +177,88 @@ private class ServiceReactNativeHost {
         factoryDelegate = ServiceReactNativeFactoryDelegate()
         factory = RCTReactNativeFactory(delegate: factoryDelegate)
         debugLog("React Native factory created")
+
+        // Listen for tab config from host via DistributedNotificationCenter
+        setupTabConfigListener()
+    }
+
+    // MARK: - Tab Config IPC
+
+    private func setupTabConfigListener() {
+        tabConfigObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.tabConfig"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleTabConfigNotification(notification)
+        }
+        debugLog("Tab config listener installed")
+    }
+
+    private func handleTabConfigNotification(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let configJson = userInfo["config"] as? String,
+              let configData = configJson.data(using: .utf8),
+              let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] else {
+            debugLog("⚠️ Invalid tab config notification")
+            return
+        }
+
+        debugLog("📥 Received tab config: \(config["tabId"] ?? "?")")
+
+        // Update React Native props with new tab config
+        updateTabConfig(config)
+    }
+
+    func updateTabConfig(_ config: [String: Any]) {
+        debugLog("📥 updateTabConfig: \(config["title"] ?? "?")")
+
+        // Build React Native tabs array from config
+        let tabId = config["tabId"] as? String ?? UUID().uuidString
+        var tabDict: [String: Any] = [
+            "id": tabId,
+            "title": config["title"] as? String ?? "Untitled",
+            "backgroundColor": config["backgroundColor"] as? String ?? "#1a1a2e"
+        ]
+
+        // Copy scripts
+        if let unifiedScript = config["unifiedScript"] as? String {
+            tabDict["unifiedScript"] = unifiedScript
+        }
+        if let leftPanelScript = config["leftPanelScript"] as? String {
+            tabDict["leftPanelScript"] = leftPanelScript
+        }
+        if let rightPanelScript = config["rightPanelScript"] as? String {
+            tabDict["rightPanelScript"] = rightPanelScript
+        }
+        if let guestScript = config["guestScript"] as? String {
+            tabDict["guestScript"] = guestScript
+        }
+
+        // Update container size if provided
+        if let width = config["containerWidth"] as? CGFloat,
+           let height = config["containerHeight"] as? CGFloat {
+            currentContainerSize = CGSize(width: width, height: height)
+        }
+
+        // Build full properties
+        var properties: [String: Any] = [
+            "tabs": [tabDict],
+            "currentTabId": tabId,
+            "isLeftPanelVisible": true,
+            "isRightPanelVisible": true,
+            "containerWidth": currentContainerSize.width,
+            "containerHeight": currentContainerSize.height
+        ]
+
+        currentProperties = properties
+        debugLog("📥 Updating RN props with tab config")
+
+        // Update React Native
+        rootView?.appProperties = properties
+
+        // Also update dimensions
+        updateDimensionsViaEvent(to: currentContainerSize)
     }
 
     func createRootView(initialProperties: [String: Any], containerSize: CGSize) -> NSView {
@@ -450,37 +533,41 @@ private func setupReactNativeContent(in containerView: NSView) {
         loadingLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor)
     ])
 
-    // Create React Native view with test properties
-    // TODO: Get actual tab config from host via IPC
-    let testTabId = UUID().uuidString  // Use same ID for tab and currentTabId
-    let testProperties: [String: Any] = [
+    // Initial properties - will be updated when host sends tab config via IPC
+    // Show a "waiting for config" state initially
+    let initialTabId = UUID().uuidString
+    let initialProperties: [String: Any] = [
         "tabs": [
             [
-                "id": testTabId,
-                "title": "ViewBridge Test",
-                "backgroundColor": "#1a4a3c",
+                "id": initialTabId,
+                "title": "Waiting for Tab Config...",
+                "backgroundColor": "#1a1a2e",
                 "unifiedScript": """
-                // Simple test app rendered in XPC service
-                const { View, Text } = require('react-native');
-                module.exports = function TestApp() {
+                // Initial placeholder - waiting for host to send tab config
+                const { View, Text, ActivityIndicator } = require('react-native');
+                module.exports = function WaitingApp() {
                     return React.createElement(View, {
-                        style: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a4a3c' }
+                        style: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e' }
                     }, [
+                        React.createElement(ActivityIndicator, {
+                            key: 'spinner',
+                            size: 'large',
+                            color: '#4ade80'
+                        }),
                         React.createElement(Text, {
                             key: 'title',
-                            style: { fontSize: 24, fontWeight: 'bold', color: 'white' }
-                        }, 'React Native in XPC Service!'),
+                            style: { fontSize: 16, color: 'rgba(255,255,255,0.7)', marginTop: 16 }
+                        }, 'Waiting for tab configuration...'),
                         React.createElement(Text, {
                             key: 'subtitle',
-                            style: { fontSize: 14, color: 'rgba(255,255,255,0.7)', marginTop: 10 }
-                        }, 'Running in CanvasViewService process')
+                            style: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 8 }
+                        }, 'CanvasViewService XPC Process')
                     ]);
                 };
-                """,
-                "rightPanelDefaultVisible": true
+                """
             ]
         ],
-        "currentTabId": testTabId,  // Same as tab id
+        "currentTabId": initialTabId,
         "isLeftPanelVisible": true,
         "isRightPanelVisible": true
     ]
@@ -500,9 +587,10 @@ private func setupReactNativeContent(in containerView: NSView) {
             let containerSize = containerView.bounds.size
             debugLog("Creating RN view with containerSize: \(containerSize)")
 
-            // Create and add React Native view with container size
+            // Create and add React Native view with initial properties
+            // Actual tab config will be sent via DistributedNotificationCenter
             let rnView = ServiceReactNativeHost.shared.createRootView(
-                initialProperties: testProperties,
+                initialProperties: initialProperties,
                 containerSize: containerSize
             )
 
