@@ -69,19 +69,28 @@ private struct WindowAccessor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            if let window = view.window {
-                // 设置窗口背景色（影响 sidebar 顶栏区域）
-                window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
-                // 显示 toolbar 下边线
-                window.titlebarSeparatorStyle = .line
-                // 隐藏窗口标题文字
-                window.titleVisibility = .hidden
-            }
+            Self.configureWindow(view.window)
         }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // 确保窗口配置在每次更新时都生效
+        DispatchQueue.main.async {
+            Self.configureWindow(nsView.window)
+        }
+    }
+
+    private static func configureWindow(_ window: NSWindow?) {
+        guard let window = window else { return }
+        // 设置窗口背景色（影响 sidebar 顶栏区域）
+        window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
+        // 显示 toolbar 下边线
+        window.titlebarSeparatorStyle = .line
+        // 隐藏窗口标题文字
+        window.titleVisibility = .hidden
+        window.title = ""
+    }
 }
 
 #Preview {
