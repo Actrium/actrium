@@ -1179,6 +1179,8 @@ private struct FaviconWithProgress: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(width: size - 4, height: size - 4)
+                            .saturation(0)  // Grayscale
+                            .opacity(0.85)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
                     case .failure:
                         // Failed to load - show globe
