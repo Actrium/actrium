@@ -237,6 +237,12 @@ private class ServiceReactNativeHost {
             "backgroundColor": config["backgroundColor"] as? String ?? "#1a1a2e"
         ]
 
+        // Copy system app type if present (takes priority over scripts)
+        if let systemAppType = config["systemAppType"] as? String {
+            tabDict["systemAppType"] = systemAppType
+            debugLog("📥 Tab is system app: \(systemAppType)")
+        }
+
         // Copy scripts
         if let unifiedScript = config["unifiedScript"] as? String {
             tabDict["unifiedScript"] = unifiedScript

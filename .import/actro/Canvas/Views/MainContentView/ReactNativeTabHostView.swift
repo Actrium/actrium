@@ -185,6 +185,9 @@ struct ReactNativeRootRepresentable: NSViewRepresentable {
                             return bookmarkDict
                         }
                     }
+                case .debug:
+                    // Debug app doesn't need extra data - just passes tab info
+                    break
                 }
                 return dict
             }

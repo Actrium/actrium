@@ -601,9 +601,9 @@ struct ViewBridgeMultiProcessTabView: View {
             tabConfig["guestScript"] = guestScript
         }
 
-        // Add system tab type if present
+        // Add system app type if present (RN expects "systemAppType")
         if let systemTabType = tab.systemTabType {
-            tabConfig["systemTabType"] = systemTabType.rawValue
+            tabConfig["systemAppType"] = systemTabType.rawValue
         }
 
         // Serialize to JSON and send

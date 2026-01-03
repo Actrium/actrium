@@ -14,6 +14,7 @@ import type { TabRouterProps } from './actr-host/types';
 const ActrApp = React.lazy(() => import('./actr-host/ActrApp').then(m => ({ default: m.ActrApp })));
 const HistoryApp = React.lazy(() => import('./system-apps/HistoryApp'));
 const BookmarksApp = React.lazy(() => import('./system-apps/BookmarksApp'));
+const DebugApp = React.lazy(() => import('./system-apps/DebugApp').then(m => ({ default: m.DebugApp })));
 
 // Props cache for bridge stability
 let cachedValidProps: TabRouterProps | null = null;
@@ -45,6 +46,15 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
             {tab.systemAppType === 'bookmarks' && (
               <BookmarksApp
                 bookmarks={tab.bookmarks ?? []}
+              />
+            )}
+            {tab.systemAppType === 'debug' && (
+              <DebugApp
+                tabId={tab.id}
+                title={tab.title}
+                backgroundColor={tab.backgroundColor}
+                containerWidth={containerWidth}
+                containerHeight={containerHeight}
               />
             )}
           </React.Suspense>
@@ -136,6 +146,15 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
               {tab.systemAppType === 'bookmarks' && (
                 <BookmarksApp
                   bookmarks={tab.bookmarks ?? []}
+                />
+              )}
+              {tab.systemAppType === 'debug' && (
+                <DebugApp
+                  tabId={tab.id}
+                  title={tab.title}
+                  backgroundColor={tab.backgroundColor}
+                  containerWidth={containerWidth}
+                  containerHeight={containerHeight}
                 />
               )}
             </React.Suspense>

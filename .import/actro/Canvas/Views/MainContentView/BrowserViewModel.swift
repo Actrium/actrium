@@ -1043,7 +1043,16 @@ class BrowserViewModel: ObservableObject {
 
             // Update UI on main thread
             DispatchQueue.main.async { [weak self] in
-                if let unified = unifiedScript {
+                // System app type takes priority (no scripts needed)
+                if let systemType = manifestInfo.systemAppType {
+                    logger.notice(" [loadFromDevDirectory] 系统应用: \(tabTitle) (type: \(systemType.rawValue))")
+                    self?.appendSystemTab(
+                        title: tabTitle,
+                        systemType: systemType,
+                        leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                    )
+                } else if let unified = unifiedScript {
                     self?.appendACTRTab(
                         title: tabTitle,
                         sourceURL: directoryURL,
@@ -1082,6 +1091,25 @@ class BrowserViewModel: ObservableObject {
         } catch {
             logger.error(" 开发目录加载失败：\(error.localizedDescription)")
         }
+    }
+
+    /// Append a system tab (debug, history, bookmarks)
+    private func appendSystemTab(
+        title: String,
+        systemType: SystemTabType,
+        leftPanelDefaultVisible: Bool = false,
+        rightPanelDefaultVisible: Bool = false
+    ) {
+        let newTab = Tab(
+            title: title,
+            systemTabType: systemType,
+            leftPanelDefaultVisible: leftPanelDefaultVisible,
+            rightPanelDefaultVisible: rightPanelDefaultVisible
+        )
+        tabs.append(newTab)
+        tabSlotPositions[newTab.id] = tabs.count - 1
+        leftPanelVisibility[newTab.id] = leftPanelDefaultVisible
+        logger.notice(" 已加载系统应用：\(title)")
     }
 
     private func appendACTRTab(
@@ -1156,7 +1184,7 @@ class BrowserViewModel: ObservableObject {
         }
     }
 
-    private func readManifestJSON(fromRoot root: URL) throws -> (name: String?, version: String?, description: String?, contractName: String?, contractVersion: Int?, permissions: [String], leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, leftPanelScript: String?, rightPanelScript: String?, unifiedScript: String?) {
+    private func readManifestJSON(fromRoot root: URL) throws -> (name: String?, version: String?, description: String?, contractName: String?, contractVersion: Int?, permissions: [String], leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, leftPanelScript: String?, rightPanelScript: String?, unifiedScript: String?, systemAppType: SystemTabType?) {
         guard let manifestURL = findManifestJSON(in: root) else {
             throw NSError(
                 domain: "ACTRPackage",
@@ -1228,7 +1256,13 @@ class BrowserViewModel: ObservableObject {
         let leftPanelScript = layout?["leftPanel"] as? String
         let rightPanelScript = layout?["rightPanel"] as? String
 
-        return (name, version, description, contractNameValue, contractVersionValue, permissionsValue, leftPanelDefaultVisible, rightPanelDefaultVisible, leftPanelScript, rightPanelScript, unifiedScript)
+        // System app type (built-in apps like debug, history, bookmarks)
+        var systemAppType: SystemTabType? = nil
+        if let typeStr = json?["systemAppType"] as? String {
+            systemAppType = SystemTabType(rawValue: typeStr)
+        }
+
+        return (name, version, description, contractNameValue, contractVersionValue, permissionsValue, leftPanelDefaultVisible, rightPanelDefaultVisible, leftPanelScript, rightPanelScript, unifiedScript, systemAppType)
     }
 
     private func findManifestJSON(in root: URL) -> URL? {
