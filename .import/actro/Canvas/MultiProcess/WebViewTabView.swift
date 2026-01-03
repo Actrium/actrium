@@ -162,6 +162,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Callback when navigation finishes with title and URL
     var onNavigationFinished: ((String?, URL?) -> Void)?
 
+    /// Callback when loading state changes
+    var onLoadingStateChanged: ((Bool) -> Void)?
+
+    /// Current loading state
+    private(set) var isLoading: Bool = false
+
     /// Canvas User-Agent string
     /// Format follows standard browser convention: Mozilla/5.0 (Platform) Engine/Version (Compatibility) Browser/Version Engine/Version
     private static let userAgent: String = {
@@ -206,16 +212,27 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     // MARK: - WKNavigationDelegate
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        isLoading = true
+        onLoadingStateChanged?(true)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isLoading = false
+        onLoadingStateChanged?(false)
         // Notify with title and URL when navigation completes
         onNavigationFinished?(webView.title, webView.url)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        isLoading = false
+        onLoadingStateChanged?(false)
         NSLog("🌐 WebViewHolder: Navigation failed - \(error.localizedDescription)")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        isLoading = false
+        onLoadingStateChanged?(false)
         let nsError = error as NSError
         // Ignore cancelled requests (e.g., due to new navigation)
         if nsError.code != NSURLErrorCancelled {
@@ -324,15 +341,20 @@ struct FocusedWebOverlay: View {
     let viewportSize: CGSize
     /// Callback when navigation finishes (title, url)
     var onNavigationFinished: ((String?, URL?) -> Void)?
+    /// Callback when loading state changes
+    var onLoadingStateChanged: ((Bool) -> Void)?
 
     /// 从全局 Manager 获取持久化的 WebViewHolder
     private let holder: WebViewHolder
 
-    init(tab: Tab, url: URL, viewportSize: CGSize, onNavigationFinished: ((String?, URL?) -> Void)? = nil) {
+    init(tab: Tab, url: URL, viewportSize: CGSize,
+         onNavigationFinished: ((String?, URL?) -> Void)? = nil,
+         onLoadingStateChanged: ((Bool) -> Void)? = nil) {
         self.tab = tab
         self.url = url
         self.viewportSize = viewportSize
         self.onNavigationFinished = onNavigationFinished
+        self.onLoadingStateChanged = onLoadingStateChanged
         self.holder = WebViewHolderManager.shared.holder(for: tab.id)
     }
 
@@ -344,6 +366,7 @@ struct FocusedWebOverlay: View {
             .frame(width: viewportSize.width, height: viewportSize.height)
             .onAppear {
                 holder.onNavigationFinished = onNavigationFinished
+                holder.onLoadingStateChanged = onLoadingStateChanged
                 holder.loadIfNeeded(url)
             }
             .onChange(of: url) { _, newURL in
