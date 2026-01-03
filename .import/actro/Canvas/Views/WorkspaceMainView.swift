@@ -31,6 +31,9 @@ struct WorkspaceMainView: View {
     @State private var keyEventMonitor: Any?
     @State private var mouseEventMonitor: Any?
 
+    // Web loading state
+    @State private var isWebLoading: Bool = false
+
     // Search Tabs 状态
     @State private var searchTabsText: String = ""
     @FocusState private var isSearchTabsFocused: Bool
@@ -164,6 +167,9 @@ struct WorkspaceMainView: View {
                                     historyVM.recordVisit(tab: tab)
                                 }
                             }
+                        },
+                        onLoadingStateChanged: { loading in
+                            isWebLoading = loading
                         }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -242,12 +248,30 @@ struct WorkspaceMainView: View {
                             Color.clear
                                 .frame(width: addressBarContainerWidth, height: 28)
                         } else {
-                            AddressBarContainer(
+                            // Compute favicon URL for web tabs
+                        let currentFaviconURL: URL? = {
+                            guard let tab = viewModel.currentTab,
+                                  case .web(let url) = tab.contentType,
+                                  let host = url.host else { return nil }
+                            // Use Google's favicon service for better compatibility
+                            return URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=64")
+                        }()
+
+                        // Only show loading for web tabs
+                        let showLoading: Bool = {
+                            guard let tab = viewModel.currentTab,
+                                  case .web = tab.contentType else { return false }
+                            return isWebLoading
+                        }()
+
+                        AddressBarContainer(
                                 titleText: .constant(viewModel.currentTab?.title ?? "New Tab"),
                                 inputText: $addressInputText,
                                 isEditing: $isAddressBarEditing,
                                 isFirstResponder: $isAddressBarFirstResponder,
                                 isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
+                                faviconURL: currentFaviconURL,
+                                isLoading: showLoading,
                                 toggleLeftPanel: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         viewModel.toggleLeftPanelForCurrentTab()
@@ -1093,6 +1117,78 @@ private struct CancelDragDropDelegate: DropDelegate {
     // 这会导致状态被错误清空
 }
 
+// MARK: - Favicon with Progress Ring
+
+/// Displays website favicon with a loading progress ring
+private struct FaviconWithProgress: View {
+    let faviconURL: URL?
+    let isLoading: Bool
+    let size: CGFloat
+
+    @State private var rotation: Double = 0
+
+    var body: some View {
+        ZStack {
+            // Progress ring (behind favicon)
+            if isLoading {
+                Circle()
+                    .trim(from: 0, to: 0.7)
+                    .stroke(
+                        Color.accentColor,
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    )
+                    .frame(width: size + 4, height: size + 4)
+                    .rotationEffect(.degrees(rotation))
+                    .onAppear {
+                        withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                            rotation = 360
+                        }
+                    }
+            }
+
+            // Favicon or fallback icon
+            if let faviconURL = faviconURL {
+                AsyncImage(url: faviconURL) { phase in
+                    switch phase {
+                    case .empty:
+                        // Loading placeholder
+                        Image(systemName: "globe")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: size - 4, height: size - 4)
+                            .foregroundColor(.white.opacity(0.7))
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: size - 4, height: size - 4)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    case .failure:
+                        // Failed to load - show globe
+                        Image(systemName: "globe")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: size - 4, height: size - 4)
+                            .foregroundColor(.white.opacity(0.7))
+                    @unknown default:
+                        Image(systemName: "globe")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: size - 4, height: size - 4)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+            } else {
+                // No favicon URL - show default icon
+                Image(systemName: "list.bullet")
+                    .frame(width: size, height: size)
+                    .foregroundColor(.white.opacity(0.85))
+            }
+        }
+        .frame(width: size + 4, height: size + 4)
+    }
+}
+
 // MARK: - Address Bar Container
 
 private struct AddressBarContainer: View {
@@ -1101,6 +1197,8 @@ private struct AddressBarContainer: View {
     @Binding var isEditing: Bool
     @Binding var isFirstResponder: Bool
     var isBookmarked: Bool
+    var faviconURL: URL?      // Favicon URL for web mode
+    var isLoading: Bool       // Loading state for progress ring
     var toggleLeftPanel: () -> Void
     var toggleBookmark: () -> Void
     var refreshAction: () -> Void
@@ -1132,8 +1230,11 @@ private struct AddressBarContainer: View {
                 // 非编辑状态：左右图标 + 中间标题
                 HStack(spacing: 10) {
                     Button(action: toggleLeftPanel) {
-                        Image(systemName: "list.bullet")
-                            .frame(width: 20, height: 20)
+                        FaviconWithProgress(
+                            faviconURL: faviconURL,
+                            isLoading: isLoading,
+                            size: 20
+                        )
                     }
                     .buttonStyle(.borderless)
                     .help("切换左侧面板")
