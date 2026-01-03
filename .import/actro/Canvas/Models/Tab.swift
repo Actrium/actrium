@@ -6,11 +6,13 @@ private let logger = AppLogger.app
 enum SystemTabType: String, Codable {
     case history
     case bookmarks
+    case debug
 
     var title: String {
         switch self {
         case .history: return "History"
         case .bookmarks: return "Bookmarks"
+        case .debug: return "Debug"
         }
     }
 
@@ -18,6 +20,7 @@ enum SystemTabType: String, Codable {
         switch self {
         case .history: return "clock.arrow.circlepath"
         case .bookmarks: return "bookmark"
+        case .debug: return "ladybug"
         }
     }
 }
