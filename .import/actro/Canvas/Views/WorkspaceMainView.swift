@@ -1124,37 +1124,33 @@ private struct CancelDragDropDelegate: DropDelegate {
 
 // MARK: - Loading Indicator
 
-/// Displays a loading spinner or default icon
+/// Displays a loading spinner or default icon - matches toolbar icon style
 private struct LoadingIndicator: View {
     let isLoading: Bool
-    let size: CGFloat
 
     @State private var rotation: Double = 0
 
     var body: some View {
-        ZStack {
-            if isLoading {
-                // Spinning progress ring - white color, smaller stroke
-                Circle()
-                    .trim(from: 0, to: 0.7)
-                    .stroke(
-                        Color.white.opacity(0.85),
-                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                    )
-                    .frame(width: size - 4, height: size - 4)
-                    .rotationEffect(.degrees(rotation))
-                    .onAppear {
-                        withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
-                            rotation = 360
-                        }
+        if isLoading {
+            // Spinning progress ring - match other toolbar icons
+            Circle()
+                .trim(from: 0, to: 0.7)
+                .stroke(
+                    Color.white.opacity(0.7),
+                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
+                )
+                .frame(width: 12, height: 12)
+                .rotationEffect(.degrees(rotation))
+                .onAppear {
+                    withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                        rotation = 360
                     }
-            } else {
-                // Default icon
-                Image(systemName: "list.bullet")
-                    .foregroundColor(.white.opacity(0.85))
-            }
+                }
+        } else {
+            // Default icon - same style as other toolbar icons
+            Image(systemName: "list.bullet")
+                .foregroundColor(.white.opacity(0.7))
         }
-        .frame(width: size, height: size)
     }
 }
 
@@ -1198,7 +1194,7 @@ private struct AddressBarContainer: View {
                 // 非编辑状态：左右图标 + 中间标题
                 HStack(spacing: 10) {
                     Button(action: toggleLeftPanel) {
-                        LoadingIndicator(isLoading: isLoading, size: 20)
+                        LoadingIndicator(isLoading: isLoading)
                     }
                     .buttonStyle(.borderless)
                     .help("切换左侧面板")
