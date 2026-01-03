@@ -46,14 +46,29 @@ struct MainContentView: View {
             }
             // 注意：拖拽处理已移至 ReactNativeTabHostView 的 Glass View
             .toolbar {
+                // Navigation buttons (Back/Forward)
+                ToolbarItemGroup(placement: .navigation) {
+                    Button(action: { viewModel.goBack() }) {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(!viewModel.canGoBack)
+                    .help("后退")
+
+                    Button(action: { viewModel.goForward() }) {
+                        Image(systemName: "chevron.right")
+                    }
+                    .disabled(!viewModel.canGoForward)
+                    .help("前进")
+                }
+
                 ToolbarItemGroup(placement: .principal) {
                     let totalWidth = geometry.size.width
                     // 地址栏容器宽度为整个窗口宽度的 50%
                     let addressBarContainerWidth = totalWidth * 0.5
-                    
+
                     HStack {
                         Spacer(minLength: 0)
-                        
+
                         AddressBarContainer(
                             titleText: .constant(viewModel.currentTab?.title ?? "New Tab"),
                             inputText: $addressInputText,
