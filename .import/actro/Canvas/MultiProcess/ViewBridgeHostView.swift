@@ -524,6 +524,12 @@ struct ViewBridgeMultiProcessTabView: View {
                 .clipped()
                 .onAppear {
                     isLoading = false
+                    // Send tab config to service via DistributedNotificationCenter
+                    sendTabConfigToService()
+                }
+                .onChange(of: tab.unifiedScript) { _, _ in
+                    // Re-send config when script changes (e.g., reload)
+                    sendTabConfigToService()
                 }
             } else {
                 unavailableView
@@ -566,6 +572,52 @@ struct ViewBridgeMultiProcessTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    /// Send tab configuration to the ViewBridge service via DistributedNotificationCenter
+    private func sendTabConfigToService() {
+        fputs("📤 Sending tab config to service: tabId=\(tab.id.uuidString.prefix(8))\n", stderr)
+
+        // Build tab config dictionary
+        var tabConfig: [String: Any] = [
+            "tabId": tab.id.uuidString,
+            "title": tab.title,
+            "backgroundColor": tab.backgroundColor ?? "#1a1a2e",
+            "containerWidth": containerSize.width,
+            "containerHeight": containerSize.height
+        ]
+
+        // Add optional scripts
+        if let unifiedScript = tab.unifiedScript {
+            tabConfig["unifiedScript"] = unifiedScript
+        }
+        if let leftPanelScript = tab.leftPanelScript {
+            tabConfig["leftPanelScript"] = leftPanelScript
+        }
+        if let rightPanelScript = tab.rightPanelScript {
+            tabConfig["rightPanelScript"] = rightPanelScript
+        }
+        if let guestScript = tab.guestScript {
+            tabConfig["guestScript"] = guestScript
+        }
+
+        // Add system tab type if present
+        if let systemTabType = tab.systemTabType {
+            tabConfig["systemTabType"] = systemTabType.rawValue
+        }
+
+        // Serialize to JSON and send
+        if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            fputs("📤 Tab config JSON: \(jsonString.prefix(200))...\n", stderr)
+
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name("com.canvas.tabConfig"),
+                object: nil,
+                userInfo: ["config": jsonString],
+                deliverImmediately: true
+            )
+        }
     }
 
     private func errorView(_ message: String) -> some View {
