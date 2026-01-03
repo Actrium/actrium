@@ -235,6 +235,23 @@ struct WorkspaceMainView: View {
                 .allowsHitTesting(false)
             }
             .toolbar {
+                // Navigation buttons (Back/Forward) - only in Focus mode
+                ToolbarItemGroup(placement: .navigation) {
+                    if case .focus = viewModel.canvasMode {
+                        Button(action: { viewModel.goBack() }) {
+                            Image(systemName: "chevron.left")
+                        }
+                        .disabled(!viewModel.canGoBack)
+                        .help("后退")
+
+                        Button(action: { viewModel.goForward() }) {
+                            Image(systemName: "chevron.right")
+                        }
+                        .disabled(!viewModel.canGoForward)
+                        .help("前进")
+                    }
+                }
+
                 ToolbarItemGroup(placement: .principal) {
                     let totalWidth = viewportSize.width
                     let addressBarContainerWidth = totalWidth * 0.5
