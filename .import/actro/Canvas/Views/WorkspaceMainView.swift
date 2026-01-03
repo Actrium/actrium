@@ -101,8 +101,8 @@ struct WorkspaceMainView: View {
             }()
 
             ZStack(alignment: .topTrailing) {
-                // 背景（稍浅的深灰色，与 toolbar 形成对比）
-                Color(nsColor: NSColor(white: 0.18, alpha: 1.0))
+                // Safari 风格：深灰色内容区域背景
+                Color(nsColor: NSColor(white: 0.12, alpha: 1.0))
                     .ignoresSafeArea()
 
                 // Canvas 视图 - 包含所有 Tab 卡片
