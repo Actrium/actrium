@@ -72,6 +72,8 @@ private struct WindowAccessor: NSViewRepresentable {
             if let window = view.window {
                 // 设置窗口背景色（影响 sidebar 顶栏区域）
                 window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
+                // 显示 toolbar 下边线
+                window.titlebarSeparatorStyle = .line
             }
         }
         return view
