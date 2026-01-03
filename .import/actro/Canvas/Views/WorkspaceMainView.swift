@@ -379,6 +379,13 @@ struct WorkspaceMainView: View {
                 NSEvent.removeMonitor(monitor)
             }
         }
+        // 响应 NSWindow.sendEvent 拦截器发出的 pinch 通知
+        .onReceive(NotificationCenter.default.publisher(for: .pinchToOverview)) { _ in
+            // 只在 Focus 模式下响应
+            guard case .focus = viewModel.canvasMode else { return }
+            fputs("🤏 Received pinchToOverview notification, exiting to overview\n", stderr)
+            exitToOverview()
+        }
         .sheet(isPresented: $showingBookmarkSheet) {
             if let tab = viewModel.currentTab {
                 let existingBookmark = bookmarkVM.getBookmark(for: tab)
