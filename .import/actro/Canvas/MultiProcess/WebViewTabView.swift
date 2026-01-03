@@ -146,31 +146,65 @@ struct WebViewMultiProcessTabView: View {
     }
 }
 
+// MARK: - Shared Process Pool
+
+/// 共享的 WKProcessPool，确保所有 WebView 使用相同的 WebContent 进程
+private let sharedProcessPool = WKProcessPool()
+
 // MARK: - Persistent WebView Holder
 
 /// 持久化 WKWebView 实例，避免 SwiftUI 视图重建导致的重复加载
 /// 注意：不使用 @Published 来跟踪 isLoading，避免 SwiftUI 更新循环
-final class WebViewHolder {
+final class WebViewHolder: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     private var loadedURL: URL?
 
-    init() {
+    override init() {
         let config = WKWebViewConfiguration()
+        config.processPool = sharedProcessPool
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
         self.webView = WKWebView(frame: .zero, configuration: config)
+        super.init()
+
         webView.allowsBackForwardNavigationGestures = true
+        webView.navigationDelegate = self
     }
 
     func loadIfNeeded(_ url: URL) {
         // 只有 URL 真正变化时才重新加载
         if loadedURL != url {
-            NSLog("🌐 WebViewHolder: loadIfNeeded - URL changed from \(loadedURL?.absoluteString ?? "nil") to \(url.absoluteString)")
+            fputs("🌐 WebViewHolder: loadIfNeeded - URL changed from \(loadedURL?.absoluteString ?? "nil") to \(url.absoluteString)\n", stderr)
             loadedURL = url
             let request = URLRequest(url: url)
             webView.load(request)
         } else {
-            NSLog("🌐 WebViewHolder: loadIfNeeded - URL unchanged: \(url.absoluteString)")
+            fputs("🌐 WebViewHolder: loadIfNeeded - URL unchanged: \(url.absoluteString)\n", stderr)
+        }
+    }
+
+    // MARK: - WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        fputs("🌐 WebViewHolder: didStartProvisionalNavigation\n", stderr)
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        fputs("🌐 WebViewHolder: didCommit - URL: \(webView.url?.absoluteString ?? "nil")\n", stderr)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        fputs("🌐 WebViewHolder: didFinish - title: \(webView.title ?? "nil")\n", stderr)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        fputs("🌐 WebViewHolder: didFail - error: \(error.localizedDescription)\n", stderr)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let nsError = error as NSError
+        if nsError.code != NSURLErrorCancelled {
+            fputs("🌐 WebViewHolder: didFailProvisionalNavigation - error: \(error.localizedDescription)\n", stderr)
         }
     }
 }
@@ -216,7 +250,7 @@ struct PersistentWebView: NSViewRepresentable {
         let container = NSView(frame: NSRect(origin: .zero, size: size))
         let webView = holder.webView
 
-        webView.navigationDelegate = context.coordinator
+        // navigationDelegate 已在 WebViewHolder 中设置
         webView.uiDelegate = context.coordinator
         webView.frame = container.bounds
         webView.autoresizingMask = [.width, .height]
@@ -249,26 +283,12 @@ struct PersistentWebView: NSViewRepresentable {
         }
     }
 
-    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    // Coordinator 只处理 UIDelegate（target=_blank 链接）
+    class Coordinator: NSObject, WKUIDelegate {
         let holder: WebViewHolder
 
         init(holder: WebViewHolder) {
             self.holder = holder
-        }
-
-        // 使用 KVO 观察 isLoading，不需要这些代理方法来跟踪加载状态
-        // 只保留错误处理和 UI 代理
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            NSLog("🌐 WebViewHolder: Navigation failed: \(error.localizedDescription)")
-        }
-
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            // 忽略取消错误（用户导航到新页面时会触发）
-            let nsError = error as NSError
-            if nsError.code != NSURLErrorCancelled {
-                NSLog("🌐 WebViewHolder: Provisional navigation failed: \(error.localizedDescription)")
-            }
         }
 
         // 处理 target="_blank" 链接
