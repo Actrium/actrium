@@ -8,9 +8,9 @@
 		<string>group.chat.askaway.canvas</string>
 	</array>
 
-	<!-- App Sandbox -->
+	<!-- App Sandbox (disabled for development) -->
 	<key>com.apple.security.app-sandbox</key>
-	<true/>
+	<false/>
 
 	<!-- Network Access -->
 	<key>com.apple.security.network.client</key>
