@@ -169,42 +169,31 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
+
+        // Set standard Safari User-Agent to avoid website detection issues
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
     }
 
     func loadIfNeeded(_ url: URL) {
         // 只有 URL 真正变化时才重新加载
         if loadedURL != url {
-            fputs("🌐 WebViewHolder: loadIfNeeded - URL changed from \(loadedURL?.absoluteString ?? "nil") to \(url.absoluteString)\n", stderr)
             loadedURL = url
             let request = URLRequest(url: url)
             webView.load(request)
-        } else {
-            fputs("🌐 WebViewHolder: loadIfNeeded - URL unchanged: \(url.absoluteString)\n", stderr)
         }
     }
 
     // MARK: - WKNavigationDelegate
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        fputs("🌐 WebViewHolder: didStartProvisionalNavigation\n", stderr)
-    }
-
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        fputs("🌐 WebViewHolder: didCommit - URL: \(webView.url?.absoluteString ?? "nil")\n", stderr)
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        fputs("🌐 WebViewHolder: didFinish - title: \(webView.title ?? "nil")\n", stderr)
-    }
-
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        fputs("🌐 WebViewHolder: didFail - error: \(error.localizedDescription)\n", stderr)
+        NSLog("🌐 WebViewHolder: Navigation failed - \(error.localizedDescription)")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsError = error as NSError
+        // Ignore cancelled requests (e.g., due to new navigation)
         if nsError.code != NSURLErrorCancelled {
-            fputs("🌐 WebViewHolder: didFailProvisionalNavigation - error: \(error.localizedDescription)\n", stderr)
+            NSLog("🌐 WebViewHolder: Provisional navigation failed - \(error.localizedDescription)")
         }
     }
 }
@@ -256,18 +245,13 @@ struct PersistentWebView: NSViewRepresentable {
         webView.autoresizingMask = [.width, .height]
 
         container.addSubview(webView)
-
-        NSLog("🌐 PersistentWebView: makeNSView, container.frame=\(container.frame), webView.frame=\(webView.frame)")
         return container
     }
 
     func updateNSView(_ container: NSView, context: Context) {
         // 使用传入的 size 而不是 container.bounds
         // 因为 SwiftUI 可能会暂时给容器 0 大小
-        guard size.width > 0 && size.height > 0 else {
-            NSLog("🌐 PersistentWebView: updateNSView SKIPPED, size=\(size) (zero size)")
-            return
-        }
+        guard size.width > 0 && size.height > 0 else { return }
 
         // 确保容器和 webView 都有正确的 frame
         let targetFrame = NSRect(origin: .zero, size: size)
@@ -275,11 +259,9 @@ struct PersistentWebView: NSViewRepresentable {
             container.frame = targetFrame
         }
 
-        if let webView = container.subviews.first as? WKWebView {
-            if webView.frame != targetFrame {
-                webView.frame = targetFrame
-                NSLog("🌐 PersistentWebView: updateNSView, size=\(size), webView.frame=\(webView.frame)")
-            }
+        if let webView = container.subviews.first as? WKWebView,
+           webView.frame != targetFrame {
+            webView.frame = targetFrame
         }
     }
 
@@ -327,11 +309,9 @@ struct FocusedWebOverlay: View {
             .id(tab.id)
             .frame(width: viewportSize.width, height: viewportSize.height)
             .onAppear {
-                NSLog("🌐 FocusedWebOverlay: onAppear, url=\(url.absoluteString), size=\(viewportSize)")
                 holder.loadIfNeeded(url)
             }
-            .onChange(of: url) { oldURL, newURL in
-                NSLog("🌐 FocusedWebOverlay: onChange url \(oldURL.absoluteString) -> \(newURL.absoluteString)")
+            .onChange(of: url) { _, newURL in
                 holder.loadIfNeeded(newURL)
             }
     }
