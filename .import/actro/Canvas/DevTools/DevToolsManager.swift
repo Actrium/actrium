@@ -25,6 +25,7 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
     case console = "Console"         // Console logs
     case network = "Network"         // Network requests
     case monitor = "Monitor"         // Engine monitor
+    case metro = "Metro"             // Metro bundler management
 
     var id: String { rawValue }
 
@@ -36,6 +37,7 @@ enum DevToolsTab: String, CaseIterable, Identifiable {
         case .console: return "terminal"
         case .network: return "network"
         case .monitor: return "waveform.path.ecg"
+        case .metro: return "shippingbox"
         }
     }
 }
