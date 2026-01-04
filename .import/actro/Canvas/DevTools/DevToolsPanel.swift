@@ -91,9 +91,11 @@ struct DevToolsToolbar: View {
 
             Spacer()
 
-            // Pause button and current inspected tab indicator - only for React Native tabs
+            // Pause button and current inspected tab indicator - only for Actr Apps
+            // (RN apps with actual guest script, not system pages like StartPage/History)
             if let currentTab = viewModel.currentTab,
-               case .reactNative = currentTab.contentType {
+               case .reactNative = currentTab.contentType,
+               currentTab.systemTabType == nil {
                 HStack(spacing: 6) {
                     // Pause/Resume button with 3-state indicator:
                     // - Gray: not connected (no engine snapshot)
