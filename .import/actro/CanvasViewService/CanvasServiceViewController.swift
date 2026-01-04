@@ -125,7 +125,7 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
             inlineSourceMap: false
         )
         #else
-        return Bundle.main.url(forResource: "actr", withExtension: "jsbundle")
+        return Bundle.main.url(forResource: "main.rctnapp", withExtension: "jsbundle")
         #endif
     }
 
