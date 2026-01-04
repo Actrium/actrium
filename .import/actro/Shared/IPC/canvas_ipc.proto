@@ -156,3 +156,95 @@ message ExecuteJSResponse {
     string result = 3;
     string error_message = 4;
 }
+
+// ============================================
+// XPC ViewBridge IPC Protocol
+// Transport: DistributedNotificationCenter
+// Key: tab_id (UUID string) for 1:1:1 mapping
+// ============================================
+
+// Host -> Service: Tab configuration
+// Notification: com.canvas.tabConfig.<serviceBundleId>
+message XPCTabConfig {
+    // Core identifier (UUID string)
+    string tab_id = 1;
+
+    // Tab metadata
+    string title = 2;
+    string background_color = 3;
+
+    // Container dimensions
+    double container_width = 10;
+    double container_height = 11;
+
+    // System app type (mutually exclusive with scripts)
+    // Values: "startPage", "history", "bookmarks", "debug", "loading"
+    string system_app_type = 20;
+
+    // ACTR scripts (for regular RN apps)
+    string unified_script = 30;
+    string left_panel_script = 31;
+    string right_panel_script = 32;
+    string guest_script = 33;
+
+    // Panel visibility
+    bool left_panel_visible = 40;
+    bool right_panel_visible = 41;
+
+    // Reload trigger
+    int32 reload_key = 50;
+
+    // System app data
+    repeated BookmarkData bookmarks = 60;
+    repeated HistoryItemData recent_history = 61;
+    repeated HistoryGroupData history_groups = 62;
+}
+
+// Service -> Host: Service ready notification
+// Notification: com.canvas.xpcServiceReady
+message XPCServiceReady {
+    string service_bundle_id = 1;  // e.g., "chat.askaway.Canvas.RCTViewService0"
+}
+
+// Service -> Host: Tab render state
+// Notification: com.canvas.tabState.<tabId>
+message XPCTabState {
+    string tab_id = 1;
+    TabRenderState state = 2;
+    string error_message = 3;
+
+    enum TabRenderState {
+        LOADING = 0;
+        READY = 1;
+        ERROR = 2;
+    }
+}
+
+// Service -> Host: Tab navigation request
+// Notification: com.canvas.tabNavigation.<tabId>
+message XPCTabNavigation {
+    string tab_id = 1;
+    string url = 2;
+    bool open_in_new_tab = 3;
+}
+
+// Data types for system apps
+message BookmarkData {
+    string id = 1;
+    string title = 2;
+    string app_url = 3;
+    string favicon_url = 4;
+    int64 created_at = 5;
+}
+
+message HistoryItemData {
+    string id = 1;
+    string title = 2;
+    string app_url = 3;
+    int64 visited_at = 4;
+}
+
+message HistoryGroupData {
+    string date = 1;  // e.g., "2024-01-15"
+    repeated HistoryItemData items = 2;
+}
