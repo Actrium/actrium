@@ -70,14 +70,14 @@ struct DevToolsToolbar: View {
             // Tab buttons (using custom order for drag-and-drop reordering)
             HStack(spacing: 2) {
                 ForEach(devTools.tabOrder) { tab in
-                    // Metro tab icon turns green when running
-                    let iconColor: Color? = (tab == .metro && metro.state.isRunning) ? .green : nil
+                    // Metro tab turns green when running
+                    let statusColor: Color? = (tab == .metro && metro.state.isRunning) ? .green : nil
 
                     DevToolsTabButton(
                         tab: tab,
                         isSelected: devTools.activeTab == tab,
                         isDragging: draggingTab == tab,
-                        iconColor: iconColor
+                        statusColor: statusColor
                     ) {
                         devTools.activeTab = tab
                     }
@@ -201,19 +201,25 @@ struct DevToolsTabButton: View {
     let tab: DevToolsTab
     let isSelected: Bool
     var isDragging: Bool = false
-    var iconColor: Color? = nil  // Optional override for icon color
+    var statusColor: Color? = nil  // Optional status color for icon and text
     let action: () -> Void
 
     var body: some View {
+        // Determine colors: statusColor overrides default when not selected
+        let effectiveColor: Color = {
+            if isSelected { return .accentColor }
+            if let status = statusColor { return status }
+            return .secondary
+        }()
+
         Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: tab.icon)
                     .font(.system(size: 11))
-                    .foregroundColor(iconColor ?? (isSelected ? .accentColor : .secondary))
                 Text(tab.rawValue)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
             }
+            .foregroundColor(effectiveColor)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
