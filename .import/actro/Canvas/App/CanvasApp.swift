@@ -1,6 +1,131 @@
 import SwiftUI
+import Combine
 
 private let logger = AppLogger.app
+
+// MARK: - DistributedNotificationCenter Publisher Extension
+
+extension DistributedNotificationCenter {
+    /// Create a Combine publisher for distributed notifications
+    func publisher(for name: NSNotification.Name) -> AnyPublisher<Notification, Never> {
+        NotificationCenter.default.publisher(for: name)
+            .eraseToAnyPublisher()
+    }
+}
+
+/// Helper class to bridge DistributedNotificationCenter to NotificationCenter for SwiftUI
+final class XPCNotificationBridge {
+    static let shared = XPCNotificationBridge()
+
+    // Local notification names (for SwiftUI .onReceive)
+    static let openBookmark = Notification.Name("xpc.openBookmark")
+    static let openHistoryItem = Notification.Name("xpc.openHistoryItem")
+    static let deleteBookmark = Notification.Name("xpc.deleteBookmark")
+    static let deleteHistoryItem = Notification.Name("xpc.deleteHistoryItem")
+    static let restoreHistoryGroup = Notification.Name("xpc.restoreHistoryGroup")
+    static let clearHistory = Notification.Name("xpc.clearHistory")
+    static let openURLFromStartPage = Notification.Name("xpc.openURLFromStartPage")
+    static let xpcLog = Notification.Name("xpc.log")
+
+    private var observers: [NSObjectProtocol] = []
+
+    private init() {
+        setupListeners()
+    }
+
+    private func setupListeners() {
+        // Bridge distributed notifications to local NotificationCenter
+
+        // Open bookmark
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.openBookmark"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            NotificationCenter.default.post(name: Self.openBookmark, object: nil, userInfo: notification.userInfo)
+        })
+
+        // Open history item
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.openHistoryItem"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            NotificationCenter.default.post(name: Self.openHistoryItem, object: nil, userInfo: notification.userInfo)
+        })
+
+        // Delete bookmark
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.deleteBookmark"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            NotificationCenter.default.post(name: Self.deleteBookmark, object: nil, userInfo: notification.userInfo)
+        })
+
+        // Delete history item
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.deleteHistoryItem"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            NotificationCenter.default.post(name: Self.deleteHistoryItem, object: nil, userInfo: notification.userInfo)
+        })
+
+        // Restore history group
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.restoreHistoryGroup"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            NotificationCenter.default.post(name: Self.restoreHistoryGroup, object: nil, userInfo: notification.userInfo)
+        })
+
+        // Clear history
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.clearHistory"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            NotificationCenter.default.post(name: Self.clearHistory, object: nil, userInfo: notification.userInfo)
+        })
+
+        // Open URL from Start Page
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.openURLFromStartPage"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            NotificationCenter.default.post(name: Self.openURLFromStartPage, object: nil, userInfo: notification.userInfo)
+        })
+
+        // XPC Log (forward to DevTools)
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.xpcLog"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let userInfo = notification.userInfo,
+                  let level = userInfo["level"] as? String,
+                  let source = userInfo["source"] as? String,
+                  let message = userInfo["message"] as? String else { return }
+
+            let logLevel: DevToolsLogEntry.LogLevel
+            switch level {
+            case "warn": logLevel = .warn
+            case "error": logLevel = .error
+            case "debug": logLevel = .debug
+            default: logLevel = .info
+            }
+
+            Task { @MainActor in
+                DevToolsManager.shared.log(message, level: logLevel, source: "[XPC] \(source)")
+            }
+        })
+
+        logger.info("XPCNotificationBridge: Initialized with \(self.observers.count) listeners")
+    }
+}
 
 // MARK: - Focused Value for Active Window's ViewModel
 
@@ -34,19 +159,25 @@ struct BrowserWindowView: View {
                 // Handle launch URL (only once)
                 handleLaunchURLIfNeeded()
             }
-            // Handle bookmark open from RN
-            .onReceive(NotificationCenter.default.publisher(for: .openBookmarkFromRN)) { notification in
+            // Handle bookmark open from XPC service
+            .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openBookmark)) { notification in
                 guard let userInfo = notification.userInfo,
-                      let url = userInfo["url"] as? URL else { return }
+                      let urlString = userInfo["url"] as? String else { return }
+
+                // Parse URL from string (XPC passes strings, not URL objects)
+                let url: URL
+                if let parsed = URL(string: urlString) {
+                    url = parsed
+                } else {
+                    url = URL(fileURLWithPath: urlString)
+                }
 
                 // Check if it's a directory or .actr file
                 var isDirectory: ObjCBool = false
                 if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
                     if isDirectory.boolValue {
-                        // It's a directory - use dev directory loader
                         viewModel.loadFromDevDirectory(url)
                     } else {
-                        // It's a file - use ACTR package loader
                         viewModel.importACTRPackage(from: url)
                     }
                 }
@@ -58,12 +189,18 @@ struct BrowserWindowView: View {
                     bookmarkVM.markAsUsed(bookmark)
                 }
             }
-            // Handle history item open from RN
-            .onReceive(NotificationCenter.default.publisher(for: .openHistoryItemFromRN)) { notification in
+            // Handle history item open from XPC service
+            .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openHistoryItem)) { notification in
                 guard let userInfo = notification.userInfo,
-                      let url = userInfo["url"] as? URL else { return }
+                      let urlString = userInfo["url"] as? String else { return }
 
-                // Check if it's a directory or .actr file
+                let url: URL
+                if let parsed = URL(string: urlString) {
+                    url = parsed
+                } else {
+                    url = URL(fileURLWithPath: urlString)
+                }
+
                 var isDirectory: ObjCBool = false
                 if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
                     if isDirectory.boolValue {
@@ -73,31 +210,37 @@ struct BrowserWindowView: View {
                     }
                 }
             }
-            // Handle bookmark delete from RN
-            .onReceive(NotificationCenter.default.publisher(for: .deleteBookmarkFromRN)) { notification in
+            // Handle bookmark delete from XPC service
+            .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteBookmark)) { notification in
                 guard let userInfo = notification.userInfo,
                       let bookmarkId = userInfo["bookmarkId"] as? String,
                       let uuid = UUID(uuidString: bookmarkId) else { return }
                 bookmarkVM.removeBookmark(id: uuid)
             }
-            // Handle history item delete from RN
-            .onReceive(NotificationCenter.default.publisher(for: .deleteHistoryItemFromRN)) { notification in
+            // Handle history item delete from XPC service
+            .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteHistoryItem)) { notification in
                 guard let userInfo = notification.userInfo,
                       let itemId = userInfo["itemId"] as? String,
                       let uuid = UUID(uuidString: itemId),
                       let item = historyVM.recentItems.first(where: { $0.id == uuid }) else { return }
                 historyVM.deleteItem(item)
             }
-            // Handle clear history from RN
-            .onReceive(NotificationCenter.default.publisher(for: .clearHistoryFromRN)) { _ in
+            // Handle clear history from XPC service
+            .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.clearHistory)) { _ in
                 historyVM.clearHistory()
             }
-            // Handle URL open from Start Page
-            .onReceive(NotificationCenter.default.publisher(for: .openURLFromStartPage)) { notification in
+            // Handle URL open from Start Page (XPC service)
+            .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openURLFromStartPage)) { notification in
                 guard let userInfo = notification.userInfo,
-                      let url = userInfo["url"] as? URL else { return }
+                      let urlString = userInfo["url"] as? String else { return }
 
-                // Check if it's a directory or .actr file
+                let url: URL
+                if let parsed = URL(string: urlString) {
+                    url = parsed
+                } else {
+                    url = URL(fileURLWithPath: urlString)
+                }
+
                 var isDirectory: ObjCBool = false
                 if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
                     if isDirectory.boolValue {
@@ -222,6 +365,9 @@ struct CanvasApp: App {
 
         // Initialize TabProcessManager early
         _ = TabProcessManager.shared
+
+        // Initialize XPC notification bridge (listens for notifications from XPC services)
+        _ = XPCNotificationBridge.shared
     }
 
     var body: some Scene {

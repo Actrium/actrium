@@ -1027,13 +1027,23 @@ class DevToolsManager: ObservableObject {
         messages.removeAll()
     }
 
-    /// Evaluate JavaScript in the active tab
+    /// Evaluate JavaScript in the active tab (via XPC service)
     func evaluateScript(_ code: String) {
         guard let tabId = inspectedTabId else {
             log("No active tab to evaluate script", level: .error, source: "DevTools")
             return
         }
-        CanvasReactNativeHost.shared.evaluateScript(code, tabId: tabId)
+        // Send to XPC service via DistributedNotificationCenter
+        let userInfo: [String: Any] = [
+            "tabId": tabId.uuidString,
+            "code": code
+        ]
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name("com.canvas.evaluateScript"),
+            object: nil,
+            userInfo: userInfo,
+            deliverImmediately: true
+        )
     }
 
     // MARK: - Logging
