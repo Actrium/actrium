@@ -378,16 +378,22 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Handle navigation action with download attribute or Option+click
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let url = navigationAction.request.url
+        NSLog("📥 WebViewHolder: decidePolicyFor action - URL: %@, shouldDownload: %d, navigationType: %ld",
+              url?.absoluteString ?? "nil",
+              navigationAction.shouldPerformDownload ? 1 : 0,
+              navigationAction.navigationType.rawValue)
+
         // Check for download attribute on links
         if navigationAction.shouldPerformDownload {
             decisionHandler(.download)
-            NSLog("📥 WebViewHolder: Link has download attribute")
+            NSLog("📥 WebViewHolder: Link has download attribute - returning .download")
             return
         }
 
         // Safari-style: Option+click to force download any link
         if navigationAction.modifierFlags.contains(.option),
-           let url = navigationAction.request.url,
+           let url = url,
            url.scheme == "http" || url.scheme == "https" {
             // Use URLSession to download directly (bypass WKDownload restrictions)
             let filename = url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent
@@ -396,7 +402,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                 URLSessionDownloader.shared.startDownload(url: url, item: item)
             }
             decisionHandler(.cancel)
-            NSLog("📥 WebViewHolder: Option+click download - \(url.lastPathComponent)")
+            NSLog("📥 WebViewHolder: Option+click download - %@", url.lastPathComponent)
             return
         }
 
@@ -405,11 +411,13 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Handle navigation response becoming a download
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        NSLog("📥 WebViewHolder: navigationResponse didBecome download - %@", navigationResponse.response.url?.absoluteString ?? "nil")
         setupDownload(download, sourceURL: navigationResponse.response.url)
     }
 
     /// Handle navigation action becoming a download (for links with download attribute)
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        NSLog("📥 WebViewHolder: navigationAction didBecome download - %@", navigationAction.request.url?.absoluteString ?? "nil")
         setupDownload(download, sourceURL: navigationAction.request.url)
     }
 
@@ -517,9 +525,12 @@ struct PersistentWebView: NSViewRepresentable {
         }
     }
 
-    // Coordinator 处理 UIDelegate（target=_blank 链接、上下文菜单）
-    class Coordinator: NSObject, WKUIDelegate {
+    // Coordinator 处理 UIDelegate（target=_blank 链接、下载）
+    class Coordinator: NSObject, WKUIDelegate, WKDownloadDelegate {
         let holder: WebViewHolder
+
+        /// Keep strong reference to download handlers
+        private var downloadHandlers: [WKDownload: DownloadDelegateHandler] = [:]
 
         init(holder: WebViewHolder) {
             self.holder = holder
@@ -539,9 +550,78 @@ struct PersistentWebView: NSViewRepresentable {
             return nil
         }
 
-        // macOS: Customize context menu with download options
-        func webView(_ webView: WKWebView, willPerformClientRedirectTo URL: URL, delay: TimeInterval) {
-            // Not used, but required for protocol conformance
+        // MARK: - WKDownloadDelegate (for context menu downloads)
+
+        /// Handle download destination - required for WKDownloadDelegate
+        func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+            NSLog("📥 Coordinator: decideDestination for %@", suggestedFilename)
+
+            let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+            var destinationURL = downloadsURL.appendingPathComponent(suggestedFilename)
+
+            // Handle duplicate filenames
+            var counter = 1
+            let fileManager = FileManager.default
+            let baseName = (suggestedFilename as NSString).deletingPathExtension
+            let ext = (suggestedFilename as NSString).pathExtension
+
+            while fileManager.fileExists(atPath: destinationURL.path) {
+                let newName = ext.isEmpty ? "\(baseName) (\(counter))" : "\(baseName) (\(counter)).\(ext)"
+                destinationURL = downloadsURL.appendingPathComponent(newName)
+                counter += 1
+            }
+
+            // Create download item in manager
+            Task { @MainActor in
+                let item = DownloadManager.shared.addDownload(filename: suggestedFilename, sourceURL: response.url)
+                item.destinationURL = destinationURL
+                item.download = download
+                item.state = .downloading
+            }
+
+            completionHandler(destinationURL)
+        }
+
+        func download(_ download: WKDownload, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+            Task { @MainActor in
+                if let item = DownloadManager.shared.item(for: download) {
+                    DownloadManager.shared.updateProgress(item, bytesReceived: totalBytesWritten, totalBytes: totalBytesExpectedToWrite)
+                }
+            }
+        }
+
+        func downloadDidFinish(_ download: WKDownload) {
+            NSLog("📥 Coordinator: Download finished")
+            Task { @MainActor in
+                if let item = DownloadManager.shared.item(for: download) {
+                    DownloadManager.shared.updateItem(item, state: .completed)
+                }
+            }
+        }
+
+        func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+            NSLog("📥 Coordinator: Download failed - %@", error.localizedDescription)
+
+            Task { @MainActor in
+                if let item = DownloadManager.shared.item(for: download) {
+                    // Try URLSession fallback for permission errors
+                    let nsError = error as NSError
+                    if (nsError.domain == NSPOSIXErrorDomain && nsError.code == 1) ||
+                       error.localizedDescription.contains("Operation not permitted") {
+                        if let sourceURL = item.sourceURL {
+                            NSLog("📥 Coordinator: Falling back to URLSession")
+                            item.bytesReceived = 0
+                            item.totalBytes = 0
+                            item.error = nil
+                            URLSessionDownloader.shared.startDownload(url: sourceURL, item: item)
+                            return
+                        }
+                    }
+
+                    item.error = error.localizedDescription
+                    DownloadManager.shared.updateItem(item, state: .failed)
+                }
+            }
         }
     }
 }
@@ -662,48 +742,41 @@ class DownloadableWebView: WKWebView {
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
 
-        // Replace system's download items with our custom ones that use URLSession
-        // System items use WKDownload which has permission issues in sandbox
-        replaceSystemDownloadItems(in: menu)
+        // Add menu items synchronously - URLs should already be detected
+        addDownloadMenuItems(to: menu)
     }
 
-    private func replaceSystemDownloadItems(in menu: NSMenu) {
-        // Titles to look for (including localized versions)
-        let downloadImageTitles = ["Download Image", "下载图像"]
-        let downloadLinkTitles = ["Download Linked File", "下载链接的文件"]
+    private func addDownloadMenuItems(to menu: NSMenu) {
+        var addedSeparator = false
 
-        // Find and replace "Download Image" with our version
-        for title in downloadImageTitles {
-            if let index = menu.items.firstIndex(where: { $0.title == title }) {
-                menu.removeItem(at: index)
-                NSLog("📥 DownloadableWebView: Replacing system '%@' at index %d", title, index)
+        if let imageURL = contextMenuImageURL {
+            NSLog("📥 DownloadableWebView: Adding Download Image for %@", imageURL.absoluteString)
 
-                if let imageURL = contextMenuImageURL {
-                    let downloadImageItem = ClosureMenuItem(title: "Download Image") { [weak self] in
-                        NSLog("📥 DownloadableWebView: Download Image clicked!")
-                        self?.startDownload(url: imageURL)
-                    }
-                    menu.insertItem(downloadImageItem, at: index)
-                }
-                break
+            if !addedSeparator {
+                menu.addItem(NSMenuItem.separator())
+                addedSeparator = true
             }
+
+            // Use closure-based menu item to ensure action fires
+            let downloadImageItem = ClosureMenuItem(title: "Download Image") { [weak self] in
+                NSLog("📥 DownloadableWebView: Download Image clicked!")
+                self?.startDownload(url: imageURL)
+            }
+            menu.addItem(downloadImageItem)
         }
 
-        // Find and replace "Download Linked File" with our version
-        for title in downloadLinkTitles {
-            if let index = menu.items.firstIndex(where: { $0.title == title }) {
-                menu.removeItem(at: index)
-                NSLog("📥 DownloadableWebView: Replacing system '%@' at index %d", title, index)
+        if let linkURL = contextMenuLinkURL, linkURL != contextMenuImageURL {
+            NSLog("📥 DownloadableWebView: Adding Download Linked File for %@", linkURL.absoluteString)
 
-                if let linkURL = contextMenuLinkURL {
-                    let downloadLinkItem = ClosureMenuItem(title: "Download Linked File") { [weak self] in
-                        NSLog("📥 DownloadableWebView: Download Linked File clicked!")
-                        self?.startDownload(url: linkURL)
-                    }
-                    menu.insertItem(downloadLinkItem, at: index)
-                }
-                break
+            if !addedSeparator {
+                menu.addItem(NSMenuItem.separator())
             }
+
+            let downloadLinkItem = ClosureMenuItem(title: "Download Linked File") { [weak self] in
+                NSLog("📥 DownloadableWebView: Download Linked File clicked!")
+                self?.startDownload(url: linkURL)
+            }
+            menu.addItem(downloadLinkItem)
         }
     }
 
