@@ -297,30 +297,33 @@ struct WorkspaceMainView: View {
             .toolbar {
                 // 使用单个 principal 布局实现地址栏居中
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 0) {
-                        // 左侧：导航按钮
-                        HStack(spacing: 4) {
-                            Button(action: { viewModel.goBack() }) {
-                                Image(systemName: "chevron.left")
+                    GeometryReader { geo in
+                        let addressBarWidth = geo.size.width * 0.5
+
+                        HStack(spacing: 0) {
+                            // 左侧：导航按钮
+                            HStack(spacing: 4) {
+                                Button(action: { viewModel.goBack() }) {
+                                    Image(systemName: "chevron.left")
+                                }
+                                .disabled(!viewModel.canGoBack)
+                                .help("后退")
+
+                                Button(action: { viewModel.goForward() }) {
+                                    Image(systemName: "chevron.right")
+                                }
+                                .disabled(!viewModel.canGoForward)
+                                .help("前进")
                             }
-                            .disabled(!viewModel.canGoBack)
-                            .help("后退")
 
-                            Button(action: { viewModel.goForward() }) {
-                                Image(systemName: "chevron.right")
-                            }
-                            .disabled(!viewModel.canGoForward)
-                            .help("前进")
-                        }
+                            Spacer()
 
-                        Spacer(minLength: 20)
-
-                        // 中间：地址栏（居中）
-                        if case .overview = viewModel.canvasMode {
-                            // Overview 模式下的空占位
-                            Color.clear
-                                .frame(width: 500, height: 28)
-                        } else {
+                            // 中间：地址栏（50% 宽度，居中）
+                            if case .overview = viewModel.canvasMode {
+                                // Overview 模式下的空占位
+                                Color.clear
+                                    .frame(width: addressBarWidth, height: 28)
+                            } else {
                             // Determine left icon state based on tab type
                             let leftIconState: AddressBarLeftIconState = {
                                 guard let tab = viewModel.currentTab else { return .none }
@@ -385,10 +388,10 @@ struct WorkspaceMainView: View {
                                     }
                                 }
                             )
-                            .frame(width: 500)
-                        }
+                            .frame(width: addressBarWidth)
+                            }
 
-                        Spacer(minLength: 20)
+                            Spacer()
 
                         // 右侧：操作按钮
                         HStack(spacing: 4) {
@@ -418,8 +421,8 @@ struct WorkspaceMainView: View {
                             }
                             .help("标签总览 (⌘⇧\\)")
                         }
+                        }
                     }
-                    .frame(maxWidth: .infinity)
                 }
             }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
