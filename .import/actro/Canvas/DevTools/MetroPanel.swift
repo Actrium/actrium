@@ -150,22 +150,30 @@ struct MetroPanel: View {
 
             Divider()
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(metro.watchFolders) { folder in
-                        watchFolderRow(folder)
+            // Content area with centered drop hint
+            ZStack {
+                // Centered drop hint (behind folder list)
+                VStack {
+                    Spacer()
+                    Text("Drag folders here to add")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+
+                // Folder list (top-aligned)
+                VStack(spacing: 0) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(metro.watchFolders) { folder in
+                                watchFolderRow(folder)
+                            }
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
             }
             .frame(maxHeight: .infinity)
-
-            // Drop zone hint
-            Text("Drag folders here to add")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers: providers)
