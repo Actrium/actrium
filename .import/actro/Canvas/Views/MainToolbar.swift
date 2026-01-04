@@ -74,7 +74,7 @@ class MainToolbar: NSToolbar, NSToolbarDelegate {
 
     // MARK: - Init
 
-    init(identifier: NSToolbar.Identifier = NSToolbar.Identifier("MainToolbar")) {
+    override init(identifier: NSToolbar.Identifier = NSToolbar.Identifier("MainToolbar")) {
         super.init(identifier: identifier)
         self.delegate = self
         self.displayMode = .iconOnly
@@ -171,10 +171,12 @@ class MainToolbar: NSToolbar, NSToolbarDelegate {
             hostingView.frame.size = CGSize(width: 400, height: 28)
         }
 
-        item.view = hostingView
-        item.minSize = NSSize(width: 200, height: 28)
-        item.maxSize = NSSize(width: 800, height: 28)
+        // Use constraints instead of deprecated minSize/maxSize
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        hostingView.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+        hostingView.heightAnchor.constraint(equalToConstant: 28).isActive = true
 
+        item.view = hostingView
         self.addressBarHostingView = hostingView
 
         return item
