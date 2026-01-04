@@ -297,117 +297,116 @@ struct WorkspaceMainView: View {
             .toolbar {
                 // 整个 toolbar 用一个 principal item，内部 HStack 手动布局
                 // 结构：[左功能组] [Spacer] [地址栏 50%] [Spacer] [右功能组]
-                // 两个 Spacer 等宽，地址栏固定 50% 宽度
+                // 用 viewportSize 计算地址栏宽度（viewportSize 约等于窗口内容区宽度）
                 ToolbarItem(placement: .principal) {
-                    GeometryReader { geo in
-                        HStack(spacing: 0) {
-                            // 左功能组
-                            HStack(spacing: 2) {
-                                Button(action: { viewModel.goBack() }) {
-                                    Image(systemName: "chevron.left")
-                                }
-                                .disabled(!viewModel.canGoBack)
-                                .help("后退")
+                    let addressBarWidth = viewportSize.width * 0.5
 
-                                Button(action: { viewModel.goForward() }) {
-                                    Image(systemName: "chevron.right")
+                    HStack(spacing: 0) {
+                        // 左功能组
+                        HStack(spacing: 2) {
+                            Button(action: { viewModel.goBack() }) {
+                                Image(systemName: "chevron.left")
+                            }
+                            .disabled(!viewModel.canGoBack)
+                            .help("后退")
+
+                            Button(action: { viewModel.goForward() }) {
+                                Image(systemName: "chevron.right")
+                            }
+                            .disabled(!viewModel.canGoForward)
+                            .help("前进")
+                        }
+
+                        // 左 Spacer
+                        Spacer(minLength: 8)
+
+                        // 地址栏（50% 宽度）
+                        if case .overview = viewModel.canvasMode {
+                            Color.clear
+                                .frame(width: addressBarWidth, height: 28)
+                        } else {
+                            let leftIconState: AddressBarLeftIconState = {
+                                guard let tab = viewModel.currentTab else { return .none }
+                                switch tab.contentType {
+                                case .reactNative: return .menu
+                                case .web: return isWebLoading ? .loading : .none
+                                case .empty: return .none
                                 }
-                                .disabled(!viewModel.canGoForward)
-                                .help("前进")
+                            }()
+
+                            let currentURLString = viewModel.currentTab?.url?.absoluteString ?? ""
+
+                            let displayTitle: String = {
+                                guard let tab = viewModel.currentTab else { return "New Tab" }
+                                if case .web = tab.contentType, let host = tab.url?.host {
+                                    return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                                }
+                                return tab.title
+                            }()
+
+                            AddressBarContainer(
+                                titleText: .constant(displayTitle),
+                                urlText: currentURLString,
+                                inputText: $addressInputText,
+                                isEditing: $isAddressBarEditing,
+                                isFirstResponder: $isAddressBarFirstResponder,
+                                isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
+                                leftIconState: leftIconState,
+                                toggleLeftPanel: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        viewModel.toggleLeftPanelForCurrentTab()
+                                    }
+                                },
+                                showingBookmarkPopover: $showingBookmarkSheet,
+                                shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
+                                refreshAction: { viewModel.reloadCurrentTab() },
+                                onNavigate: { input in
+                                    viewModel.navigateCurrentTab(to: input)
+                                    isAddressBarFirstResponder = false
+                                },
+                                bookmarkPopoverContent: {
+                                    if let tab = viewModel.currentTab {
+                                        let existingBookmark = bookmarkVM.getBookmark(for: tab)
+                                        BookmarkEditSheet(
+                                            viewModel: bookmarkVM,
+                                            tab: existingBookmark == nil ? tab : nil,
+                                            existingBookmark: existingBookmark
+                                        )
+                                    }
+                                }
+                            )
+                            .frame(width: addressBarWidth)
+                        }
+
+                        // 右 Spacer
+                        Spacer(minLength: 8)
+
+                        // 右功能组
+                        HStack(spacing: 2) {
+                            DownloadToolbarButton()
+
+                            if case .focus = viewModel.canvasMode,
+                               let currentTab = viewModel.currentTab,
+                               currentTab.url != nil {
+                                ShareToolbarButton(url: currentTab.url)
+                                QRCodeToolbarButton(url: currentTab.url)
                             }
 
-                            // 左 Spacer
-                            Spacer(minLength: 8)
-
-                            // 地址栏（50% 宽度）
-                            if case .overview = viewModel.canvasMode {
-                                Color.clear
-                                    .frame(width: geo.size.width * 0.5, height: 28)
-                            } else {
-                                let leftIconState: AddressBarLeftIconState = {
-                                    guard let tab = viewModel.currentTab else { return .none }
-                                    switch tab.contentType {
-                                    case .reactNative: return .menu
-                                    case .web: return isWebLoading ? .loading : .none
-                                    case .empty: return .none
-                                    }
-                                }()
-
-                                let currentURLString = viewModel.currentTab?.url?.absoluteString ?? ""
-
-                                let displayTitle: String = {
-                                    guard let tab = viewModel.currentTab else { return "New Tab" }
-                                    if case .web = tab.contentType, let host = tab.url?.host {
-                                        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-                                    }
-                                    return tab.title
-                                }()
-
-                                AddressBarContainer(
-                                    titleText: .constant(displayTitle),
-                                    urlText: currentURLString,
-                                    inputText: $addressInputText,
-                                    isEditing: $isAddressBarEditing,
-                                    isFirstResponder: $isAddressBarFirstResponder,
-                                    isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
-                                    leftIconState: leftIconState,
-                                    toggleLeftPanel: {
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            viewModel.toggleLeftPanelForCurrentTab()
-                                        }
-                                    },
-                                    showingBookmarkPopover: $showingBookmarkSheet,
-                                    shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
-                                    refreshAction: { viewModel.reloadCurrentTab() },
-                                    onNavigate: { input in
-                                        viewModel.navigateCurrentTab(to: input)
-                                        isAddressBarFirstResponder = false
-                                    },
-                                    bookmarkPopoverContent: {
-                                        if let tab = viewModel.currentTab {
-                                            let existingBookmark = bookmarkVM.getBookmark(for: tab)
-                                            BookmarkEditSheet(
-                                                viewModel: bookmarkVM,
-                                                tab: existingBookmark == nil ? tab : nil,
-                                                existingBookmark: existingBookmark
-                                            )
-                                        }
-                                    }
-                                )
-                                .frame(width: geo.size.width * 0.5)
+                            Button(action: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+                                    _ = viewModel.addNewTab()
+                                }
+                            }) {
+                                Image(systemName: "plus")
                             }
+                            .help("新建标签页")
 
-                            // 右 Spacer
-                            Spacer(minLength: 8)
-
-                            // 右功能组
-                            HStack(spacing: 2) {
-                                DownloadToolbarButton()
-
-                                if case .focus = viewModel.canvasMode,
-                                   let currentTab = viewModel.currentTab,
-                                   currentTab.url != nil {
-                                    ShareToolbarButton(url: currentTab.url)
-                                    QRCodeToolbarButton(url: currentTab.url)
-                                }
-
-                                Button(action: {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                                        _ = viewModel.addNewTab()
-                                    }
-                                }) {
-                                    Image(systemName: "plus")
-                                }
-                                .help("新建标签页")
-
-                                Button(action: toggleFocusOverview) {
-                                    Image(systemName: "square.on.square")
-                                }
-                                .help("标签总览 (⌘⇧\\)")
+                            Button(action: toggleFocusOverview) {
+                                Image(systemName: "square.on.square")
                             }
+                            .help("标签总览 (⌘⇧\\)")
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
