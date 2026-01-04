@@ -483,7 +483,7 @@ class DevToolsManager: ObservableObject {
     @Published var guestAppName: String?
 
     /// Host source directory (fixed path)
-    static let hostSourcePath = "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/src/actr-host"
+    static let hostSourcePath = "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/src/actr-host"
 
     struct SourceNavigation: Equatable {
         let searchText: String  // Function name for search fallback
