@@ -50,6 +50,10 @@ struct DownloadPopoverView: View {
             .frame(maxHeight: 280)
         }
         .frame(width: 300)
+        .onAppear {
+            // Check if downloaded files still exist when popover opens
+            manager.checkAllFilesExist()
+        }
     }
 }
 
@@ -58,6 +62,11 @@ struct DownloadPopoverView: View {
 struct DownloadItemRow: View {
     @ObservedObject var item: DownloadItem
     @State private var isHovering = false
+
+    /// Whether this item should be disabled (file deleted)
+    private var isDisabled: Bool {
+        item.state == .completed && !item.fileExists
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -92,14 +101,15 @@ struct DownloadItemRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isHovering ? Color.primary.opacity(0.05) : Color.clear)
+        .background(isHovering && !isDisabled ? Color.primary.opacity(0.05) : Color.clear)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(count: 2) {
-            if item.state == .completed {
+            if item.state == .completed && item.fileExists {
                 DownloadManager.shared.openFile(item)
             }
         }
+        .opacity(isDisabled ? 0.5 : 1.0)
     }
 
     @ViewBuilder
@@ -110,7 +120,12 @@ struct DownloadItemRow: View {
         case .downloading:
             Text(item.progressText)
         case .completed:
-            Text("Completed")
+            if item.fileExists {
+                Text("Completed")
+            } else {
+                Text("File Deleted")
+                    .foregroundColor(.secondary)
+            }
         case .failed:
             Text(item.error ?? "Failed")
                 .foregroundColor(.red)
@@ -139,12 +154,17 @@ struct DownloadItemRow: View {
             .help("Retry")
 
         case .completed:
-            Button(action: { DownloadManager.shared.revealInFinder(item) }) {
-                Image(systemName: "magnifyingglass.circle.fill")
-                    .foregroundColor(.secondary)
+            if item.fileExists {
+                Button(action: { DownloadManager.shared.revealInFinder(item) }) {
+                    Image(systemName: "magnifyingglass.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Show in Finder")
+            } else {
+                // File deleted - no action available
+                EmptyView()
             }
-            .buttonStyle(.plain)
-            .help("Show in Finder")
 
         case .cancelled:
             EmptyView()
