@@ -1,35 +1,36 @@
 import Foundation
 
-/// Resolves unique Metro bundler address based on process ID
-/// Uses 127.x.x.x address space to avoid port conflicts between Canvas instances
+/// Resolves unique Metro bundler port based on process ID
+/// Uses dynamic port allocation to avoid conflicts between Canvas instances
 struct MetroAddressResolver {
 
-    /// Fixed Metro port
-    static let port: UInt16 = 8081
+    /// Base port range for Metro (49152-65535 is dynamic/private range)
+    private static let basePort: UInt16 = 49152
+    private static let portRange: UInt16 = 16383  // 49152 to 65535
 
-    /// Generate unique 127.x.x.x address from process ID
-    /// Uses Knuth multiplicative hash for uniform distribution
-    static func address(for pid: pid_t) -> String {
+    /// Generate unique port from process ID
+    /// Uses hash to distribute ports across the dynamic range
+    static func port(for pid: pid_t) -> UInt16 {
         // Knuth multiplicative hash for uniform distribution
         var hash = UInt32(bitPattern: Int32(pid)) &* 2654435761
         hash ^= hash >> 16  // Additional mixing
 
-        // Map to 127.1-254.0-255.1-254 (avoiding edge cases)
-        let b1 = UInt8(clamping: ((hash >> 16) & 0xFF) % 253 + 1)  // 1-254
-        let b2 = UInt8((hash >> 8) & 0xFF)                         // 0-255
-        let b3 = UInt8(clamping: (hash & 0xFF) % 253 + 1)          // 1-254
-
-        return "127.\(b1).\(b2).\(b3)"
+        // Map to port range 49152-65535
+        let offset = UInt16(hash % UInt32(portRange))
+        return basePort + offset
     }
 
-    /// Current process's Metro address
-    static var currentAddress: String {
-        address(for: getpid())
+    /// Always use localhost
+    static let address: String = "127.0.0.1"
+
+    /// Current process's Metro port
+    static var currentPort: UInt16 {
+        port(for: getpid())
     }
 
     /// Current process's Metro host string (address:port)
     static var currentHost: String {
-        "\(currentAddress):\(port)"
+        "\(address):\(currentPort)"
     }
 
     /// Current process's Metro base URL
