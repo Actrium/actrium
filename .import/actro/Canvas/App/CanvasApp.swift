@@ -146,11 +146,14 @@ struct BrowserWindowView: View {
             let title = tabData["title"] as? String ?? "Untitled"
             let urlString = tabData["urlString"] as? String
             let url = urlString.flatMap { URL(string: $0) }
+            let systemTypeRaw = tabData["systemTabType"] as? String
+            let systemTabType = systemTypeRaw.flatMap { SystemTabType(rawValue: $0) }
 
             let tab = Tab(
                 title: title,
                 url: url,
                 htmlContent: tabData["htmlContent"] as? String,
+                systemTabType: systemTabType,
                 guestScript: tabData["guestScript"] as? String,
                 leftPanelScript: tabData["leftPanelScript"] as? String,
                 rightPanelScript: tabData["rightPanelScript"] as? String,
