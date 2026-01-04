@@ -53,7 +53,7 @@ class BrowserViewModel: ObservableObject {
         initializeSlotPositions()
 
         // TODO: 临时禁用 RN 示例应用自动加载，专注 Web 开发
-        // let sampleAppsBasePath = "/Users/leo/XData/Starbucks/GoAskAway/Canvas/Subsystem/actr-app-examples"
+        // let sampleAppsBasePath = "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples"
         // let defaultApps = ["debugapp", "counterapp"]
         // Task { @MainActor [weak self] in
         //     guard let self = self else { return }

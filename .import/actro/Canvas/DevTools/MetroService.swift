@@ -100,8 +100,8 @@ actor MetroService {
             "fonts",
             "src/assets",
             "src/images",
-            "Subsystem/assets",
-            "Subsystem/src/assets"
+            "RCTNApps/assets",
+            "RCTNApps/src/assets"
         ]
 
         for dir in assetDirs {
@@ -152,10 +152,10 @@ actor MetroService {
     private func findProjectRoot(from files: [SourceFile]) -> String? {
         // Look for common project markers in paths
         for file in files {
-            if let range = file.fullPath.range(of: "/Subsystem/") {
+            if let range = file.fullPath.range(of: "/RCTNApps/") {
                 let root = String(file.fullPath[..<range.lowerBound])
-                // Go up one level from Subsystem to get Canvas project root
-                return (root as NSString).appendingPathComponent("Subsystem")
+                // Go up one level from RCTNApps to get Canvas project root
+                return (root as NSString).appendingPathComponent("RCTNApps")
             }
         }
         return nil
@@ -346,10 +346,10 @@ struct SourceFile: Identifiable, Hashable, Sendable {
         if let range = fullPath.range(of: "/actr-host/") {
             return "Host/" + String(fullPath[range.upperBound...])
         }
-        // Also include Subsystem-level files under Host
-        if let range = fullPath.range(of: "/Subsystem/src/") {
+        // Also include RCTNApps-level files under Host
+        if let range = fullPath.range(of: "/RCTNApps/src/") {
             let remainder = String(fullPath[range.upperBound...])
-            // Files directly in Subsystem/src but not in actr-host
+            // Files directly in RCTNApps/src but not in actr-host
             if !remainder.contains("actr-host") {
                 return "Host/" + remainder
             }

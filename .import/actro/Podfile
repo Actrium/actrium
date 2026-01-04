@@ -1,10 +1,10 @@
-subsystem_path = File.join(__dir__, 'Subsystem')
+rctnapps_path = File.join(__dir__, 'RCTNApps')
 # Keep react-native-macos path RELATIVE. RN CocoaPods helpers assume `path` is relative and will
 # incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
-react_native_macos_path = 'Subsystem/node_modules/react-native-macos'
+react_native_macos_path = 'RCTNApps/node_modules/react-native-macos'
 
 # Require react_native_pods via a stable absolute path.
-require File.join(subsystem_path, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
+require File.join(rctnapps_path, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
 
 prepare_react_native_project!
 
@@ -14,15 +14,15 @@ def use_canvas_react_native
   flags = get_default_flags()
 
   use_react_native!(
-    path: 'Subsystem/node_modules/react-native-macos',
+    path: 'RCTNApps/node_modules/react-native-macos',
     hermes_enabled: false,
     fabric_enabled: ENV['RCT_NEW_ARCH_ENABLED'] == '1',
     # React Native JS 工程所在目录（包含 package.json）
-    app_path: File.join(__dir__, 'Subsystem')
+    app_path: File.join(__dir__, 'RCTNApps')
   )
 
   # rill native sandbox (JSI)
-  pod 'RillSandboxNative', :path => 'Subsystem/node_modules/rill/native/platform'
+  pod 'RillSandboxNative', :path => 'RCTNApps/node_modules/rill/native/platform'
 end
 
 target 'Canvas' do

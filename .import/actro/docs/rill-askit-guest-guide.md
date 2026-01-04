@@ -190,7 +190,7 @@ zip -r ../my-app.actr manifest.json dist/*.js
 
 Or use the provided script:
 ```bash
-cd Canvas/Subsystem/actr-app-examples
+cd Canvas/RCTNApps/actr-app-examples
 ./pack-actr.sh my-app
 ```
 

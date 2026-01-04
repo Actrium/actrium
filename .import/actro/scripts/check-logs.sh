@@ -12,8 +12,8 @@ else
   echo "[log-check] OK: no Swift print(...)"
 fi
 
-echo "[log-check] Checking Subsystem console.* usage (via node script)..."
-( cd Subsystem && node scripts/check-logs.js ) || fail=1
+echo "[log-check] Checking RCTNApps console.* usage (via node script)..."
+( cd RCTNApps && node scripts/check-logs.js ) || fail=1
 
 if [ "$fail" -ne 0 ]; then
   exit 1
