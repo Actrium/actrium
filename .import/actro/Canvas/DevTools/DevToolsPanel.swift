@@ -91,16 +91,26 @@ struct DevToolsToolbar: View {
 
             Spacer()
 
-            // Pause button and current inspected tab indicator
-            if let currentTab = viewModel.currentTab {
+            // Pause button and current inspected tab indicator - only for React Native tabs
+            if let currentTab = viewModel.currentTab,
+               case .reactNative = currentTab.contentType {
                 HStack(spacing: 6) {
-                    // Pause/Resume button
+                    // Pause/Resume button with 3-state indicator:
+                    // - Gray: not connected (no engine snapshot)
+                    // - Green: running
+                    // - Yellow: paused
+                    let isConnected = devTools.engineMonitorSnapshot?.rows.contains { $0.tabId == currentTab.id.uuidString } ?? false
+                    let indicatorColor: Color = {
+                        if !isConnected { return .gray }
+                        return devTools.isEnginePaused ? .yellow : .green
+                    }()
+
                     Button(action: {
                         devTools.togglePause()
                     }) {
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(devTools.isEnginePaused ? Color.yellow : Color.green)
+                                .fill(indicatorColor)
                                 .frame(width: 8, height: 8)
                             Image(systemName: devTools.isEnginePaused ? "play.fill" : "pause.fill")
                                 .font(.system(size: 10))
@@ -108,9 +118,20 @@ struct DevToolsToolbar: View {
                         }
                     }
                     .buttonStyle(.borderless)
+                    .disabled(!isConnected)
                     .help(devTools.isEnginePaused ? "Resume Engine" : "Pause Engine")
 
-                    Text(currentTab.title)
+                    // Display app name (contractName or systemTabType) instead of tab title
+                    let appName: String = {
+                        if let contractName = currentTab.contractName {
+                            return contractName
+                        }
+                        if let systemType = currentTab.systemTabType {
+                            return systemType.title
+                        }
+                        return currentTab.title
+                    }()
+                    Text(appName)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
