@@ -203,6 +203,15 @@ private class ServiceReactNativeHost {
             self?.handleTabConfigNotification(notification)
         }
         debugLog("Tab config listener installed")
+
+        // 通知 Host 端 XPC service 已准备好接收 tab config
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name("com.canvas.xpcServiceReady"),
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
+        debugLog("📤 Posted xpcServiceReady notification to host")
     }
 
     private func handleTabConfigNotification(_ notification: Notification) {
@@ -565,29 +574,13 @@ private func setupReactNativeContent(in containerView: NSView) {
     ])
 
     // Initial properties - will be updated when host sends tab config via IPC
-    // Show a simple "XPC Ready" state initially (minimal script to verify RN works)
+    // Use systemAppType: "loading" to avoid triggering ActrApp which imports askit
     let initialTabId = UUID().uuidString  // 临时 ID，会被 Host 发送的 tab config 覆盖
     let initialTab: [String: Any] = [
         "id": initialTabId,
         "title": "XPC Service Ready",
         "backgroundColor": "#1e40af",  // 深蓝色背景，易于区分
-        "unifiedScript": """
-        const { View, Text } = require('react-native');
-        module.exports = function XPCReady() {
-            return React.createElement(View, {
-                style: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1e40af' }
-            }, [
-                React.createElement(Text, {
-                    key: 't1',
-                    style: { fontSize: 20, fontWeight: 'bold', color: '#fff' }
-                }, 'XPC Service Ready'),
-                React.createElement(Text, {
-                    key: 't2',
-                    style: { fontSize: 12, color: '#93c5fd', marginTop: 8 }
-                }, 'Waiting for tab config from host...')
-            ]);
-        };
-        """
+        "systemAppType": "loading"  // 使用 loading 类型避免加载 ActrApp
     ]
     let initialProperties: [String: Any] = [
         "singleTabMode": true,
