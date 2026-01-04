@@ -28,6 +28,7 @@ class MetroManager: ObservableObject {
     @Published private(set) var state: State = .stopped
     @Published private(set) var logs: [LogEntry] = []
     @Published private(set) var watchFolders: [WatchFolder] = []
+    @Published private(set) var actualPort: UInt16?  // Assigned by kernel, parsed from Metro output
 
     struct LogEntry: Identifiable {
         let id = UUID()
@@ -52,9 +53,16 @@ class MetroManager: ObservableObject {
     // MARK: - Address
 
     let address = MetroAddressResolver.address
-    let port = MetroAddressResolver.currentPort
-    var host: String { "\(address):\(port)" }
-    var baseURL: URL { MetroAddressResolver.currentBaseURL }
+
+    var host: String? {
+        guard let port = actualPort else { return nil }
+        return MetroAddressResolver.host(port: port)
+    }
+
+    var baseURL: URL? {
+        guard let port = actualPort else { return nil }
+        return MetroAddressResolver.baseURL(port: port)
+    }
 
     // MARK: - Process
 
@@ -123,14 +131,13 @@ class MetroManager: ObservableObject {
         }
 
         state = .starting
+        actualPort = nil
         clearLogs()
-        appendLog("Starting Metro on \(host)...")
+        appendLog("Starting Metro (port will be assigned by kernel)...")
 
         do {
             try await startProcess()
-            state = .running
-            appendLog("Metro is running")
-            broadcastMetroConfig()
+            // Note: state transitions to .running when port is parsed from output
         } catch {
             state = .error(error.localizedDescription)
             appendLog("Failed to start: \(error.localizedDescription)", isError: true)
@@ -142,12 +149,14 @@ class MetroManager: ObservableObject {
     func stop() {
         guard let process = process, process.isRunning else {
             state = .stopped
+            actualPort = nil
             return
         }
 
         appendLog("Stopping Metro...")
         process.terminate()
         self.process = nil
+        actualPort = nil
         state = .stopped
         appendLog("Metro stopped")
     }
@@ -191,6 +200,10 @@ class MetroManager: ObservableObject {
 
     /// Trigger reload on connected clients
     func triggerHotReload() async throws {
+        guard let host = host else {
+            throw MetroError.notRunning
+        }
+
         let reloadURL = URL(string: "http://\(host)/reload")!
         var request = URLRequest(url: reloadURL)
         request.httpMethod = "POST"
@@ -229,13 +242,14 @@ class MetroManager: ObservableObject {
             .map { $0.path }
             .joined(separator: ",")
 
+        // Use port 0 to let kernel assign an available port
         if isUsingBun {
             // Bun can run npm scripts directly
             process.arguments = [
                 "run", "start",
                 "--",
                 "--host", address,
-                "--port", String(port)
+                "--port", "0"
             ]
             if !watchFolderArgs.isEmpty {
                 process.arguments?.append(contentsOf: ["--watchFolders", watchFolderArgs])
@@ -245,20 +259,21 @@ class MetroManager: ObservableObject {
             process.arguments = [
                 "node_modules/.bin/react-native", "start",
                 "--host", address,
-                "--port", String(port)
+                "--port", "0"
             ]
             if !watchFolderArgs.isEmpty {
                 process.arguments?.append(contentsOf: ["--watchFolders", watchFolderArgs])
             }
         }
 
-        // Handle stdout
+        // Handle stdout - parse port from Metro output
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else { return }
             Task { @MainActor [weak self] in
                 for line in output.components(separatedBy: .newlines) where !line.isEmpty {
                     self?.appendLog(line)
+                    self?.parsePortFromOutput(line)
                 }
             }
         }
@@ -279,8 +294,9 @@ class MetroManager: ObservableObject {
             Task { @MainActor [weak self] in
                 self?.stdoutPipe?.fileHandleForReading.readabilityHandler = nil
                 self?.stderrPipe?.fileHandleForReading.readabilityHandler = nil
-                if self?.state == .running {
+                if self?.state == .running || self?.state == .starting {
                     self?.state = .stopped
+                    self?.actualPort = nil
                     self?.appendLog("Metro process terminated")
                 }
             }
@@ -316,8 +332,38 @@ class MetroManager: ObservableObject {
         logs.removeAll()
     }
 
+    /// Parse port from Metro output like "Starting dev server on http://127.0.0.1:12345"
+    private func parsePortFromOutput(_ line: String) {
+        // Already have a port
+        guard actualPort == nil else { return }
+
+        // Look for patterns like:
+        // "Starting dev server on http://127.0.0.1:12345"
+        // "Metro waiting on http://localhost:12345"
+        let patterns = [
+            #"http://[\w.]+:(\d+)"#,
+            #"on port (\d+)"#,
+            #":(\d{4,5})\b"#
+        ]
+
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+               let portRange = Range(match.range(at: 1), in: line),
+               let port = UInt16(line[portRange]) {
+                actualPort = port
+                state = .running
+                appendLog("Metro is running on port \(port)")
+                broadcastMetroConfig()
+                return
+            }
+        }
+    }
+
     /// Broadcast Metro config to XPC services via DistributedNotificationCenter
     private func broadcastMetroConfig() {
+        guard let port = actualPort else { return }
+
         let config: [String: Any] = [
             "host": address,
             "port": port
@@ -330,7 +376,7 @@ class MetroManager: ObservableObject {
             deliverImmediately: true
         )
 
-        os_log(.info, log: logger, "Broadcasted Metro config: %{public}@", host)
+        os_log(.info, log: logger, "Broadcasted Metro config: %{public}@:%{public}d", address, port)
     }
 }
 
@@ -340,6 +386,7 @@ enum MetroError: LocalizedError {
     case failedToStart
     case reloadFailed
     case runtimeNotFound
+    case notRunning
 
     var errorDescription: String? {
         switch self {
@@ -349,6 +396,8 @@ enum MetroError: LocalizedError {
             return "Failed to trigger hot reload"
         case .runtimeNotFound:
             return "Node.js or Bun runtime not found"
+        case .notRunning:
+            return "Metro is not running"
         }
     }
 }
