@@ -295,35 +295,29 @@ struct WorkspaceMainView: View {
                 .allowsHitTesting(false)
             }
             .toolbar {
-                // 使用单个 principal 布局实现地址栏居中
+                // 左侧：导航按钮
+                ToolbarItemGroup(placement: .navigation) {
+                    Button(action: { viewModel.goBack() }) {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(!viewModel.canGoBack)
+                    .help("后退")
+
+                    Button(action: { viewModel.goForward() }) {
+                        Image(systemName: "chevron.right")
+                    }
+                    .disabled(!viewModel.canGoForward)
+                    .help("前进")
+                }
+
+                // 中间：地址栏（使用 principal，配合 flexibleSpace 实现居中）
                 ToolbarItem(placement: .principal) {
-                    GeometryReader { geo in
-                        let addressBarWidth = geo.size.width * 0.5
-
-                        HStack(spacing: 0) {
-                            // 左侧：导航按钮
-                            HStack(spacing: 4) {
-                                Button(action: { viewModel.goBack() }) {
-                                    Image(systemName: "chevron.left")
-                                }
-                                .disabled(!viewModel.canGoBack)
-                                .help("后退")
-
-                                Button(action: { viewModel.goForward() }) {
-                                    Image(systemName: "chevron.right")
-                                }
-                                .disabled(!viewModel.canGoForward)
-                                .help("前进")
-                            }
-
-                            Spacer()
-
-                            // 中间：地址栏（50% 宽度，居中）
-                            if case .overview = viewModel.canvasMode {
-                                // Overview 模式下的空占位
-                                Color.clear
-                                    .frame(width: addressBarWidth, height: 28)
-                            } else {
+                    // Overview 模式：显示空状态；Focus 模式：显示地址栏
+                    if case .overview = viewModel.canvasMode {
+                        // Overview 模式下的空占位
+                        Color.clear
+                            .frame(width: 500, height: 28)
+                    } else {
                             // Determine left icon state based on tab type
                             let leftIconState: AddressBarLeftIconState = {
                                 guard let tab = viewModel.currentTab else { return .none }
@@ -388,41 +382,37 @@ struct WorkspaceMainView: View {
                                     }
                                 }
                             )
-                            .frame(width: addressBarWidth)
-                            }
-
-                            Spacer()
-
-                        // 右侧：操作按钮
-                        HStack(spacing: 4) {
-                            // Downloads button
-                            DownloadToolbarButton()
-
-                            // QR Code & Share buttons - only visible in Focus mode with valid URL
-                            if case .focus = viewModel.canvasMode,
-                               let currentTab = viewModel.currentTab,
-                               currentTab.url != nil {
-                                ShareToolbarButton(url: currentTab.url)
-                                QRCodeToolbarButton(url: currentTab.url)
-                            }
-
-                            Button(action: {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                                    _ = viewModel.addNewTab()
-                                }
-                            }) {
-                                Image(systemName: "plus")
-                            }
-                            .help("新建标签页")
-
-                            // ━━━━ Mode Switching Trigger #2: Toolbar 按钮 ━━━━
-                            Button(action: toggleFocusOverview) {
-                                Image(systemName: "square.on.square")
-                            }
-                            .help("标签总览 (⌘⇧\\)")
-                        }
-                        }
+                            .frame(width: 500)
                     }
+                }
+
+                // 右侧：操作按钮
+                ToolbarItemGroup(placement: .primaryAction) {
+                    // Downloads button
+                    DownloadToolbarButton()
+
+                    // QR Code & Share buttons - only visible in Focus mode with valid URL
+                    if case .focus = viewModel.canvasMode,
+                       let currentTab = viewModel.currentTab,
+                       currentTab.url != nil {
+                        ShareToolbarButton(url: currentTab.url)
+                        QRCodeToolbarButton(url: currentTab.url)
+                    }
+
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+                            _ = viewModel.addNewTab()
+                        }
+                    }) {
+                        Image(systemName: "plus")
+                    }
+                    .help("新建标签页")
+
+                    // ━━━━ Mode Switching Trigger #2: Toolbar 按钮 ━━━━
+                    Button(action: toggleFocusOverview) {
+                        Image(systemName: "square.on.square")
+                    }
+                    .help("标签总览 (⌘⇧\\)")
                 }
             }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
