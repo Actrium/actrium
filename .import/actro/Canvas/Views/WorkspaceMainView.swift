@@ -293,6 +293,74 @@ struct WorkspaceMainView: View {
                     Spacer()
                 }
                 .allowsHitTesting(false)
+
+                // 地址栏 overlay（绝对居中于窗口顶部）
+                GeometryReader { geo in
+                    if case .focus = viewModel.canvasMode {
+                        // Determine left icon state based on tab type
+                        let leftIconState: AddressBarLeftIconState = {
+                            guard let tab = viewModel.currentTab else { return .none }
+                            switch tab.contentType {
+                            case .reactNative:
+                                return .menu
+                            case .web:
+                                return isWebLoading ? .loading : .none
+                            case .empty:
+                                return .none
+                            }
+                        }()
+
+                        let currentURLString: String = {
+                            guard let tab = viewModel.currentTab else { return "" }
+                            return tab.url?.absoluteString ?? ""
+                        }()
+
+                        let displayTitle: String = {
+                            guard let tab = viewModel.currentTab else { return "New Tab" }
+                            if case .web = tab.contentType, let host = tab.url?.host {
+                                return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                            }
+                            return tab.title
+                        }()
+
+                        AddressBarContainer(
+                            titleText: .constant(displayTitle),
+                            urlText: currentURLString,
+                            inputText: $addressInputText,
+                            isEditing: $isAddressBarEditing,
+                            isFirstResponder: $isAddressBarFirstResponder,
+                            isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
+                            leftIconState: leftIconState,
+                            toggleLeftPanel: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    viewModel.toggleLeftPanelForCurrentTab()
+                                }
+                            },
+                            showingBookmarkPopover: $showingBookmarkSheet,
+                            shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
+                            refreshAction: {
+                                viewModel.reloadCurrentTab()
+                            },
+                            onNavigate: { input in
+                                viewModel.navigateCurrentTab(to: input)
+                                isAddressBarFirstResponder = false
+                            },
+                            bookmarkPopoverContent: {
+                                if let tab = viewModel.currentTab {
+                                    let existingBookmark = bookmarkVM.getBookmark(for: tab)
+                                    BookmarkEditSheet(
+                                        viewModel: bookmarkVM,
+                                        tab: existingBookmark == nil ? tab : nil,
+                                        existingBookmark: existingBookmark
+                                    )
+                                }
+                            }
+                        )
+                        .frame(width: geo.size.width * 0.5)
+                        .position(x: geo.size.width / 2, y: 26)  // 居中于 toolbar 高度
+                    }
+                }
+                .allowsHitTesting(true)
             }
             .toolbar {
                 // 左侧：导航按钮
@@ -308,82 +376,6 @@ struct WorkspaceMainView: View {
                     }
                     .disabled(!viewModel.canGoForward)
                     .help("前进")
-                }
-
-                // 中间：地址栏（使用 principal，配合 flexibleSpace 实现居中）
-                ToolbarItem(placement: .principal) {
-                    // Overview 模式：显示空状态；Focus 模式：显示地址栏
-                    if case .overview = viewModel.canvasMode {
-                        // Overview 模式下的空占位
-                        Color.clear
-                            .frame(width: 500, height: 28)
-                    } else {
-                            // Determine left icon state based on tab type
-                            let leftIconState: AddressBarLeftIconState = {
-                                guard let tab = viewModel.currentTab else { return .none }
-                                switch tab.contentType {
-                                case .reactNative:
-                                    return .menu  // RN app shows menu icon
-                                case .web:
-                                    return isWebLoading ? .loading : .none  // Web shows loading or nothing
-                                case .empty:
-                                    return .none
-                                }
-                            }()
-
-                            // Get URL string for edit mode
-                            let currentURLString: String = {
-                                guard let tab = viewModel.currentTab else { return "" }
-                                return tab.url?.absoluteString ?? ""
-                            }()
-
-                            // Safari-style: web tab shows main domain only, other tabs show title
-                            let displayTitle: String = {
-                                guard let tab = viewModel.currentTab else { return "New Tab" }
-                                if case .web = tab.contentType, let host = tab.url?.host {
-                                    // Strip www. prefix
-                                    return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-                                }
-                                return tab.title
-                            }()
-
-                            AddressBarContainer(
-                                titleText: .constant(displayTitle),
-                                urlText: currentURLString,
-                                inputText: $addressInputText,
-                                isEditing: $isAddressBarEditing,
-                                isFirstResponder: $isAddressBarFirstResponder,
-                                isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
-                                leftIconState: leftIconState,
-                                toggleLeftPanel: {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        viewModel.toggleLeftPanelForCurrentTab()
-                                    }
-                                },
-                                showingBookmarkPopover: $showingBookmarkSheet,
-                                shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
-                                refreshAction: {
-                                    viewModel.reloadCurrentTab()
-                                },
-                                onNavigate: { input in
-                                    // 导航到 URL 或 app id
-                                    viewModel.navigateCurrentTab(to: input)
-                                    // 退出编辑状态（设置 isFirstResponder=false 会自动退出编辑模式）
-                                    isAddressBarFirstResponder = false
-                                },
-                                bookmarkPopoverContent: {
-                                    if let tab = viewModel.currentTab {
-                                        let existingBookmark = bookmarkVM.getBookmark(for: tab)
-                                        BookmarkEditSheet(
-                                            viewModel: bookmarkVM,
-                                            tab: existingBookmark == nil ? tab : nil,
-                                            existingBookmark: existingBookmark
-                                        )
-                                    }
-                                }
-                            )
-                            .frame(width: 500)
-                    }
                 }
 
                 // 右侧：操作按钮
