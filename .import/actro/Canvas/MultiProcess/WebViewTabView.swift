@@ -662,41 +662,48 @@ class DownloadableWebView: WKWebView {
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
 
-        // Add menu items synchronously - URLs should already be detected
-        addDownloadMenuItems(to: menu)
+        // Replace system's download items with our custom ones that use URLSession
+        // System items use WKDownload which has permission issues in sandbox
+        replaceSystemDownloadItems(in: menu)
     }
 
-    private func addDownloadMenuItems(to menu: NSMenu) {
-        var addedSeparator = false
+    private func replaceSystemDownloadItems(in menu: NSMenu) {
+        // Titles to look for (including localized versions)
+        let downloadImageTitles = ["Download Image", "下载图像"]
+        let downloadLinkTitles = ["Download Linked File", "下载链接的文件"]
 
-        if let imageURL = contextMenuImageURL {
-            NSLog("📥 DownloadableWebView: Adding Download Image for %@", imageURL.absoluteString)
+        // Find and replace "Download Image" with our version
+        for title in downloadImageTitles {
+            if let index = menu.items.firstIndex(where: { $0.title == title }) {
+                menu.removeItem(at: index)
+                NSLog("📥 DownloadableWebView: Replacing system '%@' at index %d", title, index)
 
-            if !addedSeparator {
-                menu.addItem(NSMenuItem.separator())
-                addedSeparator = true
+                if let imageURL = contextMenuImageURL {
+                    let downloadImageItem = ClosureMenuItem(title: "Download Image") { [weak self] in
+                        NSLog("📥 DownloadableWebView: Download Image clicked!")
+                        self?.startDownload(url: imageURL)
+                    }
+                    menu.insertItem(downloadImageItem, at: index)
+                }
+                break
             }
-
-            // Use closure-based menu item to ensure action fires
-            let downloadImageItem = ClosureMenuItem(title: "Download Image") { [weak self] in
-                NSLog("📥 DownloadableWebView: Download Image clicked!")
-                self?.startDownload(url: imageURL)
-            }
-            menu.addItem(downloadImageItem)
         }
 
-        if let linkURL = contextMenuLinkURL, linkURL != contextMenuImageURL {
-            NSLog("📥 DownloadableWebView: Adding Download Linked File for %@", linkURL.absoluteString)
+        // Find and replace "Download Linked File" with our version
+        for title in downloadLinkTitles {
+            if let index = menu.items.firstIndex(where: { $0.title == title }) {
+                menu.removeItem(at: index)
+                NSLog("📥 DownloadableWebView: Replacing system '%@' at index %d", title, index)
 
-            if !addedSeparator {
-                menu.addItem(NSMenuItem.separator())
+                if let linkURL = contextMenuLinkURL {
+                    let downloadLinkItem = ClosureMenuItem(title: "Download Linked File") { [weak self] in
+                        NSLog("📥 DownloadableWebView: Download Linked File clicked!")
+                        self?.startDownload(url: linkURL)
+                    }
+                    menu.insertItem(downloadLinkItem, at: index)
+                }
+                break
             }
-
-            let downloadLinkItem = ClosureMenuItem(title: "Download Linked File") { [weak self] in
-                NSLog("📥 DownloadableWebView: Download Linked File clicked!")
-                self?.startDownload(url: linkURL)
-            }
-            menu.addItem(downloadLinkItem)
         }
     }
 
