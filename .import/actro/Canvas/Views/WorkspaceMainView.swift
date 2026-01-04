@@ -296,8 +296,13 @@ struct WorkspaceMainView: View {
             }
             // AppKit toolbar configured via WindowToolbarConfigurator
             .background(
-                WindowToolbarConfigurator(viewModel: viewModel, bookmarkVM: bookmarkVM)
-                    .frame(width: 0, height: 0)
+                WindowToolbarConfigurator(
+                    viewModel: viewModel,
+                    bookmarkVM: bookmarkVM,
+                    isWebLoading: $isWebLoading,
+                    toggleFocusOverview: toggleFocusOverview
+                )
+                .frame(width: 0, height: 0)
             )
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 从 Focus 切换到 Overview 时，先截图当前页面
