@@ -295,122 +295,131 @@ struct WorkspaceMainView: View {
                 .allowsHitTesting(false)
             }
             .toolbar {
-                // Navigation buttons (Back/Forward) - always visible
-                ToolbarItemGroup(placement: .navigation) {
-                    Button(action: { viewModel.goBack() }) {
-                        Image(systemName: "chevron.left")
-                    }
-                    .disabled(!viewModel.canGoBack)
-                    .help("后退")
-
-                    Button(action: { viewModel.goForward() }) {
-                        Image(systemName: "chevron.right")
-                    }
-                    .disabled(!viewModel.canGoForward)
-                    .help("前进")
-                }
-
-                ToolbarItemGroup(placement: .principal) {
-                    // Overview 模式：显示空状态；Focus 模式：显示地址栏
-                    if case .overview = viewModel.canvasMode {
-                        // Overview 模式下的空占位
-                        Color.clear
-                            .frame(minWidth: 300, maxWidth: 600, maxHeight: 28)
-                    } else {
-                        // Determine left icon state based on tab type
-                        let leftIconState: AddressBarLeftIconState = {
-                            guard let tab = viewModel.currentTab else { return .none }
-                            switch tab.contentType {
-                            case .reactNative:
-                                return .menu  // RN app shows menu icon
-                            case .web:
-                                return isWebLoading ? .loading : .none  // Web shows loading or nothing
-                            case .empty:
-                                return .none
+                // 使用单个 principal 布局实现地址栏居中
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 0) {
+                        // 左侧：导航按钮
+                        HStack(spacing: 4) {
+                            Button(action: { viewModel.goBack() }) {
+                                Image(systemName: "chevron.left")
                             }
-                        }()
+                            .disabled(!viewModel.canGoBack)
+                            .help("后退")
 
-                        // Get URL string for edit mode
-                        let currentURLString: String = {
-                            guard let tab = viewModel.currentTab else { return "" }
-                            return tab.url?.absoluteString ?? ""
-                        }()
-
-                        // Safari-style: web tab shows main domain only, other tabs show title
-                        let displayTitle: String = {
-                            guard let tab = viewModel.currentTab else { return "New Tab" }
-                            if case .web = tab.contentType, let host = tab.url?.host {
-                                // Strip www. prefix
-                                return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                            Button(action: { viewModel.goForward() }) {
+                                Image(systemName: "chevron.right")
                             }
-                            return tab.title
-                        }()
-
-                        AddressBarContainer(
-                            titleText: .constant(displayTitle),
-                            urlText: currentURLString,
-                            inputText: $addressInputText,
-                            isEditing: $isAddressBarEditing,
-                            isFirstResponder: $isAddressBarFirstResponder,
-                            isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
-                            leftIconState: leftIconState,
-                            toggleLeftPanel: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    viewModel.toggleLeftPanelForCurrentTab()
-                                }
-                            },
-                            showingBookmarkPopover: $showingBookmarkSheet,
-                            shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
-                            refreshAction: {
-                                viewModel.reloadCurrentTab()
-                            },
-                            onNavigate: { input in
-                                // 导航到 URL 或 app id
-                                viewModel.navigateCurrentTab(to: input)
-                                // 退出编辑状态（设置 isFirstResponder=false 会自动退出编辑模式）
-                                isAddressBarFirstResponder = false
-                            },
-                            bookmarkPopoverContent: {
-                                if let tab = viewModel.currentTab {
-                                    let existingBookmark = bookmarkVM.getBookmark(for: tab)
-                                    BookmarkEditSheet(
-                                        viewModel: bookmarkVM,
-                                        tab: existingBookmark == nil ? tab : nil,
-                                        existingBookmark: existingBookmark
-                                    )
-                                }
-                            }
-                        )
-                        .frame(minWidth: 300, maxWidth: 600)
-                    }
-                }
-
-                ToolbarItemGroup(placement: .primaryAction) {
-                    // Downloads button
-                    DownloadToolbarButton()
-
-                    // QR Code & Share buttons - only visible in Focus mode with valid URL
-                    if case .focus = viewModel.canvasMode,
-                       let currentTab = viewModel.currentTab,
-                       currentTab.url != nil {
-                        ShareToolbarButton(url: currentTab.url)
-                        QRCodeToolbarButton(url: currentTab.url)
-                    }
-
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                            _ = viewModel.addNewTab()
+                            .disabled(!viewModel.canGoForward)
+                            .help("前进")
                         }
-                    }) {
-                        Image(systemName: "plus")
-                    }
-                    .help("新建标签页")
 
-                    // ━━━━ Mode Switching Trigger #2: Toolbar 按钮 ━━━━
-                    Button(action: toggleFocusOverview) {
-                        Image(systemName: "square.on.square")
+                        Spacer(minLength: 20)
+
+                        // 中间：地址栏（居中）
+                        if case .overview = viewModel.canvasMode {
+                            // Overview 模式下的空占位
+                            Color.clear
+                                .frame(width: 500, height: 28)
+                        } else {
+                            // Determine left icon state based on tab type
+                            let leftIconState: AddressBarLeftIconState = {
+                                guard let tab = viewModel.currentTab else { return .none }
+                                switch tab.contentType {
+                                case .reactNative:
+                                    return .menu  // RN app shows menu icon
+                                case .web:
+                                    return isWebLoading ? .loading : .none  // Web shows loading or nothing
+                                case .empty:
+                                    return .none
+                                }
+                            }()
+
+                            // Get URL string for edit mode
+                            let currentURLString: String = {
+                                guard let tab = viewModel.currentTab else { return "" }
+                                return tab.url?.absoluteString ?? ""
+                            }()
+
+                            // Safari-style: web tab shows main domain only, other tabs show title
+                            let displayTitle: String = {
+                                guard let tab = viewModel.currentTab else { return "New Tab" }
+                                if case .web = tab.contentType, let host = tab.url?.host {
+                                    // Strip www. prefix
+                                    return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                                }
+                                return tab.title
+                            }()
+
+                            AddressBarContainer(
+                                titleText: .constant(displayTitle),
+                                urlText: currentURLString,
+                                inputText: $addressInputText,
+                                isEditing: $isAddressBarEditing,
+                                isFirstResponder: $isAddressBarFirstResponder,
+                                isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
+                                leftIconState: leftIconState,
+                                toggleLeftPanel: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        viewModel.toggleLeftPanelForCurrentTab()
+                                    }
+                                },
+                                showingBookmarkPopover: $showingBookmarkSheet,
+                                shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
+                                refreshAction: {
+                                    viewModel.reloadCurrentTab()
+                                },
+                                onNavigate: { input in
+                                    // 导航到 URL 或 app id
+                                    viewModel.navigateCurrentTab(to: input)
+                                    // 退出编辑状态（设置 isFirstResponder=false 会自动退出编辑模式）
+                                    isAddressBarFirstResponder = false
+                                },
+                                bookmarkPopoverContent: {
+                                    if let tab = viewModel.currentTab {
+                                        let existingBookmark = bookmarkVM.getBookmark(for: tab)
+                                        BookmarkEditSheet(
+                                            viewModel: bookmarkVM,
+                                            tab: existingBookmark == nil ? tab : nil,
+                                            existingBookmark: existingBookmark
+                                        )
+                                    }
+                                }
+                            )
+                            .frame(width: 500)
+                        }
+
+                        Spacer(minLength: 20)
+
+                        // 右侧：操作按钮
+                        HStack(spacing: 4) {
+                            // Downloads button
+                            DownloadToolbarButton()
+
+                            // QR Code & Share buttons - only visible in Focus mode with valid URL
+                            if case .focus = viewModel.canvasMode,
+                               let currentTab = viewModel.currentTab,
+                               currentTab.url != nil {
+                                ShareToolbarButton(url: currentTab.url)
+                                QRCodeToolbarButton(url: currentTab.url)
+                            }
+
+                            Button(action: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+                                    _ = viewModel.addNewTab()
+                                }
+                            }) {
+                                Image(systemName: "plus")
+                            }
+                            .help("新建标签页")
+
+                            // ━━━━ Mode Switching Trigger #2: Toolbar 按钮 ━━━━
+                            Button(action: toggleFocusOverview) {
+                                Image(systemName: "square.on.square")
+                            }
+                            .help("标签总览 (⌘⇧\\)")
+                        }
                     }
-                    .help("标签总览 (⌘⇧\\)")
+                    .frame(maxWidth: .infinity)
                 }
             }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
