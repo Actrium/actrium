@@ -670,32 +670,67 @@ class DownloadableWebView: WKWebView {
     }
 
     private func detectElementSynchronously(at point: CGPoint) {
+        // Note: point is in NSView coordinates (origin at bottom-left)
+        // WebKit's elementFromPoint uses viewport coordinates (origin at top-left)
+        // We need to flip Y coordinate
+        let flippedY = bounds.height - point.y
+
+        NSLog("📥 detectElement: NSView point=(%f, %f), flipped Y=%f, bounds=%f x %f",
+              point.x, point.y, flippedY, bounds.width, bounds.height)
+
         let js = """
         (function() {
             var x = \(point.x);
-            var y = \(point.y);
+            var y = \(flippedY);
+            var result = { imageURL: null, linkURL: null, debug: '' };
+
+            // Try elementFromPoint
             var element = document.elementFromPoint(x, y);
-            var result = { imageURL: null, linkURL: null };
+            result.debug = 'point=' + x + ',' + y + ' element=' + (element ? element.tagName : 'null');
 
             if (element) {
-                // Check for image
+                // Check if element itself is an image
                 if (element.tagName === 'IMG' && element.src) {
                     result.imageURL = element.src;
+                    result.debug += ' [direct IMG]';
                 }
 
-                // Check parent if current is not IMG
+                // If not directly on an image, find all images and check which one contains the click point
                 if (!result.imageURL) {
-                    var img = element.querySelector && element.querySelector('img');
-                    if (img && img.src) {
-                        result.imageURL = img.src;
+                    var allImages = document.querySelectorAll('img');
+                    var nearbyImages = [];
+                    for (var i = 0; i < allImages.length; i++) {
+                        var img = allImages[i];
+                        if (!img.src) continue;
+                        var rect = img.getBoundingClientRect();
+                        // Log images within 200px of click
+                        var dx = Math.min(Math.abs(x - rect.left), Math.abs(x - rect.right));
+                        var dy = Math.min(Math.abs(y - rect.top), Math.abs(y - rect.bottom));
+                        if (rect.width > 0 && rect.height > 0 && (dx < 200 || dy < 200)) {
+                            nearbyImages.push(img.src.substring(img.src.lastIndexOf('/') + 1) + '@' + Math.round(rect.left) + ',' + Math.round(rect.top));
+                        }
+                        // Check if click point is inside this image's bounds
+                        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                            result.imageURL = img.src;
+                            result.debug += ' [bounds match: ' + Math.round(rect.left) + ',' + Math.round(rect.top) + '-' + Math.round(rect.right) + ',' + Math.round(rect.bottom) + ']';
+                            break;
+                        }
+                    }
+                    if (!result.imageURL && nearbyImages.length > 0) {
+                        result.debug += ' [nearby: ' + nearbyImages.slice(0,5).join(', ') + ']';
                     }
                 }
 
-                // Check for background image
+                // Check for background image on element or parents
                 if (!result.imageURL) {
-                    var bgImage = window.getComputedStyle(element).backgroundImage;
-                    if (bgImage && bgImage !== 'none' && bgImage.startsWith('url(')) {
-                        result.imageURL = bgImage.slice(5, -2).replace(/['"]/g, '');
+                    var current = element;
+                    while (current && !result.imageURL) {
+                        var bgImage = window.getComputedStyle(current).backgroundImage;
+                        if (bgImage && bgImage !== 'none' && bgImage.startsWith('url(')) {
+                            result.imageURL = bgImage.slice(5, -2).replace(/['"]/g, '');
+                            result.debug += ' [background]';
+                        }
+                        current = current.parentElement;
                     }
                 }
 
@@ -705,6 +740,7 @@ class DownloadableWebView: WKWebView {
                     result.linkURL = linkElement.href;
                 }
             }
+
             return JSON.stringify(result);
         })();
         """
@@ -719,20 +755,31 @@ class DownloadableWebView: WKWebView {
                let data = jsonString.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
 
+                let debug = json["debug"] as? String ?? ""
+                NSLog("📥 detectElement JS result: %@", debug)
+
                 if let imageURLString = json["imageURL"] as? String {
                     detectedImageURL = URL(string: imageURLString)
+                    NSLog("📥 detectElement: Found image URL: %@", imageURLString)
                 }
                 if let linkURLString = json["linkURL"] as? String {
                     detectedLinkURL = URL(string: linkURLString)
+                    NSLog("📥 detectElement: Found link URL: %@", linkURLString)
                 }
+            } else if let error = error {
+                NSLog("📥 detectElement JS error: %@", error.localizedDescription)
             }
             completed = true
         }
 
-        // Wait for completion with a short timeout (100ms max)
-        let deadline = Date().addingTimeInterval(0.1)
+        // Wait for completion with timeout (300ms max for slower pages)
+        let deadline = Date().addingTimeInterval(0.3)
         while !completed && Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+        }
+
+        if !completed {
+            NSLog("📥 detectElement: Timeout waiting for JS evaluation")
         }
 
         contextMenuImageURL = detectedImageURL
@@ -761,7 +808,8 @@ class DownloadableWebView: WKWebView {
         pendingCopyImageItem = nil
 
         // Collect items to replace first, then replace (to avoid index issues)
-        var replacements: [(item: NSMenuItem, url: URL, isImage: Bool)] = []
+        var imageDownloadItems: [NSMenuItem] = []
+        var linkDownloadItems: [(item: NSMenuItem, url: URL)] = []
 
         for item in menu.items {
             let title = item.title.lowercased()
@@ -773,40 +821,48 @@ class DownloadableWebView: WKWebView {
                 NSLog("📥 DownloadableWebView: Found Copy Image menu item: %@", item.title)
             }
 
-            // Check for image download items
+            // Check for image download items - we'll replace these even without URL
+            // because we can use Copy Image + save from clipboard approach
             if title.contains("download image") || title.contains("save image") ||
                title.contains("下载图像") || title.contains("存储图像") ||
                title.contains("下载图片") {
-                if let url = imageURL {
-                    replacements.append((item, url, true))
-                }
+                imageDownloadItems.append(item)
             }
 
-            // Check for link download items
+            // Check for link download items - these need URL
             if title.contains("download linked") || title.contains("下载链接") ||
                title.contains("下载链接的文件") {
                 if let url = linkURL {
-                    replacements.append((item, url, false))
+                    linkDownloadItems.append((item, url))
                 }
             }
         }
 
-        // Now replace the items
-        for (item, url, isImage) in replacements {
+        // Replace image download items - use Copy Image approach (doesn't need URL detection)
+        for item in imageDownloadItems {
             if let index = menu.items.firstIndex(of: item) {
-                let typeName = isImage ? "Image" : "Linked File"
+                NSLog("📥 DownloadableWebView: Replacing '%@' at index %d (using Copy Image approach)",
+                      item.title, index)
+
+                let replacement = ClosureMenuItem(title: item.title) { [weak self] in
+                    NSLog("📥 DownloadableWebView: Download Image clicked! Using Copy-then-Save approach")
+                    // Use Copy Image + clipboard save - more reliable than URL detection
+                    self?.downloadImageViaCopy(url: self?.contextMenuImageURL)
+                }
+                menu.removeItem(at: index)
+                menu.insertItem(replacement, at: index)
+            }
+        }
+
+        // Replace link download items
+        for (item, url) in linkDownloadItems {
+            if let index = menu.items.firstIndex(of: item) {
                 NSLog("📥 DownloadableWebView: Replacing '%@' at index %d with URL: %@",
                       item.title, index, url.absoluteString)
 
                 let replacement = ClosureMenuItem(title: item.title) { [weak self] in
-                    NSLog("📥 DownloadableWebView: Download %@ clicked! URL: %@", typeName, url.absoluteString)
-                    if isImage {
-                        // For images, try copy-then-save approach first (more reliable)
-                        self?.downloadImageViaCopy(url: url)
-                    } else {
-                        // For links, use direct download
-                        self?.startDownload(url: url)
-                    }
+                    NSLog("📥 DownloadableWebView: Download Linked File clicked!")
+                    self?.startDownload(url: url)
                 }
                 menu.removeItem(at: index)
                 menu.insertItem(replacement, at: index)
@@ -814,7 +870,7 @@ class DownloadableWebView: WKWebView {
         }
 
         // If no download items were found/replaced but we detected downloadable content, add our own
-        if replacements.isEmpty && (imageURL != nil || linkURL != nil) {
+        if imageDownloadItems.isEmpty && linkDownloadItems.isEmpty && (imageURL != nil || linkURL != nil) {
             addCustomDownloadMenuItems(to: menu)
         }
     }
@@ -887,10 +943,11 @@ class DownloadableWebView: WKWebView {
     private var pendingImageURL: URL?
 
     /// Download image by triggering system Copy Image, then saving from clipboard
-    private func downloadImageViaCopy(url: URL) {
-        NSLog("📥 DownloadableWebView: downloadImageViaCopy - %@", url.absoluteString)
+    /// This is more reliable than URL-based download because WebKit's Copy Image always works correctly
+    private func downloadImageViaCopy(url: URL?) {
+        NSLog("📥 DownloadableWebView: downloadImageViaCopy - url=%@", url?.absoluteString ?? "nil")
 
-        // Store URL for later use
+        // Store URL for later use (for filename generation)
         pendingImageURL = url
 
         // Trigger the system's Copy Image action if we have the menu item
@@ -899,8 +956,8 @@ class DownloadableWebView: WKWebView {
             // Perform the copy action
             if let action = copyItem.action, let target = copyItem.target {
                 _ = target.perform(action, with: copyItem)
-            } else {
-                NSApp.sendAction(copyItem.action!, to: copyItem.target, from: copyItem)
+            } else if let action = copyItem.action {
+                NSApp.sendAction(action, to: copyItem.target, from: copyItem)
             }
 
             // Wait a moment for copy to complete, then save
@@ -908,25 +965,50 @@ class DownloadableWebView: WKWebView {
                 self?.saveImageFromClipboard(originalURL: url)
             }
         } else {
-            // Fallback: directly save from clipboard (user might have already copied)
-            NSLog("📥 DownloadableWebView: No Copy Image item, trying clipboard directly")
+            // Fallback: try to save from clipboard directly
+            NSLog("📥 DownloadableWebView: No Copy Image item found, trying clipboard directly")
             saveImageFromClipboard(originalURL: url)
         }
     }
 
     /// Save image from clipboard to Downloads folder
-    private func saveImageFromClipboard(originalURL: URL) {
+    private func saveImageFromClipboard(originalURL: URL?) {
         let pasteboard = NSPasteboard.general
 
         // Try to get image from clipboard
         guard let image = NSImage(pasteboard: pasteboard) else {
-            NSLog("📥 DownloadableWebView: No image in clipboard, falling back to URLSession")
-            startDownload(url: originalURL)
+            NSLog("📥 DownloadableWebView: No image in clipboard")
+            if let url = originalURL {
+                NSLog("📥 DownloadableWebView: Falling back to URLSession download")
+                startDownload(url: url)
+            }
             return
         }
 
+        // Try to get image URL from clipboard (WebKit might include it)
+        var imageURL = originalURL
+        if imageURL == nil {
+            // Debug: log all pasteboard types
+            if let types = pasteboard.types {
+                NSLog("📥 DownloadableWebView: Pasteboard types: %@", types.map { $0.rawValue }.joined(separator: ", "))
+            }
+
+            // Check for URL types in pasteboard
+            if let urlString = pasteboard.string(forType: .URL) ?? pasteboard.string(forType: NSPasteboard.PasteboardType("public.url")),
+               let url = URL(string: urlString) {
+                imageURL = url
+                NSLog("📥 DownloadableWebView: Got URL from clipboard: %@", urlString)
+            } else if let urlStrings = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("WebURLsWithTitlesPboardType")) as? [[String]],
+                      let firstList = urlStrings.first,
+                      let urlString = firstList.first,
+                      let url = URL(string: urlString) {
+                imageURL = url
+                NSLog("📥 DownloadableWebView: Got URL from WebURLsWithTitlesPboardType: %@", urlString)
+            }
+        }
+
         // Generate filename
-        var filename = originalURL.lastPathComponent
+        var filename = imageURL?.lastPathComponent ?? ""
         if filename.isEmpty || !filename.contains(".") {
             filename = "image_\(Int(Date().timeIntervalSince1970)).png"
         }
@@ -953,7 +1035,9 @@ class DownloadableWebView: WKWebView {
               let bitmap = NSBitmapImageRep(data: tiffData),
               let pngData = bitmap.representation(using: .png, properties: [:]) else {
             NSLog("📥 DownloadableWebView: Failed to convert image to PNG")
-            startDownload(url: originalURL)
+            if let url = originalURL {
+                startDownload(url: url)
+            }
             return
         }
 
@@ -971,7 +1055,9 @@ class DownloadableWebView: WKWebView {
             }
         } catch {
             NSLog("📥 DownloadableWebView: Failed to save image: %@", error.localizedDescription)
-            startDownload(url: originalURL)
+            if let url = originalURL {
+                startDownload(url: url)
+            }
         }
     }
 }
