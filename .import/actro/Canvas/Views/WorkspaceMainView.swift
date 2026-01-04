@@ -1729,6 +1729,7 @@ private struct TabPanel: View {
             switch tab.contentType {
             case .reactNative(let fingerprint):
                 // React Native 应用 - 使用 ViewBridge XPC
+                // .id(tab.id) 确保 SwiftUI 保持 View identity，防止 @State 被重置
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     fingerprint: fingerprint,
@@ -1736,6 +1737,7 @@ private struct TabPanel: View {
                     coordinator: viewBridgeCoordinator,
                     isFocused: isFocused
                 )
+                .id(tab.id)
 
             case .web(let url):
                 // Web 内容 - 使用 WKWebView

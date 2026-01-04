@@ -449,13 +449,40 @@ import SwiftUI
 import Combine
 
 /// Coordinator that holds reference to ViewBridgeHostView
+/// 管理 XPC 连接状态，生命周期由 ViewBridgeCoordinatorManager 管理
 final class ViewBridgeCoordinator {
     weak var hostView: ViewBridgeHostView?
     /// Callback when XPC connection is established
     var onConnectionEstablished: (() -> Void)?
 
+    // XPC 状态 - 移到这里避免 SwiftUI @State 被重置
+    var allocatedServiceId: String?
+    var xpcServiceReady: Bool = false
+    var hasConnection: Bool = false
+    var xpcReadyObserver: NSObjectProtocol?
+    var tabId: UUID?
+
     func captureSnapshot() -> NSImage? {
         return hostView?.captureSnapshot()
+    }
+
+    /// 清理 XPC 资源
+    func cleanup() {
+        if let observer = xpcReadyObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            xpcReadyObserver = nil
+        }
+        if let tabId = tabId, allocatedServiceId != nil {
+            XPCServicePool.shared.releaseService(for: tabId)
+            fputs("📦 Coordinator cleanup: Tab \(tabId.uuidString.prefix(8)) released service\n", stderr)
+        }
+        allocatedServiceId = nil
+        xpcServiceReady = false
+        hasConnection = false
+    }
+
+    deinit {
+        cleanup()
     }
 }
 
@@ -541,10 +568,9 @@ struct ViewBridgeMultiProcessTabView: View {
     let coordinator: ViewBridgeCoordinator
     var isFocused: Bool = false  // 是否当前 focused
 
+    // 只保留 UI 相关的 @State，XPC 状态全部移到 coordinator
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var hasConnection = false  // 是否已建立 ViewBridge 连接
-    @State private var allocatedServiceId: String?  // 从进程池分配的 service bundle id
 
     init(tab: Tab, fingerprint: String, containerSize: CGSize, coordinator: ViewBridgeCoordinator, isFocused: Bool = false) {
         self.tab = tab
@@ -552,15 +578,18 @@ struct ViewBridgeMultiProcessTabView: View {
         self.containerSize = containerSize
         self.coordinator = coordinator
         self.isFocused = isFocused
+        // 设置 coordinator 的 tabId
+        coordinator.tabId = tab.id
         fputs("🔵 ViewBridgeMultiProcessTabView.init: tab=\(tab.id.uuidString.prefix(8)), fingerprint=\(fingerprint.prefix(16)), containerSize=\(containerSize)\n", stderr)
         fflush(stderr)
     }
 
     var body: some View {
-        let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), isFocused=\(isFocused)\n", stderr)
+        let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), isFocused=\(isFocused), serviceId=\(coordinator.allocatedServiceId ?? "nil")\n", stderr)
         ZStack(alignment: .topLeading) {
             // 多进程架构：基于应用指纹分配进程
-            if ViewBridgeHostView.isAvailable, let serviceId = allocatedServiceId {
+            // 使用 coordinator 中的 allocatedServiceId（不会被 SwiftUI 重置）
+            if ViewBridgeHostView.isAvailable, let serviceId = coordinator.allocatedServiceId {
                 ViewBridgeTabView(
                     tabId: tab.id,
                     contentSize: containerSize,
@@ -574,18 +603,23 @@ struct ViewBridgeMultiProcessTabView: View {
                 .onAppear {
                     isLoading = false
                     fputs("📤 ViewBridgeTabView appeared with service \(serviceId.components(separatedBy: ".").last ?? ""), fingerprint: \(fingerprint.prefix(16))\n", stderr)
-                    // 设置连接建立回调 - 在 XPC 连接成功后发送 tab config
-                    coordinator.onConnectionEstablished = { [self] in
-                        hasConnection = true
-                        fputs("📤 XPC connection established, sending tab config: \(tab.id.uuidString.prefix(8))\n", stderr)
-                        sendTabConfigToService()
+
+                    // 设置 XPC service ready 监听器（如果还没设置）
+                    setupXPCReadyListener()
+
+                    // 设置连接建立回调
+                    coordinator.onConnectionEstablished = {
+                        coordinator.hasConnection = true
+                        fputs("📤 XPC connection established for tab: \(tab.id.uuidString.prefix(8))\n", stderr)
+                        // 只有当 XPC service 也准备好后才发送 config
+                        sendTabConfigIfReady()
                     }
                 }
                 .onChange(of: tab.unifiedScript) { _, _ in
                     sendTabConfigToService()
                 }
                 .onChange(of: isFocused) { _, newValue in
-                    if newValue && hasConnection {
+                    if newValue && coordinator.hasConnection {
                         fputs("📤 Tab became focused, re-sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
                         sendTabConfigToService()
                     }
@@ -601,7 +635,7 @@ struct ViewBridgeMultiProcessTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            if isLoading && allocatedServiceId != nil && errorMessage == nil {
+            if isLoading && coordinator.allocatedServiceId != nil && errorMessage == nil {
                 loadingView
             }
         }
@@ -609,22 +643,18 @@ struct ViewBridgeMultiProcessTabView: View {
         .onAppear {
             allocateServiceIfNeeded()
         }
-        .onDisappear {
-            // 释放进程池资源
-            if allocatedServiceId != nil {
-                XPCServicePool.shared.releaseService(for: tab.id)
-                fputs("📦 Tab \(tab.id.uuidString.prefix(8)) released service\n", stderr)
-            }
-        }
+        // 不在 onDisappear 中释放资源 - 资源由 ViewBridgeCoordinator.deinit 管理
+        // 这样可以避免 SwiftUI View 重建时意外释放 XPC 连接
     }
 
     /// 从进程池分配 service
     private func allocateServiceIfNeeded() {
-        guard allocatedServiceId == nil else { return }
+        // 使用 coordinator 的状态，不会因为 View 重建而丢失
+        guard coordinator.allocatedServiceId == nil else { return }
 
         do {
-            allocatedServiceId = try XPCServicePool.shared.allocateService(for: tab.id, fingerprint: fingerprint)
-            fputs("📦 Tab \(tab.id.uuidString.prefix(8)) allocated service: \(allocatedServiceId ?? "nil") for fingerprint: \(fingerprint.prefix(16))\n", stderr)
+            coordinator.allocatedServiceId = try XPCServicePool.shared.allocateService(for: tab.id, fingerprint: fingerprint)
+            fputs("📦 Tab \(tab.id.uuidString.prefix(8)) allocated service: \(coordinator.allocatedServiceId ?? "nil") for fingerprint: \(fingerprint.prefix(16))\n", stderr)
         } catch let error as XPCServicePoolError {
             errorMessage = error.localizedDescription
             fputs("❌ Tab \(tab.id.uuidString.prefix(8)) allocation failed: \(error.localizedDescription)\n", stderr)
@@ -632,6 +662,35 @@ struct ViewBridgeMultiProcessTabView: View {
             errorMessage = "Failed to allocate RN process: \(error.localizedDescription)"
             fputs("❌ Tab \(tab.id.uuidString.prefix(8)) allocation failed: \(error.localizedDescription)\n", stderr)
         }
+    }
+
+    /// 设置 XPC service ready 通知监听器
+    private func setupXPCReadyListener() {
+        // 使用 coordinator 的状态，避免重复设置
+        guard coordinator.xpcReadyObserver == nil else { return }
+
+        NSLog("📡 [HOST] Setting up XPC ready listener for tab: %@", String(tab.id.uuidString.prefix(8)))
+
+        coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.xpcServiceReady"),
+            object: nil,
+            queue: .main
+        ) { [coordinator] _ in
+            NSLog("📡 [HOST] Received xpcServiceReady notification for tab: %@", String(tab.id.uuidString.prefix(8)))
+            coordinator.xpcServiceReady = true
+            sendTabConfigIfReady()
+        }
+    }
+
+    /// 仅当 ViewBridge 连接和 XPC service listener 都就绪时才发送 config
+    private func sendTabConfigIfReady() {
+        NSLog("🔍 [HOST] sendTabConfigIfReady: hasConnection=%d, xpcServiceReady=%d", coordinator.hasConnection ? 1 : 0, coordinator.xpcServiceReady ? 1 : 0)
+        guard coordinator.hasConnection && coordinator.xpcServiceReady else {
+            NSLog("⏳ [HOST] Not ready yet - waiting for both connection and XPC service ready")
+            return
+        }
+        NSLog("✅ [HOST] Both ready, sending tab config now!")
+        sendTabConfigToService()
     }
 
     private var loadingView: some View {
@@ -664,7 +723,9 @@ struct ViewBridgeMultiProcessTabView: View {
 
     /// Send tab configuration to the ViewBridge service via DistributedNotificationCenter
     private func sendTabConfigToService() {
-        fputs("📤 Sending tab config to service: tabId=\(tab.id.uuidString.prefix(8))\n", stderr)
+        NSLog("📤 [HOST] Sending tab config to service: tabId=%@, systemTabType=%@",
+              String(tab.id.uuidString.prefix(8)),
+              tab.systemTabType?.rawValue ?? "nil")
 
         // Build tab config dictionary
         var tabConfig: [String: Any] = [

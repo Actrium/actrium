@@ -38,6 +38,12 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
       return (
         <View style={styles.container} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
           <React.Suspense fallback={<LoadingFallback />}>
+            {tab.systemAppType === 'loading' && (
+              <View style={styles.xpcLoading}>
+                <Text style={styles.xpcLoadingTitle}>XPC Service Ready</Text>
+                <Text style={styles.xpcLoadingSubtitle}>Waiting for tab config...</Text>
+              </View>
+            )}
             {tab.systemAppType === 'history' && (
               <HistoryApp
                 items={tab.historyItems ?? []}
@@ -196,6 +202,22 @@ const styles = StyleSheet.create({
   loadingText: {
     color: '#888',
     fontSize: 14,
+  },
+  xpcLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1e40af',
+  },
+  xpcLoadingTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  xpcLoadingSubtitle: {
+    color: '#93c5fd',
+    fontSize: 12,
+    marginTop: 8,
   },
 });
 
