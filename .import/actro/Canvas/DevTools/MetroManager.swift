@@ -244,6 +244,15 @@ class MetroManager: ObservableObject {
 
     // MARK: - Private
 
+    /// Result of Metro startup detection
+    private enum StartupResult {
+        case success
+        case portConflict
+        case failed(String)
+    }
+
+    private var startupContinuation: CheckedContinuation<StartupResult, Never>?
+
     private func startProcess(port: UInt16) async throws {
         let process = Process()
         self.process = process
@@ -269,7 +278,6 @@ class MetroManager: ObservableObject {
 
         // Use pre-allocated available port
         if isUsingBun {
-            // Bun can run npm scripts directly
             process.arguments = [
                 "run", "start",
                 "--",
@@ -280,7 +288,6 @@ class MetroManager: ObservableObject {
                 process.arguments?.append(contentsOf: ["--watchFolders", watchFolderArgs])
             }
         } else {
-            // Node needs npx
             process.arguments = [
                 "node_modules/.bin/react-native", "start",
                 "--host", address,
@@ -291,60 +298,97 @@ class MetroManager: ObservableObject {
             }
         }
 
-        // Handle stdout
+        // Patterns to detect success or failure
+        let successPatterns = ["Dev server ready", "Metro waiting on", "Welcome to Metro"]
+        let errorPatterns = ["EADDRINUSE", "EADDRNOTAVAIL", "address already in use", "address not available"]
+
+        // Handle stdout - detect success
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else { return }
             Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 for line in output.components(separatedBy: .newlines) where !line.isEmpty {
-                    self?.appendLog(line)
+                    self.appendLog(line)
+                    // Check for success
+                    for pattern in successPatterns {
+                        if line.contains(pattern) {
+                            self.startupContinuation?.resume(returning: .success)
+                            self.startupContinuation = nil
+                            return
+                        }
+                    }
                 }
             }
         }
 
-        // Handle stderr
+        // Handle stderr - detect errors
         stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else { return }
             Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 for line in output.components(separatedBy: .newlines) where !line.isEmpty {
-                    self?.appendLog(line, isError: true)
+                    self.appendLog(line, isError: true)
+                    // Check for port conflict
+                    for pattern in errorPatterns {
+                        if line.contains(pattern) {
+                            self.startupContinuation?.resume(returning: .portConflict)
+                            self.startupContinuation = nil
+                            return
+                        }
+                    }
                 }
             }
         }
 
         // Handle termination
-        process.terminationHandler = { [weak self] _ in
+        process.terminationHandler = { [weak self] proc in
             Task { @MainActor [weak self] in
-                self?.stdoutPipe?.fileHandleForReading.readabilityHandler = nil
-                self?.stderrPipe?.fileHandleForReading.readabilityHandler = nil
-                if self?.state == .running || self?.state == .starting {
-                    self?.state = .stopped
-                    self?.actualPort = nil
-                    self?.appendLog("Metro process terminated")
+                guard let self = self else { return }
+                self.stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+                self.stderrPipe?.fileHandleForReading.readabilityHandler = nil
+
+                // If still waiting for startup, report failure
+                if self.startupContinuation != nil {
+                    self.startupContinuation?.resume(returning: .failed("Process terminated with code \(proc.terminationStatus)"))
+                    self.startupContinuation = nil
+                }
+
+                if self.state == .running || self.state == .starting {
+                    self.state = .stopped
+                    self.actualPort = nil
+                    self.appendLog("Metro process terminated")
                 }
             }
         }
 
         try process.run()
 
-        // Wait a bit and check if process started successfully
-        try await Task.sleep(nanoseconds: 2_000_000_000)  // 2s to allow Metro to start or fail
+        // Wait for startup result (event-driven, not polling)
+        let result = await withCheckedContinuation { continuation in
+            self.startupContinuation = continuation
 
-        // Check if process is still running
-        if !process.isRunning {
-            throw MetroError.failedToStart
-        }
-
-        // Check logs for port binding errors (EADDRINUSE, EADDRNOTAVAIL, etc.)
-        let errorPatterns = ["EADDRINUSE", "EADDRNOTAVAIL", "address already in use", "address not available"]
-        for entry in logs where entry.isError {
-            for pattern in errorPatterns {
-                if entry.message.contains(pattern) {
-                    process.terminate()
-                    throw MetroError.portConflict
+            // Timeout after 30s
+            Task {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if self.startupContinuation != nil {
+                    self.startupContinuation?.resume(returning: .failed("Startup timeout"))
+                    self.startupContinuation = nil
                 }
             }
+        }
+
+        // Handle result
+        switch result {
+        case .success:
+            return  // Success!
+        case .portConflict:
+            process.terminate()
+            throw MetroError.portConflict
+        case .failed:
+            process.terminate()
+            throw MetroError.failedToStart
         }
     }
 
