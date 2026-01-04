@@ -115,10 +115,14 @@ class MetroManager: ObservableObject {
     // MARK: - Init
 
     private init() {
-        // Add system apps folder by default
+        #if DEBUG
+        // Add system apps folder by default (only in debug builds)
         watchFolders = [
             WatchFolder(path: rctnAppsPath, isSystemApp: true)
         ]
+        #else
+        watchFolders = []
+        #endif
     }
 
     // MARK: - Public API
@@ -131,14 +135,20 @@ class MetroManager: ObservableObject {
         }
 
         state = .starting
-        actualPort = nil
         clearLogs()
-        appendLog("Starting Metro (port will be assigned by kernel)...")
+
+        // Find an available port before starting
+        let port = MetroAddressResolver.findAvailablePort()
+        actualPort = port
+        appendLog("Starting Metro on port \(port)...")
 
         do {
-            try await startProcess()
-            // Note: state transitions to .running when port is parsed from output
+            try await startProcess(port: port)
+            state = .running
+            appendLog("Metro is running on http://\(address):\(port)")
+            broadcastMetroConfig()
         } catch {
+            actualPort = nil
             state = .error(error.localizedDescription)
             appendLog("Failed to start: \(error.localizedDescription)", isError: true)
             throw error
@@ -219,7 +229,7 @@ class MetroManager: ObservableObject {
 
     // MARK: - Private
 
-    private func startProcess() async throws {
+    private func startProcess(port: UInt16) async throws {
         let process = Process()
         self.process = process
 
@@ -242,14 +252,14 @@ class MetroManager: ObservableObject {
             .map { $0.path }
             .joined(separator: ",")
 
-        // Use port 0 to let kernel assign an available port
+        // Use pre-allocated available port
         if isUsingBun {
             // Bun can run npm scripts directly
             process.arguments = [
                 "run", "start",
                 "--",
                 "--host", address,
-                "--port", "0"
+                "--port", String(port)
             ]
             if !watchFolderArgs.isEmpty {
                 process.arguments?.append(contentsOf: ["--watchFolders", watchFolderArgs])
@@ -259,21 +269,20 @@ class MetroManager: ObservableObject {
             process.arguments = [
                 "node_modules/.bin/react-native", "start",
                 "--host", address,
-                "--port", "0"
+                "--port", String(port)
             ]
             if !watchFolderArgs.isEmpty {
                 process.arguments?.append(contentsOf: ["--watchFolders", watchFolderArgs])
             }
         }
 
-        // Handle stdout - parse port from Metro output
+        // Handle stdout
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else { return }
             Task { @MainActor [weak self] in
                 for line in output.components(separatedBy: .newlines) where !line.isEmpty {
                     self?.appendLog(line)
-                    self?.parsePortFromOutput(line)
                 }
             }
         }
@@ -330,34 +339,6 @@ class MetroManager: ObservableObject {
 
     private func clearLogs() {
         logs.removeAll()
-    }
-
-    /// Parse port from Metro output like "Starting dev server on http://127.0.0.1:12345"
-    private func parsePortFromOutput(_ line: String) {
-        // Already have a port
-        guard actualPort == nil else { return }
-
-        // Look for patterns like:
-        // "Starting dev server on http://127.0.0.1:12345"
-        // "Metro waiting on http://localhost:12345"
-        let patterns = [
-            #"http://[\w.]+:(\d+)"#,
-            #"on port (\d+)"#,
-            #":(\d{4,5})\b"#
-        ]
-
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern),
-               let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-               let portRange = Range(match.range(at: 1), in: line),
-               let port = UInt16(line[portRange]) {
-                actualPort = port
-                state = .running
-                appendLog("Metro is running on port \(port)")
-                broadcastMetroConfig()
-                return
-            }
-        }
     }
 
     /// Broadcast Metro config to XPC services via DistributedNotificationCenter
