@@ -571,6 +571,8 @@ struct ViewBridgeMultiProcessTabView: View {
     // 只保留 UI 相关的 @State，XPC 状态全部移到 coordinator
     @State private var isLoading = true
     @State private var errorMessage: String?
+    // 用于触发 UI 刷新的状态（coordinator 变化不会自动触发 SwiftUI 刷新）
+    @State private var serviceAllocated = false
 
     init(tab: Tab, fingerprint: String, containerSize: CGSize, coordinator: ViewBridgeCoordinator, isFocused: Bool = false) {
         self.tab = tab
@@ -585,11 +587,11 @@ struct ViewBridgeMultiProcessTabView: View {
     }
 
     var body: some View {
-        let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), isFocused=\(isFocused), serviceId=\(coordinator.allocatedServiceId ?? "nil")\n", stderr)
+        let _ = fputs("🔵 ViewBridgeMultiProcessTabView.body: tab=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), isFocused=\(isFocused), serviceAllocated=\(serviceAllocated), serviceId=\(coordinator.allocatedServiceId ?? "nil")\n", stderr)
         ZStack(alignment: .topLeading) {
             // 多进程架构：基于应用指纹分配进程
-            // 使用 coordinator 中的 allocatedServiceId（不会被 SwiftUI 重置）
-            if ViewBridgeHostView.isAvailable, let serviceId = coordinator.allocatedServiceId {
+            // 使用 serviceAllocated 触发 UI 刷新，实际 serviceId 从 coordinator 获取
+            if ViewBridgeHostView.isAvailable, serviceAllocated, let serviceId = coordinator.allocatedServiceId {
                 ViewBridgeTabView(
                     tabId: tab.id,
                     contentSize: containerSize,
@@ -635,7 +637,7 @@ struct ViewBridgeMultiProcessTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            if isLoading && coordinator.allocatedServiceId != nil && errorMessage == nil {
+            if isLoading && serviceAllocated && errorMessage == nil {
                 loadingView
             }
         }
@@ -649,12 +651,19 @@ struct ViewBridgeMultiProcessTabView: View {
 
     /// 从进程池分配 service
     private func allocateServiceIfNeeded() {
-        // 使用 coordinator 的状态，不会因为 View 重建而丢失
-        guard coordinator.allocatedServiceId == nil else { return }
+        // 如果已经分配过，直接返回（但确保 @State 同步）
+        if coordinator.allocatedServiceId != nil {
+            if !serviceAllocated {
+                serviceAllocated = true
+            }
+            return
+        }
 
         do {
             coordinator.allocatedServiceId = try XPCServicePool.shared.allocateService(for: tab.id, fingerprint: fingerprint)
             fputs("📦 Tab \(tab.id.uuidString.prefix(8)) allocated service: \(coordinator.allocatedServiceId ?? "nil") for fingerprint: \(fingerprint.prefix(16))\n", stderr)
+            // 触发 SwiftUI 重新渲染
+            serviceAllocated = true
         } catch let error as XPCServicePoolError {
             errorMessage = error.localizedDescription
             fputs("❌ Tab \(tab.id.uuidString.prefix(8)) allocation failed: \(error.localizedDescription)\n", stderr)
