@@ -312,64 +312,68 @@ struct WorkspaceMainView: View {
 
                 // 中间：地址栏（50% viewportSize 宽度）
                 ToolbarItem(placement: .principal) {
-                    let addressBarWidth = viewportSize.width * 0.5
+                    // 计算地址栏宽度（依赖 viewportSize，窗口大小变化时自动更新）
+                    let addressBarWidth = max(viewportSize.width * 0.5, 200)
 
-                    if case .overview = viewModel.canvasMode {
-                        Color.clear
-                            .frame(width: addressBarWidth, height: 28)
-                    } else {
-                        let leftIconState: AddressBarLeftIconState = {
-                            guard let tab = viewModel.currentTab else { return .none }
-                            switch tab.contentType {
-                            case .reactNative: return .menu
-                            case .web: return isWebLoading ? .loading : .none
-                            case .empty: return .none
-                            }
-                        }()
-
-                        let currentURLString = viewModel.currentTab?.url?.absoluteString ?? ""
-
-                        let displayTitle: String = {
-                            guard let tab = viewModel.currentTab else { return "New Tab" }
-                            if case .web = tab.contentType, let host = tab.url?.host {
-                                return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-                            }
-                            return tab.title
-                        }()
-
-                        AddressBarContainer(
-                            titleText: .constant(displayTitle),
-                            urlText: currentURLString,
-                            inputText: $addressInputText,
-                            isEditing: $isAddressBarEditing,
-                            isFirstResponder: $isAddressBarFirstResponder,
-                            isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
-                            leftIconState: leftIconState,
-                            toggleLeftPanel: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    viewModel.toggleLeftPanelForCurrentTab()
+                    Group {
+                        if case .overview = viewModel.canvasMode {
+                            Color.clear
+                                .frame(width: addressBarWidth, height: 28)
+                        } else {
+                            let leftIconState: AddressBarLeftIconState = {
+                                guard let tab = viewModel.currentTab else { return .none }
+                                switch tab.contentType {
+                                case .reactNative: return .menu
+                                case .web: return isWebLoading ? .loading : .none
+                                case .empty: return .none
                                 }
-                            },
-                            showingBookmarkPopover: $showingBookmarkSheet,
-                            shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
-                            refreshAction: { viewModel.reloadCurrentTab() },
-                            onNavigate: { input in
-                                viewModel.navigateCurrentTab(to: input)
-                                isAddressBarFirstResponder = false
-                            },
-                            bookmarkPopoverContent: {
-                                if let tab = viewModel.currentTab {
-                                    let existingBookmark = bookmarkVM.getBookmark(for: tab)
-                                    BookmarkEditSheet(
-                                        viewModel: bookmarkVM,
-                                        tab: existingBookmark == nil ? tab : nil,
-                                        existingBookmark: existingBookmark
-                                    )
+                            }()
+
+                            let currentURLString = viewModel.currentTab?.url?.absoluteString ?? ""
+
+                            let displayTitle: String = {
+                                guard let tab = viewModel.currentTab else { return "New Tab" }
+                                if case .web = tab.contentType, let host = tab.url?.host {
+                                    return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
                                 }
-                            }
-                        )
-                        .frame(width: addressBarWidth)
+                                return tab.title
+                            }()
+
+                            AddressBarContainer(
+                                titleText: .constant(displayTitle),
+                                urlText: currentURLString,
+                                inputText: $addressInputText,
+                                isEditing: $isAddressBarEditing,
+                                isFirstResponder: $isAddressBarFirstResponder,
+                                isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
+                                leftIconState: leftIconState,
+                                toggleLeftPanel: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        viewModel.toggleLeftPanelForCurrentTab()
+                                    }
+                                },
+                                showingBookmarkPopover: $showingBookmarkSheet,
+                                shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
+                                refreshAction: { viewModel.reloadCurrentTab() },
+                                onNavigate: { input in
+                                    viewModel.navigateCurrentTab(to: input)
+                                    isAddressBarFirstResponder = false
+                                },
+                                bookmarkPopoverContent: {
+                                    if let tab = viewModel.currentTab {
+                                        let existingBookmark = bookmarkVM.getBookmark(for: tab)
+                                        BookmarkEditSheet(
+                                            viewModel: bookmarkVM,
+                                            tab: existingBookmark == nil ? tab : nil,
+                                            existingBookmark: existingBookmark
+                                        )
+                                    }
+                                }
+                            )
+                            .frame(width: addressBarWidth)
+                        }
                     }
+                    .id(addressBarWidth) // 强制 SwiftUI 在宽度变化时重建视图
                 }
 
                 // 右侧：操作按钮
