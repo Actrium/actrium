@@ -411,7 +411,27 @@ private class ServiceReactNativeHost {
         ]
 
         entry.currentProperties = properties
-        entry.rootView?.appProperties = properties
+
+        // Debug: Log the properties being set
+        let systemAppType = (tabDict["systemAppType"] as? String) ?? "nil"
+        debugLog("[\(logId)] Setting appProperties: systemAppType=\(systemAppType), rootView=\(entry.rootView != nil ? "exists" : "nil")")
+
+        if let rootView = entry.rootView {
+            rootView.appProperties = properties
+            debugLog("[\(logId)] appProperties updated (systemAppType=\(systemAppType))")
+
+            // RN bridge may still be loading, re-apply properties after a delay to ensure render
+            // This is needed because RCTRootView.setAppProperties only calls runApplication
+            // when bridge.valid && !bridge.loading
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak entry] in
+                guard let entry = entry, let rootView = entry.rootView else { return }
+                let props = entry.currentProperties
+                rootView.appProperties = props
+                debugLog("[\(logId)] appProperties re-applied after delay")
+            }
+        } else {
+            debugLog("[\(logId)] ⚠️ rootView is nil, cannot update appProperties")
+        }
 
         // Update RN dimensions
         updateDimensionsForEntry(entry)

@@ -28,6 +28,13 @@ const LoadingFallback = () => (
 );
 
 export const TabRouter: React.FC<TabRouterProps> = (props) => {
+  // Debug: Log props received - use NativeModules for visibility
+  const { NativeModules } = require('react-native');
+  const NativeLogger = NativeModules.NativeLogger;
+  const logMsg = `[TabRouter] props: singleTabMode=${props?.singleTabMode}, tabId=${props?.tab?.id?.substring(0,8)}, systemAppType=${props?.tab?.systemAppType}`;
+  NativeLogger?.log?.(logMsg);
+  console.log(logMsg);
+
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
