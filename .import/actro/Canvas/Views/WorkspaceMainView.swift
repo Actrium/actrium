@@ -294,16 +294,17 @@ struct WorkspaceMainView: View {
                 }
                 .allowsHitTesting(false)
             }
-            // AppKit toolbar configured via WindowToolbarConfigurator
-            .background(
-                WindowToolbarConfigurator(
+            // 自定义工具栏 - 使用 safeAreaInset 精确控制布局
+            .safeAreaInset(edge: .top, spacing: 0) {
+                CustomToolbarView(
                     viewModel: viewModel,
                     bookmarkVM: bookmarkVM,
                     isWebLoading: $isWebLoading,
                     toggleFocusOverview: toggleFocusOverview
                 )
-                .frame(width: 0, height: 0)
-            )
+            }
+            // 隐藏系统 toolbar
+            .toolbar(.hidden, for: .windowToolbar)
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 从 Focus 切换到 Overview 时，先截图当前页面
             if case .focus(let focusedTabId) = oldValue, case .overview = newValue {
