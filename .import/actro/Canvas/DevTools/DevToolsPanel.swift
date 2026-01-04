@@ -255,6 +255,8 @@ struct DevToolsContent: View {
                 NetworkSequenceView(devTools: devTools, viewModel: viewModel)
             case .monitor:
                 DevToolsMonitorView(devTools: devTools, viewModel: viewModel)
+            case .metro:
+                MetroPanel()
             }
         }
         .onAppear {

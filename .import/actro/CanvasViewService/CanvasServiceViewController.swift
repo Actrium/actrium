@@ -100,6 +100,34 @@ private class ResizableContainerView: NSView {
     }
 }
 
+// MARK: - Metro Config (received from Host via DistributedNotificationCenter)
+
+/// Holds Metro bundler configuration received from Canvas Host
+/// Updated dynamically when Host's MetroManager broadcasts config
+private enum MetroConfig {
+    /// Default Metro host (fallback if no config received)
+    static var host: String = "127.0.0.1"
+    static var port: UInt16 = 8081
+
+    static var hostString: String {
+        "\(host):\(port)"
+    }
+
+    /// Update config from notification userInfo
+    static func update(from userInfo: [AnyHashable: Any]?) {
+        guard let info = userInfo else { return }
+        if let host = info["host"] as? String {
+            Self.host = host
+        }
+        if let port = info["port"] as? UInt16 {
+            Self.port = port
+        } else if let port = info["port"] as? Int {
+            Self.port = UInt16(port)
+        }
+        debugLog("MetroConfig updated: \(Self.hostString)")
+    }
+}
+
 // MARK: - React Native Factory Delegate
 
 private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegate {
@@ -115,11 +143,10 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
 
     override func bundleURL() -> URL? {
         #if DEBUG
-        let metroPort = ProcessInfo.processInfo.environment["RCT_METRO_PORT"] ?? "8081"
-        let host = "127.0.0.1:\(metroPort)"
+        // Use Metro config received from Host (or fallback to default)
         return RCTBundleURLProvider.jsBundleURL(
             forBundleRoot: "index",
-            packagerHost: host,
+            packagerHost: MetroConfig.hostString,
             enableDev: true,
             enableMinification: false,
             inlineSourceMap: false
@@ -303,6 +330,8 @@ private class ServiceReactNativeHost {
 
     // MARK: - Tab Config IPC
 
+    private var metroConfigObserver: NSObjectProtocol?
+
     private func setupTabConfigListener() {
         // Listen for tab config with service-specific notification
         let notificationName = "com.canvas.tabConfig.\(serviceBundleId)"
@@ -315,6 +344,16 @@ private class ServiceReactNativeHost {
         ) { [weak self] notification in
             self?.handleTabConfigNotification(notification)
         }
+
+        // Listen for Metro config broadcasts from Host
+        metroConfigObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.metro.config"),
+            object: nil,
+            queue: .main
+        ) { notification in
+            MetroConfig.update(from: notification.userInfo)
+        }
+        debugLog("📡 Setting up Metro config listener")
 
         // Notify Host that this service is ready
         DistributedNotificationCenter.default().postNotificationName(
