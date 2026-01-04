@@ -137,22 +137,37 @@ class MetroManager: ObservableObject {
         state = .starting
         clearLogs()
 
-        // Find an available port before starting
-        let port = MetroAddressResolver.findAvailablePort()
-        actualPort = port
-        appendLog("Starting Metro on port \(port)...")
+        // Retry with different ports if binding fails (race condition with other processes)
+        let maxRetries = 3
+        var lastError: Error?
 
-        do {
-            try await startProcess(port: port)
-            state = .running
-            appendLog("Metro is running on http://\(address):\(port)")
-            broadcastMetroConfig()
-        } catch {
-            actualPort = nil
-            state = .error(error.localizedDescription)
-            appendLog("Failed to start: \(error.localizedDescription)", isError: true)
-            throw error
+        for attempt in 1...maxRetries {
+            let port = MetroAddressResolver.findAvailablePort()
+            actualPort = port
+            appendLog("Starting Metro on port \(port)..." + (attempt > 1 ? " (attempt \(attempt))" : ""))
+
+            do {
+                try await startProcess(port: port)
+                state = .running
+                appendLog("Metro is running on http://\(address):\(port)")
+                broadcastMetroConfig()
+                return  // Success
+            } catch {
+                lastError = error
+                actualPort = nil
+
+                // Check if it's a port conflict (process started but Metro failed to bind)
+                if attempt < maxRetries {
+                    appendLog("Port \(port) may be taken, retrying...", isError: true)
+                    try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms before retry
+                }
+            }
         }
+
+        // All retries failed
+        state = .error(lastError?.localizedDescription ?? "Unknown error")
+        appendLog("Failed to start after \(maxRetries) attempts: \(lastError?.localizedDescription ?? "Unknown")", isError: true)
+        throw lastError ?? MetroError.failedToStart
     }
 
     /// Stop Metro bundler
@@ -314,10 +329,22 @@ class MetroManager: ObservableObject {
         try process.run()
 
         // Wait a bit and check if process started successfully
-        try await Task.sleep(nanoseconds: 1_000_000_000)  // 1s
+        try await Task.sleep(nanoseconds: 2_000_000_000)  // 2s to allow Metro to start or fail
 
+        // Check if process is still running
         if !process.isRunning {
             throw MetroError.failedToStart
+        }
+
+        // Check logs for port binding errors (EADDRINUSE, EADDRNOTAVAIL, etc.)
+        let errorPatterns = ["EADDRINUSE", "EADDRNOTAVAIL", "address already in use", "address not available"]
+        for entry in logs where entry.isError {
+            for pattern in errorPatterns {
+                if entry.message.contains(pattern) {
+                    process.terminate()
+                    throw MetroError.portConflict
+                }
+            }
         }
     }
 
@@ -368,6 +395,7 @@ enum MetroError: LocalizedError {
     case reloadFailed
     case runtimeNotFound
     case notRunning
+    case portConflict
 
     var errorDescription: String? {
         switch self {
@@ -379,6 +407,8 @@ enum MetroError: LocalizedError {
             return "Node.js or Bun runtime not found"
         case .notRunning:
             return "Metro is not running"
+        case .portConflict:
+            return "Port is already in use"
         }
     }
 }
