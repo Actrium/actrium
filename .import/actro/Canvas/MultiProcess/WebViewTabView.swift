@@ -790,7 +790,13 @@ class DownloadableWebView: WKWebView {
 
                 let replacement = ClosureMenuItem(title: item.title) { [weak self] in
                     NSLog("📥 DownloadableWebView: Download %@ clicked! URL: %@", typeName, url.absoluteString)
-                    self?.startDownload(url: url)
+                    if isImage {
+                        // For images, try copy-then-save approach first (more reliable)
+                        self?.downloadImageViaCopy(url: url)
+                    } else {
+                        // For links, use direct download
+                        self?.startDownload(url: url)
+                    }
                 }
                 menu.removeItem(at: index)
                 menu.insertItem(replacement, at: index)
@@ -816,7 +822,8 @@ class DownloadableWebView: WKWebView {
 
             let downloadImageItem = ClosureMenuItem(title: "Download Image") { [weak self] in
                 NSLog("📥 DownloadableWebView: Download Image clicked!")
-                self?.startDownload(url: imageURL)
+                // Use copy-then-save approach for images (more reliable)
+                self?.downloadImageViaCopy(url: imageURL)
             }
             menu.addItem(downloadImageItem)
         }
@@ -840,7 +847,7 @@ class DownloadableWebView: WKWebView {
         NSLog("📥 DownloadableWebView: startDownload - %@", url.absoluteString)
 
         // Check if URL is valid for download
-        guard url.scheme == "http" || url.scheme == "https" else {
+        guard url.scheme == "http" || url.scheme == "https" || url.scheme == "data" else {
             NSLog("📥 DownloadableWebView: Invalid URL scheme: %@", url.scheme ?? "nil")
             return
         }
@@ -862,6 +869,122 @@ class DownloadableWebView: WKWebView {
             let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: url)
             NSLog("📥 DownloadableWebView: Created item, starting URLSession download")
             URLSessionDownloader.shared.startDownload(url: url, item: item)
+        }
+    }
+
+    /// Download image by copying to clipboard first, then saving from clipboard
+    /// This is a workaround for WKDownload issues - Copy Image always works
+    private func downloadImageViaCopy(url: URL) {
+        NSLog("📥 DownloadableWebView: downloadImageViaCopy - %@", url.absoluteString)
+
+        // JavaScript to copy image to clipboard
+        let js = """
+        (async function() {
+            try {
+                var img = document.querySelector('img[src="\(url.absoluteString)"]');
+                if (!img) {
+                    // Try to find by partial match
+                    var imgs = document.querySelectorAll('img');
+                    for (var i = 0; i < imgs.length; i++) {
+                        if (imgs[i].src === '\(url.absoluteString)') {
+                            img = imgs[i];
+                            break;
+                        }
+                    }
+                }
+                if (img) {
+                    // Create a canvas and draw the image
+                    var canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    var ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+
+                    // Convert to blob and copy
+                    var blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    await navigator.clipboard.write([
+                        new ClipboardItem({ 'image/png': blob })
+                    ]);
+                    return 'copied';
+                }
+                return 'not_found';
+            } catch (e) {
+                return 'error: ' + e.message;
+            }
+        })();
+        """
+
+        evaluateJavaScript(js) { [weak self] result, error in
+            if let result = result as? String, result == "copied" {
+                NSLog("📥 DownloadableWebView: Image copied to clipboard, now saving...")
+                self?.saveImageFromClipboard(originalURL: url)
+            } else {
+                // Fallback to URLSession download
+                NSLog("📥 DownloadableWebView: Copy failed (%@), falling back to URLSession",
+                      (result as? String) ?? error?.localizedDescription ?? "unknown")
+                self?.startDownload(url: url)
+            }
+        }
+    }
+
+    /// Save image from clipboard to Downloads folder
+    private func saveImageFromClipboard(originalURL: URL) {
+        let pasteboard = NSPasteboard.general
+
+        // Try to get image from clipboard
+        guard let image = NSImage(pasteboard: pasteboard) else {
+            NSLog("📥 DownloadableWebView: No image in clipboard, falling back to URLSession")
+            startDownload(url: originalURL)
+            return
+        }
+
+        // Generate filename
+        var filename = originalURL.lastPathComponent
+        if filename.isEmpty || !filename.contains(".") {
+            filename = "image_\(Int(Date().timeIntervalSince1970)).png"
+        }
+        // Ensure .png extension since we're saving as PNG
+        if !filename.lowercased().hasSuffix(".png") {
+            filename = (filename as NSString).deletingPathExtension + ".png"
+        }
+
+        // Get downloads directory
+        let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+        var destinationURL = downloadsURL.appendingPathComponent(filename)
+
+        // Handle duplicate filenames
+        var counter = 1
+        let baseName = (filename as NSString).deletingPathExtension
+        while FileManager.default.fileExists(atPath: destinationURL.path) {
+            let newName = "\(baseName) (\(counter)).png"
+            destinationURL = downloadsURL.appendingPathComponent(newName)
+            counter += 1
+        }
+
+        // Convert to PNG and save
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            NSLog("📥 DownloadableWebView: Failed to convert image to PNG")
+            startDownload(url: originalURL)
+            return
+        }
+
+        do {
+            try pngData.write(to: destinationURL)
+            NSLog("📥 DownloadableWebView: Image saved to %@", destinationURL.path)
+
+            // Add to download manager for UI feedback
+            Task { @MainActor in
+                let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: originalURL)
+                item.destinationURL = destinationURL
+                item.bytesReceived = Int64(pngData.count)
+                item.totalBytes = Int64(pngData.count)
+                DownloadManager.shared.updateItem(item, state: .completed)
+            }
+        } catch {
+            NSLog("📥 DownloadableWebView: Failed to save image: %@", error.localizedDescription)
+            startDownload(url: originalURL)
         }
     }
 }
