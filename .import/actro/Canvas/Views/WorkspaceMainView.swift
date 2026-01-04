@@ -294,19 +294,16 @@ struct WorkspaceMainView: View {
                 }
                 .allowsHitTesting(false)
             }
-            // 自定义工具栏 - 使用 SwiftUI toolbar 但内容完全自定义
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    CustomToolbarView(
-                        viewModel: viewModel,
-                        bookmarkVM: bookmarkVM,
-                        isWebLoading: $isWebLoading,
-                        toggleFocusOverview: toggleFocusOverview
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .toolbarBackground(.visible, for: .windowToolbar)
+            // NSToolbar with centeredItemIdentifier for Safari-style layout
+            .background(
+                ToolbarConfigurator(
+                    viewModel: viewModel,
+                    bookmarkVM: bookmarkVM,
+                    isWebLoading: $isWebLoading,
+                    toggleFocusOverview: toggleFocusOverview
+                )
+                .frame(width: 0, height: 0)
+            )
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 从 Focus 切换到 Overview 时，先截图当前页面
             if case .focus(let focusedTabId) = oldValue, case .overview = newValue {

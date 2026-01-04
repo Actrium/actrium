@@ -1,47 +1,197 @@
+import AppKit
 import SwiftUI
+import Combine
 
-// MARK: - Custom Toolbar View
+// MARK: - Window Toolbar Setup
 
-/// Pure SwiftUI toolbar with precise layout control
-/// Layout: [Left buttons] [Spacer] [AddressBar 50%] [Spacer] [Right buttons]
-struct CustomToolbarView: View {
+/// Configures NSToolbar with centeredItemIdentifier for Safari-style layout
+struct ToolbarConfigurator: NSViewRepresentable {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @Binding var isWebLoading: Bool
     let toggleFocusOverview: () -> Void
 
-    @Environment(\.viewportSize) private var viewportSize
-
-    var body: some View {
-        let addressBarWidth = max(viewportSize.width * 0.5, 200)
-
-        HStack(spacing: 0) {
-            // 左功能组（左对齐）
-            leftButtonsGroup
-
-            Spacer(minLength: 12)
-
-            // 地址栏（50% 窗口宽度）
-            addressBarView
-                .frame(width: addressBarWidth)
-
-            Spacer(minLength: 12)
-
-            // 右功能组（右对齐）
-            rightButtonsGroup
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            self.configureToolbar(for: view, context: context)
         }
-        .frame(maxWidth: .infinity, minHeight: 28)
+        return view
     }
 
-    // MARK: - Left Buttons
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // Update toolbar when state changes
+        guard let window = nsView.window,
+              let coordinator = context.coordinator as? ToolbarCoordinator else { return }
+        coordinator.updateToolbarItems()
+    }
 
-    private var leftButtonsGroup: some View {
+    func makeCoordinator() -> ToolbarCoordinator {
+        ToolbarCoordinator(
+            viewModel: viewModel,
+            bookmarkVM: bookmarkVM,
+            isWebLoading: _isWebLoading,
+            toggleFocusOverview: toggleFocusOverview
+        )
+    }
+
+    private func configureToolbar(for view: NSView, context: Context) {
+        guard let window = view.window else { return }
+
+        // Skip if already configured
+        if window.toolbar?.identifier == ToolbarCoordinator.toolbarIdentifier { return }
+
+        let toolbar = NSToolbar(identifier: ToolbarCoordinator.toolbarIdentifier)
+        toolbar.delegate = context.coordinator
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+
+        // Key: Set centeredItemIdentifier for Safari-style centering
+        toolbar.centeredItemIdentifier = ToolbarCoordinator.addressBarId
+
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+
+        context.coordinator.window = window
+    }
+}
+
+// MARK: - Toolbar Coordinator
+
+class ToolbarCoordinator: NSObject, NSToolbarDelegate {
+    static let toolbarIdentifier = NSToolbar.Identifier("MainToolbar")
+    static let navigationId = NSToolbarItem.Identifier("navigation")
+    static let addressBarId = NSToolbarItem.Identifier("addressBar")
+    static let actionsId = NSToolbarItem.Identifier("actions")
+
+    weak var window: NSWindow?
+    var viewModel: BrowserViewModel
+    var bookmarkVM: BookmarkViewModel
+    var isWebLoading: Binding<Bool>
+    var toggleFocusOverview: () -> Void
+
+    private var addressBarHostingView: NSHostingView<AnyView>?
+    private var cancellables = Set<AnyCancellable>()
+
+    init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel,
+         isWebLoading: Binding<Bool>, toggleFocusOverview: @escaping () -> Void) {
+        self.viewModel = viewModel
+        self.bookmarkVM = bookmarkVM
+        self.isWebLoading = isWebLoading
+        self.toggleFocusOverview = toggleFocusOverview
+        super.init()
+
+        // Observe window resize
+        NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)
+            .sink { [weak self] notification in
+                guard let window = notification.object as? NSWindow,
+                      window === self?.window else { return }
+                self?.updateAddressBarWidth()
+            }
+            .store(in: &cancellables)
+    }
+
+    func updateToolbarItems() {
+        updateAddressBarWidth()
+    }
+
+    private func updateAddressBarWidth() {
+        guard let window = window, let hostingView = addressBarHostingView else { return }
+        let width = max(window.frame.width * 0.5, 200)
+        hostingView.frame.size.width = width
+    }
+
+    // MARK: - NSToolbarDelegate
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        switch itemIdentifier {
+        case Self.navigationId:
+            return makeNavigationItem()
+        case Self.addressBarId:
+            return makeAddressBarItem()
+        case Self.actionsId:
+            return makeActionsItem()
+        default:
+            return nil
+        }
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [
+            Self.navigationId,
+            .flexibleSpace,
+            Self.addressBarId,
+            .flexibleSpace,
+            Self.actionsId
+        ]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    // MARK: - Toolbar Items
+
+    private func makeNavigationItem() -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: Self.navigationId)
+
+        let view = NavigationButtonsView(viewModel: viewModel)
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame.size = hostingView.fittingSize
+
+        item.view = hostingView
+        return item
+    }
+
+    private func makeAddressBarItem() -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: Self.addressBarId)
+
+        let windowWidth = window?.frame.width ?? 800
+        let width = max(windowWidth * 0.5, 200)
+
+        let view = AddressBarToolbarView(
+            viewModel: viewModel,
+            bookmarkVM: bookmarkVM,
+            isWebLoading: isWebLoading
+        )
+
+        let hostingView = NSHostingView(rootView: AnyView(view))
+        hostingView.frame.size = CGSize(width: width, height: 28)
+
+        item.view = hostingView
+        self.addressBarHostingView = hostingView
+
+        return item
+    }
+
+    private func makeActionsItem() -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: Self.actionsId)
+
+        let view = ActionButtonsView(
+            viewModel: viewModel,
+            toggleFocusOverview: toggleFocusOverview
+        )
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame.size = hostingView.fittingSize
+
+        item.view = hostingView
+        return item
+    }
+}
+
+// MARK: - Navigation Buttons View
+
+private struct NavigationButtonsView: View {
+    @ObservedObject var viewModel: BrowserViewModel
+
+    var body: some View {
         HStack(spacing: 2) {
             Button(action: { viewModel.goBack() }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .medium))
             }
-            .buttonStyle(ToolbarButtonStyle())
+            .buttonStyle(.borderless)
             .disabled(!viewModel.canGoBack)
             .help("后退")
 
@@ -49,15 +199,21 @@ struct CustomToolbarView: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .medium))
             }
-            .buttonStyle(ToolbarButtonStyle())
+            .buttonStyle(.borderless)
             .disabled(!viewModel.canGoForward)
             .help("前进")
         }
+        .frame(height: 28)
     }
+}
 
-    // MARK: - Right Buttons
+// MARK: - Action Buttons View
 
-    private var rightButtonsGroup: some View {
+private struct ActionButtonsView: View {
+    @ObservedObject var viewModel: BrowserViewModel
+    let toggleFocusOverview: () -> Void
+
+    var body: some View {
         HStack(spacing: 2) {
             DownloadToolbarButton()
 
@@ -76,57 +232,23 @@ struct CustomToolbarView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 14, weight: .medium))
             }
-            .buttonStyle(ToolbarButtonStyle())
+            .buttonStyle(.borderless)
             .help("新建标签页")
 
             Button(action: toggleFocusOverview) {
                 Image(systemName: "square.on.square")
                     .font(.system(size: 14, weight: .medium))
             }
-            .buttonStyle(ToolbarButtonStyle())
+            .buttonStyle(.borderless)
             .help("标签总览 (⌘⇧\\)")
         }
-    }
-
-    // MARK: - Address Bar
-
-    @ViewBuilder
-    private var addressBarView: some View {
-        if case .overview = viewModel.canvasMode {
-            // Overview 模式：空占位
-            Color.clear
-                .frame(height: 28)
-        } else {
-            ToolbarAddressBarView(
-                viewModel: viewModel,
-                bookmarkVM: bookmarkVM,
-                isWebLoading: $isWebLoading
-            )
-        }
+        .frame(height: 28)
     }
 }
 
-// MARK: - Toolbar Button Style
+// MARK: - Address Bar Toolbar View
 
-private struct ToolbarButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundColor(isEnabled ? .primary : .secondary.opacity(0.5))
-            .frame(width: 32, height: 24)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(configuration.isPressed ? Color.white.opacity(0.1) : Color.clear)
-            )
-            .contentShape(Rectangle())
-    }
-}
-
-// MARK: - Address Bar View
-
-/// Address bar with focus ring animation - matches original SwiftUI implementation
-private struct ToolbarAddressBarView: View {
+private struct AddressBarToolbarView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @Binding var isWebLoading: Bool
@@ -135,14 +257,23 @@ private struct ToolbarAddressBarView: View {
     @State private var isEditing: Bool = false
     @State private var isFirstResponder: Bool = false
     @State private var showingBookmarkPopover: Bool = false
-
-    // Focus ring animation state
     @State private var focusRingScale: CGFloat = 1.0
     @State private var focusRingOpacity: Double = 0.0
 
     private let placeholder = "Enter URL (http/https) or app id"
 
     var body: some View {
+        Group {
+            if case .overview = viewModel.canvasMode {
+                Color.clear.frame(height: 28)
+            } else {
+                addressBarContent
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 28)
+    }
+
+    private var addressBarContent: some View {
         let leftIconState: AddressBarLeftIconState = {
             guard let tab = viewModel.currentTab else { return .none }
             switch tab.contentType {
@@ -153,7 +284,6 @@ private struct ToolbarAddressBarView: View {
         }()
 
         let currentURLString = viewModel.currentTab?.url?.absoluteString ?? ""
-
         let displayTitle: String = {
             guard let tab = viewModel.currentTab else { return "New Tab" }
             if case .web = tab.contentType, let host = tab.url?.host {
@@ -161,12 +291,10 @@ private struct ToolbarAddressBarView: View {
             }
             return tab.title
         }()
-
         let isBookmarked = viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false
 
-        Group {
+        return Group {
             if isEditing {
-                // 编辑状态
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(Color.white.opacity(0.7))
@@ -186,7 +314,6 @@ private struct ToolbarAddressBarView: View {
                     refreshButton
                 }
             } else {
-                // 非编辑状态
                 HStack(spacing: 10) {
                     AddressBarLeftIcon(state: leftIconState) {
                         withAnimation(.easeInOut(duration: 0.2)) {
@@ -199,9 +326,7 @@ private struct ToolbarAddressBarView: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                            isEditing = true
-                        }
+                        .onTapGesture { isEditing = true }
 
                     bookmarkButton(isBookmarked: isBookmarked)
                     refreshButton
@@ -210,42 +335,28 @@ private struct ToolbarAddressBarView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, minHeight: 28)
-        .background(
-            Capsule()
-                .fill(Color(nsColor: NSColor.controlBackgroundColor))
-        )
+        .background(Capsule().fill(Color(nsColor: NSColor.controlBackgroundColor)))
         .overlay(
             Capsule()
-                .stroke(
-                    Color(red: 0.18, green: 0.56, blue: 0.96)
-                        .opacity(focusRingOpacity),
-                    lineWidth: 2.8
-                )
+                .stroke(Color(red: 0.18, green: 0.56, blue: 0.96).opacity(focusRingOpacity), lineWidth: 2.8)
                 .scaleEffect(focusRingScale)
                 .padding(.vertical, -4)
         )
         .onChange(of: isFirstResponder) { _, newValue in
-            if !newValue && isEditing {
-                isEditing = false
-            }
+            if !newValue && isEditing { isEditing = false }
         }
         .onChange(of: isEditing) { _, newValue in
             if newValue {
                 inputText = currentURLString
                 focusRingScale = 1.08
                 focusRingOpacity = 0.0
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.7, blendDuration: 0.1)) {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
                     focusRingScale = 1.0
                     focusRingOpacity = 1.0
                 }
-                DispatchQueue.main.async {
-                    isFirstResponder = true
-                }
+                DispatchQueue.main.async { isFirstResponder = true }
             } else {
-                withAnimation(.easeOut(duration: 0.15)) {
-                    focusRingOpacity = 0.0
-                }
+                withAnimation(.easeOut(duration: 0.15)) { focusRingOpacity = 0.0 }
             }
         }
         .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, newValue in
@@ -262,7 +373,6 @@ private struct ToolbarAddressBarView: View {
                 .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
         }
         .buttonStyle(.borderless)
-        .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
         .popover(isPresented: $showingBookmarkPopover, arrowEdge: .bottom) {
             if let tab = viewModel.currentTab {
                 let existingBookmark = bookmarkVM.getBookmark(for: tab)
@@ -281,24 +391,16 @@ private struct ToolbarAddressBarView: View {
                 .foregroundColor(.white.opacity(0.7))
         }
         .buttonStyle(.borderless)
-        .help("刷新")
     }
-}
-
-// MARK: - Address Bar Left Icon State
-
-private enum AddressBarLeftIconState {
-    case none
-    case loading
-    case menu
 }
 
 // MARK: - Address Bar Left Icon
 
+private enum AddressBarLeftIconState { case none, loading, menu }
+
 private struct AddressBarLeftIcon: View {
     let state: AddressBarLeftIconState
     let action: () -> Void
-
     @State private var rotation: Double = 0
 
     var body: some View {
@@ -308,10 +410,7 @@ private struct AddressBarLeftIcon: View {
         case .loading:
             Circle()
                 .trim(from: 0, to: 0.7)
-                .stroke(
-                    Color.white.opacity(0.7),
-                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
-                )
+                .stroke(Color.white.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
                 .frame(width: 12, height: 12)
                 .rotationEffect(.degrees(rotation))
                 .onAppear {
@@ -321,11 +420,9 @@ private struct AddressBarLeftIcon: View {
                 }
         case .menu:
             Button(action: action) {
-                Image(systemName: "list.bullet")
-                    .foregroundColor(.white.opacity(0.7))
+                Image(systemName: "list.bullet").foregroundColor(.white.opacity(0.7))
             }
             .buttonStyle(.borderless)
-            .help("切换左侧面板")
         }
     }
 }
@@ -338,9 +435,7 @@ private struct FocusableTextField: NSViewRepresentable {
     @Binding var isFirstResponder: Bool
     var onSubmit: ((String) -> Void)?
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
@@ -361,39 +456,25 @@ private struct FocusableTextField: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
-        if nsView.stringValue != text {
-            nsView.stringValue = text
-        }
+        if nsView.stringValue != text { nsView.stringValue = text }
         nsView.placeholderString = placeholder
-
-        if isFirstResponder,
-           let window = nsView.window,
-           window.firstResponder != nsView.currentEditor() {
+        if isFirstResponder, let window = nsView.window, window.firstResponder != nsView.currentEditor() {
             window.makeFirstResponder(nsView)
             DispatchQueue.main.async {
-                if let editor = nsView.currentEditor() {
-                    editor.selectAll(nil)
-                }
+                nsView.currentEditor()?.selectAll(nil)
             }
         }
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: FocusableTextField
-
-        init(_ parent: FocusableTextField) {
-            self.parent = parent
-        }
+        init(_ parent: FocusableTextField) { self.parent = parent }
 
         func controlTextDidChange(_ obj: Notification) {
             guard let field = obj.object as? NSTextField else { return }
             let raw = field.stringValue
-            let cleaned = raw
-                .components(separatedBy: .newlines)
-                .joined(separator: " ")
-            if cleaned != raw {
-                field.stringValue = cleaned
-            }
+            let cleaned = raw.components(separatedBy: .newlines).joined(separator: " ")
+            if cleaned != raw { field.stringValue = cleaned }
             parent.text = cleaned
         }
 
@@ -403,9 +484,7 @@ private struct FocusableTextField: NSViewRepresentable {
 
         @objc func handleAction(_ sender: NSTextField) {
             let text = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty {
-                parent.onSubmit?(text)
-            }
+            if !text.isEmpty { parent.onSubmit?(text) }
             parent.isFirstResponder = false
         }
     }
