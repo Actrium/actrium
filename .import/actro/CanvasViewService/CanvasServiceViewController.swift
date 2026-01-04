@@ -5,6 +5,12 @@
 //  NSServiceViewController subclass that hosts React Native content for ViewBridge.
 //  Uses Objective-C runtime to properly inherit from private NSServiceViewController.
 //
+//  Architecture: 1:1:1 Mapping
+//  - Each Tab has exactly one ViewBridge connection
+//  - Each ViewBridge connection has exactly one CanvasServiceViewController instance
+//  - Each CanvasServiceViewController has exactly one RCTRootView
+//  - All RCTRootViews share the same RCTBridge (managed by ServiceReactNativeHost singleton)
+//
 
 import Cocoa
 import ObjectiveC
@@ -20,14 +26,10 @@ private let debugLogPath: String = {
 }()
 
 private func debugLog(_ message: String) {
-    // Use NSLog for reliable logging in XPC service
     NSLog("[CanvasViewService] %@", message)
-
-    // Also write to stderr
     fputs("[CanvasViewService] \(message)\n", stderr)
     fflush(stderr)
 
-    // Also append to log file
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let logMessage = "[\(timestamp)] \(message)\n"
     if let data = logMessage.data(using: .utf8) {
@@ -45,30 +47,26 @@ private func debugLog(_ message: String) {
 
 // MARK: - Resizable Container View
 
-/// Container view - 直接使用 ViewBridge 传来的尺寸（remoteViewSize）
-/// ViewBridge 会自动将 Host 端 NSRemoteView 的 frame 同步到这里
+/// Container view for each Tab's RCTRootView
+/// ViewBridge automatically syncs Host's NSRemoteView frame here
 private class ResizableContainerView: NSView {
     private var rnView: NSView?
-    /// Callback to notify React Native of size changes
     var onSizeChanged: ((CGSize) -> Void)?
-
-    /// 累积的捏合手势值（用于检测 pinch-out）
     private var cumulativeMagnification: CGFloat = 0
+
+    /// The tabId this container belongs to (for 1:1:1 mapping)
+    var tabId: String?
 
     override var acceptsFirstResponder: Bool { true }
 
     override func setFrameSize(_ newSize: NSSize) {
-        // 直接使用 ViewBridge 传来的尺寸，无需任何过滤或锁定
-        debugLog("Container setFrameSize: \(newSize)")
+        debugLog("[\(tabId?.prefix(8) ?? "?")] Container setFrameSize: \(newSize)")
         super.setFrameSize(newSize)
 
-        // 更新 RN view 尺寸
         if let rnView = rnView {
             rnView.frame = bounds
-            debugLog("Updated RN view frame to: \(bounds)")
         }
 
-        // 通知 React Native 尺寸变化
         if newSize.width > 0 && newSize.height > 0 {
             onSizeChanged?(newSize)
         }
@@ -78,36 +76,19 @@ private class ResizableContainerView: NSView {
         self.rnView = view
     }
 
-    // MARK: - Magnify Gesture Handling (Mode Switching Trigger #4)
-    //
-    // ┌─────────────────────────────────────────────────────────────────────┐
-    // │ 双指捏合手势处理 - Focus → Overview 退出                              │
-    // ├─────────────────────────────────────────────────────────────────────┤
-    // │ 架构说明:                                                            │
-    // │ - NSRemoteView 会将事件直接路由到 Service 进程                         │
-    // │ - 无需 Accessibility 权限（区别于 CGEventTap 方案）                    │
-    // │ - 通过 DistributedNotificationCenter 通知 Host 端                     │
-    // │ - Host 端在 WorkspaceMainView 中监听并调用 exitToOverview()           │
-    // └─────────────────────────────────────────────────────────────────────┘
-
     override func magnify(with event: NSEvent) {
-        debugLog("🤏 magnify: phase=\(event.phase.rawValue), delta=\(event.magnification), cumulative=\(cumulativeMagnification)")
-
         switch event.phase {
         case .began:
             cumulativeMagnification = 0
         case .changed:
             cumulativeMagnification += event.magnification
-
-            // 捏合缩小超过阈值 (-0.3)，通知 Host 端
             if cumulativeMagnification < -0.3 {
-                debugLog("🤏 Threshold reached → posting pinchToOverview")
+                debugLog("🤏 Pinch threshold reached → posting pinchToOverview")
                 cumulativeMagnification = 0
-
                 DistributedNotificationCenter.default().postNotificationName(
                     NSNotification.Name("com.canvas.pinchToOverview"),
                     object: nil,
-                    userInfo: nil,
+                    userInfo: ["tabId": tabId ?? ""],
                     deliverImmediately: true
                 )
             }
@@ -119,7 +100,7 @@ private class ResizableContainerView: NSView {
     }
 }
 
-// MARK: - React Native Host for XPC Service
+// MARK: - React Native Factory Delegate
 
 private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegate {
     override init() {
@@ -134,23 +115,17 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
 
     override func bundleURL() -> URL? {
         #if DEBUG
-        // Connect to Metro bundler in development
         let metroPort = ProcessInfo.processInfo.environment["RCT_METRO_PORT"] ?? "8081"
         let host = "127.0.0.1:\(metroPort)"
-        let url = RCTBundleURLProvider.jsBundleURL(
+        return RCTBundleURLProvider.jsBundleURL(
             forBundleRoot: "index",
             packagerHost: host,
             enableDev: true,
             enableMinification: false,
             inlineSourceMap: false
         )
-        debugLog("bundleURL() called, returning: \(url?.absoluteString ?? "nil")")
-        return url
         #else
-        // Use offline bundle in release
-        let url = Bundle.main.url(forResource: "actr", withExtension: "jsbundle")
-        debugLog("bundleURL() called (release), returning: \(url?.absoluteString ?? "nil")")
-        return url
+        return Bundle.main.url(forResource: "actr", withExtension: "jsbundle")
         #endif
     }
 
@@ -159,26 +134,87 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
     }
 }
 
-// MARK: - Single-Process React Native Host
-//
-// 简化架构：每个 XPC service 进程只处理一个 tab
-// 进程池由 Host app 的 XPCServicePool 管理
+// MARK: - Tab View Controller Entry
 
+/// Represents a single Tab's ViewController and RCTRootView
+/// Key component for 1:1:1 architecture
+private class TabViewControllerEntry {
+    /// The tabId from Host (assigned when first config is received)
+    /// Initially nil until Host sends tabConfig with the real tabId
+    var tabId: String?
+
+    /// Temporary ID for internal tracking before real tabId is known
+    let internalId: String
+
+    weak var containerView: ResizableContainerView?
+    var rootView: RCTRootView?
+    var currentProperties: [String: Any] = [:]
+    var containerSize: CGSize = .zero
+    var pendingConfig: [String: Any]?
+
+    /// Whether this entry is waiting for its first tabConfig from Host
+    var isPending: Bool { tabId == nil }
+
+    init(internalId: String, containerView: ResizableContainerView) {
+        self.internalId = internalId
+        self.containerView = containerView
+        containerView.tabId = internalId  // Use internal ID for logging initially
+        debugLog("[pending:\(internalId.prefix(8))] TabViewControllerEntry created (waiting for Host tabId)")
+    }
+
+    /// Assign the real tabId from Host
+    func assignTabId(_ hostTabId: String) {
+        self.tabId = hostTabId
+        self.containerView?.tabId = hostTabId
+        debugLog("[\(hostTabId.prefix(8))] TabId assigned (was pending:\(internalId.prefix(8)))")
+    }
+
+    deinit {
+        debugLog("[\(tabId?.prefix(8) ?? internalId.prefix(8))] TabViewControllerEntry destroyed")
+    }
+}
+
+// MARK: - Service React Native Host (Process Singleton)
+
+/// Manages shared RCTBridge and per-Tab RCTRootViews
+/// Singleton per XPC service process
 private class ServiceReactNativeHost {
     static let shared = ServiceReactNativeHost()
 
     private let factoryDelegate: ServiceReactNativeFactoryDelegate
     private let factory: RCTReactNativeFactory
-    private var rootView: RCTRootView?
-    private var currentProperties: [String: Any] = [:]
-    private var currentContainerSize: CGSize = .zero
     private var tabConfigObserver: NSObjectProtocol?
 
-    /// 缓存的 tab config，用于在 RN 就绪前收到的配置
-    private var pendingTabConfig: [String: Any]?
+    /// Registry of TabViewControllerEntry by tabId (1:1:1 mapping)
+    /// Key is the Host's tabId (Tab.id.uuidString)
+    private var tabRegistry: [String: TabViewControllerEntry] = [:]
+
+    /// Pending entries waiting for Host to send tabConfig with real tabId
+    /// Key is the internal ID generated at loadView time
+    private var pendingEntries: [String: TabViewControllerEntry] = [:]
+
+    private let registryLock = NSLock()
+
+    /// This service's bundle identifier for notification routing
+    let serviceBundleId: String
 
     private init() {
-        debugLog("Initializing React Native host")
+        // In XPC services, Bundle.main returns the host app's bundle, not the XPC service's bundle.
+        // We need to get the XPC service's own bundle identifier from its bundle path.
+        // The executable path format: .../RCTViewService0.xpc/Contents/MacOS/CanvasViewService
+        let executablePath = ProcessInfo.processInfo.arguments[0]
+        var bundlePath = (executablePath as NSString).deletingLastPathComponent  // Remove executable name
+        bundlePath = (bundlePath as NSString).deletingLastPathComponent  // Remove MacOS
+        bundlePath = (bundlePath as NSString).deletingLastPathComponent  // Remove Contents -> now at .xpc bundle root
+        if let serviceBundle = Bundle(path: bundlePath),
+           let serviceBundleIdentifier = serviceBundle.bundleIdentifier {
+            serviceBundleId = serviceBundleIdentifier
+            debugLog("Initializing ServiceReactNativeHost, bundleId: \(serviceBundleId) (from: \(bundlePath))")
+        } else {
+            // Fallback - shouldn't happen in normal operation
+            serviceBundleId = Bundle.main.bundleIdentifier ?? "unknown"
+            debugLog("⚠️ Failed to get XPC service bundle ID, using fallback: \(serviceBundleId)")
+        }
 
         #if DEBUG
         RCTRedBoxSetEnabled(false)
@@ -186,128 +222,213 @@ private class ServiceReactNativeHost {
 
         factoryDelegate = ServiceReactNativeFactoryDelegate()
         factory = RCTReactNativeFactory(delegate: factoryDelegate)
-        debugLog("React Native factory created")
+        debugLog("Shared RCTBridge created")
 
-        // Listen for tab config from host via DistributedNotificationCenter
         setupTabConfigListener()
+    }
+
+    // MARK: - Tab Registry (1:1:1 Mapping)
+
+    /// Register a new Tab's ViewController (initially as pending)
+    /// The entry will be moved to tabRegistry when Host sends tabConfig with real tabId
+    func registerPendingEntry(internalId: String, containerView: ResizableContainerView) -> TabViewControllerEntry {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+
+        let entry = TabViewControllerEntry(internalId: internalId, containerView: containerView)
+        pendingEntries[internalId] = entry
+        debugLog("[pending:\(internalId.prefix(8))] Entry registered, pending count: \(pendingEntries.count)")
+        return entry
+    }
+
+    /// Unregister a Tab when its ViewController is destroyed
+    func unregisterEntry(internalId: String) {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+
+        // Try to find by internalId in pending
+        if let entry = pendingEntries.removeValue(forKey: internalId) {
+            debugLog("[pending:\(internalId.prefix(8))] Pending entry removed")
+            // Also remove from tabRegistry if it was assigned
+            if let tabId = entry.tabId {
+                tabRegistry.removeValue(forKey: tabId)
+            }
+            return
+        }
+
+        // Try to find in tabRegistry by checking internalId
+        for (tabId, entry) in tabRegistry {
+            if entry.internalId == internalId {
+                tabRegistry.removeValue(forKey: tabId)
+                debugLog("[\(tabId.prefix(8))] Entry removed from registry")
+                return
+            }
+        }
+    }
+
+    /// Get entry for a specific tabId (Host's Tab.id)
+    func getTabEntry(tabId: String) -> TabViewControllerEntry? {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        return tabRegistry[tabId]
+    }
+
+    /// Find the oldest pending entry and assign it the given tabId
+    /// Returns the entry if successful, nil if no pending entries
+    private func assignPendingEntry(tabId: String) -> TabViewControllerEntry? {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+
+        // If already registered, return existing
+        if let existing = tabRegistry[tabId] {
+            return existing
+        }
+
+        // Find the oldest pending entry (FIFO)
+        guard let (internalId, entry) = pendingEntries.first else {
+            debugLog("⚠️ No pending entries to assign tabId: \(tabId.prefix(8))")
+            return nil
+        }
+
+        // Remove from pending
+        pendingEntries.removeValue(forKey: internalId)
+
+        // Assign real tabId and add to registry
+        entry.assignTabId(tabId)
+        tabRegistry[tabId] = entry
+
+        debugLog("[\(tabId.prefix(8))] Assigned to pending entry, registry count: \(tabRegistry.count), pending count: \(pendingEntries.count)")
+        return entry
     }
 
     // MARK: - Tab Config IPC
 
     private func setupTabConfigListener() {
+        // Listen for tab config with service-specific notification
+        let notificationName = "com.canvas.tabConfig.\(serviceBundleId)"
+        debugLog("📡 Setting up listener for: \(notificationName)")
+
         tabConfigObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.canvas.tabConfig"),
+            forName: NSNotification.Name(notificationName),
             object: nil,
             queue: .main
         ) { [weak self] notification in
             self?.handleTabConfigNotification(notification)
         }
-        debugLog("Tab config listener installed")
 
-        // 通知 Host 端 XPC service 已准备好接收 tab config
+        // Notify Host that this service is ready
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name("com.canvas.xpcServiceReady"),
             object: nil,
-            userInfo: nil,
+            userInfo: ["bundleId": serviceBundleId],
             deliverImmediately: true
         )
-        debugLog("📤 Posted xpcServiceReady notification to host")
+        debugLog("📤 Posted xpcServiceReady with bundleId: \(serviceBundleId)")
     }
 
     private func handleTabConfigNotification(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let configJson = userInfo["config"] as? String,
               let configData = configJson.data(using: .utf8),
-              let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] else {
-            debugLog("⚠️ Invalid tab config notification")
+              let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any],
+              let tabId = config["tabId"] as? String else {
+            debugLog("⚠️ Invalid tab config notification (missing tabId)")
             return
         }
 
-        debugLog("📥 Received tab config: \(config["tabId"] ?? "?")")
+        debugLog("📥 Received config for tab: \(tabId.prefix(8))")
 
-        // Update React Native props with new tab config
-        updateTabConfig(config)
+        // Try to find existing entry, or assign a pending entry
+        let entry: TabViewControllerEntry?
+        if let existing = getTabEntry(tabId: tabId) {
+            entry = existing
+        } else {
+            // First config for this tabId - assign a pending entry
+            entry = assignPendingEntry(tabId: tabId)
+        }
+
+        if let entry = entry {
+            applyConfigToEntry(entry, config: config)
+        } else {
+            debugLog("⚠️ Tab \(tabId.prefix(8)) has no pending entry to assign")
+        }
     }
 
-    func updateTabConfig(_ config: [String: Any]) {
-        debugLog("📥 updateTabConfig: \(config["title"] ?? "?")")
+    private func applyConfigToEntry(_ entry: TabViewControllerEntry, config: [String: Any]) {
+        let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
+        debugLog("[\(logId)] Applying config: \(config["title"] ?? "?")")
 
-        // 如果 RN rootView 还未就绪，缓存配置
-        if rootView == nil {
-            debugLog("📥 RN not ready, caching tab config for later")
-            pendingTabConfig = config
+        // If RCTRootView not ready yet, cache config
+        guard entry.rootView != nil else {
+            debugLog("[\(logId)] RootView not ready, caching config")
+            entry.pendingConfig = config
             return
         }
 
-        applyTabConfig(config)
-    }
+        // Use Host's tabId (should be assigned by now)
+        let tabId = entry.tabId ?? entry.internalId
 
-    private func applyTabConfig(_ config: [String: Any]) {
-        // Build React Native tabs array from config
-        let tabId = config["tabId"] as? String ?? UUID().uuidString
+        // Build tab properties
         var tabDict: [String: Any] = [
             "id": tabId,
             "title": config["title"] as? String ?? "Untitled",
             "backgroundColor": config["backgroundColor"] as? String ?? "#1a1a2e"
         ]
 
-        // Copy system app type if present (takes priority over scripts)
+        // System app type
         if let systemAppType = config["systemAppType"] as? String {
             tabDict["systemAppType"] = systemAppType
-            debugLog("📥 Tab is system app: \(systemAppType)")
+            debugLog("[\(logId)] System app: \(systemAppType)")
         }
 
-        // Copy scripts
-        if let unifiedScript = config["unifiedScript"] as? String {
-            tabDict["unifiedScript"] = unifiedScript
-            debugLog("📥 Tab has unifiedScript: \(unifiedScript.prefix(100))...")
-        }
-        if let leftPanelScript = config["leftPanelScript"] as? String {
-            tabDict["leftPanelScript"] = leftPanelScript
-        }
-        if let rightPanelScript = config["rightPanelScript"] as? String {
-            tabDict["rightPanelScript"] = rightPanelScript
-        }
-        if let guestScript = config["guestScript"] as? String {
-            tabDict["guestScript"] = guestScript
-        }
+        // Scripts
+        if let s = config["unifiedScript"] as? String { tabDict["unifiedScript"] = s }
+        if let s = config["leftPanelScript"] as? String { tabDict["leftPanelScript"] = s }
+        if let s = config["rightPanelScript"] as? String { tabDict["rightPanelScript"] = s }
+        if let s = config["guestScript"] as? String { tabDict["guestScript"] = s }
 
-        // Update container size if provided
+        // System app data
+        if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }
+        if let recentHistory = config["recentHistory"] { tabDict["recentHistory"] = recentHistory }
+        if let historyGroups = config["historyGroups"] { tabDict["historyGroups"] = historyGroups }
+        if let historyItems = config["historyItems"] { tabDict["historyItems"] = historyItems }
+
+        // Update container size
         if let width = config["containerWidth"] as? Double,
            let height = config["containerHeight"] as? Double {
-            currentContainerSize = CGSize(width: width, height: height)
+            entry.containerSize = CGSize(width: width, height: height)
         }
 
-        // Build full properties using single tab mode (matching SingleTabRootView.swift)
+        // Build full properties
         let properties: [String: Any] = [
             "singleTabMode": true,
             "tab": tabDict,
             "currentTabId": tabId,
-            "isLeftPanelVisible": true,
-            "isRightPanelVisible": true,
-            "containerWidth": currentContainerSize.width,
-            "containerHeight": currentContainerSize.height
+            "isLeftPanelVisible": config["leftPanelVisible"] as? Bool ?? true,
+            "isRightPanelVisible": config["rightPanelVisible"] as? Bool ?? true,
+            "containerWidth": entry.containerSize.width,
+            "containerHeight": entry.containerSize.height
         ]
 
-        currentProperties = properties
-        debugLog("📥 Applying tab config to RN: \(config["title"] ?? "?")")
+        entry.currentProperties = properties
+        entry.rootView?.appProperties = properties
 
-        // Update React Native
-        rootView?.appProperties = properties
-
-        // Also update dimensions
-        updateDimensionsViaEvent(to: currentContainerSize)
+        // Update RN dimensions
+        updateDimensionsForEntry(entry)
     }
 
-    func createRootView(initialProperties: [String: Any], containerSize: CGSize) -> NSView {
-        debugLog("Creating RCTRootView, containerSize: \(containerSize)")
+    // MARK: - RCTRootView Creation
 
-        // Merge container size into initial properties
+    /// Create a new RCTRootView for a specific Tab
+    /// Each Tab gets its own RCTRootView, sharing the same RCTBridge
+    func createRootView(for entry: TabViewControllerEntry, initialProperties: [String: Any]) -> RCTRootView? {
+        let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
+        debugLog("[\(logId)] Creating RCTRootView")
+
         var properties = initialProperties
-        properties["containerWidth"] = containerSize.width
-        properties["containerHeight"] = containerSize.height
-        self.currentProperties = properties
-        self.currentContainerSize = containerSize
+        properties["containerWidth"] = entry.containerSize.width
+        properties["containerHeight"] = entry.containerSize.height
+        entry.currentProperties = properties
 
         let view = factory.rootViewFactory.view(
             withModuleName: "ActrApp",
@@ -315,86 +436,53 @@ private class ServiceReactNativeHost {
             launchOptions: nil
         )
 
-        if let rctRootView = view as? RCTRootView {
-            self.rootView = rctRootView
-            rctRootView.sizeFlexibility = .none
-            rctRootView.backgroundColor = NSColor.clear
-            debugLog("RCTRootView created successfully")
+        guard let rootView = view as? RCTRootView else {
+            debugLog("[\(logId)] ⚠️ Failed to create RCTRootView")
+            return nil
+        }
 
-            // 应用缓存的 tab config（如果有）
-            if let pending = pendingTabConfig {
-                debugLog("📥 Applying pending tab config")
-                pendingTabConfig = nil
-                // 稍微延迟以确保 RN bridge 就绪
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                    self?.applyTabConfig(pending)
-                }
+        rootView.sizeFlexibility = .none
+        rootView.backgroundColor = NSColor.clear
+        entry.rootView = rootView
+
+        debugLog("[\(logId)] RCTRootView created successfully")
+
+        // Apply pending config if any
+        if let pending = entry.pendingConfig {
+            entry.pendingConfig = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak entry] in
+                guard let entry = entry else { return }
+                self?.applyConfigToEntry(entry, config: pending)
             }
-        } else {
-            debugLog("WARNING: View is not RCTRootView, type: \(type(of: view))")
         }
 
-        return view
+        return rootView
     }
 
-    func updateProperties(_ properties: [String: Any]) {
-        var mergedProps = properties
-        // Preserve container size
-        mergedProps["containerWidth"] = currentContainerSize.width
-        mergedProps["containerHeight"] = currentContainerSize.height
-        currentProperties = mergedProps
-        rootView?.appProperties = mergedProps
-    }
+    /// Update container size for a specific Tab
+    func updateContainerSize(for entry: TabViewControllerEntry, size: CGSize) {
+        guard size.width > 0 && size.height > 0 else { return }
 
-    /// Update container size - this is the critical method for XPC service
-    /// Since RCTKeyWindow() returns nil in XPC, we pass container size via props
-    func updateContainerSize(to size: CGSize) {
-        guard size.width > 0 && size.height > 0 else {
-            debugLog("updateContainerSize: Invalid size \(size), skipping")
-            return
-        }
+        let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
+        debugLog("[\(logId)] updateContainerSize: \(entry.containerSize) -> \(size)")
+        entry.containerSize = size
 
-        debugLog("updateContainerSize: \(currentContainerSize) -> \(size)")
-
-        // Update stored size
-        currentContainerSize = size
-
-        // Update React Native props with new container size
-        var properties = currentProperties
+        var properties = entry.currentProperties
         properties["containerWidth"] = size.width
         properties["containerHeight"] = size.height
-        currentProperties = properties
+        entry.currentProperties = properties
 
-        if let rootView = rootView {
-            rootView.appProperties = properties
-            debugLog("updateContainerSize: Updated appProperties with new size")
-        } else {
-            debugLog("updateContainerSize: rootView not ready, size will be applied when created")
-        }
-
-        // Also try to update RN Dimensions via bridge event
-        updateDimensionsViaEvent(to: size)
+        entry.rootView?.appProperties = properties
+        updateDimensionsForEntry(entry)
     }
 
-    /// Update React Native Dimensions via event
-    private func updateDimensionsViaEvent(to size: CGSize) {
-        guard let bridge = rootView?.bridge else {
-            debugLog("updateDimensionsViaEvent: No bridge available")
-            return
-        }
+    private func updateDimensionsForEntry(_ entry: TabViewControllerEntry) {
+        guard let bridge = entry.rootView?.bridge else { return }
 
-        debugLog("updateDimensionsViaEvent: Sending size \(size) to React Native")
-
-        // Create dimensions object matching RCTDeviceInfo format
+        let size = entry.containerSize
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
-        let screenDims: [String: Any] = [
-            "width": size.width,
-            "height": size.height,
-            "scale": scale,
-            "fontScale": 1.0
-        ]
 
-        let windowDims: [String: Any] = [
+        let dims: [String: Any] = [
             "width": size.width,
             "height": size.height,
             "scale": scale,
@@ -402,90 +490,88 @@ private class ServiceReactNativeHost {
         ]
 
         let dimensions: [String: Any] = [
-            "window": windowDims,
-            "screen": screenDims
+            "window": dims,
+            "screen": dims
         ]
 
-        // Send didUpdateDimensions event through the bridge
         bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["didUpdateDimensions", dimensions], completion: nil)
-
-        debugLog("updateDimensionsViaEvent: Event sent successfully")
     }
 }
 
 // MARK: - Dynamic Class Registration
 
-/// Register CanvasServiceViewController as a subclass of NSServiceViewController at runtime
 @_cdecl("registerCanvasServiceViewController")
 public func registerCanvasServiceViewController() {
-    debugLog("Registering class...")
+    debugLog("Registering CanvasServiceViewController class...")
 
-    // Load ViewBridge framework
     let frameworkPath = "/System/Library/PrivateFrameworks/ViewBridge.framework/ViewBridge"
     guard dlopen(frameworkPath, RTLD_NOW) != nil else {
         debugLog("Failed to load ViewBridge")
         return
     }
 
-    // Get NSServiceViewController class
     guard let superclass = NSClassFromString("NSServiceViewController") else {
         debugLog("NSServiceViewController not found")
         return
     }
 
-    // Check if already registered
     if NSClassFromString("CanvasServiceViewController") != nil {
         debugLog("Already registered")
         return
     }
 
-    // Create new class as subclass of NSServiceViewController
     guard let newClass = objc_allocateClassPair(superclass, "CanvasServiceViewController", 0) else {
         debugLog("Failed to allocate class pair")
         return
     }
 
-    // Add loadView method - creates React Native view
-    // 简化架构：每个 XPC service 进程只处理一个 tab
-    let loadViewBlock: @convention(block) (AnyObject) -> Void = { (self_) in
-        debugLog("🔵 loadView called")
+    // Add instance variable to store tabId
+    class_addIvar(newClass, "_tabId", MemoryLayout<NSString>.size, UInt8(log2(Double(MemoryLayout<NSString>.alignment))), "@")
 
-        // 初始化 ServiceReactNativeHost（单例，包含 tab config 监听器）
-        _ = ServiceReactNativeHost.shared
-        debugLog("ServiceReactNativeHost initialized")
+    // loadView - creates React Native view for this Tab
+    let loadViewBlock: @convention(block) (AnyObject) -> Void = { self_ in
+        // Generate internal ID for tracking (Host will send the real tabId later)
+        let internalId = UUID().uuidString
+        debugLog("[pending:\(internalId.prefix(8))] loadView called")
 
-        // Use a reasonable default size instead of screen size
+        // Store internal ID in instance variable (for cleanup on dealloc)
+        object_setIvar(self_, class_getInstanceVariable(type(of: self_) as! AnyClass, "_tabId")!, internalId as NSString)
+
+        // Initialize shared host (creates shared RCTBridge)
+        let host = ServiceReactNativeHost.shared
+
         let initialWidth: CGFloat = 1280
         let initialHeight: CGFloat = 720
-        debugLog("Using default initial size: \(initialWidth)x\(initialHeight)")
 
         let containerView = ResizableContainerView(frame: NSRect(x: 0, y: 0, width: initialWidth, height: initialHeight))
         containerView.wantsLayer = true
         containerView.layer?.backgroundColor = NSColor.clear.cgColor
         containerView.autoresizingMask = []
 
-        // Set as view using KVC
+        // Register as pending entry (will be assigned real tabId when Host sends config)
+        let entry = host.registerPendingEntry(internalId: internalId, containerView: containerView)
+        entry.containerSize = CGSize(width: initialWidth, height: initialHeight)
+
         self_.setValue(containerView, forKey: "view")
-        debugLog("Container view set, frame: \(containerView.frame)")
 
         let targetSize = NSSize(width: initialWidth, height: initialHeight)
-        let preferredSizeSelector = NSSelectorFromString("setPreferredContentSize:")
-        if self_.responds(to: preferredSizeSelector) {
+        if self_.responds(to: NSSelectorFromString("setPreferredContentSize:")) {
             self_.setValue(NSValue(size: targetSize), forKey: "preferredContentSize")
-            debugLog("preferredContentSize set to \(targetSize)")
         }
 
-        debugLog("Setting up React Native content...")
-        setupReactNativeContent(in: containerView)
-        debugLog("React Native content setup complete")
+        // Setup React Native content for this Tab
+        setupReactNativeContent(for: entry)
     }
     let loadViewImp = imp_implementationWithBlock(loadViewBlock)
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
 
-    // Add remoteViewSizeDidChange: method - called by ViewBridge when host requests resize
-    // ViewBridge 自动同步 Host 端 NSRemoteView 的尺寸，直接使用无需过滤
-    let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { (self_, size) in
-        debugLog("remoteViewSizeDidChange -> \(size)")
+    // remoteViewSizeDidChange: - ViewBridge calls this when host resizes
+    let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { self_, size in
+        guard let tabIdObj = object_getIvar(self_, class_getInstanceVariable(type(of: self_) as! AnyClass, "_tabId")!) as? NSString else {
+            return
+        }
+        let tabId = tabIdObj as String
+        debugLog("[\(tabId.prefix(8))] remoteViewSizeDidChange: \(size)")
 
         if let view = self_.value(forKey: "view") as? NSView {
             CATransaction.begin()
@@ -493,94 +579,88 @@ public func registerCanvasServiceViewController() {
             view.setFrameSize(size)
             view.needsLayout = true
             CATransaction.commit()
-            debugLog("Updated view size to: \(size)")
         }
     }
     let sizeDidChangeImp = imp_implementationWithBlock(sizeDidChangeBlock)
-    // Signature: v = void, @ = self, : = selector, {CGSize=dd} = CGSize with two doubles
     class_addMethod(newClass, NSSelectorFromString("remoteViewSizeDidChange:"), sizeDidChangeImp, "v@:{CGSize=dd}")
 
-    // Add allowsImplicitResizeRequests - return YES to accept host-initiated resizes
-    // 这样 Host 端的约束变化会传递到 Service 端
-    let allowsImplicitBlock: @convention(block) (AnyObject) -> Bool = { _ in
-        debugLog("allowsImplicitResizeRequests called -> YES")
-        return true  // Accept implicit resize from host
-    }
-    let allowsImplicitImp = imp_implementationWithBlock(allowsImplicitBlock)
-    class_addMethod(newClass, NSSelectorFromString("allowsImplicitResizeRequests"), allowsImplicitImp, "B@:")
+    // allowsImplicitResizeRequests
+    let allowsImplicitBlock: @convention(block) (AnyObject) -> Bool = { _ in true }
+    class_addMethod(newClass, NSSelectorFromString("allowsImplicitResizeRequests"), imp_implementationWithBlock(allowsImplicitBlock), "B@:")
 
-    // Add makesExplicitResizeRequests - return YES (we control our size)
-    let makesExplicitBlock: @convention(block) (AnyObject) -> Bool = { _ in
-        debugLog("makesExplicitResizeRequests called -> YES")
-        return true  // We make explicit resize requests
-    }
-    let makesExplicitImp = imp_implementationWithBlock(makesExplicitBlock)
-    class_addMethod(newClass, NSSelectorFromString("makesExplicitResizeRequests"), makesExplicitImp, "B@:")
+    // makesExplicitResizeRequests
+    let makesExplicitBlock: @convention(block) (AnyObject) -> Bool = { _ in true }
+    class_addMethod(newClass, NSSelectorFromString("makesExplicitResizeRequests"), imp_implementationWithBlock(makesExplicitBlock), "B@:")
 
-    // Override setPreferredContentSize: to capture size changes from host
-    // 直接使用 Host 传来的尺寸，无需过滤
-    let setPreferredSizeBlock: @convention(block) (AnyObject, NSSize) -> Void = { (self_, size) in
-        debugLog("setPreferredContentSize -> \(size)")
-
+    // setPreferredContentSize:
+    let setPreferredSizeBlock: @convention(block) (AnyObject, NSSize) -> Void = { self_, size in
         if let view = self_.value(forKey: "view") as? NSView {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             view.setFrameSize(size)
             view.needsLayout = true
             CATransaction.commit()
-            debugLog("Updated view from setPreferredContentSize to: \(size)")
         }
     }
-    let setPreferredSizeImp = imp_implementationWithBlock(setPreferredSizeBlock)
-    class_addMethod(newClass, NSSelectorFromString("setPreferredContentSize:"), setPreferredSizeImp, "v@:{CGSize=dd}")
+    class_addMethod(newClass, NSSelectorFromString("setPreferredContentSize:"), imp_implementationWithBlock(setPreferredSizeBlock), "v@:{CGSize=dd}")
 
-    // Add remoteViewSize getter - return actual view size
+    // remoteViewSize
     let remoteViewSizeBlock: @convention(block) (AnyObject) -> CGSize = { self_ in
-        let size: CGSize
         if let view = self_.value(forKey: "view") as? NSView {
-            size = view.frame.size
-        } else {
-            size = .zero
+            return view.frame.size
         }
-        debugLog("remoteViewSize called -> \(size)")
-        return size
+        return .zero
     }
-    let remoteViewSizeImp = imp_implementationWithBlock(remoteViewSizeBlock)
-    class_addMethod(newClass, NSSelectorFromString("remoteViewSize"), remoteViewSizeImp, "{CGSize=dd}@:")
+    class_addMethod(newClass, NSSelectorFromString("remoteViewSize"), imp_implementationWithBlock(remoteViewSizeBlock), "{CGSize=dd}@:")
 
-    // Register the class
+    // dealloc - cleanup when ViewController is destroyed
+    let deallocBlock: @convention(block) (AnyObject) -> Void = { self_ in
+        if let tabIdObj = object_getIvar(self_, class_getInstanceVariable(type(of: self_) as! AnyClass, "_tabId")!) as? NSString {
+            let internalId = tabIdObj as String
+            debugLog("[\(internalId.prefix(8))] ViewController dealloc")
+            ServiceReactNativeHost.shared.unregisterEntry(internalId: internalId)
+        }
+    }
+    // Note: dealloc needs special handling, using release pattern instead
+    // For now, rely on notification or explicit cleanup
+
     objc_registerClassPair(newClass)
-    debugLog("Class registered successfully")
+    debugLog("CanvasServiceViewController class registered")
 }
 
 // MARK: - React Native Content Setup
 
-/// 简化版 - 每个 XPC service 进程只处理一个 tab
-/// 使用 ServiceReactNativeHost.shared 单例
-private func setupReactNativeContent(in containerView: NSView) {
-    debugLog("Setting up React Native content (single-process mode)")
+/// Setup React Native content for a specific Tab entry
+private func setupReactNativeContent(for entry: TabViewControllerEntry) {
+    let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
 
-    // Show loading indicator first
+    guard let containerView = entry.containerView else {
+        debugLog("[\(logId)] ⚠️ containerView is nil")
+        return
+    }
+
+    debugLog("[\(logId)] Setting up React Native content")
+
+    // Loading indicator
     let loadingLabel = NSTextField(labelWithString: "Starting React Native...")
     loadingLabel.font = NSFont.systemFont(ofSize: 14)
     loadingLabel.textColor = NSColor.secondaryLabelColor
     loadingLabel.alignment = .center
     loadingLabel.translatesAutoresizingMaskIntoConstraints = false
     containerView.addSubview(loadingLabel)
-
     NSLayoutConstraint.activate([
         loadingLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
         loadingLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor)
     ])
 
-    // Initial properties - will be updated when host sends tab config via IPC
-    // Use systemAppType: "loading" to avoid triggering ActrApp which imports askit
-    let initialTabId = UUID().uuidString  // 临时 ID，会被 Host 发送的 tab config 覆盖
+    // Initial properties with "loading" type (avoids loading askit)
+    // Use internalId for initial properties (Host tabId not yet known)
+    let initialTabId = entry.tabId ?? entry.internalId
     let initialTab: [String: Any] = [
         "id": initialTabId,
         "title": "XPC Service Ready",
-        "backgroundColor": "#1e40af",  // 深蓝色背景，易于区分
-        "systemAppType": "loading"  // 使用 loading 类型避免加载 ActrApp
+        "backgroundColor": "#1e40af",
+        "systemAppType": "loading"
     ]
     let initialProperties: [String: Any] = [
         "singleTabMode": true,
@@ -590,60 +670,47 @@ private func setupReactNativeContent(in containerView: NSView) {
         "isRightPanelVisible": true
     ]
 
-    // Create RN view in background to not block
+    // Create RN view asynchronously
+    // Capture logId for use in async blocks
+    let asyncLogId = logId
     DispatchQueue.global(qos: .userInitiated).async {
-        // Small delay to let ViewBridge connection stabilize
-        Thread.sleep(forTimeInterval: 0.5)
+        Thread.sleep(forTimeInterval: 0.3)
 
         DispatchQueue.main.async {
-            debugLog("Creating React Native root view (single-process mode)")
-
-            // Remove loading indicator
             loadingLabel.removeFromSuperview()
 
-            // Get container size for React Native
-            let containerSize = containerView.bounds.size
-            debugLog("Creating RN view with containerSize: \(containerSize)")
+            guard let container = entry.containerView else { return }
+            let containerSize = container.bounds.size
+            entry.containerSize = containerSize
 
-            // Create and add React Native view with initial properties
-            // 使用进程单例 ServiceReactNativeHost.shared
-            let rnView = ServiceReactNativeHost.shared.createRootView(
-                initialProperties: initialProperties,
-                containerSize: containerSize
-            )
+            debugLog("[\(asyncLogId)] Creating RCTRootView, size: \(containerSize)")
 
-            // Use frame-based layout instead of Auto Layout (RCTRootView may not work well with Auto Layout)
-            rnView.frame = containerView.bounds
-            rnView.autoresizingMask = [.width, .height]
-            containerView.addSubview(rnView)
-
-            // Register RN view with ResizableContainerView for resize handling
-            if let resizableContainer = containerView as? ResizableContainerView {
-                resizableContainer.setRNView(rnView)
-
-                // Connect size change callback to update React Native container size
-                // 使用进程单例 ServiceReactNativeHost.shared
-                resizableContainer.onSizeChanged = { newSize in
-                    debugLog("onSizeChanged callback: \(newSize)")
-                    ServiceReactNativeHost.shared.updateContainerSize(to: newSize)
-                }
-
-                // Send initial dimensions to React Native (as backup)
-                // Note: containerSize is already passed during createRootView
-                let initialSize = containerView.bounds.size
-                if initialSize.width > 0 && initialSize.height > 0 {
-                    // Delay slightly to ensure bridge is ready, then send again
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        ServiceReactNativeHost.shared.updateContainerSize(to: initialSize)
-                    }
-                }
+            guard let rnView = ServiceReactNativeHost.shared.createRootView(
+                for: entry,
+                initialProperties: initialProperties
+            ) else {
+                debugLog("[\(asyncLogId)] ⚠️ Failed to create RCTRootView")
+                return
             }
 
-            debugLog("React Native view added to container, rnView.frame: \(rnView.frame), container.bounds: \(containerView.bounds)")
+            rnView.frame = container.bounds
+            rnView.autoresizingMask = [.width, .height]
+            container.addSubview(rnView)
+            container.setRNView(rnView)
 
-            // Force layout update
-            rnView.needsLayout = true
-            containerView.needsLayout = true
+            // Size change callback
+            container.onSizeChanged = { [weak entry] newSize in
+                guard let entry = entry else { return }
+                ServiceReactNativeHost.shared.updateContainerSize(for: entry, size: newSize)
+            }
+
+            debugLog("[\(asyncLogId)] RCTRootView added to container")
+
+            // Send initial dimensions after bridge is ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak entry] in
+                guard let entry = entry else { return }
+                ServiceReactNativeHost.shared.updateContainerSize(for: entry, size: entry.containerSize)
+            }
         }
     }
 }

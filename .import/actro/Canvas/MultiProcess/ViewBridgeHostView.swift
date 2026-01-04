@@ -472,9 +472,13 @@ final class ViewBridgeCoordinator {
             DistributedNotificationCenter.default().removeObserver(observer)
             xpcReadyObserver = nil
         }
+        // 断开 ViewBridge 连接
+        hostView?.disconnect()
+        hostView = nil
+
         if let tabId = tabId, allocatedServiceId != nil {
             XPCServicePool.shared.releaseService(for: tabId)
-            fputs("📦 Coordinator cleanup: Tab \(tabId.uuidString.prefix(8)) released service\n", stderr)
+            fputs("📦 Coordinator cleanup: Tab \(tabId.uuidString.prefix(8)) released service and disconnected\n", stderr)
         }
         allocatedServiceId = nil
         xpcServiceReady = false
@@ -546,9 +550,10 @@ struct ViewBridgeTabView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
-        NSLog("❌ ViewBridgeTabView.dismantleNSView: DISCONNECTING!")
-        nsView.disconnect()
-        // Note: 进程池释放由 ViewBridgeMultiProcessTabView 的 onDisappear 处理
+        // 不在这里断开连接！SwiftUI 可能会因为尺寸变化频繁调用 dismantle
+        // 连接生命周期由 ViewBridgeCoordinator.deinit 管理
+        NSLog("⚠️ ViewBridgeTabView.dismantleNSView called (NOT disconnecting - managed by coordinator)")
+        // Note: 旧设计会调用 nsView.disconnect()，但这会在尺寸变化时意外断开连接
     }
 }
 
@@ -678,14 +683,31 @@ struct ViewBridgeMultiProcessTabView: View {
         // 使用 coordinator 的状态，避免重复设置
         guard coordinator.xpcReadyObserver == nil else { return }
 
-        NSLog("📡 [HOST] Setting up XPC ready listener for tab: %@", String(tab.id.uuidString.prefix(8)))
+        // Get the allocated service bundle identifier from coordinator
+        guard let expectedBundleId = coordinator.allocatedServiceId else {
+            NSLog("⚠️ [HOST] Cannot setup XPC ready listener - no service allocated")
+            return
+        }
+
+        NSLog("📡 [HOST] Setting up XPC ready listener for tab: %@, expecting bundleId: %@",
+              String(tab.id.uuidString.prefix(8)), expectedBundleId)
 
         coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.canvas.xpcServiceReady"),
             object: nil,
             queue: .main
-        ) { [coordinator] _ in
-            NSLog("📡 [HOST] Received xpcServiceReady notification for tab: %@", String(tab.id.uuidString.prefix(8)))
+        ) { [coordinator, expectedBundleId] notification in
+            // Filter by bundle identifier - only accept notifications from our target service
+            guard let userInfo = notification.userInfo,
+                  let notifyingBundleId = userInfo["bundleId"] as? String,
+                  notifyingBundleId == expectedBundleId else {
+                NSLog("📡 [HOST] Ignoring xpcServiceReady from different service: %@",
+                      notification.userInfo?["bundleId"] as? String ?? "unknown")
+                return
+            }
+
+            NSLog("📡 [HOST] Received xpcServiceReady notification for tab: %@ from: %@",
+                  String(tab.id.uuidString.prefix(8)), notifyingBundleId)
             coordinator.xpcServiceReady = true
             sendTabConfigIfReady()
         }
@@ -732,9 +754,16 @@ struct ViewBridgeMultiProcessTabView: View {
 
     /// Send tab configuration to the ViewBridge service via DistributedNotificationCenter
     private func sendTabConfigToService() {
-        NSLog("📤 [HOST] Sending tab config to service: tabId=%@, systemTabType=%@",
+        // Get the target service bundle identifier from coordinator
+        guard let targetServiceId = coordinator.allocatedServiceId else {
+            NSLog("⚠️ [HOST] Cannot send tab config - no service allocated")
+            return
+        }
+
+        NSLog("📤 [HOST] Sending tab config to service: tabId=%@, systemTabType=%@, targetService=%@",
               String(tab.id.uuidString.prefix(8)),
-              tab.systemTabType?.rawValue ?? "nil")
+              tab.systemTabType?.rawValue ?? "nil",
+              targetServiceId)
 
         // Build tab config dictionary
         var tabConfig: [String: Any] = [
@@ -764,13 +793,17 @@ struct ViewBridgeMultiProcessTabView: View {
             tabConfig["systemAppType"] = systemTabType.rawValue
         }
 
-        // Serialize to JSON and send
+        // Serialize to JSON and send using service-specific notification name
+        // Format: com.canvas.tabConfig.<bundleId>
         if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
            let jsonString = String(data: jsonData, encoding: .utf8) {
             fputs("📤 Tab config JSON: \(jsonString.prefix(200))...\n", stderr)
 
+            let notificationName = "com.canvas.tabConfig.\(targetServiceId)"
+            fputs("📤 Posting to notification: \(notificationName)\n", stderr)
+
             DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name("com.canvas.tabConfig"),
+                NSNotification.Name(notificationName),
                 object: nil,
                 userInfo: ["config": jsonString],
                 deliverImmediately: true
