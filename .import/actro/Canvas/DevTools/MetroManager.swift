@@ -51,8 +51,8 @@ class MetroManager: ObservableObject {
 
     // MARK: - Address
 
-    let address = MetroAddressResolver.currentAddress
-    let port = MetroAddressResolver.port
+    let address = MetroAddressResolver.address
+    let port = MetroAddressResolver.currentPort
     var host: String { "\(address):\(port)" }
     var baseURL: URL { MetroAddressResolver.currentBaseURL }
 
