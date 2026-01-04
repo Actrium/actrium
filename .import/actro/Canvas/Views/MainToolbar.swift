@@ -1,203 +1,45 @@
-import AppKit
 import SwiftUI
-import Combine
 
-// MARK: - Window Toolbar Configurator
+// MARK: - Custom Toolbar View
 
-/// Sets up the AppKit toolbar when the SwiftUI view appears
-struct WindowToolbarConfigurator: NSViewRepresentable {
+/// Pure SwiftUI toolbar with precise layout control
+/// Layout: [Left buttons] [Spacer] [AddressBar 50%] [Spacer] [Right buttons]
+struct CustomToolbarView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @Binding var isWebLoading: Bool
-    let toggleFocusOverview: () -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            setupToolbar(for: view)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        // Trigger toolbar content update via notification
-        if let window = nsView.window {
-            NotificationCenter.default.post(
-                name: .toolbarNeedsUpdate,
-                object: window
-            )
-        }
-    }
-
-    private func setupToolbar(for view: NSView) {
-        guard let window = view.window else { return }
-        if window.toolbar is MainToolbar { return }
-
-        let toolbar = MainToolbar()
-        toolbar.configure(
-            viewModel: viewModel,
-            bookmarkVM: bookmarkVM,
-            isWebLoadingBinding: _isWebLoading,
-            toggleFocusOverview: toggleFocusOverview
-        )
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
-    }
-}
-
-extension Notification.Name {
-    static let toolbarNeedsUpdate = Notification.Name("toolbarNeedsUpdate")
-}
-
-// MARK: - Main Toolbar
-
-/// AppKit toolbar with single full-width item for precise layout control
-class MainToolbar: NSToolbar, NSToolbarDelegate {
-
-    private static let fullWidthItemId = NSToolbarItem.Identifier("fullWidthContent")
-
-    private var viewModel: BrowserViewModel?
-    private var bookmarkVM: BookmarkViewModel?
-    private var isWebLoadingBinding: Binding<Bool>?
-    private var toggleFocusOverview: (() -> Void)?
-    private var contentHostingView: NSHostingView<AnyView>?
-    private var cancellables = Set<AnyCancellable>()
-
-    override init(identifier: NSToolbar.Identifier = NSToolbar.Identifier("MainToolbar")) {
-        super.init(identifier: identifier)
-        self.delegate = self
-        self.displayMode = .iconOnly
-        self.allowsUserCustomization = false
-    }
-
-    func configure(
-        viewModel: BrowserViewModel,
-        bookmarkVM: BookmarkViewModel,
-        isWebLoadingBinding: Binding<Bool>,
-        toggleFocusOverview: @escaping () -> Void
-    ) {
-        self.viewModel = viewModel
-        self.bookmarkVM = bookmarkVM
-        self.isWebLoadingBinding = isWebLoadingBinding
-        self.toggleFocusOverview = toggleFocusOverview
-
-        // Listen for update notifications
-        NotificationCenter.default.publisher(for: .toolbarNeedsUpdate)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.updateContent()
-            }
-            .store(in: &cancellables)
-
-        // Observe window resize
-        NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                guard let window = notification.object as? NSWindow,
-                      window.toolbar === self else { return }
-                self?.updateContent()
-            }
-            .store(in: &cancellables)
-    }
-
-    private func updateContent() {
-        guard let hostingView = contentHostingView,
-              let viewModel = viewModel,
-              let bookmarkVM = bookmarkVM,
-              let isWebLoadingBinding = isWebLoadingBinding,
-              let toggleFocusOverview = toggleFocusOverview else { return }
-
-        // Get window width for address bar sizing
-        let windowWidth = hostingView.window?.frame.width ?? 800
-
-        let content = ToolbarContentView(
-            viewModel: viewModel,
-            bookmarkVM: bookmarkVM,
-            isWebLoading: isWebLoadingBinding,
-            windowWidth: windowWidth,
-            toggleFocusOverview: toggleFocusOverview
-        )
-        hostingView.rootView = AnyView(content)
-    }
-
-    // MARK: - NSToolbarDelegate
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        guard itemIdentifier == Self.fullWidthItemId else { return nil }
-
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-
-        guard let viewModel = viewModel,
-              let bookmarkVM = bookmarkVM,
-              let isWebLoadingBinding = isWebLoadingBinding,
-              let toggleFocusOverview = toggleFocusOverview else {
-            return item
-        }
-
-        let windowWidth: CGFloat = 800 // Initial width, will be updated
-        let content = ToolbarContentView(
-            viewModel: viewModel,
-            bookmarkVM: bookmarkVM,
-            isWebLoading: isWebLoadingBinding,
-            windowWidth: windowWidth,
-            toggleFocusOverview: toggleFocusOverview
-        )
-
-        let hostingView = NSHostingView(rootView: AnyView(content))
-        hostingView.translatesAutoresizingMaskIntoConstraints = false
-
-        item.view = hostingView
-        self.contentHostingView = hostingView
-
-        return item
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.fullWidthItemId]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.fullWidthItemId]
-    }
-}
-
-// MARK: - Toolbar Content View (SwiftUI)
-
-/// Full toolbar content with precise layout: [Left] [Spacer] [AddressBar 50%] [Spacer] [Right]
-private struct ToolbarContentView: View {
-    @ObservedObject var viewModel: BrowserViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
-    @Binding var isWebLoading: Bool
-    let windowWidth: CGFloat
     let toggleFocusOverview: () -> Void
 
     var body: some View {
-        let addressBarWidth = max(windowWidth * 0.5, 200)
+        GeometryReader { geometry in
+            let addressBarWidth = max(geometry.size.width * 0.5, 200)
 
-        HStack(spacing: 0) {
-            // 左功能组（左对齐）
-            leftButtonsGroup
-                .frame(minWidth: 60, alignment: .leading)
+            HStack(spacing: 0) {
+                // 左功能组（左对齐）
+                leftButtonsGroup
 
-            Spacer(minLength: 12)
+                Spacer(minLength: 12)
 
-            // 地址栏（50% 窗口宽度）
-            addressBarView
-                .frame(width: addressBarWidth)
+                // 地址栏（50% 窗口宽度）
+                addressBarView
+                    .frame(width: addressBarWidth)
 
-            Spacer(minLength: 12)
+                Spacer(minLength: 12)
 
-            // 右功能组（右对齐）
-            rightButtonsGroup
-                .frame(minWidth: 60, alignment: .trailing)
+                // 右功能组（右对齐）
+                rightButtonsGroup
+            }
+            .padding(.horizontal, 8)
+            .frame(width: geometry.size.width, height: 38)
         }
-        .frame(maxWidth: .infinity)
+        .frame(height: 38)
+        .background(VisualEffectBackground())
     }
 
     // MARK: - Left Buttons
 
     private var leftButtonsGroup: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             Button(action: { viewModel.goBack() }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .medium))
@@ -219,7 +61,7 @@ private struct ToolbarContentView: View {
     // MARK: - Right Buttons
 
     private var rightButtonsGroup: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             DownloadToolbarButton()
 
             if case .focus = viewModel.canvasMode,
@@ -267,12 +109,29 @@ private struct ToolbarContentView: View {
     }
 }
 
+// MARK: - Visual Effect Background
+
+private struct VisualEffectBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .titlebar
+        view.blendingMode = .withinWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
 // MARK: - Toolbar Button Style
 
 private struct ToolbarButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .frame(width: 28, height: 22)
+            .foregroundColor(isEnabled ? .primary : .secondary.opacity(0.5))
+            .frame(width: 32, height: 24)
             .background(
                 RoundedRectangle(cornerRadius: 5)
                     .fill(configuration.isPressed ? Color.white.opacity(0.1) : Color.clear)
