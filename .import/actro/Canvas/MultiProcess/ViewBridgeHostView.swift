@@ -42,6 +42,10 @@ public class ViewBridgeHostView: NSView {
     /// Callback when XPC connection is established
     public var onConnectionEstablished: (() -> Void)?
 
+    /// Reference to coordinator for lifecycle management
+    /// When SwiftUI replaces the view, we only disconnect if coordinator.hostView still points to us
+    weak var coordinator: ViewBridgeCoordinator?
+
     /// 节流：上次更新时间
     private var lastResizeTime: Date = .distantPast
     /// 节流：待处理的尺寸更新
@@ -393,7 +397,13 @@ public class ViewBridgeHostView: NSView {
     deinit {
         resizeThrottleTimer?.invalidate()
         resizeThrottleTimer = nil
-        disconnect()
+        // Only disconnect if the coordinator still points to us
+        // When SwiftUI replaces the view, coordinator.hostView will point to the new view
+        if coordinator == nil || coordinator?.hostView === self {
+            disconnect()
+        } else {
+            NSLog("ViewBridgeHostView: deinit skipped disconnect (replaced by new view)")
+        }
     }
 
     // MARK: - Snapshot
@@ -535,6 +545,8 @@ struct ViewBridgeTabView: NSViewRepresentable {
               serviceBundleIdentifier.components(separatedBy: ".").last ?? "",
               contentSize.width, contentSize.height)
         let view = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: contentSize)
+        // Set coordinator reference for lifecycle management
+        view.coordinator = coordinator
         coordinator.hostView = view
         // 设置连接建立回调
         view.onConnectionEstablished = { [weak coordinator] in
@@ -545,6 +557,8 @@ struct ViewBridgeTabView: NSViewRepresentable {
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
         fputs("📐 ViewBridgeTabView.updateNSView: contentSize=\(contentSize)\n", stderr)
+        // Ensure coordinator reference is set
+        nsView.coordinator = coordinator
         coordinator.hostView = nsView
         nsView.updateContentSize(contentSize)
     }
