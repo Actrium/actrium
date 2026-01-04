@@ -371,6 +371,7 @@ struct WorkspaceMainView: View {
                         .frame(width: addressBarWidth)
                     }
                 }
+                .id(viewportSize.width)  // 窗口宽度变化时强制重新布局
 
                 // 右侧：操作按钮
                 ToolbarItemGroup(placement: .primaryAction) {
