@@ -299,8 +299,7 @@ struct WorkspaceMainView: View {
                 // 结构：[左功能组] [Spacer] [地址栏 50%] [Spacer] [右功能组]
                 // 用 viewportSize 计算地址栏宽度（viewportSize 约等于窗口内容区宽度）
                 ToolbarItem(placement: .principal) {
-                    // 地址栏宽度：窗口宽度的 40%，最大 600px
-                    let addressBarWidth = min(viewportSize.width * 0.4, 600)
+                    let addressBarWidth = viewportSize.width * 0.5
 
                     HStack(spacing: 0) {
                         // 左功能组
@@ -408,6 +407,7 @@ struct WorkspaceMainView: View {
                             .help("标签总览 (⌘⇧\\)")
                         }
                     }
+                    .frame(maxWidth: .infinity)
                 }
             }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
