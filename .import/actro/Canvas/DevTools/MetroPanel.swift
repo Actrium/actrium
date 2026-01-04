@@ -100,6 +100,14 @@ struct MetroPanel: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(metro.state == .starting)
                 }
+
+                Spacer()
+
+                Button("Clear logs") {
+                    metro.clearLogs()
+                }
+                .buttonStyle(.bordered)
+                .disabled(metro.logs.isEmpty)
             }
         }
     }
@@ -249,42 +257,21 @@ struct MetroPanel: View {
     // MARK: - Logs Panel
 
     private var logsPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Logs")
-                    .font(.headline)
-
-                Spacer()
-
-                Button {
-                    metro.clearLogs()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .disabled(metro.logs.isEmpty)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
-            Divider()
-
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(metro.logs) { entry in
-                            logEntryRow(entry)
-                                .id(entry.id)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(metro.logs) { entry in
+                        logEntryRow(entry)
+                            .id(entry.id)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
                 }
-                .onChange(of: metro.logs.count) { _, _ in
-                    if let lastLog = metro.logs.last {
-                        withAnimation {
-                            proxy.scrollTo(lastLog.id, anchor: .bottom)
-                        }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+            }
+            .onChange(of: metro.logs.count) { _, _ in
+                if let lastLog = metro.logs.last {
+                    withAnimation {
+                        proxy.scrollTo(lastLog.id, anchor: .bottom)
                     }
                 }
             }
