@@ -311,15 +311,17 @@ struct WorkspaceMainView: View {
                 }
 
                 ToolbarItemGroup(placement: .principal) {
-                    // 地址栏固定宽度，principal placement 自动居中
-                    let addressBarWidth: CGFloat = 500
+                    GeometryReader { geo in
+                        // 动态宽度：toolbar 可用宽度的 50%，限制在 300-600 之间
+                        let addressBarWidth = min(600, max(300, geo.size.width * 0.5))
 
-                    // Overview 模式：显示空状态；Focus 模式：显示地址栏
-                    if case .overview = viewModel.canvasMode {
-                        // Overview 模式下的空占位
-                        Color.clear
-                            .frame(width: addressBarWidth, height: 28)
-                    } else {
+                        // Overview 模式：显示空状态；Focus 模式：显示地址栏
+                        if case .overview = viewModel.canvasMode {
+                            // Overview 模式下的空占位
+                            Color.clear
+                                .frame(width: addressBarWidth, height: 28)
+                                .frame(maxWidth: .infinity)
+                        } else {
                         // Determine left icon state based on tab type
                         let leftIconState: AddressBarLeftIconState = {
                             guard let tab = viewModel.currentTab else { return .none }
@@ -385,7 +387,10 @@ struct WorkspaceMainView: View {
                             }
                         )
                         .frame(width: addressBarWidth)
+                        .frame(maxWidth: .infinity)  // 居中
+                        }
                     }
+                    .frame(height: 28)
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
