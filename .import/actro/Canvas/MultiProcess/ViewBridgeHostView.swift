@@ -39,6 +39,9 @@ public class ViewBridgeHostView: NSView {
     /// Current content size - 跟随 TabPanel 实际尺寸
     private var currentContentSize: CGSize = CGSize(width: 1280, height: 720)
 
+    /// Callback when XPC connection is established
+    public var onConnectionEstablished: (() -> Void)?
+
     /// 节流：上次更新时间
     private var lastResizeTime: Date = .distantPast
     /// 节流：待处理的尺寸更新
@@ -256,6 +259,9 @@ public class ViewBridgeHostView: NSView {
         super.setFrameSize(currentContentSize)
 
         NSLog("ViewBridgeHostView: Remote view embedded, size=\(currentContentSize)")
+
+        // 通知连接已建立
+        onConnectionEstablished?()
     }
 
     // MARK: - Content Size Management
@@ -445,6 +451,8 @@ import Combine
 /// Coordinator that holds reference to ViewBridgeHostView
 final class ViewBridgeCoordinator {
     weak var hostView: ViewBridgeHostView?
+    /// Callback when XPC connection is established
+    var onConnectionEstablished: (() -> Void)?
 
     func captureSnapshot() -> NSImage? {
         return hostView?.captureSnapshot()
@@ -497,6 +505,10 @@ struct ViewBridgeTabView: NSViewRepresentable {
               contentSize.width, contentSize.height)
         let view = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: contentSize)
         coordinator.hostView = view
+        // 设置连接建立回调
+        view.onConnectionEstablished = { [weak coordinator] in
+            coordinator?.onConnectionEstablished?()
+        }
         return view
     }
 
@@ -561,9 +573,13 @@ struct ViewBridgeMultiProcessTabView: View {
                 .clipped()
                 .onAppear {
                     isLoading = false
-                    hasConnection = true
                     fputs("📤 ViewBridgeTabView appeared with service \(serviceId.components(separatedBy: ".").last ?? ""), fingerprint: \(fingerprint.prefix(16))\n", stderr)
-                    sendTabConfigToService()
+                    // 设置连接建立回调 - 在 XPC 连接成功后发送 tab config
+                    coordinator.onConnectionEstablished = { [self] in
+                        hasConnection = true
+                        fputs("📤 XPC connection established, sending tab config: \(tab.id.uuidString.prefix(8))\n", stderr)
+                        sendTabConfigToService()
+                    }
                 }
                 .onChange(of: tab.unifiedScript) { _, _ in
                     sendTabConfigToService()
