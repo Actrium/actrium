@@ -38,6 +38,7 @@ struct WorkspaceMainView: View {
     // Search Tabs 状态
     @State private var searchTabsText: String = ""
     @FocusState private var isSearchTabsFocused: Bool
+    @State private var shouldAutoFocusSearchTabs: Bool = false
 
     // Find in Page 状态
     @State private var showFindBar: Bool = false
@@ -130,6 +131,8 @@ struct WorkspaceMainView: View {
                     mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
                     viewportSize: safeViewportSize,
+                    bookmarkVM: bookmarkVM,
+                    historyVM: historyVM,
                     // ━━━━ Mode Switching Trigger #3: 卡片点击 ━━━━
                     onSelectTab: { tabId in
                         enterFocus(tabId: tabId)
@@ -144,6 +147,12 @@ struct WorkspaceMainView: View {
                         withAnimation {
                             viewModel.closeTab(id: tabId)
                         }
+                    },
+                    onNavigate: { tabId, url in
+                        // Navigate the tab to the URL from Start Page
+                        viewModel.currentTabId = tabId
+                        viewModel.navigateCurrentTab(to: url.absoluteString)
+                        enterFocus(tabId: tabId)
                     }
                 )
                 .frame(width: canvasSize.width, height: canvasSize.height)
@@ -261,6 +270,12 @@ struct WorkspaceMainView: View {
                             .textFieldStyle(.plain)
                             .frame(width: 150)
                             .focused($isSearchTabsFocused)
+                            .onAppear {
+                                if shouldAutoFocusSearchTabs {
+                                    shouldAutoFocusSearchTabs = false
+                                    isSearchTabsFocused = true
+                                }
+                            }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -327,8 +342,18 @@ struct WorkspaceMainView: View {
                                 return tab.url?.absoluteString ?? ""
                             }()
 
+                            // Safari-style: web tab shows main domain only, other tabs show title
+                            let displayTitle: String = {
+                                guard let tab = viewModel.currentTab else { return "New Tab" }
+                                if case .web = tab.contentType, let host = tab.url?.host {
+                                    // Strip www. prefix
+                                    return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                                }
+                                return tab.title
+                            }()
+
                             AddressBarContainer(
-                                titleText: .constant(viewModel.currentTab?.title ?? "New Tab"),
+                                titleText: .constant(displayTitle),
                                 urlText: currentURLString,
                                 inputText: $addressInputText,
                                 isEditing: $isAddressBarEditing,
@@ -340,26 +365,26 @@ struct WorkspaceMainView: View {
                                         viewModel.toggleLeftPanelForCurrentTab()
                                     }
                                 },
-                                toggleBookmark: {
-                                    if let tab = viewModel.currentTab {
-                                        if bookmarkVM.isBookmarked(tab: tab) {
-                                            // Already bookmarked - open edit sheet
-                                            showingBookmarkSheet = true
-                                        } else {
-                                            // Not bookmarked - show add sheet
-                                            showingBookmarkSheet = true
-                                        }
-                                    }
-                                },
+                                showingBookmarkPopover: $showingBookmarkSheet,
+                                shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
                                 refreshAction: {
                                     viewModel.reloadCurrentTab()
                                 },
                                 onNavigate: { input in
                                     // 导航到 URL 或 app id
                                     viewModel.navigateCurrentTab(to: input)
-                                    // 退出编辑状态
-                                    isAddressBarEditing = false
-                                    addressInputText = ""
+                                    // 退出编辑状态（设置 isFirstResponder=false 会自动退出编辑模式）
+                                    isAddressBarFirstResponder = false
+                                },
+                                bookmarkPopoverContent: {
+                                    if let tab = viewModel.currentTab {
+                                        let existingBookmark = bookmarkVM.getBookmark(for: tab)
+                                        BookmarkEditSheet(
+                                            viewModel: bookmarkVM,
+                                            tab: existingBookmark == nil ? tab : nil,
+                                            existingBookmark: existingBookmark
+                                        )
+                                    }
                                 }
                             )
                             .frame(width: addressBarContainerWidth)
@@ -382,10 +407,13 @@ struct WorkspaceMainView: View {
                     // Downloads button
                     DownloadToolbarButton()
 
-                    Button(action: {}) {
-                        Image(systemName: "square.and.arrow.up")
+                    // QR Code & Share buttons - only visible in Focus mode with valid URL
+                    if case .focus = viewModel.canvasMode,
+                       let currentTab = viewModel.currentTab,
+                       currentTab.url != nil {
+                        ShareToolbarButton(url: currentTab.url)
+                        QRCodeToolbarButton(url: currentTab.url)
                     }
-                    .help("分享")
 
                     Button(action: {
                         withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
@@ -398,7 +426,7 @@ struct WorkspaceMainView: View {
 
                     // ━━━━ Mode Switching Trigger #2: Toolbar 按钮 ━━━━
                     Button(action: toggleFocusOverview) {
-                        Image(systemName: "square.grid.2x2")
+                        Image(systemName: "square.on.square")
                     }
                     .help("标签总览 (⌘⇧\\)")
                 }
@@ -415,29 +443,17 @@ struct WorkspaceMainView: View {
                 }
             }
 
-            // 进入 Overview 模式时自动聚焦搜索框
+            // 进入 Overview 模式时标记需要自动聚焦搜索框
             if case .overview = newValue {
-                // 延迟一帧，确保搜索框已渲染
-                DispatchQueue.main.async {
-                    isSearchTabsFocused = true
-                }
+                shouldAutoFocusSearchTabs = true
             } else {
                 // 离开 Overview 模式时清空搜索文本
                 searchTabsText = ""
                 isSearchTabsFocused = false
             }
         }
-        .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, shouldFocus in
-            // 新建 Tab 后自动聚焦地址栏
-            if shouldFocus {
-                viewModel.shouldAutoFocusAddressBar = false
-                // 延迟一帧，确保 Focus 模式 UI 已渲染
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isAddressBarFirstResponder = true
-                    isAddressBarEditing = true
-                }
-            }
-        }
+        // shouldAutoFocusAddressBar 的处理移到 AddressBarContainer 的 onAppear 中
+        // 这样当地址栏实际渲染时才触发，无需延迟
         .onAppear {
             fputs("🟡 onAppear: shouldStartInFocusMode=\(viewModel.shouldStartInFocusMode), currentTabId=\(viewModel.currentTabId?.uuidString.prefix(8) ?? "nil")\n", stderr)
             fflush(stderr)
@@ -508,8 +524,8 @@ struct WorkspaceMainView: View {
             mouseEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
                 if isAddressBarEditing {
                     // 延迟执行，让系统先处理点击事件
+                    // 只需设置 isFirstResponder=false，onChange 会自动退出编辑模式
                     DispatchQueue.main.async {
-                        isAddressBarEditing = false
                         isAddressBarFirstResponder = false
                     }
                 }
@@ -538,16 +554,6 @@ struct WorkspaceMainView: View {
             guard case .focus = viewModel.canvasMode else { return }
             fputs("🤏 Received pinchToOverview → exitToOverview()\n", stderr)
             exitToOverview()
-        }
-        .sheet(isPresented: $showingBookmarkSheet) {
-            if let tab = viewModel.currentTab {
-                let existingBookmark = bookmarkVM.getBookmark(for: tab)
-                BookmarkEditSheet(
-                    viewModel: bookmarkVM,
-                    tab: existingBookmark == nil ? tab : nil,
-                    existingBookmark: existingBookmark
-                )
-            }
         }
     }
 
@@ -613,6 +619,9 @@ struct WorkspaceMainView: View {
 
         // 记录为上次 focused 的 tab
         lastFocusedTabId = tabId
+
+        // 同步设置 currentTabId，确保地址栏和内容显示同一个 tab
+        viewModel.currentTabId = tabId
 
         withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
             viewModel.canvasMode = .focus(tabId: tabId)
@@ -919,10 +928,13 @@ private struct TabGridView: View {
     let mode: CanvasMode
     let showNewTabButton: Bool  // 是否显示 [+] 按钮（搜索过滤时隐藏）
     let viewportSize: CGSize    // 视口尺寸，用于 RN 渲染
+    @ObservedObject var bookmarkVM: BookmarkViewModel
+    @ObservedObject var historyVM: HistoryViewModel
     let onSelectTab: (UUID) -> Void
     let onSwapPositions: (UUID?, UUID?) -> Void
     let onNewTab: () -> Void
     let onCloseTab: (UUID) -> Void
+    var onNavigate: ((UUID, URL) -> Void)?  // tabId, url
 
     @State private var draggingTabId: UUID?
     @State private var hoveringOverTabId: UUID?
@@ -996,6 +1008,8 @@ private struct TabGridView: View {
                         isSwapping: isSwapping,
                         viewportSize: viewportSize,
                         viewBridgeCoordinator: coordinatorManager.coordinator(for: tab.id),
+                        bookmarkVM: bookmarkVM,
+                        historyVM: historyVM,
                         onSelect: {
                             onSelectTab(tab.id)
                         },
@@ -1012,6 +1026,9 @@ private struct TabGridView: View {
                         },
                         onClose: {
                             onCloseTab(tab.id)
+                        },
+                        onNavigate: { url in
+                            onNavigate?(tab.id, url)
                         }
                     )
                     .zIndex(isBeingDragged ? 1000 : (draggingTabId != nil ? 100 : Double(itemPosition)))
@@ -1326,7 +1343,7 @@ private struct AddressBarLeftIcon: View {
 
 // MARK: - Address Bar Container
 
-private struct AddressBarContainer: View {
+private struct AddressBarContainer<BookmarkContent: View>: View {
     @Binding var titleText: String
     var urlText: String  // URL for edit mode
     @Binding var inputText: String
@@ -1335,9 +1352,11 @@ private struct AddressBarContainer: View {
     var isBookmarked: Bool
     var leftIconState: AddressBarLeftIconState
     var toggleLeftPanel: () -> Void
-    var toggleBookmark: () -> Void
+    @Binding var showingBookmarkPopover: Bool
+    @Binding var shouldAutoFocus: Bool  // 自动聚焦标志
     var refreshAction: () -> Void
     var onNavigate: ((String) -> Void)?  // URL 导航回调
+    @ViewBuilder var bookmarkPopoverContent: () -> BookmarkContent
 
     private let placeholder = "Enter URL (http/https) or app id"
     @State private var focusRingScale: CGFloat = 1.0
@@ -1362,12 +1381,15 @@ private struct AddressBarContainer: View {
                     )
 
                     // 保留右侧按钮
-                    Button(action: toggleBookmark) {
+                    Button(action: { showingBookmarkPopover.toggle() }) {
                         Image(systemName: isBookmarked ? "star.fill" : "star")
                             .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
                     }
                     .buttonStyle(.borderless)
                     .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
+                    .popover(isPresented: $showingBookmarkPopover, arrowEdge: .bottom) {
+                        bookmarkPopoverContent()
+                    }
 
                     Button(action: refreshAction) {
                         Image(systemName: "arrow.clockwise")
@@ -1388,22 +1410,21 @@ private struct AddressBarContainer: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if !isEditing {
+                                // 设置 isEditing，onChange 会自动处理 URL 复制和焦点
                                 isEditing = true
-                                // 使用 URL（非标题），进入编辑后会自动选中
-                                inputText = urlText
-                                DispatchQueue.main.async {
-                                    isFirstResponder = true
-                                }
                             }
                         }
 
                     // Star button for bookmarking
-                    Button(action: toggleBookmark) {
+                    Button(action: { showingBookmarkPopover.toggle() }) {
                         Image(systemName: isBookmarked ? "star.fill" : "star")
                             .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
                     }
                     .buttonStyle(.borderless)
                     .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
+                    .popover(isPresented: $showingBookmarkPopover, arrowEdge: .bottom) {
+                        bookmarkPopoverContent()
+                    }
 
                     Button(action: refreshAction) {
                         Image(systemName: "arrow.clockwise")
@@ -1426,13 +1447,16 @@ private struct AddressBarContainer: View {
                 .scaleEffect(focusRingScale)
                 .padding(.vertical, -4)
         )
-        .onChange(of: isFirstResponder) {
-            if !isFirstResponder && isEditing {
+        .onChange(of: isFirstResponder) { _, newValue in
+            if !newValue && isEditing {
+                // 失焦时退出编辑模式
                 isEditing = false
             }
         }
-        .onChange(of: isEditing) {
-            if isEditing {
+        .onChange(of: isEditing) { _, newValue in
+            if newValue {
+                // 进入编辑模式时，复制 URL 并延迟设置焦点（等待 TextField 渲染）
+                inputText = urlText
                 // 从略大的、透明的蓝圈收缩到正常大小并渐显
                 focusRingScale = 1.08
                 focusRingOpacity = 0.0
@@ -1440,10 +1464,21 @@ private struct AddressBarContainer: View {
                     focusRingScale = 1.0
                     focusRingOpacity = 1.0
                 }
+                // 延迟一帧，确保 FocusableTextField 已渲染
+                DispatchQueue.main.async {
+                    isFirstResponder = true
+                }
             } else {
                 withAnimation(.easeOut(duration: 0.15)) {
                     focusRingOpacity = 0.0
                 }
+            }
+        }
+        .onAppear {
+            // 地址栏渲染完成后，检查是否需要自动聚焦
+            if shouldAutoFocus {
+                shouldAutoFocus = false
+                isEditing = true
             }
         }
     }
@@ -1553,9 +1588,12 @@ private struct TabPanel: View {
     let isSwapping: Bool  // 正在交换过程中（用于淡入动画）
     let viewportSize: CGSize  // 视口尺寸，用于 RN 渲染
     let viewBridgeCoordinator: ViewBridgeCoordinator  // 从外部传入，确保稳定
+    @ObservedObject var bookmarkVM: BookmarkViewModel
+    @ObservedObject var historyVM: HistoryViewModel
     let onSelect: () -> Void
     let onDragStart: () -> NSItemProvider
     let onClose: () -> Void
+    var onNavigate: ((URL) -> Void)?
 
     // 悬浮标题栏高度（固定值，Overview 模式下显示在卡片上方）
     private let floatingTitleBarHeight: CGFloat = 24
@@ -1710,15 +1748,8 @@ private struct TabPanel: View {
                 )
 
             case .empty:
-                // 空白 Tab
-                VStack(spacing: 12) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 48))
-                        .foregroundColor(.white.opacity(0.3))
-                    Text("Enter a URL or drop an app")
-                        .font(.system(size: 14))
-                        .foregroundColor(.white.opacity(0.4))
-                }
+                // Empty placeholder - new tabs now use system startPage
+                EmptyView()
             }
         }
         .frame(maxHeight: .infinity)
@@ -1873,6 +1904,115 @@ private struct FindInPageBar: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .top)
+    }
+}
+
+// MARK: - Share Button (System Picker)
+
+/// Share toolbar button using system NSSharingServicePicker
+struct ShareToolbarButton: View {
+    let url: URL?
+    @State private var triggerShare = false
+
+    var body: some View {
+        Button(action: { triggerShare.toggle() }) {
+            Image(systemName: "square.and.arrow.up")
+        }
+        .help("分享")
+        .background(ShareAnchor(url: url, trigger: $triggerShare))
+    }
+}
+
+/// Hidden anchor that shows share picker when triggered
+private struct ShareAnchor: NSViewRepresentable {
+    let url: URL?
+    @Binding var trigger: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // When trigger changes, show the picker
+        if trigger, let url = url {
+            DispatchQueue.main.async {
+                self.trigger = false
+                let picker = NSSharingServicePicker(items: [url])
+                picker.show(relativeTo: nsView.bounds, of: nsView, preferredEdge: .minY)
+            }
+        }
+    }
+}
+
+// MARK: - QR Code Button
+
+/// QR Code toolbar button with popover
+struct QRCodeToolbarButton: View {
+    let url: URL?
+
+    @State private var showingPopover = false
+    @State private var qrImage: NSImage?
+
+    var body: some View {
+        Button(action: { showingPopover.toggle() }) {
+            Image("qr-icon")
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 16, height: 16)
+                .offset(y: 1)
+        }
+        .help("QR Code")
+        .popover(isPresented: $showingPopover, arrowEdge: .bottom) {
+            if let url = url {
+                VStack(spacing: 12) {
+                    if let qrImage = qrImage {
+                        Image(nsImage: qrImage)
+                            .interpolation(.none)
+                            .resizable()
+                            .frame(width: 160, height: 160)
+                            .background(Color.white)
+                            .cornerRadius(8)
+                    }
+
+                    Text(url.host ?? url.absoluteString)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+
+                    Button("Copy QR Image") {
+                        if let qrImage = qrImage {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.writeObjects([qrImage])
+                        }
+                        showingPopover = false
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding()
+                .onAppear {
+                    generateQRCode(for: url)
+                }
+            }
+        }
+    }
+
+    private func generateQRCode(for url: URL) {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return }
+        let data = url.absoluteString.data(using: .utf8)
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+
+        guard let ciImage = filter.outputImage else { return }
+
+        let scale = 10.0
+        let transform = CGAffineTransform(scaleX: scale, y: scale)
+        let scaledImage = ciImage.transformed(by: transform)
+
+        let rep = NSCIImageRep(ciImage: scaledImage)
+        let nsImage = NSImage(size: rep.size)
+        nsImage.addRepresentation(rep)
+        qrImage = nsImage
     }
 }
 

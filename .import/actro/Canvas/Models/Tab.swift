@@ -35,12 +35,14 @@ enum SystemTabType: String, Codable {
     case history
     case bookmarks
     case debug
+    case startPage
 
     var title: String {
         switch self {
         case .history: return "History"
         case .bookmarks: return "Bookmarks"
         case .debug: return "Debug"
+        case .startPage: return "New Tab"
         }
     }
 
@@ -49,6 +51,7 @@ enum SystemTabType: String, Codable {
         case .history: return "clock.arrow.circlepath"
         case .bookmarks: return "bookmark"
         case .debug: return "ladybug"
+        case .startPage: return "house"
         }
     }
 }

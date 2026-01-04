@@ -1,5 +1,5 @@
 // System app types (built-in apps like chrome:// pages)
-export type SystemAppType = 'history' | 'bookmarks' | 'debug';
+export type SystemAppType = 'history' | 'bookmarks' | 'debug' | 'startPage';
 
 // History item passed from native
 export type HistoryItemData = {
@@ -52,6 +52,7 @@ export type TabConfig = {
   historyItems?: HistoryItemData[];
   historyGroups?: HistoryGroupData[];
   bookmarks?: BookmarkData[];
+  recentHistory?: HistoryItemData[];  // For startPage
 };
 
 export type ActrProps = {
