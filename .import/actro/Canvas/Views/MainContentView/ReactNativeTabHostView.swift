@@ -188,6 +188,38 @@ struct ReactNativeRootRepresentable: NSViewRepresentable {
                 case .debug:
                     // Debug app doesn't need extra data - just passes tab info
                     break
+
+                case .startPage:
+                    // Start Page needs bookmarks and recent history
+                    if let bookmarkVM = bookmarkVM {
+                        dict["bookmarks"] = bookmarkVM.bookmarks.map { bookmark in
+                            var bookmarkDict: [String: Any] = [
+                                "id": bookmark.id.uuidString,
+                                "title": bookmark.title,
+                                "createdAt": bookmark.createdAt.timeIntervalSince1970 * 1000
+                            ]
+                            if let url = bookmark.appURL {
+                                bookmarkDict["appURL"] = url.absoluteString
+                            }
+                            if let lastUsedAt = bookmark.lastUsedAt {
+                                bookmarkDict["lastUsed"] = lastUsedAt.timeIntervalSince1970 * 1000
+                            }
+                            return bookmarkDict
+                        }
+                    }
+                    if let historyVM = historyVM {
+                        dict["recentHistory"] = historyVM.recentItems.prefix(16).map { item in
+                            var itemDict: [String: Any] = [
+                                "id": item.id.uuidString,
+                                "title": item.title,
+                                "visitTime": item.visitTime.timeIntervalSince1970 * 1000
+                            ]
+                            if let url = item.appURL {
+                                itemDict["appURL"] = url.absoluteString
+                            }
+                            return itemDict
+                        }
+                    }
                 }
                 return dict
             }

@@ -75,54 +75,8 @@ class BrowserViewModel: ObservableObject {
     func addNewTab() -> Tab {
         logger.debug("🆕 开始创建新标签页...")
         let newTab = Tab(
-            title: "New Tab \(tabs.count + 1)",
-            htmlContent: """
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="utf-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                            padding: 40px;
-                            color: #ffffff;
-                            margin: 0;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
-                        }
-                        .container {
-                            max-width: 800px;
-                            text-align: center;
-                        }
-                        h1 {
-                            color: #e06c75;
-                            font-size: 2.5em;
-                            margin-bottom: 20px;
-                        }
-                        p {
-                            line-height: 1.8;
-                            font-size: 1.2em;
-                            color: #abb2bf;
-                        }
-                        .tab-number {
-                            color: #c678dd;
-                            font-weight: bold;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>📄 New Tab</h1>
-                        <p>This is <span class="tab-number">Tab #\(tabs.count + 1)</span></p>
-                        <p>Start typing in the address bar to navigate to a new page.</p>
-                    </div>
-                </body>
-                </html>
-                """
+            title: "New Tab",
+            systemTabType: .startPage
         )
         tabs.append(newTab)
         currentTabId = newTab.id

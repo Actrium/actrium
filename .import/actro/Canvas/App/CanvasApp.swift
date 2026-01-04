@@ -92,6 +92,21 @@ struct BrowserWindowView: View {
             .onReceive(NotificationCenter.default.publisher(for: .clearHistoryFromRN)) { _ in
                 historyVM.clearHistory()
             }
+            // Handle URL open from Start Page
+            .onReceive(NotificationCenter.default.publisher(for: .openURLFromStartPage)) { notification in
+                guard let userInfo = notification.userInfo,
+                      let url = userInfo["url"] as? URL else { return }
+
+                // Check if it's a directory or .actr file
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+                    if isDirectory.boolValue {
+                        viewModel.loadFromDevDirectory(url)
+                    } else {
+                        viewModel.importACTRPackage(from: url)
+                    }
+                }
+            }
     }
 
     private func handleLaunchURLIfNeeded() {
