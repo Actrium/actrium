@@ -727,6 +727,7 @@ struct TabOutlineView: NSViewRepresentable {
                     "title": tab.title,
                 ]
                 if let url = tab.url?.absoluteString { data["urlString"] = url }
+                if let systemType = tab.systemTabType { data["systemTabType"] = systemType.rawValue }
                 if let script = tab.unifiedScript { data["unifiedScript"] = script }
                 if let script = tab.leftPanelScript { data["leftPanelScript"] = script }
                 if let script = tab.rightPanelScript { data["rightPanelScript"] = script }
