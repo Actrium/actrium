@@ -24,8 +24,18 @@ class DownloadItem: ObservableObject, Identifiable {
     @Published var bytesReceived: Int64 = 0
     @Published var totalBytes: Int64 = 0
     @Published var error: String?
+    @Published var fileExists: Bool = true
 
     weak var download: WKDownload?
+
+    /// Check if the downloaded file still exists on disk
+    func checkFileExists() {
+        guard state == .completed, let url = destinationURL else {
+            fileExists = true  // Not applicable for non-completed items
+            return
+        }
+        fileExists = FileManager.default.fileExists(atPath: url.path)
+    }
 
     var progress: Double {
         guard totalBytes > 0 else { return 0 }
@@ -138,6 +148,13 @@ class DownloadManager: ObservableObject {
     func openFile(_ item: DownloadItem) {
         guard let url = item.destinationURL else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    /// Check if all completed download files still exist
+    func checkAllFilesExist() {
+        for item in downloads {
+            item.checkFileExists()
+        }
     }
 
     private func updateActiveState() {
