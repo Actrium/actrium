@@ -427,6 +427,17 @@ struct WorkspaceMainView: View {
                 isSearchTabsFocused = false
             }
         }
+        .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, shouldFocus in
+            // 新建 Tab 后自动聚焦地址栏
+            if shouldFocus {
+                viewModel.shouldAutoFocusAddressBar = false
+                // 延迟一帧，确保 Focus 模式 UI 已渲染
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isAddressBarFirstResponder = true
+                    isAddressBarEditing = true
+                }
+            }
+        }
         .onAppear {
             fputs("🟡 onAppear: shouldStartInFocusMode=\(viewModel.shouldStartInFocusMode), currentTabId=\(viewModel.currentTabId?.uuidString.prefix(8) ?? "nil")\n", stderr)
             fflush(stderr)

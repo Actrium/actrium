@@ -32,6 +32,9 @@ class BrowserViewModel: ObservableObject {
     /// Stored here to survive view recreation when DevTools layout changes
     @Published var canvasMode: CanvasMode = .overview
 
+    /// Flag to trigger address bar focus (set by addNewTab, consumed by view)
+    @Published var shouldAutoFocusAddressBar: Bool = false
+
     // MARK: - Grid Slot Position Management
 
     /// Tab ID → grid slot index mapping
@@ -126,6 +129,10 @@ class BrowserViewModel: ObservableObject {
 
         // 简化：直接添加到末尾
         tabSlotPositions[newTab.id] = tabs.count - 1
+
+        // 新建 Tab 直接进入 Focus 模式，并自动聚焦地址栏
+        canvasMode = .focus(tabId: newTab.id)
+        shouldAutoFocusAddressBar = true
 
         logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
         return newTab
