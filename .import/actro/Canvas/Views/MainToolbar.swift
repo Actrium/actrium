@@ -138,7 +138,8 @@ class ToolbarCoordinator: NSObject, NSToolbarDelegate {
 
         let view = NavigationButtonsView(viewModel: viewModel)
         let hostingView = NSHostingView(rootView: view)
-        hostingView.frame.size = hostingView.fittingSize
+        // 固定尺寸：2个按钮 * 32px + 间距
+        hostingView.frame.size = CGSize(width: 70, height: 28)
 
         item.view = hostingView
         return item
@@ -147,8 +148,8 @@ class ToolbarCoordinator: NSObject, NSToolbarDelegate {
     private func makeAddressBarItem() -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: Self.addressBarId)
 
-        let windowWidth = window?.frame.width ?? 800
-        let width = max(windowWidth * 0.5, 200)
+        let windowWidth = window?.frame.width ?? 1000
+        let width = max(windowWidth * 0.5, 300)
 
         let view = AddressBarToolbarView(
             viewModel: viewModel,
@@ -173,7 +174,8 @@ class ToolbarCoordinator: NSObject, NSToolbarDelegate {
             toggleFocusOverview: toggleFocusOverview
         )
         let hostingView = NSHostingView(rootView: view)
-        hostingView.frame.size = hostingView.fittingSize
+        // 固定尺寸：4个按钮 * 32px + 间距
+        hostingView.frame.size = CGSize(width: 140, height: 28)
 
         item.view = hostingView
         return item
