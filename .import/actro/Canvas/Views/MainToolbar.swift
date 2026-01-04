@@ -10,30 +10,27 @@ struct CustomToolbarView: View {
     @Binding var isWebLoading: Bool
     let toggleFocusOverview: () -> Void
 
+    @Environment(\.viewportSize) private var viewportSize
+
     var body: some View {
-        GeometryReader { geometry in
-            let addressBarWidth = max(geometry.size.width * 0.5, 200)
+        let addressBarWidth = max(viewportSize.width * 0.5, 200)
 
-            HStack(spacing: 0) {
-                // 左功能组（左对齐）
-                leftButtonsGroup
+        HStack(spacing: 0) {
+            // 左功能组（左对齐）
+            leftButtonsGroup
 
-                Spacer(minLength: 12)
+            Spacer(minLength: 12)
 
-                // 地址栏（50% 窗口宽度）
-                addressBarView
-                    .frame(width: addressBarWidth)
+            // 地址栏（50% 窗口宽度）
+            addressBarView
+                .frame(width: addressBarWidth)
 
-                Spacer(minLength: 12)
+            Spacer(minLength: 12)
 
-                // 右功能组（右对齐）
-                rightButtonsGroup
-            }
-            .padding(.horizontal, 8)
-            .frame(width: geometry.size.width, height: 38)
+            // 右功能组（右对齐）
+            rightButtonsGroup
         }
-        .frame(height: 38)
-        .background(VisualEffectBackground())
+        .frame(maxWidth: .infinity, minHeight: 28)
     }
 
     // MARK: - Left Buttons
@@ -107,20 +104,6 @@ struct CustomToolbarView: View {
             )
         }
     }
-}
-
-// MARK: - Visual Effect Background
-
-private struct VisualEffectBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .titlebar
-        view.blendingMode = .withinWindow
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 // MARK: - Toolbar Button Style
