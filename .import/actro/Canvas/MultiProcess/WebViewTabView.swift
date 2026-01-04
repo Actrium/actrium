@@ -757,11 +757,21 @@ class DownloadableWebView: WKWebView {
         NSLog("📥 DownloadableWebView: replaceDownloadMenuItems - imageURL=%@, linkURL=%@",
               imageURL?.absoluteString ?? "nil", linkURL?.absoluteString ?? "nil")
 
+        // Reset stored copy item
+        pendingCopyImageItem = nil
+
         // Collect items to replace first, then replace (to avoid index issues)
         var replacements: [(item: NSMenuItem, url: URL, isImage: Bool)] = []
 
         for item in menu.items {
             let title = item.title.lowercased()
+
+            // Find and store reference to "Copy Image" menu item
+            if title.contains("copy image") || title.contains("拷贝图像") ||
+               title.contains("复制图像") || title.contains("拷贝图片") {
+                pendingCopyImageItem = item
+                NSLog("📥 DownloadableWebView: Found Copy Image menu item: %@", item.title)
+            }
 
             // Check for image download items
             if title.contains("download image") || title.contains("save image") ||
@@ -872,58 +882,35 @@ class DownloadableWebView: WKWebView {
         }
     }
 
-    /// Download image by copying to clipboard first, then saving from clipboard
-    /// This is a workaround for WKDownload issues - Copy Image always works
+    /// Stored reference to the "Copy Image" menu item for triggering
+    private var pendingCopyImageItem: NSMenuItem?
+    private var pendingImageURL: URL?
+
+    /// Download image by triggering system Copy Image, then saving from clipboard
     private func downloadImageViaCopy(url: URL) {
         NSLog("📥 DownloadableWebView: downloadImageViaCopy - %@", url.absoluteString)
 
-        // JavaScript to copy image to clipboard
-        let js = """
-        (async function() {
-            try {
-                var img = document.querySelector('img[src="\(url.absoluteString)"]');
-                if (!img) {
-                    // Try to find by partial match
-                    var imgs = document.querySelectorAll('img');
-                    for (var i = 0; i < imgs.length; i++) {
-                        if (imgs[i].src === '\(url.absoluteString)') {
-                            img = imgs[i];
-                            break;
-                        }
-                    }
-                }
-                if (img) {
-                    // Create a canvas and draw the image
-                    var canvas = document.createElement('canvas');
-                    canvas.width = img.naturalWidth;
-                    canvas.height = img.naturalHeight;
-                    var ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
+        // Store URL for later use
+        pendingImageURL = url
 
-                    // Convert to blob and copy
-                    var blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-                    await navigator.clipboard.write([
-                        new ClipboardItem({ 'image/png': blob })
-                    ]);
-                    return 'copied';
-                }
-                return 'not_found';
-            } catch (e) {
-                return 'error: ' + e.message;
-            }
-        })();
-        """
-
-        evaluateJavaScript(js) { [weak self] result, error in
-            if let result = result as? String, result == "copied" {
-                NSLog("📥 DownloadableWebView: Image copied to clipboard, now saving...")
-                self?.saveImageFromClipboard(originalURL: url)
+        // Trigger the system's Copy Image action if we have the menu item
+        if let copyItem = pendingCopyImageItem {
+            NSLog("📥 DownloadableWebView: Triggering system Copy Image")
+            // Perform the copy action
+            if let action = copyItem.action, let target = copyItem.target {
+                _ = target.perform(action, with: copyItem)
             } else {
-                // Fallback to URLSession download
-                NSLog("📥 DownloadableWebView: Copy failed (%@), falling back to URLSession",
-                      (result as? String) ?? error?.localizedDescription ?? "unknown")
-                self?.startDownload(url: url)
+                NSApp.sendAction(copyItem.action!, to: copyItem.target, from: copyItem)
             }
+
+            // Wait a moment for copy to complete, then save
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.saveImageFromClipboard(originalURL: url)
+            }
+        } else {
+            // Fallback: directly save from clipboard (user might have already copied)
+            NSLog("📥 DownloadableWebView: No Copy Image item, trying clipboard directly")
+            saveImageFromClipboard(originalURL: url)
         }
     }
 
