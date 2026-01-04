@@ -369,6 +369,17 @@ struct CanvasApp: App {
 
                 Divider()
 
+                Button("聚焦地址栏") {
+                    // Only works in Focus mode (when address bar is visible)
+                    if case .focus = focusedViewModel?.canvasMode {
+                        focusedViewModel?.shouldAutoFocusAddressBar = true
+                    }
+                }
+                .keyboardShortcut("l", modifiers: .command)
+                .disabled(focusedViewModel == nil)
+
+                Divider()
+
                 Button("打印...") {
                     printCurrentPage()
                 }
