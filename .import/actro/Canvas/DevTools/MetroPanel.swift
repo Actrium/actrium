@@ -257,7 +257,7 @@ struct MetroPanel: View {
                 Spacer()
 
                 Button {
-                    // Clear would require adding a method to MetroManager
+                    metro.clearLogs()
                 } label: {
                     Image(systemName: "trash")
                 }

@@ -408,7 +408,7 @@ class MetroManager: ObservableObject {
         }
     }
 
-    private func clearLogs() {
+    func clearLogs() {
         logs.removeAll()
     }
 
