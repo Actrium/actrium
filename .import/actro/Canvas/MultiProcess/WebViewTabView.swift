@@ -742,22 +742,78 @@ class DownloadableWebView: WKWebView {
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
 
-        // Add menu items synchronously - URLs should already be detected
-        addDownloadMenuItems(to: menu)
+        // Replace WebKit's default download menu items with our working versions
+        replaceDownloadMenuItems(in: menu)
     }
 
-    private func addDownloadMenuItems(to menu: NSMenu) {
+    private func replaceDownloadMenuItems(in menu: NSMenu) {
+        // WebKit's default download menu items don't work because they bypass our delegate
+        // We need to replace them with our own implementations that use URLSession
+
+        // Capture URLs before iterating (they might change)
+        let imageURL = contextMenuImageURL
+        let linkURL = contextMenuLinkURL
+
+        NSLog("📥 DownloadableWebView: replaceDownloadMenuItems - imageURL=%@, linkURL=%@",
+              imageURL?.absoluteString ?? "nil", linkURL?.absoluteString ?? "nil")
+
+        // Collect items to replace first, then replace (to avoid index issues)
+        var replacements: [(item: NSMenuItem, url: URL, isImage: Bool)] = []
+
+        for item in menu.items {
+            let title = item.title.lowercased()
+
+            // Check for image download items
+            if title.contains("download image") || title.contains("save image") ||
+               title.contains("下载图像") || title.contains("存储图像") ||
+               title.contains("下载图片") {
+                if let url = imageURL {
+                    replacements.append((item, url, true))
+                }
+            }
+
+            // Check for link download items
+            if title.contains("download linked") || title.contains("下载链接") ||
+               title.contains("下载链接的文件") {
+                if let url = linkURL {
+                    replacements.append((item, url, false))
+                }
+            }
+        }
+
+        // Now replace the items
+        for (item, url, isImage) in replacements {
+            if let index = menu.items.firstIndex(of: item) {
+                let typeName = isImage ? "Image" : "Linked File"
+                NSLog("📥 DownloadableWebView: Replacing '%@' at index %d with URL: %@",
+                      item.title, index, url.absoluteString)
+
+                let replacement = ClosureMenuItem(title: item.title) { [weak self] in
+                    NSLog("📥 DownloadableWebView: Download %@ clicked! URL: %@", typeName, url.absoluteString)
+                    self?.startDownload(url: url)
+                }
+                menu.removeItem(at: index)
+                menu.insertItem(replacement, at: index)
+            }
+        }
+
+        // If no download items were found/replaced but we detected downloadable content, add our own
+        if replacements.isEmpty && (imageURL != nil || linkURL != nil) {
+            addCustomDownloadMenuItems(to: menu)
+        }
+    }
+
+    private func addCustomDownloadMenuItems(to menu: NSMenu) {
         var addedSeparator = false
 
         if let imageURL = contextMenuImageURL {
-            NSLog("📥 DownloadableWebView: Adding Download Image for %@", imageURL.absoluteString)
+            NSLog("📥 DownloadableWebView: Adding custom Download Image for %@", imageURL.absoluteString)
 
             if !addedSeparator {
                 menu.addItem(NSMenuItem.separator())
                 addedSeparator = true
             }
 
-            // Use closure-based menu item to ensure action fires
             let downloadImageItem = ClosureMenuItem(title: "Download Image") { [weak self] in
                 NSLog("📥 DownloadableWebView: Download Image clicked!")
                 self?.startDownload(url: imageURL)
@@ -766,7 +822,7 @@ class DownloadableWebView: WKWebView {
         }
 
         if let linkURL = contextMenuLinkURL, linkURL != contextMenuImageURL {
-            NSLog("📥 DownloadableWebView: Adding Download Linked File for %@", linkURL.absoluteString)
+            NSLog("📥 DownloadableWebView: Adding custom Download Linked File for %@", linkURL.absoluteString)
 
             if !addedSeparator {
                 menu.addItem(NSMenuItem.separator())
