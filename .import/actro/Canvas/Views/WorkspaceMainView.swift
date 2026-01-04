@@ -131,6 +131,7 @@ struct WorkspaceMainView: View {
                     mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
                     viewportSize: safeViewportSize,
+                    viewModel: viewModel,
                     bookmarkVM: bookmarkVM,
                     historyVM: historyVM,
                     // ━━━━ Mode Switching Trigger #3: 卡片点击 ━━━━
@@ -928,6 +929,7 @@ private struct TabGridView: View {
     let mode: CanvasMode
     let showNewTabButton: Bool  // 是否显示 [+] 按钮（搜索过滤时隐藏）
     let viewportSize: CGSize    // 视口尺寸，用于 RN 渲染
+    @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var historyVM: HistoryViewModel
     let onSelectTab: (UUID) -> Void
@@ -1008,6 +1010,7 @@ private struct TabGridView: View {
                         isSwapping: isSwapping,
                         viewportSize: viewportSize,
                         viewBridgeCoordinator: coordinatorManager.coordinator(for: tab.id),
+                        viewModel: viewModel,
                         bookmarkVM: bookmarkVM,
                         historyVM: historyVM,
                         onSelect: {
@@ -1588,6 +1591,7 @@ private struct TabPanel: View {
     let isSwapping: Bool  // 正在交换过程中（用于淡入动画）
     let viewportSize: CGSize  // 视口尺寸，用于 RN 渲染
     let viewBridgeCoordinator: ViewBridgeCoordinator  // 从外部传入，确保稳定
+    @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var historyVM: HistoryViewModel
     let onSelect: () -> Void
@@ -1728,14 +1732,26 @@ private struct TabPanel: View {
             // 多态渲染：根据 contentType 选择渲染引擎
             switch tab.contentType {
             case .reactNative(let fingerprint):
-                // React Native 应用 - 使用 ViewBridge XPC
-                ViewBridgeMultiProcessTabView(
-                    tab: tab,
-                    fingerprint: fingerprint,
-                    containerSize: panelSize,
-                    coordinator: viewBridgeCoordinator,
-                    isFocused: isFocused
-                )
+                // 系统应用使用 in-process RN bridge，常规应用使用 XPC 多进程
+                if tab.systemTabType != nil {
+                    // System apps (History, Bookmarks, StartPage, Debug) - in-process
+                    SingleTabRootView(
+                        tab: tab,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM,
+                        containerSize: panelSize
+                    )
+                } else {
+                    // Regular actr apps - XPC multi-process
+                    ViewBridgeMultiProcessTabView(
+                        tab: tab,
+                        fingerprint: fingerprint,
+                        containerSize: panelSize,
+                        coordinator: viewBridgeCoordinator,
+                        isFocused: isFocused
+                    )
+                }
 
             case .web(let url):
                 // Web 内容 - 使用 WKWebView
