@@ -50,15 +50,15 @@ struct MetroPanel: View {
             }
 
             // Address info
-            if metro.state.isRunning {
+            if metro.state.isRunning, let host = metro.host {
                 HStack {
-                    Text("http://\(metro.host)")
+                    Text("http://\(host)")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.secondary)
 
                     Button {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString("http://\(metro.host)", forType: .string)
+                        NSPasteboard.general.setString("http://\(host)", forType: .string)
                     } label: {
                         Image(systemName: "doc.on.doc")
                     }
