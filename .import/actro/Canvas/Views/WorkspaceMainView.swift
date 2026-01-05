@@ -32,6 +32,8 @@ struct WorkspaceMainView: View {
     @State private var isAddressBarFirstResponder: Bool = false
     @State private var keyEventMonitor: Any?
     @State private var mouseEventMonitor: Any?
+    @State private var magnifyEventMonitor: Any?
+    @State private var cumulativeMagnification: CGFloat = 0
 
     // Web loading state
     @State private var isWebLoading: Bool = false
@@ -517,6 +519,10 @@ struct WorkspaceMainView: View {
 
             // 点击主窗口区域时退出地址栏编辑状态
             mouseEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+                // 通知 LiquidGlassToolbar 取消焦点 (for native titlebar)
+                NotificationCenter.default.post(name: NSNotification.Name("com.canvas.dismissAddressBarFocus"), object: nil)
+
+                // 旧逻辑：SwiftUI toolbar 的地址栏
                 if isAddressBarEditing {
                     // 延迟执行，让系统先处理点击事件
                     // 只需设置 isFirstResponder=false，onChange 会自动退出编辑模式
@@ -528,9 +534,29 @@ struct WorkspaceMainView: View {
             }
 
             // ━━━━ Mode Switching Trigger #4: 双指捏合 ━━━━
-            // 捏合手势在 CanvasViewService 端处理 (ResizableContainerView.magnify)
-            // 通过 DistributedNotificationCenter 发送 "com.canvas.pinchToOverview" 通知
-            // 监听在下方 .onReceive(DistributedNotificationCenter...)
+            // - ACTR/RN 内容: 由 CanvasViewService 端处理并发送 DistributedNotification
+            // - Web 内容: 由本地 magnify 事件监听器处理
+            magnifyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [self] event in
+                guard case .focus = viewModel.canvasMode else { return event }
+
+                switch event.phase {
+                case .began:
+                    cumulativeMagnification = 0
+                case .changed:
+                    cumulativeMagnification += event.magnification
+                    // Pinch-in (zoom out) threshold to enter Overview
+                    if cumulativeMagnification < -0.3 {
+                        cumulativeMagnification = 0
+                        fputs("🤏 Local magnify threshold reached → exitToOverview()\n", stderr)
+                        exitToOverview()
+                    }
+                case .ended, .cancelled:
+                    cumulativeMagnification = 0
+                default:
+                    break
+                }
+                return event
+            }
         }
         .onDisappear {
             // 清理事件监听
@@ -538,6 +564,9 @@ struct WorkspaceMainView: View {
                 NSEvent.removeMonitor(monitor)
             }
             if let monitor = mouseEventMonitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            if let monitor = magnifyEventMonitor {
                 NSEvent.removeMonitor(monitor)
             }
         }
