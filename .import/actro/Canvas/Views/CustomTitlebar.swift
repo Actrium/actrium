@@ -260,6 +260,9 @@ private class ToolbarContainerView: NSView {
 
         let hosting = NSHostingView(rootView: AnyView(swiftUIView))
         hosting.translatesAutoresizingMaskIntoConstraints = false
+        // Transparent background for Liquid Glass effect
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = .clear
         addSubview(hosting)
 
         NSLayoutConstraint.activate([
@@ -367,7 +370,8 @@ private struct LiquidGlassToolbar: View {
             .padding(.vertical, 3)
             .glassEffect(.regular, in: .capsule)
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, 5)
+        .padding(.trailing, 10)
         .onChange(of: viewModel.currentTab?.url) { _, _ in
             updateDisplayText()
         }
