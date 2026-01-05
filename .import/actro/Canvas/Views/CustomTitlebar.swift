@@ -357,25 +357,22 @@ private struct LiquidGlassToolbar: View {
 
                 // === Right side: [+] button (normal) or just >> menu (compact) ===
                 if !isCompact {
-                    // Normal mode: + button (standalone) + >> overflow menu
+                    // Normal mode: + button (standalone, circular) + >> overflow menu
                     Button(action: { _ = viewModel.addNewTab() }) {
                         Image(systemName: "plus")
                             .font(.system(size: 16, weight: .medium))
-                            .frame(width: 30, height: 30)
+                            .frame(width: 36, height: 36)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 3)
-                    .glassEffect(.regular, in: .capsule)
+                    .glassEffect(.regular, in: .circle)
                 }
 
-                // Overflow menu (>> button) - always visible
+                // Overflow menu (>> button) - always visible, circular
                 overflowMenu(isCompact: isCompact)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 3)
-                    .glassEffect(.regular, in: .capsule)
+                    .frame(width: 36, height: 36)
+                    .glassEffect(.regular, in: .circle)
             }
             .frame(maxHeight: .infinity)
             .padding(.leading, 5)
