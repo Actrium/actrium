@@ -222,7 +222,7 @@ final class TitlebarManager: NSObject {
     }
 }
 
-// MARK: - Toolbar Container View (Safari Style)
+// MARK: - Toolbar Container View (Safari Liquid Glass Style)
 
 private class ToolbarContainerView: NSView, NSTextFieldDelegate {
 
@@ -230,12 +230,15 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
     weak var bookmarkVM: BookmarkViewModel?
 
     // UI Elements
-    private let navContainer: NSView  // Rounded background for nav buttons
+    private let navContainer: NSView
+    private let navDivider: NSView
     private let backButton: NSButton
     private let forwardButton: NSButton
-    private let addressBarContainer: NSView  // Rounded pill for address bar
+    private let addressBarContainer: AddressBarContainerView
+    private let searchIcon: NSImageView
     private let addressField: NSTextField
-    private let refreshButton: NSButton
+    private let actionContainer: NSView
+    private let shareButton: NSButton
     private let newTabButton: NSButton
     private let overviewButton: NSButton
 
@@ -244,60 +247,86 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
     var onBookmarkTap: (() -> Void)?
     var onOverview: (() -> Void)?
 
-    // Colors - Safari dark theme
-    private let containerBgColor = NSColor(white: 0.18, alpha: 1.0)
-    private let containerBorderColor = NSColor(white: 0.28, alpha: 1.0)
-    private let addressBarBgColor = NSColor(white: 0.12, alpha: 1.0)
+    // Colors - Safari Liquid Glass dark theme
+    private let pillBgColor = NSColor(white: 0.22, alpha: 1.0)
+    private let pillBorderColor = NSColor(white: 0.35, alpha: 1.0)
+    private let addressBarBgColor = NSColor(white: 0.13, alpha: 1.0)
+    private let dividerColor = NSColor(white: 0.4, alpha: 1.0)
+    private let iconColor = NSColor(white: 0.55, alpha: 1.0)
+    private let focusBorderColor = NSColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1.0)
 
     init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel, onOverview: @escaping () -> Void) {
         self.viewModel = viewModel
         self.bookmarkVM = bookmarkVM
         self.onOverview = onOverview
 
-        // Create navigation container with rounded background
+        // === Navigation Container (pill with divider) ===
         navContainer = NSView()
         navContainer.wantsLayer = true
-        navContainer.layer?.backgroundColor = containerBgColor.cgColor
-        navContainer.layer?.cornerRadius = 8
-        navContainer.layer?.borderWidth = 0.5
-        navContainer.layer?.borderColor = containerBorderColor.cgColor
+        navContainer.layer?.backgroundColor = pillBgColor.cgColor
+        navContainer.layer?.cornerRadius = 16  // Full pill shape
+        navContainer.layer?.borderWidth = 1
+        navContainer.layer?.borderColor = pillBorderColor.cgColor
         navContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        // Create nav buttons (larger, Safari style)
+        // Divider between < and >
+        navDivider = NSView()
+        navDivider.wantsLayer = true
+        navDivider.layer?.backgroundColor = dividerColor.cgColor
+        navDivider.translatesAutoresizingMaskIntoConstraints = false
+
         backButton = Self.createNavButton(symbol: "chevron.left", tooltip: "Back (⌘[)")
         forwardButton = Self.createNavButton(symbol: "chevron.right", tooltip: "Forward (⌘])")
 
-        // Create address bar container (pill shape)
-        addressBarContainer = NSView()
+        // === Address Bar Container (large pill with focus ring) ===
+        addressBarContainer = AddressBarContainerView()
         addressBarContainer.wantsLayer = true
         addressBarContainer.layer?.backgroundColor = addressBarBgColor.cgColor
-        addressBarContainer.layer?.cornerRadius = 10
-        addressBarContainer.layer?.borderWidth = 0.5
-        addressBarContainer.layer?.borderColor = containerBorderColor.cgColor
+        addressBarContainer.layer?.cornerRadius = 18  // Large pill
+        addressBarContainer.layer?.borderWidth = 1.5
+        addressBarContainer.layer?.borderColor = pillBorderColor.cgColor
         addressBarContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        // Create address field (plain text field, centered)
+        // Search icon
+        searchIcon = NSImageView()
+        let searchConfig = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
+            .withSymbolConfiguration(searchConfig)
+        searchIcon.contentTintColor = iconColor
+        searchIcon.translatesAutoresizingMaskIntoConstraints = false
+
+        // Address field
         addressField = NSTextField()
         addressField.isEditable = true
         addressField.isSelectable = true
         addressField.isBordered = false
         addressField.drawsBackground = false
         addressField.backgroundColor = .clear
-        addressField.textColor = NSColor(white: 0.85, alpha: 1.0)
-        addressField.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-        addressField.alignment = .center
-        addressField.placeholderString = "Search or enter website"
+        addressField.textColor = NSColor(white: 0.75, alpha: 1.0)
+        addressField.font = NSFont.systemFont(ofSize: 14, weight: .regular)
+        addressField.alignment = .left
+        addressField.placeholderString = "Search or enter website name"
+        addressField.placeholderAttributedString = NSAttributedString(
+            string: "Search or enter website name",
+            attributes: [.foregroundColor: NSColor(white: 0.45, alpha: 1.0)]
+        )
         addressField.focusRingType = .none
         addressField.lineBreakMode = .byTruncatingTail
         addressField.cell?.truncatesLastVisibleLine = true
         addressField.translatesAutoresizingMaskIntoConstraints = false
 
-        // Refresh button inside address bar
-        refreshButton = Self.createInlineButton(symbol: "arrow.clockwise", tooltip: "Reload (⌘R)")
+        // === Action Container (pill with buttons) ===
+        actionContainer = NSView()
+        actionContainer.wantsLayer = true
+        actionContainer.layer?.backgroundColor = pillBgColor.cgColor
+        actionContainer.layer?.cornerRadius = 16
+        actionContainer.layer?.borderWidth = 1
+        actionContainer.layer?.borderColor = pillBorderColor.cgColor
+        actionContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        // Create action buttons
+        shareButton = Self.createActionButton(symbol: "square.and.arrow.up", tooltip: "Share")
         newTabButton = Self.createActionButton(symbol: "plus", tooltip: "New Tab (⌘T)")
-        overviewButton = Self.createActionButton(symbol: "square.grid.2x2", tooltip: "Tab Overview (⌘⇧\\)")
+        overviewButton = Self.createActionButton(symbol: "square.on.square", tooltip: "Tab Overview (⌘⇧\\)")
 
         super.init(frame: .zero)
 
@@ -306,15 +335,20 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
         backButton.action = #selector(backTapped)
         forwardButton.target = self
         forwardButton.action = #selector(forwardTapped)
+        shareButton.target = self
+        shareButton.action = #selector(shareTapped)
         newTabButton.target = self
         newTabButton.action = #selector(newTabTapped)
         overviewButton.target = self
         overviewButton.action = #selector(overviewTapped)
-        refreshButton.target = self
-        refreshButton.action = #selector(refreshTapped)
         addressField.delegate = self
         addressField.target = self
         addressField.action = #selector(addressFieldSubmitted)
+
+        // Track focus for address bar border color
+        addressBarContainer.onFocusChange = { [weak self] focused in
+            self?.updateAddressBarBorder(focused: focused)
+        }
 
         setupView()
         updateState()
@@ -325,93 +359,122 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
     }
 
     private func setupView() {
-        // Add nav buttons to nav container
+        // Nav container contents
         navContainer.addSubview(backButton)
+        navContainer.addSubview(navDivider)
         navContainer.addSubview(forwardButton)
 
-        // Add address field and refresh to address bar container
+        // Address bar contents
+        addressBarContainer.addSubview(searchIcon)
         addressBarContainer.addSubview(addressField)
-        addressBarContainer.addSubview(refreshButton)
 
-        // Spacers for centering address bar
+        // Action container contents
+        actionContainer.addSubview(shareButton)
+        actionContainer.addSubview(newTabButton)
+        actionContainer.addSubview(overviewButton)
+
+        // Spacers
         let leftSpacer = NSView()
         let rightSpacer = NSView()
         leftSpacer.translatesAutoresizingMaskIntoConstraints = false
         rightSpacer.translatesAutoresizingMaskIntoConstraints = false
 
-        // Add all to main view
+        // Add to main view
         addSubview(navContainer)
         addSubview(leftSpacer)
         addSubview(addressBarContainer)
         addSubview(rightSpacer)
-        addSubview(newTabButton)
-        addSubview(overviewButton)
+        addSubview(actionContainer)
 
-        let navHeight: CGFloat = 28
-        let addressBarHeight: CGFloat = 28
+        let pillHeight: CGFloat = 32
+        let addressBarHeight: CGFloat = 36
 
         NSLayoutConstraint.activate([
-            // Nav container
-            navContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            // === Nav Container ===
+            navContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             navContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
-            navContainer.heightAnchor.constraint(equalToConstant: navHeight),
+            navContainer.heightAnchor.constraint(equalToConstant: pillHeight),
 
-            // Back button inside nav container
-            backButton.leadingAnchor.constraint(equalTo: navContainer.leadingAnchor, constant: 4),
+            backButton.leadingAnchor.constraint(equalTo: navContainer.leadingAnchor, constant: 8),
             backButton.centerYAnchor.constraint(equalTo: navContainer.centerYAnchor),
-            backButton.widthAnchor.constraint(equalToConstant: 28),
+            backButton.widthAnchor.constraint(equalToConstant: 24),
             backButton.heightAnchor.constraint(equalToConstant: 24),
 
-            // Forward button inside nav container
-            forwardButton.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 0),
-            forwardButton.trailingAnchor.constraint(equalTo: navContainer.trailingAnchor, constant: -4),
+            navDivider.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 6),
+            navDivider.centerYAnchor.constraint(equalTo: navContainer.centerYAnchor),
+            navDivider.widthAnchor.constraint(equalToConstant: 1),
+            navDivider.heightAnchor.constraint(equalToConstant: 16),
+
+            forwardButton.leadingAnchor.constraint(equalTo: navDivider.trailingAnchor, constant: 6),
+            forwardButton.trailingAnchor.constraint(equalTo: navContainer.trailingAnchor, constant: -8),
             forwardButton.centerYAnchor.constraint(equalTo: navContainer.centerYAnchor),
-            forwardButton.widthAnchor.constraint(equalToConstant: 28),
+            forwardButton.widthAnchor.constraint(equalToConstant: 24),
             forwardButton.heightAnchor.constraint(equalToConstant: 24),
 
-            // Left spacer
+            // === Left Spacer ===
             leftSpacer.leadingAnchor.constraint(equalTo: navContainer.trailingAnchor, constant: 12),
             leftSpacer.centerYAnchor.constraint(equalTo: centerYAnchor),
             leftSpacer.heightAnchor.constraint(equalToConstant: 1),
             leftSpacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 8),
 
-            // Address bar container (centered, flexible width)
+            // === Address Bar ===
             addressBarContainer.leadingAnchor.constraint(equalTo: leftSpacer.trailingAnchor),
             addressBarContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
             addressBarContainer.heightAnchor.constraint(equalToConstant: addressBarHeight),
-            addressBarContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
-            addressBarContainer.widthAnchor.constraint(lessThanOrEqualToConstant: 600),
+            addressBarContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 280),
+            addressBarContainer.widthAnchor.constraint(lessThanOrEqualToConstant: 700),
 
-            // Address field inside container
-            addressField.leadingAnchor.constraint(equalTo: addressBarContainer.leadingAnchor, constant: 12),
-            addressField.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -4),
+            searchIcon.leadingAnchor.constraint(equalTo: addressBarContainer.leadingAnchor, constant: 12),
+            searchIcon.centerYAnchor.constraint(equalTo: addressBarContainer.centerYAnchor),
+            searchIcon.widthAnchor.constraint(equalToConstant: 16),
+            searchIcon.heightAnchor.constraint(equalToConstant: 16),
+
+            addressField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 6),
+            addressField.trailingAnchor.constraint(equalTo: addressBarContainer.trailingAnchor, constant: -12),
             addressField.centerYAnchor.constraint(equalTo: addressBarContainer.centerYAnchor),
 
-            // Refresh button inside address bar (right side)
-            refreshButton.trailingAnchor.constraint(equalTo: addressBarContainer.trailingAnchor, constant: -8),
-            refreshButton.centerYAnchor.constraint(equalTo: addressBarContainer.centerYAnchor),
-            refreshButton.widthAnchor.constraint(equalToConstant: 20),
-            refreshButton.heightAnchor.constraint(equalToConstant: 20),
-
-            // Right spacer (equal to left)
+            // === Right Spacer ===
             rightSpacer.leadingAnchor.constraint(equalTo: addressBarContainer.trailingAnchor),
             rightSpacer.centerYAnchor.constraint(equalTo: centerYAnchor),
             rightSpacer.heightAnchor.constraint(equalToConstant: 1),
             rightSpacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 8),
             rightSpacer.widthAnchor.constraint(equalTo: leftSpacer.widthAnchor),
 
-            // Action buttons (right side)
-            newTabButton.leadingAnchor.constraint(equalTo: rightSpacer.trailingAnchor, constant: 8),
-            newTabButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            newTabButton.widthAnchor.constraint(equalToConstant: 28),
-            newTabButton.heightAnchor.constraint(equalToConstant: 28),
+            // === Action Container ===
+            actionContainer.leadingAnchor.constraint(equalTo: rightSpacer.trailingAnchor, constant: 12),
+            actionContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            actionContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
+            actionContainer.heightAnchor.constraint(equalToConstant: pillHeight),
 
-            overviewButton.leadingAnchor.constraint(equalTo: newTabButton.trailingAnchor, constant: 4),
-            overviewButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            overviewButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            overviewButton.widthAnchor.constraint(equalToConstant: 28),
-            overviewButton.heightAnchor.constraint(equalToConstant: 28),
+            shareButton.leadingAnchor.constraint(equalTo: actionContainer.leadingAnchor, constant: 8),
+            shareButton.centerYAnchor.constraint(equalTo: actionContainer.centerYAnchor),
+            shareButton.widthAnchor.constraint(equalToConstant: 24),
+            shareButton.heightAnchor.constraint(equalToConstant: 24),
+
+            newTabButton.leadingAnchor.constraint(equalTo: shareButton.trailingAnchor, constant: 8),
+            newTabButton.centerYAnchor.constraint(equalTo: actionContainer.centerYAnchor),
+            newTabButton.widthAnchor.constraint(equalToConstant: 24),
+            newTabButton.heightAnchor.constraint(equalToConstant: 24),
+
+            overviewButton.leadingAnchor.constraint(equalTo: newTabButton.trailingAnchor, constant: 8),
+            overviewButton.trailingAnchor.constraint(equalTo: actionContainer.trailingAnchor, constant: -8),
+            overviewButton.centerYAnchor.constraint(equalTo: actionContainer.centerYAnchor),
+            overviewButton.widthAnchor.constraint(equalToConstant: 24),
+            overviewButton.heightAnchor.constraint(equalToConstant: 24),
         ])
+    }
+
+    private func updateAddressBarBorder(focused: Bool) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            if focused {
+                addressBarContainer.layer?.borderColor = focusBorderColor.cgColor
+                addressBarContainer.layer?.borderWidth = 2.5
+            } else {
+                addressBarContainer.layer?.borderColor = pillBorderColor.cgColor
+                addressBarContainer.layer?.borderWidth = 1.5
+            }
+        }
     }
 
     // MARK: - Actions
@@ -424,6 +487,13 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
         viewModel?.goForward()
     }
 
+    @objc private func shareTapped() {
+        guard let url = viewModel?.currentTab?.url,
+              let view = shareButton.superview else { return }
+        let picker = NSSharingServicePicker(items: [url])
+        picker.show(relativeTo: shareButton.bounds, of: shareButton, preferredEdge: .minY)
+    }
+
     @objc private func newTabTapped() {
         _ = viewModel?.addNewTab()
     }
@@ -432,27 +502,20 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
         onOverview?()
     }
 
-    @objc private func refreshTapped() {
-        viewModel?.reloadCurrentTab()
-    }
-
     @objc private func addressFieldSubmitted() {
         let input = addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
         viewModel?.navigateCurrentTab(to: input)
-        // Resign first responder
         addressField.window?.makeFirstResponder(nil)
-        // Restore display title
         updateState()
     }
 
     // MARK: - NSTextFieldDelegate
 
     func controlTextDidBeginEditing(_ obj: Notification) {
-        // When editing starts, show full URL instead of domain
+        addressBarContainer.onFocusChange?(true)
         if let tab = viewModel?.currentTab, let url = tab.url {
             addressField.stringValue = url.absoluteString
-            // Select all text for easy replacement
             if let editor = addressField.currentEditor() {
                 editor.selectAll(nil)
             }
@@ -460,7 +523,7 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
-        // Restore display title when editing ends
+        addressBarContainer.onFocusChange?(false)
         updateState()
     }
 
@@ -472,17 +535,16 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
         backButton.isEnabled = viewModel.canGoBack
         forwardButton.isEnabled = viewModel.canGoForward
 
-        // Update button appearance based on enabled state
-        backButton.contentTintColor = viewModel.canGoBack ? NSColor(white: 0.9, alpha: 1.0) : NSColor(white: 0.4, alpha: 1.0)
-        forwardButton.contentTintColor = viewModel.canGoForward ? NSColor(white: 0.9, alpha: 1.0) : NSColor(white: 0.4, alpha: 1.0)
+        backButton.contentTintColor = viewModel.canGoBack ? iconColor : NSColor(white: 0.3, alpha: 1.0)
+        forwardButton.contentTintColor = viewModel.canGoForward ? iconColor : NSColor(white: 0.3, alpha: 1.0)
 
-        // Show domain or title (not full URL) when not editing
         if addressField.currentEditor() == nil {
             let displayText: String = {
-                guard let tab = viewModel.currentTab else { return "New Tab" }
+                guard let tab = viewModel.currentTab else { return "" }
                 if case .web = tab.contentType, let host = tab.url?.host {
                     return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
                 }
+                if tab.title.isEmpty { return "" }
                 return tab.title
             }()
             addressField.stringValue = displayText
@@ -491,37 +553,20 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
 
     // MARK: - Button Factories
 
-    /// Navigation button (inside rounded container)
     private static func createNavButton(symbol: String, tooltip: String) -> NSButton {
         let button = NSButton()
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
         button.bezelStyle = .inline
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.toolTip = tooltip
-        button.contentTintColor = NSColor(white: 0.9, alpha: 1.0)
+        button.contentTintColor = NSColor(white: 0.55, alpha: 1.0)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }
 
-    /// Inline button (inside address bar)
-    private static func createInlineButton(symbol: String, tooltip: String) -> NSButton {
-        let button = NSButton()
-        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-        button.bezelStyle = .inline
-        button.isBordered = false
-        button.imagePosition = .imageOnly
-        button.toolTip = tooltip
-        button.contentTintColor = NSColor(white: 0.5, alpha: 1.0)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }
-
-    /// Action button (standalone)
     private static func createActionButton(symbol: String, tooltip: String) -> NSButton {
         let button = NSButton()
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
@@ -531,8 +576,26 @@ private class ToolbarContainerView: NSView, NSTextFieldDelegate {
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.toolTip = tooltip
-        button.contentTintColor = NSColor(white: 0.7, alpha: 1.0)
+        button.contentTintColor = NSColor(white: 0.55, alpha: 1.0)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
+    }
+}
+
+// MARK: - Address Bar Container (tracks focus)
+
+private class AddressBarContainerView: NSView {
+    var onFocusChange: ((Bool) -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        onFocusChange?(true)
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        onFocusChange?(false)
+        return super.resignFirstResponder()
     }
 }
