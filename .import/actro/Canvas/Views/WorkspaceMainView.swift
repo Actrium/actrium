@@ -18,6 +18,7 @@ struct WorkspaceMainView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
+    var useNativeToolbar: Bool = false  // 使用原生 NSToolbar 时隐藏 SwiftUI toolbar
 
     // Viewport size from WorkspaceMainViewport (via Environment)
     @Environment(\.viewportSize) private var viewportSize
@@ -294,16 +295,118 @@ struct WorkspaceMainView: View {
                 }
                 .allowsHitTesting(false)
             }
-            // NSToolbar with centeredItemIdentifier for Safari-style layout
-            .background(
-                ToolbarConfigurator(
-                    viewModel: viewModel,
-                    bookmarkVM: bookmarkVM,
-                    isWebLoading: $isWebLoading,
-                    toggleFocusOverview: toggleFocusOverview
-                )
-                .frame(width: 0, height: 0)
-            )
+            .toolbar {
+                // 使用原生 NSToolbar 时隐藏 SwiftUI toolbar 内容
+                if !useNativeToolbar {
+                    // 左侧：导航按钮
+                    ToolbarItemGroup(placement: .navigation) {
+                    Button(action: { viewModel.goBack() }) {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(!viewModel.canGoBack)
+                    .help("后退")
+
+                    Button(action: { viewModel.goForward() }) {
+                        Image(systemName: "chevron.right")
+                    }
+                    .disabled(!viewModel.canGoForward)
+                    .help("前进")
+                }
+
+                // 中间：地址栏（50% viewportSize 宽度，但限制最大宽度以保持居中）
+                ToolbarItem(placement: .principal) {
+                    // 左右按钮组各约 100px，需要预留空间才能保持居中
+                    // 可居中的最大宽度 = viewportSize.width - 2 * 较大一侧的按钮宽度
+                    let sideButtonsWidth: CGFloat = 140
+                    let maxCenterableWidth = max(200, viewportSize.width - 2 * sideButtonsWidth)
+                    // 最小宽度 200，确保地址栏始终可见
+                    let addressBarWidth = max(200, min(viewportSize.width * 0.5, maxCenterableWidth))
+
+                    if case .overview = viewModel.canvasMode {
+                        Color.clear
+                            .frame(width: addressBarWidth, height: 28)
+                    } else {
+                        let leftIconState: AddressBarLeftIconState = {
+                            guard let tab = viewModel.currentTab else { return .none }
+                            switch tab.contentType {
+                            case .reactNative: return .menu
+                            case .web: return isWebLoading ? .loading : .none
+                            case .empty: return .none
+                            }
+                        }()
+
+                        let currentURLString = viewModel.currentTab?.url?.absoluteString ?? ""
+
+                        let displayTitle: String = {
+                            guard let tab = viewModel.currentTab else { return "New Tab" }
+                            if case .web = tab.contentType, let host = tab.url?.host {
+                                return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+                            }
+                            return tab.title
+                        }()
+
+                        AddressBarContainer(
+                            titleText: .constant(displayTitle),
+                            urlText: currentURLString,
+                            inputText: $addressInputText,
+                            isEditing: $isAddressBarEditing,
+                            isFirstResponder: $isAddressBarFirstResponder,
+                            isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
+                            leftIconState: leftIconState,
+                            toggleLeftPanel: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    viewModel.toggleLeftPanelForCurrentTab()
+                                }
+                            },
+                            showingBookmarkPopover: $showingBookmarkSheet,
+                            shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
+                            refreshAction: { viewModel.reloadCurrentTab() },
+                            onNavigate: { input in
+                                viewModel.navigateCurrentTab(to: input)
+                                isAddressBarFirstResponder = false
+                            },
+                            bookmarkPopoverContent: {
+                                if let tab = viewModel.currentTab {
+                                    let existingBookmark = bookmarkVM.getBookmark(for: tab)
+                                    BookmarkEditSheet(
+                                        viewModel: bookmarkVM,
+                                        tab: existingBookmark == nil ? tab : nil,
+                                        existingBookmark: existingBookmark
+                                    )
+                                }
+                            }
+                        )
+                        .frame(width: addressBarWidth)
+                    }
+                }
+
+                // 右侧：操作按钮
+                ToolbarItemGroup(placement: .primaryAction) {
+                    DownloadToolbarButton()
+
+                    if case .focus = viewModel.canvasMode,
+                       let currentTab = viewModel.currentTab,
+                       currentTab.url != nil {
+                        ShareToolbarButton(url: currentTab.url)
+                        QRCodeToolbarButton(url: currentTab.url)
+                    }
+
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+                            _ = viewModel.addNewTab()
+                        }
+                    }) {
+                        Image(systemName: "plus")
+                    }
+                    .help("新建标签页")
+
+                    Button(action: toggleFocusOverview) {
+                        Image(systemName: "square.on.square")
+                    }
+                    .help("标签总览 (⌘⇧\\)")
+                }
+                }  // end if !useNativeToolbar
+            }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 从 Focus 切换到 Overview 时，先截图当前页面
             if case .focus(let focusedTabId) = oldValue, case .overview = newValue {
@@ -1309,16 +1412,16 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, minHeight: 28)
+        .frame(maxWidth: .infinity)
+        .frame(height: 28)
         .overlay(
-            Capsule()
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(
                     Color(red: 0.18, green: 0.56, blue: 0.96)
                         .opacity(focusRingOpacity),
                     lineWidth: 2.8
                 )
                 .scaleEffect(focusRingScale)
-                .padding(.vertical, -4)
         )
         .onChange(of: isFirstResponder) { _, newValue in
             if !newValue && isEditing {
@@ -1330,12 +1433,15 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
             if newValue {
                 // 进入编辑模式时，复制 URL 并延迟设置焦点（等待 TextField 渲染）
                 inputText = urlText
-                // 从略大的、透明的蓝圈收缩到正常大小并渐显
-                focusRingScale = 1.08
-                focusRingOpacity = 0.0
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.7, blendDuration: 0.1)) {
-                    focusRingScale = 1.0
-                    focusRingOpacity = 1.0
+                // Safari 风格：从较大的蓝圈收缩到边框
+                // 1. 先设置初始状态（大圈、完全可见）
+                focusRingScale = 1.2
+                focusRingOpacity = 1.0
+                // 2. 延迟一帧后开始收缩动画，确保初始状态已渲染
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        focusRingScale = 1.0
+                    }
                 }
                 // 延迟一帧，确保 FocusableTextField 已渲染
                 DispatchQueue.main.async {

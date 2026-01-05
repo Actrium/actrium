@@ -2,492 +2,635 @@ import AppKit
 import SwiftUI
 import Combine
 
-// MARK: - Window Toolbar Setup
+// MARK: - Toolbar Item Identifiers
 
-/// Configures NSToolbar with centeredItemIdentifier for Safari-style layout
-struct ToolbarConfigurator: NSViewRepresentable {
-    @ObservedObject var viewModel: BrowserViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
-    @Binding var isWebLoading: Bool
-    let toggleFocusOverview: () -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            self.configureToolbar(for: view, context: context)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        // Update toolbar when state changes
-        guard let window = nsView.window,
-              let coordinator = context.coordinator as? ToolbarCoordinator else { return }
-        coordinator.updateToolbarItems()
-    }
-
-    func makeCoordinator() -> ToolbarCoordinator {
-        ToolbarCoordinator(
-            viewModel: viewModel,
-            bookmarkVM: bookmarkVM,
-            isWebLoading: _isWebLoading,
-            toggleFocusOverview: toggleFocusOverview
-        )
-    }
-
-    private func configureToolbar(for view: NSView, context: Context) {
-        guard let window = view.window else { return }
-
-        // Skip if already configured
-        if window.toolbar?.identifier == ToolbarCoordinator.toolbarIdentifier { return }
-
-        let toolbar = NSToolbar(identifier: ToolbarCoordinator.toolbarIdentifier)
-        toolbar.delegate = context.coordinator
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = false
-
-        // Key: Set centeredItemIdentifier for Safari-style centering
-        toolbar.centeredItemIdentifier = ToolbarCoordinator.addressBarId
-
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
-
-        context.coordinator.window = window
-    }
+extension NSToolbarItem.Identifier {
+    static let fullWidthBar = NSToolbarItem.Identifier("fullWidthBar")
 }
 
-// MARK: - Toolbar Coordinator
+// MARK: - Toolbar Manager (Singleton) - Using NSTitlebarAccessoryViewController
 
-class ToolbarCoordinator: NSObject, NSToolbarDelegate {
-    static let toolbarIdentifier = NSToolbar.Identifier("MainToolbar")
-    static let navigationId = NSToolbarItem.Identifier("navigation")
-    static let addressBarId = NSToolbarItem.Identifier("addressBar")
-    static let actionsId = NSToolbarItem.Identifier("actions")
+@MainActor
+final class ToolbarManager: ObservableObject {
+    static let shared = ToolbarManager()
 
-    weak var window: NSWindow?
-    var viewModel: BrowserViewModel
-    var bookmarkVM: BookmarkViewModel
-    var isWebLoading: Binding<Bool>
-    var toggleFocusOverview: () -> Void
-
-    private var addressBarHostingView: NSHostingView<AnyView>?
+    private var accessoryViewController: NSTitlebarAccessoryViewController?
+    private var toolbarHostingView: NSHostingView<TitlebarToolbarView>?
     private var cancellables = Set<AnyCancellable>()
 
-    init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel,
-         isWebLoading: Binding<Bool>, toggleFocusOverview: @escaping () -> Void) {
-        self.viewModel = viewModel
-        self.bookmarkVM = bookmarkVM
-        self.isWebLoading = isWebLoading
-        self.toggleFocusOverview = toggleFocusOverview
-        super.init()
+    // State
+    private var canGoBack: Bool = false
+    private var canGoForward: Bool = false
+    private var displayTitle: String = "New Tab"
+    private var isOverviewMode: Bool = false
+    private var isBookmarked: Bool = false
 
-        // Observe window resize
-        NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)
-            .sink { [weak self] notification in
-                guard let window = notification.object as? NSWindow,
-                      window === self?.window else { return }
-                self?.updateAddressBarWidth()
+    // Callbacks
+    var onGoBack: (() -> Void)?
+    var onGoForward: (() -> Void)?
+    var onAddNewTab: (() -> Void)?
+    var onReload: (() -> Void)?
+    var onToggleFocusOverview: (() -> Void)?
+    var onToggleBookmark: (() -> Void)?
+
+    private init() {}
+
+    func setupToolbar(for window: NSWindow, viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel) {
+        // 移除默认 toolbar，使用自定义 titlebar
+        window.toolbar = nil
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = false
+        window.styleMask.insert(.fullSizeContentView)
+
+        // Setup callbacks
+        onGoBack = { [weak viewModel] in viewModel?.goBack() }
+        onGoForward = { [weak viewModel] in viewModel?.goForward() }
+        onAddNewTab = { [weak viewModel] in _ = viewModel?.addNewTab() }
+        onReload = { [weak viewModel] in viewModel?.reloadCurrentTab() }
+
+        // 创建 titlebar accessory view controller
+        let accessoryVC = NSTitlebarAccessoryViewController()
+        accessoryVC.layoutAttribute = .trailing  // 放在红绿灯右边，和 titlebar 一体
+        accessoryVC.fullScreenMinHeight = 52
+
+        // 创建 SwiftUI toolbar 视图
+        let toolbarView = TitlebarToolbarView(
+            canGoBack: canGoBack,
+            canGoForward: canGoForward,
+            displayTitle: displayTitle,
+            isOverviewMode: isOverviewMode,
+            isBookmarked: isBookmarked,
+            onBack: { [weak self] in self?.onGoBack?() },
+            onForward: { [weak self] in self?.onGoForward?() },
+            onAddressBarTap: { },
+            onBookmarkTap: { [weak self] in self?.onToggleBookmark?() },
+            onReloadTap: { [weak self] in self?.onReload?() },
+            onNewTab: { [weak self] in self?.onAddNewTab?() },
+            onOverview: { [weak self] in self?.onToggleFocusOverview?() }
+        )
+
+        let hostingView = NSHostingView(rootView: toolbarView)
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+
+        accessoryVC.view = hostingView
+        self.accessoryViewController = accessoryVC
+        self.toolbarHostingView = hostingView
+
+        // 添加到窗口
+        window.addTitlebarAccessoryViewController(accessoryVC)
+
+        // Observe viewModel changes
+        setupObservers(viewModel: viewModel, bookmarkVM: bookmarkVM)
+    }
+
+    private func setupObservers(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel) {
+        viewModel.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self, weak viewModel, weak bookmarkVM] _ in
+                guard let viewModel = viewModel, let bookmarkVM = bookmarkVM else { return }
+                self?.updateToolbarState(viewModel: viewModel, bookmarkVM: bookmarkVM)
             }
             .store(in: &cancellables)
     }
 
-    func updateToolbarItems() {
-        updateAddressBarWidth()
-    }
+    func updateToolbarState(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel) {
+        canGoBack = viewModel.canGoBack
+        canGoForward = viewModel.canGoForward
 
-    private func updateAddressBarWidth() {
-        guard let window = window, let hostingView = addressBarHostingView else { return }
-        let width = max(window.frame.width * 0.5, 200)
-        hostingView.frame.size.width = width
-    }
-
-    // MARK: - NSToolbarDelegate
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        switch itemIdentifier {
-        case Self.navigationId:
-            return makeNavigationItem()
-        case Self.addressBarId:
-            return makeAddressBarItem()
-        case Self.actionsId:
-            return makeActionsItem()
-        default:
-            return nil
-        }
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
-            Self.navigationId,
-            .flexibleSpace,
-            Self.addressBarId,
-            .flexibleSpace,
-            Self.actionsId
-        ]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar)
-    }
-
-    // MARK: - Toolbar Items
-
-    private func makeNavigationItem() -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: Self.navigationId)
-
-        let view = NavigationButtonsView(viewModel: viewModel)
-        let hostingView = NSHostingView(rootView: view)
-        // 固定尺寸：2个按钮 * 32px + 间距
-        hostingView.frame.size = CGSize(width: 70, height: 28)
-
-        item.view = hostingView
-        return item
-    }
-
-    private func makeAddressBarItem() -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: Self.addressBarId)
-
-        let windowWidth = window?.frame.width ?? 1000
-        let width = max(windowWidth * 0.5, 300)
-
-        let view = AddressBarToolbarView(
-            viewModel: viewModel,
-            bookmarkVM: bookmarkVM,
-            isWebLoading: isWebLoading
-        )
-
-        let hostingView = NSHostingView(rootView: AnyView(view))
-        hostingView.frame.size = CGSize(width: width, height: 28)
-
-        item.view = hostingView
-        self.addressBarHostingView = hostingView
-
-        return item
-    }
-
-    private func makeActionsItem() -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: Self.actionsId)
-
-        let view = ActionButtonsView(
-            viewModel: viewModel,
-            toggleFocusOverview: toggleFocusOverview
-        )
-        let hostingView = NSHostingView(rootView: view)
-        // 固定尺寸：4个按钮 * 32px + 间距
-        hostingView.frame.size = CGSize(width: 140, height: 28)
-
-        item.view = hostingView
-        return item
-    }
-}
-
-// MARK: - Navigation Buttons View
-
-private struct NavigationButtonsView: View {
-    @ObservedObject var viewModel: BrowserViewModel
-
-    var body: some View {
-        HStack(spacing: 2) {
-            Button(action: { viewModel.goBack() }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .buttonStyle(.borderless)
-            .disabled(!viewModel.canGoBack)
-            .help("后退")
-
-            Button(action: { viewModel.goForward() }) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .buttonStyle(.borderless)
-            .disabled(!viewModel.canGoForward)
-            .help("前进")
-        }
-        .frame(height: 28)
-    }
-}
-
-// MARK: - Action Buttons View
-
-private struct ActionButtonsView: View {
-    @ObservedObject var viewModel: BrowserViewModel
-    let toggleFocusOverview: () -> Void
-
-    var body: some View {
-        HStack(spacing: 2) {
-            DownloadToolbarButton()
-
-            if case .focus = viewModel.canvasMode,
-               let currentTab = viewModel.currentTab,
-               currentTab.url != nil {
-                ShareToolbarButton(url: currentTab.url)
-                QRCodeToolbarButton(url: currentTab.url)
-            }
-
-            Button(action: {
-                withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                    _ = viewModel.addNewTab()
-                }
-            }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .buttonStyle(.borderless)
-            .help("新建标签页")
-
-            Button(action: toggleFocusOverview) {
-                Image(systemName: "square.on.square")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .buttonStyle(.borderless)
-            .help("标签总览 (⌘⇧\\)")
-        }
-        .frame(height: 28)
-    }
-}
-
-// MARK: - Address Bar Toolbar View
-
-private struct AddressBarToolbarView: View {
-    @ObservedObject var viewModel: BrowserViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
-    @Binding var isWebLoading: Bool
-
-    @State private var inputText: String = ""
-    @State private var isEditing: Bool = false
-    @State private var isFirstResponder: Bool = false
-    @State private var showingBookmarkPopover: Bool = false
-    @State private var focusRingScale: CGFloat = 1.0
-    @State private var focusRingOpacity: Double = 0.0
-
-    private let placeholder = "Enter URL (http/https) or app id"
-
-    var body: some View {
-        Group {
-            if case .overview = viewModel.canvasMode {
-                Color.clear.frame(height: 28)
-            } else {
-                addressBarContent
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 28)
-    }
-
-    private var addressBarContent: some View {
-        let leftIconState: AddressBarLeftIconState = {
-            guard let tab = viewModel.currentTab else { return .none }
-            switch tab.contentType {
-            case .reactNative: return .menu
-            case .web: return isWebLoading ? .loading : .none
-            case .empty: return .none
-            }
+        isOverviewMode = {
+            if case .overview = viewModel.canvasMode { return true }
+            return false
         }()
 
-        let currentURLString = viewModel.currentTab?.url?.absoluteString ?? ""
-        let displayTitle: String = {
+        displayTitle = {
             guard let tab = viewModel.currentTab else { return "New Tab" }
             if case .web = tab.contentType, let host = tab.url?.host {
                 return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
             }
             return tab.title
         }()
-        let isBookmarked = viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false
 
-        return Group {
-            if isEditing {
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(Color.white.opacity(0.7))
-                        .frame(width: 16, height: 16)
+        isBookmarked = viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false
 
-                    FocusableTextField(
-                        text: $inputText,
-                        placeholder: placeholder,
-                        isFirstResponder: $isFirstResponder,
-                        onSubmit: { text in
-                            viewModel.navigateCurrentTab(to: text)
-                            isFirstResponder = false
-                        }
-                    )
+        // 更新 SwiftUI 视图
+        let toolbarView = TitlebarToolbarView(
+            canGoBack: canGoBack,
+            canGoForward: canGoForward,
+            displayTitle: displayTitle,
+            isOverviewMode: isOverviewMode,
+            isBookmarked: isBookmarked,
+            onBack: { [weak self] in self?.onGoBack?() },
+            onForward: { [weak self] in self?.onGoForward?() },
+            onAddressBarTap: { },
+            onBookmarkTap: { [weak self] in self?.onToggleBookmark?() },
+            onReloadTap: { [weak self] in self?.onReload?() },
+            onNewTab: { [weak self] in self?.onAddNewTab?() },
+            onOverview: { [weak self] in self?.onToggleFocusOverview?() }
+        )
 
-                    bookmarkButton(isBookmarked: isBookmarked)
-                    refreshButton
+        toolbarHostingView?.rootView = toolbarView
+    }
+}
+
+// MARK: - Main Toolbar Delegate
+
+final class MainToolbarDelegate: NSObject, NSToolbarDelegate {
+    weak var viewModel: BrowserViewModel?
+    weak var bookmarkVM: BookmarkViewModel?
+
+    // Callbacks
+    var onToggleFocusOverview: (() -> Void)?
+    var onAddNewTab: (() -> Void)?
+    var onGoBack: (() -> Void)?
+    var onGoForward: (() -> Void)?
+    var onReload: (() -> Void)?
+    var onNavigate: ((String) -> Void)?
+    var onToggleLeftPanel: (() -> Void)?
+    var onToggleBookmark: (() -> Void)?
+
+    // State bindings (updated externally)
+    var canGoBack: Bool = false
+    var canGoForward: Bool = false
+    var isBookmarked: Bool = false
+    var displayTitle: String = "New Tab"
+    var currentURL: String = ""
+    var isOverviewMode: Bool = false
+    var viewportWidth: CGFloat = 800
+
+    // Keep references to items for updating
+    private var addressBarItem: NSToolbarItem?
+
+    // MARK: - NSToolbarDelegate
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.fullWidthBar]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.fullWidthBar]
+    }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        switch itemIdentifier {
+        case .fullWidthBar:
+            return makeFullWidthBarItem()
+        default:
+            return nil
+        }
+    }
+
+    // MARK: - Create Toolbar Items
+
+    private func makeFullWidthBarItem() -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: .fullWidthBar)
+
+        // 创建包含所有元素的全宽 SwiftUI 视图
+        let fullBarView = FullWidthToolbarView(
+            canGoBack: canGoBack,
+            canGoForward: canGoForward,
+            displayTitle: displayTitle,
+            isOverviewMode: isOverviewMode,
+            isBookmarked: isBookmarked,
+            onBack: { [weak self] in self?.onGoBack?() },
+            onForward: { [weak self] in self?.onGoForward?() },
+            onAddressBarTap: { [weak self] in
+                // TODO: Enter edit mode
+            },
+            onBookmarkTap: { [weak self] in self?.onToggleBookmark?() },
+            onReloadTap: { [weak self] in self?.onReload?() },
+            onNewTab: { [weak self] in self?.onAddNewTab?() },
+            onOverview: { [weak self] in self?.onToggleFocusOverview?() }
+        )
+
+        // 创建一个容器视图来确保填充整个可用宽度
+        let hostingView = NSHostingView(rootView: fullBarView)
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+
+        // 包装在一个 NSView 中以便设置约束
+        let containerView = NSView()
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(hostingView)
+
+        NSLayoutConstraint.activate([
+            hostingView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            hostingView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+        ])
+
+        item.view = containerView
+
+        // 允许伸展到最大宽度 - 这是关键！
+        item.minSize = NSSize(width: 400, height: 38)
+        item.maxSize = NSSize(width: 10000, height: 38)
+        item.visibilityPriority = .user
+
+        fullWidthBarItem = item
+        return item
+    }
+
+    private var fullWidthBarItem: NSToolbarItem?
+
+    // MARK: - Actions
+
+    @objc private func goBackAction() {
+        onGoBack?()
+    }
+
+    @objc private func goForwardAction() {
+        onGoForward?()
+    }
+
+    @objc private func addNewTabAction() {
+        onAddNewTab?()
+    }
+
+    @objc private func toggleOverviewAction() {
+        onToggleFocusOverview?()
+    }
+
+    // MARK: - Update State
+
+    func updateNavigationState(canGoBack: Bool, canGoForward: Bool) {
+        self.canGoBack = canGoBack
+        self.canGoForward = canGoForward
+        // Navigation item 会在下次 updateAddressBar 时重建
+    }
+
+    func updateAddressBar(title: String, url: String, isBookmarked: Bool, isOverviewMode: Bool, width: CGFloat) {
+        self.displayTitle = title
+        self.currentURL = url
+        self.isBookmarked = isBookmarked
+        self.isOverviewMode = isOverviewMode
+        self.viewportWidth = width
+
+        // 重建 fullWidthBar 视图
+        if let item = fullWidthBarItem {
+            let fullBarView = FullWidthToolbarView(
+                canGoBack: canGoBack,
+                canGoForward: canGoForward,
+                displayTitle: title,
+                isOverviewMode: isOverviewMode,
+                isBookmarked: isBookmarked,
+                onBack: { [weak self] in self?.onGoBack?() },
+                onForward: { [weak self] in self?.onGoForward?() },
+                onAddressBarTap: { [weak self] in
+                    // TODO: Enter edit mode
+                },
+                onBookmarkTap: { [weak self] in self?.onToggleBookmark?() },
+                onReloadTap: { [weak self] in self?.onReload?() },
+                onNewTab: { [weak self] in self?.onAddNewTab?() },
+                onOverview: { [weak self] in self?.onToggleFocusOverview?() }
+            )
+
+            let hostingView = NSHostingView(rootView: fullBarView)
+            item.view = hostingView
+        }
+    }
+}
+
+// MARK: - Titlebar Toolbar View (for NSTitlebarAccessoryViewController)
+
+struct TitlebarToolbarView: View {
+    let canGoBack: Bool
+    let canGoForward: Bool
+    let displayTitle: String
+    let isOverviewMode: Bool
+    let isBookmarked: Bool
+    let onBack: () -> Void
+    let onForward: () -> Void
+    let onAddressBarTap: () -> Void
+    let onBookmarkTap: () -> Void
+    let onReloadTap: () -> Void
+    let onNewTab: () -> Void
+    let onOverview: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // 左侧：导航按钮
+            HStack(spacing: 0) {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 26, height: 22)
                 }
-            } else {
-                HStack(spacing: 10) {
-                    AddressBarLeftIcon(state: leftIconState) {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            viewModel.toggleLeftPanelForCurrentTab()
+                .disabled(!canGoBack)
+
+                Divider()
+                    .frame(height: 14)
+
+                Button(action: onForward) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 26, height: 22)
+                }
+                .disabled(!canGoForward)
+            }
+            .buttonStyle(.borderless)
+            .foregroundColor(.white.opacity(0.8))
+            .background(Color.white.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            Spacer()
+
+            // 中间：地址栏（占 50% 宽度）
+            GeometryReader { geometry in
+                let addressBarWidth = geometry.size.width
+
+                if !isOverviewMode {
+                    HStack(spacing: 8) {
+                        Text(displayTitle)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+
+                        Button(action: onBookmarkTap) {
+                            Image(systemName: isBookmarked ? "star.fill" : "star")
+                                .font(.system(size: 12))
+                                .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.6))
                         }
+                        .buttonStyle(.borderless)
+
+                        Button(action: onReloadTap) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        .buttonStyle(.borderless)
                     }
-
-                    Text(displayTitle)
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture { isEditing = true }
-
-                    bookmarkButton(isBookmarked: isBookmarked)
-                    refreshButton
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .frame(width: addressBarWidth, height: 26)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    )
+                    .onTapGesture { onAddressBarTap() }
                 }
+            }
+            .frame(maxWidth: .infinity)
+
+            Spacer()
+
+            // 右侧：操作按钮
+            HStack(spacing: 6) {
+                Button(action: onNewTab) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 26, height: 22)
+                }
+                .help("New Tab")
+
+                Button(action: onOverview) {
+                    Image(systemName: "square.on.square")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 26, height: 22)
+                }
+                .help("Tab Overview (⌘⇧\\)")
+            }
+            .buttonStyle(.borderless)
+            .foregroundColor(.white.opacity(0.8))
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .frame(height: 52)
+    }
+}
+
+// MARK: - Full Width Toolbar View (Legacy)
+
+struct FullWidthToolbarView: View {
+    let canGoBack: Bool
+    let canGoForward: Bool
+    let displayTitle: String
+    let isOverviewMode: Bool
+    let isBookmarked: Bool
+    let onBack: () -> Void
+    let onForward: () -> Void
+    let onAddressBarTap: () -> Void
+    let onBookmarkTap: () -> Void
+    let onReloadTap: () -> Void
+    let onNewTab: () -> Void
+    let onOverview: () -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                // 左侧：导航按钮
+                HStack(spacing: 0) {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 28, height: 24)
+                    }
+                    .disabled(!canGoBack)
+
+                    Divider()
+                        .frame(height: 16)
+
+                    Button(action: onForward) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 28, height: 24)
+                    }
+                    .disabled(!canGoForward)
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(.white.opacity(0.8))
+                .background(Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                Spacer()
+
+                // 中间：地址栏（占 50% 宽度）
+                if !isOverviewMode {
+                    HStack(spacing: 8) {
+                        Text(displayTitle)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+
+                        Button(action: onBookmarkTap) {
+                            Image(systemName: isBookmarked ? "star.fill" : "star")
+                                .font(.system(size: 13))
+                                .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.6))
+                        }
+                        .buttonStyle(.borderless)
+
+                        Button(action: onReloadTap) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .frame(width: geometry.size.width * 0.5, height: 28)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    )
+                    .onTapGesture {
+                        onAddressBarTap()
+                    }
+                } else {
+                    // Overview 模式下显示空白占位
+                    Color.clear
+                        .frame(width: geometry.size.width * 0.5, height: 28)
+                }
+
+                Spacer()
+
+                // 右侧：操作按钮
+                HStack(spacing: 8) {
+                    Button(action: onNewTab) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 28, height: 24)
+                    }
+                    .help("New Tab")
+
+                    Button(action: onOverview) {
+                        Image(systemName: "square.on.square")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 28, height: 24)
+                    }
+                    .help("Tab Overview (⌘⇧\\)")
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(.white.opacity(0.8))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(height: 28)
+    }
+}
+
+// MARK: - Navigation Buttons View (Safari style) - Legacy
+
+struct NavigationButtonsView: View {
+    let onBack: () -> Void
+    let onForward: () -> Void
+    let canGoBack: Bool
+    let canGoForward: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 28, height: 24)
+            }
+            .disabled(!canGoBack)
+
+            Divider()
+                .frame(height: 16)
+
+            Button(action: onForward) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 28, height: 24)
+            }
+            .disabled(!canGoForward)
+        }
+        .buttonStyle(.borderless)
+        .foregroundColor(.white.opacity(0.8))
+        .background(Color.white.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+// MARK: - Action Buttons View (Safari style)
+
+struct ActionButtonsView: View {
+    let onNewTab: () -> Void
+    let onOverview: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onNewTab) {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 28, height: 24)
+            }
+            .help("New Tab")
+
+            Button(action: onOverview) {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 28, height: 24)
+            }
+            .help("Tab Overview (⌘⇧\\)")
+        }
+        .buttonStyle(.borderless)
+        .foregroundColor(.white.opacity(0.8))
+    }
+}
+
+// MARK: - Address Bar SwiftUI View (for NSToolbar)
+
+struct AddressBarToolbarView: View {
+    let displayTitle: String
+    let isOverviewMode: Bool
+    let isBookmarked: Bool
+    let onTap: () -> Void
+    let onBookmarkTap: () -> Void
+    let onReloadTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if !isOverviewMode {
+                Text(displayTitle)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+
+                Button(action: onBookmarkTap) {
+                    Image(systemName: isBookmarked ? "star.fill" : "star")
+                        .font(.system(size: 13))
+                        .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.6))
+                }
+                .buttonStyle(.borderless)
+
+                Button(action: onReloadTap) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                .buttonStyle(.borderless)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(Color(nsColor: NSColor.controlBackgroundColor)))
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, minHeight: 28)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
-            Capsule()
-                .stroke(Color(red: 0.18, green: 0.56, blue: 0.96).opacity(focusRingOpacity), lineWidth: 2.8)
-                .scaleEffect(focusRingScale)
-                .padding(.vertical, -4)
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
         )
-        .onChange(of: isFirstResponder) { _, newValue in
-            if !newValue && isEditing { isEditing = false }
-        }
-        .onChange(of: isEditing) { _, newValue in
-            if newValue {
-                inputText = currentURLString
-                focusRingScale = 1.08
-                focusRingOpacity = 0.0
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
-                    focusRingScale = 1.0
-                    focusRingOpacity = 1.0
-                }
-                DispatchQueue.main.async { isFirstResponder = true }
-            } else {
-                withAnimation(.easeOut(duration: 0.15)) { focusRingOpacity = 0.0 }
+        .onTapGesture {
+            if !isOverviewMode {
+                onTap()
             }
-        }
-        .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, newValue in
-            if newValue {
-                viewModel.shouldAutoFocusAddressBar = false
-                isEditing = true
-            }
-        }
-    }
-
-    private func bookmarkButton(isBookmarked: Bool) -> some View {
-        Button(action: { showingBookmarkPopover.toggle() }) {
-            Image(systemName: isBookmarked ? "star.fill" : "star")
-                .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
-        }
-        .buttonStyle(.borderless)
-        .popover(isPresented: $showingBookmarkPopover, arrowEdge: .bottom) {
-            if let tab = viewModel.currentTab {
-                let existingBookmark = bookmarkVM.getBookmark(for: tab)
-                BookmarkEditSheet(
-                    viewModel: bookmarkVM,
-                    tab: existingBookmark == nil ? tab : nil,
-                    existingBookmark: existingBookmark
-                )
-            }
-        }
-    }
-
-    private var refreshButton: some View {
-        Button(action: { viewModel.reloadCurrentTab() }) {
-            Image(systemName: "arrow.clockwise")
-                .foregroundColor(.white.opacity(0.7))
-        }
-        .buttonStyle(.borderless)
-    }
-}
-
-// MARK: - Address Bar Left Icon
-
-private enum AddressBarLeftIconState { case none, loading, menu }
-
-private struct AddressBarLeftIcon: View {
-    let state: AddressBarLeftIconState
-    let action: () -> Void
-    @State private var rotation: Double = 0
-
-    var body: some View {
-        switch state {
-        case .none:
-            Color.clear.frame(width: 16, height: 16)
-        case .loading:
-            Circle()
-                .trim(from: 0, to: 0.7)
-                .stroke(Color.white.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
-                .frame(width: 12, height: 12)
-                .rotationEffect(.degrees(rotation))
-                .onAppear {
-                    withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
-                        rotation = 360
-                    }
-                }
-        case .menu:
-            Button(action: action) {
-                Image(systemName: "list.bullet").foregroundColor(.white.opacity(0.7))
-            }
-            .buttonStyle(.borderless)
         }
     }
 }
 
-// MARK: - Focusable TextField
+// MARK: - Toolbar Setup Helper
 
-private struct FocusableTextField: NSViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-    @Binding var isFirstResponder: Bool
-    var onSubmit: ((String) -> Void)?
+func setupMainToolbar(for window: NSWindow, delegate: MainToolbarDelegate) {
+    let toolbar = NSToolbar(identifier: "MainToolbar")
+    toolbar.delegate = delegate
+    toolbar.displayMode = .iconOnly
+    toolbar.allowsUserCustomization = false
+    toolbar.autosavesConfiguration = false
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
-        field.isBordered = false
-        field.isBezeled = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        field.placeholderString = placeholder
-        field.delegate = context.coordinator
-        field.usesSingleLineMode = true
-        field.maximumNumberOfLines = 1
-        field.cell?.wraps = false
-        field.cell?.isScrollable = true
-        field.target = context.coordinator
-        field.action = #selector(Coordinator.handleAction(_:))
-        return field
-    }
-
-    func updateNSView(_ nsView: NSTextField, context: Context) {
-        if nsView.stringValue != text { nsView.stringValue = text }
-        nsView.placeholderString = placeholder
-        if isFirstResponder, let window = nsView.window, window.firstResponder != nsView.currentEditor() {
-            window.makeFirstResponder(nsView)
-            DispatchQueue.main.async {
-                nsView.currentEditor()?.selectAll(nil)
-            }
-        }
-    }
-
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        var parent: FocusableTextField
-        init(_ parent: FocusableTextField) { self.parent = parent }
-
-        func controlTextDidChange(_ obj: Notification) {
-            guard let field = obj.object as? NSTextField else { return }
-            let raw = field.stringValue
-            let cleaned = raw.components(separatedBy: .newlines).joined(separator: " ")
-            if cleaned != raw { field.stringValue = cleaned }
-            parent.text = cleaned
-        }
-
-        func controlTextDidEndEditing(_ notification: Notification) {
-            parent.isFirstResponder = false
-        }
-
-        @objc func handleAction(_ sender: NSTextField) {
-            let text = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { parent.onSubmit?(text) }
-            parent.isFirstResponder = false
-        }
-    }
+    window.toolbar = toolbar
+    window.toolbarStyle = .unified
 }
