@@ -411,6 +411,17 @@ private struct LiquidGlassToolbar: View {
         .onAppear {
             updateDisplayText()
         }
+        // Listen for Cmd-L shortcut (shouldAutoFocusAddressBar)
+        .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, shouldFocus in
+            if shouldFocus {
+                isAddressFocused = true
+                viewModel.shouldAutoFocusAddressBar = false
+            }
+        }
+        // Listen for click-outside notification from main content area
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.canvas.dismissAddressBarFocus"))) { _ in
+            isAddressFocused = false
+        }
     }
 
     private func updateDisplayText() {
