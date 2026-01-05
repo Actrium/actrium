@@ -434,6 +434,25 @@ struct WorkspaceMainView: View {
             fputs("🟡 onAppear: shouldStartInFocusMode=\(viewModel.shouldStartInFocusMode), currentTabId=\(viewModel.currentTabId?.uuidString.prefix(8) ?? "nil")\n", stderr)
             fflush(stderr)
 
+            // Setup native titlebar toggle callback
+            TitlebarManager.shared.onToggleFocusOverview = { [weak viewModel] in
+                guard let viewModel = viewModel else { return }
+                switch viewModel.canvasMode {
+                case .focus:
+                    withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+                        viewModel.canvasMode = .overview
+                    }
+                case .overview:
+                    // Find target tab to focus
+                    if let tabId = viewModel.currentTabId ?? viewModel.tabs.first?.id {
+                        viewModel.currentTabId = tabId
+                        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+                            viewModel.canvasMode = .focus(tabId: tabId)
+                        }
+                    }
+                }
+            }
+
             // 🔴 开发调试：如果设置了启动时进入 Focus 模式，延迟切换
             // 延迟切换确保渲染进程完全初始化后再切换模式
             // 注意：不要在这里立即修改 @Published 属性，否则会触发视图重建
