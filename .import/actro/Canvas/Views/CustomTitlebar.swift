@@ -291,93 +291,103 @@ private struct LiquidGlassToolbar: View {
     @FocusState private var isAddressFocused: Bool
 
     var body: some View {
-        HStack(spacing: 15) {
-            // === Navigation Buttons (with Glass) ===
-            HStack(spacing: 0) {
-                Button(action: { viewModel.goBack() }) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canGoBack)
-
-                Divider()
-                    .frame(height: 18)
-                    .padding(.horizontal, 1)
-
-                Button(action: { viewModel.goForward() }) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canGoForward)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .glassEffect(.regular, in: .capsule)
-
-            // === Address Bar (centered, 50% of available space) ===
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.tertiary)
-
-                TextField("Search or enter website name", text: $addressText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .focused($isAddressFocused)
-                    .onSubmit {
-                        submitAddress()
+        GeometryReader { geo in
+            HStack(spacing: 15) {
+                // === Navigation Buttons (with Glass) ===
+                HStack(spacing: 0) {
+                    Button(action: { viewModel.goBack() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .medium))
+                            .frame(width: 30, height: 30)
                     }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .frame(minWidth: 200)
-            .frame(maxWidth: .infinity)
-            .glassEffect(.regular, in: .capsule)
-            .overlay {
-                // Blue focus ring with shrink animation
-                Capsule()
-                    .strokeBorder(Color.blue, lineWidth: isAddressFocused ? 2.5 : 0)
-                    .scaleEffect(isAddressFocused ? 1.0 : 1.08)
-                    .opacity(isAddressFocused ? 1 : 0)
-                    .animation(.easeOut(duration: 0.25), value: isAddressFocused)
-            }
-            .layoutPriority(-1)
+                    .buttonStyle(.plain)
+                    .disabled(!viewModel.canGoBack)
 
-            // === Action Buttons (with Glass) ===
-            HStack(spacing: 4) {
-                ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .medium))
-                        .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.plain)
+                    Divider()
+                        .frame(height: 18)
+                        .padding(.horizontal, 1)
 
-                Button(action: { _ = viewModel.addNewTab() }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 30)
+                    Button(action: { viewModel.goForward() }) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 16, weight: .medium))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!viewModel.canGoForward)
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .glassEffect(.regular, in: .capsule)
 
-                Button(action: onOverview) {
-                    Image(systemName: "square.on.square")
-                        .font(.system(size: 15, weight: .medium))
-                        .frame(width: 30, height: 30)
+                Spacer(minLength: 0)
+
+                // === Address Bar (50% of container width) ===
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tertiary)
+
+                    TextField("Search or enter website name", text: $addressText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 14))
+                        .focused($isAddressFocused)
+                        .onSubmit {
+                            submitAddress()
+                        }
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .frame(width: max(200, geo.size.width * 0.5))
+                .glassEffect(.regular, in: .capsule)
+                .overlay {
+                    // Blue focus ring with shrink animation
+                    Capsule()
+                        .strokeBorder(Color.blue, lineWidth: isAddressFocused ? 2.5 : 0)
+                        .scaleEffect(isAddressFocused ? 1.0 : 1.08)
+                        .opacity(isAddressFocused ? 1 : 0)
+                        .animation(.easeOut(duration: 0.25), value: isAddressFocused)
+                }
+
+                Spacer(minLength: 0)
+
+                // === Action Buttons (with Glass) ===
+                HStack(spacing: 4) {
+                    ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { _ = viewModel.addNewTab() }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .medium))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onOverview) {
+                        Image(systemName: "square.on.square")
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .glassEffect(.regular, in: .capsule)
             }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .glassEffect(.regular, in: .capsule)
+            .frame(maxHeight: .infinity)
+            .padding(.leading, 5)
+            .padding(.trailing, 10)
         }
-        .padding(.leading, 5)
-        .padding(.trailing, 10)
+        // Tap outside to dismiss focus
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isAddressFocused = false
+        }
         .onChange(of: viewModel.currentTab?.url) { _, _ in
             updateDisplayText()
         }
