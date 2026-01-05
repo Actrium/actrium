@@ -319,28 +319,28 @@ private struct LiquidGlassToolbar: View {
             .padding(.vertical, 3)
             .glassEffect(.regular, in: .capsule)
 
-            Spacer(minLength: 10)
+            // === Address Bar (centered, 50% of available space) ===
+            GeometryReader { geo in
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tertiary)
 
-            // === Address Bar (with Glass) ===
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.tertiary)
-
-                TextField("Search or enter website name", text: $addressText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .focused($isAddressFocused)
-                    .onSubmit {
-                        submitAddress()
-                    }
+                    TextField("Search or enter website name", text: $addressText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 14))
+                        .focused($isAddressFocused)
+                        .onSubmit {
+                            submitAddress()
+                        }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .frame(width: geo.size.width * 0.5)
+                .glassEffect(isAddressFocused ? .regular.tint(.blue) : .regular, in: .capsule)
+                .animation(.easeInOut(duration: 0.2), value: isAddressFocused)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .frame(minWidth: 300, maxWidth: 650)
-            .glassEffect(.regular, in: .capsule)
-
-            Spacer(minLength: 10)
 
             // === Action Buttons (with Glass) ===
             HStack(spacing: 4) {
@@ -383,6 +383,10 @@ private struct LiquidGlassToolbar: View {
                 // Show full URL when editing
                 if let url = viewModel.currentTab?.url {
                     addressText = url.absoluteString
+                }
+                // Auto-select all text after focus
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
                 }
             } else {
                 updateDisplayText()
