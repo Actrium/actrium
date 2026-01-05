@@ -304,7 +304,7 @@ private struct LiquidGlassToolbar: View {
 
                 Divider()
                     .frame(height: 18)
-                    .padding(.horizontal, 2)
+                    .padding(.horizontal, 1)
 
                 Button(action: { viewModel.goForward() }) {
                     Image(systemName: "chevron.right")
