@@ -271,6 +271,8 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
         overviewButton.target = self
         overviewButton.action = #selector(overviewTapped)
         searchField.delegate = self
+        searchField.target = self
+        searchField.action = #selector(searchFieldSubmitted)
 
         setupView()
         updateState()
@@ -354,6 +356,14 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
 
     @objc private func overviewTapped() {
         onOverview?()
+    }
+
+    @objc private func searchFieldSubmitted() {
+        let input = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else { return }
+        viewModel?.navigateCurrentTab(to: input)
+        // Resign first responder to dismiss keyboard
+        searchField.window?.makeFirstResponder(nil)
     }
 
     // MARK: - State Update
