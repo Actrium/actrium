@@ -290,99 +290,52 @@ private struct LiquidGlassToolbar: View {
     @State private var isEditing: Bool = false
     @FocusState private var isAddressFocused: Bool
 
-    // Breakpoint for responsive layout (Safari-style)
-    // Below this width: hide nav buttons and + button, only show address bar + >> menu
-    private let compactThreshold: CGFloat = 380
+    // Breakpoints for responsive layout (Safari-style)
+    // Normal: nav + 50% address bar + [share/+/tabs] capsule
+    // Compact: nav + flexible address bar + [+] circle + [>>] circle
+    // Narrow: flexible address bar + [>>] circle
+    private let compactThreshold: CGFloat = 500
+    private let narrowThreshold: CGFloat = 380
 
     var body: some View {
         GeometryReader { geo in
-            let isCompact = geo.size.width < compactThreshold
+            let isNarrow = geo.size.width < narrowThreshold
+            let isCompact = geo.size.width < compactThreshold && !isNarrow
+            let isNormal = !isNarrow && !isCompact
             let addressBarWidth: CGFloat = max(200, geo.size.width * 0.5)
 
             HStack(spacing: 12) {
-                // === Navigation Buttons (hidden in compact mode) ===
-                if !isCompact {
-                    HStack(spacing: 0) {
-                        Button(action: { viewModel.goBack() }) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 16, weight: .medium))
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!viewModel.canGoBack)
-
-                        Divider()
-                            .frame(height: 18)
-                            .padding(.horizontal, 1)
-
-                        Button(action: { viewModel.goForward() }) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 16, weight: .medium))
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!viewModel.canGoForward)
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 3)
-                    .glassEffect(.regular, in: .capsule)
+                // === Navigation Buttons (hidden in narrow mode) ===
+                if !isNarrow {
+                    navButtonsGroup
                 }
 
                 Spacer(minLength: 0)
 
-                // === Address Bar (50% width in normal mode, flexible in compact) ===
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tertiary)
-
-                    TextField("Search or enter website name", text: $addressText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14))
-                        .focused($isAddressFocused)
-                        .onSubmit {
-                            submitAddress()
-                        }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .frame(width: isCompact ? nil : addressBarWidth)
-                .frame(maxWidth: isCompact ? .infinity : nil)
-                .glassEffect(.regular, in: .capsule)
-                .overlay {
-                    // Blue focus ring with shrink animation
-                    Capsule()
-                        .strokeBorder(Color.blue, lineWidth: isAddressFocused ? 2.5 : 0)
-                        .scaleEffect(isAddressFocused ? 1.0 : 1.08)
-                        .opacity(isAddressFocused ? 1 : 0)
-                        .animation(.easeOut(duration: 0.25), value: isAddressFocused)
-                }
+                // === Address Bar ===
+                addressBarView
+                    .frame(width: isNormal ? addressBarWidth : nil)
+                    .frame(maxWidth: isNormal ? nil : .infinity)
 
                 Spacer(minLength: 0)
 
-                // === Right side: [+] button (normal) or just >> menu (compact) ===
-                if !isCompact {
-                    // Normal mode: + button (standalone, circular) + >> overflow menu
-                    Button(action: { _ = viewModel.addNewTab() }) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .glassEffect(.regular, in: .circle)
+                // === Right side buttons ===
+                if isNormal {
+                    // Normal: [Share + Tabs] capsule
+                    actionButtonsGroup
+                } else if isCompact {
+                    // Compact: [+] circle + [>>] circle
+                    newTabButton
+                    overflowMenuButton(showNavActions: false)
+                } else {
+                    // Narrow: [>>] circle only
+                    overflowMenuButton(showNavActions: true)
                 }
-
-                // Overflow menu (>> button) - always visible, circular
-                overflowMenu(isCompact: isCompact)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 36, height: 36)
-                    .glassEffect(.regular, in: .circle)
             }
             .frame(maxHeight: .infinity)
             .padding(.leading, 5)
             .padding(.trailing, 10)
+            .animation(.easeInOut(duration: 0.2), value: isNarrow)
             .animation(.easeInOut(duration: 0.2), value: isCompact)
         }
         // Tap outside to dismiss focus
@@ -448,13 +401,111 @@ private struct LiquidGlassToolbar: View {
         isAddressFocused = false
     }
 
-    /// Overflow menu for hidden actions (Safari-style >>)
-    /// - Parameter isCompact: When true, includes navigation and new tab actions
+    // MARK: - Subviews
+
+    /// Navigation buttons [< | >]
+    private var navButtonsGroup: some View {
+        HStack(spacing: 0) {
+            Button(action: { viewModel.goBack() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.canGoBack)
+
+            Divider()
+                .frame(height: 18)
+                .padding(.horizontal, 1)
+
+            Button(action: { viewModel.goForward() }) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.canGoForward)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .glassEffect(.regular, in: .capsule)
+    }
+
+    /// Address bar with search icon
+    private var addressBarView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14))
+                .foregroundStyle(.tertiary)
+
+            TextField("Search or enter website name", text: $addressText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .focused($isAddressFocused)
+                .onSubmit {
+                    submitAddress()
+                }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .glassEffect(.regular, in: .capsule)
+        .overlay {
+            Capsule()
+                .strokeBorder(Color.blue, lineWidth: isAddressFocused ? 2.5 : 0)
+                .scaleEffect(isAddressFocused ? 1.0 : 1.08)
+                .opacity(isAddressFocused ? 1 : 0)
+                .animation(.easeOut(duration: 0.25), value: isAddressFocused)
+        }
+    }
+
+    /// Action buttons group [Share + Tabs] in capsule (normal mode)
+    private var actionButtonsGroup: some View {
+        HStack(spacing: 4) {
+            ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: { _ = viewModel.addNewTab() }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onOverview) {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .glassEffect(.regular, in: .capsule)
+    }
+
+    /// New tab button (circular, for compact mode)
+    private var newTabButton: some View {
+        Button(action: { _ = viewModel.addNewTab() }) {
+            Image(systemName: "plus")
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .glassEffect(.regular, in: .circle)
+    }
+
+    /// Overflow menu button (circular)
     @ViewBuilder
-    private func overflowMenu(isCompact: Bool) -> some View {
+    private func overflowMenuButton(showNavActions: Bool) -> some View {
         Menu {
-            // Navigation actions (only shown in compact mode when nav buttons are hidden)
-            if isCompact {
+            if showNavActions {
                 Button(action: { viewModel.goBack() }) {
                     Label("Go Back", systemImage: "chevron.left")
                 }
@@ -468,7 +519,6 @@ private struct LiquidGlassToolbar: View {
                 Divider()
             }
 
-            // Share action
             if let url = viewModel.currentTab?.url {
                 Button(action: {
                     let picker = NSSharingServicePicker(items: [url])
@@ -481,23 +531,22 @@ private struct LiquidGlassToolbar: View {
                 }
             }
 
-            // New Tab (only shown in compact mode when + button is hidden)
-            if isCompact {
-                Button(action: { _ = viewModel.addNewTab() }) {
-                    Label("New Tab", systemImage: "plus")
-                }
+            Button(action: { _ = viewModel.addNewTab() }) {
+                Label("New Tab", systemImage: "plus")
             }
 
-            // Tab Overview
             Button(action: onOverview) {
                 Label("Tab Overview", systemImage: "square.on.square")
             }
         } label: {
             Image(systemName: "chevron.right.2")
                 .font(.system(size: 14, weight: .medium))
-                .frame(width: 30, height: 30)
+                .frame(width: 36, height: 36)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .foregroundStyle(.secondary)
+        .glassEffect(.regular, in: .circle)
     }
+
 }
