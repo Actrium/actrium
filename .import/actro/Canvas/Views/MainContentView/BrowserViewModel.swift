@@ -684,20 +684,6 @@ class BrowserViewModel: ObservableObject {
         WebViewHolderManager.shared.existingHolder(for: tabId)?.goForward()
     }
 
-    /// Toggle between Overview and Focus mode
-    func toggleOverview() {
-        switch canvasMode {
-        case .focus(let tabId):
-            // Remember focused tab for quick return
-            canvasMode = .overview
-        case .overview:
-            // Return to last focused tab or current tab
-            if let tabId = currentTabId {
-                canvasMode = .focus(tabId: tabId)
-            }
-        }
-    }
-
     /// Reload the current tab by re-reading its source .actr package
     func reloadCurrentTab() {
         guard let id = currentTabId,

@@ -10,15 +10,17 @@ struct ContentView: View {
     @ObservedObject var windowState: WindowStateManager = .shared
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isACTRDropTarget: Bool = false
+    @State private var useNativeToolbar: Bool = true  // 使用原生 NSToolbar
 
     var body: some View {
         ZStack {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
+                    .toolbar(removing: .sidebarToggle)
             } detail: {
                 // Workspace: main canvas + optional docked DevTools panel
                 WorkspaceView(devTools: devTools, viewModel: viewModel) {
-                    WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                    WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar)
                 }
             }
             // 让 toolbar 背景透明，内容区域背景通栏
@@ -58,7 +60,7 @@ struct ContentView: View {
                 isACTRDropTarget = isTargeted
             }
             // 配置窗口：透明标题栏，让背景通栏
-            .background(WindowAccessor())
+            .background(WindowAccessor(viewModel: viewModel, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar))
             // 强制清空窗口标题
             .navigationTitle("")
         }
@@ -68,8 +70,15 @@ struct ContentView: View {
 // MARK: - Window Accessor (配置 NSWindow 透明标题栏)
 
 private struct WindowAccessor: NSViewRepresentable {
+    let viewModel: BrowserViewModel
+    let bookmarkVM: BookmarkViewModel
+    let useNativeToolbar: Bool
+
     func makeNSView(context: Context) -> NSView {
         let view = WindowObserverView()
+        view.viewModel = viewModel
+        view.bookmarkVM = bookmarkVM
+        view.useNativeToolbar = useNativeToolbar
         return view
     }
 
@@ -83,6 +92,10 @@ private struct WindowAccessor: NSViewRepresentable {
 /// 监听窗口并持续隐藏标题
 private class WindowObserverView: NSView {
     private var titleObserver: NSKeyValueObservation?
+    weak var viewModel: BrowserViewModel?
+    weak var bookmarkVM: BookmarkViewModel?
+    var useNativeToolbar: Bool = false
+    private var toolbarConfigured: Bool = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -96,6 +109,16 @@ private class WindowObserverView: NSView {
         window.titlebarSeparatorStyle = .line
         window.titleVisibility = .hidden
         window.title = ""
+        // 设置窗口最小尺寸
+        window.minSize = NSSize(width: 500, height: 400)
+
+        // 配置自定义 AppKit 标题栏（只执行一次）
+        if useNativeToolbar && !toolbarConfigured,
+           let viewModel = viewModel,
+           let bookmarkVM = bookmarkVM {
+            toolbarConfigured = true
+            TitlebarManager.shared.setupTitlebar(for: window, viewModel: viewModel, bookmarkVM: bookmarkVM)
+        }
     }
 
     private func setupTitleObserver() {
