@@ -50,12 +50,13 @@ final class TitlebarManager: NSObject {
 
         // Create sidebar toggle button (separate, positioned in sidebar area)
         let toggleButton = NSButton()
-        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
         toggleButton.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
         toggleButton.bezelStyle = .accessoryBar
         toggleButton.isBordered = false
         toggleButton.imagePosition = .imageOnly
+        toggleButton.contentTintColor = NSColor(white: 0.55, alpha: 1.0)
         toggleButton.toolTip = "Toggle Sidebar (⌃⌘S)"
         toggleButton.translatesAutoresizingMaskIntoConstraints = false
         toggleButton.target = self
@@ -72,8 +73,8 @@ final class TitlebarManager: NSObject {
 
         NSLayoutConstraint.activate([
             toggleButton.centerYAnchor.constraint(equalTo: titlebarView.centerYAnchor),
-            toggleButton.widthAnchor.constraint(equalToConstant: 28),
-            toggleButton.heightAnchor.constraint(equalToConstant: 28),
+            toggleButton.widthAnchor.constraint(equalToConstant: 30),
+            toggleButton.heightAnchor.constraint(equalToConstant: 30),
         ])
 
         // Create main toolbar view (navigation, address bar, actions)
