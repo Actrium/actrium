@@ -320,27 +320,33 @@ private struct LiquidGlassToolbar: View {
             .glassEffect(.regular, in: .capsule)
 
             // === Address Bar (centered, 50% of available space) ===
-            GeometryReader { geo in
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tertiary)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tertiary)
 
-                    TextField("Search or enter website name", text: $addressText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14))
-                        .focused($isAddressFocused)
-                        .onSubmit {
-                            submitAddress()
-                        }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .frame(width: geo.size.width * 0.5)
-                .glassEffect(isAddressFocused ? .regular.tint(.blue) : .regular, in: .capsule)
-                .animation(.easeInOut(duration: 0.2), value: isAddressFocused)
-                .frame(maxWidth: .infinity)
+                TextField("Search or enter website name", text: $addressText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .focused($isAddressFocused)
+                    .onSubmit {
+                        submitAddress()
+                    }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .frame(minWidth: 200)
+            .frame(maxWidth: .infinity)
+            .glassEffect(.regular, in: .capsule)
+            .overlay {
+                // Blue focus ring with shrink animation
+                Capsule()
+                    .strokeBorder(Color.blue, lineWidth: isAddressFocused ? 2.5 : 0)
+                    .scaleEffect(isAddressFocused ? 1.0 : 1.08)
+                    .opacity(isAddressFocused ? 1 : 0)
+                    .animation(.easeOut(duration: 0.25), value: isAddressFocused)
+            }
+            .layoutPriority(-1)
 
             // === Action Buttons (with Glass) ===
             HStack(spacing: 4) {
