@@ -18,6 +18,8 @@ final class TitlebarManager: NSObject {
     }
 
     private var leadingConstraint: NSLayoutConstraint?
+    private var sidebarToggleButton: NSButton?
+    private var toggleTrailingConstraint: NSLayoutConstraint?
     private weak var window: NSWindow?
 
     func setupTitlebar(for window: NSWindow, viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel) {
@@ -43,12 +45,42 @@ final class TitlebarManager: NSObject {
             return
         }
 
-        // Create main toolbar view (includes sidebar toggle button)
+        // Get initial sidebar width
+        let sidebarWidth = getSidebarWidth(from: window)
+
+        // Create sidebar toggle button (separate, positioned in sidebar area)
+        let toggleButton = NSButton()
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        toggleButton.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        toggleButton.bezelStyle = .accessoryBar
+        toggleButton.isBordered = false
+        toggleButton.imagePosition = .imageOnly
+        toggleButton.toolTip = "Toggle Sidebar (⌃⌘S)"
+        toggleButton.translatesAutoresizingMaskIntoConstraints = false
+        toggleButton.target = self
+        toggleButton.action = #selector(toggleSidebar)
+        self.sidebarToggleButton = toggleButton
+
+        titlebarView.addSubview(toggleButton)
+
+        // Position toggle button at sidebar's right edge
+        let effectiveWidth = sidebarWidth < 50 ? 78 : sidebarWidth
+        let toggleTrailing = toggleButton.trailingAnchor.constraint(equalTo: titlebarView.leadingAnchor, constant: effectiveWidth - 8)
+        toggleTrailing.isActive = true
+        self.toggleTrailingConstraint = toggleTrailing
+
+        NSLayoutConstraint.activate([
+            toggleButton.centerYAnchor.constraint(equalTo: titlebarView.centerYAnchor),
+            toggleButton.widthAnchor.constraint(equalToConstant: 28),
+            toggleButton.heightAnchor.constraint(equalToConstant: 28),
+        ])
+
+        // Create main toolbar view (navigation, address bar, actions)
         let containerView = ToolbarContainerView(
             viewModel: viewModel,
             bookmarkVM: bookmarkVM,
-            onOverview: { [weak self] in self?.onToggleFocusOverview?() },
-            onToggleSidebar: { [weak self] in self?.toggleSidebar() }
+            onOverview: { [weak self] in self?.onToggleFocusOverview?() }
         )
         containerView.translatesAutoresizingMaskIntoConstraints = false
         self.customToolbarView = containerView
@@ -56,11 +88,8 @@ final class TitlebarManager: NSObject {
         // Add to titlebar
         titlebarView.addSubview(containerView)
 
-        // Get initial sidebar width
-        let sidebarWidth = getSidebarWidth(from: window)
-
-        // Main toolbar - starts after sidebar
-        let leading = containerView.leadingAnchor.constraint(equalTo: titlebarView.leadingAnchor, constant: sidebarWidth)
+        // Main toolbar - starts after sidebar (leave space for toggle button)
+        let leading = containerView.leadingAnchor.constraint(equalTo: titlebarView.leadingAnchor, constant: effectiveWidth)
         leading.isActive = true
         self.leadingConstraint = leading
 
@@ -90,13 +119,17 @@ final class TitlebarManager: NSObject {
             if abs(newWidth - self.lastSidebarWidth) > 1 && newWidth >= 0 && newWidth < 1000 {
                 self.lastSidebarWidth = newWidth
 
-                // When sidebar is collapsed (width ~0), position toolbar near traffic lights
+                // When sidebar is collapsed (width ~0), position near traffic lights
                 let effectiveWidth = newWidth < 50 ? 78 : newWidth
 
+                // Update toggle button position (at sidebar's right edge)
+                self.toggleTrailingConstraint?.constant = effectiveWidth - 8
+
+                // Update toolbar position (after toggle button)
                 self.leadingConstraint?.constant = effectiveWidth
 
                 // Force layout update
-                self.customToolbarView?.layoutSubtreeIfNeeded()
+                self.sidebarToggleButton?.superview?.layoutSubtreeIfNeeded()
             }
         }
     }
@@ -188,7 +221,6 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
     weak var bookmarkVM: BookmarkViewModel?
 
     // UI Elements
-    let sidebarToggleButton: NSButton
     let backButton: NSButton
     let forwardButton: NSButton
     let searchField: NSSearchField
@@ -199,16 +231,13 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
     var onAddressBarTap: (() -> Void)?
     var onBookmarkTap: (() -> Void)?
     var onOverview: (() -> Void)?
-    var onToggleSidebar: (() -> Void)?
 
-    init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel, onOverview: @escaping () -> Void, onToggleSidebar: @escaping () -> Void) {
+    init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel, onOverview: @escaping () -> Void) {
         self.viewModel = viewModel
         self.bookmarkVM = bookmarkVM
         self.onOverview = onOverview
-        self.onToggleSidebar = onToggleSidebar
 
         // Create buttons
-        sidebarToggleButton = Self.createButton(symbol: "sidebar.left", tooltip: "Toggle Sidebar (⌃⌘S)")
         backButton = Self.createButton(symbol: "chevron.left", tooltip: "Back")
         forwardButton = Self.createButton(symbol: "chevron.right", tooltip: "Forward")
         newTabButton = Self.createButton(symbol: "plus", tooltip: "New Tab")
@@ -224,8 +253,6 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
         super.init(frame: .zero)
 
         // Setup actions
-        sidebarToggleButton.target = self
-        sidebarToggleButton.action = #selector(sidebarToggleTapped)
         backButton.target = self
         backButton.action = #selector(backTapped)
         forwardButton.target = self
@@ -245,8 +272,8 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
     }
 
     private func setupView() {
-        // Navigation stack (includes sidebar toggle)
-        let navStack = NSStackView(views: [sidebarToggleButton, backButton, forwardButton])
+        // Navigation stack
+        let navStack = NSStackView(views: [backButton, forwardButton])
         navStack.orientation = .horizontal
         navStack.spacing = 2
         navStack.translatesAutoresizingMaskIntoConstraints = false
@@ -270,9 +297,9 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
         addSubview(rightSpacer)
         addSubview(actionStack)
 
-        // Layout: [ToggleButton+NavStack][LeftSpacer][SearchField][RightSpacer][ActionStack]
+        // Layout: [NavStack][LeftSpacer][SearchField][RightSpacer][ActionStack]
         NSLayoutConstraint.activate([
-            // Nav stack - left (now includes toggle button)
+            // Nav stack - left
             navStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             navStack.centerYAnchor.constraint(equalTo: centerYAnchor),
 
@@ -303,10 +330,6 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
     }
 
     // MARK: - Actions
-
-    @objc private func sidebarToggleTapped() {
-        onToggleSidebar?()
-    }
 
     @objc private func backTapped() {
         viewModel?.goBack()
