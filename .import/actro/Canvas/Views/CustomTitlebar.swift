@@ -287,86 +287,86 @@ private struct LiquidGlassToolbar: View {
     @FocusState private var isAddressFocused: Bool
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 15) {
             // === Navigation Buttons (with Glass) ===
             HStack(spacing: 0) {
                 Button(action: { viewModel.goBack() }) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .medium))
-                        .frame(width: 32, height: 32)
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 30, height: 30)
                 }
                 .buttonStyle(.plain)
                 .disabled(!viewModel.canGoBack)
 
                 Divider()
-                    .frame(height: 20)
+                    .frame(height: 18)
                     .padding(.horizontal, 2)
 
                 Button(action: { viewModel.goForward() }) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 17, weight: .medium))
-                        .frame(width: 32, height: 32)
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 30, height: 30)
                 }
                 .buttonStyle(.plain)
                 .disabled(!viewModel.canGoForward)
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
             .glassEffect(.regular, in: .capsule)
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 10)
 
             // === Address Bar (with Glass) ===
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .foregroundStyle(.tertiary)
 
                 TextField("Search or enter website name", text: $addressText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .focused($isAddressFocused)
                     .onSubmit {
                         submitAddress()
                     }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .frame(minWidth: 320, maxWidth: 700)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .frame(minWidth: 300, maxWidth: 650)
             .glassEffect(.regular, in: .capsule)
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 10)
 
             // === Action Buttons (with Glass) ===
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 32, height: 32)
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 30, height: 30)
                 }
                 .buttonStyle(.plain)
 
                 Button(action: { _ = viewModel.addNewTab() }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .medium))
-                        .frame(width: 32, height: 32)
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 30, height: 30)
                 }
                 .buttonStyle(.plain)
 
                 Button(action: onOverview) {
                     Image(systemName: "square.on.square")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 32, height: 32)
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 30, height: 30)
                 }
                 .buttonStyle(.plain)
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
             .glassEffect(.regular, in: .capsule)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .onChange(of: viewModel.currentTab?.url) { _, _ in
             updateDisplayText()
         }
