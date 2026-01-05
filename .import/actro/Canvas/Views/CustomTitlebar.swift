@@ -45,8 +45,8 @@ final class TitlebarManager: NSObject {
             return
         }
 
-        // Get initial sidebar width
-        let sidebarWidth = getSidebarWidth(from: window)
+        // Use default sidebar width initially (will be updated from SwiftUI)
+        let sidebarWidth: CGFloat = 250
 
         // Create sidebar toggle button (separate, positioned in sidebar area)
         let toggleButton = NSButton()
@@ -99,72 +99,81 @@ final class TitlebarManager: NSObject {
             containerView.bottomAnchor.constraint(equalTo: titlebarView.bottomAnchor),
         ])
 
-        // Schedule periodic check for sidebar width (safe approach)
-        scheduleSidebarWidthCheck()
-
         // Observe viewModel changes
         setupObservers(viewModel: viewModel, bookmarkVM: bookmarkVM)
     }
 
-    private var sidebarCheckTimer: Timer?
-    private var lastSidebarWidth: CGFloat = 0
+    // Minimum position for toggle button (after traffic lights)
+    // Left edge at 110px, button is 28px wide, so right edge at 138px
+    private let minTogglePosition: CGFloat = 138
 
-    private func scheduleSidebarWidthCheck() {
-        // Use a timer to periodically check sidebar width (avoids infinite loop)
-        sidebarCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            guard let self = self, let window = self.window else { return }
-            let newWidth = self.getSidebarWidth(from: window)
+    /// Called from SwiftUI when sidebar width changes
+    func updateSidebarWidth(_ width: CGFloat) {
+        // Just save the width for future use, don't move the button
+        // (button animation is handled by toggleSidebar)
+        if width > minTogglePosition {
+            lastKnownSidebarWidth = width
+        }
+    }
 
-            // Only update if width actually changed and is reasonable
-            if abs(newWidth - self.lastSidebarWidth) > 1 && newWidth >= 0 && newWidth < 1000 {
-                self.lastSidebarWidth = newWidth
+    private var lastKnownSidebarWidth: CGFloat = 250
 
-                // When sidebar is collapsed (width ~0), position near traffic lights
-                let effectiveWidth = newWidth < 50 ? 78 : newWidth
+    /// Called from SwiftUI when sidebar visibility changes
+    func updateSidebarVisibility(_ visible: Bool) {
+        // Handle sidebar toggled by other means (keyboard shortcut, menu, etc.)
+        if isSidebarExpanded != visible {
+            isSidebarExpanded = visible
 
-                // Update toggle button position (at sidebar's right edge)
-                self.toggleTrailingConstraint?.constant = effectiveWidth - 8
+            let targetTogglePosition: CGFloat
+            let targetToolbarPosition: CGFloat
 
-                // Update toolbar position (after toggle button)
-                self.leadingConstraint?.constant = effectiveWidth
+            if visible {
+                targetTogglePosition = lastKnownSidebarWidth - 8
+                targetToolbarPosition = lastKnownSidebarWidth
+            } else {
+                targetTogglePosition = minTogglePosition
+                targetToolbarPosition = minTogglePosition + 8
+            }
 
-                // Force layout update
-                self.sidebarToggleButton?.superview?.layoutSubtreeIfNeeded()
+            // Animate to sync with sidebar
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.25
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                toggleTrailingConstraint?.animator().constant = targetTogglePosition
+                leadingConstraint?.animator().constant = targetToolbarPosition
             }
         }
     }
+
+    private var isSidebarExpanded: Bool = true
 
     @objc private func toggleSidebar() {
-        // Toggle NavigationSplitView sidebar
+        // Toggle state and start animation IMMEDIATELY (same time as sidebar)
+        isSidebarExpanded.toggle()
+
+        let targetTogglePosition: CGFloat
+        let targetToolbarPosition: CGFloat
+
+        if isSidebarExpanded {
+            // Expanding to last known width
+            targetTogglePosition = lastKnownSidebarWidth - 8
+            targetToolbarPosition = lastKnownSidebarWidth
+        } else {
+            // Collapsing to minimum position
+            targetTogglePosition = minTogglePosition
+            targetToolbarPosition = minTogglePosition + 8
+        }
+
+        // Start animation immediately
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            toggleTrailingConstraint?.animator().constant = targetTogglePosition
+            leadingConstraint?.animator().constant = targetToolbarPosition
+        }
+
+        // Trigger sidebar toggle at the same time
         NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
-    }
-
-    private func getSidebarWidth(from window: NSWindow) -> CGFloat {
-        // Try to find NSSplitView and get sidebar width
-        if let splitView = findSplitView(in: window.contentView) {
-            if splitView.subviews.count > 0 {
-                let width = splitView.subviews[0].frame.width
-                // Sanity check - sidebar shouldn't be wider than half the window
-                if width > 0 && width < window.frame.width / 2 {
-                    return width
-                }
-            }
-        }
-        // Default sidebar width
-        return 250
-    }
-
-    private func findSplitView(in view: NSView?) -> NSSplitView? {
-        guard let view = view else { return nil }
-        if let splitView = view as? NSSplitView {
-            return splitView
-        }
-        for subview in view.subviews {
-            if let found = findSplitView(in: subview) {
-                return found
-            }
-        }
-        return nil
     }
 
     private func findTitlebarContainerView(in window: NSWindow) -> NSView? {
@@ -364,12 +373,6 @@ private class ToolbarContainerView: NSView, NSSearchFieldDelegate {
         }()
         searchField.stringValue = title
 
-        // Hide address bar in overview mode
-        let isOverview: Bool = {
-            if case .overview = viewModel.canvasMode { return true }
-            return false
-        }()
-        searchField.isHidden = isOverview
     }
 
     // MARK: - NSSearchFieldDelegate

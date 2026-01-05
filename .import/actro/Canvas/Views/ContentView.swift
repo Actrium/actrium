@@ -2,6 +2,15 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 
+// MARK: - Sidebar Width Preference Key
+
+private struct SidebarWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 250
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
@@ -17,6 +26,11 @@ struct ContentView: View {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
                     .toolbar(removing: .sidebarToggle)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(key: SidebarWidthKey.self, value: geo.size.width)
+                        }
+                    )
             } detail: {
                 // Workspace: main canvas + optional docked DevTools panel
                 WorkspaceView(devTools: devTools, viewModel: viewModel) {
@@ -63,6 +77,15 @@ struct ContentView: View {
             .background(WindowAccessor(viewModel: viewModel, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar))
             // 强制清空窗口标题
             .navigationTitle("")
+            // 监听 sidebar 宽度变化
+            .onPreferenceChange(SidebarWidthKey.self) { width in
+                TitlebarManager.shared.updateSidebarWidth(width)
+            }
+            // 监听 sidebar 显示/隐藏
+            .onChange(of: columnVisibility) { _, newValue in
+                let isVisible = newValue != .detailOnly
+                TitlebarManager.shared.updateSidebarVisibility(isVisible)
+            }
         }
     }
 }
