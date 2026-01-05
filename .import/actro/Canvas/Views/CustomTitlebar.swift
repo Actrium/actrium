@@ -297,6 +297,7 @@ private struct LiquidGlassToolbar: View {
     var body: some View {
         GeometryReader { geo in
             let isCompact = geo.size.width < compactThreshold
+            let addressBarWidth: CGFloat = max(200, geo.size.width * 0.5)
 
             HStack(spacing: 12) {
                 // === Navigation Buttons (hidden in compact mode) ===
@@ -328,7 +329,9 @@ private struct LiquidGlassToolbar: View {
                     .glassEffect(.regular, in: .capsule)
                 }
 
-                // === Address Bar (flexible width) ===
+                Spacer(minLength: 0)
+
+                // === Address Bar (50% width in normal mode, flexible in compact) ===
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14))
@@ -344,7 +347,8 @@ private struct LiquidGlassToolbar: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .frame(maxWidth: .infinity)
+                .frame(width: isCompact ? nil : addressBarWidth)
+                .frame(maxWidth: isCompact ? .infinity : nil)
                 .glassEffect(.regular, in: .capsule)
                 .overlay {
                     // Blue focus ring with shrink animation
@@ -354,6 +358,8 @@ private struct LiquidGlassToolbar: View {
                         .opacity(isAddressFocused ? 1 : 0)
                         .animation(.easeOut(duration: 0.25), value: isAddressFocused)
                 }
+
+                Spacer(minLength: 0)
 
                 // === Right side: [+] button (normal) or just >> menu (compact) ===
                 if !isCompact {
