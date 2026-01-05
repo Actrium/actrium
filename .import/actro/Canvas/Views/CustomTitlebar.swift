@@ -290,39 +290,48 @@ private struct LiquidGlassToolbar: View {
     @State private var isEditing: Bool = false
     @FocusState private var isAddressFocused: Bool
 
+    // Breakpoints for responsive layout (Safari-style)
+    private let compactThreshold: CGFloat = 500  // Hide nav buttons
+    private let veryCompactThreshold: CGFloat = 400  // Hide action buttons, show overflow menu
+
     var body: some View {
         GeometryReader { geo in
-            HStack(spacing: 15) {
-                // === Navigation Buttons (with Glass) ===
-                HStack(spacing: 0) {
-                    Button(action: { viewModel.goBack() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!viewModel.canGoBack)
+            let isCompact = geo.size.width < compactThreshold
+            let isVeryCompact = geo.size.width < veryCompactThreshold
 
-                    Divider()
-                        .frame(height: 18)
-                        .padding(.horizontal, 1)
+            HStack(spacing: isCompact ? 10 : 15) {
+                // === Navigation Buttons (hidden in compact mode) ===
+                if !isCompact {
+                    HStack(spacing: 0) {
+                        Button(action: { viewModel.goBack() }) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!viewModel.canGoBack)
 
-                    Button(action: { viewModel.goForward() }) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(width: 30, height: 30)
+                        Divider()
+                            .frame(height: 18)
+                            .padding(.horizontal, 1)
+
+                        Button(action: { viewModel.goForward() }) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!viewModel.canGoForward)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!viewModel.canGoForward)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 3)
+                    .glassEffect(.regular, in: .capsule)
                 }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 3)
-                .glassEffect(.regular, in: .capsule)
 
                 Spacer(minLength: 0)
 
-                // === Address Bar (50% of container width) ===
+                // === Address Bar (responsive width) ===
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14))
@@ -338,7 +347,7 @@ private struct LiquidGlassToolbar: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .frame(width: max(200, geo.size.width * 0.5))
+                .frame(width: addressBarWidth(for: geo.size.width, isCompact: isCompact, isVeryCompact: isVeryCompact))
                 .glassEffect(.regular, in: .capsule)
                 .overlay {
                     // Blue focus ring with shrink animation
@@ -351,37 +360,54 @@ private struct LiquidGlassToolbar: View {
 
                 Spacer(minLength: 0)
 
-                // === Action Buttons (with Glass) ===
-                HStack(spacing: 4) {
-                    ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 15, weight: .medium))
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.plain)
+                // === Action Buttons or Overflow Menu ===
+                if isVeryCompact {
+                    // Very compact: overflow menu with all actions
+                    overflowMenu
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 3)
+                        .glassEffect(.regular, in: .capsule)
+                } else {
+                    // Normal/compact: show action buttons
+                    HStack(spacing: 4) {
+                        ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
 
-                    Button(action: { _ = viewModel.addNewTab() }) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.plain)
+                        Button(action: { _ = viewModel.addNewTab() }) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
 
-                    Button(action: onOverview) {
-                        Image(systemName: "square.on.square")
-                            .font(.system(size: 15, weight: .medium))
-                            .frame(width: 30, height: 30)
+                        Button(action: onOverview) {
+                            Image(systemName: "square.on.square")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+
+                        // Show overflow menu in compact mode (contains hidden nav buttons)
+                        if isCompact {
+                            overflowMenu
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 3)
+                    .glassEffect(.regular, in: .capsule)
                 }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 3)
-                .glassEffect(.regular, in: .capsule)
             }
             .frame(maxHeight: .infinity)
             .padding(.leading, 5)
             .padding(.trailing, 10)
+            .animation(.easeInOut(duration: 0.2), value: isCompact)
+            .animation(.easeInOut(duration: 0.2), value: isVeryCompact)
         }
         // Tap outside to dismiss focus
         .contentShape(Rectangle())
@@ -444,5 +470,65 @@ private struct LiquidGlassToolbar: View {
         guard !input.isEmpty else { return }
         viewModel.navigateCurrentTab(to: input)
         isAddressFocused = false
+    }
+
+    /// Calculate address bar width based on available space
+    private func addressBarWidth(for totalWidth: CGFloat, isCompact: Bool, isVeryCompact: Bool) -> CGFloat {
+        if isVeryCompact {
+            // Very compact: take most of the space minus overflow menu
+            return max(150, totalWidth - 80)
+        } else if isCompact {
+            // Compact: larger share since nav buttons are hidden
+            return max(180, totalWidth * 0.55)
+        } else {
+            // Normal: 50% of available space
+            return max(200, totalWidth * 0.5)
+        }
+    }
+
+    /// Overflow menu for hidden actions (Safari-style >>)
+    private var overflowMenu: some View {
+        Menu {
+            // Navigation actions (only in compact mode)
+            Button(action: { viewModel.goBack() }) {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .disabled(!viewModel.canGoBack)
+
+            Button(action: { viewModel.goForward() }) {
+                Label("Forward", systemImage: "chevron.right")
+            }
+            .disabled(!viewModel.canGoForward)
+
+            Divider()
+
+            // Action buttons (in very compact mode)
+            Button(action: { _ = viewModel.addNewTab() }) {
+                Label("New Tab", systemImage: "plus")
+            }
+
+            Button(action: onOverview) {
+                Label("Show All Tabs", systemImage: "square.on.square")
+            }
+
+            // Share is handled separately since ShareLink doesn't work in Menu
+            if let url = viewModel.currentTab?.url {
+                Button(action: {
+                    let picker = NSSharingServicePicker(items: [url])
+                    if let window = NSApp.keyWindow,
+                       let contentView = window.contentView {
+                        picker.show(relativeTo: .zero, of: contentView, preferredEdge: .maxY)
+                    }
+                }) {
+                    Label("Share...", systemImage: "square.and.arrow.up")
+                }
+            }
+        } label: {
+            Image(systemName: "chevron.right.2")
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: 30, height: 30)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
     }
 }
