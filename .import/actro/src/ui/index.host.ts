@@ -19,3 +19,4 @@ export { PanelMarker } from './Panel/PanelMarker.host';
 export { StepList } from './StepList/StepList.host';
 export { ThemeView } from './ThemeView/ThemeView.host';
 export { UserAvatar } from './UserAvatar/UserAvatar.host';
+export { MyTouchableOpacity } from './MyTouchableOpacity/MyTouchableOpacity.host';

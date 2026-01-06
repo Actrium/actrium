@@ -3,6 +3,7 @@
  */
 
 import type { ReactNode } from 'react';
+import type { GestureResponderEvent } from 'react-native';
 
 // ============================================================================
 // Environment Detection
@@ -217,6 +218,27 @@ export interface ChatBubbleProps extends BaseProps {
   onLongPress?: () => void;
   onPress?: () => void;
   renderMarkdown?: boolean;
+}
+
+// ============================================================================
+// MyTouchableOpacity Component Types
+// ============================================================================
+
+export interface MyTouchableOpacityProps extends BaseProps {
+  children?: ReactNode;
+  control?: boolean;
+  onPress?: (event: GestureResponderEvent) => void;
+  onPressIn?: (event: GestureResponderEvent) => void;
+  onPressOut?: (event: GestureResponderEvent) => void;
+  onLongPress?: (event: GestureResponderEvent) => void;
+  activeOpacity?: number;
+  disabled?: boolean;
+  delayPressIn?: number;
+  delayPressOut?: number;
+  delayLongPress?: number;
+  accessible?: boolean;
+  accessibilityLabel?: string;
+  accessibilityRole?: 'button' | 'link' | 'none';
 }
 
 // ============================================================================
