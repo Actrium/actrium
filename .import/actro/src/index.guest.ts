@@ -34,6 +34,7 @@ export type {
   ToastPosition,
   // UserAvatar
   UserAvatarProps,
+  MyTouchableOpacityProps,
 } from './types';
 // UI Components (DSL identifiers)
-export { ChatBubble, Panel, StepList, ThemeView, UserAvatar } from './ui/index.guest';
+export { ChatBubble, Panel, StepList, ThemeView, UserAvatar, MyTouchableOpacity } from './ui/index.guest';
