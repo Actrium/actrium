@@ -257,9 +257,9 @@ struct BrowserWindowView: View {
               let launchURL = CanvasApp.launchURL else { return }
         hasHandledLaunchURL = true
 
-        // Create a new tab, navigate to the URL, and enter focus mode
+        // Create a new tab, navigate to the URL, and enter focus mode (don't focus address bar)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let tab = self.viewModel.addNewTab()
+            let tab = self.viewModel.addNewTab(focusAddressBar: false)
             self.viewModel.navigateCurrentTab(to: launchURL.absoluteString)
 
             // Auto enter focus mode

@@ -204,8 +204,8 @@ struct WorkspaceMainView: View {
                             isWebLoading = loading
                         },
                         onOpenNewWindow: { newURL in
-                            // Open target="_blank" links in a new tab
-                            let newTab = viewModel.addNewTab()
+                            // Open target="_blank" links in a new tab (don't focus address bar)
+                            let newTab = viewModel.addNewTab(focusAddressBar: false)
                             viewModel.navigateCurrentTab(to: newURL.absoluteString)
                             // Enter focus mode for the new tab
                             enterFocus(tabId: newTab.id)
