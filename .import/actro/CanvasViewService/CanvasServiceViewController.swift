@@ -179,6 +179,9 @@ private class TabViewControllerEntry {
     var containerSize: CGSize = .zero
     var pendingConfig: [String: Any]?
 
+    /// Whether a pending size change was applied from containerSizeChanged notification
+    var hasPendingSizeApplied: Bool = false
+
     /// Loading indicator shown while waiting for tab config
     weak var loadingLabel: NSTextField?
 
@@ -223,6 +226,10 @@ private class ServiceReactNativeHost {
     /// Pending entries waiting for Host to send tabConfig with real tabId
     /// Key is the internal ID generated at loadView time
     private var pendingEntries: [String: TabViewControllerEntry] = [:]
+
+    /// Pending container size changes received before entry was registered
+    /// Key is tabId, value is the pending size
+    private var pendingSizeChanges: [String: CGSize] = [:]
 
     private let registryLock = NSLock()
 
@@ -317,15 +324,16 @@ private class ServiceReactNativeHost {
     /// Returns the entry if successful, nil if no pending entries
     private func assignPendingEntry(tabId: String) -> TabViewControllerEntry? {
         registryLock.lock()
-        defer { registryLock.unlock() }
 
         // If already registered, return existing
         if let existing = tabRegistry[tabId] {
+            registryLock.unlock()
             return existing
         }
 
         // Find the oldest pending entry (FIFO)
         guard let (internalId, entry) = pendingEntries.first else {
+            registryLock.unlock()
             debugLog("⚠️ No pending entries to assign tabId: \(tabId.prefix(8))")
             return nil
         }
@@ -337,7 +345,23 @@ private class ServiceReactNativeHost {
         entry.assignTabId(tabId)
         tabRegistry[tabId] = entry
 
+        // Check for any pending size changes for this tabId
+        let pendingSize = pendingSizeChanges.removeValue(forKey: tabId)
+
+        registryLock.unlock()
+
         debugLog("[\(tabId.prefix(8))] Assigned to pending entry, registry count: \(tabRegistry.count), pending count: \(pendingEntries.count)")
+
+        // Apply pending size change if any (outside lock)
+        if let size = pendingSize {
+            debugLog("[\(tabId.prefix(8))] 📐 Applying cached container size: \(size)")
+            entry.containerSize = size
+            entry.hasPendingSizeApplied = true
+            if let container = entry.containerView {
+                container.setFrameSize(size)
+            }
+        }
+
         return entry
     }
 
@@ -410,6 +434,12 @@ private class ServiceReactNativeHost {
 
             // Update entry's container size and RN dimensions
             updateContainerSize(for: entry, size: newSize)
+        } else {
+            // Entry not yet registered - cache the size for later
+            registryLock.lock()
+            pendingSizeChanges[tabId] = newSize
+            registryLock.unlock()
+            debugLog("[pending:\(tabId.prefix(8))] 📐 Cached container size for later: \(newSize)")
         }
     }
 
@@ -817,14 +847,22 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     entry.loadingLabel?.removeFromSuperview()
     entry.loadingLabel = nil
 
-    // Get container size - prefer from config if available (Host knows the actual viewport size)
-    var containerSize = container.bounds.size
-    if let width = config["containerWidth"] as? Double,
-       let height = config["containerHeight"] as? Double,
-       width > 0 && height > 0 {
+    // Get container size - priority:
+    // 1. entry.containerSize if already set by pending size change (most up-to-date)
+    // 2. config's containerWidth/Height (from tab config)
+    // 3. container.bounds.size (fallback)
+    var containerSize: CGSize
+    if entry.hasPendingSizeApplied {
+        // Use size from pending size change (already applied in assignPendingEntry)
+        containerSize = entry.containerSize
+        debugLog("[\(logId)] Using entry.containerSize (from pending): \(containerSize)")
+    } else if let width = config["containerWidth"] as? Double,
+              let height = config["containerHeight"] as? Double,
+              width > 0 && height > 0 {
         containerSize = CGSize(width: width, height: height)
         debugLog("[\(logId)] Using container size from config: \(containerSize)")
     } else {
+        containerSize = container.bounds.size
         debugLog("[\(logId)] Using container bounds size: \(containerSize)")
     }
     entry.containerSize = containerSize

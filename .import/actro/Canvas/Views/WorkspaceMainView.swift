@@ -1775,8 +1775,11 @@ private struct TabPanel: View {
             renderSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
         }
 
-        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, renderSize=%.0fx%.0f",
-                      String(describing: tab.contentType), isFocused ? 1 : 0, renderSize.width, renderSize.height)
+        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, viewportSize=%.0fx%.0f, cardSize=%.0fx%.0f, renderSize=%.0fx%.0f",
+                      String(describing: tab.contentType), isFocused ? 1 : 0,
+                      viewportSize.width, viewportSize.height,
+                      cardWidth, cardHeight,
+                      renderSize.width, renderSize.height)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
