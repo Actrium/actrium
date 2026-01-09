@@ -266,50 +266,16 @@ struct MetroPanel: View {
     // MARK: - Logs Panel
 
     private var logsPanel: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(metro.logs) { entry in
-                        logEntryRow(entry)
-                            .id(entry.id)
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-            }
-            .onChange(of: metro.logs.count) { _, _ in
-                if let lastLog = metro.logs.last {
-                    withAnimation {
-                        proxy.scrollTo(lastLog.id, anchor: .bottom)
-                    }
-                }
-            }
-        }
-        .background(Color(nsColor: .textBackgroundColor))
-    }
-
-    private func logEntryRow(_ entry: MetroManager.LogEntry) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(formatTime(entry.timestamp))
-                .font(.system(.caption, design: .monospaced))
-                .foregroundColor(.secondary)
-
-            Text(entry.message)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundColor(entry.isError ? .red : .primary)
-                .textSelection(.enabled)
-        }
-    }
-
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: date)
+        MetroLogsTextView(logs: metro.logs)
+            .background(Color(nsColor: .textBackgroundColor))
     }
 
     private func copyAllLogs() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+
         let text = metro.logs.map { entry in
-            "[\(formatTime(entry.timestamp))] \(entry.message)"
+            "[\(formatter.string(from: entry.timestamp))] \(entry.message)"
         }.joined(separator: "\n")
 
         NSPasteboard.general.clearContents()
@@ -345,6 +311,99 @@ struct MetroPanel: View {
             }
         }
         return true
+    }
+}
+
+// MARK: - NSTextView-based Logs View (supports selection and Cmd-C)
+
+private struct MetroLogsTextView: NSViewRepresentable {
+    let logs: [MetroManager.LogEntry]
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.backgroundColor = .textBackgroundColor
+        textView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        textView.textContainerInset = NSSize(width: 8, height: 4)
+        textView.autoresizingMask = [.width]
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+
+        scrollView.documentView = textView
+        context.coordinator.textView = textView
+        context.coordinator.scrollView = scrollView
+
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+
+        let attributedString = NSMutableAttributedString()
+        let timestampColor = NSColor.secondaryLabelColor
+        let normalColor = NSColor.labelColor
+        let errorColor = NSColor.systemRed
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+
+        for (index, entry) in logs.enumerated() {
+            // Timestamp
+            let timestamp = "[\(formatter.string(from: entry.timestamp))] "
+            let timestampAttr = NSAttributedString(string: timestamp, attributes: [
+                .foregroundColor: timestampColor,
+                .font: font
+            ])
+            attributedString.append(timestampAttr)
+
+            // Message
+            let message = entry.message + (index < logs.count - 1 ? "\n" : "")
+            let messageAttr = NSAttributedString(string: message, attributes: [
+                .foregroundColor: entry.isError ? errorColor : normalColor,
+                .font: font
+            ])
+            attributedString.append(messageAttr)
+        }
+
+        // Only update if content changed
+        let currentText = textView.attributedString().string
+        let newText = attributedString.string
+        if currentText != newText {
+            let wasAtBottom = context.coordinator.isScrolledToBottom(scrollView)
+            textView.textStorage?.setAttributedString(attributedString)
+
+            // Auto-scroll to bottom if was at bottom
+            if wasAtBottom {
+                textView.scrollToEndOfDocument(nil)
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    class Coordinator {
+        weak var textView: NSTextView?
+        weak var scrollView: NSScrollView?
+
+        func isScrolledToBottom(_ scrollView: NSScrollView) -> Bool {
+            guard let documentView = scrollView.documentView else { return true }
+            let visibleRect = scrollView.contentView.bounds
+            let documentHeight = documentView.frame.height
+            // Consider "at bottom" if within 50 points
+            return visibleRect.maxY >= documentHeight - 50
+        }
     }
 }
 
