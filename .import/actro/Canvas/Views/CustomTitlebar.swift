@@ -506,12 +506,27 @@ private struct LiquidGlassToolbar: View {
 
             // Address display/input area (shared for all modes)
             if isAddressFocused {
-                // Editing: TextField with full URL, left-aligned, auto-select
-                AddressInputField(
-                    text: $addressText,
-                    onSubmit: submitAddress,
-                    onBlur: handleBlur
-                )
+                // Editing: TextField with placeholder overlay when empty
+                ZStack(alignment: .leading) {
+                    // Placeholder (shown when text is empty)
+                    if addressText.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("Search or enter website name")
+                                .font(.system(size: 13))
+                        }
+                        .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
+                    }
+
+                    // Text field (always present, transparent when empty)
+                    AddressInputField(
+                        text: $addressText,
+                        onSubmit: submitAddress,
+                        onBlur: handleBlur
+                    )
+                }
                 .frame(maxWidth: .infinity, maxHeight: 22)
                 .padding(.horizontal, 8)
             } else {
@@ -602,7 +617,7 @@ private struct LiquidGlassToolbar: View {
 
         var leftIcon: String? {
             switch self {
-            case .web: return nil  // Web: no icon, just space for loading
+            case .web: return "globe"  // Web: globe icon
             case .app: return "app.badge.checkmark"
             case .empty: return nil
             }
