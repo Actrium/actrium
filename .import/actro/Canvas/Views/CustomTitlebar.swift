@@ -483,16 +483,15 @@ private struct LiquidGlassToolbar: View {
         let mode = addressBarMode
 
         return HStack(spacing: 0) {
-            // Left area: loading indicator, mode-specific icon, or empty space
+            // Left area: ONE icon only - loading spinner, mode icon, or search icon
             if mode.showsLoading && viewModel.isCurrentTabLoading {
                 // Loading: show arc spinner
                 ArcSpinner()
                     .frame(width: 32, height: 32)
             } else if let icon = mode.leftIcon {
-                // Has icon: show mode-specific button
+                // Has mode icon (globe for web, app icon for actr)
                 Button(action: {
                     NSLog("🔘 [Toolbar] Left button tapped (mode: \(mode))")
-                    // App mode: could show app info panel in the future
                 }) {
                     Image(systemName: icon)
                         .font(.system(size: 14, weight: .medium))
@@ -502,36 +501,32 @@ private struct LiquidGlassToolbar: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
             } else {
-                // No icon (Web/Empty): just empty space
-                Spacer()
-                    .frame(width: 8)
+                // Empty mode: show search icon
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
             }
 
-            // Address display/input area (shared for all modes)
+            // Address display/input area (no icon here - icon is in left area)
             if isAddressFocused {
-                // Editing: Icon + TextField with placeholder
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-
-                    ZStack(alignment: .leading) {
-                        // Placeholder text (hidden when any input activity including IME)
-                        if addressText.isEmpty && !hasInputActivity {
-                            Text("Search or enter website name")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                                .allowsHitTesting(false)
-                        }
-
-                        // Text field
-                        AddressInputField(
-                            text: $addressText,
-                            onSubmit: submitAddress,
-                            onBlur: handleBlur,
-                            onInputActivity: { hasInputActivity = true }
-                        )
+                // Editing: TextField with placeholder
+                ZStack(alignment: .leading) {
+                    // Placeholder text (hidden when any input activity including IME)
+                    if addressText.isEmpty && !hasInputActivity {
+                        Text("Search or enter website name")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .allowsHitTesting(false)
                     }
+
+                    // Text field
+                    AddressInputField(
+                        text: $addressText,
+                        onSubmit: submitAddress,
+                        onBlur: handleBlur,
+                        onInputActivity: { hasInputActivity = true }
+                    )
                 }
                 .frame(maxWidth: .infinity, maxHeight: 22)
                 .padding(.horizontal, 8)
@@ -539,16 +534,12 @@ private struct LiquidGlassToolbar: View {
                 // Display: Label with host/app name, centered
                 Group {
                     if addressText.isEmpty {
-                        // Empty state: search icon + placeholder
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 13, weight: .medium))
-                            Text("Search or enter website name")
-                                .font(.system(size: 13))
-                        }
-                        .foregroundStyle(.secondary)
+                        // Empty state: just placeholder text (icon is in left area)
+                        Text("Search or enter website name")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
                     } else {
-                        // Has content: just show address
+                        // Has content: show address
                         Text(addressText)
                             .font(.system(size: 13))
                             .foregroundStyle(.primary)
