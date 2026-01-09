@@ -229,6 +229,23 @@ struct BrowserWindowView: View {
             .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.clearHistory)) { _ in
                 historyVM.clearHistory()
             }
+            // Handle internal URI navigation (e.g., canvas://bookmarks/tags/{tagId})
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.canvas.openURI"))) { notification in
+                guard let userInfo = notification.userInfo,
+                      let uri = userInfo["uri"] as? String else { return }
+
+                // Parse canvas:// URI scheme
+                if uri.hasPrefix("canvas://bookmarks") {
+                    // Open bookmarks tab (tag filtering will be handled by the tab itself later)
+                    _ = viewModel.openSystemTab(.bookmarks)
+
+                    // Log the tag info for future implementation
+                    if let tagId = userInfo["tagId"] as? String,
+                       let tagName = userInfo["tagName"] as? String {
+                        NSLog("🏷️ Opening bookmarks with tag filter: \(tagName) (\(tagId))")
+                    }
+                }
+            }
             // Handle URL open from Start Page (XPC service)
             .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openURLFromStartPage)) { notification in
                 guard let userInfo = notification.userInfo,
