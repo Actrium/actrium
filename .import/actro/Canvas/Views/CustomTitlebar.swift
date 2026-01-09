@@ -524,10 +524,15 @@ private struct LiquidGlassToolbar: View {
                     }
             }
 
-            // Bookmark button with popover
+            // Bookmark button with popover (Chrome-style: click always adds, popover to edit/remove)
             Button(action: {
                 NSLog("🔘 [Toolbar] Bookmark button tapped, isBookmarked=\(isBookmarked)")
-                showingBookmarkPopover.toggle()
+                // If not bookmarked, add it first
+                if !isBookmarked, let tab = viewModel.currentTab {
+                    let bookmark = Bookmark.from(tab: tab, manufacturer: nil)
+                    bookmarkVM.addBookmark(bookmark)
+                }
+                showingBookmarkPopover = true
             }) {
                 Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                     .font(.system(size: 14, weight: .medium))
