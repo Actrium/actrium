@@ -506,26 +506,28 @@ private struct LiquidGlassToolbar: View {
 
             // Address display/input area (shared for all modes)
             if isAddressFocused {
-                // Editing: TextField with placeholder overlay when empty
-                ZStack(alignment: .leading) {
-                    // Placeholder (shown when text is empty)
-                    if addressText.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 13, weight: .medium))
+                // Editing: Icon + TextField with placeholder
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+
+                    ZStack(alignment: .leading) {
+                        // Placeholder text (shown when empty)
+                        if addressText.isEmpty {
                             Text("Search or enter website name")
                                 .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .allowsHitTesting(false)
                         }
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
-                    }
 
-                    // Text field (always present, transparent when empty)
-                    AddressInputField(
-                        text: $addressText,
-                        onSubmit: submitAddress,
-                        onBlur: handleBlur
-                    )
+                        // Text field
+                        AddressInputField(
+                            text: $addressText,
+                            onSubmit: submitAddress,
+                            onBlur: handleBlur
+                        )
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: 22)
                 .padding(.horizontal, 8)
@@ -803,6 +805,7 @@ private struct AddressInputField: NSViewRepresentable {
         textField.cell?.isScrollable = true
         textField.cell?.wraps = false
         textField.usesSingleLineMode = true
+        textField.isAutomaticTextCompletionEnabled = false  // Disable autocomplete popup
         textField.stringValue = text
         context.coordinator.textField = textField
 
