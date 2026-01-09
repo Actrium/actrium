@@ -320,10 +320,7 @@ private struct LiquidGlassToolbar: View {
 
     private func exitEditingMode() {
         isAddressFocused = false
-        // Delay to ensure SwiftUI state has propagated after navigation
-        DispatchQueue.main.async {
-            self.addressText = self.displayText(for: self.viewModel.currentTab)
-        }
+        // addressText will be updated by onChange handlers when URL/Tab changes
     }
 
     // Breakpoints for responsive layout (Safari-style)
@@ -382,6 +379,12 @@ private struct LiquidGlassToolbar: View {
         }
         .onChange(of: viewModel.currentTabId) { _, _ in
             updateDisplayText()
+        }
+        .onChange(of: isAddressFocused) { _, focused in
+            if !focused {
+                // When exiting edit mode, update to display text
+                updateAddressTextFromTab()
+            }
         }
         .onAppear {
             updateDisplayText()
