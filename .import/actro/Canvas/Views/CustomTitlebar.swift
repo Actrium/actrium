@@ -334,11 +334,19 @@ private struct LiquidGlassToolbar: View {
 
     private func enterEditingMode() {
         addressText = editingText(for: viewModel.currentTab)
-        // Start with expanded width, then animate to normal size
-        focusRingScale = 1.20
+
+        // Only animate if not already focused
+        guard !isAddressFocused else { return }
+
+        // First make the ring visible with expanded scale
+        focusRingScale = 1.15
         isAddressFocused = true
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-            focusRingScale = 1.0
+
+        // Delay scale animation so it starts after opacity transition begins
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+                self.focusRingScale = 1.0
+            }
         }
     }
 
