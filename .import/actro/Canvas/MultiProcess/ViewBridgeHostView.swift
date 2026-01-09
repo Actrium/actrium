@@ -368,21 +368,22 @@ public class ViewBridgeHostView: NSView {
 
         // 备用方案：通过 DistributedNotificationCenter 发送尺寸更新
         // ViewBridge 的私有 API 不稳定，这个通知作为可靠的备份
-        if let vc = remoteViewController {
-            // 从 coordinator 获取 tabId（如果可用）
-            if let tabId = coordinator?.tabId?.uuidString {
-                let sizeInfo: [String: Any] = [
-                    "tabId": tabId,
-                    "width": newSize.width,
-                    "height": newSize.height
-                ]
-                DistributedNotificationCenter.default().postNotificationName(
-                    NSNotification.Name("com.canvas.containerSizeChanged"),
-                    object: nil,
-                    userInfo: sizeInfo,
-                    deliverImmediately: true
-                )
-            }
+        // 从 coordinator 获取 tabId（如果可用）
+        if let tabId = coordinator?.tabId?.uuidString {
+            let sizeInfo: [String: Any] = [
+                "tabId": tabId,
+                "width": newSize.width,
+                "height": newSize.height
+            ]
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name("com.canvas.containerSizeChanged"),
+                object: nil,
+                userInfo: sizeInfo,
+                deliverImmediately: true
+            )
+            fputs("📐 Posted containerSizeChanged: tabId=\(tabId.prefix(8)), size=\(newSize)\n", stderr)
+        } else {
+            fputs("⚠️ Cannot post containerSizeChanged: coordinator or tabId is nil\n", stderr)
         }
     }
 
