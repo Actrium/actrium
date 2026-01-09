@@ -474,23 +474,30 @@ private struct LiquidGlassToolbar: View {
         .glassEffect(.regular, in: .capsule)
     }
 
-    /// Safari-style address bar: [loading/sidebar | text field | bookmark | refresh]
+    /// Unified address bar for Web and RN App tabs
+    /// Layout: [loading/icon | text field | bookmark | refresh]
     private var addressBarView: some View {
-        HStack(spacing: 0) {
-            // Left button: loading indicator or sidebar toggle
-            if isWebContent && viewModel.isCurrentTabLoading {
-                // Loading: show arc spinner (Safari-style)
+        let mode = addressBarMode
+
+        return HStack(spacing: 0) {
+            // Left button: loading indicator or mode-specific icon
+            if mode.showsLoading && viewModel.isCurrentTabLoading {
+                // Loading: show arc spinner
                 ArcSpinner()
                     .frame(width: 32, height: 32)
             } else {
-                // Not loading: show sidebar toggle
+                // Not loading: show mode-specific icon
                 Button(action: {
-                    NSLog("🔘 [Toolbar] Sidebar toggle tapped")
-                    NSApp.keyWindow?.firstResponder?.tryToPerform(
-                        #selector(NSSplitViewController.toggleSidebar(_:)), with: nil
-                    )
+                    NSLog("🔘 [Toolbar] Left button tapped (mode: \(mode))")
+                    if mode == .web {
+                        // Web: toggle sidebar
+                        NSApp.keyWindow?.firstResponder?.tryToPerform(
+                            #selector(NSSplitViewController.toggleSidebar(_:)), with: nil
+                        )
+                    }
+                    // App mode: could show app info panel in the future
                 }) {
-                    Image(systemName: "sidebar.left")
+                    Image(systemName: mode.leftIcon)
                         .font(.system(size: 14, weight: .medium))
                         .frame(width: 32, height: 32)
                         .contentShape(Circle())
@@ -499,7 +506,7 @@ private struct LiquidGlassToolbar: View {
                 .foregroundStyle(.secondary)
             }
 
-            // Address display/input area
+            // Address display/input area (shared for all modes)
             if isAddressFocused {
                 // Editing: TextField with full URL, left-aligned, auto-select
                 AddressInputField(
@@ -510,7 +517,7 @@ private struct LiquidGlassToolbar: View {
                 .frame(maxWidth: .infinity, maxHeight: 22)
                 .padding(.horizontal, 8)
             } else {
-                // Display: Label with host, centered
+                // Display: Label with host/app name, centered
                 Text(addressText.isEmpty ? "Search or enter website name" : addressText)
                     .font(.system(size: 13))
                     .foregroundStyle(addressText.isEmpty ? .secondary : .primary)
@@ -524,39 +531,42 @@ private struct LiquidGlassToolbar: View {
                     }
             }
 
-            // Bookmark button with popover (Chrome-style: click always adds, popover to edit/remove)
-            Button(action: {
-                NSLog("🔘 [Toolbar] Bookmark button tapped, isBookmarked=\(isBookmarked)")
-                // If not bookmarked, add it first
-                if !isBookmarked, let tab = viewModel.currentTab {
-                    let bookmark = Bookmark.from(tab: tab, manufacturer: nil)
-                    bookmarkVM.addBookmark(bookmark)
+            // Bookmark button (Chrome-style: click always adds, popover to edit/remove)
+            if mode.showsBookmark {
+                Button(action: {
+                    NSLog("🔘 [Toolbar] Bookmark button tapped, isBookmarked=\(isBookmarked)")
+                    if !isBookmarked, let tab = viewModel.currentTab {
+                        let bookmark = Bookmark.from(tab: tab, manufacturer: nil)
+                        bookmarkVM.addBookmark(bookmark)
+                    }
+                    showingBookmarkPopover = true
+                }) {
+                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
                 }
-                showingBookmarkPopover = true
-            }) {
-                Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(isBookmarked ? .blue : .secondary)
-            .popover(isPresented: $showingBookmarkPopover, arrowEdge: .bottom) {
-                bookmarkPopoverContent
+                .buttonStyle(.plain)
+                .foregroundStyle(isBookmarked ? .blue : .secondary)
+                .popover(isPresented: $showingBookmarkPopover, arrowEdge: .bottom) {
+                    bookmarkPopoverContent
+                }
             }
 
             // Refresh button
-            Button(action: {
-                NSLog("🔘 [Toolbar] Refresh button tapped")
-                viewModel.reloadCurrentTab()
-            }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Circle())
+            if mode.showsRefresh {
+                Button(action: {
+                    NSLog("🔘 [Toolbar] Refresh button tapped")
+                    viewModel.reloadCurrentTab()
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
@@ -564,17 +574,58 @@ private struct LiquidGlassToolbar: View {
         .overlay {
             Capsule()
                 .strokeBorder(Color.blue, lineWidth: 2.5)
-                .scaleEffect(x: focusRingScale, y: 1.0)  // Only scale width
+                .scaleEffect(x: focusRingScale, y: 1.0)
                 .opacity(isAddressFocused ? 1 : 0)
         }
         .animation(.easeOut(duration: 0.15), value: isAddressFocused)
     }
 
-    private var isWebContent: Bool {
-        if case .web = viewModel.currentTab?.contentType {
-            return true
+    // MARK: - Tab Type Helpers
+
+    private enum AddressBarMode {
+        case web       // Web content (http/https)
+        case app       // React Native app (.actr)
+        case empty     // Empty/new tab
+
+        var leftIcon: String {
+            switch self {
+            case .web: return "sidebar.left"
+            case .app: return "app.badge.checkmark"
+            case .empty: return "sidebar.left"
+            }
         }
-        return false
+
+        var showsLoading: Bool {
+            switch self {
+            case .web: return true
+            case .app: return true  // RN apps can also show loading
+            case .empty: return false
+            }
+        }
+
+        var showsBookmark: Bool {
+            switch self {
+            case .web, .app: return true
+            case .empty: return false
+            }
+        }
+
+        var showsRefresh: Bool {
+            switch self {
+            case .web: return true
+            case .app: return true  // RN apps can be refreshed too
+            case .empty: return false
+            }
+        }
+    }
+
+    private var addressBarMode: AddressBarMode {
+        guard let tab = viewModel.currentTab else { return .empty }
+        switch tab.contentType {
+        case .web: return .web
+        case .reactNative: return .app
+        case .empty: return .empty
+        }
     }
 
     private var isBookmarked: Bool {
