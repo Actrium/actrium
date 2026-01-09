@@ -516,17 +516,31 @@ private struct LiquidGlassToolbar: View {
                 .padding(.horizontal, 8)
             } else {
                 // Display: Label with host/app name, centered
-                Text(addressText.isEmpty ? "Search or enter website name" : addressText)
-                    .font(.system(size: 13))
-                    .foregroundStyle(addressText.isEmpty ? .secondary : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, maxHeight: 22)
-                    .padding(.horizontal, 8)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        enterEditingMode()
+                Group {
+                    if addressText.isEmpty {
+                        // Empty state: search icon + placeholder
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("Search or enter website name")
+                                .font(.system(size: 13))
+                        }
+                        .foregroundStyle(.secondary)
+                    } else {
+                        // Has content: just show address
+                        Text(addressText)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
+                }
+                .frame(maxWidth: .infinity, maxHeight: 22)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    enterEditingMode()
+                }
             }
 
             // Bookmark button (Chrome-style: click always adds, popover to edit/remove)
