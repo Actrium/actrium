@@ -600,8 +600,13 @@ class BrowserViewModel: ObservableObject {
 
     /// Update URL for a specific tab (for web navigation)
     func updateTabURL(for tabId: UUID, url: URL) {
-        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else {
+            logger.warning("⚠️ [updateTabURL] Tab not found: \(tabId)")
+            return
+        }
+        let oldURL = tabs[index].url?.absoluteString ?? "nil"
         tabs[index].url = url
+        logger.notice("🔗 [updateTabURL] Tab \(tabId) URL updated from \(oldURL) to \(url.absoluteString)")
     }
 
     /// 导航当前 Tab 到指定 URL 或应用 ID

@@ -193,6 +193,13 @@ struct WorkspaceMainView: View {
                                 await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
                             }
                         },
+                        onURLChanged: { newURL in
+                            // Update tab URL when page uses History.pushState/replaceState
+                            if let newURL = newURL {
+                                NSLog("🔗 WorkspaceMainView: Updating tab \(focusedTabId) URL to: \(newURL.absoluteString)")
+                                viewModel.updateTabURL(for: focusedTabId, url: newURL)
+                            }
+                        },
                         onLoadingStateChanged: { loading in
                             isWebLoading = loading
                         },
@@ -520,10 +527,25 @@ struct WorkspaceMainView: View {
             // 点击主窗口区域时退出地址栏编辑状态
             mouseEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
                 // 通知 LiquidGlassToolbar 取消焦点 (for native titlebar)
-                NotificationCenter.default.post(name: NSNotification.Name("com.canvas.dismissAddressBarFocus"), object: nil)
+                let shouldNotifyDismiss: Bool = {
+                    if useNativeToolbar {
+                        if let window = event.window ?? NSApp.keyWindow,
+                           let contentView = window.contentView {
+                            let pointInContent = contentView.convert(event.locationInWindow, from: nil)
+                            return contentView.bounds.contains(pointInContent)
+                        }
+                        return false
+                    } else {
+                        return true
+                    }
+                }()
+
+                if shouldNotifyDismiss {
+                    NotificationCenter.default.post(name: NSNotification.Name("com.canvas.dismissAddressBarFocus"), object: nil)
+                }
 
                 // 旧逻辑：SwiftUI toolbar 的地址栏
-                if isAddressBarEditing {
+                if !useNativeToolbar && isAddressBarEditing {
                     // 延迟执行，让系统先处理点击事件
                     // 只需设置 isFirstResponder=false，onChange 会自动退出编辑模式
                     DispatchQueue.main.async {

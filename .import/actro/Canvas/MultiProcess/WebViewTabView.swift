@@ -170,6 +170,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Callback when navigation finishes with title and URL
     var onNavigationFinished: ((String?, URL?) -> Void)?
 
+    /// Callback when URL changes (including History.pushState/replaceState)
+    var onURLChanged: ((URL?) -> Void)?
+
     /// Callback when loading state changes
     var onLoadingStateChanged: ((Bool) -> Void)?
 
@@ -184,6 +187,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Download delegate handlers (keep strong reference)
     private var downloadHandlers: [WKDownload: DownloadDelegateHandler] = [:]
+
+    /// KVO observation for URL changes
+    private var urlObservation: NSKeyValueObservation?
 
     /// Canvas User-Agent string
     /// Format follows standard browser convention: Mozilla/5.0 (Platform) Engine/Version (Compatibility) Browser/Version Engine/Version
@@ -207,6 +213,22 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
         webView.customUserAgent = Self.userAgent
+
+        // Observe URL changes (including History.pushState/replaceState)
+        urlObservation = webView.observe(\.url, options: [.new, .old]) { [weak self] webView, change in
+            // change.newValue is URL?? (double optional), need to flatten
+            guard let newURL = webView.url else { return }
+            let oldURL = change.oldValue ?? nil
+            // Only notify if URL actually changed
+            if oldURL != newURL {
+                NSLog("🔗 WebViewHolder: URL changed via KVO from \(oldURL?.absoluteString ?? "nil") to: \(newURL.absoluteString)")
+                self?.onURLChanged?(newURL)
+            }
+        }
+    }
+
+    deinit {
+        urlObservation?.invalidate()
     }
 
     func loadIfNeeded(_ url: URL) {
@@ -1078,6 +1100,8 @@ struct FocusedWebOverlay: View {
     let viewportSize: CGSize
     /// Callback when navigation finishes (title, url)
     var onNavigationFinished: ((String?, URL?) -> Void)?
+    /// Callback when URL changes (including History.pushState/replaceState)
+    var onURLChanged: ((URL?) -> Void)?
     /// Callback when loading state changes
     var onLoadingStateChanged: ((Bool) -> Void)?
     /// Callback when a new window should be opened (target="_blank")
@@ -1088,15 +1112,23 @@ struct FocusedWebOverlay: View {
 
     init(tab: Tab, url: URL, viewportSize: CGSize,
          onNavigationFinished: ((String?, URL?) -> Void)? = nil,
+         onURLChanged: ((URL?) -> Void)? = nil,
          onLoadingStateChanged: ((Bool) -> Void)? = nil,
          onOpenNewWindow: ((URL) -> Void)? = nil) {
         self.tab = tab
         self.url = url
         self.viewportSize = viewportSize
         self.onNavigationFinished = onNavigationFinished
+        self.onURLChanged = onURLChanged
         self.onLoadingStateChanged = onLoadingStateChanged
         self.onOpenNewWindow = onOpenNewWindow
         self.holder = WebViewHolderManager.shared.holder(for: tab.id)
+
+        // Set callbacks immediately in init (SwiftUI View init can be called multiple times)
+        holder.onNavigationFinished = onNavigationFinished
+        holder.onURLChanged = onURLChanged
+        holder.onLoadingStateChanged = onLoadingStateChanged
+        holder.onOpenNewWindow = onOpenNewWindow
     }
 
     var body: some View {
@@ -1106,9 +1138,6 @@ struct FocusedWebOverlay: View {
             .id(tab.id)
             .frame(width: viewportSize.width, height: viewportSize.height)
             .onAppear {
-                holder.onNavigationFinished = onNavigationFinished
-                holder.onLoadingStateChanged = onLoadingStateChanged
-                holder.onOpenNewWindow = onOpenNewWindow
                 holder.loadIfNeeded(url)
             }
             .onChange(of: url) { _, newURL in
