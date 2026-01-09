@@ -334,6 +334,7 @@ private class ServiceReactNativeHost {
     // MARK: - Tab Config IPC
 
     private var metroConfigObserver: NSObjectProtocol?
+    private var containerSizeObserver: NSObjectProtocol?
     private var readyNotificationTimer: Timer?
     private var hasReceivedTabConfig = false
 
@@ -360,9 +361,44 @@ private class ServiceReactNativeHost {
         }
         debugLog("📡 Setting up Metro config listener")
 
+        // Listen for container size changes from Host (backup for ViewBridge's private API)
+        containerSizeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.containerSizeChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleContainerSizeChanged(notification)
+        }
+        debugLog("📡 Setting up container size listener")
+
         // Notify Host that this service is ready (with retry until tab config received)
         postXPCServiceReady()
         startReadyNotificationRetry()
+    }
+
+    private func handleContainerSizeChanged(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tabId = userInfo["tabId"] as? String,
+              let width = userInfo["width"] as? Double,
+              let height = userInfo["height"] as? Double else {
+            return
+        }
+
+        let newSize = CGSize(width: width, height: height)
+
+        // Find the entry for this tab
+        if let entry = getTabEntry(tabId: tabId) {
+            let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
+            debugLog("[\(logId)] 📐 Container size changed via notification: \(newSize)")
+
+            // Update container view frame
+            if let container = entry.containerView {
+                container.setFrameSize(newSize)
+            }
+
+            // Update entry's container size and RN dimensions
+            updateContainerSize(for: entry, size: newSize)
+        }
     }
 
     private func postXPCServiceReady() {
