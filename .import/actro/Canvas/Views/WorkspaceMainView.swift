@@ -202,6 +202,7 @@ struct WorkspaceMainView: View {
                         },
                         onLoadingStateChanged: { loading in
                             isWebLoading = loading
+                            viewModel.isCurrentTabLoading = loading
                         },
                         onOpenNewWindow: { newURL in
                             // Open target="_blank" links in a new tab (don't focus address bar)
