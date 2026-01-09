@@ -295,6 +295,8 @@ private struct LiquidGlassToolbar: View {
     @State private var showingBookmarkPopover: Bool = false
     /// Tracks the focus ring animation scale (starts larger, animates to 1.0)
     @State private var focusRingScale: CGFloat = 1.0
+    /// Tracks if user has started typing (including IME composition)
+    @State private var hasInputActivity: Bool = false
 
     // Safari 风格地址栏规则：
     // 1) 非编辑态只显示 host（去掉 scheme 和 www.）
@@ -329,6 +331,7 @@ private struct LiquidGlassToolbar: View {
     private func exitEditingMode() {
         isAddressFocused = false
         focusRingScale = 1.0
+        hasInputActivity = false  // Reset input activity state
         // addressText will be updated by onChange handlers when URL/Tab changes
     }
 
@@ -513,8 +516,8 @@ private struct LiquidGlassToolbar: View {
                         .foregroundStyle(.secondary)
 
                     ZStack(alignment: .leading) {
-                        // Placeholder text (shown when empty)
-                        if addressText.isEmpty {
+                        // Placeholder text (hidden when any input activity including IME)
+                        if addressText.isEmpty && !hasInputActivity {
                             Text("Search or enter website name")
                                 .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
@@ -525,7 +528,8 @@ private struct LiquidGlassToolbar: View {
                         AddressInputField(
                             text: $addressText,
                             onSubmit: submitAddress,
-                            onBlur: handleBlur
+                            onBlur: handleBlur,
+                            onInputActivity: { hasInputActivity = true }
                         )
                     }
                 }
@@ -791,6 +795,7 @@ private struct AddressInputField: NSViewRepresentable {
     @Binding var text: String
     var onSubmit: () -> Void
     var onBlur: () -> Void
+    var onInputActivity: (() -> Void)?  // Called when any input activity (including IME)
 
     func makeNSView(context: Context) -> NSTextField {
         let textField = NSTextField()
@@ -838,9 +843,16 @@ private struct AddressInputField: NSViewRepresentable {
             parent.onBlur()
         }
 
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            // Notify when editing starts (user typed something)
+            parent.onInputActivity?()
+        }
+
         func controlTextDidChange(_ obj: Notification) {
             guard let tf = obj.object as? NSTextField else { return }
             parent.text = tf.stringValue
+            // Also notify on text change (covers IME composition)
+            parent.onInputActivity?()
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
