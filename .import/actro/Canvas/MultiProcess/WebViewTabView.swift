@@ -213,6 +213,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
         webView.customUserAgent = Self.userAgent
+        webView.isInspectable = true  // Enable Web Inspector
 
         // Observe URL changes (including History.pushState/replaceState)
         urlObservation = webView.observe(\.url, options: [.new, .old]) { [weak self] webView, change in
@@ -250,6 +251,20 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
     func reload() { webView.reload() }
+
+    // MARK: - Web Inspector
+
+    /// Show WebKit Web Inspector for this webView
+    func showInspector() {
+        // Use private API to open Web Inspector
+        // WKWebView has a private _inspector property that returns WKInspector
+        guard let inspector = webView.value(forKey: "_inspector") as? NSObject else {
+            NSLog("⚠️ WebViewHolder: Could not get _inspector")
+            return
+        }
+        inspector.perform(Selector(("show")))
+        NSLog("🔧 WebViewHolder: Opened Web Inspector")
+    }
 
     // MARK: - Print
 
