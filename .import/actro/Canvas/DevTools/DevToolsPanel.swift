@@ -14,6 +14,16 @@ struct DevToolsPanel: View {
     /// Whether the DevTools is active (false when in Overview mode)
     var isActive: Bool = true
 
+    /// Check if current tab is a web tab (not Actr/React Native app)
+    private var isWebTab: Bool {
+        guard let tab = viewModel.currentTab else { return false }
+        // Web tabs have .web(url:) contentType
+        if case .web = tab.contentType {
+            return true
+        }
+        return false
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Toolbar
@@ -25,12 +35,15 @@ struct DevToolsPanel: View {
 
             Divider()
 
-            if isActive {
-                // Content based on active tab
-                DevToolsContent(devTools: devTools, viewModel: viewModel)
-            } else {
-                // Inactive placeholder
+            if !isActive {
+                // Overview mode - no tab selected
                 DevToolsInactivePlaceholder()
+            } else if isWebTab {
+                // Web tab - DevTools not available, use WebKit Inspector
+                DevToolsWebPlaceholder()
+            } else {
+                // Actr/React Native app - show full DevTools
+                DevToolsContent(devTools: devTools, viewModel: viewModel)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -50,6 +63,44 @@ private struct DevToolsInactivePlaceholder: View {
             Text("Switch to a tab to use DevTools")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+/// Placeholder view shown for Web tabs (non-Actr apps)
+private struct DevToolsWebPlaceholder: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "globe")
+                .font(.system(size: 36))
+                .foregroundColor(.secondary.opacity(0.5))
+
+            VStack(spacing: 6) {
+                Text("DevTools unavailable for Web content")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.secondary)
+
+                Text("Use WebKit Inspector for web page debugging")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary.opacity(0.8))
+            }
+
+            // Keyboard shortcut hint
+            HStack(spacing: 4) {
+                Image(systemName: "command")
+                    .font(.system(size: 11))
+                Image(systemName: "option")
+                    .font(.system(size: 11))
+                Text("I")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(6)
+            .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
