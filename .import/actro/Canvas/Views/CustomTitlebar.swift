@@ -293,6 +293,8 @@ private struct LiquidGlassToolbar: View {
     @State private var addressText: String = ""
     @State private var isAddressFocused: Bool = false
     @State private var showingBookmarkPopover: Bool = false
+    /// Tracks the focus ring animation scale (starts larger, animates to 1.0)
+    @State private var focusRingScale: CGFloat = 1.0
 
     // Safari 风格地址栏规则：
     // 1) 非编辑态只显示 host（去掉 scheme 和 www.）
@@ -316,11 +318,17 @@ private struct LiquidGlassToolbar: View {
 
     private func enterEditingMode() {
         addressText = editingText(for: viewModel.currentTab)
+        // Start with expanded width, then animate to normal size
+        focusRingScale = 1.20
         isAddressFocused = true
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            focusRingScale = 1.0
+        }
     }
 
     private func exitEditingMode() {
         isAddressFocused = false
+        focusRingScale = 1.0
         // addressText will be updated by onChange handlers when URL/Tab changes
     }
 
@@ -550,9 +558,11 @@ private struct LiquidGlassToolbar: View {
         .glassEffect(.regular, in: .capsule)
         .overlay {
             Capsule()
-                .strokeBorder(Color.blue, lineWidth: isAddressFocused ? 2.5 : 0)
+                .strokeBorder(Color.blue, lineWidth: 2.5)
+                .scaleEffect(x: focusRingScale, y: 1.0)  // Only scale width
                 .opacity(isAddressFocused ? 1 : 0)
         }
+        .animation(.easeOut(duration: 0.15), value: isAddressFocused)
     }
 
     private var isWebContent: Bool {
