@@ -31,9 +31,18 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
   // Debug: Log props received - use NativeModules for visibility
   const { NativeModules } = require('react-native');
   const NativeLogger = NativeModules.NativeLogger;
-  const logMsg = `[TabRouter] props: singleTabMode=${props?.singleTabMode}, tabId=${props?.tab?.id?.substring(0,8)}, systemAppType=${props?.tab?.systemAppType}`;
+  const logMsg = `[TabRouter] render: singleTabMode=${props?.singleTabMode}, tabId=${props?.tab?.id?.substring(0,8)}, systemAppType=${props?.tab?.systemAppType}`;
   NativeLogger?.log?.(logMsg);
   console.log(logMsg);
+
+  // Also log to stderr for XPC service visibility
+  const propsJson = JSON.stringify({
+    singleTabMode: props?.singleTabMode,
+    tabId: props?.tab?.id,
+    systemAppType: props?.tab?.systemAppType,
+    title: props?.tab?.title,
+  });
+  console.warn(`[TabRouter] PROPS: ${propsJson}`);
 
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
