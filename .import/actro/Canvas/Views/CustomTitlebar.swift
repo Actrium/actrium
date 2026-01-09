@@ -631,8 +631,8 @@ private struct LiquidGlassToolbar: View {
         .glassEffect(.regular, in: .capsule)
         .overlay {
             Capsule()
-                .strokeBorder(Color.blue, lineWidth: 2.5)
-                .scaleEffect(x: focusRingScale, y: 1.0)
+                .strokeBorder(Color.blue.opacity(0.75), lineWidth: 3.5)
+                .scaleEffect(focusRingScale)
                 .opacity(isAddressFocused ? 1 : 0)
                 // Only animate opacity based on focus state; scale is controlled via explicit withAnimation/withTransaction
                 .animation(.easeOut(duration: 0.12), value: isAddressFocused)
