@@ -179,6 +179,9 @@ private class TabViewControllerEntry {
     var containerSize: CGSize = .zero
     var pendingConfig: [String: Any]?
 
+    /// Loading indicator shown while waiting for tab config
+    weak var loadingLabel: NSTextField?
+
     /// Whether this entry is waiting for its first tabConfig from Host
     var isPending: Bool { tabId == nil }
 
@@ -331,6 +334,8 @@ private class ServiceReactNativeHost {
     // MARK: - Tab Config IPC
 
     private var metroConfigObserver: NSObjectProtocol?
+    private var readyNotificationTimer: Timer?
+    private var hasReceivedTabConfig = false
 
     private func setupTabConfigListener() {
         // Listen for tab config with service-specific notification
@@ -355,7 +360,12 @@ private class ServiceReactNativeHost {
         }
         debugLog("📡 Setting up Metro config listener")
 
-        // Notify Host that this service is ready
+        // Notify Host that this service is ready (with retry until tab config received)
+        postXPCServiceReady()
+        startReadyNotificationRetry()
+    }
+
+    private func postXPCServiceReady() {
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name("com.canvas.xpcServiceReady"),
             object: nil,
@@ -363,6 +373,25 @@ private class ServiceReactNativeHost {
             deliverImmediately: true
         )
         debugLog("📤 Posted xpcServiceReady with bundleId: \(serviceBundleId)")
+    }
+
+    /// Retry sending xpcServiceReady every 500ms until first tab config is received
+    /// This handles race condition where Host hasn't set up listener yet
+    private func startReadyNotificationRetry() {
+        readyNotificationTimer?.invalidate()
+        readyNotificationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            if self.hasReceivedTabConfig {
+                timer.invalidate()
+                self.readyNotificationTimer = nil
+                NSLog("[XPC] 📤 Stopped xpcServiceReady retry (config received)")
+            } else {
+                self.postXPCServiceReady()
+            }
+        }
     }
 
     private func handleTabConfigNotification(_ notification: Notification) {
@@ -374,6 +403,9 @@ private class ServiceReactNativeHost {
             debugLog("⚠️ Invalid tab config notification (missing tabId)")
             return
         }
+
+        // Stop retry timer once we receive first config
+        hasReceivedTabConfig = true
 
         debugLog("📥 Received config for tab: \(tabId.prefix(8))")
 
@@ -397,10 +429,10 @@ private class ServiceReactNativeHost {
         let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
         debugLog("[\(logId)] Applying config: \(config["title"] ?? "?")")
 
-        // If RCTRootView not ready yet, cache config
+        // If RCTRootView not ready yet, create it now (event-driven)
         guard entry.rootView != nil else {
-            debugLog("[\(logId)] RootView not ready, caching config")
-            entry.pendingConfig = config
+            debugLog("[\(logId)] RootView not ready, creating now with config")
+            createRootViewWithConfig(for: entry, config: config)
             return
         }
 
@@ -459,14 +491,16 @@ private class ServiceReactNativeHost {
             rootView.appProperties = properties
             debugLog("[\(logId)] appProperties updated (systemAppType=\(systemAppType))")
 
-            // RN bridge may still be loading, re-apply properties after a delay to ensure render
+            // RN bridge may still be loading, re-apply properties multiple times to ensure render
             // This is needed because RCTRootView.setAppProperties only calls runApplication
             // when bridge.valid && !bridge.loading
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak entry] in
-                guard let entry = entry, let rootView = entry.rootView else { return }
-                let props = entry.currentProperties
-                rootView.appProperties = props
-                debugLog("[\(logId)] appProperties re-applied after delay")
+            for delay in [0.3, 0.8, 1.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak entry] in
+                    guard let entry = entry, let rootView = entry.rootView else { return }
+                    let props = entry.currentProperties
+                    rootView.appProperties = props
+                    debugLog("[\(logId)] appProperties re-applied after \(delay)s delay")
+                }
             }
         } else {
             debugLog("[\(logId)] ⚠️ rootView is nil, cannot update appProperties")
@@ -505,15 +539,6 @@ private class ServiceReactNativeHost {
         entry.rootView = rootView
 
         debugLog("[\(logId)] RCTRootView created successfully")
-
-        // Apply pending config if any
-        if let pending = entry.pendingConfig {
-            entry.pendingConfig = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak entry] in
-                guard let entry = entry else { return }
-                self?.applyConfigToEntry(entry, config: pending)
-            }
-        }
 
         return rootView
     }
@@ -689,7 +714,7 @@ public func registerCanvasServiceViewController() {
 
 // MARK: - React Native Content Setup
 
-/// Setup React Native content for a specific Tab entry
+/// Setup loading indicator for a Tab entry (RCTRootView created when config arrives)
 private func setupReactNativeContent(for entry: TabViewControllerEntry) {
     let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
 
@@ -698,10 +723,10 @@ private func setupReactNativeContent(for entry: TabViewControllerEntry) {
         return
     }
 
-    debugLog("[\(logId)] Setting up React Native content")
+    debugLog("[\(logId)] Setting up loading indicator (waiting for tab config)")
 
-    // Loading indicator
-    let loadingLabel = NSTextField(labelWithString: "Starting React Native...")
+    // Loading indicator - will be removed when RCTRootView is created
+    let loadingLabel = NSTextField(labelWithString: "Waiting for tab config...")
     loadingLabel.font = NSFont.systemFont(ofSize: 14)
     loadingLabel.textColor = NSColor.secondaryLabelColor
     loadingLabel.alignment = .center
@@ -712,65 +737,89 @@ private func setupReactNativeContent(for entry: TabViewControllerEntry) {
         loadingLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor)
     ])
 
-    // Initial properties with "loading" type (avoids loading askit)
-    // Use internalId for initial properties (Host tabId not yet known)
-    let initialTabId = entry.tabId ?? entry.internalId
-    let initialTab: [String: Any] = [
-        "id": initialTabId,
-        "title": "XPC Service Ready",
-        "backgroundColor": "#1e40af",
-        "systemAppType": "loading"
+    // Store reference for later removal
+    entry.loadingLabel = loadingLabel
+
+    // RCTRootView will be created when tab config is received (event-driven)
+}
+
+/// Create RCTRootView with the received config (called when tab config arrives)
+private func createRootViewWithConfig(for entry: TabViewControllerEntry, config: [String: Any]) {
+    let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
+
+    guard entry.rootView == nil else {
+        debugLog("[\(logId)] RootView already exists, skipping creation")
+        return
+    }
+
+    guard let container = entry.containerView else {
+        debugLog("[\(logId)] ⚠️ containerView is nil")
+        return
+    }
+
+    // Remove loading indicator
+    entry.loadingLabel?.removeFromSuperview()
+    entry.loadingLabel = nil
+
+    let containerSize = container.bounds.size
+    entry.containerSize = containerSize
+
+    // Build initial properties from config
+    let tabId = config["tabId"] as? String ?? entry.internalId
+    var tabDict: [String: Any] = [
+        "id": tabId,
+        "title": config["title"] as? String ?? "Tab",
+        "backgroundColor": config["backgroundColor"] as? String ?? "#1e40af"
     ]
+    if let systemAppType = config["systemAppType"] as? String {
+        tabDict["systemAppType"] = systemAppType
+        debugLog("[\(logId)] Creating RootView with systemAppType: \(systemAppType)")
+    }
+    if let unifiedScript = config["unifiedScript"] as? String {
+        tabDict["unifiedScript"] = unifiedScript
+    }
+    // Copy other tab properties
+    if let historyItems = config["historyItems"] { tabDict["historyItems"] = historyItems }
+    if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }
+    if let recentHistory = config["recentHistory"] { tabDict["recentHistory"] = recentHistory }
+
     let initialProperties: [String: Any] = [
         "singleTabMode": true,
-        "tab": initialTab,
-        "currentTabId": initialTabId,
-        "isLeftPanelVisible": true,
-        "isRightPanelVisible": true
+        "tab": tabDict,
+        "currentTabId": tabId,
+        "isLeftPanelVisible": config["leftPanelVisible"] as? Bool ?? true,
+        "isRightPanelVisible": config["rightPanelVisible"] as? Bool ?? true,
+        "containerWidth": containerSize.width,
+        "containerHeight": containerSize.height
     ]
 
-    // Create RN view asynchronously
-    // Capture logId for use in async blocks
-    let asyncLogId = logId
-    DispatchQueue.global(qos: .userInitiated).async {
-        Thread.sleep(forTimeInterval: 0.3)
+    debugLog("[\(logId)] Creating RCTRootView, size: \(containerSize)")
 
-        DispatchQueue.main.async {
-            loadingLabel.removeFromSuperview()
+    guard let rnView = ServiceReactNativeHost.shared.createRootView(
+        for: entry,
+        initialProperties: initialProperties
+    ) else {
+        debugLog("[\(logId)] ⚠️ Failed to create RCTRootView")
+        return
+    }
 
-            guard let container = entry.containerView else { return }
-            let containerSize = container.bounds.size
-            entry.containerSize = containerSize
+    rnView.frame = container.bounds
+    rnView.autoresizingMask = [.width, .height]
+    container.addSubview(rnView)
+    container.setRNView(rnView)
 
-            debugLog("[\(asyncLogId)] Creating RCTRootView, size: \(containerSize)")
+    // Size change callback
+    container.onSizeChanged = { [weak entry] newSize in
+        guard let entry = entry else { return }
+        ServiceReactNativeHost.shared.updateContainerSize(for: entry, size: newSize)
+    }
 
-            guard let rnView = ServiceReactNativeHost.shared.createRootView(
-                for: entry,
-                initialProperties: initialProperties
-            ) else {
-                debugLog("[\(asyncLogId)] ⚠️ Failed to create RCTRootView")
-                return
-            }
+    debugLog("[\(logId)] RCTRootView created and added to container")
 
-            rnView.frame = container.bounds
-            rnView.autoresizingMask = [.width, .height]
-            container.addSubview(rnView)
-            container.setRNView(rnView)
-
-            // Size change callback
-            container.onSizeChanged = { [weak entry] newSize in
-                guard let entry = entry else { return }
-                ServiceReactNativeHost.shared.updateContainerSize(for: entry, size: newSize)
-            }
-
-            debugLog("[\(asyncLogId)] RCTRootView added to container")
-
-            // Send initial dimensions after bridge is ready
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak entry] in
-                guard let entry = entry else { return }
-                ServiceReactNativeHost.shared.updateContainerSize(for: entry, size: entry.containerSize)
-            }
-        }
+    // Send initial dimensions after bridge is ready
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak entry] in
+        guard let entry = entry else { return }
+        ServiceReactNativeHost.shared.updateContainerSize(for: entry, size: entry.containerSize)
     }
 }
 
