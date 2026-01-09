@@ -65,9 +65,9 @@ final class TitlebarManager: NSObject {
 
         titlebarView.addSubview(toggleButton)
 
-        // Position toggle button at sidebar's right edge (with gap for toolbar)
+        // Position toggle button at sidebar's right edge (centered in gap)
         let effectiveWidth = sidebarWidth < 50 ? 78 : sidebarWidth
-        let toggleTrailing = toggleButton.trailingAnchor.constraint(equalTo: titlebarView.leadingAnchor, constant: effectiveWidth - 12)
+        let toggleTrailing = toggleButton.trailingAnchor.constraint(equalTo: titlebarView.leadingAnchor, constant: effectiveWidth - 10)
         toggleTrailing.isActive = true
         self.toggleTrailingConstraint = toggleTrailing
 
@@ -89,8 +89,8 @@ final class TitlebarManager: NSObject {
         // Add to titlebar
         titlebarView.addSubview(containerView)
 
-        // Main toolbar - starts after sidebar (leave space for toggle button + gap)
-        let leading = containerView.leadingAnchor.constraint(equalTo: titlebarView.leadingAnchor, constant: effectiveWidth + 8)
+        // Main toolbar - starts after sidebar (centered in gap with toggle button)
+        let leading = containerView.leadingAnchor.constraint(equalTo: titlebarView.leadingAnchor, constant: effectiveWidth + 10)
         leading.isActive = true
         self.leadingConstraint = leading
 
@@ -114,10 +114,10 @@ final class TitlebarManager: NSObject {
         lastKnownSidebarWidth = width
 
         // Update toolbar position immediately when sidebar is expanded
-        // Gap: toggle button at (width - 12), toolbar at (width + 8) = 20pt gap
+        // Gap: toggle button at (width - 10), toolbar at (width + 10) = centered
         if isSidebarExpanded {
-            toggleTrailingConstraint?.constant = width - 12
-            leadingConstraint?.constant = width + 8
+            toggleTrailingConstraint?.constant = width - 10
+            leadingConstraint?.constant = width + 10
             // Force layout update so SwiftUI GeometryReader picks up new size
             customToolbarView?.forceLayoutUpdate()
         }
@@ -135,8 +135,8 @@ final class TitlebarManager: NSObject {
             let targetToolbarPosition: CGFloat
 
             if visible {
-                targetTogglePosition = lastKnownSidebarWidth - 12
-                targetToolbarPosition = lastKnownSidebarWidth + 8
+                targetTogglePosition = lastKnownSidebarWidth - 10
+                targetToolbarPosition = lastKnownSidebarWidth + 10
             } else {
                 targetTogglePosition = minTogglePosition
                 targetToolbarPosition = minTogglePosition + 20
@@ -162,9 +162,9 @@ final class TitlebarManager: NSObject {
         let targetToolbarPosition: CGFloat
 
         if isSidebarExpanded {
-            // Expanding to last known width
-            targetTogglePosition = lastKnownSidebarWidth - 12
-            targetToolbarPosition = lastKnownSidebarWidth + 8
+            // Expanding to last known width (centered in gap)
+            targetTogglePosition = lastKnownSidebarWidth - 10
+            targetToolbarPosition = lastKnownSidebarWidth + 10
         } else {
             // Collapsing to minimum position
             targetTogglePosition = minTogglePosition
