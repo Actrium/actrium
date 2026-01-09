@@ -722,6 +722,25 @@ struct ViewBridgeMultiProcessTabView: View {
 
             NSLog("📡 [HOST] Received xpcServiceReady notification for tab: %@ from: %@",
                   String(tab.id.uuidString.prefix(8)), notifyingBundleId)
+
+            // Broadcast Metro config to XPC service before it creates RCTBridge
+            // This ensures the service uses the correct Metro port
+            Task { @MainActor in
+                if let port = MetroManager.shared.actualPort {
+                    let config: [String: Any] = [
+                        "host": MetroManager.shared.address,
+                        "port": port
+                    ]
+                    DistributedNotificationCenter.default().postNotificationName(
+                        NSNotification.Name("com.canvas.metro.config"),
+                        object: nil,
+                        userInfo: config,
+                        deliverImmediately: true
+                    )
+                    NSLog("📡 [HOST] Broadcasted Metro config to XPC: %@:%d", MetroManager.shared.address, port)
+                }
+            }
+
             coordinator.xpcServiceReady = true
             sendTabConfigIfReady()
         }

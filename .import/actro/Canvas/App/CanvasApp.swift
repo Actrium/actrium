@@ -381,6 +381,17 @@ struct CanvasApp: App {
 
         #if DEBUG
         logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
+
+        // Auto-start Metro bundler in Debug mode
+        Task { @MainActor in
+            do {
+                logger.info("🚀 Auto-starting Metro bundler...")
+                try await MetroManager.shared.start()
+                logger.info("✅ Metro bundler started on port \(MetroManager.shared.actualPort ?? 0)")
+            } catch {
+                logger.error("❌ Failed to auto-start Metro: \(error.localizedDescription)")
+            }
+        }
         #endif
 
         // Initialize TabProcessManager early
