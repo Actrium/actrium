@@ -12,6 +12,7 @@ struct BookmarkEditSheet: View {
     @State private var selectedTagIds: Set<UUID> = []
     @State private var showingNewTagField = false
     @State private var newTagName: String = ""
+    @FocusState private var isNewTagFieldFocused: Bool
 
     init(viewModel: BookmarkViewModel, tab: Tab? = nil, existingBookmark: Bookmark? = nil) {
         self.viewModel = viewModel
@@ -123,7 +124,10 @@ struct BookmarkEditSheet: View {
                 }
 
                 // Add new tag button
-                Button(action: { showingNewTagField = true }) {
+                Button(action: {
+                    showingNewTagField = true
+                    isNewTagFieldFocused = true
+                }) {
                     HStack(spacing: 4) {
                         Image(systemName: "plus")
                         Text("Add Tag")
@@ -143,6 +147,7 @@ struct BookmarkEditSheet: View {
                     TextField("New tag name", text: $newTagName)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 120)
+                        .focused($isNewTagFieldFocused)
                         .onSubmit {
                             createNewTag()
                         }
@@ -155,6 +160,7 @@ struct BookmarkEditSheet: View {
                     Button("Cancel") {
                         showingNewTagField = false
                         newTagName = ""
+                        isNewTagFieldFocused = false
                     }
                 }
                 .font(.caption)
