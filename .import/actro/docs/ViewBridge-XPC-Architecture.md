@@ -226,11 +226,14 @@ viewportSize.height / cardHeight = scale
 
 **解决**: 延迟创建 RCTBridge，等待收到 Metro config 通知后再创建
 
-### 7.2 Focus 模式渲染模糊
+### 7.2 尺寸同步时序问题
 
-**问题**: ViewBridge XPC 用 cardSize (187x126) 渲染，Canvas Transform 放大后模糊
+**问题**: `containerSizeChanged` 通知在 `tabRegistry` entry 分配之前到达，导致尺寸无法更新
 
-**解决**: Focus 模式下让 XPC Service 用 viewportSize (589x398) 渲染，然后用 scaleEffect 缩小，最后 Canvas Transform 放大
+**解决**:
+- 在 Service 端添加 `pendingSizeChanges` 缓存存储早期到达的尺寸变化
+- 当 entry 被分配时自动应用缓存的尺寸
+- 添加 `hasPendingSizeApplied` 标记区分缓存尺寸和 config 尺寸
 
 ### 7.3 尺寸同步不可靠
 
@@ -238,7 +241,178 @@ viewportSize.height / cardHeight = scale
 
 **解决**: 添加 DistributedNotificationCenter 备用机制 (`com.canvas.containerSizeChanged`)
 
-## 8. 文件清单
+## 8. 未解决的问题：Focus 模式渲染
+
+### 8.1 问题描述
+
+React Native 内容在 Focus 模式下无法正确显示。具体表现：
+- Overview 模式：能看到 cardSize 的卡片内容 ✓
+- Focus 模式：看不到内容，或者只有拖动窗口时偶尔闪烁
+
+### 8.2 目标
+
+| 模式 | 期望的渲染尺寸 | 期望的显示尺寸 | 期望效果 |
+|------|---------------|---------------|---------|
+| Overview | cardSize (187x126) | cardSize (187x126) | 小卡片，清晰显示 |
+| Focus | viewportSize (589x398) | viewportSize (589x398) | 全尺寸，清晰显示 |
+
+### 8.3 核心难点
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Canvas Transform                          │
+│   - Overview 模式: scale = 1.0                                   │
+│   - Focus 模式: scale = viewportSize / cardSize ≈ 3.154         │
+│                                                                  │
+│   问题：Canvas Transform 会放大 TabPanel，但 NSViewRepresentable │
+│         (ViewBridge) 不会被 scaleEffect 正确缩放                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**关键发现**: `scaleEffect` 对 `NSViewRepresentable` 不生效（macOS 限制）。
+这导致无法像 SwiftUI 原生视图那样通过 scaleEffect 预缩小来抵消 Canvas Transform 的放大。
+
+### 8.4 尝试过的方案
+
+#### 方案 A: viewportSize 渲染 + scaleEffect 缩小 ❌
+
+```swift
+// 思路：Focus 模式用 viewportSize 渲染，scaleEffect 缩小到 cardSize，
+//       Canvas Transform 再放大回 viewportSize
+ViewBridgeMultiProcessTabView(containerSize: viewportSize)
+    .scaleEffect(cardWidth / viewportSize.width)  // ≈ 0.317
+```
+
+**失败原因**: `scaleEffect` 对 `NSViewRepresentable` 不生效，ViewBridge 内容不会被缩小
+
+#### 方案 B: 始终以 cardSize 渲染 ❌
+
+```swift
+// 思路：ViewBridge 始终以 cardSize 渲染，由 Canvas Transform 负责放大
+ViewBridgeMultiProcessTabView(containerSize: cardSize)
+// 不使用 scaleEffect
+```
+
+**结果**:
+- Overview 模式：内容正确显示 ✓
+- Focus 模式：Canvas Transform 放大后内容模糊/不显示 ❌
+
+**观察**: 拖动窗口时能偶尔看到闪烁的画面，说明内容确实在渲染
+
+#### 方案 C: 动态切换 containerSize ❌
+
+```swift
+// 思路：根据 isFocused 动态更新 containerSize
+let renderSize = isFocused ? viewportSize : cardSize
+ViewBridgeMultiProcessTabView(containerSize: renderSize)
+```
+
+**失败原因**:
+1. `containerSizeChanged` 通知时序问题（已通过 pendingSizeChanges 缓存修复）
+2. 即使尺寸正确传递，Focus 模式下仍有显示问题
+
+### 8.5 当前现状
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Service 端状态（从日志确认）                                      │
+│ - RCTRootView 创建成功 ✓                                        │
+│ - 尺寸正确设置 (187x126 或 589x398) ✓                           │
+│ - React Native 内容正在渲染 ✓                                    │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ ViewBridge 传输（推测问题区域）                                   │
+│ - NSRemoteView 连接到 NSServiceViewController ✓                 │
+│ - 跨进程图像传输 ?                                               │
+│ - 尺寸同步 ?                                                     │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Host 端显示                                                      │
+│ - Overview 模式：能看到内容 ✓                                    │
+│ - Focus 模式：看不到/偶尔闪烁 ❌                                  │
+│ - 拖动窗口时：偶尔能看到画面闪烁                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 8.6 对比：Web 内容的解决方案
+
+Web 内容（WKWebView）也面临相同问题，其解决方案是 **FocusedWebOverlay**：
+
+```swift
+// Focus 模式下，Web 内容在 Canvas Transform 之外独立渲染
+if case .focus(let tabId) = mode, case .web(let url) = tab.contentType {
+    FocusedWebOverlay(
+        tab: tab,
+        url: url,
+        viewportSize: viewportSize  // 直接以 viewportSize 渲染
+    )
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+}
+```
+
+关键点：
+1. Focus 模式下的 Web 内容**不在 Canvas Transform 内**
+2. 使用 `WebViewHolderManager` 管理持久化的 WKWebView 实例
+3. Overview 和 Focus 共享同一个 WKWebView，只是位置不同
+
+### 8.7 可能的解决方向
+
+#### 方向 1: FocusedReactNativeOverlay
+
+类似 Web 内容，创建独立的 overlay 在 Canvas Transform 之外渲染：
+
+```swift
+if case .focus(let tabId) = mode, case .reactNative = tab.contentType {
+    FocusedReactNativeOverlay(
+        tab: tab,
+        viewportSize: viewportSize,
+        coordinator: coordinator
+    )
+}
+```
+
+**挑战**:
+- ViewBridge 连接是一对一的，不能同时显示两个 ViewBridgeHostView
+- 需要在 Focus/Overview 切换时重建 ViewBridge 连接？
+
+#### 方向 2: 调查 Canvas Transform 对 NSRemoteView 的影响
+
+可能 Canvas Transform（通过 CALayer transform）影响了 NSRemoteView 的显示。
+
+**调试方向**:
+- 检查 NSRemoteView 的 layer 属性
+- 尝试禁用 Canvas Transform 看是否能正常显示
+- 研究 ViewBridge 私有 API 中的尺寸同步机制
+
+#### 方向 3: 放弃 Canvas Transform，使用布局切换
+
+完全重构，不使用 Canvas Transform 实现 Focus/Overview 切换：
+
+- Overview: TabPanel 以 cardSize 布局
+- Focus: TabPanel 以 viewportSize 布局，其他 Tab 隐藏
+
+**挑战**: 需要重写大量动画和交互逻辑
+
+### 8.8 关键日志
+
+```
+# Service 端日志 - 确认 RCTRootView 正确创建
+[F2C28491] Using container size from config: (186.74, 126.19)
+[F2C28491] Creating RCTRootView, size: (186.74, 126.19)
+[F2C28491] RCTRootView frame set to: (0.0, 0.0, 186.74, 126.19)
+[F2C28491] RCTRootView created and added to container
+
+# Host 端日志 - 确认 ViewBridge 连接建立
+ViewBridgeHostView: Remote view embedded, size=(186.74, 126.19)
+📤 XPC connection established for tab: F2C28491
+
+# 尺寸更新日志 - 确认通知正确发送
+📐 Posted containerSizeChanged: tabId=88C5221A, size=(589.0, 398.0)
+```
+
+## 9. 文件清单
 
 ```
 Canvas/
@@ -267,9 +441,9 @@ Canvas/
             └── HistoryApp.tsx
 ```
 
-## 9. 调试技巧
+## 10. 调试技巧
 
-### 9.1 日志过滤
+### 10.1 日志过滤
 
 ```bash
 # Host 端日志
@@ -282,7 +456,7 @@ log show --predicate 'process contains "CanvasViewService"' --last 1m
 log show --predicate 'eventMessage contains "Metro"' --last 1m
 ```
 
-### 9.2 关键日志标记
+### 10.2 关键日志标记
 
 | 标记 | 含义 |
 |------|------|
@@ -295,5 +469,6 @@ log show --predicate 'eventMessage contains "Metro"' --last 1m
 
 ---
 
-*文档生成时间: 2026-01-09*
+*文档更新时间: 2026-01-09*
 *基于 Canvas 项目实际运行日志分析*
+*第 8 节"未解决的问题"记录了 Focus 模式渲染问题的调试过程*
