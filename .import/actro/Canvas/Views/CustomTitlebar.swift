@@ -856,10 +856,12 @@ private struct AddressInputField: NSViewRepresentable {
         textField.stringValue = text
         context.coordinator.textField = textField
 
-        // Auto-focus and select all on appear
+        // Auto-focus and select all on appear, then start observing firstResponder
         DispatchQueue.main.async {
             textField.window?.makeFirstResponder(textField)
             textField.currentEditor()?.selectAll(nil)
+            // Start observing after focus is set
+            context.coordinator.startObservingFirstResponder()
         }
 
         return textField
@@ -876,16 +878,55 @@ private struct AddressInputField: NSViewRepresentable {
     class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: AddressInputField
         weak var textField: NSTextField?
+        private var firstResponderObservation: NSKeyValueObservation?
 
         init(_ parent: AddressInputField) {
             self.parent = parent
+            super.init()
+        }
+
+        deinit {
+            stopObservingFirstResponder()
+        }
+
+        func startObservingFirstResponder() {
+            guard let window = textField?.window else { return }
+            // Use KVO to observe window's firstResponder changes
+            firstResponderObservation = window.observe(\.firstResponder, options: [.new]) { [weak self] window, _ in
+                self?.checkFirstResponder()
+            }
+        }
+
+        func stopObservingFirstResponder() {
+            firstResponderObservation?.invalidate()
+            firstResponderObservation = nil
+        }
+
+        private func checkFirstResponder() {
+            guard let textField = textField,
+                  let window = textField.window else { return }
+
+            // Check if first responder is still our text field or its field editor
+            let firstResponder = window.firstResponder
+            let isOurTextField = (firstResponder === textField)
+            let isFieldEditor = (firstResponder as? NSTextView)?.delegate === textField
+
+            if !isOurTextField && !isFieldEditor {
+                // Focus moved away from our text field - trigger blur
+                DispatchQueue.main.async {
+                    self.parent.onBlur()
+                }
+            }
         }
 
         func controlTextDidEndEditing(_ obj: Notification) {
+            stopObservingFirstResponder()
             parent.onBlur()
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
+            // Start observing first responder changes
+            startObservingFirstResponder()
             // Notify when editing starts (user typed something)
             parent.onInputActivity?()
         }
