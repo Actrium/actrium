@@ -471,9 +471,8 @@ private struct LiquidGlassToolbar: View {
         HStack(spacing: 0) {
             // Left button: loading indicator or sidebar toggle
             if isWebContent && viewModel.isCurrentTabLoading {
-                // Loading: show spinner
-                ProgressView()
-                    .controlSize(.small)
+                // Loading: show arc spinner (Safari-style)
+                ArcSpinner()
                     .frame(width: 32, height: 32)
             } else {
                 // Not loading: show sidebar toggle
@@ -759,5 +758,25 @@ private struct AddressInputField: NSViewRepresentable {
             }
             return false
         }
+    }
+}
+
+// MARK: - Arc Spinner (Safari-style loading indicator)
+
+/// A rotating arc spinner, similar to Safari's loading indicator
+private struct ArcSpinner: View {
+    @State private var rotation: Double = 0
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.7)
+            .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(rotation))
+            .onAppear {
+                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
     }
 }
