@@ -459,20 +459,26 @@ struct CanvasApp: App {
 
             // DevTools menu
             CommandMenu("Developer") {
+                // For Web tabs: use WebKit Inspector; for actr tabs: use built-in DevTools
                 Button("Toggle DevTools") {
-                    devTools.toggle()
+                    toggleDevToolsForCurrentTab()
                 }
                 .keyboardShortcut("i", modifiers: [.command, .option])
 
                 Divider()
 
-                Button("Open DevTools in New Window") {
+                // actr DevTools section
+                Button("Toggle ACTR DevTools") {
+                    devTools.toggle()
+                }
+
+                Button("Open ACTR DevTools in New Window") {
                     devTools.detach()
                     openWindow(id: "devtools")
                 }
                 .keyboardShortcut("i", modifiers: [.command, .option, .shift])
 
-                Button("Dock DevTools") {
+                Button("Dock ACTR DevTools") {
                     devTools.dock()
                 }
                 .disabled(devTools.displayMode != .detached)
@@ -652,6 +658,31 @@ struct CanvasApp: App {
             if let tab = vm.currentTab {
                 historyVM.recordVisit(tab: tab)
             }
+        }
+    }
+
+    // MARK: - DevTools
+
+    /// Toggle DevTools based on current tab type:
+    /// - Web tab: Open WebKit Web Inspector
+    /// - ACTR tab: Toggle built-in DevTools panel
+    private func toggleDevToolsForCurrentTab() {
+        guard let vm = focusedViewModel,
+              let tab = vm.currentTab else {
+            // No tab, fallback to actr DevTools
+            devTools.toggle()
+            return
+        }
+
+        switch tab.contentType {
+        case .web:
+            // Web tab: open WebKit Inspector
+            if let holder = WebViewHolderManager.shared.existingHolder(for: tab.id) {
+                holder.showInspector()
+            }
+        case .reactNative, .empty:
+            // ACTR/RN tab or empty: use built-in DevTools
+            devTools.toggle()
         }
     }
 
