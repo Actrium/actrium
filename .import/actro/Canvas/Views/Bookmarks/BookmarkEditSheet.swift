@@ -39,43 +39,43 @@ struct BookmarkEditSheet: View {
 
             Divider()
 
-            // Form
-            VStack(alignment: .leading, spacing: 16) {
-                // Name field
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Name")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    TextField("Bookmark name", text: $title)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                // Tags (as folder substitute)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Tags")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    tagSelectionView
-                }
-
-                // URL info (read-only)
-                if let url = tab?.url ?? existingBookmark?.appURL {
+            // Scrollable content area (expands downward when Add Tag is shown)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Name field
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("URL")
+                        Text("Name")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(url.absoluteString)
+                        TextField("Bookmark name", text: $title)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    // Tags (as folder substitute)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Tags")
                             .font(.caption)
-                            .foregroundColor(.primary)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
+                            .foregroundColor(.secondary)
+
+                        tagSelectionView
+                    }
+
+                    // URL info (read-only)
+                    if let url = tab?.url ?? existingBookmark?.appURL {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("URL")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(url.absoluteString)
+                                .font(.caption)
+                                .foregroundColor(.primary)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                        }
                     }
                 }
+                .padding()
             }
-            .padding()
-
-            Spacer()
 
             Divider()
 
@@ -99,7 +99,8 @@ struct BookmarkEditSheet: View {
             }
             .padding()
         }
-        .frame(width: 320, height: 340)
+        .frame(width: 320)
+        .frame(minHeight: 300, maxHeight: 420)
         .onAppear {
             loadInitialValues()
         }
