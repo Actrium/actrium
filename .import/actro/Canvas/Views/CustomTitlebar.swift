@@ -646,12 +646,6 @@ private struct LiquidGlassToolbar: View {
 
     private var addressBarMode: AddressBarMode {
         guard let tab = viewModel.currentTab else { return .empty }
-
-        // StartPage (New Tab) should show search icon
-        if tab.systemTabType == .startPage {
-            return .empty
-        }
-
         switch tab.contentType {
         case .web: return .web
         case .reactNative: return .app
