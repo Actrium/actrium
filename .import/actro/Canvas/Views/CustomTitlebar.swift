@@ -117,6 +117,8 @@ final class TitlebarManager: NSObject {
         if isSidebarExpanded {
             toggleTrailingConstraint?.constant = width - 8
             leadingConstraint?.constant = width
+            // Force layout update so SwiftUI GeometryReader picks up new size
+            customToolbarView?.superview?.layoutSubtreeIfNeeded()
         }
     }
 
