@@ -103,7 +103,16 @@ struct MetroPanel: View {
 
                 Spacer()
 
-                Button("Clear logs") {
+                Button {
+                    copyAllLogs()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .help("Copy all logs")
+                .disabled(metro.logs.isEmpty)
+
+                Button("Clear") {
                     metro.clearLogs()
                 }
                 .buttonStyle(.bordered)
@@ -296,6 +305,15 @@ struct MetroPanel: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
         return formatter.string(from: date)
+    }
+
+    private func copyAllLogs() {
+        let text = metro.logs.map { entry in
+            "[\(formatTime(entry.timestamp))] \(entry.message)"
+        }.joined(separator: "\n")
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     // MARK: - Actions
