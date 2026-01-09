@@ -693,7 +693,7 @@ class BrowserViewModel: ObservableObject {
         WebViewHolderManager.shared.existingHolder(for: tabId)?.goForward()
     }
 
-    /// Reload the current tab by re-reading its source .actr package
+    /// Reload the current tab (web page or .actr package)
     func reloadCurrentTab() {
         guard let id = currentTabId,
               let index = tabs.firstIndex(where: { $0.id == id }) else {
@@ -711,7 +711,14 @@ class BrowserViewModel: ObservableObject {
             return
         }
 
-        logger.debug("🔄 [reloadCurrentTab] 有源 URL，重新读取包")
+        // For web content (http/https), use WebView's reload
+        if sourceURL.scheme == "http" || sourceURL.scheme == "https" {
+            logger.notice("🔄 [reloadCurrentTab] Web 内容，调用 WebView reload")
+            WebViewHolderManager.shared.existingHolder(for: id)?.reload()
+            return
+        }
+
+        logger.debug("🔄 [reloadCurrentTab] 本地包，重新读取")
 
         // Re-read the .actr package
         let resolvedURL = sourceURL.standardizedFileURL
