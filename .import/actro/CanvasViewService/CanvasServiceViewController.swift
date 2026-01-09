@@ -761,7 +761,16 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     entry.loadingLabel?.removeFromSuperview()
     entry.loadingLabel = nil
 
-    let containerSize = container.bounds.size
+    // Get container size - prefer from config if available (Host knows the actual viewport size)
+    var containerSize = container.bounds.size
+    if let width = config["containerWidth"] as? Double,
+       let height = config["containerHeight"] as? Double,
+       width > 0 && height > 0 {
+        containerSize = CGSize(width: width, height: height)
+        debugLog("[\(logId)] Using container size from config: \(containerSize)")
+    } else {
+        debugLog("[\(logId)] Using container bounds size: \(containerSize)")
+    }
     entry.containerSize = containerSize
 
     // Build initial properties from config
@@ -803,10 +812,20 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         return
     }
 
-    rnView.frame = container.bounds
+    // Sync container size first if it differs from bounds
+    if container.bounds.size != containerSize {
+        debugLog("[\(logId)] Updating container frame to match config size: \(containerSize)")
+        container.setFrameSize(containerSize)
+    }
+
+    // Set RCTRootView frame to fill container
+    let targetFrame = CGRect(origin: .zero, size: containerSize)
+    rnView.frame = targetFrame
     rnView.autoresizingMask = [.width, .height]
     container.addSubview(rnView)
     container.setRNView(rnView)
+
+    debugLog("[\(logId)] RCTRootView frame set to: \(rnView.frame)")
 
     // Size change callback
     container.onSizeChanged = { [weak entry] newSize in
