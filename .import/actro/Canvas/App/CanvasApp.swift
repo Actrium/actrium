@@ -356,6 +356,9 @@ struct CanvasApp: App {
     }()
 
     init() {
+        // Setup crash handler to log crashes
+        CrashHandler.setup()
+
         // Suppress common system warnings in development
         UserDefaults.standard.set(false, forKey: "NSConstraintBasedLayoutLogUnsatisfiable")
 
