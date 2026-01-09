@@ -365,6 +365,25 @@ public class ViewBridgeHostView: NSView {
         // 通知 intrinsicContentSize 变化并触发重新布局
         invalidateIntrinsicContentSize()
         needsLayout = true
+
+        // 备用方案：通过 DistributedNotificationCenter 发送尺寸更新
+        // ViewBridge 的私有 API 不稳定，这个通知作为可靠的备份
+        if let vc = remoteViewController {
+            // 从 coordinator 获取 tabId（如果可用）
+            if let tabId = coordinator?.tabId?.uuidString {
+                let sizeInfo: [String: Any] = [
+                    "tabId": tabId,
+                    "width": newSize.width,
+                    "height": newSize.height
+                ]
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name("com.canvas.containerSizeChanged"),
+                    object: nil,
+                    userInfo: sizeInfo,
+                    deliverImmediately: true
+                )
+            }
+        }
     }
 
     private func handleError(_ message: String) {
