@@ -531,7 +531,7 @@ private struct LiquidGlassToolbar: View {
                     NSLog("🔘 [Toolbar] Left button tapped (mode: \(mode))")
                 }) {
                     Image(systemName: icon)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 14, weight: .light))
                         .frame(width: 32, height: 32)
                         .contentShape(Circle())
                 }
