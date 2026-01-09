@@ -566,8 +566,9 @@ private struct LiquidGlassToolbar: View {
                 .foregroundStyle(.secondary)
             }
         }
+        .frame(height: 30)  // Match nav buttons height
         .padding(.horizontal, 4)
-        .padding(.vertical, 4)
+        .padding(.vertical, 3)  // Match nav buttons padding
         .glassEffect(.regular, in: .capsule)
         .overlay {
             Capsule()
