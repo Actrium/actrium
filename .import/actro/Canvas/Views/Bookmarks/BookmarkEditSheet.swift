@@ -114,6 +114,17 @@ struct BookmarkEditSheet: View {
 
             // Actions
             HStack {
+                // Delete button (only when editing existing bookmark)
+                if isEditing, let bookmark = existingBookmark {
+                    Button(role: .destructive) {
+                        viewModel.removeBookmark(id: bookmark.id)
+                        dismiss()
+                    } label: {
+                        Label("Delete Bookmark", systemImage: "trash")
+                    }
+                    .foregroundStyle(.red)
+                }
+
                 Spacer()
 
                 Button("Cancel") {
