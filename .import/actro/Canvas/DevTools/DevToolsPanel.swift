@@ -35,6 +35,11 @@ struct DevToolsPanel: View {
         }
     }
 
+    /// Check if current DevTools tab is a global tool (always available)
+    private var isGlobalTab: Bool {
+        devTools.activeTab == .metro || devTools.activeTab == .monitor
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Toolbar
@@ -47,23 +52,48 @@ struct DevToolsPanel: View {
             Divider()
 
             if !isActive {
-                // Overview mode - no tab selected
-                DevToolsInactivePlaceholder()
+                // Overview mode - but global tabs (Metro, Monitor) are still available
+                if isGlobalTab {
+                    globalTabContent
+                } else {
+                    DevToolsInactivePlaceholder()
+                }
             } else {
                 switch devToolsMode {
                 case .actr:
                     // Actr/React Native app - show full DevTools
                     DevToolsContent(devTools: devTools, viewModel: viewModel)
                 case .web:
-                    // Web tab - use WebKit Inspector
-                    DevToolsWebPlaceholder()
+                    // Web tab - global tabs available, others use WebKit Inspector
+                    if isGlobalTab {
+                        globalTabContent
+                    } else {
+                        DevToolsWebPlaceholder()
+                    }
                 case .unavailable:
-                    // System tabs or empty - not available
-                    DevToolsUnavailablePlaceholder()
+                    // System tabs or empty - only global tabs available
+                    if isGlobalTab {
+                        globalTabContent
+                    } else {
+                        DevToolsUnavailablePlaceholder()
+                    }
                 }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    /// Content view for global tabs (Metro, Monitor)
+    @ViewBuilder
+    private var globalTabContent: some View {
+        switch devTools.activeTab {
+        case .metro:
+            MetroPanel()
+        case .monitor:
+            DevToolsMonitorView(devTools: devTools, viewModel: viewModel)
+        default:
+            EmptyView()
+        }
     }
 }
 
