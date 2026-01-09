@@ -432,10 +432,14 @@ private struct LiquidGlassToolbar: View {
     /// Navigation buttons [< | >]
     private var navButtonsGroup: some View {
         HStack(spacing: 0) {
-            Button(action: { viewModel.goBack() }) {
+            Button(action: {
+                NSLog("🔘 [Toolbar] Back button tapped")
+                viewModel.goBack()
+            }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 16, weight: .medium))
                     .frame(width: 30, height: 30)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .disabled(!viewModel.canGoBack)
@@ -444,10 +448,14 @@ private struct LiquidGlassToolbar: View {
                 .frame(height: 18)
                 .padding(.horizontal, 1)
 
-            Button(action: { viewModel.goForward() }) {
+            Button(action: {
+                NSLog("🔘 [Toolbar] Forward button tapped")
+                viewModel.goForward()
+            }) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 16, weight: .medium))
                     .frame(width: 30, height: 30)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .disabled(!viewModel.canGoForward)
@@ -470,6 +478,7 @@ private struct LiquidGlassToolbar: View {
             } else {
                 // Not loading: show sidebar toggle
                 Button(action: {
+                    NSLog("🔘 [Toolbar] Sidebar toggle tapped")
                     NSApp.keyWindow?.firstResponder?.tryToPerform(
                         #selector(NSSplitViewController.toggleSidebar(_:)), with: nil
                     )
@@ -477,6 +486,7 @@ private struct LiquidGlassToolbar: View {
                     Image(systemName: "sidebar.left")
                         .font(.system(size: 14, weight: .medium))
                         .frame(width: 32, height: 32)
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -508,10 +518,14 @@ private struct LiquidGlassToolbar: View {
             }
 
             // Bookmark button with popover
-            Button(action: { showingBookmarkPopover.toggle() }) {
+            Button(action: {
+                NSLog("🔘 [Toolbar] Bookmark button tapped, isBookmarked=\(isBookmarked)")
+                showingBookmarkPopover.toggle()
+            }) {
                 Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                     .font(.system(size: 14, weight: .medium))
                     .frame(width: 32, height: 32)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(isBookmarked ? .blue : .secondary)
@@ -520,10 +534,14 @@ private struct LiquidGlassToolbar: View {
             }
 
             // Refresh button
-            Button(action: { viewModel.reloadCurrentTab() }) {
+            Button(action: {
+                NSLog("🔘 [Toolbar] Refresh button tapped")
+                viewModel.reloadCurrentTab()
+            }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 14, weight: .medium))
                     .frame(width: 32, height: 32)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -572,20 +590,29 @@ private struct LiquidGlassToolbar: View {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 15, weight: .medium))
                     .frame(width: 30, height: 30)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
 
-            Button(action: { _ = viewModel.addNewTab() }) {
+            Button(action: {
+                NSLog("🔘 [Toolbar] New tab button tapped (normal mode)")
+                _ = viewModel.addNewTab()
+            }) {
                 Image(systemName: "plus")
                     .font(.system(size: 16, weight: .medium))
                     .frame(width: 30, height: 30)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
 
-            Button(action: onOverview) {
+            Button(action: {
+                NSLog("🔘 [Toolbar] Overview button tapped")
+                onOverview()
+            }) {
                 Image(systemName: "square.on.square")
                     .font(.system(size: 15, weight: .medium))
                     .frame(width: 30, height: 30)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
         }
@@ -597,10 +624,14 @@ private struct LiquidGlassToolbar: View {
 
     /// New tab button (circular, for compact mode)
     private var newTabButton: some View {
-        Button(action: { _ = viewModel.addNewTab() }) {
+        Button(action: {
+            NSLog("🔘 [Toolbar] New tab button tapped (compact mode)")
+            _ = viewModel.addNewTab()
+        }) {
             Image(systemName: "plus")
                 .font(.system(size: 16, weight: .medium))
                 .frame(width: 36, height: 36)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
@@ -648,6 +679,7 @@ private struct LiquidGlassToolbar: View {
             Image(systemName: "chevron.right.2")
                 .font(.system(size: 14, weight: .medium))
                 .frame(width: 36, height: 36)
+                .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
