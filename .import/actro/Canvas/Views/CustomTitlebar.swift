@@ -778,20 +778,19 @@ private struct AddressInputField: NSViewRepresentable {
 
 // MARK: - Arc Spinner (Safari-style loading indicator)
 
-/// A rotating arc spinner, similar to Safari's loading indicator
+/// A rotating arc spinner using TimelineView for stable animation
+/// Avoids animation restart issues when view reappears rapidly
 private struct ArcSpinner: View {
-    @State private var rotation: Double = 0
-
     var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.7)
-            .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            .frame(width: 14, height: 14)
-            .rotationEffect(.degrees(rotation))
-            .onAppear {
-                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
-                    rotation = 360
-                }
-            }
+        TimelineView(.animation) { timeline in
+            let seconds = timeline.date.timeIntervalSinceReferenceDate
+            let rotation = (seconds.truncatingRemainder(dividingBy: 0.8)) / 0.8 * 360
+
+            Circle()
+                .trim(from: 0, to: 0.7)
+                .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .frame(width: 14, height: 14)
+                .rotationEffect(.degrees(rotation))
+        }
     }
 }
