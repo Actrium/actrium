@@ -1764,20 +1764,12 @@ private struct TabPanel: View {
     // 内容区域视图 - 多态容器
     // 根据 Tab.contentType 决定使用 ViewBridge (RN) 还是 WKWebView (Web)
     private var contentView: some View {
-        // Focus 模式：ViewBridge XPC 需要实际视口尺寸（因为它在独立进程渲染，不受 Canvas 变换影响）
-        // Overview 模式：使用 cardSize，Canvas 变换负责缩放显示
-        let panelSize: CGSize
-        if isFocused {
-            // Focus 模式：使用实际视口尺寸
-            panelSize = CGSize(width: max(viewportSize.width, 1), height: max(viewportSize.height, 1))
-        } else {
-            // Overview 模式：使用 card 尺寸
-            panelSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
-        }
+        // 始终使用 cardSize - Canvas 变换负责缩放
+        // ViewBridge XPC 的视图会被 Canvas 变换一起缩放
+        let panelSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
 
-        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, panelSize=%.0fx%.0f (viewport=%.0fx%.0f)",
-                      String(describing: tab.contentType), isFocused ? 1 : 0, panelSize.width, panelSize.height,
-                      viewportSize.width, viewportSize.height)
+        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, panelSize=%.0fx%.0f",
+                      String(describing: tab.contentType), isFocused ? 1 : 0, panelSize.width, panelSize.height)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
