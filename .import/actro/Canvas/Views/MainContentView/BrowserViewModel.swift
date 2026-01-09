@@ -55,23 +55,15 @@ class BrowserViewModel: ObservableObject {
         // Initialize slot positions first
         initializeSlotPositions()
 
-        // TODO: 临时禁用 RN 示例应用自动加载，专注 Web 开发
-        // let sampleAppsBasePath = "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples"
-        // let defaultApps = ["debugapp", "counterapp"]
-        // Task { @MainActor [weak self] in
-        //     guard let self = self else { return }
-        //     for appName in defaultApps {
-        //         let appPath = "\(sampleAppsBasePath)/\(appName)"
-        //         var isDirectory: ObjCBool = false
-        //         if FileManager.default.fileExists(atPath: appPath, isDirectory: &isDirectory), isDirectory.boolValue {
-        //             let url = URL(fileURLWithPath: appPath)
-        //             self.loadFromDevDirectory(url)
-        //         }
-        //     }
-        //     if let firstTab = self.tabs.first {
-        //         self.currentTabId = firstTab.id
-        //     }
-        // }
+        // Create initial StartUp tab
+        let startTab = Tab(
+            title: "Start Page",
+            systemTabType: .startPage
+        )
+        tabs.append(startTab)
+        currentTabId = startTab.id
+        tabSlotPositions[startTab.id] = 0
+        canvasMode = .focus(tabId: startTab.id)
     }
     
     @discardableResult
