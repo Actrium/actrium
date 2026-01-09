@@ -108,12 +108,15 @@ final class TitlebarManager: NSObject {
     // Left edge at 110px, button is 28px wide, so right edge at 138px
     private let minTogglePosition: CGFloat = 138
 
-    /// Called from SwiftUI when sidebar width changes
+    /// Called from SwiftUI when sidebar width changes (including drag resize)
     func updateSidebarWidth(_ width: CGFloat) {
-        // Just save the width for future use, don't move the button
-        // (button animation is handled by toggleSidebar)
-        if width > minTogglePosition {
-            lastKnownSidebarWidth = width
+        guard width > minTogglePosition else { return }
+        lastKnownSidebarWidth = width
+
+        // Update toolbar position immediately when sidebar is expanded
+        if isSidebarExpanded {
+            toggleTrailingConstraint?.constant = width - 8
+            leadingConstraint?.constant = width
         }
     }
 
