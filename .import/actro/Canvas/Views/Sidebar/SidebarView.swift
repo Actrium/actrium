@@ -15,7 +15,18 @@ struct SidebarView: View {
 
             Spacer(minLength: 0)
                 .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    _ = viewModel.addNewTab()
+                }
                 .contextMenu {
+                    Button(action: {
+                        _ = viewModel.addNewTab()
+                    }) {
+                        Label("New Tab", systemImage: "plus")
+                    }
+
+                    Divider()
+
                     Button(action: {
                         AppsManagerWindowController.shared.showWindow()
                     }) {
