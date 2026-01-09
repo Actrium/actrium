@@ -480,30 +480,28 @@ private struct LiquidGlassToolbar: View {
         let mode = addressBarMode
 
         return HStack(spacing: 0) {
-            // Left button: loading indicator or mode-specific icon
+            // Left area: loading indicator, mode-specific icon, or empty space
             if mode.showsLoading && viewModel.isCurrentTabLoading {
                 // Loading: show arc spinner
                 ArcSpinner()
                     .frame(width: 32, height: 32)
-            } else {
-                // Not loading: show mode-specific icon
+            } else if let icon = mode.leftIcon {
+                // Has icon: show mode-specific button
                 Button(action: {
                     NSLog("🔘 [Toolbar] Left button tapped (mode: \(mode))")
-                    if mode == .web {
-                        // Web: toggle sidebar
-                        NSApp.keyWindow?.firstResponder?.tryToPerform(
-                            #selector(NSSplitViewController.toggleSidebar(_:)), with: nil
-                        )
-                    }
                     // App mode: could show app info panel in the future
                 }) {
-                    Image(systemName: mode.leftIcon)
+                    Image(systemName: icon)
                         .font(.system(size: 14, weight: .medium))
                         .frame(width: 32, height: 32)
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+            } else {
+                // No icon (Web/Empty): just empty space
+                Spacer()
+                    .frame(width: 8)
             }
 
             // Address display/input area (shared for all modes)
@@ -587,11 +585,11 @@ private struct LiquidGlassToolbar: View {
         case app       // React Native app (.actr)
         case empty     // Empty/new tab
 
-        var leftIcon: String {
+        var leftIcon: String? {
             switch self {
-            case .web: return "sidebar.left"
+            case .web: return nil  // Web: no icon, just space for loading
             case .app: return "app.badge.checkmark"
-            case .empty: return "sidebar.left"
+            case .empty: return nil
             }
         }
 
