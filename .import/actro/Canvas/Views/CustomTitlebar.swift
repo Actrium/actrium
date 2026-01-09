@@ -251,11 +251,13 @@ private class ToolbarContainerView: NSView {
     }
 
     private func setupSwiftUIView() {
-        guard let viewModel = viewModel else { return }
+        guard let viewModel = viewModel, let bookmarkVM = bookmarkVM else { return }
 
         let swiftUIView = LiquidGlassToolbar(
             viewModel: viewModel,
-            onOverview: { [weak self] in self?.onOverview?() }
+            bookmarkVM: bookmarkVM,
+            onOverview: { [weak self] in self?.onOverview?() },
+            onBookmarkTap: { [weak self] in self?.onBookmarkTap?() }
         )
 
         let hosting = NSHostingView(rootView: AnyView(swiftUIView))
@@ -284,11 +286,42 @@ private class ToolbarContainerView: NSView {
 
 private struct LiquidGlassToolbar: View {
     @ObservedObject var viewModel: BrowserViewModel
+    @ObservedObject var bookmarkVM: BookmarkViewModel
     var onOverview: () -> Void
+    var onBookmarkTap: () -> Void
 
     @State private var addressText: String = ""
-    @State private var isEditing: Bool = false
-    @FocusState private var isAddressFocused: Bool
+    @State private var isAddressFocused: Bool = false
+    
+    // Safari 风格地址栏规则：
+    // 1) 非编辑态只显示 host（去掉 scheme 和 www.）
+    // 2) 点击/快捷键进入编辑态时，切换为完整 URL 并全选
+    // 3) 编辑过程中不被外部的 URL/Title 变化覆盖，失焦后恢复精简展示
+    private func displayText(for tab: Tab?) -> String {
+        guard let tab = tab else { return "" }
+        if case .web = tab.contentType, let url = tab.url {
+            let host = url.host ?? url.absoluteString
+            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        }
+        return tab.title
+    }
+
+    private func editingText(for tab: Tab?) -> String {
+        if let url = tab?.url {
+            return url.absoluteString
+        }
+        return displayText(for: tab)
+    }
+
+    private func enterEditingMode() {
+        addressText = editingText(for: viewModel.currentTab)
+        isAddressFocused = true
+    }
+
+    private func exitEditingMode() {
+        isAddressFocused = false
+        addressText = displayText(for: viewModel.currentTab)
+    }
 
     // Breakpoints for responsive layout (Safari-style)
     // Normal: nav + 50% address bar + [share/+/tabs] capsule
@@ -338,30 +371,14 @@ private struct LiquidGlassToolbar: View {
             .animation(.easeInOut(duration: 0.2), value: isNarrow)
             .animation(.easeInOut(duration: 0.2), value: isCompact)
         }
-        // Tap outside to dismiss focus
-        .contentShape(Rectangle())
-        .onTapGesture {
-            isAddressFocused = false
-        }
         .onChange(of: viewModel.currentTab?.url) { _, _ in
             updateDisplayText()
         }
         .onChange(of: viewModel.currentTab?.title) { _, _ in
             updateDisplayText()
         }
-        .onChange(of: isAddressFocused) { _, focused in
-            if focused {
-                // Show full URL when editing
-                if let url = viewModel.currentTab?.url {
-                    addressText = url.absoluteString
-                }
-                // Auto-select all text after focus
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
-                }
-            } else {
-                updateDisplayText()
-            }
+        .onChange(of: viewModel.currentTabId) { _, _ in
+            updateDisplayText()
         }
         .onAppear {
             updateDisplayText()
@@ -369,36 +386,38 @@ private struct LiquidGlassToolbar: View {
         // Listen for Cmd-L shortcut (shouldAutoFocusAddressBar)
         .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, shouldFocus in
             if shouldFocus {
-                isAddressFocused = true
+                enterEditingMode()
                 viewModel.shouldAutoFocusAddressBar = false
             }
         }
         // Listen for click-outside notification from main content area
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.canvas.dismissAddressBarFocus"))) { _ in
-            isAddressFocused = false
+            exitEditingMode()
         }
     }
 
-    private func updateDisplayText() {
-        guard !isAddressFocused else { return }
+    private func updateAddressTextFromTab() {
         guard let tab = viewModel.currentTab else {
             addressText = ""
             return
         }
-        if case .web = tab.contentType, let host = tab.url?.host {
-            addressText = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-        } else if !tab.title.isEmpty {
-            addressText = tab.title
-        } else {
-            addressText = ""
-        }
+        addressText = displayText(for: tab)
+    }
+
+    private func updateDisplayText() {
+        guard !isAddressFocused else { return }
+        updateAddressTextFromTab()
+    }
+    
+    private func handleBlur() {
+        exitEditingMode()
     }
 
     private func submitAddress() {
         let input = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
         viewModel.navigateCurrentTab(to: input)
-        isAddressFocused = false
+        exitEditingMode()
     }
 
     // MARK: - Subviews
@@ -432,31 +451,78 @@ private struct LiquidGlassToolbar: View {
         .glassEffect(.regular, in: .capsule)
     }
 
-    /// Address bar with search icon
+    /// Safari-style address bar: [sidebar toggle | text field | bookmark | refresh]
     private var addressBarView: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 14))
-                .foregroundStyle(.tertiary)
+        HStack(spacing: 0) {
+            // Sidebar toggle
+            Button(action: {
+                NSApp.keyWindow?.firstResponder?.tryToPerform(
+                    #selector(NSSplitViewController.toggleSidebar(_:)), with: nil
+                )
+            }) {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
 
-            TextField("Search or enter website name", text: $addressText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .focused($isAddressFocused)
-                .onSubmit {
-                    submitAddress()
-                }
+            // Address display/input area
+            if isAddressFocused {
+                // Editing: TextField with full URL, left-aligned, auto-select
+                AddressInputField(
+                    text: $addressText,
+                    onSubmit: submitAddress,
+                    onBlur: handleBlur
+                )
+                .frame(maxWidth: .infinity, maxHeight: 22)
+                .padding(.horizontal, 8)
+            } else {
+                // Display: Label with host, centered
+                Text(addressText.isEmpty ? "Search or enter website name" : addressText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(addressText.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, maxHeight: 22)
+                    .padding(.horizontal, 8)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        enterEditingMode()
+                    }
+            }
+
+            // Bookmark
+            Button(action: onBookmarkTap) {
+                Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isBookmarked ? .blue : .secondary)
+
+            // Refresh
+            Button(action: { viewModel.reloadCurrentTab() }) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
         .glassEffect(.regular, in: .capsule)
         .overlay {
             Capsule()
                 .strokeBorder(Color.blue, lineWidth: isAddressFocused ? 2.5 : 0)
-                .scaleEffect(isAddressFocused ? 1.0 : 1.08)
                 .opacity(isAddressFocused ? 1 : 0)
-                .animation(.easeOut(duration: 0.25), value: isAddressFocused)
         }
+    }
+
+    private var isBookmarked: Bool {
+        guard let tab = viewModel.currentTab else { return false }
+        return bookmarkVM.isBookmarked(tab: tab)
     }
 
     /// Action buttons group [Share + Tabs] in capsule (normal mode)
@@ -549,4 +615,77 @@ private struct LiquidGlassToolbar: View {
         .glassEffect(.regular, in: .circle)
     }
 
+}
+
+// MARK: - Address Input Field (for editing state)
+
+/// Simple text field that auto-focuses and selects all on appear
+private struct AddressInputField: NSViewRepresentable {
+    @Binding var text: String
+    var onSubmit: () -> Void
+    var onBlur: () -> Void
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField()
+        textField.font = .systemFont(ofSize: 13)
+        textField.isBordered = false
+        textField.drawsBackground = false
+        textField.focusRingType = .none
+        textField.delegate = context.coordinator
+        textField.alignment = .left
+        textField.lineBreakMode = .byTruncatingTail
+        textField.maximumNumberOfLines = 1
+        textField.cell?.isScrollable = true
+        textField.cell?.wraps = false
+        textField.usesSingleLineMode = true
+        textField.stringValue = text
+        context.coordinator.textField = textField
+
+        // Auto-focus and select all on appear
+        DispatchQueue.main.async {
+            textField.window?.makeFirstResponder(textField)
+            textField.currentEditor()?.selectAll(nil)
+        }
+
+        return textField
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        // Don't update text while editing to avoid cursor issues
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: AddressInputField
+        weak var textField: NSTextField?
+
+        init(_ parent: AddressInputField) {
+            self.parent = parent
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            parent.onBlur()
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let tf = obj.object as? NSTextField else { return }
+            parent.text = tf.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.onSubmit()
+                textField?.window?.makeFirstResponder(nil)
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                textField?.window?.makeFirstResponder(nil)
+                return true
+            }
+            return false
+        }
+    }
 }
