@@ -338,13 +338,19 @@ private struct LiquidGlassToolbar: View {
         // Only animate if not already focused
         guard !isAddressFocused else { return }
 
-        // First make the ring visible with expanded scale
-        focusRingScale = 1.15
+        // Set initial expanded scale WITHOUT animation (prevent implicit animation conflict)
+        var noAnimation = Transaction()
+        noAnimation.disablesAnimations = true
+        withTransaction(noAnimation) {
+            focusRingScale = 1.15
+        }
+
+        // Show the ring (opacity will animate via .animation modifier)
         isAddressFocused = true
 
-        // Delay scale animation so it starts after opacity transition begins
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+        // Animate scale contraction after opacity animation starts
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                 self.focusRingScale = 1.0
             }
         }
@@ -352,7 +358,12 @@ private struct LiquidGlassToolbar: View {
 
     private func exitEditingMode() {
         isAddressFocused = false
-        focusRingScale = 1.0
+        // Reset scale without animation
+        var noAnimation = Transaction()
+        noAnimation.disablesAnimations = true
+        withTransaction(noAnimation) {
+            focusRingScale = 1.0
+        }
         hasInputActivity = false  // Reset input activity state
         // addressText will be updated by onChange handlers when URL/Tab changes
     }
@@ -623,8 +634,9 @@ private struct LiquidGlassToolbar: View {
                 .strokeBorder(Color.blue, lineWidth: 2.5)
                 .scaleEffect(x: focusRingScale, y: 1.0)
                 .opacity(isAddressFocused ? 1 : 0)
+                // Only animate opacity based on focus state; scale is controlled via explicit withAnimation/withTransaction
+                .animation(.easeOut(duration: 0.12), value: isAddressFocused)
         }
-        .animation(.easeOut(duration: 0.15), value: isAddressFocused)
     }
 
     // MARK: - Tab Type Helpers
