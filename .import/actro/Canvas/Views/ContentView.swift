@@ -20,15 +20,22 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isACTRDropTarget: Bool = false
     @State private var useNativeToolbar: Bool = true  // 使用原生 NSToolbar
+    @State private var sidebarWidth: CGFloat = 250
 
     var body: some View {
         ZStack {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
                     .toolbar(removing: .sidebarToggle)
-                    .background(
+                    .overlay(
                         GeometryReader { geo in
-                            Color.clear.preference(key: SidebarWidthKey.self, value: geo.size.width)
+                            Color.clear
+                                .onChange(of: geo.size.width) { _, newWidth in
+                                    sidebarWidth = newWidth
+                                }
+                                .onAppear {
+                                    sidebarWidth = geo.size.width
+                                }
                         }
                     )
             } detail: {
@@ -78,8 +85,8 @@ struct ContentView: View {
             // 强制清空窗口标题
             .navigationTitle("")
             // 监听 sidebar 宽度变化
-            .onPreferenceChange(SidebarWidthKey.self) { width in
-                TitlebarManager.shared.updateSidebarWidth(width)
+            .onChange(of: sidebarWidth) { _, newWidth in
+                TitlebarManager.shared.updateSidebarWidth(newWidth)
             }
             // 监听 sidebar 显示/隐藏
             .onChange(of: columnVisibility) { _, newValue in
