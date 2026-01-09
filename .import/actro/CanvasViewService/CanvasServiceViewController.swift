@@ -211,9 +211,10 @@ private class TabViewControllerEntry {
 private class ServiceReactNativeHost {
     static let shared = ServiceReactNativeHost()
 
-    private let factoryDelegate: ServiceReactNativeFactoryDelegate
-    private let factory: RCTReactNativeFactory
+    private var factoryDelegate: ServiceReactNativeFactoryDelegate?
+    private var factory: RCTReactNativeFactory?
     private var tabConfigObserver: NSObjectProtocol?
+    private var bridgeCreated = false
 
     /// Registry of TabViewControllerEntry by tabId (1:1:1 mapping)
     /// Key is the Host's tabId (Tab.id.uuidString)
@@ -250,11 +251,20 @@ private class ServiceReactNativeHost {
         RCTRedBoxSetEnabled(false)
         #endif
 
-        factoryDelegate = ServiceReactNativeFactoryDelegate()
-        factory = RCTReactNativeFactory(delegate: factoryDelegate)
-        debugLog("Shared RCTBridge created")
-
+        // Setup listeners first - RCTBridge will be created after Metro config is received
         setupTabConfigListener()
+        debugLog("Waiting for Metro config before creating RCTBridge...")
+    }
+
+    /// Create RCTBridge after Metro config is received
+    private func ensureBridgeCreated() {
+        guard !bridgeCreated else { return }
+        bridgeCreated = true
+
+        debugLog("Creating RCTBridge with Metro config: \(MetroConfig.hostString)")
+        factoryDelegate = ServiceReactNativeFactoryDelegate()
+        factory = RCTReactNativeFactory(delegate: factoryDelegate!)
+        debugLog("Shared RCTBridge created")
     }
 
     // MARK: - Tab Registry (1:1:1 Mapping)
@@ -356,8 +366,10 @@ private class ServiceReactNativeHost {
             forName: NSNotification.Name("com.canvas.metro.config"),
             object: nil,
             queue: .main
-        ) { notification in
+        ) { [weak self] notification in
             MetroConfig.update(from: notification.userInfo)
+            // Create RCTBridge after Metro config is received
+            self?.ensureBridgeCreated()
         }
         debugLog("📡 Setting up Metro config listener")
 
@@ -553,6 +565,14 @@ private class ServiceReactNativeHost {
     func createRootView(for entry: TabViewControllerEntry, initialProperties: [String: Any]) -> RCTRootView? {
         let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
         debugLog("[\(logId)] Creating RCTRootView")
+
+        // Ensure RCTBridge is created (should have been done when Metro config was received)
+        ensureBridgeCreated()
+
+        guard let factory = factory else {
+            debugLog("[\(logId)] ⚠️ Factory not created yet - waiting for Metro config")
+            return nil
+        }
 
         var properties = initialProperties
         properties["containerWidth"] = entry.containerSize.width
