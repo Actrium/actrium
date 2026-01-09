@@ -624,7 +624,12 @@ struct TabOutlineView: NSViewRepresentable {
 
         @objc func doubleClickAction(_ sender: NSOutlineView) {
             let clickedRow = sender.clickedRow
-            guard clickedRow >= 0 else { return }
+
+            // Double-click on empty space: create new tab
+            if clickedRow < 0 {
+                _ = viewModel.addNewTab()
+                return
+            }
 
             if let item = sender.item(atRow: clickedRow) as? TabOutlineItem {
                 switch item {
