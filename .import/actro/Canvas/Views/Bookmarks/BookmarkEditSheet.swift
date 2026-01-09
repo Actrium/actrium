@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Sheet for adding or editing a bookmark
+/// Chrome-style bookmark popover: edit name/tags, with Remove and Done buttons
 struct BookmarkEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var viewModel: BookmarkViewModel
@@ -9,13 +9,9 @@ struct BookmarkEditSheet: View {
     let existingBookmark: Bookmark?
 
     @State private var title: String = ""
-    @State private var notes: String = ""
-    @State private var manufacturer: String = ""
     @State private var selectedTagIds: Set<UUID> = []
-    @State private var newTagName: String = ""
     @State private var showingNewTagField = false
-
-    var isEditing: Bool { existingBookmark != nil }
+    @State private var newTagName: String = ""
 
     init(viewModel: BookmarkViewModel, tab: Tab? = nil, existingBookmark: Bookmark? = nil) {
         self.viewModel = viewModel
@@ -27,7 +23,7 @@ struct BookmarkEditSheet: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text(isEditing ? "Edit Bookmark" : "Add Bookmark")
+                Text("Bookmark added")
                     .font(.headline)
 
                 Spacer()
@@ -44,105 +40,66 @@ struct BookmarkEditSheet: View {
             Divider()
 
             // Form
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Title
+            VStack(alignment: .leading, spacing: 16) {
+                // Name field
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Name")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    TextField("Bookmark name", text: $title)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                // Tags (as folder substitute)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tags")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    tagSelectionView
+                }
+
+                // URL info (read-only)
+                if let url = tab?.url ?? existingBookmark?.appURL {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Title")
+                        Text("URL")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        TextField("Bookmark title", text: $title)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    // Tags
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Tags")
+                        Text(url.absoluteString)
                             .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        tagSelectionView
-                    }
-
-                    // Notes
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Notes")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        TextEditor(text: $notes)
-                            .frame(height: 80)
-                            .font(.body)
-                            .padding(4)
-                            .background(Color(nsColor: .controlBackgroundColor))
-                            .cornerRadius(6)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                            )
-                    }
-
-                    Divider()
-
-                    // Metadata (read-only)
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let tab = tab {
-                            metadataRow(label: "App", value: tab.title)
-                        }
-
-                        if !manufacturer.isEmpty || tab != nil {
-                            HStack(alignment: .top) {
-                                Text("Manufacturer")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 100, alignment: .leading)
-
-                                TextField("Enter manufacturer", text: $manufacturer)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.caption)
-                            }
-                        }
-
-                        if let url = tab?.url ?? existingBookmark?.appURL {
-                            metadataRow(label: "URL", value: url.path)
-                        }
+                            .foregroundColor(.primary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
                     }
                 }
-                .padding()
             }
+            .padding()
+
+            Spacer()
 
             Divider()
 
-            // Actions
+            // Actions: Remove and Done (Chrome-style)
             HStack {
-                // Delete button (only when editing existing bookmark)
-                if isEditing, let bookmark = existingBookmark {
-                    Button(role: .destructive) {
-                        viewModel.removeBookmark(id: bookmark.id)
-                        dismiss()
-                    } label: {
-                        Label("Delete Bookmark", systemImage: "trash")
-                    }
-                    .foregroundStyle(.red)
-                }
-
                 Spacer()
 
-                Button("Cancel") {
+                Button("Remove") {
+                    if let bookmark = existingBookmark {
+                        viewModel.removeBookmark(id: bookmark.id)
+                    }
                     dismiss()
                 }
-                .keyboardShortcut(.escape)
+                .foregroundStyle(.secondary)
 
-                Button(isEditing ? "Save Changes" : "Add Bookmark") {
+                Button("Done") {
                     saveBookmark()
                     dismiss()
                 }
-                .keyboardShortcut(.return)
                 .buttonStyle(.borderedProminent)
-                .disabled(title.isEmpty)
             }
             .padding()
         }
-        .frame(width: 400, height: 500)
+        .frame(width: 320, height: 340)
         .onAppear {
             loadInitialValues()
         }
@@ -152,7 +109,6 @@ struct BookmarkEditSheet: View {
 
     private var tagSelectionView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Selected and available tags
             FlowLayout(spacing: 6) {
                 ForEach(viewModel.userTags) { tag in
                     TagPillView(
@@ -184,7 +140,7 @@ struct BookmarkEditSheet: View {
                 HStack {
                     TextField("New tag name", text: $newTagName)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 150)
+                        .frame(width: 120)
                         .onSubmit {
                             createNewTag()
                         }
@@ -199,23 +155,8 @@ struct BookmarkEditSheet: View {
                         newTagName = ""
                     }
                 }
+                .font(.caption)
             }
-        }
-    }
-
-    private func metadataRow(label: String, value: String) -> some View {
-        HStack(alignment: .top) {
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .frame(width: 100, alignment: .leading)
-
-            Text(value)
-                .font(.caption)
-                .foregroundColor(.primary)
-                .lineLimit(2)
-
-            Spacer()
         }
     }
 
@@ -224,8 +165,6 @@ struct BookmarkEditSheet: View {
     private func loadInitialValues() {
         if let bookmark = existingBookmark {
             title = bookmark.title
-            notes = bookmark.notes ?? ""
-            manufacturer = bookmark.manufacturer ?? ""
             selectedTagIds = Set(bookmark.tags.map { $0.id })
         } else if let tab = tab {
             title = tab.title.isEmpty ? "Untitled" : tab.title
@@ -245,7 +184,6 @@ struct BookmarkEditSheet: View {
 
         viewModel.createTag(name: newTagName, color: Tag.defaultColors.randomElement())
 
-        // Select the new tag
         if let newTag = viewModel.tags.first(where: { $0.name == newTagName }) {
             selectedTagIds.insert(newTag.id)
         }
@@ -259,16 +197,8 @@ struct BookmarkEditSheet: View {
 
         if var bookmark = existingBookmark {
             bookmark.title = title
-            bookmark.notes = notes.isEmpty ? nil : notes
-            bookmark.manufacturer = manufacturer.isEmpty ? nil : manufacturer
             bookmark.tags = selectedTags
             viewModel.updateBookmark(bookmark)
-        } else if let tab = tab {
-            var bookmark = Bookmark.from(tab: tab, manufacturer: manufacturer.isEmpty ? nil : manufacturer)
-            bookmark.title = title
-            bookmark.notes = notes.isEmpty ? nil : notes
-            bookmark.tags = selectedTags
-            viewModel.addBookmark(bookmark)
         }
     }
 }
@@ -347,9 +277,10 @@ struct FlowLayout: Layout {
 
 // MARK: - Preview
 
-#Preview("Add Bookmark") {
+#Preview("Bookmark Popover") {
     BookmarkEditSheet(
         viewModel: BookmarkViewModel(),
-        tab: Tab(title: "Counter App")
+        tab: Tab(title: "Google"),
+        existingBookmark: Bookmark(title: "Google", appURL: URL(string: "https://google.com"))
     )
 }
