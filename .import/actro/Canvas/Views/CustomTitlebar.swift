@@ -488,8 +488,8 @@ private struct LiquidGlassToolbar: View {
                 // Loading: show arc spinner
                 ArcSpinner()
                     .frame(width: 32, height: 32)
-            } else if let icon = mode.leftIcon {
-                // Has mode icon (globe for web, app icon for actr)
+            } else if let icon = currentLeftIcon {
+                // Has mode icon (globe for web, custom/default app icon for actr)
                 Button(action: {
                     NSLog("🔘 [Toolbar] Left button tapped (mode: \(mode))")
                 }) {
@@ -651,6 +651,19 @@ private struct LiquidGlassToolbar: View {
         case .reactNative: return .app
         case .empty: return .empty
         }
+    }
+
+    /// Get the actual left icon, considering tab's custom appIcon
+    private var currentLeftIcon: String? {
+        let mode = addressBarMode
+        guard let tab = viewModel.currentTab else { return mode.leftIcon }
+
+        // For app mode, use custom appIcon if available
+        if case .app = mode, let customIcon = tab.appIcon {
+            return customIcon
+        }
+
+        return mode.leftIcon
     }
 
     private var isBookmarked: Bool {

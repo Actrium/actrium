@@ -99,6 +99,9 @@ struct Tab: Identifiable {
     /// Background color for this tab (Hex format: "#rrggbb")
     var backgroundColor: String
 
+    /// Custom app icon (SF Symbol name) - can be set by RCTNApp
+    var appIcon: String?
+
     init(
         title: String,
         url: URL? = nil,
@@ -115,7 +118,8 @@ struct Tab: Identifiable {
         reloadNonce: Int = 0,
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
-        backgroundColor: String? = nil
+        backgroundColor: String? = nil,
+        appIcon: String? = nil
     ) {
         self.title = title
         self.url = url
@@ -133,6 +137,7 @@ struct Tab: Identifiable {
         self.leftPanelDefaultVisible = leftPanelDefaultVisible
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
         self.backgroundColor = backgroundColor ?? Self.generateRandomColor()
+        self.appIcon = appIcon
     }
 
     // MARK: - Content Type Detection
