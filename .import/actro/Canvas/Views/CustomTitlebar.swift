@@ -539,7 +539,7 @@ private struct LiquidGlassToolbar: View {
                     }
                     showingBookmarkPopover = true
                 }) {
-                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                    Image(systemName: isBookmarked ? "star.fill" : "star")
                         .font(.system(size: 14, weight: .medium))
                         .frame(width: 32, height: 32)
                         .contentShape(Circle())
