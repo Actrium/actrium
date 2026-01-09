@@ -1764,12 +1764,19 @@ private struct TabPanel: View {
     // 内容区域视图 - 多态容器
     // 根据 Tab.contentType 决定使用 ViewBridge (RN) 还是 WKWebView (Web)
     private var contentView: some View {
-        // 始终使用 cardSize - Canvas 变换负责缩放
-        // ViewBridge XPC 的视图会被 Canvas 变换一起缩放
-        let panelSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
+        // ViewBridge XPC 需要实际渲染尺寸：
+        // - Focus 模式：使用 viewportSize（因为 XPC 独立进程渲染，不受 Canvas 变换影响）
+        // - Overview 模式：使用 cardSize
+        // 注意：这里的 panelSize 是传给 ViewBridge 的渲染尺寸，不是 SwiftUI frame
+        let renderSize: CGSize
+        if isFocused {
+            renderSize = CGSize(width: max(viewportSize.width, 1), height: max(viewportSize.height, 1))
+        } else {
+            renderSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
+        }
 
-        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, panelSize=%.0fx%.0f",
-                      String(describing: tab.contentType), isFocused ? 1 : 0, panelSize.width, panelSize.height)
+        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, renderSize=%.0fx%.0f",
+                      String(describing: tab.contentType), isFocused ? 1 : 0, renderSize.width, renderSize.height)
 
         return ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
@@ -1779,15 +1786,20 @@ private struct TabPanel: View {
             switch tab.contentType {
             case .reactNative(let fingerprint):
                 // React Native 应用 - 使用 ViewBridge XPC
+                // Focus 模式：使用 viewportSize 渲染，不依赖 Canvas 变换
+                // Overview 模式：使用 cardSize 渲染
                 // .id(tab.id) 确保 SwiftUI 保持 View identity，防止 @State 被重置
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     fingerprint: fingerprint,
-                    containerSize: panelSize,
+                    containerSize: renderSize,
                     coordinator: viewBridgeCoordinator,
                     isFocused: isFocused
                 )
                 .id(tab.id)
+                // Focus 模式下，ViewBridge 已经用 viewportSize 渲染，需要缩小到 cardSize
+                // 以便 Canvas 变换放大时得到正确的最终尺寸
+                .scaleEffect(isFocused ? (cardWidth / viewportSize.width) : 1.0, anchor: .topLeading)
 
             case .web(let url):
                 // Web 内容 - 使用 WKWebView
@@ -1795,7 +1807,7 @@ private struct TabPanel: View {
                 WebViewMultiProcessTabView(
                     tab: tab,
                     url: url,
-                    containerSize: panelSize,
+                    containerSize: renderSize,
                     isFocused: isFocused
                 )
 
