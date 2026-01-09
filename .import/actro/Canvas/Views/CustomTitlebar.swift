@@ -292,7 +292,8 @@ private struct LiquidGlassToolbar: View {
 
     @State private var addressText: String = ""
     @State private var isAddressFocused: Bool = false
-    
+    @State private var showingBookmarkPopover: Bool = false
+
     // Safari 风格地址栏规则：
     // 1) 非编辑态只显示 host（去掉 scheme 和 www.）
     // 2) 点击/快捷键进入编辑态时，切换为完整 URL 并全选
@@ -457,21 +458,29 @@ private struct LiquidGlassToolbar: View {
         .glassEffect(.regular, in: .capsule)
     }
 
-    /// Safari-style address bar: [sidebar toggle | text field | bookmark | refresh]
+    /// Safari-style address bar: [loading/sidebar | text field | bookmark | refresh]
     private var addressBarView: some View {
         HStack(spacing: 0) {
-            // Sidebar toggle
-            Button(action: {
-                NSApp.keyWindow?.firstResponder?.tryToPerform(
-                    #selector(NSSplitViewController.toggleSidebar(_:)), with: nil
-                )
-            }) {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 14, weight: .medium))
+            // Left button: loading indicator or sidebar toggle
+            if isWebContent && viewModel.isCurrentTabLoading {
+                // Loading: show spinner
+                ProgressView()
+                    .controlSize(.small)
                     .frame(width: 32, height: 32)
+            } else {
+                // Not loading: show sidebar toggle
+                Button(action: {
+                    NSApp.keyWindow?.firstResponder?.tryToPerform(
+                        #selector(NSSplitViewController.toggleSidebar(_:)), with: nil
+                    )
+                }) {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
 
             // Address display/input area
             if isAddressFocused {
@@ -498,16 +507,19 @@ private struct LiquidGlassToolbar: View {
                     }
             }
 
-            // Bookmark
-            Button(action: onBookmarkTap) {
+            // Bookmark button with popover
+            Button(action: { showingBookmarkPopover.toggle() }) {
                 Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                     .font(.system(size: 14, weight: .medium))
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
             .foregroundStyle(isBookmarked ? .blue : .secondary)
+            .popover(isPresented: $showingBookmarkPopover, arrowEdge: .bottom) {
+                bookmarkPopoverContent
+            }
 
-            // Refresh
+            // Refresh button
             Button(action: { viewModel.reloadCurrentTab() }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 14, weight: .medium))
@@ -526,9 +538,31 @@ private struct LiquidGlassToolbar: View {
         }
     }
 
+    private var isWebContent: Bool {
+        if case .web = viewModel.currentTab?.contentType {
+            return true
+        }
+        return false
+    }
+
     private var isBookmarked: Bool {
         guard let tab = viewModel.currentTab else { return false }
         return bookmarkVM.isBookmarked(tab: tab)
+    }
+
+    @ViewBuilder
+    private var bookmarkPopoverContent: some View {
+        if let tab = viewModel.currentTab {
+            let existingBookmark = bookmarkVM.getBookmark(for: tab)
+            BookmarkEditSheet(
+                viewModel: bookmarkVM,
+                tab: tab,
+                existingBookmark: existingBookmark
+            )
+        } else {
+            Text("No tab selected")
+                .padding()
+        }
     }
 
     /// Action buttons group [Share + Tabs] in capsule (normal mode)

@@ -35,6 +35,9 @@ class BrowserViewModel: ObservableObject {
     /// Flag to trigger address bar focus (set by addNewTab, consumed by view)
     @Published var shouldAutoFocusAddressBar: Bool = false
 
+    /// Current tab loading state (for web content)
+    @Published var isCurrentTabLoading: Bool = false
+
     // MARK: - Grid Slot Position Management
 
     /// Tab ID → grid slot index mapping
