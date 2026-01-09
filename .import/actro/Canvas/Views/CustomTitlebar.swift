@@ -320,7 +320,10 @@ private struct LiquidGlassToolbar: View {
 
     private func exitEditingMode() {
         isAddressFocused = false
-        addressText = displayText(for: viewModel.currentTab)
+        // Delay to ensure SwiftUI state has propagated after navigation
+        DispatchQueue.main.async {
+            self.addressText = self.displayText(for: self.viewModel.currentTab)
+        }
     }
 
     // Breakpoints for responsive layout (Safari-style)
