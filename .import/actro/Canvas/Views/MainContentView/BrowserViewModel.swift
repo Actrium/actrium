@@ -72,7 +72,7 @@ class BrowserViewModel: ObservableObject {
     }
     
     @discardableResult
-    func addNewTab() -> Tab {
+    func addNewTab(focusAddressBar: Bool = true) -> Tab {
         logger.debug("🆕 开始创建新标签页...")
         let newTab = Tab(
             title: "New Tab",
@@ -84,9 +84,10 @@ class BrowserViewModel: ObservableObject {
         // 简化：直接添加到末尾
         tabSlotPositions[newTab.id] = tabs.count - 1
 
-        // 新建 Tab 直接进入 Focus 模式，并自动聚焦地址栏
+        // 新建 Tab 直接进入 Focus 模式
         canvasMode = .focus(tabId: newTab.id)
-        shouldAutoFocusAddressBar = true
+        // 只有纯粹新建空白 Tab 时才自动聚焦地址栏，从链接打开时不聚焦
+        shouldAutoFocusAddressBar = focusAddressBar
 
         logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
         return newTab
