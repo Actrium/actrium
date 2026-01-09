@@ -545,7 +545,7 @@ private struct LiquidGlassToolbar: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(isBookmarked ? .primary : .secondary)
+                .foregroundStyle(isBookmarked ? Color.secondary : Color.secondary.opacity(0.5))
                 .popover(isPresented: $showingBookmarkPopover, arrowEdge: .bottom) {
                     bookmarkPopoverContent
                 }
