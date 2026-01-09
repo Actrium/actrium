@@ -115,6 +115,9 @@ struct BookmarkEditSheet: View {
                         isSelected: selectedTagIds.contains(tag.id),
                         onTap: {
                             toggleTag(tag.id)
+                        },
+                        onLongPress: {
+                            openTagManager(tag)
                         }
                     )
                 }
@@ -200,6 +203,21 @@ struct BookmarkEditSheet: View {
             viewModel.updateBookmark(bookmark)
         }
     }
+
+    /// Long press on tag -> open tag manager in new window
+    /// URI: canvas://bookmarks/tags/{tagId}
+    private func openTagManager(_ tag: Tag) {
+        dismiss()
+        // Post notification to open bookmarks with tag filter
+        // URI scheme: canvas://bookmarks/tags/{tagId}
+        let uri = "canvas://bookmarks/tags/\(tag.id.uuidString)"
+        NotificationCenter.default.post(
+            name: NSNotification.Name("com.canvas.openURI"),
+            object: nil,
+            userInfo: ["uri": uri, "tagId": tag.id.uuidString, "tagName": tag.name]
+        )
+        NSLog("🏷️ Long press tag: \(tag.name), URI: \(uri)")
+    }
 }
 
 // MARK: - Tag Pill View
@@ -208,22 +226,26 @@ struct TagPillView: View {
     let tag: Tag
     let isSelected: Bool
     var onTap: (() -> Void)?
+    var onLongPress: (() -> Void)?
 
     var body: some View {
-        Button(action: { onTap?() }) {
-            Text(tag.name)
-                .font(.caption)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(isSelected ? tag.swiftUIColor.opacity(0.2) : Color(nsColor: .controlBackgroundColor))
-                .foregroundColor(isSelected ? tag.swiftUIColor : .primary)
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(isSelected ? tag.swiftUIColor : Color.clear, lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
+        Text(tag.name)
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(isSelected ? tag.swiftUIColor.opacity(0.2) : Color(nsColor: .controlBackgroundColor))
+            .foregroundColor(isSelected ? tag.swiftUIColor : .primary)
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? tag.swiftUIColor : Color.clear, lineWidth: 1)
+            )
+            .onTapGesture {
+                onTap?()
+            }
+            .onLongPressGesture(minimumDuration: 0.5) {
+                onLongPress?()
+            }
     }
 }
 
