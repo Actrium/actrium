@@ -308,7 +308,8 @@ private struct LiquidGlassToolbar: View {
     @State private var isAddressFocused: Bool = false
     @State private var showingBookmarkPopover: Bool = false
     /// Tracks the focus ring animation scale (starts larger, animates to 1.0)
-    @State private var focusRingScale: CGFloat = 1.0
+    @State private var focusRingScaleX: CGFloat = 1.0
+    @State private var focusRingScaleY: CGFloat = 1.0
     /// Tracks if user has started typing (including IME composition)
     @State private var hasInputActivity: Bool = false
 
@@ -342,7 +343,8 @@ private struct LiquidGlassToolbar: View {
         var noAnimation = Transaction()
         noAnimation.disablesAnimations = true
         withTransaction(noAnimation) {
-            focusRingScale = 1.15
+            focusRingScaleX = 1.1
+            focusRingScaleY = 1.25
         }
 
         // Show the ring (opacity will animate via .animation modifier)
@@ -351,7 +353,8 @@ private struct LiquidGlassToolbar: View {
         // Animate scale contraction after opacity animation starts
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                self.focusRingScale = 1.0
+                self.focusRingScaleX = 1.0
+                self.focusRingScaleY = 1.0
             }
         }
     }
@@ -362,7 +365,8 @@ private struct LiquidGlassToolbar: View {
         var noAnimation = Transaction()
         noAnimation.disablesAnimations = true
         withTransaction(noAnimation) {
-            focusRingScale = 1.0
+            focusRingScaleX = 1.0
+            focusRingScaleY = 1.0
         }
         hasInputActivity = false  // Reset input activity state
         // addressText will be updated by onChange handlers when URL/Tab changes
@@ -631,8 +635,8 @@ private struct LiquidGlassToolbar: View {
         .glassEffect(.regular, in: .capsule)
         .overlay {
             Capsule()
-                .strokeBorder(Color.blue.opacity(0.75), lineWidth: 3.5)
-                .scaleEffect(focusRingScale)
+                .strokeBorder(Color.blue.opacity(0.75), lineWidth: 3)
+                .scaleEffect(x: focusRingScaleX, y: focusRingScaleY)
                 .opacity(isAddressFocused ? 1 : 0)
                 // Only animate opacity based on focus state; scale is controlled via explicit withAnimation/withTransaction
                 .animation(.easeOut(duration: 0.12), value: isAddressFocused)
