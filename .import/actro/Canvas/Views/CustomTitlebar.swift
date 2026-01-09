@@ -536,12 +536,12 @@ private struct LiquidGlassToolbar: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondary.opacity(0.5))
             } else {
                 // Empty mode: show search icon
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondary.opacity(0.5))
                     .frame(width: 32, height: 32)
             }
 
@@ -626,7 +626,7 @@ private struct LiquidGlassToolbar: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondary.opacity(0.5))
             }
         }
         .frame(height: 30)  // Match nav buttons height
