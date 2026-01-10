@@ -147,6 +147,7 @@ struct BrowserWindowView: View {
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @State private var hasHandledLaunchURL = false
+    @State private var hasAppliedDebugConfig = false
 
     var body: some View {
         ContentView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
@@ -158,6 +159,8 @@ struct BrowserWindowView: View {
                 checkPendingGroupTransfer()
                 // Handle launch URL (only once)
                 handleLaunchURLIfNeeded()
+                // Apply debug configuration (only once)
+                applyDebugConfigIfNeeded()
             }
             // Handle bookmark open from XPC service
             .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openBookmark)) { notification in
@@ -286,6 +289,62 @@ struct BrowserWindowView: View {
         }
     }
 
+    /// Apply debug launch configuration
+    private func applyDebugConfigIfNeeded() {
+        guard !hasAppliedDebugConfig else { return }
+        hasAppliedDebugConfig = true
+
+        let config = CanvasApp.debugConfig
+        guard config.hasDebugOptions else { return }
+
+        NSLog("🔧 [Debug] Applying debug configuration...")
+
+        // Apply window frame
+        if let frame = config.windowFrame {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let window = NSApp.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) {
+                    window.setFrame(frame, display: true, animate: false)
+                    NSLog("🔧 [Debug] Window frame set to: \(frame)")
+                }
+            }
+        }
+
+        // Apply mode and tab
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            // Create specific tab type if requested
+            if let tabType = config.tabType {
+                switch tabType {
+                case "startPage":
+                    _ = self.viewModel.openSystemTab(.startPage)
+                case "history":
+                    _ = self.viewModel.openSystemTab(.history)
+                case "bookmarks":
+                    _ = self.viewModel.openSystemTab(.bookmarks)
+                default:
+                    NSLog("🔧 [Debug] Unknown tab type: \(tabType)")
+                }
+            }
+
+            // Apply display mode
+            if let mode = config.mode {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    switch mode {
+                    case "focus":
+                        if let currentTab = self.viewModel.currentTab {
+                            self.viewModel.canvasMode = .focus(tabId: currentTab.id)
+                            NSLog("🔧 [Debug] Mode set to: focus (tab: \(currentTab.id.uuidString.prefix(8)))")
+                        }
+                    case "overview":
+                        self.viewModel.canvasMode = .overview
+                        NSLog("🔧 [Debug] Mode set to: overview")
+                    default:
+                        NSLog("🔧 [Debug] Unknown mode: \(mode)")
+                    }
+                }
+            }
+        }
+    }
+
     private func checkPendingGroupTransfer() {
         guard let groupData = UserDefaults.standard.dictionary(forKey: "pendingGroupTransfer"),
               let tabsData = groupData["tabs"] as? [[String: Any]],
@@ -342,6 +401,69 @@ struct BrowserWindowView: View {
     }
 }
 
+// MARK: - Debug Launch Configuration
+
+/// Configuration for debugging launch with specific window/mode settings
+/// Usage: Canvas.app --window-frame=100,100,800,600 --mode=focus --tab=startPage
+struct DebugLaunchConfig {
+    /// Window frame (x, y, width, height)
+    var windowFrame: NSRect?
+    /// Display mode: "focus" or "overview"
+    var mode: String?
+    /// Initial tab type
+    var tabType: String?
+    /// Log file path for redirecting output
+    var logFile: String?
+
+    /// Parse command line arguments
+    static func parse(_ args: [String]) -> DebugLaunchConfig {
+        var config = DebugLaunchConfig()
+
+        for arg in args {
+            if arg.hasPrefix("--window-frame=") {
+                let value = String(arg.dropFirst("--window-frame=".count))
+                let parts = value.split(separator: ",").compactMap { Double($0) }
+                if parts.count == 4 {
+                    config.windowFrame = NSRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+                    NSLog("🔧 [DebugConfig] Window frame: \(config.windowFrame!)")
+                }
+            } else if arg.hasPrefix("--mode=") {
+                config.mode = String(arg.dropFirst("--mode=".count))
+                NSLog("🔧 [DebugConfig] Mode: \(config.mode!)")
+            } else if arg.hasPrefix("--tab=") {
+                config.tabType = String(arg.dropFirst("--tab=".count))
+                NSLog("🔧 [DebugConfig] Tab: \(config.tabType!)")
+            } else if arg.hasPrefix("--log-file=") {
+                config.logFile = String(arg.dropFirst("--log-file=".count))
+                NSLog("🔧 [DebugConfig] Log file: \(config.logFile!)")
+                // Setup log file redirection
+                setupLogFile(config.logFile!)
+            }
+        }
+
+        return config
+    }
+
+    /// Redirect stderr/stdout to a log file
+    private static func setupLogFile(_ path: String) {
+        // Clear existing log file
+        try? FileManager.default.removeItem(atPath: path)
+        FileManager.default.createFile(atPath: path, contents: nil)
+
+        // Redirect stderr to file (Swift print and fputs go here)
+        freopen(path, "a", stderr)
+        // Also redirect stdout
+        freopen(path, "a", stdout)
+
+        NSLog("🔧 [DebugConfig] Logs redirected to: \(path)")
+    }
+
+    /// Check if any debug options are set
+    var hasDebugOptions: Bool {
+        windowFrame != nil || mode != nil || tabType != nil
+    }
+}
+
 // MARK: - App
 
 @main
@@ -371,6 +493,14 @@ struct CanvasApp: App {
         }
         return nil
     }()
+
+    /// Debug launch configuration from command line arguments
+    /// Supports:
+    /// - `--window-frame=x,y,width,height` - Set window position and size
+    /// - `--mode=focus|overview` - Start in focus or overview mode
+    /// - `--tab=startPage|history|bookmarks` - Initial tab type
+    /// - `--log-file=/path/to/log` - Redirect logs to file
+    static let debugConfig: DebugLaunchConfig = DebugLaunchConfig.parse(CommandLine.arguments)
 
     init() {
         // Setup crash handler to log crashes
