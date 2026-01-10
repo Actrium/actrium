@@ -177,6 +177,19 @@ public class ViewBridgeHostView: NSView {
 
         NSLog("ViewBridgeHostView: Requesting \(serviceViewControllerClassName) from \(serviceBundleIdentifier)")
 
+        // Send tabId to Service BEFORE requesting connection
+        // This allows Service to associate the upcoming connection with the correct tabId
+        if let tabId = coordinator?.tabId?.uuidString {
+            let notificationName = "com.canvas.pendingTabId.\(serviceBundleIdentifier)"
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name(notificationName),
+                object: nil,
+                userInfo: ["tabId": tabId],
+                deliverImmediately: true
+            )
+            fputs("📤 [HOST] Sent pendingTabId: \(tabId.prefix(8)) to \(serviceBundleIdentifier)\n", stderr)
+        }
+
         // Load ViewBridge framework
         let frameworkPath = "/System/Library/PrivateFrameworks/ViewBridge.framework/ViewBridge"
         guard dlopen(frameworkPath, RTLD_NOW) != nil else {
@@ -753,6 +766,7 @@ struct ViewBridgeMultiProcessTabView: View {
     }
 
     /// 监听 service 端的 connectionCreated，并发送 tabId->internalId 显式绑定
+    /// Only processes notifications that match our tabId to avoid cross-tab binding conflicts
     private func setupConnectionBindingListener(for serviceId: String) {
         guard coordinator.connectionCreatedObserver == nil else { return }
 
@@ -765,6 +779,15 @@ struct ViewBridgeMultiProcessTabView: View {
                   let bundleId = info["bundleId"] as? String,
                   bundleId == serviceId,
                   let internalId = info["internalId"] as? String else { return }
+
+            // CRITICAL: Only process if this notification is for OUR tab
+            // Service includes the tabId it received via pendingTabId notification
+            if let notificationTabId = info["tabId"] as? String {
+                guard notificationTabId == tabId.uuidString else {
+                    fputs("🔗 [HOST] Ignoring xpcConnectionCreated for different tab: \(notificationTabId.prefix(8)) (we are \(tabId.uuidString.prefix(8)))\n", stderr)
+                    return
+                }
+            }
 
             let bindName = "com.canvas.bindTab.\(serviceId)"
             let bindInfo: [String: Any] = [

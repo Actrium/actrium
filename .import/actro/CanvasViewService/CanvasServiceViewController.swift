@@ -462,8 +462,22 @@ private class ServiceReactNativeHost {
     private var metroConfigObserver: NSObjectProtocol?
     private var containerSizeObserver: NSObjectProtocol?
     private var bindTabObserver: NSObjectProtocol?
+    private var pendingTabIdObserver: NSObjectProtocol?
     private var readyNotificationTimer: Timer?
     private var hasReceivedTabConfig = false
+
+    /// Queue of pending tabIds sent by Host before connection request
+    /// Used to associate each loadView call with the correct Host tabId
+    private var pendingTabIdQueue: [String] = []
+    private let pendingTabIdLock = NSLock()
+
+    /// Get the next pending tabId from the queue (FIFO)
+    func dequeueNextPendingTabId() -> String? {
+        pendingTabIdLock.lock()
+        defer { pendingTabIdLock.unlock() }
+        guard !pendingTabIdQueue.isEmpty else { return nil }
+        return pendingTabIdQueue.removeFirst()
+    }
 
     private func setupTabConfigListener() {
         // Listen for tab config with service-specific notification
@@ -513,6 +527,24 @@ private class ServiceReactNativeHost {
             self?.bind(hostTabId: tabId, toInternalId: internalId)
         }
         debugLog("📡 Setting up bindTab listener: \(bindName)")
+
+        // Listen for pending tabId from Host (sent before connection request)
+        let pendingTabIdName = "com.canvas.pendingTabId.\(serviceBundleId)"
+        pendingTabIdObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(pendingTabIdName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let userInfo = notification.userInfo,
+                  let tabId = userInfo["tabId"] as? String else { return }
+
+            self.pendingTabIdLock.lock()
+            self.pendingTabIdQueue.append(tabId)
+            self.pendingTabIdLock.unlock()
+            debugLog("📡 Received pendingTabId: \(tabId.prefix(8)), queue size: \(self.pendingTabIdQueue.count)")
+        }
+        debugLog("📡 Setting up pendingTabId listener: \(pendingTabIdName)")
 
         // Notify Host that this service is ready (with retry until tab config received)
         postXPCServiceReady()
@@ -847,14 +879,28 @@ public func registerCanvasServiceViewController() {
         let entry = host.registerPendingEntry(internalId: internalId, containerView: containerView)
         entry.containerSize = CGSize(width: initialWidth, height: initialHeight)
 
+        // Get the pending tabId from the queue (Host sends this before connection request)
+        // This enables 1:1:1 mapping by associating each connection with its Host tabId
+        let pendingTabId = host.dequeueNextPendingTabId()
+        if let tabId = pendingTabId {
+            debugLog("[pending:\(internalId.prefix(8))] Associated with Host tabId: \(tabId.prefix(8))")
+        } else {
+            debugLog("⚠️ [pending:\(internalId.prefix(8))] No pending tabId in queue")
+        }
+
         // Inform Host about this connection so it can bind tabId -> internalId explicitly
+        // Include the tabId so Host can filter notifications for its own tab
+        var userInfo: [String: Any] = [
+            "bundleId": host.serviceBundleId,
+            "internalId": internalId
+        ]
+        if let tabId = pendingTabId {
+            userInfo["tabId"] = tabId
+        }
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name("com.canvas.xpcConnectionCreated"),
             object: nil,
-            userInfo: [
-                "bundleId": host.serviceBundleId,
-                "internalId": internalId
-            ],
+            userInfo: userInfo,
             deliverImmediately: true
         )
 
