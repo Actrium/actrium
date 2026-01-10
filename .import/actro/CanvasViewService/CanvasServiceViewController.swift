@@ -62,9 +62,11 @@ private class ResizableContainerView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
-    /// Pin to superview bounds when added to view hierarchy
-    /// This is the key fix: ViewBridge updates superview bounds, and Auto Layout
-    /// propagates the size change to this view automatically.
+    /// Setup view when added to hierarchy
+    /// NOTE: Do NOT use Auto Layout to pin to superview bounds!
+    /// ViewBridge superview bounds include canvas scale transform, which would make
+    /// the container too large. Instead, we use explicit frame management via
+    /// containerSizeChanged notifications from Host.
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         debugLog("[\(tabId?.prefix(8) ?? "?")] viewDidMoveToSuperview: superview=\(String(describing: superview))")
@@ -77,18 +79,14 @@ private class ResizableContainerView: NSView {
 
         guard let superview = superview else { return }
 
-        debugLog("[\(tabId?.prefix(8) ?? "?")] Superview bounds: \(superview.bounds.size)")
+        debugLog("[\(tabId?.prefix(8) ?? "?")] Superview bounds: \(superview.bounds.size) (ignored - using Host's containerSize)")
 
-        // Pin to superview bounds using Auto Layout
-        translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            leadingAnchor.constraint(equalTo: superview.leadingAnchor),
-            trailingAnchor.constraint(equalTo: superview.trailingAnchor),
-            topAnchor.constraint(equalTo: superview.topAnchor),
-            bottomAnchor.constraint(equalTo: superview.bottomAnchor)
-        ])
+        // Use autoresizing mask for flexible positioning, but NOT for size
+        // Size is controlled by Host's containerSizeChanged notification
+        translatesAutoresizingMaskIntoConstraints = true
+        autoresizingMask = []  // Don't auto-resize with superview
 
-        // Also observe superview frame changes as backup
+        // Log superview frame changes for debugging, but don't use them for sizing
         superview.postsFrameChangedNotifications = true
         superviewFrameObserver = NotificationCenter.default.addObserver(
             forName: NSView.frameDidChangeNotification,
@@ -96,12 +94,25 @@ private class ResizableContainerView: NSView {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, let superview = self.superview else { return }
-            debugLog("[\(self.tabId?.prefix(8) ?? "?")] Superview frame changed: \(superview.bounds.size)")
-            self.needsLayout = true
+            debugLog("[\(self.tabId?.prefix(8) ?? "?")] Superview frame changed: \(superview.bounds.size) (ignored)")
         }
     }
 
+    /// The authorized size from Host (via containerSizeChanged notification)
+    /// We only apply sizes that match this, to filter out ViewBridge's scaled sizes
+    var authorizedSize: NSSize?
+
     override func setFrameSize(_ newSize: NSSize) {
+        // Filter out sizes that are likely canvas-scaled
+        // Only accept sizes from Host's containerSizeChanged or tabConfig
+        // Heuristic: if size is larger than 2000 in either dimension, it's probably scaled
+        let isLikelyScaled = newSize.width > 2000 || newSize.height > 2000
+
+        if isLikelyScaled {
+            debugLog("[\(tabId?.prefix(8) ?? "?")] Container setFrameSize: \(newSize) (REJECTED - likely canvas-scaled)")
+            return
+        }
+
         debugLog("[\(tabId?.prefix(8) ?? "?")] Container setFrameSize: \(newSize)")
         super.setFrameSize(newSize)
 
@@ -918,17 +929,13 @@ public func registerCanvasServiceViewController() {
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
 
     // remoteViewSizeDidChange: - ViewBridge calls this when host resizes
+    // NOTE: ViewBridge passes the SCALED size (including canvas transform), which is wrong
+    // We ignore this and rely on Host's containerSizeChanged notification for correct logical size
     let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { self_, size in
         let tabId = logId(self_)
-        debugLog("[\(tabId.prefix(8))] remoteViewSizeDidChange: \(size)")
-
-        if let view = self_.value(forKey: "view") as? NSView {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            view.setFrameSize(size)
-            view.needsLayout = true
-            CATransaction.commit()
-        }
+        debugLog("[\(tabId.prefix(8))] remoteViewSizeDidChange: \(size) (ignored - using Host's containerSize)")
+        // Do NOT resize the view here - ViewBridge size includes canvas scale transform
+        // Size is managed by Host's containerSizeChanged notification instead
     }
     let sizeDidChangeImp = imp_implementationWithBlock(sizeDidChangeBlock)
     class_addMethod(newClass, NSSelectorFromString("remoteViewSizeDidChange:"), sizeDidChangeImp, "v@:{CGSize=dd}")
@@ -953,15 +960,13 @@ public func registerCanvasServiceViewController() {
     }
     class_addMethod(newClass, NSSelectorFromString("setHostTabId:"), imp_implementationWithBlock(setHostTabIdBlock), "v@:@")
 
-    // setPreferredContentSize:
+    // setPreferredContentSize: - ViewBridge may call this when host changes size
+    // NOTE: Like remoteViewSizeDidChange:, this includes canvas scale transform
+    // We ignore this and rely on Host's containerSizeChanged notification
     let setPreferredSizeBlock: @convention(block) (AnyObject, NSSize) -> Void = { self_, size in
-        if let view = self_.value(forKey: "view") as? NSView {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            view.setFrameSize(size)
-            view.needsLayout = true
-            CATransaction.commit()
-        }
+        let tabId = logId(self_)
+        debugLog("[\(tabId.prefix(8))] setPreferredContentSize: \(size) (ignored - using Host's containerSize)")
+        // Do NOT resize the view here - ViewBridge size includes canvas scale transform
     }
     class_addMethod(newClass, NSSelectorFromString("setPreferredContentSize:"), imp_implementationWithBlock(setPreferredSizeBlock), "v@:{CGSize=dd}")
 

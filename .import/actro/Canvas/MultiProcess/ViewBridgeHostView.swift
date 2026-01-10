@@ -357,8 +357,8 @@ public class ViewBridgeHostView: NSView {
             vc.view.layoutSubtreeIfNeeded()
         }
 
-        // Backup: Also send via DistributedNotificationCenter
-        // In case the Auto Layout propagation doesn't work in some edge cases
+        // Send size via DistributedNotificationCenter
+        // This is the primary size sync mechanism now (Auto Layout is disabled)
         if let tabId = coordinator?.tabId?.uuidString {
             let sizeInfo: [String: Any] = [
                 "tabId": tabId,
@@ -371,6 +371,9 @@ public class ViewBridgeHostView: NSView {
                 userInfo: sizeInfo,
                 deliverImmediately: true
             )
+            fputs("📐 [HOST] Sent containerSizeChanged: tab=\(tabId.prefix(8)), size=\(newSize)\n", stderr)
+        } else {
+            fputs("⚠️ [HOST] Cannot send containerSizeChanged - no tabId (coordinator=\(coordinator != nil))\n", stderr)
         }
         fflush(stderr)
     }
