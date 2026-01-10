@@ -5,11 +5,10 @@
 //  Host view that displays content from a ViewBridge XPC service.
 //  Uses NSRemoteViewController to request and embed remote views.
 //
-//  新架构：Remote view size 跟随 TabPanel 实际尺寸
-//  - Focus 模式：接近全屏尺寸
-//  - Overview 模式：卡片尺寸
-//  - 动画过程：尺寸平滑过渡
-//  - RN 自适应布局
+//  双层架构 (Dual-Layer Architecture):
+//  - Real Layer: 始终以 viewport size 渲染 RemoteView
+//  - Scale Layer: 使用截图 + scaleEffect 实现缩放动画
+//  - Focus/Overview 切换使用截图过渡，避免 RemoteView resize
 //
 
 import Cocoa
@@ -39,6 +38,9 @@ public class ViewBridgeHostView: NSView {
     /// Current content size - 跟随 TabPanel 实际尺寸
     /// Accessible by coordinator for sending size notifications
     var currentContentSize: CGSize = CGSize(width: 1280, height: 720)
+
+    /// Callback when remote view content changes (for updating Scale layer screenshots)
+    var onContentChange: (() -> Void)?
 
     /// Callback when XPC connection is established
     public var onConnectionEstablished: (() -> Void)?
@@ -479,7 +481,7 @@ import SwiftUI
 import Combine
 
 /// Coordinator that holds reference to ViewBridgeHostView
-/// 管理 XPC 连接状态，生命周期由 ViewBridgeCoordinatorManager 管理
+/// 管理 XPC 连接状态和截图，生命周期由 ViewBridgeCoordinatorManager 管理
 final class ViewBridgeCoordinator {
     weak var hostView: ViewBridgeHostView?
     /// Callback when XPC connection is established
@@ -493,8 +495,19 @@ final class ViewBridgeCoordinator {
     var connectionCreatedObserver: NSObjectProtocol?
     var tabId: UUID?
 
-    func captureSnapshot() -> NSImage? {
-        return hostView?.captureSnapshot()
+    /// 双层架构：Scale Layer 使用的截图（Overview 模式下显示）
+    /// 在 Focus -> Overview 切换时拍摄
+    var cachedSnapshot: NSImage?
+
+    /// Capture and cache a snapshot for Scale Layer
+    func captureAndCacheSnapshot() -> NSImage? {
+        cachedSnapshot = hostView?.captureSnapshot()
+        return cachedSnapshot
+    }
+
+    /// Get cached snapshot (for Scale Layer display)
+    func getCachedSnapshot() -> NSImage? {
+        return cachedSnapshot
     }
 
     /// Send a containerSizeChanged notification to the XPC service
@@ -556,6 +569,9 @@ final class ViewBridgeCoordinator {
 /// Manager that holds coordinators for all tabs
 /// 不使用 @Published 避免在 view body 评估时触发状态更新
 final class ViewBridgeCoordinatorManager: ObservableObject {
+    /// Singleton instance for global access
+    static let shared = ViewBridgeCoordinatorManager()
+
     // 不使用 @Published - coordinators 的变化不需要触发 UI 更新
     private var coordinators: [UUID: ViewBridgeCoordinator] = [:]
 
@@ -577,11 +593,11 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
 }
 
 /// SwiftUI wrapper for ViewBridgeHostView
-/// Remote view size 跟随 TabPanel 实际尺寸
+/// Real Layer: 始终以 viewport size 渲染 RemoteView
 /// 支持从进程池分配独立的 XPC service
 struct ViewBridgeTabView: NSViewRepresentable {
     let tabId: UUID
-    let contentSize: CGSize  // TabPanel 实际尺寸
+    let contentSize: CGSize  // Remote view 渲染尺寸（viewport size）
     let coordinator: ViewBridgeCoordinator
     let serviceBundleIdentifier: String  // 从进程池分配的 bundle id
 
@@ -609,7 +625,6 @@ struct ViewBridgeTabView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
-        fputs("📐 ViewBridgeTabView.updateNSView: contentSize=\(contentSize)\n", stderr)
         // Ensure coordinator reference is set
         nsView.coordinator = coordinator
         coordinator.hostView = nsView
@@ -627,7 +642,7 @@ struct ViewBridgeTabView: NSViewRepresentable {
 // MARK: - ViewBridge Multi-Process Tab View
 
 /// A view that displays tab content via ViewBridge XPC service
-/// Remote view size 跟随 TabPanel 实际尺寸，RN 自适应
+/// Real Layer: 始终以 viewport size 渲染 RemoteView（双层架构）
 ///
 /// 多进程架构：基于应用指纹分配进程
 /// - 相同应用（fingerprint 相同）= 共享同一个 RCTViewService 进程
@@ -636,7 +651,7 @@ struct ViewBridgeTabView: NSViewRepresentable {
 struct ViewBridgeMultiProcessTabView: View {
     let tab: Tab
     let fingerprint: String  // 应用指纹
-    let containerSize: CGSize  // TabPanel 实际尺寸
+    let containerSize: CGSize  // Remote view 渲染尺寸（viewport size）
     let coordinator: ViewBridgeCoordinator
     var isFocused: Bool = false  // 是否当前 focused
 
@@ -664,6 +679,7 @@ struct ViewBridgeMultiProcessTabView: View {
             // 多进程架构：基于应用指纹分配进程
             // 使用 serviceAllocated 触发 UI 刷新，实际 serviceId 从 coordinator 获取
             if ViewBridgeHostView.isAvailable, serviceAllocated, let serviceId = coordinator.allocatedServiceId {
+                // Real Layer: 始终以 viewport size 渲染，不进行缩放
                 ViewBridgeTabView(
                     tabId: tab.id,
                     contentSize: containerSize,
@@ -672,6 +688,7 @@ struct ViewBridgeMultiProcessTabView: View {
                 )
                 // 稳定的 id 确保 View 不会因为 containerSize 变化而被重建
                 .id(tab.id)
+                // frame 使用完整 containerSize（viewport size）
                 .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
                 .clipped()
                 .onAppear {
@@ -713,6 +730,7 @@ struct ViewBridgeMultiProcessTabView: View {
                 loadingView
             }
         }
+        // 双层架构：Real Layer 使用完整 viewport size
         .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
         .onAppear {
             allocateServiceIfNeeded()
@@ -967,5 +985,57 @@ struct ViewBridgeMultiProcessTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+// MARK: - Focused React Native Overlay
+
+/// Focus 模式下的全屏 React Native 内容层（Real Layer）
+/// 双层架构：此层始终以 viewport size 渲染，不受 canvas scaleEffect 影响
+struct FocusedReactNativeOverlay: View {
+    let tab: Tab
+    let fingerprint: String
+    let viewportSize: CGSize
+    let coordinator: ViewBridgeCoordinator
+
+    var body: some View {
+        ViewBridgeMultiProcessTabView(
+            tab: tab,
+            fingerprint: fingerprint,
+            containerSize: viewportSize,
+            coordinator: coordinator,
+            isFocused: true
+        )
+        .id(tab.id)
+        .frame(width: viewportSize.width, height: viewportSize.height)
+    }
+}
+
+// MARK: - Scale Layer Thumbnail View
+
+/// Overview 模式下的缩略图层（Scale Layer）
+/// 使用截图 + scaleEffect 实现平滑的 Focus/Overview 切换动画
+struct ViewBridgeThumbnailView: View {
+    let tabId: UUID
+    let screenshot: NSImage?
+    let thumbnailSize: CGSize
+
+    var body: some View {
+        if let image = screenshot {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: thumbnailSize.width, height: thumbnailSize.height)
+                .clipped()
+        } else {
+            // Placeholder when no screenshot available
+            Rectangle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: thumbnailSize.width, height: thumbnailSize.height)
+                .overlay(
+                    ProgressView()
+                        .scaleEffect(0.8)
+                )
+        }
     }
 }
