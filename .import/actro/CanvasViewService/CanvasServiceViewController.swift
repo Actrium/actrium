@@ -45,6 +45,95 @@ private func debugLog(_ message: String) {
     }
 }
 
+// MARK: - Native Debug View
+
+/// A native debug view that displays current size information
+/// Used to debug ViewBridge size sync without React Native involvement
+private class NativeDebugView: NSView {
+    private let sizeLabel: NSTextField
+    private let titleLabel: NSTextField
+    private var lastUpdateTime: Date = Date()
+
+    override init(frame frameRect: NSRect) {
+        // Title label
+        titleLabel = NSTextField(labelWithString: "Native Debug View")
+        titleLabel.font = NSFont.boldSystemFont(ofSize: 18)
+        titleLabel.textColor = .white
+        titleLabel.alignment = .center
+
+        // Size label
+        sizeLabel = NSTextField(labelWithString: "Size: --")
+        sizeLabel.font = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
+        sizeLabel.textColor = .systemGreen
+        sizeLabel.alignment = .center
+
+        super.init(frame: frameRect)
+
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1.0).cgColor
+
+        addSubview(titleLabel)
+        addSubview(sizeLabel)
+
+        updateSizeDisplay()
+        debugLog("📐 [NativeDebugView] Created with frame: \(frameRect)")
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+
+        let centerX = bounds.midX
+        let centerY = bounds.midY
+
+        titleLabel.sizeToFit()
+        titleLabel.frame.origin = CGPoint(
+            x: centerX - titleLabel.frame.width / 2,
+            y: centerY + 20
+        )
+
+        sizeLabel.sizeToFit()
+        sizeLabel.frame.origin = CGPoint(
+            x: centerX - sizeLabel.frame.width / 2,
+            y: centerY - 30
+        )
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let oldSize = frame.size
+        super.setFrameSize(newSize)
+
+        if oldSize != newSize {
+            updateSizeDisplay()
+            debugLog("📐 [NativeDebugView] setFrameSize: \(oldSize) -> \(newSize)")
+        }
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        updateSizeDisplay()
+    }
+
+    private func updateSizeDisplay() {
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastUpdateTime)
+        lastUpdateTime = now
+
+        let sizeText = String(format: "Size: %.0f × %.0f", bounds.width, bounds.height)
+        sizeLabel.stringValue = sizeText
+        sizeLabel.sizeToFit()
+
+        // Re-center the label
+        let centerX = bounds.midX
+        sizeLabel.frame.origin.x = centerX - sizeLabel.frame.width / 2
+
+        debugLog("📐 [NativeDebugView] updateSizeDisplay: \(bounds.size) (elapsed: \(String(format: "%.3f", elapsed))s)")
+    }
+}
+
 // MARK: - Resizable Container View
 
 /// Container view for each Tab's RCTRootView
@@ -1086,6 +1175,27 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     }
     entry.containerSize = containerSize
 
+    // Check if this is startPage - use NativeDebugView for debugging
+    let systemAppType = config["systemAppType"] as? String
+    if systemAppType == "startPage" {
+        debugLog("[\(logId)] 🔧 Using NativeDebugView for startPage (size debugging)")
+
+        // Sync container size first if it differs from bounds
+        if container.bounds.size != containerSize {
+            debugLog("[\(logId)] Updating container frame to match config size: \(containerSize)")
+            container.setFrameSize(containerSize)
+        }
+
+        // Create native debug view instead of RCTRootView
+        let debugView = NativeDebugView(frame: CGRect(origin: .zero, size: containerSize))
+        debugView.autoresizingMask = [.width, .height]
+        container.addSubview(debugView)
+        container.setRNView(debugView)  // Use same slot for cleanup
+
+        debugLog("[\(logId)] NativeDebugView created and added to container, frame: \(debugView.frame)")
+        return
+    }
+
     // Build initial properties from config
     let tabId = config["tabId"] as? String ?? entry.internalId
     var tabDict: [String: Any] = [
@@ -1093,7 +1203,7 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         "title": config["title"] as? String ?? "Tab",
         "backgroundColor": config["backgroundColor"] as? String ?? "#1e40af"
     ]
-    if let systemAppType = config["systemAppType"] as? String {
+    if let systemAppType = systemAppType {
         tabDict["systemAppType"] = systemAppType
         debugLog("[\(logId)] Creating RootView with systemAppType: \(systemAppType)")
     }
