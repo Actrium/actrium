@@ -1789,14 +1789,14 @@ private struct TabPanel: View {
             switch tab.contentType {
             case .reactNative(let fingerprint):
                 // React Native 应用 - 使用 ViewBridge XPC
-                // 注意：scaleEffect 对 NSViewRepresentable 不生效，
-                // 所以 ViewBridge 始终以 cardSize 渲染，由 Canvas transform 负责缩放
-                // Focus 模式下的全尺寸渲染由 FocusedReactNativeOverlay 处理（canvas transform 之外）
+                // ViewBridge 跨进程渲染，不受 SwiftUI scaleEffect 影响
+                // Focus 模式: 使用 viewportSize 全尺寸渲染
+                // Overview 模式: 使用 cardSize 渲染
                 // .id(tab.id) 确保 SwiftUI 保持 View identity，防止 @State 被重置
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     fingerprint: fingerprint,
-                    containerSize: CGSize(width: cardWidth, height: cardHeight),  // 始终用 cardSize
+                    containerSize: renderSize,  // Focus: viewportSize, Overview: cardSize
                     coordinator: viewBridgeCoordinator,
                     isFocused: isFocused
                 )
