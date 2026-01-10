@@ -37,7 +37,8 @@ public class ViewBridgeHostView: NSView {
     private var statusLabel: NSTextField?
 
     /// Current content size - 跟随 TabPanel 实际尺寸
-    private var currentContentSize: CGSize = CGSize(width: 1280, height: 720)
+    /// Accessible by coordinator for sending size notifications
+    var currentContentSize: CGSize = CGSize(width: 1280, height: 720)
 
     /// Callback when XPC connection is established
     public var onConnectionEstablished: (() -> Void)?
@@ -496,6 +497,34 @@ final class ViewBridgeCoordinator {
         return hostView?.captureSnapshot()
     }
 
+    /// Send a containerSizeChanged notification to the XPC service
+    /// This is used to ensure the service has the correct size after it's fully ready
+    func sendContainerSizeNotification(size: CGSize) {
+        guard let tabId = tabId,
+              let serviceId = allocatedServiceId else {
+            NSLog("⚠️ [Coordinator] Cannot send containerSizeChanged - no tabId or serviceId")
+            return
+        }
+
+        let sizeInfo: [String: Any] = [
+            "tabId": tabId.uuidString,
+            "width": size.width,
+            "height": size.height
+        ]
+
+        if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            let notificationName = "com.canvas.containerSizeChanged.\(serviceId)"
+            NSLog("📐 [Coordinator] Sending containerSizeChanged: size=%.0fx%.0f", size.width, size.height)
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name(notificationName),
+                object: nil,
+                userInfo: ["sizeInfo": jsonString],
+                deliverImmediately: true
+            )
+        }
+    }
+
     /// 清理 XPC 资源
     func cleanup() {
         if let observer = xpcReadyObserver {
@@ -824,6 +853,16 @@ struct ViewBridgeMultiProcessTabView: View {
         }
         NSLog("✅ [HOST] Both ready, sending tab config now!")
         sendTabConfigToService()
+
+        // After tabConfig is sent, also send current size as containerSizeChanged
+        // This ensures the Service gets the size when it's fully ready to receive notifications
+        // Earlier notifications may have been missed during XPC service startup
+        // Use hostView's currentContentSize at dispatch time to get the latest size
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [coordinator] in
+            if let currentSize = coordinator.hostView?.currentContentSize {
+                coordinator.sendContainerSizeNotification(size: currentSize)
+            }
+        }
     }
 
     private var loadingView: some View {
