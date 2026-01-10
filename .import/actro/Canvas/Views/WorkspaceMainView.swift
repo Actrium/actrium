@@ -215,32 +215,17 @@ struct WorkspaceMainView: View {
                         }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                    // Find in Page Bar
-                    if showFindBar {
-                        FindInPageBar(
-                            findText: $findText,
-                            resultCount: findResultCount,
-                            currentIndex: findCurrentIndex,
-                            isFocused: $isFindBarFocused,
-                            onFind: { text in
-                                performFind(text: text, forward: true)
-                            },
-                            onFindNext: {
-                                performFind(text: findText, forward: true)
-                            },
-                            onFindPrevious: {
-                                performFind(text: findText, forward: false)
-                            },
-                            onClose: {
-                                showFindBar = false
-                                findText = ""
-                                clearFindHighlights()
-                            }
-                        )
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
                 }
+
+                // Focus 模式下的 ViewBridge 内容层（canvas 变换之外）
+                // 暂时禁用 - 由 TabPanel 内部渲染，后续优化
+                /*
+                if case .focus(let focusedTabId) = viewModel.canvasMode,
+                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
+                   case .reactNative(let fingerprint) = focusedTab.contentType {
+                    // ViewBridge overlay disabled - using TabPanel rendering instead
+                }
+                */
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
@@ -1789,18 +1774,27 @@ private struct TabPanel: View {
             switch tab.contentType {
             case .reactNative(let fingerprint):
                 // React Native 应用 - 使用 ViewBridge XPC
-                // ViewBridge 跨进程渲染，不受 SwiftUI scaleEffect 影响
-                // Focus 模式: 使用 viewportSize 全尺寸渲染
-                // Overview 模式: 使用 cardSize 渲染
-                // .id(tab.id) 确保 SwiftUI 保持 View identity，防止 @State 被重置
+                // Remote View 始终使用 viewportSize（稳定尺寸，不随模式切换变化）
+                // Overview 模式：对 ViewBridge 应用 scaleEffect 缩小到卡片尺寸
+                // Focus 模式：抵消 canvas scale，让 ViewBridge 正好填满 viewport
+                //
+                // 原理：ViewBridge 在 canvas 内部，canvas 有 scaleEffect(currentScale)
+                // - Focus 模式：currentScale = viewportSize/cardSize（放大）
+                //   我们需要 inverseScale = 1/currentScale 来抵消
+                // - Overview 模式：cardSize/viewportSize 让 ViewBridge 缩小到卡片尺寸
+                let viewBridgeScale = isFocused ? (1.0 / currentScale) : (renderSize.width / viewportSize.width)
                 ViewBridgeMultiProcessTabView(
                     tab: tab,
                     fingerprint: fingerprint,
-                    containerSize: renderSize,  // Focus: viewportSize, Overview: cardSize
+                    containerSize: viewportSize,  // 始终使用 viewport 尺寸
                     coordinator: viewBridgeCoordinator,
                     isFocused: isFocused
                 )
                 .id(tab.id)
+                .frame(width: viewportSize.width, height: viewportSize.height)  // 先设置原始大小
+                .scaleEffect(viewBridgeScale, anchor: .topLeading)  // 再缩放
+                .frame(width: renderSize.width, height: renderSize.height)  // 最后裁剪到卡片大小
+                .clipped()
 
             case .web(let url):
                 // Web 内容 - 使用 WKWebView
