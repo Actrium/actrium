@@ -343,7 +343,7 @@ public class ViewBridgeHostView: NSView {
         lastResizeTime = Date()
         currentContentSize = newSize
 
-        fputs("📐 ViewBridgeHostView.applyContentSize: \(newSize)\n", stderr)
+        NSLog("📐 ViewBridgeHostView.applyContentSize: %.0fx%.0f, serviceBundleId=%@", newSize.width, newSize.height, serviceBundleIdentifier)
 
         // 通知 intrinsicContentSize 变化并触发重新布局
         // Auto Layout constraints will propagate the size to NSRemoteView,
@@ -359,21 +359,29 @@ public class ViewBridgeHostView: NSView {
 
         // Send size via DistributedNotificationCenter
         // This is the primary size sync mechanism now (Auto Layout is disabled)
+        // Use service-specific notification name for XPC service compatibility
         if let tabId = coordinator?.tabId?.uuidString {
             let sizeInfo: [String: Any] = [
                 "tabId": tabId,
                 "width": newSize.width,
                 "height": newSize.height
             ]
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name("com.canvas.containerSizeChanged"),
-                object: nil,
-                userInfo: sizeInfo,
-                deliverImmediately: true
-            )
-            fputs("📐 [HOST] Sent containerSizeChanged: tab=\(tabId.prefix(8)), size=\(newSize)\n", stderr)
+            // Serialize to JSON string for cross-process compatibility
+            if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                // Use service-specific notification name (same pattern as tabConfig)
+                let notificationName = "com.canvas.containerSizeChanged.\(serviceBundleIdentifier)"
+                NSLog("📐 [HOST] Sending containerSizeChanged: name=%@, size=%.0fx%.0f", notificationName, newSize.width, newSize.height)
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name(notificationName),
+                    object: nil,
+                    userInfo: ["sizeInfo": jsonString],
+                    deliverImmediately: true
+                )
+                NSLog("📐 [HOST] Posted containerSizeChanged: tab=%@, size=%.0fx%.0f", String(tabId.prefix(8)), newSize.width, newSize.height)
+            }
         } else {
-            fputs("⚠️ [HOST] Cannot send containerSizeChanged - no tabId (coordinator=\(coordinator != nil))\n", stderr)
+            NSLog("⚠️ [HOST] Cannot send containerSizeChanged - no tabId (coordinator=%d)", coordinator != nil ? 1 : 0)
         }
         fflush(stderr)
     }

@@ -105,8 +105,9 @@ private class ResizableContainerView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         // Filter out sizes that are likely canvas-scaled
         // Only accept sizes from Host's containerSizeChanged or tabConfig
-        // Heuristic: if size is larger than 2000 in either dimension, it's probably scaled
-        let isLikelyScaled = newSize.width > 2000 || newSize.height > 2000
+        // Heuristic: if size is larger than 3000 in either dimension, it's probably scaled
+        // (Retina displays can have viewport sizes up to ~2500, but canvas-scaled is 3000+)
+        let isLikelyScaled = newSize.width > 3000 || newSize.height > 3000
 
         if isLikelyScaled {
             debugLog("[\(tabId?.prefix(8) ?? "?")] Container setFrameSize: \(newSize) (REJECTED - likely canvas-scaled)")
@@ -515,15 +516,17 @@ private class ServiceReactNativeHost {
         }
         debugLog("📡 Setting up Metro config listener")
 
-        // Listen for container size changes from Host (backup for ViewBridge's private API)
+        // Listen for container size changes from Host (service-specific notification)
+        let containerSizeName = "com.canvas.containerSizeChanged.\(serviceBundleId)"
         containerSizeObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.canvas.containerSizeChanged"),
+            forName: NSNotification.Name(containerSizeName),
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            debugLog("📐 [SERVICE] Received containerSizeChanged notification: \(notification.userInfo ?? [:])")
             self?.handleContainerSizeChanged(notification)
         }
-        debugLog("📡 Setting up container size listener")
+        debugLog("📡 Setting up container size listener: \(containerSizeName)")
 
         // Listen for explicit tabId binding from Host (connection-aware)
         let bindName = "com.canvas.bindTab.\(serviceBundleId)"
@@ -563,10 +566,15 @@ private class ServiceReactNativeHost {
     }
 
     private func handleContainerSizeChanged(_ notification: Notification) {
+        // Parse JSON string format (for cross-process compatibility)
         guard let userInfo = notification.userInfo,
-              let tabId = userInfo["tabId"] as? String,
-              let width = userInfo["width"] as? Double,
-              let height = userInfo["height"] as? Double else {
+              let jsonString = userInfo["sizeInfo"] as? String,
+              let jsonData = jsonString.data(using: .utf8),
+              let sizeInfo = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let tabId = sizeInfo["tabId"] as? String,
+              let width = sizeInfo["width"] as? Double,
+              let height = sizeInfo["height"] as? Double else {
+            debugLog("⚠️ handleContainerSizeChanged: failed to parse notification: \(notification.userInfo ?? [:])")
             return
         }
 
