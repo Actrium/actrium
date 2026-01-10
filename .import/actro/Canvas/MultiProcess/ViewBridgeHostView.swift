@@ -592,6 +592,100 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     }
 }
 
+// MARK: - ViewBridge Host View Manager
+
+/// 全局管理 ViewBridgeHostView，避免视图重建时丢失 XPC 连接
+/// 类似 WebViewHolderManager 的模式
+@MainActor
+final class ViewBridgeHostViewManager {
+    static let shared = ViewBridgeHostViewManager()
+    private var hostViews: [UUID: ViewBridgeHostView] = [:]
+
+    private init() {}
+
+    /// Get or create a ViewBridgeHostView for a tab
+    func hostView(for tabId: UUID, serviceBundleIdentifier: String, coordinator: ViewBridgeCoordinator) -> ViewBridgeHostView {
+        if let existing = hostViews[tabId] {
+            // Update coordinator reference
+            existing.coordinator = coordinator
+            coordinator.hostView = existing
+            return existing
+        }
+
+        let new = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: CGSize(width: 1280, height: 720))
+        new.coordinator = coordinator
+        coordinator.hostView = new
+        hostViews[tabId] = new
+        fputs("🏠 ViewBridgeHostViewManager: Created host view for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        return new
+    }
+
+    /// Get existing host view without creating a new one
+    func existingHostView(for tabId: UUID) -> ViewBridgeHostView? {
+        hostViews[tabId]
+    }
+
+    func remove(tabId: UUID) {
+        if let removed = hostViews.removeValue(forKey: tabId) {
+            removed.disconnect()
+            fputs("🏠 ViewBridgeHostViewManager: Removed host view for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        }
+    }
+}
+
+// MARK: - Persistent ViewBridge Representable
+
+/// 持久化的 ViewBridge 视图包装器
+/// 使用容器视图来持久化 ViewBridgeHostView，避免 SwiftUI 重建时丢失
+struct PersistentViewBridgeView: NSViewRepresentable {
+    let tabId: UUID
+    let serviceBundleIdentifier: String
+    let coordinator: ViewBridgeCoordinator
+    let size: CGSize
+
+    func makeNSView(context: Context) -> NSView {
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        container.wantsLayer = true
+
+        // 从 Manager 获取持久化的 ViewBridgeHostView
+        let hostView = ViewBridgeHostViewManager.shared.hostView(
+            for: tabId,
+            serviceBundleIdentifier: serviceBundleIdentifier,
+            coordinator: coordinator
+        )
+
+        hostView.frame = container.bounds
+        hostView.autoresizingMask = [.width, .height]
+        container.addSubview(hostView)
+
+        fputs("🆕 PersistentViewBridgeView.makeNSView: tab=\(tabId.uuidString.prefix(8)), size=\(size)\n", stderr)
+        return container
+    }
+
+    func updateNSView(_ container: NSView, context: Context) {
+        guard size.width > 0 && size.height > 0 else { return }
+
+        let targetFrame = NSRect(origin: .zero, size: size)
+        if container.frame != targetFrame {
+            container.frame = targetFrame
+        }
+
+        // 确保 hostView 有正确的尺寸
+        if let hostView = container.subviews.first as? ViewBridgeHostView {
+            if hostView.frame != targetFrame {
+                hostView.frame = targetFrame
+            }
+            hostView.updateContentSize(size)
+        }
+    }
+
+    static func dismantleNSView(_ container: NSView, coordinator: ()) {
+        // 不从容器移除 hostView - 让它保持在 Manager 中
+        // 下次 makeNSView 时会重用
+        fputs("⚠️ PersistentViewBridgeView.dismantleNSView called (NOT removing from manager)\n", stderr)
+    }
+}
+
 /// SwiftUI wrapper for ViewBridgeHostView
 /// Real Layer: 始终以 viewport size 渲染 RemoteView
 /// 支持从进程池分配独立的 XPC service
@@ -679,12 +773,12 @@ struct ViewBridgeMultiProcessTabView: View {
             // 多进程架构：基于应用指纹分配进程
             // 使用 serviceAllocated 触发 UI 刷新，实际 serviceId 从 coordinator 获取
             if ViewBridgeHostView.isAvailable, serviceAllocated, let serviceId = coordinator.allocatedServiceId {
-                // Real Layer: 始终以 viewport size 渲染，不进行缩放
-                ViewBridgeTabView(
+                // Real Layer: 使用持久化的 ViewBridgeHostView，避免 SwiftUI 重建时丢失 XPC 连接
+                PersistentViewBridgeView(
                     tabId: tab.id,
-                    contentSize: containerSize,
+                    serviceBundleIdentifier: serviceId,
                     coordinator: coordinator,
-                    serviceBundleIdentifier: serviceId
+                    size: containerSize
                 )
                 // 稳定的 id 确保 View 不会因为 containerSize 变化而被重建
                 .id(tab.id)
@@ -693,7 +787,7 @@ struct ViewBridgeMultiProcessTabView: View {
                 .clipped()
                 .onAppear {
                     isLoading = false
-                    fputs("📤 ViewBridgeTabView appeared with service \(serviceId.components(separatedBy: ".").last ?? ""), fingerprint: \(fingerprint.prefix(16))\n", stderr)
+                    fputs("📤 PersistentViewBridgeView appeared with service \(serviceId.components(separatedBy: ".").last ?? ""), fingerprint: \(fingerprint.prefix(16))\n", stderr)
 
                     // 设置 XPC service ready 监听器（如果还没设置）
                     setupXPCReadyListener()
