@@ -217,20 +217,8 @@ struct WorkspaceMainView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
 
-                // Focus 模式下的 React Native 内容层（Real Layer - canvas 变换之外）
-                // 双层架构：Real Layer 始终以 viewport size 渲染，不受 canvas scaleEffect 影响
-                if case .focus(let focusedTabId) = viewModel.canvasMode,
-                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
-                   case .reactNative(let fingerprint) = focusedTab.contentType {
-                    let coordinator = ViewBridgeCoordinatorManager.shared.coordinator(for: focusedTabId)
-                    FocusedReactNativeOverlay(
-                        tab: focusedTab,
-                        fingerprint: fingerprint,
-                        viewportSize: safeViewportSize,
-                        coordinator: coordinator
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
+                // React Native 的 Real Layer 已整合到 TabPanel 中
+                // 不再使用独立的 FocusedReactNativeOverlay，避免 XPC 连接生命周期问题
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
@@ -1785,22 +1773,31 @@ private struct TabPanel: View {
 
             // 多态渲染：根据 contentType 选择渲染引擎
             switch tab.contentType {
-            case .reactNative(_):
-                // React Native 应用 - 双层架构
-                // - Real Layer: FocusedReactNativeOverlay 在 canvas 变换之外（Focus 模式）
-                // - Scale Layer: 此处显示截图缩略图（Overview 模式）
-                if isFocused {
-                    // Focus 模式下，Real Layer 已经在 canvas 外全屏显示
-                    // 这里只显示背景色作为占位
-                    Color(hslString: tab.backgroundColor)
-                } else {
-                    // Overview 模式下，显示截图缩略图
-                    ViewBridgeThumbnailView(
-                        tabId: tab.id,
-                        screenshot: viewBridgeCoordinator.getCachedSnapshot(),
-                        thumbnailSize: CGSize(width: cardWidth, height: cardHeight)
+            case .reactNative(let fingerprint):
+                // React Native 应用 - 单一 ViewBridge 实例策略
+                // ViewBridge 始终存在于 TabPanel 中，避免 XPC 连接生命周期问题
+                // 使用 ZStack + opacity 控制显示，而不是条件渲染
+                ZStack {
+                    // ViewBridge 始终存在（保持 XPC 连接）
+                    // Focus 模式下可见，Overview 模式下隐藏
+                    ViewBridgeMultiProcessTabView(
+                        tab: tab,
+                        fingerprint: fingerprint,
+                        containerSize: viewportSize,
+                        coordinator: viewBridgeCoordinator,
+                        isFocused: isFocused
                     )
                     .id(tab.id)
+                    .opacity(isFocused ? 1.0 : 0.0)
+
+                    // Overview 模式下显示截图缩略图
+                    if !isFocused {
+                        ViewBridgeThumbnailView(
+                            tabId: tab.id,
+                            screenshot: viewBridgeCoordinator.getCachedSnapshot(),
+                            thumbnailSize: CGSize(width: cardWidth, height: cardHeight)
+                        )
+                    }
                 }
 
             case .web(let url):
