@@ -140,17 +140,11 @@ public class ViewBridgeHostView: NSView {
         return currentContentSize
     }
 
-    /// 确保子视图使用 currentContentSize
+    /// Layout handled by Auto Layout constraints
     public override func layout() {
         super.layout()
-        // NSRemoteView 使用 currentContentSize，忽略 SwiftUI 可能设置的其他尺寸
-        if let vc = remoteViewController {
-            let targetFrame = CGRect(origin: .zero, size: currentContentSize)
-            if vc.view.frame != targetFrame {
-                vc.view.frame = targetFrame
-                NSLog("ViewBridgeHostView: layout() -> %.0fx%.0f", currentContentSize.width, currentContentSize.height)
-            }
-        }
+        // NSRemoteView size is managed by Auto Layout constraints
+        // No manual frame setting needed - ViewBridge propagates size to service automatically
     }
 
     /// 接受外部尺寸设置
@@ -252,17 +246,23 @@ public class ViewBridgeHostView: NSView {
 
         let remoteView = vc.view
 
-        // 设置 NSRemoteView 的尺寸为 currentContentSize（视口尺寸）
-        remoteView.translatesAutoresizingMaskIntoConstraints = true
-        remoteView.autoresizingMask = []  // 禁用自动调整，由 layout() 控制
-        remoteView.frame = CGRect(origin: .zero, size: currentContentSize)
-
+        // Use Auto Layout to embed NSRemoteView
+        // Key insight: ViewBridge updates the superview's bounds, so the service's
+        // view (pinned to its superview) will automatically follow size changes.
+        remoteView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(remoteView)
+
+        NSLayoutConstraint.activate([
+            remoteView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            remoteView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            remoteView.topAnchor.constraint(equalTo: topAnchor),
+            remoteView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
 
         // 确保 ViewBridgeHostView 自身也使用正确的尺寸
         super.setFrameSize(currentContentSize)
 
-        NSLog("ViewBridgeHostView: Remote view embedded, size=\(currentContentSize)")
+        NSLog("ViewBridgeHostView: Remote view embedded with Auto Layout constraints, size=\(currentContentSize)")
 
         // 将 Host 侧的 tabId 显式绑定到 Service 连接，避免 FIFO 错绑
         if let tabId = coordinator?.tabId {
@@ -324,58 +324,28 @@ public class ViewBridgeHostView: NSView {
     }
 
     /// 实际应用尺寸更新
+    /// With Auto Layout, ViewBridge automatically propagates size changes to the service.
+    /// The service's ResizableContainerView is pinned to its superview bounds.
     private func applyContentSize(_ newSize: CGSize) {
         lastResizeTime = Date()
         currentContentSize = newSize
 
         fputs("📐 ViewBridgeHostView.applyContentSize: \(newSize)\n", stderr)
-        fflush(stderr)
-
-        // 更新 NSRemoteView 的尺寸
-        if let vc = remoteViewController {
-            let remoteView = vc.view
-
-            // 更新 NSRemoteView 的 frame
-            remoteView.frame = CGRect(origin: .zero, size: newSize)
-
-            fputs("📐 ViewBridgeHostView: remoteView size = \(remoteView.frame.size)\n", stderr)
-
-            // 尝试通过 NSRemoteViewController 的私有方法通知 service 端尺寸变化
-            // 方法1: _setRemoteViewSize:
-            let setRemoteSizeSelector = NSSelectorFromString("_setRemoteViewSize:")
-            fputs("📐 _setRemoteViewSize: responds=\(vc.responds(to: setRemoteSizeSelector))\n", stderr)
-            if vc.responds(to: setRemoteSizeSelector) {
-                vc.perform(setRemoteSizeSelector, with: NSValue(size: newSize))
-            }
-
-            // 方法2: setPreferredContentSize: (标准方法)
-            let setPreferredSelector = NSSelectorFromString("setPreferredContentSize:")
-            fputs("📐 setPreferredContentSize: responds=\(vc.responds(to: setPreferredSelector))\n", stderr)
-            if vc.responds(to: setPreferredSelector) {
-                vc.setValue(NSValue(size: newSize), forKey: "preferredContentSize")
-            }
-
-            // 方法3: 尝试直接发送 remoteViewSizeDidChange: 到 service (通过 NSInvocation)
-            let notifySizeSelector = NSSelectorFromString("_notifyRemoteViewOfSizeChange:")
-            fputs("📐 _notifyRemoteViewOfSizeChange: responds=\(vc.responds(to: notifySizeSelector))\n", stderr)
-            if vc.responds(to: notifySizeSelector) {
-                vc.perform(notifySizeSelector, with: NSValue(size: newSize))
-            }
-
-            fflush(stderr)
-
-            // 强制布局更新
-            remoteView.needsLayout = true
-            remoteView.layoutSubtreeIfNeeded()
-        }
 
         // 通知 intrinsicContentSize 变化并触发重新布局
+        // Auto Layout constraints will propagate the size to NSRemoteView,
+        // which ViewBridge then syncs to the service's superview.
         invalidateIntrinsicContentSize()
         needsLayout = true
 
-        // 备用方案：通过 DistributedNotificationCenter 发送尺寸更新
-        // ViewBridge 的私有 API 不稳定，这个通知作为可靠的备份
-        // 从 coordinator 获取 tabId（如果可用）
+        // Force layout update to propagate size change immediately
+        if let vc = remoteViewController {
+            vc.view.needsLayout = true
+            vc.view.layoutSubtreeIfNeeded()
+        }
+
+        // Backup: Also send via DistributedNotificationCenter
+        // In case the Auto Layout propagation doesn't work in some edge cases
         if let tabId = coordinator?.tabId?.uuidString {
             let sizeInfo: [String: Any] = [
                 "tabId": tabId,
@@ -388,10 +358,8 @@ public class ViewBridgeHostView: NSView {
                 userInfo: sizeInfo,
                 deliverImmediately: true
             )
-            fputs("📐 Posted containerSizeChanged: tabId=\(tabId.prefix(8)), size=\(newSize)\n", stderr)
-        } else {
-            fputs("⚠️ Cannot post containerSizeChanged: coordinator or tabId is nil\n", stderr)
         }
+        fflush(stderr)
     }
 
     private func handleError(_ message: String) {

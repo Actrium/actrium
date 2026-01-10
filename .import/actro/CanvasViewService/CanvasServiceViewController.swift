@@ -49,15 +49,57 @@ private func debugLog(_ message: String) {
 
 /// Container view for each Tab's RCTRootView
 /// ViewBridge automatically syncs Host's NSRemoteView frame here
+/// Key insight: ViewBridge updates the superview's bounds, so we use Auto Layout
+/// to pin this view to the superview and automatically follow size changes.
 private class ResizableContainerView: NSView {
     private var rnView: NSView?
     var onSizeChanged: ((CGSize) -> Void)?
     private var cumulativeMagnification: CGFloat = 0
+    private var superviewFrameObserver: NSObjectProtocol?
 
     /// The tabId this container belongs to (for 1:1:1 mapping)
     var tabId: String?
 
     override var acceptsFirstResponder: Bool { true }
+
+    /// Pin to superview bounds when added to view hierarchy
+    /// This is the key fix: ViewBridge updates superview bounds, and Auto Layout
+    /// propagates the size change to this view automatically.
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        debugLog("[\(tabId?.prefix(8) ?? "?")] viewDidMoveToSuperview: superview=\(String(describing: superview))")
+
+        // Clean up old observer
+        if let observer = superviewFrameObserver {
+            NotificationCenter.default.removeObserver(observer)
+            superviewFrameObserver = nil
+        }
+
+        guard let superview = superview else { return }
+
+        debugLog("[\(tabId?.prefix(8) ?? "?")] Superview bounds: \(superview.bounds.size)")
+
+        // Pin to superview bounds using Auto Layout
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            leadingAnchor.constraint(equalTo: superview.leadingAnchor),
+            trailingAnchor.constraint(equalTo: superview.trailingAnchor),
+            topAnchor.constraint(equalTo: superview.topAnchor),
+            bottomAnchor.constraint(equalTo: superview.bottomAnchor)
+        ])
+
+        // Also observe superview frame changes as backup
+        superview.postsFrameChangedNotifications = true
+        superviewFrameObserver = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification,
+            object: superview,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, let superview = self.superview else { return }
+            debugLog("[\(self.tabId?.prefix(8) ?? "?")] Superview frame changed: \(superview.bounds.size)")
+            self.needsLayout = true
+        }
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
         debugLog("[\(tabId?.prefix(8) ?? "?")] Container setFrameSize: \(newSize)")
@@ -96,6 +138,12 @@ private class ResizableContainerView: NSView {
             cumulativeMagnification = 0
         default:
             break
+        }
+    }
+
+    deinit {
+        if let observer = superviewFrameObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 }
