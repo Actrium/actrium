@@ -264,6 +264,13 @@ public class ViewBridgeHostView: NSView {
 
         NSLog("ViewBridgeHostView: Remote view embedded, size=\(currentContentSize)")
 
+        // 将 Host 侧的 tabId 显式绑定到 Service 连接，避免 FIFO 错绑
+        if let tabId = coordinator?.tabId {
+            fputs("🔗 ViewBridgeHostView: remote VC received for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        } else {
+            fputs("⚠️ ViewBridgeHostView: cannot bind tabId (nil)\n", stderr)
+        }
+
         // 通知连接已建立
         onConnectionEstablished?()
     }
@@ -490,6 +497,7 @@ final class ViewBridgeCoordinator {
     var xpcServiceReady: Bool = false
     var hasConnection: Bool = false
     var xpcReadyObserver: NSObjectProtocol?
+    var connectionCreatedObserver: NSObjectProtocol?
     var tabId: UUID?
 
     func captureSnapshot() -> NSImage? {
@@ -501,6 +509,10 @@ final class ViewBridgeCoordinator {
         if let observer = xpcReadyObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
             xpcReadyObserver = nil
+        }
+        if let observer = connectionCreatedObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            connectionCreatedObserver = nil
         }
         // 断开 ViewBridge 连接
         hostView?.disconnect()
@@ -695,6 +707,9 @@ struct ViewBridgeMultiProcessTabView: View {
             if !serviceAllocated {
                 serviceAllocated = true
             }
+            if let serviceId = coordinator.allocatedServiceId {
+                setupConnectionBindingListener(for: serviceId)
+            }
             return
         }
 
@@ -703,6 +718,9 @@ struct ViewBridgeMultiProcessTabView: View {
             fputs("📦 Tab \(tab.id.uuidString.prefix(8)) allocated service: \(coordinator.allocatedServiceId ?? "nil") for fingerprint: \(fingerprint.prefix(16))\n", stderr)
             // 触发 SwiftUI 重新渲染
             serviceAllocated = true
+            if let serviceId = coordinator.allocatedServiceId {
+                setupConnectionBindingListener(for: serviceId)
+            }
         } catch let error as XPCServicePoolError {
             errorMessage = error.localizedDescription
             fputs("❌ Tab \(tab.id.uuidString.prefix(8)) allocation failed: \(error.localizedDescription)\n", stderr)
@@ -763,6 +781,35 @@ struct ViewBridgeMultiProcessTabView: View {
 
             coordinator.xpcServiceReady = true
             sendTabConfigIfReady()
+        }
+    }
+
+    /// 监听 service 端的 connectionCreated，并发送 tabId->internalId 显式绑定
+    private func setupConnectionBindingListener(for serviceId: String) {
+        guard coordinator.connectionCreatedObserver == nil else { return }
+
+        coordinator.connectionCreatedObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.xpcConnectionCreated"),
+            object: nil,
+            queue: .main
+        ) { [coordinator, tabId = tab.id] notification in
+            guard let info = notification.userInfo,
+                  let bundleId = info["bundleId"] as? String,
+                  bundleId == serviceId,
+                  let internalId = info["internalId"] as? String else { return }
+
+            let bindName = "com.canvas.bindTab.\(serviceId)"
+            let bindInfo: [String: Any] = [
+                "tabId": tabId.uuidString,
+                "internalId": internalId
+            ]
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name(bindName),
+                object: nil,
+                userInfo: bindInfo,
+                deliverImmediately: true
+            )
+            fputs("🔗 [HOST] Bound tab \(tabId.uuidString.prefix(8)) to connection \(internalId.prefix(8)) via \(bindName)\n", stderr)
         }
     }
 

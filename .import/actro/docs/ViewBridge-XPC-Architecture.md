@@ -137,7 +137,111 @@ viewportSize.height / cardHeight = scale
 }
 ```
 
-## 5. 启动时序 (关键)
+## 5. ViewBridge 连接时序图
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SwiftUI as SwiftUI View<br/>(TabPanel)
+    participant VBMPV as ViewBridgeMulti<br/>ProcessTabView
+    participant VBTabView as ViewBridgeTabView<br/>(NSViewRepresentable)
+    participant VBHostView as ViewBridgeHostView<br/>(NSView)
+    participant RemoteVC as NSRemoteView<br/>Controller
+    participant DNC as Distributed<br/>NotificationCenter
+    participant ServiceVC as CanvasService<br/>ViewController
+    participant Container as Resizable<br/>ContainerView
+    participant RNHost as ServiceReact<br/>NativeHost
+    participant RCTRoot as RCTRootView
+
+    Note over SwiftUI,RCTRoot: === 阶段 1: ViewBridge 连接建立 ===
+
+    SwiftUI->>VBMPV: init(tab, fingerprint, containerSize)
+    VBMPV->>VBMPV: allocateServiceIfNeeded()
+    VBMPV->>VBTabView: init(tabId, contentSize, coordinator)
+    VBTabView->>VBHostView: makeNSView() → init(bundleId, initialContentSize)
+    VBHostView->>VBHostView: setupView() 显示 Loading...
+
+    VBHostView->>RemoteVC: requestViewController:<br/>fromServiceWithBundleIdentifier:
+    Note right of RemoteVC: ViewBridge 私有 API<br/>请求远程 ViewController
+
+    RemoteVC-->>ServiceVC: launchd 启动 XPC Service
+    ServiceVC->>ServiceVC: loadView() 被调用
+    ServiceVC->>Container: 创建 ResizableContainerView(1280x720)
+    ServiceVC->>RNHost: registerPendingEntry(internalId)
+
+    Note over ServiceVC,RNHost: Service 端等待 Tab config
+
+    ServiceVC->>DNC: post(xpcServiceReady, bundleId)
+    DNC-->>VBMPV: 收到 xpcServiceReady
+    VBMPV->>VBMPV: xpcServiceReady = true
+
+    RemoteVC-->>VBHostView: connectionHandler(viewController, nil)
+    VBHostView->>VBHostView: handleConnectionResult()
+    VBHostView->>VBHostView: 嵌入 remoteView, 移除 Loading
+    VBHostView-->>VBMPV: onConnectionEstablished()
+    VBMPV->>VBMPV: hasConnection = true
+
+    Note over SwiftUI,RCTRoot: === 阶段 2: Metro Config & Tab Config ===
+
+    VBMPV->>VBMPV: sendTabConfigIfReady()<br/>检查 hasConnection && xpcServiceReady
+    VBMPV->>DNC: post(metro.config, host, port)
+    DNC-->>RNHost: 收到 metro.config
+    RNHost->>RNHost: MetroConfig.update()
+    RNHost->>RNHost: ensureBridgeCreated()<br/>创建 RCTBridge
+
+    VBMPV->>DNC: post(tabConfig.{bundleId}, config JSON)
+    DNC-->>RNHost: 收到 tabConfig
+    RNHost->>RNHost: assignPendingEntry(tabId)<br/>检查 pendingSizeChanges
+    RNHost->>RCTRoot: createRootView(initialProperties)
+    RCTRoot->>Container: addSubview(rootView)
+    Container->>Container: setRNView(rootView)
+
+    Note over SwiftUI,RCTRoot: === 阶段 3: 尺寸同步机制 ===
+
+    rect rgb(255, 240, 240)
+        Note over VBHostView,Container: 方式 A: ViewBridge 私有 API (不稳定)
+        VBHostView->>RemoteVC: _setRemoteViewSize:(newSize)
+        RemoteVC-->>ServiceVC: remoteViewSizeDidChange:(size)
+        ServiceVC->>Container: setFrameSize(size)
+        Container->>RCTRoot: frame = bounds
+    end
+
+    rect rgb(240, 255, 240)
+        Note over VBHostView,Container: 方式 B: DistributedNotificationCenter (备用)
+        VBHostView->>DNC: post(containerSizeChanged, tabId, width, height)
+        DNC-->>RNHost: 收到 containerSizeChanged
+        RNHost->>RNHost: handleContainerSizeChanged()
+        alt tabRegistry 中有 entry
+            RNHost->>Container: setFrameSize(newSize)
+            RNHost->>RCTRoot: updateContainerSize()
+        else entry 尚未注册
+            RNHost->>RNHost: 缓存到 pendingSizeChanges
+        end
+    end
+
+    Note over SwiftUI,RCTRoot: === 阶段 4: 渲染与显示 ===
+
+    RCTRoot->>RCTRoot: React Native 渲染内容
+    RCTRoot-->>Container: 内容显示在 Container 中
+    Container-->>ServiceVC: Service 端视图更新
+
+    Note over RemoteVC,ServiceVC: ViewBridge 跨进程<br/>图像传输 (IOSurface)
+
+    ServiceVC-->>RemoteVC: 渲染内容传输到 Host
+    RemoteVC-->>VBHostView: NSRemoteView 显示内容
+    VBHostView-->>VBTabView: NSView 内容更新
+    VBTabView-->>SwiftUI: SwiftUI 视图显示
+
+    Note over SwiftUI,RCTRoot: === 问题区域: Focus 模式 ===
+
+    rect rgb(255, 200, 200)
+        Note over SwiftUI,VBHostView: Canvas Transform 应用 scaleEffect(3.154)
+        SwiftUI->>SwiftUI: .scaleEffect(scale) 放大 TabPanel
+        Note right of SwiftUI: ⚠️ scaleEffect 对 NSViewRepresentable<br/>不生效，导致 ViewBridge<br/>内容显示异常
+    end
+```
+
+## 6. 启动时序 (关键)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -382,18 +486,10 @@ if case .focus(let tabId) = mode, case .reactNative = tab.contentType {
 可能 Canvas Transform（通过 CALayer transform）影响了 NSRemoteView 的显示。
 
 **调试方向**:
+
 - 检查 NSRemoteView 的 layer 属性
 - 尝试禁用 Canvas Transform 看是否能正常显示
 - 研究 ViewBridge 私有 API 中的尺寸同步机制
-
-#### 方向 3: 放弃 Canvas Transform，使用布局切换
-
-完全重构，不使用 Canvas Transform 实现 Focus/Overview 切换：
-
-- Overview: TabPanel 以 cardSize 布局
-- Focus: TabPanel 以 viewportSize 布局，其他 Tab 隐藏
-
-**挑战**: 需要重写大量动画和交互逻辑
 
 ### 8.8 关键日志
 
@@ -472,3 +568,40 @@ log show --predicate 'eventMessage contains "Metro"' --last 1m
 *文档更新时间: 2026-01-09*
 *基于 Canvas 项目实际运行日志分析*
 *第 8 节"未解决的问题"记录了 Focus 模式渲染问题的调试过程*
+
+## 11. 新问题：Remote / Local 视图错位
+
+### 11.1 现象（对应截图）
+
+- 工具栏标题和侧边栏高亮显示的是 `History / Bookmarks`，但右侧 ViewBridge 画面仍然是 Start Page 的卡片栅格。
+- 切换到 Bookmarks 时右侧几乎空白，只剩 “0 bookmarks” 底栏；切换到 History 时偶尔又变成 Start Page 的空状态大卡。
+- 说明 Host 侧认为当前 Tab A，但 Service 侧给到的画面是 Tab B（或旧连接）。
+
+### 11.2 根因分析
+
+1) **Tab 配置路由缺少“连接维度”**  
+   - Host → Service 的配置广播只有 `com.canvas.tabConfig.<bundleId>`，未携带哪个 NSRemoteViewController/连接在请求该配置。  
+   - Service 侧用 `assignPendingEntry(tabId:)` 的 FIFO 策略把收到的 `tabId` 绑定到“最老的 pending entry”——即最早 `loadView` 的连接。  
+   - 当同一进程槽（slot0）里同时有 StartPage/Bookmarks/History 三个连接时，只要“连接建立顺序”和“配置发送顺序”不一致，就会把 TabA 的 config 绑定到 TabB 的远程视图，出现内容错位。
+
+2) **Service 端未清理旧 entry，容易复用到错误连接**  
+   - `registerCanvasServiceViewController` 里定义了 dealloc block，但没有 `class_addMethod` 注册，`unregisterEntry` 从未被调用。  
+   - SwiftUI 若重建 Host 侧 ViewBridge（例如切换模式或尺寸变化导致视图替换），旧的 entry 仍在 `tabRegistry`，新的 pending entry 拿不到 `tabId` 绑定，导致新连接渲染不到内容或拿到旧内容。
+
+3) **xpcServiceReady 只在首个 tabConfig 前重发**（次要但加剧混乱）  
+   - Service 在收到首个 tabConfig 后停止重发 ready。后续新建的 coordinator 如果错过 ready，`xpcServiceReady=false` 就不会再触发 sendTabConfig，仍然保留旧画面。
+
+### 11.3 建议的修复方向
+
+- **引入 connectionId（或直接用 tabId）做一对一绑定**  
+  - Host 在请求 NSRemoteViewController 时生成 `connectionId` 并存到 coordinator；Service 的 `loadView` 将内部 `internalId` 回传或暴露 setter（例如新增 `setHostTabId:` 方法），让 Host 用「连接专属」的通知名或方法调用把 `tabId` 绑定到正确的 entry，而不是 FIFO。
+- **修复 Service 清理逻辑**  
+  - 正式注册 dealloc / disconnect 钩子调用 `unregisterEntry(internalId:)`，确保关闭/重建连接时不会遗留旧 entry。  
+  - 在 `remoteViewSizeDidChange:` 等回调里也可检测连接断开并清理。
+- **Ready 广播幂等化**  
+  - 要么在 Host 侧：如果 `hasConnection && !xpcServiceReady` 超时仍未 true，就主动发送 config；要么在 Service 侧：始终在新连接建立时再发一次 `xpcServiceReady`（带 bundleId 和 connectionId）。  
+  - 这样新 coordinator 不会卡在旧画面。
+- **临时缓解方案**  
+  - 若短期内不做 connectionId，至少避免多个 Tab 共享同一 service：系统页可以临时拆分到独立 slot，减少 FIFO 误绑概率（代价：更多进程）。
+
+> 调试建议：在 Service `assignPendingEntry`、`handleTabConfigNotification` 里打印 `connection(internalId) -> tabId -> title` 的绑定关系，观察是否出现 “tabId 绑定到非当前 NSRemoteViewController” 的情况；同时打印 `pendingEntries.count / tabRegistry.keys`，确认清理是否生效。

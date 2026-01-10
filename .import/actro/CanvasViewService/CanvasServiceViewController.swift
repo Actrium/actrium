@@ -274,6 +274,50 @@ private class ServiceReactNativeHost {
         debugLog("Shared RCTBridge created")
     }
 
+    /// Bind host tabId to a specific pending entry (by internalId) to avoid FIFO 误绑
+    func bind(hostTabId: String, toInternalId internalId: String) {
+        var pendingSize: CGSize?
+
+        registryLock.lock()
+        if let size = pendingSizeChanges.removeValue(forKey: hostTabId) {
+            pendingSize = size
+        }
+
+        // Prefer pending entry that matches the connection internalId
+        if let entry = pendingEntries.removeValue(forKey: internalId) {
+            entry.assignTabId(hostTabId)
+            tabRegistry[hostTabId] = entry
+            registryLock.unlock()
+
+            debugLog("[\(hostTabId.prefix(8))] Bound to connection \(internalId.prefix(8)), registry count: \(tabRegistry.count), pending count: \(pendingEntries.count)")
+            if let size = pendingSize {
+                debugLog("[\(hostTabId.prefix(8))] 📐 Applying cached container size after bind: \(size)")
+                entry.containerSize = size
+                entry.hasPendingSizeApplied = true
+                entry.containerView?.setFrameSize(size)
+                updateDimensionsForEntry(entry)
+            }
+            return
+        }
+
+        // Already registered? Update tabId on container for consistency
+        if let entry = tabRegistry[hostTabId] {
+            registryLock.unlock()
+            entry.assignTabId(hostTabId)
+            if let size = pendingSize {
+                debugLog("[\(hostTabId.prefix(8))] 📐 Applying cached size to existing entry: \(size)")
+                entry.containerSize = size
+                entry.hasPendingSizeApplied = true
+                entry.containerView?.setFrameSize(size)
+                updateDimensionsForEntry(entry)
+            }
+            return
+        }
+
+        registryLock.unlock()
+        debugLog("⚠️ [\(hostTabId.prefix(8))] bindHostTabId: no pending entry for internalId \(internalId.prefix(8))")
+    }
+
     // MARK: - Tab Registry (1:1:1 Mapping)
 
     /// Register a new Tab's ViewController (initially as pending)
@@ -369,6 +413,7 @@ private class ServiceReactNativeHost {
 
     private var metroConfigObserver: NSObjectProtocol?
     private var containerSizeObserver: NSObjectProtocol?
+    private var bindTabObserver: NSObjectProtocol?
     private var readyNotificationTimer: Timer?
     private var hasReceivedTabConfig = false
 
@@ -406,6 +451,20 @@ private class ServiceReactNativeHost {
             self?.handleContainerSizeChanged(notification)
         }
         debugLog("📡 Setting up container size listener")
+
+        // Listen for explicit tabId binding from Host (connection-aware)
+        let bindName = "com.canvas.bindTab.\(serviceBundleId)"
+        bindTabObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(bindName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let info = notification.userInfo,
+                  let tabId = info["tabId"] as? String,
+                  let internalId = info["internalId"] as? String else { return }
+            self?.bind(hostTabId: tabId, toInternalId: internalId)
+        }
+        debugLog("📡 Setting up bindTab listener: \(bindName)")
 
         // Notify Host that this service is ready (with retry until tab config received)
         postXPCServiceReady()
@@ -695,8 +754,25 @@ public func registerCanvasServiceViewController() {
         return
     }
 
-    // Add instance variable to store tabId
-    class_addIvar(newClass, "_tabId", MemoryLayout<NSString>.size, UInt8(log2(Double(MemoryLayout<NSString>.alignment))), "@")
+    // Add instance variables to store connection/internalId and host tabId
+    class_addIvar(newClass, "_tabId", MemoryLayout<NSString>.size, UInt8(log2(Double(MemoryLayout<NSString>.alignment))), "@")  // internalId
+    class_addIvar(newClass, "_hostTabId", MemoryLayout<NSString>.size, UInt8(log2(Double(MemoryLayout<NSString>.alignment))), "@")
+
+    guard let tabIdIvar = class_getInstanceVariable(newClass, "_tabId"),
+          let hostTabIdIvar = class_getInstanceVariable(newClass, "_hostTabId") else {
+        debugLog("⚠️ Failed to get ivars for CanvasServiceViewController")
+        return
+    }
+
+    let logId: (AnyObject) -> String = { self_ in
+        if let host = object_getIvar(self_, hostTabIdIvar) as? NSString {
+            return host as String
+        }
+        if let internalId = object_getIvar(self_, tabIdIvar) as? NSString {
+            return internalId as String
+        }
+        return "?"
+    }
 
     // loadView - creates React Native view for this Tab
     let loadViewBlock: @convention(block) (AnyObject) -> Void = { self_ in
@@ -705,7 +781,8 @@ public func registerCanvasServiceViewController() {
         debugLog("[pending:\(internalId.prefix(8))] loadView called")
 
         // Store internal ID in instance variable (for cleanup on dealloc)
-        object_setIvar(self_, class_getInstanceVariable(type(of: self_) as! AnyClass, "_tabId")!, internalId as NSString)
+        object_setIvar(self_, tabIdIvar, internalId as NSString)
+        object_setIvar(self_, hostTabIdIvar, nil)
 
         // Initialize shared host (creates shared RCTBridge)
         let host = ServiceReactNativeHost.shared
@@ -722,6 +799,17 @@ public func registerCanvasServiceViewController() {
         let entry = host.registerPendingEntry(internalId: internalId, containerView: containerView)
         entry.containerSize = CGSize(width: initialWidth, height: initialHeight)
 
+        // Inform Host about this connection so it can bind tabId -> internalId explicitly
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name("com.canvas.xpcConnectionCreated"),
+            object: nil,
+            userInfo: [
+                "bundleId": host.serviceBundleId,
+                "internalId": internalId
+            ],
+            deliverImmediately: true
+        )
+
         self_.setValue(containerView, forKey: "view")
 
         let targetSize = NSSize(width: initialWidth, height: initialHeight)
@@ -737,10 +825,7 @@ public func registerCanvasServiceViewController() {
 
     // remoteViewSizeDidChange: - ViewBridge calls this when host resizes
     let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { self_, size in
-        guard let tabIdObj = object_getIvar(self_, class_getInstanceVariable(type(of: self_) as! AnyClass, "_tabId")!) as? NSString else {
-            return
-        }
-        let tabId = tabIdObj as String
+        let tabId = logId(self_)
         debugLog("[\(tabId.prefix(8))] remoteViewSizeDidChange: \(size)")
 
         if let view = self_.value(forKey: "view") as? NSView {
@@ -761,6 +846,18 @@ public func registerCanvasServiceViewController() {
     // makesExplicitResizeRequests
     let makesExplicitBlock: @convention(block) (AnyObject) -> Bool = { _ in true }
     class_addMethod(newClass, NSSelectorFromString("makesExplicitResizeRequests"), imp_implementationWithBlock(makesExplicitBlock), "B@:")
+
+    // setHostTabId: - Host 显式绑定 tabId 到当前连接，避免 FIFO 错绑
+    let setHostTabIdBlock: @convention(block) (AnyObject, NSString) -> Void = { self_, hostTabIdObj in
+        let hostTabId = hostTabIdObj as String
+        guard !hostTabId.isEmpty else { return }
+
+        object_setIvar(self_, hostTabIdIvar, hostTabIdObj)
+        let internalId = (object_getIvar(self_, tabIdIvar) as? NSString) as String? ?? hostTabId
+        debugLog("[\(hostTabId.prefix(8))] setHostTabId for connection \(internalId.prefix(8))")
+        ServiceReactNativeHost.shared.bind(hostTabId: hostTabId, toInternalId: internalId)
+    }
+    class_addMethod(newClass, NSSelectorFromString("setHostTabId:"), imp_implementationWithBlock(setHostTabIdBlock), "v@:@")
 
     // setPreferredContentSize:
     let setPreferredSizeBlock: @convention(block) (AnyObject, NSSize) -> Void = { self_, size in
@@ -783,16 +880,31 @@ public func registerCanvasServiceViewController() {
     }
     class_addMethod(newClass, NSSelectorFromString("remoteViewSize"), imp_implementationWithBlock(remoteViewSizeBlock), "{CGSize=dd}@:")
 
-    // dealloc - cleanup when ViewController is destroyed
-    let deallocBlock: @convention(block) (AnyObject) -> Void = { self_ in
-        if let tabIdObj = object_getIvar(self_, class_getInstanceVariable(type(of: self_) as! AnyClass, "_tabId")!) as? NSString {
+    // disconnect - called by Host when tearing down connection
+    let disconnectBlock: @convention(block) (AnyObject) -> Void = { self_ in
+        if let tabIdObj = object_getIvar(self_, tabIdIvar) as? NSString {
             let internalId = tabIdObj as String
-            debugLog("[\(internalId.prefix(8))] ViewController dealloc")
+            debugLog("[\(logId(self_).prefix(8))] disconnect called, internal \(internalId.prefix(8))")
             ServiceReactNativeHost.shared.unregisterEntry(internalId: internalId)
         }
     }
-    // Note: dealloc needs special handling, using release pattern instead
-    // For now, rely on notification or explicit cleanup
+    class_addMethod(newClass, NSSelectorFromString("disconnect"), imp_implementationWithBlock(disconnectBlock), "v@:")
+
+    // dealloc - cleanup when ViewController is destroyed
+    let deallocBlock: @convention(block) (AnyObject) -> Void = { self_ in
+        if let tabIdObj = object_getIvar(self_, tabIdIvar) as? NSString {
+            let internalId = tabIdObj as String
+            debugLog("[\(logId(self_).prefix(8))] ViewController dealloc (internal \(internalId.prefix(8)))")
+            ServiceReactNativeHost.shared.unregisterEntry(internalId: internalId)
+        }
+        if let superClass = class_getSuperclass(object_getClass(self_)),
+           let superMethod = class_getMethodImplementation(superClass, NSSelectorFromString("dealloc")) {
+            var superStruct = objc_super(receiver: Unmanaged.passUnretained(self_), super_class: superClass)
+            let superDealloc = unsafeBitCast(superMethod, to: (@convention(c) (UnsafeMutablePointer<objc_super>, Selector) -> Void).self)
+            superDealloc(&superStruct, NSSelectorFromString("dealloc"))
+        }
+    }
+    class_addMethod(newClass, NSSelectorFromString("dealloc"), imp_implementationWithBlock(deallocBlock), "v@:")
 
     objc_registerClassPair(newClass)
     debugLog("CanvasServiceViewController class registered")

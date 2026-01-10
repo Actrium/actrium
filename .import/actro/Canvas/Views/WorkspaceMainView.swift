@@ -49,6 +49,7 @@ struct WorkspaceMainView: View {
     @State private var findResultCount: Int = 0
     @State private var findCurrentIndex: Int = 0
     @FocusState private var isFindBarFocused: Bool
+    @StateObject private var viewBridgeCoordinatorManager = ViewBridgeCoordinatorManager()
 
     // 根据搜索文本过滤 tabs
     private var filteredTabs: [Tab] {
@@ -134,6 +135,7 @@ struct WorkspaceMainView: View {
                     mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
                     viewportSize: safeViewportSize,
+                    viewBridgeCoordinatorManager: viewBridgeCoordinatorManager,
                     bookmarkVM: bookmarkVM,
                     historyVM: historyVM,
                     // ━━━━ Mode Switching Trigger #3: 卡片点击 ━━━━
@@ -975,6 +977,7 @@ private struct TabGridView: View {
     let mode: CanvasMode
     let showNewTabButton: Bool  // 是否显示 [+] 按钮（搜索过滤时隐藏）
     let viewportSize: CGSize    // 视口尺寸，用于 RN 渲染
+    let viewBridgeCoordinatorManager: ViewBridgeCoordinatorManager
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var historyVM: HistoryViewModel
     let onSelectTab: (UUID) -> Void
@@ -990,9 +993,6 @@ private struct TabGridView: View {
     // 固定的槽位索引（拖动开始时记录，不随 tabs 交换而改变）
     @State private var dragSourceSlotIndexFixed: Int?  // 拖动源槽位 a
     @State private var dropTargetSlotIndexFixed: Int?  // 目标槽位 b
-
-    // ViewBridge coordinators 管理器：确保在 mode 切换时不会被重建
-    @StateObject private var coordinatorManager = ViewBridgeCoordinatorManager()
 
     // 构建显示项列表（按位置排序）
     // [+] 按钮紧随最后一个 tab（位置 = tabs.count）
@@ -1054,7 +1054,7 @@ private struct TabGridView: View {
                         isHovering: isHovering,
                         isSwapping: isSwapping,
                         viewportSize: viewportSize,
-                        viewBridgeCoordinator: coordinatorManager.coordinator(for: tab.id),
+                        viewBridgeCoordinator: viewBridgeCoordinatorManager.coordinator(for: tab.id),
                         bookmarkVM: bookmarkVM,
                         historyVM: historyVM,
                         onSelect: {
