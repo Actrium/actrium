@@ -218,14 +218,18 @@ struct WorkspaceMainView: View {
                 }
 
                 // Focus 模式下的 ViewBridge 内容层（canvas 变换之外）
-                // 暂时禁用 - 由 TabPanel 内部渲染，后续优化
-                /*
+                // scaleEffect 对 NSViewRepresentable 不生效，所以 ViewBridge 需要独立渲染
                 if case .focus(let focusedTabId) = viewModel.canvasMode,
                    let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
                    case .reactNative(let fingerprint) = focusedTab.contentType {
-                    // ViewBridge overlay disabled - using TabPanel rendering instead
+                    FocusedReactNativeOverlay(
+                        tab: focusedTab,
+                        fingerprint: fingerprint,
+                        viewportSize: safeViewportSize,
+                        coordinator: viewBridgeCoordinatorManager.coordinator(for: focusedTabId)
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
-                */
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
@@ -407,11 +411,18 @@ struct WorkspaceMainView: View {
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 从 Focus 切换到 Overview 时，先截图当前页面
             if case .focus(let focusedTabId) = oldValue, case .overview = newValue {
-                // 检查是否为 web tab
-                if let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
-                   case .web = tab.contentType {
-                    Task {
-                        await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
+                if let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }) {
+                    switch tab.contentType {
+                    case .web:
+                        // Web tab: 异步截图
+                        Task {
+                            await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
+                        }
+                    case .reactNative:
+                        // ViewBridge tab: 同步截图
+                        ViewBridgeHostViewManager.shared.takeSnapshot(for: focusedTabId)
+                    case .empty:
+                        break
                     }
                 }
             }
@@ -1774,27 +1785,39 @@ private struct TabPanel: View {
             switch tab.contentType {
             case .reactNative(let fingerprint):
                 // React Native 应用 - 使用 ViewBridge XPC
-                // Remote View 始终使用 viewportSize（稳定尺寸，不随模式切换变化）
-                // Overview 模式：对 ViewBridge 应用 scaleEffect 缩小到卡片尺寸
-                // Focus 模式：抵消 canvas scale，让 ViewBridge 正好填满 viewport
-                //
-                // 原理：ViewBridge 在 canvas 内部，canvas 有 scaleEffect(currentScale)
-                // - Focus 模式：currentScale = viewportSize/cardSize（放大）
-                //   我们需要 inverseScale = 1/currentScale 来抵消
-                // - Overview 模式：cardSize/viewportSize 让 ViewBridge 缩小到卡片尺寸
-                let viewBridgeScale = isFocused ? (1.0 / currentScale) : (renderSize.width / viewportSize.width)
-                ViewBridgeMultiProcessTabView(
-                    tab: tab,
-                    fingerprint: fingerprint,
-                    containerSize: viewportSize,  // 始终使用 viewport 尺寸
-                    coordinator: viewBridgeCoordinator,
-                    isFocused: isFocused
-                )
-                .id(tab.id)
-                .frame(width: viewportSize.width, height: viewportSize.height)  // 先设置原始大小
-                .scaleEffect(viewBridgeScale, anchor: .topLeading)  // 再缩放
-                .frame(width: renderSize.width, height: renderSize.height)  // 最后裁剪到卡片大小
-                .clipped()
+                // 采用与 WebView 相同的双层架构：
+                // - Overview 模式：在 canvas 内显示截图（可以被 scaleEffect 正确缩放）
+                // - Focus 模式：由 FocusedReactNativeOverlay 在 canvas 外独立渲染
+                //   (因为 scaleEffect 对 NSViewRepresentable 不生效)
+                ZStack {
+                    // 背景色
+                    Color(nsColor: .windowBackgroundColor)
+
+                    if !isFocused {
+                        // Overview 模式：显示截图
+                        if let snapshot = ViewBridgeHostViewManager.shared.snapshot(for: tab.id) {
+                            Image(nsImage: snapshot)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: renderSize.width, height: renderSize.height)
+                                .clipped()
+                        } else {
+                            // 没有截图时显示占位符
+                            VStack {
+                                Image(systemName: "app.fill")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.secondary)
+                                Text(fingerprint.prefix(16) + "...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    // Focus 模式：canvas 内不渲染任何内容
+                    // 由 FocusedReactNativeOverlay 在 canvas 外渲染
+                }
+                .frame(width: renderSize.width, height: renderSize.height)
 
             case .web(let url):
                 // Web 内容 - 使用 WKWebView
