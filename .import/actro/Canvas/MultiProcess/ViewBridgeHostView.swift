@@ -43,6 +43,11 @@ public class ViewBridgeHostView: NSView {
     /// Callback when XPC connection is established
     public var onConnectionEstablished: (() -> Void)?
 
+    /// Check if remote view controller is connected (public accessor)
+    public var hasRemoteViewController: Bool {
+        remoteViewController != nil
+    }
+
     /// Reference to coordinator for lifecycle management
     /// When SwiftUI replaces the view, we only disconnect if coordinator.hostView still points to us
     weak var coordinator: ViewBridgeCoordinator?
@@ -559,6 +564,9 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     // 不使用 @Published - coordinators 的变化不需要触发 UI 更新
     private var coordinators: [UUID: ViewBridgeCoordinator] = [:]
 
+    /// Singleton for global access (used in mode switching)
+    static let shared = ViewBridgeCoordinatorManager()
+
     func coordinator(for tabId: UUID) -> ViewBridgeCoordinator {
         if let existing = coordinators[tabId] {
             return existing
@@ -572,6 +580,369 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     func removeCoordinator(for tabId: UUID) {
         if coordinators.removeValue(forKey: tabId) != nil {
             fputs("🗑️ CoordinatorManager: removed coordinator for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        }
+    }
+}
+
+// MARK: - ViewBridge Host View Manager
+
+/// 全局管理 ViewBridgeHostView 实例，避免视图重建时丢失 XPC 连接
+/// 类似 WebViewHolderManager 的模式
+@MainActor
+final class ViewBridgeHostViewManager {
+    static let shared = ViewBridgeHostViewManager()
+    private var hostViews: [UUID: ViewBridgeHostView] = [:]
+    /// Cached snapshots for Overview mode
+    private var snapshots: [UUID: NSImage] = [:]
+
+    private init() {}
+
+    /// Get or create a ViewBridgeHostView for a tab
+    func hostView(for tabId: UUID, serviceBundleIdentifier: String, coordinator: ViewBridgeCoordinator, contentSize: CGSize) -> ViewBridgeHostView {
+        if let existing = hostViews[tabId] {
+            // Update coordinator reference
+            existing.coordinator = coordinator
+            coordinator.hostView = existing
+            return existing
+        }
+
+        let new = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: contentSize)
+        new.coordinator = coordinator
+        coordinator.hostView = new
+        hostViews[tabId] = new
+        fputs("🏠 ViewBridgeHostViewManager: Created host view for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        return new
+    }
+
+    /// Get existing host view without creating a new one
+    func existingHostView(for tabId: UUID) -> ViewBridgeHostView? {
+        hostViews[tabId]
+    }
+
+    func remove(tabId: UUID) {
+        if let removed = hostViews.removeValue(forKey: tabId) {
+            removed.disconnect()
+            fputs("🏠 ViewBridgeHostViewManager: Removed host view for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        }
+        snapshots.removeValue(forKey: tabId)
+    }
+
+    // MARK: - Snapshot Management
+
+    /// Take a snapshot of the ViewBridge content for Overview mode
+    func takeSnapshot(for tabId: UUID) {
+        guard let hostView = hostViews[tabId] else { return }
+        if let snapshot = hostView.captureSnapshot() {
+            snapshots[tabId] = snapshot
+            fputs("📸 ViewBridgeHostViewManager: Snapshot captured for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        }
+    }
+
+    /// Get cached snapshot for Overview mode
+    func snapshot(for tabId: UUID) -> NSImage? {
+        snapshots[tabId]
+    }
+}
+
+// MARK: - Persistent ViewBridge View
+
+/// 持久化的 ViewBridge 视图包装器
+/// 使用 ViewBridgeHostViewManager 获取持久化的 hostView，避免 SwiftUI 重建时丢失 XPC 连接
+/// 类似 PersistentWebView 的模式
+struct PersistentViewBridgeView: NSViewRepresentable {
+    let tabId: UUID
+    let serviceBundleIdentifier: String
+    let coordinator: ViewBridgeCoordinator
+    let size: CGSize
+
+    func makeNSView(context: Context) -> NSView {
+        // 使用容器视图确保正确布局
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        container.wantsLayer = true
+
+        // 从 Manager 获取持久化的 hostView
+        let hostView = ViewBridgeHostViewManager.shared.hostView(
+            for: tabId,
+            serviceBundleIdentifier: serviceBundleIdentifier,
+            coordinator: coordinator,
+            contentSize: size
+        )
+
+        // 设置连接建立回调
+        hostView.onConnectionEstablished = { [weak coordinator] in
+            coordinator?.onConnectionEstablished?()
+        }
+
+        hostView.frame = container.bounds
+        hostView.autoresizingMask = [.width, .height]
+        container.addSubview(hostView)
+
+        fputs("🆕 PersistentViewBridgeView.makeNSView: tab=\(tabId.uuidString.prefix(8)), size=\(size)\n", stderr)
+        return container
+    }
+
+    func updateNSView(_ container: NSView, context: Context) {
+        guard size.width > 0 && size.height > 0 else { return }
+
+        let targetFrame = NSRect(origin: .zero, size: size)
+        if container.frame != targetFrame {
+            container.frame = targetFrame
+        }
+
+        // 更新 hostView 尺寸
+        if let hostView = container.subviews.first as? ViewBridgeHostView {
+            if hostView.frame != targetFrame {
+                hostView.frame = targetFrame
+            }
+            hostView.updateContentSize(size)
+        }
+    }
+
+    static func dismantleNSView(_ container: NSView, coordinator: ()) {
+        // 不移除 hostView - 它由 Manager 持有
+        // 下次 makeNSView 时会重用同一个 hostView
+        fputs("⚠️ PersistentViewBridgeView.dismantleNSView called (hostView retained by manager)\n", stderr)
+    }
+}
+
+// MARK: - Nine Grid Debug Overlay
+
+/// 九宫格调试视图 - 用于可视化视口位置
+struct NineGridDebugOverlay: View {
+    let size: CGSize
+
+    var body: some View {
+        ZStack {
+            // 网格线
+            Canvas { context, canvasSize in
+                let cellWidth = canvasSize.width / 3
+                let cellHeight = canvasSize.height / 3
+
+                // 绘制竖线
+                for i in 1..<3 {
+                    let x = cellWidth * CGFloat(i)
+                    var path = Path()
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: canvasSize.height))
+                    context.stroke(path, with: .color(.red.opacity(0.5)), lineWidth: 2)
+                }
+
+                // 绘制横线
+                for i in 1..<3 {
+                    let y = cellHeight * CGFloat(i)
+                    var path = Path()
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: canvasSize.width, y: y))
+                    context.stroke(path, with: .color(.red.opacity(0.5)), lineWidth: 2)
+                }
+
+                // 绘制边框
+                let borderPath = Path(CGRect(x: 1, y: 1, width: canvasSize.width - 2, height: canvasSize.height - 2))
+                context.stroke(borderPath, with: .color(.red), lineWidth: 2)
+
+                // 中心十字
+                let centerX = canvasSize.width / 2
+                let centerY = canvasSize.height / 2
+                var crossPath = Path()
+                crossPath.move(to: CGPoint(x: centerX - 20, y: centerY))
+                crossPath.addLine(to: CGPoint(x: centerX + 20, y: centerY))
+                crossPath.move(to: CGPoint(x: centerX, y: centerY - 20))
+                crossPath.addLine(to: CGPoint(x: centerX, y: centerY + 20))
+                context.stroke(crossPath, with: .color(.blue), lineWidth: 2)
+            }
+
+            // 格子编号
+            VStack(spacing: 0) {
+                ForEach(0..<3) { row in
+                    HStack(spacing: 0) {
+                        ForEach(0..<3) { col in
+                            let index = row * 3 + col + 1
+                            Text("\(index)")
+                                .font(.system(size: 48, weight: .bold))
+                                .foregroundColor(.red.opacity(0.3))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                }
+            }
+
+            // 尺寸信息
+            VStack {
+                HStack {
+                    Spacer()
+                    Text(String(format: "%.0f × %.0f", size.width, size.height))
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.red.opacity(0.7))
+                        .cornerRadius(4)
+                        .padding(8)
+                }
+                Spacer()
+            }
+        }
+        .allowsHitTesting(false) // 不阻止交互
+    }
+}
+
+// MARK: - Focused React Native Overlay
+
+/// Focus 模式下的全屏 ViewBridge 内容层
+/// 在 canvas scaleEffect 之外渲染，避免 scaleEffect 对 NSViewRepresentable 不生效的问题
+/// 类似 FocusedWebOverlay 的模式
+struct FocusedReactNativeOverlay: View {
+    let tab: Tab
+    let fingerprint: String
+    let viewportSize: CGSize
+    let coordinator: ViewBridgeCoordinator
+
+    // XPC 状态
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @State private var serviceAllocated = false
+
+    // 调试模式开关
+    private static let showDebugGrid = true
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if ViewBridgeHostView.isAvailable, serviceAllocated, let serviceId = coordinator.allocatedServiceId {
+                PersistentViewBridgeView(
+                    tabId: tab.id,
+                    serviceBundleIdentifier: serviceId,
+                    coordinator: coordinator,
+                    size: viewportSize
+                )
+                .id(tab.id)
+                .frame(width: viewportSize.width, height: viewportSize.height)
+                .onAppear {
+                    isLoading = false
+                    fputs("📤 FocusedReactNativeOverlay: PersistentViewBridgeView appeared\n", stderr)
+
+                    // 检查连接是否已建立（hostView 可能已复用且已连接）
+                    if coordinator.hostView?.hasRemoteViewController == true && !coordinator.hasConnection {
+                        fputs("📤 FocusedReactNativeOverlay: Connection already established, triggering callback\n", stderr)
+                        coordinator.hasConnection = true
+                        sendTabConfigIfReady()
+                    }
+                }
+            } else if !ViewBridgeHostView.isAvailable {
+                Text("ViewBridge not available")
+                    .foregroundColor(.secondary)
+            } else if let error = errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+            } else {
+                ProgressView("Allocating process...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            // 九宫格调试 overlay
+            if Self.showDebugGrid {
+                NineGridDebugOverlay(size: viewportSize)
+            }
+        }
+        .frame(width: viewportSize.width, height: viewportSize.height)
+        .onAppear {
+            coordinator.tabId = tab.id
+            // 先设置回调，再分配服务（确保回调在连接建立前设置好）
+            setupConnectionCallback()
+            allocateServiceIfNeeded()
+        }
+    }
+
+    private func allocateServiceIfNeeded() {
+        if coordinator.allocatedServiceId != nil {
+            if !serviceAllocated { serviceAllocated = true }
+            // 已分配，设置 XPC ready listener
+            setupXPCReadyListener()
+            return
+        }
+
+        do {
+            let serviceId = try XPCServicePool.shared.allocateService(
+                for: tab.id,
+                fingerprint: fingerprint
+            )
+            coordinator.allocatedServiceId = serviceId
+            serviceAllocated = true
+            fputs("📦 FocusedReactNativeOverlay: Allocated service \(serviceId) for tab \(tab.id.uuidString.prefix(8))\n", stderr)
+            // 新分配，设置 XPC ready listener
+            setupXPCReadyListener()
+        } catch let error as XPCServicePoolError {
+            errorMessage = error.localizedDescription
+            fputs("❌ FocusedReactNativeOverlay: \(error.localizedDescription)\n", stderr)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func setupXPCReadyListener() {
+        guard coordinator.xpcReadyObserver == nil,
+              let serviceId = coordinator.allocatedServiceId else { return }
+
+        let notificationName = "com.canvas.xpcServiceReady.\(serviceId)"
+        coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(notificationName),
+            object: nil,
+            queue: .main
+        ) { _ in
+            coordinator.xpcServiceReady = true
+            fputs("📤 FocusedReactNativeOverlay: XPC service ready for tab \(tab.id.uuidString.prefix(8))\n", stderr)
+            sendTabConfigIfReady()
+        }
+    }
+
+    private func setupConnectionCallback() {
+        coordinator.onConnectionEstablished = {
+            coordinator.hasConnection = true
+            fputs("📤 FocusedReactNativeOverlay: Connection established for tab \(tab.id.uuidString.prefix(8))\n", stderr)
+            sendTabConfigIfReady()
+        }
+
+        // 检查连接是否已建立
+        if coordinator.hostView?.hasRemoteViewController == true && !coordinator.hasConnection {
+            coordinator.onConnectionEstablished?()
+        }
+    }
+
+    private func sendTabConfigIfReady() {
+        guard coordinator.hasConnection && coordinator.xpcServiceReady,
+              let serviceId = coordinator.allocatedServiceId else { return }
+
+        // 发送 tab config - 使用与 ViewBridgeMultiProcessTabView 相同的格式
+        var tabConfig: [String: Any] = [
+            "tabId": tab.id.uuidString,
+            "title": tab.title,
+            "backgroundColor": tab.backgroundColor,
+            "containerWidth": viewportSize.width,
+            "containerHeight": viewportSize.height
+        ]
+
+        // Add optional scripts
+        if let unifiedScript = tab.unifiedScript {
+            tabConfig["unifiedScript"] = unifiedScript
+        }
+        if let systemTabType = tab.systemTabType {
+            tabConfig["systemAppType"] = systemTabType.rawValue
+        }
+
+        if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            let notificationName = "com.canvas.tabConfig.\(serviceId)"
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name(notificationName),
+                object: nil,
+                userInfo: ["config": jsonString],
+                deliverImmediately: true
+            )
+            fputs("📤 FocusedReactNativeOverlay: Sent tab config for \(tab.id.uuidString.prefix(8))\n", stderr)
+        }
+
+        // 发送容器尺寸
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            coordinator.sendContainerSizeNotification(size: viewportSize)
         }
     }
 }
