@@ -594,41 +594,65 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
 
 // MARK: - ViewBridge Host View Manager
 
-/// 全局管理 ViewBridgeHostView，避免视图重建时丢失 XPC 连接
+/// 持久化的 ViewBridge 容器，包含 hostView
+/// 将容器也保存在 Manager 中，避免 SwiftUI 销毁容器导致 hostView 变成"孤儿"
+final class ViewBridgeContainer: NSView {
+    let hostView: ViewBridgeHostView
+
+    init(hostView: ViewBridgeHostView, size: CGSize) {
+        self.hostView = hostView
+        super.init(frame: NSRect(origin: .zero, size: size))
+        wantsLayer = true
+
+        hostView.frame = bounds
+        hostView.autoresizingMask = [.width, .height]
+        addSubview(hostView)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+/// 全局管理 ViewBridgeHostView 和容器，避免视图重建时丢失 XPC 连接
 /// 类似 WebViewHolderManager 的模式
+/// 关键改进：将容器也保存在 Manager 中，避免 hostView 变成"孤儿"导致 ViewBridge 断开
 @MainActor
 final class ViewBridgeHostViewManager {
     static let shared = ViewBridgeHostViewManager()
-    private var hostViews: [UUID: ViewBridgeHostView] = [:]
+    private var containers: [UUID: ViewBridgeContainer] = [:]
 
     private init() {}
 
-    /// Get or create a ViewBridgeHostView for a tab
-    func hostView(for tabId: UUID, serviceBundleIdentifier: String, coordinator: ViewBridgeCoordinator) -> ViewBridgeHostView {
-        if let existing = hostViews[tabId] {
+    /// Get or create a ViewBridgeContainer for a tab
+    /// 返回整个容器，而不仅仅是 hostView
+    func container(for tabId: UUID, serviceBundleIdentifier: String, coordinator: ViewBridgeCoordinator, size: CGSize) -> ViewBridgeContainer {
+        if let existing = containers[tabId] {
             // Update coordinator reference
-            existing.coordinator = coordinator
-            coordinator.hostView = existing
+            existing.hostView.coordinator = coordinator
+            coordinator.hostView = existing.hostView
             return existing
         }
 
-        let new = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: CGSize(width: 1280, height: 720))
-        new.coordinator = coordinator
-        coordinator.hostView = new
-        hostViews[tabId] = new
-        fputs("🏠 ViewBridgeHostViewManager: Created host view for tab \(tabId.uuidString.prefix(8))\n", stderr)
-        return new
+        let hostView = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: size)
+        hostView.coordinator = coordinator
+        coordinator.hostView = hostView
+
+        let container = ViewBridgeContainer(hostView: hostView, size: size)
+        containers[tabId] = container
+        fputs("🏠 ViewBridgeHostViewManager: Created container for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        return container
     }
 
     /// Get existing host view without creating a new one
     func existingHostView(for tabId: UUID) -> ViewBridgeHostView? {
-        hostViews[tabId]
+        containers[tabId]?.hostView
     }
 
     func remove(tabId: UUID) {
-        if let removed = hostViews.removeValue(forKey: tabId) {
-            removed.disconnect()
-            fputs("🏠 ViewBridgeHostViewManager: Removed host view for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        if let removed = containers.removeValue(forKey: tabId) {
+            removed.hostView.disconnect()
+            fputs("🏠 ViewBridgeHostViewManager: Removed container for tab \(tabId.uuidString.prefix(8))\n", stderr)
         }
     }
 }
@@ -636,7 +660,10 @@ final class ViewBridgeHostViewManager {
 // MARK: - Persistent ViewBridge Representable
 
 /// 持久化的 ViewBridge 视图包装器
-/// 使用容器视图来持久化 ViewBridgeHostView，避免 SwiftUI 重建时丢失
+/// 使用双层容器模式：
+/// - Wrapper (NSView): 由 SwiftUI 管理，可以被销毁
+/// - Container (ViewBridgeContainer): 由 Manager 持久化，永不销毁
+/// - HostView (ViewBridgeHostView): 始终是 Container 的子视图，永不变成"孤儿"
 struct PersistentViewBridgeView: NSViewRepresentable {
     let tabId: UUID
     let serviceBundleIdentifier: String
@@ -644,45 +671,53 @@ struct PersistentViewBridgeView: NSViewRepresentable {
     let size: CGSize
 
     func makeNSView(context: Context) -> NSView {
-        let container = NSView(frame: NSRect(origin: .zero, size: size))
-        container.wantsLayer = true
+        // 创建一个 wrapper 视图，它会被 SwiftUI 管理
+        let wrapper = NSView(frame: NSRect(origin: .zero, size: size))
+        wrapper.wantsLayer = true
 
-        // 从 Manager 获取持久化的 ViewBridgeHostView
-        let hostView = ViewBridgeHostViewManager.shared.hostView(
+        // 从 Manager 获取持久化的 container（包含 hostView）
+        let container = ViewBridgeHostViewManager.shared.container(
             for: tabId,
             serviceBundleIdentifier: serviceBundleIdentifier,
-            coordinator: coordinator
+            coordinator: coordinator,
+            size: size
         )
 
-        hostView.frame = container.bounds
-        hostView.autoresizingMask = [.width, .height]
-        container.addSubview(hostView)
+        // 将 container 添加到 wrapper
+        // 当 wrapper 被销毁时，container 只是从 wrapper 移除，但仍保存在 Manager 中
+        container.frame = wrapper.bounds
+        container.autoresizingMask = [.width, .height]
+        wrapper.addSubview(container)
 
         fputs("🆕 PersistentViewBridgeView.makeNSView: tab=\(tabId.uuidString.prefix(8)), size=\(size)\n", stderr)
-        return container
+        return wrapper
     }
 
-    func updateNSView(_ container: NSView, context: Context) {
+    func updateNSView(_ wrapper: NSView, context: Context) {
         guard size.width > 0 && size.height > 0 else { return }
 
         let targetFrame = NSRect(origin: .zero, size: size)
-        if container.frame != targetFrame {
-            container.frame = targetFrame
+        if wrapper.frame != targetFrame {
+            wrapper.frame = targetFrame
         }
 
-        // 确保 hostView 有正确的尺寸
-        if let hostView = container.subviews.first as? ViewBridgeHostView {
-            if hostView.frame != targetFrame {
-                hostView.frame = targetFrame
+        // 确保 container 和 hostView 有正确的尺寸
+        if let container = wrapper.subviews.first as? ViewBridgeContainer {
+            if container.frame != targetFrame {
+                container.frame = targetFrame
             }
-            hostView.updateContentSize(size)
+            if container.hostView.frame != targetFrame {
+                container.hostView.frame = targetFrame
+            }
+            container.hostView.updateContentSize(size)
         }
     }
 
-    static func dismantleNSView(_ container: NSView, coordinator: ()) {
-        // 不从容器移除 hostView - 让它保持在 Manager 中
-        // 下次 makeNSView 时会重用
-        fputs("⚠️ PersistentViewBridgeView.dismantleNSView called (NOT removing from manager)\n", stderr)
+    static func dismantleNSView(_ wrapper: NSView, coordinator: ()) {
+        // wrapper 被销毁时，container 会从 wrapper 移除
+        // 但 container 仍保存在 Manager 中，hostView 仍是 container 的子视图
+        // 因此 hostView 永远不会变成"孤儿"，XPC 连接不会断开
+        fputs("⚠️ PersistentViewBridgeView.dismantleNSView: wrapper destroyed, container stays in manager\n", stderr)
     }
 }
 
