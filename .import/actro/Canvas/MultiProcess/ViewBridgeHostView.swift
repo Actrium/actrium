@@ -844,6 +844,18 @@ struct ViewBridgeMultiProcessTabView: View {
                         sendTabConfigToService()
                     }
                 }
+                .onChange(of: containerSize) { oldSize, newSize in
+                    // containerSize 变化时重新发送 tabConfig（确保 Service 获得正确尺寸）
+                    // 这处理了初始 viewportSize 为 (1,1) 然后变为正确值的情况
+                    guard newSize.width > 10 && newSize.height > 10 else {
+                        fputs("📐 [HOST] containerSize changed but still invalid: \(newSize)\n", stderr)
+                        return
+                    }
+                    fputs("📐 [HOST] containerSize changed: \(oldSize) -> \(newSize), hasConnection=\(coordinator.hasConnection), xpcReady=\(coordinator.xpcServiceReady)\n", stderr)
+                    if coordinator.hasConnection && coordinator.xpcServiceReady {
+                        sendTabConfigToService()
+                    }
+                }
             } else if !ViewBridgeHostView.isAvailable {
                 unavailableView
             } else if errorMessage != nil {
@@ -901,33 +913,36 @@ struct ViewBridgeMultiProcessTabView: View {
     /// 设置 XPC service ready 通知监听器
     private func setupXPCReadyListener() {
         // 使用 coordinator 的状态，避免重复设置
-        guard coordinator.xpcReadyObserver == nil else { return }
-
-        // Get the allocated service bundle identifier from coordinator
-        guard let expectedBundleId = coordinator.allocatedServiceId else {
-            NSLog("⚠️ [HOST] Cannot setup XPC ready listener - no service allocated")
+        guard coordinator.xpcReadyObserver == nil else {
+            fputs("📡 [HOST] XPC ready listener already setup for tab \(tab.id.uuidString.prefix(8))\n", stderr)
             return
         }
 
-        NSLog("📡 [HOST] Setting up XPC ready listener for tab: %@, expecting bundleId: %@",
-              String(tab.id.uuidString.prefix(8)), expectedBundleId)
+        // Get the allocated service bundle identifier from coordinator
+        guard let expectedBundleId = coordinator.allocatedServiceId else {
+            fputs("⚠️ [HOST] Cannot setup XPC ready listener - no service allocated for tab \(tab.id.uuidString.prefix(8))\n", stderr)
+            return
+        }
+
+        fputs("📡 [HOST] Setting up XPC ready listener for tab: \(tab.id.uuidString.prefix(8)), expecting bundleId: \(expectedBundleId)\n", stderr)
 
         coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.canvas.xpcServiceReady"),
             object: nil,
             queue: .main
-        ) { [coordinator, expectedBundleId] notification in
+        ) { [coordinator, expectedBundleId, tab] notification in
+            let notifyingBundleId = notification.userInfo?["bundleId"] as? String ?? "nil"
+            fputs("📡 [HOST] Received xpcServiceReady: notifyingBundleId=\(notifyingBundleId), expectedBundleId=\(expectedBundleId), match=\(notifyingBundleId == expectedBundleId)\n", stderr)
+
             // Filter by bundle identifier - only accept notifications from our target service
             guard let userInfo = notification.userInfo,
-                  let notifyingBundleId = userInfo["bundleId"] as? String,
-                  notifyingBundleId == expectedBundleId else {
-                NSLog("📡 [HOST] Ignoring xpcServiceReady from different service: %@",
-                      notification.userInfo?["bundleId"] as? String ?? "unknown")
+                  let validBundleId = userInfo["bundleId"] as? String,
+                  validBundleId == expectedBundleId else {
+                fputs("📡 [HOST] Ignoring xpcServiceReady from different service (expected \(expectedBundleId))\n", stderr)
                 return
             }
 
-            NSLog("📡 [HOST] Received xpcServiceReady notification for tab: %@ from: %@",
-                  String(tab.id.uuidString.prefix(8)), notifyingBundleId)
+            fputs("📡 [HOST] ✓ xpcServiceReady matched for tab: \(tab.id.uuidString.prefix(8))\n", stderr)
 
             // Broadcast Metro config to XPC service before it creates RCTBridge
             // This ensures the service uses the correct Metro port
@@ -993,12 +1008,18 @@ struct ViewBridgeMultiProcessTabView: View {
 
     /// 仅当 ViewBridge 连接和 XPC service listener 都就绪时才发送 config
     private func sendTabConfigIfReady() {
-        NSLog("🔍 [HOST] sendTabConfigIfReady: hasConnection=%d, xpcServiceReady=%d", coordinator.hasConnection ? 1 : 0, coordinator.xpcServiceReady ? 1 : 0)
+        fputs("🔍 [HOST] sendTabConfigIfReady: tab=\(tab.id.uuidString.prefix(8)), hasConnection=\(coordinator.hasConnection), xpcServiceReady=\(coordinator.xpcServiceReady), serviceId=\(coordinator.allocatedServiceId ?? "nil"), containerSize=\(containerSize)\n", stderr)
         guard coordinator.hasConnection && coordinator.xpcServiceReady else {
-            NSLog("⏳ [HOST] Not ready yet - waiting for both connection and XPC service ready")
+            fputs("⏳ [HOST] Not ready yet - waiting for both connection(\(coordinator.hasConnection)) and XPC service ready(\(coordinator.xpcServiceReady))\n", stderr)
             return
         }
-        NSLog("✅ [HOST] Both ready, sending tab config now!")
+        // 只有当 containerSize 有效时才发送 tabConfig
+        // 如果 containerSize 无效，onChange(of: containerSize) 会在它变为有效时触发发送
+        guard containerSize.width > 10 && containerSize.height > 10 else {
+            fputs("⏳ [HOST] Connection ready but containerSize invalid (\(containerSize)) - waiting for valid size\n", stderr)
+            return
+        }
+        fputs("✅ [HOST] Both ready and size valid, sending tab config now with containerSize=\(containerSize)\n", stderr)
         sendTabConfigToService()
 
         // After tabConfig is sent, also send current size as containerSizeChanged
@@ -1044,14 +1065,11 @@ struct ViewBridgeMultiProcessTabView: View {
     private func sendTabConfigToService() {
         // Get the target service bundle identifier from coordinator
         guard let targetServiceId = coordinator.allocatedServiceId else {
-            NSLog("⚠️ [HOST] Cannot send tab config - no service allocated")
+            fputs("⚠️ [HOST] Cannot send tab config - no service allocated\n", stderr)
             return
         }
 
-        NSLog("📤 [HOST] Sending tab config to service: tabId=%@, systemTabType=%@, targetService=%@",
-              String(tab.id.uuidString.prefix(8)),
-              tab.systemTabType?.rawValue ?? "nil",
-              targetServiceId)
+        fputs("📤 [HOST] sendTabConfigToService: tabId=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), targetService=\(targetServiceId)\n", stderr)
 
         // Build tab config dictionary
         var tabConfig: [String: Any] = [
