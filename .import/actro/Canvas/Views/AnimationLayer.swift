@@ -58,7 +58,9 @@ final class AnimationLayerNSView: NSView {
         layer?.masksToBounds = true
 
         // Background layer - fills entire window with window background color
+        // Initially hidden, only shown during animation or debug mode
         backgroundLayer.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        backgroundLayer.opacity = 0
         layer?.addSublayer(backgroundLayer)
 
         // Container layer for viewport content + transform
@@ -159,6 +161,10 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
+        // Show background when animating
+        let isAnimating = primaryOpacity > 0 || secondaryOpacity > 0
+        backgroundLayer.opacity = isAnimating ? 1.0 : 0
+
         primaryLayer.opacity = primaryOpacity
         secondaryLayer.opacity = secondaryOpacity
 
@@ -179,6 +185,7 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
+        backgroundLayer.opacity = 0
         primaryLayer.opacity = 0
         secondaryLayer.opacity = 0
         primaryLayer.contents = nil
@@ -198,6 +205,7 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
+        backgroundLayer.opacity = 1.0
         primaryLayer.opacity = 1.0
         secondaryLayer.opacity = 0
 
