@@ -8,12 +8,16 @@ struct ContentView: View {
     @ObservedObject var windowState: WindowStateManager = .shared
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isACTRDropTarget: Bool = false
+    @State private var showAllTabs: Bool = false
 
     var body: some View {
         ZStack {
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
-            } detail: {
+            // 浏览器风格的布局
+            VStack(spacing: 0) {
+                // 顶部导航栏
+                TabNavigationBar(viewModel: viewModel, showAllTabs: $showAllTabs)
+                
+                // 内容区域
                 UnifiedCanvasView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
             }
             // 顶层兜底：拖入 .actr 或目录时创建新标签
