@@ -1,0 +1,1377 @@
+import Foundation
+import UIKit
+import Combine
+import ZIPFoundation
+
+private let logger = AppLogger.viewModel
+
+/// Canvas display mode - stored in ViewModel to survive view recreation
+enum CanvasMode: Equatable {
+    case overview
+    case focus(tabId: UUID)
+
+    var isInFocusMode: Bool {
+        if case .focus = self { return true }
+        return false
+    }
+}
+
+@MainActor
+class BrowserViewModel: ObservableObject {
+    @Published var tabs: [Tab] = []
+    @Published var currentTabId: UUID?
+    // 默认所有标签页左侧面板可见；仅在用户切换时记录覆盖值
+    @Published private var leftPanelVisibility: [UUID: Bool] = [:]
+
+    // MARK: - Tab Groups
+    @Published var tabGroups: [TabGroup] = []
+
+    // 🔴 开发调试：启动时直接进入 Focus 模式
+    @Published var shouldStartInFocusMode: Bool = false
+
+    /// Canvas display mode (Overview vs Focus)
+    /// Stored here to survive view recreation when DevTools layout changes
+    @Published var canvasMode: CanvasMode = .overview
+
+    // MARK: - Grid Slot Position Management
+
+    /// Tab ID → grid slot index mapping
+    @Published var tabSlotPositions: [UUID: Int] = [:]
+
+    /// Toolbar 实际高度（从视图测量得到）
+    @Published var toolbarHeight: CGFloat = 52 // 默认值，会在视图中更新
+    
+    var currentTab: Tab? {
+        guard let currentTabId = currentTabId else { return nil }
+        return tabs.first(where: { $0.id == currentTabId })
+    }
+
+    init() {
+        // 🔴 开发调试：优先加载 counterapp 开发目录作为启动 tab (Focus 模式)
+        let counterAppDevPath = "/Users/example-dev-5/Projects/example-app-2/Subsystem/actr-app-examples/counterapp"
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
+            logger.debug("🔄 [BrowserViewModel] 启动时直接加载 counterapp 开发目录 (Focus 模式)")
+            // Initialize slot positions
+            initializeSlotPositions()
+            // 🔴 Focus 模式：启动时直接进入全屏 Focus 模式
+            shouldStartInFocusMode = true
+
+            // 延迟加载开发目录，避免在 SwiftUI 初始化期间阻塞主线程
+            let url = URL(fileURLWithPath: counterAppDevPath)
+            Task { @MainActor [weak self] in
+                self?.loadFromDevDirectory(url)
+            }
+            return
+        }
+
+        // 如果没有 todoapp.actr，创建默认的 HTML 标签页
+        let defaultTab = Tab(
+            title: "human in loop - coding for ever",
+            htmlContent: """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body {
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                            padding: 40px;
+                            color: #ffffff;
+                            margin: 0;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            min-height: 100vh;
+                            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+                        }
+                        .container {
+                            max-width: 800px;
+                            text-align: center;
+                        }
+                        h1 {
+                            color: #61afef;
+                            font-size: 2.5em;
+                            margin-bottom: 20px;
+                        }
+                        p {
+                            line-height: 1.8;
+                            font-size: 1.2em;
+                            color: #abb2bf;
+                        }
+                        .highlight {
+                            color: #98c379;
+                            font-weight: bold;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>🚀 Welcome to Your Browser</h1>
+                        <p>Human in loop - <span class="highlight">coding forever</span></p>
+                        <p>Click the + button to create a new tab, or explore the bookmarks in the left panel.</p>
+                    </div>
+                </body>
+                </html>
+                """
+        )
+        tabs.append(defaultTab)
+        currentTabId = defaultTab.id
+
+        // Initialize slot positions
+        initializeSlotPositions()
+    }
+    
+    @discardableResult
+    func addNewTab() -> Tab {
+        logger.debug("🆕 开始创建新标签页...")
+        let newTab = Tab(
+            title: "New Tab \(tabs.count + 1)",
+            htmlContent: """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body {
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                            padding: 40px;
+                            color: #ffffff;
+                            margin: 0;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            min-height: 100vh;
+                            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+                        }
+                        .container {
+                            max-width: 800px;
+                            text-align: center;
+                        }
+                        h1 {
+                            color: #e06c75;
+                            font-size: 2.5em;
+                            margin-bottom: 20px;
+                        }
+                        p {
+                            line-height: 1.8;
+                            font-size: 1.2em;
+                            color: #abb2bf;
+                        }
+                        .tab-number {
+                            color: #c678dd;
+                            font-weight: bold;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>📄 New Tab</h1>
+                        <p>This is <span class="tab-number">Tab #\(tabs.count + 1)</span></p>
+                        <p>Start typing in the address bar to navigate to a new page.</p>
+                    </div>
+                </body>
+                </html>
+                """
+        )
+        tabs.append(newTab)
+        currentTabId = newTab.id
+
+        // 简化：直接添加到末尾
+        tabSlotPositions[newTab.id] = tabs.count - 1
+
+        logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
+        return newTab
+    }
+
+    /// Open or switch to a system tab (History, Bookmarks)
+    /// Returns the existing tab if already open, otherwise creates a new one
+    @discardableResult
+    func openSystemTab(_ type: SystemTabType) -> Tab {
+        // Check if a system tab of this type is already open
+        if let existingTab = tabs.first(where: { $0.systemTabType == type }) {
+            // Switch to existing tab
+            currentTabId = existingTab.id
+            canvasMode = .focus(tabId: existingTab.id)
+            logger.debug("🔄 切换到已有系统标签: \(type.title)")
+            return existingTab
+        }
+
+        // Create new system tab
+        let newTab = Tab(
+            title: type.title,
+            systemTabType: type,
+            backgroundColor: "#1e1e1e"  // Dark background for system tabs
+        )
+        tabs.append(newTab)
+        currentTabId = newTab.id
+        tabSlotPositions[newTab.id] = tabs.count - 1
+        canvasMode = .focus(tabId: newTab.id)
+
+        logger.notice(" 已创建系统标签: \(type.title), 位置: \(self.tabs.count - 1)")
+        return newTab
+    }
+
+    func switchToTab(id: UUID) {
+        if let tab = tabs.first(where: { $0.id == id }) {
+            logger.debug("🔄 切换到标签页: \(tab.title)")
+        }
+        currentTabId = id
+        // Ensure canvas is in focus mode when switching tabs
+        canvasMode = .focus(tabId: id)
+    }
+    
+    func closeTab(id: UUID) {
+        // Get the slot position of the tab being closed
+        guard let closedPosition = tabSlotPositions[id] else {
+            logger.warning(" Cannot find tab slot position")
+            return
+        }
+
+        // 如果这是最后一个标签页，关闭后退出应用
+        if tabs.count == 1 {
+            logger.debug("🚪 关闭最后一个标签页，应用即将退出")
+            exit(0)
+        }
+
+        // 如果关闭的是当前标签，切换到相邻标签
+        if currentTabId == id {
+            if let index = tabs.firstIndex(where: { $0.id == id }) {
+                if index > 0 {
+                    currentTabId = tabs[index - 1].id
+                } else if index < tabs.count - 1 {
+                    currentTabId = tabs[index + 1].id
+                }
+            }
+        }
+
+        // 删除标签页
+        tabs.removeAll(where: { $0.id == id })
+
+        // 删除该标签的位置映射
+        tabSlotPositions.removeValue(forKey: id)
+
+        // 重新整理位置：将所有大于被删除位置的位置减1
+        for tabId in tabs.map({ $0.id }) {
+            if let position = tabSlotPositions[tabId], position > closedPosition {
+                tabSlotPositions[tabId] = position - 1
+            }
+        }
+
+        logger.debug("🗑️ 关闭标签页，位置 \(closedPosition)，剩余 \(self.tabs.count) 个标签页")
+    }
+
+    func reorderTab(fromIndex source: Int, toIndex destination: Int) {
+        guard source >= 0, source < tabs.count,
+              destination >= 0, destination <= tabs.count,
+              source != destination else { return }
+
+        let movedTab = tabs.remove(at: source)
+        let insertIndex = destination > source ? destination - 1 : destination
+        tabs.insert(movedTab, at: insertIndex)
+
+        logger.debug("🔄 标签页重排: 从索引 \(source) 移动到 \(insertIndex)")
+    }
+
+    // MARK: - Tab Group Management
+
+    /// Create a new tab group
+    @discardableResult
+    func createGroup(name: String = "", color: TabGroupColor = .gray) -> TabGroup {
+        let group = TabGroup(name: name, color: color)
+        tabGroups.append(group)
+        logger.debug("📁 创建新分组: \(group.id), 名称: \(name.isEmpty ? "(无名称)" : name)")
+        return group
+    }
+
+    /// Move a tab to a specific index in the tabs array
+    /// - Parameters:
+    ///   - tabId: The tab to move
+    ///   - toIndex: The target index (will be clamped to valid range)
+    func moveTab(tabId: UUID, toIndex: Int) {
+        guard let fromIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        guard fromIndex != toIndex else { return }
+
+        let tab = tabs.remove(at: fromIndex)
+        let targetIndex = min(max(0, toIndex), tabs.count)
+        tabs.insert(tab, at: targetIndex)
+        logger.debug("📍 Tab 移动: \(tab.title) 从位置 \(fromIndex) 到 \(targetIndex)")
+    }
+
+    /// Move a tab to a specific position and optionally change its group
+    /// - Parameters:
+    ///   - tabId: The tab to move
+    ///   - toIndex: Target index in the tabs array
+    ///   - groupId: New group ID (nil to ungroup)
+    func moveTabToPosition(tabId: UUID, toIndex: Int, groupId: UUID?) {
+        guard let fromIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+
+        let oldGroupId = tabs[fromIndex].groupId
+
+        // Update group membership
+        tabs[fromIndex].groupId = groupId
+
+        // Move to new position
+        let tab = tabs.remove(at: fromIndex)
+        let targetIndex = min(max(0, toIndex), tabs.count)
+        tabs.insert(tab, at: targetIndex)
+
+        logger.debug("📍 Tab 移动: \(tab.title) 到位置 \(targetIndex), 分组: \(groupId?.uuidString ?? "无")")
+
+        // Clean up old empty group if needed
+        if let oldId = oldGroupId, oldId != groupId {
+            cleanupEmptyGroup(oldId)
+        }
+    }
+
+    /// Insert a tab received from another window (cross-window drag)
+    func insertTabFromCrossWindow(_ tab: Tab, at index: Int, groupId: UUID?) {
+        var newTab = tab
+        newTab.groupId = groupId
+
+        let targetIndex = min(max(0, index), tabs.count)
+        tabs.insert(newTab, at: targetIndex)
+        tabSlotPositions[newTab.id] = tabs.count - 1
+        currentTabId = newTab.id
+
+        logger.notice(" 跨窗口插入 Tab: \(newTab.title) 到位置 \(targetIndex), 分组: \(groupId?.uuidString ?? "无")")
+    }
+
+    /// Remove a tab by ID (used for cross-window drag source cleanup)
+    func removeTabById(_ tabId: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        let tab = tabs[index]
+        let oldGroupId = tab.groupId
+
+        tabs.remove(at: index)
+        tabSlotPositions.removeValue(forKey: tabId)
+
+        // Update current tab if needed
+        if currentTabId == tabId {
+            currentTabId = tabs.first?.id
+        }
+
+        // Clean up empty group
+        if let oldId = oldGroupId {
+            cleanupEmptyGroup(oldId)
+        }
+
+        logger.debug("🗑️ 跨窗口移除 Tab: \(tab.title)")
+    }
+
+    /// Calculate the index for inserting a tab into a group at a specific child position
+    /// - Parameters:
+    ///   - groupId: The target group
+    ///   - childIndex: Position within the group's children (NSOutlineView child index)
+    /// - Returns: The absolute index in the tabs array
+    func indexForInsertingIntoGroup(groupId: UUID, atChildIndex childIndex: Int) -> Int {
+        let groupTabs = tabs.enumerated().filter { $0.element.groupId == groupId }
+        if childIndex >= groupTabs.count {
+            // Insert at end of group
+            if let lastGroupTab = groupTabs.last {
+                return lastGroupTab.offset + 1
+            }
+        } else if childIndex >= 0 && childIndex < groupTabs.count {
+            // Insert before the child at childIndex
+            return groupTabs[childIndex].offset
+        }
+        // Fallback: find first tab of this group
+        return tabs.firstIndex(where: { $0.groupId == groupId }) ?? tabs.count
+    }
+
+    /// Calculate the index for inserting at root level (ungrouped)
+    /// - Parameter rootChildIndex: The child index at root level (from NSOutlineView)
+    /// - Returns: The absolute index in the tabs array
+    func indexForInsertingAtRoot(atChildIndex rootChildIndex: Int) -> Int {
+        let organized = tabsOrganizedByGroups()
+        var currentIndex = 0
+
+        for (i, groupData) in organized.enumerated() {
+            if i == rootChildIndex {
+                return currentIndex
+            }
+            currentIndex += groupData.tabs.count
+        }
+
+        // Insert at end
+        return tabs.count
+    }
+
+    /// Add a tab to a group
+    func addTabToGroup(tabId: UUID, groupId: UUID) {
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        tabs[tabIndex].groupId = groupId
+        logger.debug("📁 Tab \(tabId) 已加入分组 \(groupId)")
+    }
+
+    /// Remove a tab from its group
+    func removeTabFromGroup(tabId: UUID) {
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        let oldGroupId = tabs[tabIndex].groupId
+        tabs[tabIndex].groupId = nil
+        logger.debug("📁 Tab \(tabId) 已从分组 \(String(describing: oldGroupId)) 移除")
+
+        // Clean up empty groups
+        if let groupId = oldGroupId {
+            cleanupEmptyGroup(groupId)
+        }
+    }
+
+    /// Delete a group (removes all tabs from the group but keeps the tabs)
+    func deleteGroup(groupId: UUID) {
+        // Remove all tabs from this group
+        for i in tabs.indices {
+            if tabs[i].groupId == groupId {
+                tabs[i].groupId = nil
+            }
+        }
+        // Remove the group
+        tabGroups.removeAll { $0.id == groupId }
+        logger.debug("🗑️ 分组 \(groupId) 已删除")
+    }
+
+    /// Close all tabs in a group
+    /// - Parameters:
+    ///   - groupId: The group to close
+    ///   - historyVM: Optional HistoryViewModel to record the closed group for restore
+    func closeGroup(groupId: UUID, historyVM: HistoryViewModel? = nil) {
+        guard let group = tabGroups.first(where: { $0.id == groupId }) else { return }
+        let tabsToClose = tabs.filter { $0.groupId == groupId }
+
+        // Record to history before closing
+        if let historyVM = historyVM {
+            historyVM.recordClosedGroup(group, tabs: tabsToClose)
+        }
+
+        for tab in tabsToClose {
+            closeTab(id: tab.id)
+        }
+        // Remove the group
+        tabGroups.removeAll { $0.id == groupId }
+        logger.debug("🗑️ 分组 \(groupId) 及其所有 Tab 已关闭")
+    }
+
+    /// Restore a group from history
+    func restoreGroup(from historyGroup: HistoryGroup) {
+        // Create a new group with the same properties
+        let newGroup = createGroup(name: historyGroup.name, color: historyGroup.color)
+
+        // Restore each tab in the group
+        for historyTab in historyGroup.tabs {
+            if let appURL = historyTab.appURL {
+                // Import the ACTR package
+                importACTRPackageToGroup(from: appURL, groupId: newGroup.id)
+            }
+        }
+
+        logger.debug("♻️ 已恢复分组: \(historyGroup.name.isEmpty ? "Unnamed" : historyGroup.name) 包含 \(historyGroup.tabs.count) 个 Tab")
+    }
+
+    /// Import ACTR package and add to a specific group
+    private func importACTRPackageToGroup(from fileURL: URL, groupId: UUID) {
+        let resolvedURL = fileURL.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
+            logger.error(" 找不到 .actr 文件：\(resolvedURL.path)")
+            return
+        }
+
+        // Check if it's a directory (dev mode) or archive
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
+
+        let rootDir: URL
+        var tempDir: URL? = nil
+
+        if isDirectory.boolValue {
+            // Directory mode - use directly
+            rootDir = resolvedURL
+            tempDir = nil
+        } else {
+            // Archive mode - extract to temp
+            let temp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: temp)
+            } catch {
+                logger.error(" [restoreGroup] .actr 装载失败：\(error.localizedDescription)")
+                return
+            }
+            rootDir = temp
+            tempDir = temp
+        }
+
+        // Mark as read to silence "written to, but never read" warnings.
+        if tempDir != nil { }
+
+        do {
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+            let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
+
+            let guestScript = readGuestScript(fromRoot: rootDir)
+            var unifiedScript: String? = nil
+            if let unifiedFileName = manifestInfo.unifiedScript {
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
+            }
+
+            var leftPanelScript: String? = nil
+            var rightPanelScript: String? = nil
+            if let leftFileName = manifestInfo.leftPanelScript {
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
+            }
+            if let rightFileName = manifestInfo.rightPanelScript {
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
+            }
+
+            // Create tab with groupId
+            let newTab = Tab(
+                title: tabTitle,
+                url: resolvedURL,
+                groupId: groupId,
+                guestScript: guestScript,
+                leftPanelScript: leftPanelScript,
+                rightPanelScript: rightPanelScript,
+                unifiedScript: unifiedScript,
+                contractName: manifestInfo.contractName,
+                contractVersion: manifestInfo.contractVersion,
+                permissions: manifestInfo.permissions,
+                leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
+                rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+            )
+            tabs.append(newTab)
+            tabSlotPositions[newTab.id] = tabs.count - 1
+            leftPanelVisibility[newTab.id] = newTab.leftPanelDefaultVisible
+            logger.notice(" [restoreGroup] 已加载 .actr 到分组: \(tabTitle)")
+
+        } catch {
+            logger.error(" [restoreGroup] .actr 装载失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// Update group properties
+    func updateGroup(groupId: UUID, name: String? = nil, color: TabGroupColor? = nil, isCollapsed: Bool? = nil) {
+        guard let index = tabGroups.firstIndex(where: { $0.id == groupId }) else { return }
+        if let name = name {
+            tabGroups[index].name = name
+        }
+        if let color = color {
+            tabGroups[index].color = color
+        }
+        if let isCollapsed = isCollapsed {
+            tabGroups[index].isCollapsed = isCollapsed
+        }
+        logger.debug("📝 分组 \(groupId) 已更新")
+    }
+
+    /// Toggle group collapsed state
+    func toggleGroupCollapsed(groupId: UUID) {
+        guard let index = tabGroups.firstIndex(where: { $0.id == groupId }) else { return }
+        tabGroups[index].isCollapsed.toggle()
+        logger.debug("📁 分组 \(groupId) 折叠状态: \(self.tabGroups[index].isCollapsed)")
+    }
+
+    /// Get group for a tab
+    func group(for tabId: UUID) -> TabGroup? {
+        guard let tab = tabs.first(where: { $0.id == tabId }),
+              let groupId = tab.groupId else { return nil }
+        return tabGroups.first { $0.id == groupId }
+    }
+
+    /// Get all tabs in a group
+    func tabs(in groupId: UUID) -> [Tab] {
+        return tabs.filter { $0.groupId == groupId }
+    }
+
+    /// Get tabs organized by group while maintaining original tab order
+    /// Groups appear at the position of their first member tab
+    func tabsOrganizedByGroups() -> [TabGroupWithTabs] {
+        var result: [TabGroupWithTabs] = []
+        var processedGroupIds: Set<UUID> = []
+        var currentUngroupedTabs: [Tab] = []
+
+        for tab in tabs {
+            if let groupId = tab.groupId {
+                // Flush any pending ungrouped tabs first
+                if !currentUngroupedTabs.isEmpty {
+                    result.append(TabGroupWithTabs(group: nil, tabs: currentUngroupedTabs))
+                    currentUngroupedTabs = []
+                }
+
+                // If this is the first tab of this group, add the whole group
+                if !processedGroupIds.contains(groupId) {
+                    processedGroupIds.insert(groupId)
+                    if let group = tabGroups.first(where: { $0.id == groupId }) {
+                        // Get all tabs in this group (maintaining their relative order)
+                        let groupTabs = tabs.filter { $0.groupId == groupId }
+                        result.append(TabGroupWithTabs(group: group, tabs: groupTabs))
+                    }
+                }
+                // Skip - already added with group
+            } else {
+                // Ungrouped tab - collect them
+                currentUngroupedTabs.append(tab)
+            }
+        }
+
+        // Flush remaining ungrouped tabs
+        if !currentUngroupedTabs.isEmpty {
+            result.append(TabGroupWithTabs(group: nil, tabs: currentUngroupedTabs))
+        }
+
+        return result
+    }
+
+    /// Clean up empty group (called after removing a tab from a group)
+    private func cleanupEmptyGroup(_ groupId: UUID) {
+        let hasTabsInGroup = tabs.contains { $0.groupId == groupId }
+        if !hasTabsInGroup {
+            tabGroups.removeAll { $0.id == groupId }
+            logger.debug("🧹 空分组 \(groupId) 已自动删除")
+        }
+    }
+
+    /// Create a group from selected tabs
+    func createGroupFromTabs(_ tabIds: [UUID], name: String = "", color: TabGroupColor = .gray) {
+        let group = createGroup(name: name, color: color)
+        for tabId in tabIds {
+            addTabToGroup(tabId: tabId, groupId: group.id)
+        }
+    }
+
+    // MARK: - Grid Slot Position Methods
+
+    /// Initialize slot positions for all tabs
+    func initializeSlotPositions() {
+        for (index, tab) in tabs.enumerated() {
+            tabSlotPositions[tab.id] = index
+        }
+        logger.debug("📍 Initialized slot positions: \(self.tabs.count) tabs")
+    }
+
+    /// Swap slot positions between two tabs
+    func swapSlotPositions(tabId1: UUID?, tabId2: UUID?) {
+        guard let id1 = tabId1, let id2 = tabId2 else {
+            logger.warning(" Cannot swap: need two valid tab IDs")
+            return
+        }
+
+        guard let pos1 = tabSlotPositions[id1],
+              let pos2 = tabSlotPositions[id2] else {
+            logger.warning(" Cannot swap: slot position not found")
+            return
+        }
+
+        tabSlotPositions[id1] = pos2
+        tabSlotPositions[id2] = pos1
+        logger.debug("🔄 Swapped slot positions: \(pos1) ↔ \(pos2)")
+    }
+
+    /// Get tabs sorted by their slot position
+    func tabsSortedBySlotPosition() -> [(tab: Tab, position: Int)] {
+        return tabs.compactMap { tab in
+            guard let position = tabSlotPositions[tab.id] else { return nil }
+            return (tab, position)
+        }.sorted { $0.position < $1.position }
+    }
+    
+    func updateCurrentTabTitle(_ title: String) {
+        guard let currentTabId = currentTabId,
+              let index = tabs.firstIndex(where: { $0.id == currentTabId }) else { return }
+        tabs[index].title = title
+    }
+
+    func closeCurrentTab() {
+        guard let id = currentTabId else { return }
+        closeTab(id: id)
+    }
+
+    /// Reload the current tab by re-reading its source .actr package
+    func reloadCurrentTab() {
+        guard let id = currentTabId,
+              let index = tabs.firstIndex(where: { $0.id == id }) else {
+            logger.warning("⚠️ [reloadCurrentTab] 无法刷新：没有当前 tab")
+            return
+        }
+
+        logger.notice("🔄 [reloadCurrentTab] 开始刷新 tab: \(self.tabs[index].title), reloadNonce: \(self.tabs[index].reloadNonce)")
+
+        // 如果没有源 URL，只增加 reloadNonce 强制 RN 重新挂载
+        guard let sourceURL = tabs[index].url else {
+            logger.notice("🔄 [reloadCurrentTab] 无源 URL，仅强制 RN remount")
+            tabs[index].reloadNonce &+= 1
+            objectWillChange.send()
+            return
+        }
+
+        logger.debug("🔄 [reloadCurrentTab] 有源 URL，重新读取包")
+
+        // Re-read the .actr package
+        let resolvedURL = sourceURL.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
+            logger.error(" [reloadCurrentTab] 源文件不存在：\(resolvedURL.path)")
+            return
+        }
+
+        // Check if it's a directory (dev mode) or archive
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
+
+        let rootDir: URL
+
+        if isDirectory.boolValue {
+            // Directory mode - use directly
+            rootDir = resolvedURL
+        } else {
+            // Archive mode - extract to temp
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: tempDir)
+            } catch {
+                logger.error(" [reloadCurrentTab] 解压失败：\(error.localizedDescription)")
+                return
+            }
+            rootDir = tempDir
+        }
+
+        do {
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+
+            // Read scripts
+            var unifiedScript: String? = nil
+            if let unifiedFileName = manifestInfo.unifiedScript {
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
+            }
+
+            var leftPanelScript: String? = nil
+            var rightPanelScript: String? = nil
+            if let leftFileName = manifestInfo.leftPanelScript {
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
+            }
+            if let rightFileName = manifestInfo.rightPanelScript {
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
+            }
+
+            let guestScript = readGuestScript(fromRoot: rootDir)
+
+            // Update the tab in place
+            tabs[index].unifiedScript = unifiedScript
+            tabs[index].leftPanelScript = leftPanelScript
+            tabs[index].rightPanelScript = rightPanelScript
+            tabs[index].guestScript = guestScript
+            tabs[index].contractName = manifestInfo.contractName
+            tabs[index].contractVersion = manifestInfo.contractVersion
+            tabs[index].permissions = manifestInfo.permissions
+            tabs[index].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
+            tabs[index].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
+            leftPanelVisibility[tabs[index].id] = manifestInfo.leftPanelDefaultVisible
+
+            if let name = manifestInfo.name {
+                tabs[index].title = name
+            }
+
+            logger.notice(" [reloadCurrentTab] 刷新完成: \(self.tabs[index].title)")
+
+            // 增加刷新 nonce，提醒 RN 侧 remount
+            tabs[index].reloadNonce &+= 1
+
+            // Force UI update by triggering objectWillChange
+            objectWillChange.send()
+
+        } catch {
+            logger.error(" [reloadCurrentTab] 刷新失败：\(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Per-Tab Left Panel Visibility
+
+    func isLeftPanelVisible(for tabId: UUID?) -> Bool {
+        guard let id = tabId else { return true }
+        let visible = leftPanelVisibility[id] ?? true
+        logger.debug("🔍 [isLeftPanelVisible] Tab \(id.uuidString.prefix(8)): \(visible)")
+        return visible
+    }
+
+    func toggleLeftPanelForCurrentTab() {
+        // Focus 模式下使用 focus tabId，否则使用 currentTabId
+        let id: UUID
+        if case .focus(let focusTabId) = canvasMode {
+            id = focusTabId
+        } else if let currentId = currentTabId {
+            id = currentId
+        } else {
+            logger.warning(" [toggleLeftPanel] 无法确定当前 tab，无法切换")
+            return
+        }
+
+        var visibility = leftPanelVisibility
+        let current = visibility[id] ?? true
+        visibility[id] = !current
+        leftPanelVisibility = visibility  // 重新赋值整个字典，确保触发 @Published
+        logger.debug("🔄 [toggleLeftPanel] Tab \(id.uuidString.prefix(8)) 左侧面板: \(current) -> \(!current)")
+    }
+
+    // MARK: - .actr 应用加载
+
+    /// 从本地 .actr 包创建一个新标签并装载应用基础信息
+    func importACTRPackage(from fileURL: URL) {
+        let resolvedURL = fileURL.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
+            logger.error(" 找不到 .actr 文件：\(resolvedURL.path)")
+            return
+        }
+
+        // Check if it's a directory (dev mode) or archive
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
+
+        let rootDir: URL
+
+        if isDirectory.boolValue {
+            // Directory mode - use directly
+            rootDir = resolvedURL
+        } else {
+            // Archive mode - extract to temp
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: tempDir)
+            } catch {
+                logger.error(" .actr 装载失败：\(error.localizedDescription)")
+                return
+            }
+            rootDir = tempDir
+        }
+
+        do {
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+            let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
+
+            // 读取 guest 脚本
+            let guestScript = readGuestScript(fromRoot: rootDir)
+
+            // v2.0: 优先读取 unified script (Single Engine 架构)
+            var unifiedScript: String? = nil
+            if let unifiedFileName = manifestInfo.unifiedScript {
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
+                logger.notice(" [BrowserViewModel] 从 manifest.json 读取 unified: \(unifiedFileName), 脚本存在: \(unifiedScript != nil)")
+            }
+
+            // Legacy: 从 manifest.json 读取面板脚本文件名
+            var leftPanelScript: String? = nil
+            var rightPanelScript: String? = nil
+
+            if let leftFileName = manifestInfo.leftPanelScript {
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
+                logger.debug("🔍 [BrowserViewModel] 从 manifest.json 读取 leftPanel: \(leftFileName), 脚本存在: \(leftPanelScript != nil)")
+            }
+
+            if let rightFileName = manifestInfo.rightPanelScript {
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
+                logger.debug("🔍 [BrowserViewModel] 从 manifest.json 读取 rightPanel: \(rightFileName), 脚本存在: \(rightPanelScript != nil)")
+            }
+
+            // v2.0: 优先使用 Single Engine 架构
+            if let unified = unifiedScript {
+                logger.debug("🚀 [BrowserViewModel] 使用 Single Engine 架构 (unified bundle)")
+                appendACTRTab(
+                    title: tabTitle,
+                    sourceURL: resolvedURL,
+                    unifiedScript: unified,
+                    contractName: manifestInfo.contractName,
+                    contractVersion: manifestInfo.contractVersion,
+                    permissions: manifestInfo.permissions,
+                    leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
+                    rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                )
+            }
+            // Legacy: 双 Engine 架构
+            else if leftPanelScript != nil || rightPanelScript != nil {
+                logger.debug("🔄 [BrowserViewModel] 使用 Legacy 双 Engine 架构")
+                appendACTRTab(
+                    title: tabTitle,
+                    sourceURL: resolvedURL,
+                    leftPanelScript: leftPanelScript,
+                    rightPanelScript: rightPanelScript,
+                    contractName: manifestInfo.contractName,
+                    contractVersion: manifestInfo.contractVersion,
+                    permissions: manifestInfo.permissions,
+                    leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
+                    rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                )
+            } else if let script = guestScript {
+                // 旧架构：兼容单一的 guest.js
+                logger.debug("🔄 [BrowserViewModel] 使用兼容模式 (guestScript)")
+                appendACTRTab(
+                    title: tabTitle,
+                    sourceURL: resolvedURL,
+                    guestScript: script,
+                    contractName: manifestInfo.contractName,
+                    contractVersion: manifestInfo.contractVersion,
+                    permissions: manifestInfo.permissions
+                )
+            } else {
+                // 没有脚本，显示应用信息页面
+                let html = renderACTRInfoHTML(
+                    name: manifestInfo.name ?? "Unknown App",
+                    version: manifestInfo.version ?? "0.0.0",
+                    description: manifestInfo.description ?? "No description provided.",
+                    sourcePath: resolvedURL.path
+                )
+                appendACTRTab(title: tabTitle, sourceURL: resolvedURL, htmlContent: html)
+            }
+        } catch {
+            logger.error(" .actr 装载失败：\(error.localizedDescription)")
+            let fallbackHTML = renderACTRInfoHTML(
+                name: resolvedURL.deletingPathExtension().lastPathComponent,
+                version: "unknown",
+                description: "加载失败：\(error.localizedDescription)",
+                sourcePath: resolvedURL.path
+            )
+            appendACTRTab(
+                title: resolvedURL.deletingPathExtension().lastPathComponent,
+                sourceURL: resolvedURL,
+                htmlContent: fallbackHTML
+            )
+        }
+    }
+
+    /// Async version of importACTRPackage - runs file I/O on background thread
+    /// Call this from background thread, it will dispatch UI updates to main thread
+    private func importACTRPackageAsync(from fileURL: URL) {
+        let resolvedURL = fileURL.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
+            logger.error(" 找不到 .actr 文件：\(resolvedURL.path)")
+            return
+        }
+
+        // Check if it's a directory (dev mode) or archive
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory)
+
+        let rootDir: URL
+
+        if isDirectory.boolValue {
+            // Directory mode - use directly
+            rootDir = resolvedURL
+        } else {
+            // Archive mode - extract to temp
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: tempDir)
+            } catch {
+                logger.error(" .actr 装载失败：\(error.localizedDescription)")
+                return
+            }
+            rootDir = tempDir
+        }
+
+        do {
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+            let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
+
+            let guestScript = readGuestScript(fromRoot: rootDir)
+
+            var unifiedScript: String? = nil
+            if let unifiedFileName = manifestInfo.unifiedScript {
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
+            }
+
+            var leftPanelScript: String? = nil
+            var rightPanelScript: String? = nil
+            if let leftFileName = manifestInfo.leftPanelScript {
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
+            }
+            if let rightFileName = manifestInfo.rightPanelScript {
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
+            }
+
+            // Update UI on main thread
+            DispatchQueue.main.async { [weak self] in
+                if let unified = unifiedScript {
+                    self?.appendACTRTab(
+                        title: tabTitle,
+                        sourceURL: resolvedURL,
+                        unifiedScript: unified,
+                        contractName: manifestInfo.contractName,
+                        contractVersion: manifestInfo.contractVersion,
+                        permissions: manifestInfo.permissions,
+                        leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                    )
+                } else if leftPanelScript != nil || rightPanelScript != nil {
+                    self?.appendACTRTab(
+                        title: tabTitle,
+                        sourceURL: resolvedURL,
+                        leftPanelScript: leftPanelScript,
+                        rightPanelScript: rightPanelScript,
+                        contractName: manifestInfo.contractName,
+                        contractVersion: manifestInfo.contractVersion,
+                        permissions: manifestInfo.permissions,
+                        leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                    )
+                } else if let script = guestScript {
+                    self?.appendACTRTab(
+                        title: tabTitle,
+                        sourceURL: resolvedURL,
+                        guestScript: script,
+                        contractName: manifestInfo.contractName,
+                        contractVersion: manifestInfo.contractVersion,
+                        permissions: manifestInfo.permissions
+                    )
+                } else {
+                    let html = self?.renderACTRInfoHTML(
+                        name: manifestInfo.name ?? "Unknown App",
+                        version: manifestInfo.version ?? "0.0.0",
+                        description: manifestInfo.description ?? "No description provided.",
+                        sourcePath: resolvedURL.path
+                    ) ?? ""
+                    self?.appendACTRTab(title: tabTitle, sourceURL: resolvedURL, htmlContent: html)
+                }
+            }
+        } catch {
+            logger.error(" .actr 装载失败：\(error.localizedDescription)")
+            DispatchQueue.main.async { [weak self] in
+                let fallbackHTML = self?.renderACTRInfoHTML(
+                    name: resolvedURL.deletingPathExtension().lastPathComponent,
+                    version: "unknown",
+                    description: "加载失败：\(error.localizedDescription)",
+                    sourcePath: resolvedURL.path
+                ) ?? ""
+                self?.appendACTRTab(
+                    title: resolvedURL.deletingPathExtension().lastPathComponent,
+                    sourceURL: resolvedURL,
+                    htmlContent: fallbackHTML
+                )
+            }
+        }
+    }
+
+    /// Load from development directory (not packaged .actr)
+    /// Used for hot-reload development workflow and bookmark/history loading
+    func loadFromDevDirectory(_ directoryURL: URL) {
+        guard FileManager.default.fileExists(atPath: directoryURL.path) else {
+            logger.error(" 找不到开发目录：\(directoryURL.path)")
+            return
+        }
+
+        do {
+            let manifestInfo = try readManifestJSON(fromRoot: directoryURL)
+            let tabTitle = manifestInfo.name ?? directoryURL.lastPathComponent
+            logger.debug("📂 [loadFromDevDirectory] 加载开发目录: \(tabTitle)")
+
+            let guestScript = readGuestScript(fromRoot: directoryURL)
+
+            var unifiedScript: String? = nil
+            if let unifiedFileName = manifestInfo.unifiedScript {
+                unifiedScript = readScript(fromRoot: directoryURL, fileName: unifiedFileName)
+                logger.notice(" [loadFromDevDirectory] 读取 unified: \(unifiedFileName), 长度: \(unifiedScript?.count ?? 0)")
+            }
+
+            var leftPanelScript: String? = nil
+            var rightPanelScript: String? = nil
+            if let leftFileName = manifestInfo.leftPanelScript {
+                leftPanelScript = readScript(fromRoot: directoryURL, fileName: leftFileName)
+                logger.notice(" [loadFromDevDirectory] 读取 leftPanel: \(leftFileName), 长度: \(leftPanelScript?.count ?? 0)")
+            }
+            if let rightFileName = manifestInfo.rightPanelScript {
+                rightPanelScript = readScript(fromRoot: directoryURL, fileName: rightFileName)
+                logger.notice(" [loadFromDevDirectory] 读取 rightPanel: \(rightFileName), 长度: \(rightPanelScript?.count ?? 0)")
+            }
+
+            // Update UI on main thread
+            DispatchQueue.main.async { [weak self] in
+                if let unified = unifiedScript {
+                    self?.appendACTRTab(
+                        title: tabTitle,
+                        sourceURL: directoryURL,
+                        unifiedScript: unified,
+                        contractName: manifestInfo.contractName,
+                        contractVersion: manifestInfo.contractVersion,
+                        permissions: manifestInfo.permissions,
+                        leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                    )
+                } else if leftPanelScript != nil || rightPanelScript != nil {
+                    self?.appendACTRTab(
+                        title: tabTitle,
+                        sourceURL: directoryURL,
+                        leftPanelScript: leftPanelScript,
+                        rightPanelScript: rightPanelScript,
+                        contractName: manifestInfo.contractName,
+                        contractVersion: manifestInfo.contractVersion,
+                        permissions: manifestInfo.permissions,
+                        leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                    )
+                } else if let script = guestScript {
+                    self?.appendACTRTab(
+                        title: tabTitle,
+                        sourceURL: directoryURL,
+                        guestScript: script,
+                        contractName: manifestInfo.contractName,
+                        contractVersion: manifestInfo.contractVersion,
+                        permissions: manifestInfo.permissions
+                    )
+                } else {
+                    logger.warning(" [loadFromDevDirectory] 没有找到任何脚本文件")
+                }
+            }
+        } catch {
+            logger.error(" 开发目录加载失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func appendACTRTab(
+        title: String,
+        sourceURL: URL,
+        htmlContent: String? = nil,
+        guestScript: String? = nil,
+        leftPanelScript: String? = nil,
+        rightPanelScript: String? = nil,
+        unifiedScript: String? = nil,
+        contractName: String? = nil,
+        contractVersion: Int? = nil,
+        permissions: [String] = [],
+        leftPanelDefaultVisible: Bool = true,
+        rightPanelDefaultVisible: Bool = false
+    ) {
+        let newTab = Tab(
+            title: title,
+            url: sourceURL,
+            htmlContent: htmlContent,
+            guestScript: guestScript,
+            leftPanelScript: leftPanelScript,
+            rightPanelScript: rightPanelScript,
+            unifiedScript: unifiedScript,
+            contractName: contractName,
+            contractVersion: contractVersion,
+            permissions: permissions,
+            leftPanelDefaultVisible: leftPanelDefaultVisible,
+            rightPanelDefaultVisible: rightPanelDefaultVisible
+        )
+        tabs.append(newTab)
+        currentTabId = newTab.id
+        tabSlotPositions[newTab.id] = tabs.count - 1
+        leftPanelVisibility[newTab.id] = leftPanelDefaultVisible
+
+        logger.notice(" 已加载 .actr：\(title)")
+
+        if let unified = unifiedScript {
+            logger.debug("  ├─ 统一脚本 (Single Engine): \(unified.count) 字节")
+            logger.debug("  ├─ 左侧面板默认\(leftPanelDefaultVisible ? "显示" : "隐藏")")
+            logger.debug("  └─ 右侧面板默认\(rightPanelDefaultVisible ? "显示" : "隐藏")")
+        } else if let leftScript = leftPanelScript {
+            logger.debug("  ├─ 左侧面板脚本 (Legacy): \(leftScript.count) 字节")
+            if let rightScript = rightPanelScript {
+                logger.debug("  ├─ 右侧扩展面板脚本 (Legacy): \(rightScript.count) 字节")
+                logger.debug("  └─ 右侧面板默认\(rightPanelDefaultVisible ? "显示" : "隐藏")")
+            }
+        }
+    }
+
+    private func unzipACTR(archive: URL, to destination: URL) throws {
+        let fileManager = FileManager.default
+        
+        if !fileManager.fileExists(atPath: destination.path) {
+            try fileManager.createDirectory(
+                at: destination,
+                withIntermediateDirectories: true
+            )
+        }
+        
+        try fileManager.unzipItem(
+            at: archive,
+            to: destination
+        )
+    }
+
+    private func readManifestJSON(fromRoot root: URL) throws -> (name: String?, version: String?, description: String?, contractName: String?, contractVersion: Int?, permissions: [String], leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, leftPanelScript: String?, rightPanelScript: String?, unifiedScript: String?) {
+        guard let manifestURL = findManifestJSON(in: root) else {
+            throw NSError(
+                domain: "ACTRPackage",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "包内未找到 manifest.json"]
+            )
+        }
+
+        let data = try Data(contentsOf: manifestURL)
+        let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+        let name = json?["name"] as? String
+        let version = json?["version"] as? String
+        let description = json?["description"] as? String
+
+        // MARK: - Contracts / Permissions (Phase 1: gating + logging)
+        let supportedContractName = "ask"
+        let supportedContractVersion = 1
+        var contractNameValue: String? = nil
+        var contractVersionValue: Int? = nil
+        var permissionsValue: [String] = []
+
+        if let contract = json?["contract"] as? [String: Any] {
+            let contractName = contract["name"] as? String
+            let contractVersion: Int? = {
+                if let v = contract["version"] as? Int { return v }
+                if let v = contract["version"] as? Double { return Int(v) }
+                return nil
+            }()
+
+            if let cn = contractName, let cv = contractVersion {
+                if cn != supportedContractName {
+                    throw NSError(
+                        domain: "ACTRContract",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "不支持的 contract：\(cn)（当前仅支持 \(supportedContractName)）"]
+                    )
+                }
+                if cv > supportedContractVersion {
+                    throw NSError(
+                        domain: "ACTRContract",
+                        code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: "contractVersion 太新：\(cn)@v\(cv)（当前宿主仅支持到 v\(supportedContractVersion)）"]
+                    )
+                }
+                contractNameValue = cn
+                contractVersionValue = cv
+                logger.notice(" [BrowserViewModel] contract: \(cn)@v\(cv)")
+            } else {
+                logger.warning(" [BrowserViewModel] manifest.contract 字段不完整，跳过校验")
+            }
+        } else {
+            logger.warning(" [BrowserViewModel] manifest 缺少 contract（兼容模式继续运行）")
+        }
+
+        if let permissions = json?["permissions"] as? [String] {
+            permissionsValue = permissions
+            if !permissions.isEmpty {
+                logger.debug("🔐 [BrowserViewModel] permissions: \(permissions.joined(separator: ", "))")
+            }
+        }
+
+        // v2.1: 简化格式 - 顶级字段优先
+        let unifiedScript = json?["entry"] as? String
+        let leftPanelDefaultVisible = json?["leftPanelDefaultVisible"] as? Bool ?? true
+        let rightPanelDefaultVisible = json?["rightPanelDefaultVisible"] as? Bool ?? false
+
+        // Legacy: layout 嵌套格式 (向后兼容)
+        let layout = json?["layout"] as? [String: Any]
+        let leftPanelScript = layout?["leftPanel"] as? String
+        let rightPanelScript = layout?["rightPanel"] as? String
+
+        return (name, version, description, contractNameValue, contractVersionValue, permissionsValue, leftPanelDefaultVisible, rightPanelDefaultVisible, leftPanelScript, rightPanelScript, unifiedScript)
+    }
+
+    private func findManifestJSON(in root: URL) -> URL? {
+        let fm = FileManager.default
+        if let direct = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first(where: { $0.lastPathComponent == "manifest.json" }) {
+            return direct
+        }
+
+        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil) {
+            for case let fileURL as URL in enumerator {
+                if fileURL.lastPathComponent == "manifest.json" {
+                    return fileURL
+                }
+            }
+        }
+        return nil
+    }
+
+    /// 通用脚本读取方法
+    private func readScript(fromRoot root: URL, fileName: String) -> String? {
+        let fm = FileManager.default
+
+        // 如果 fileName 包含路径（如 "dist/unified-app.js"），直接拼接读取
+        if fileName.contains("/") {
+            let fullPath = root.appendingPathComponent(fileName)
+            if let script = try? String(contentsOf: fullPath, encoding: .utf8) {
+                logger.notice(" 找到 \(fileName): \(fullPath.path)")
+                return script
+            }
+        }
+
+        // 首先在根目录查找
+        if let direct = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first(where: { $0.lastPathComponent == fileName }) {
+            if let script = try? String(contentsOf: direct, encoding: .utf8) {
+                logger.notice(" 找到 \(fileName): \(direct.path)")
+                return script
+            }
+        }
+
+        // 如果根目录没有，递归查找
+        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil) {
+            for case let fileURL as URL in enumerator {
+                if fileURL.lastPathComponent == fileName {
+                    if let script = try? String(contentsOf: fileURL, encoding: .utf8) {
+                        logger.notice(" 找到 \(fileName): \(fileURL.path)")
+                        return script
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    /// 读取 guest.js (向后兼容)
+    private func readGuestScript(fromRoot root: URL) -> String? {
+        return readScript(fromRoot: root, fileName: "guest.js")
+    }
+
+    private func renderACTRInfoHTML(name: String, version: String, description: String, sourcePath: String) -> String {
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    padding: 32px;
+                    color: #e6e8ee;
+                    margin: 0;
+                    min-height: 100vh;
+                    background: linear-gradient(135deg, #0f172a 0%, #111827 50%, #0b1220 100%);
+                }
+                .card {
+                    max-width: 860px;
+                    margin: 0 auto;
+                    padding: 28px;
+                    background: rgba(255, 255, 255, 0.04);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 16px;
+                    box-shadow: 0 15px 50px rgba(0,0,0,0.35);
+                    backdrop-filter: blur(10px);
+                }
+                h1 { margin: 0 0 12px 0; font-size: 28px; letter-spacing: -0.02em; }
+                .meta { color: #9ca3af; margin-bottom: 18px; }
+                .pill { display: inline-block; padding: 6px 10px; margin-right: 8px;
+                        border-radius: 10px; background: rgba(96, 165, 250, 0.12); color: #bfdbfe; font-size: 12px; }
+                .desc { line-height: 1.6; color: #d1d5db; margin-bottom: 20px; }
+                .path { font-family: 'Menlo', 'SFMono-Regular', ui-monospace, monospace;
+                        background: rgba(255,255,255,0.05); padding: 10px 12px; border-radius: 10px; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h1>🧩 \(name)</h1>
+                <div class="meta">
+                    <span class="pill">version \(version)</span>
+                    <span class="pill">ACTR package</span>
+                </div>
+                <div class="desc">\(description)</div>
+                <div class="path">\(sourcePath)</div>
+            </div>
+        </body>
+        </html>
+        """
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "counterapp",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "bun ../../../../rill/src/cli/index.ts build src/unified-app.tsx -o unified-app.js --footer ../../../../askit/src/cli/actr-footer.js --no-minify --dev"
+  },
+  "dependencies": {
+    "rill": "file:../../../../rill",
+    "askit": "file:../../../../askit",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.2"
+  }
+}
