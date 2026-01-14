@@ -385,6 +385,60 @@ struct WorkspaceMainView: View {
                     .padding(.trailing, 10)
                 }
 
+                // 🔧 Animation Debug Panel - 浮动调试面板
+                if case .overview = viewModel.canvasMode {
+                    VStack {
+                        Spacer()
+                        HStack(spacing: 12) {
+                            Toggle(isOn: $animationDebugMode) {
+                                Text("Debug")
+                            }
+                            .toggleStyle(.switch)
+
+                            if animationDebugMode {
+                                Text("Scale:")
+                                Slider(value: $animationDebugScale, in: 1.0...5.0)
+                                    .frame(width: 150)
+                                Text(String(format: "%.2f", animationDebugScale))
+                                    .monospacedDigit()
+                                    .frame(width: 40)
+
+                                Button("📸") {
+                                    isCapturingScreenshot = true
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        let size = CGSize(width: max(viewportSize.width, 1), height: max(viewportSize.height, 1))
+                                        animationDebugImage = captureViewportSnapshot(viewportSize: size)
+                                        isCapturingScreenshot = false
+                                        NSLog("🔧 Debug screenshot captured: %@", animationDebugImage != nil ? "OK" : "nil")
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color(nsColor: NSColor.controlBackgroundColor).opacity(0.95))
+                        .cornerRadius(10)
+                        .shadow(radius: 4)
+                        .padding(.bottom, 20)
+                    }
+                    .onChange(of: animationDebugMode) { _, isOn in
+                        if isOn {
+                            // Auto-capture when entering debug mode
+                            isCapturingScreenshot = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                let size = CGSize(width: max(viewportSize.width, 1), height: max(viewportSize.height, 1))
+                                animationDebugImage = captureViewportSnapshot(viewportSize: size)
+                                isCapturingScreenshot = false
+                                NSLog("🔧 Debug mode ON, screenshot: %@", animationDebugImage != nil ? "OK" : "nil")
+                            }
+                        } else {
+                            animationDebugImage = nil
+                            animationDebugScale = 1.0
+                            NSLog("🔧 Debug mode OFF")
+                        }
+                    }
+                }
+
                 // Toolbar 底部分隔线（最上层，通栏）
                 VStack {
                     Rectangle()
