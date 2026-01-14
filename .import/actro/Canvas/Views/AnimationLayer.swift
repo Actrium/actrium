@@ -2,8 +2,33 @@
 //  AnimationLayer.swift
 //  Canvas
 //
-//  Animation Layer for two-phase transition between Focus and Overview modes.
-//  Uses CALayer for high-performance animation without SwiftUI redraw overhead.
+//  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  动画层 - Focus/Overview 模式切换的两阶段动画
+//  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+//  设计目标：
+//  - 使用 CALayer 实现高性能动画，避免 SwiftUI 状态变化触发视图树重绘
+//  - 通过快照 + 变换实现平滑的缩放/淡入淡出过渡
+//
+//  架构：
+//  ┌─────────────────────────────────────────────────────────────────┐
+//  │  AnimationLayerNSView (NSView, isFlipped=true)                  │
+//  │  ├── backgroundLayer: 背景色填充层 (默认隐藏)                     │
+//  │  └── containerLayer: 内容容器层 (承载缩放/平移变换)                │
+//  │      ├── primaryLayer: 主截图层 (Overview 或 Focus 快照)         │
+//  │      └── secondaryLayer: 次截图层 (Cross-dissolve 用)           │
+//  └─────────────────────────────────────────────────────────────────┘
+//
+//  变换公式：
+//  - 目标：将 cardRect 区域缩放填满整个视口
+//  - scale = min(viewport.width / card.width, viewport.height / card.height)
+//  - offset = -cardRect.origin * scale
+//  - 变换：先缩放(原点)，后平移 → Point(x,y) → (x*scale + offset.x, y*scale + offset.y)
+//
+//  使用方式：
+//  1. WorkspaceMainView 中嵌入 AnimationLayerRepresentable
+//  2. ModeTransitionController 通过 animationLayerView 引用直接操作 CALayer
+//  3. 调试模式：通过 debugShowWithScale(_:cardRect:) 手动控制显示
 //
 
 import SwiftUI
@@ -11,34 +36,41 @@ import QuartzCore
 
 // MARK: - Animation Layer NSView
 
-/// High-performance animation layer using CALayer
-/// Bypasses SwiftUI state updates to avoid view tree redraw during animation
+/// 高性能动画层 - 使用 CALayer 绑过 SwiftUI 状态更新
 ///
-/// Layer hierarchy:
-/// - backgroundLayer: Solid color background filling entire window
-/// - containerLayer: Contains the screenshot content, positioned at viewport offset
-///   - primaryLayer: Primary screenshot (Overview or Focus)
-///   - secondaryLayer: Secondary screenshot (for cross-dissolve)
+/// Layer 层级：
+/// - backgroundLayer: 窗口背景色填充 (动画/调试时才显示)
+/// - containerLayer: 内容容器，承载缩放+平移变换
+///   - primaryLayer: 主截图 (Overview 快照)
+///   - secondaryLayer: 次截图 (Focus 快照，用于 Cross-dissolve)
 final class AnimationLayerNSView: NSView {
 
-    // MARK: - Layers
+    // MARK: - CALayer 层级
 
+    /// 背景层 - 填充窗口背景色，默认 opacity=0 隐藏
     private let backgroundLayer = CALayer()
+
+    /// 容器层 - 承载缩放和平移变换，anchorPoint=(0,0) 即左上角
     private let containerLayer = CALayer()
+
+    /// 主截图层 - 显示 Overview 网格快照
     private let primaryLayer = CALayer()
+
+    /// 次截图层 - 显示 Focus 快照，用于 Cross-dissolve 过渡
     private let secondaryLayer = CALayer()
 
-    // MARK: - Configuration
+    // MARK: - 视口配置
 
-    /// Viewport offset from left edge (sidebar width)
+    /// 视口相对窗口左边缘的偏移量 (即侧边栏宽度)
     private var viewportOffset: CGFloat = 0
 
-    /// Viewport size (content area size)
+    /// 视口尺寸 (主内容区大小)
     private var viewportSize: CGSize = .zero
 
-    // MARK: - Coordinate System
+    // MARK: - 坐标系
 
-    /// Use flipped coordinate system to match SwiftUI (origin at top-left)
+    /// 使用翻转坐标系匹配 SwiftUI (原点在左上角)
+    /// 注意：CALayer 的 anchorPoint Y 轴仍然是底部为 0
     override var isFlipped: Bool { true }
 
     // MARK: - Initialization
@@ -53,23 +85,29 @@ final class AnimationLayerNSView: NSView {
         setupLayers()
     }
 
+    /// 初始化 CALayer 层级结构
     private func setupLayers() {
         wantsLayer = true
         layer?.masksToBounds = true
 
-        // Background layer - fills entire window with window background color
-        // Initially hidden, only shown during animation or debug mode
+        // ━━━━ 背景层 ━━━━
+        // 填充窗口背景色，默认隐藏 (opacity=0)
+        // 仅在动画播放或调试模式时显示
         backgroundLayer.backgroundColor = NSColor.windowBackgroundColor.cgColor
         backgroundLayer.opacity = 0
         layer?.addSublayer(backgroundLayer)
 
-        // Container layer for viewport content + transform
-        containerLayer.masksToBounds = false  // Allow content to overflow during zoom
+        // ━━━━ 容器层 ━━━━
+        // 承载所有内容的变换 (缩放 + 平移)
+        // anchorPoint=(0,0) 表示以左上角为变换原点
+        // masksToBounds=false 允许缩放时内容溢出边界
+        containerLayer.masksToBounds = false
         containerLayer.anchorPoint = .zero
         containerLayer.position = .zero
         layer?.addSublayer(containerLayer)
 
-        // Primary and secondary image layers
+        // ━━━━ 截图层 ━━━━
+        // contentsGravity=.topLeft 确保图片从左上角开始绘制
         primaryLayer.contentsGravity = .topLeft
         primaryLayer.masksToBounds = false
         containerLayer.addSublayer(primaryLayer)
@@ -78,7 +116,7 @@ final class AnimationLayerNSView: NSView {
         secondaryLayer.masksToBounds = false
         containerLayer.addSublayer(secondaryLayer)
 
-        // Disable implicit animations
+        // 禁用 CALayer 隐式动画，我们手动控制每一帧
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         primaryLayer.opacity = 0
@@ -146,12 +184,24 @@ final class AnimationLayerNSView: NSView {
         CATransaction.commit()
     }
 
-    /// Update animation state (called every frame)
+    /// 更新动画状态 (每帧调用)
+    ///
+    /// 由 ModeTransitionController 的 CVDisplayLink 回调驱动
+    ///
     /// - Parameters:
-    ///   - primaryOpacity: Primary layer opacity (0-1)
-    ///   - secondaryOpacity: Secondary layer opacity (0-1)
-    ///   - scale: Scale factor for zoom
-    ///   - offset: Translation offset in points (after scaling)
+    ///   - primaryOpacity: 主截图层透明度 (0-1)
+    ///   - secondaryOpacity: 次截图层透明度 (0-1)，用于 Cross-dissolve
+    ///   - scale: 缩放因子
+    ///   - offset: 平移偏移量 (像素)
+    ///
+    /// 变换公式：
+    /// ```
+    /// 最终位置 = 原始位置 × scale + offset
+    /// ```
+    /// 要让 cardRect.origin 移动到 (0,0)：
+    /// ```
+    /// offset = -cardRect.origin × scale
+    /// ```
     func updateAnimationState(
         primaryOpacity: Float,
         secondaryOpacity: Float,
@@ -161,17 +211,16 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        // Show background when animating
+        // 动画时显示背景层
         let isAnimating = primaryOpacity > 0 || secondaryOpacity > 0
         backgroundLayer.opacity = isAnimating ? 1.0 : 0
 
         primaryLayer.opacity = primaryOpacity
         secondaryLayer.opacity = secondaryOpacity
 
-        // Apply transform: scale first (around origin), then translate by offset
-        // Matrix order: Translate * Scale, applied as Scale first, then Translate
-        // Point (x, y) becomes: (x * scale + offset.x, y * scale + offset.y)
-        // For cardRect.origin to map to (0, 0): offset = -cardRect.origin * scale
+        // 应用变换：先缩放(以原点为中心)，再平移
+        // CATransform3D 的矩阵乘法顺序是 Translate × Scale
+        // 对于点 (x,y)：先缩放 → (x×scale, y×scale)，再平移 → (x×scale+offset.x, y×scale+offset.y)
         var transform = CATransform3DIdentity
         transform = CATransform3DScale(transform, scale, scale, 1.0)
         transform = CATransform3DTranslate(transform, offset.x, offset.y, 0)
@@ -195,28 +244,39 @@ final class AnimationLayerNSView: NSView {
         CATransaction.commit()
     }
 
-    // MARK: - Debug API
+    // MARK: - 调试 API
 
-    /// Show animation layer with specified scale (for debugging)
+    /// 调试模式：显示动画层并应用指定缩放
+    ///
+    /// 用于手动观察动画层的缩放效果，由底部浮动面板的滑条控制
+    ///
     /// - Parameters:
-    ///   - scale: Scale factor
-    ///   - cardRect: Target card rect in viewport coordinates
+    ///   - scale: 缩放因子 (1.0 = 完整 Overview, targetScale = 卡片填满视口)
+    ///   - cardRect: 目标卡片在视口坐标系中的矩形位置
+    ///
+    /// 工作原理：
+    /// ```
+    /// scale=1.0 时：offset=(0,0)，显示完整 Overview 网格
+    /// scale=2.0 时：offset=(-cardRect.x×2, -cardRect.y×2)，卡片开始放大
+    /// scale=targetScale 时：卡片正好填满整个视口
+    /// ```
     func debugShowWithScale(_ scale: CGFloat, cardRect: CGRect) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
+        // 显示背景和主截图层
         backgroundLayer.opacity = 1.0
         primaryLayer.opacity = 1.0
         secondaryLayer.opacity = 0
 
-        // Calculate offset to center the card in viewport
-        // When scale = 1.0: offset = (0, 0) - show full overview
-        // When scale = targetScale: offset = -cardRect.origin * scale - card fills viewport
+        // 计算偏移量：让 cardRect 的左上角在缩放后位于视口原点
+        // offset = -cardRect.origin × scale
         let offset = CGPoint(
             x: -cardRect.origin.x * scale,
             y: -cardRect.origin.y * scale
         )
 
+        // 应用变换
         var transform = CATransform3DIdentity
         transform = CATransform3DScale(transform, scale, scale, 1.0)
         transform = CATransform3DTranslate(transform, offset.x, offset.y, 0)
@@ -229,7 +289,7 @@ final class AnimationLayerNSView: NSView {
               offset.x, offset.y)
     }
 
-    /// Hide debug view
+    /// 隐藏调试视图
     func debugHide() {
         resetState()
     }
