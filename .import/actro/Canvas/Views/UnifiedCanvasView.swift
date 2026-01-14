@@ -177,6 +177,48 @@ struct UnifiedCanvasView: View {
                         isAddressBarFirstResponder = false
                     }
                 }
+                
+                // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
+                if case .overview = viewModel.canvasMode {
+                    VStack {
+                        Spacer()
+                        
+                        HStack {
+                            Spacer()
+                            
+                            HStack(spacing: 12) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundColor(.gray)
+                                    .font(.system(size: 16))
+
+                                ZStack(alignment: .leading) {
+                                    if searchTabsText.isEmpty {
+                                        Text("搜索应用...")
+                                            .foregroundColor(.gray)
+                                            .font(.system(size: 15))
+                                    }
+                                    TextField("", text: $searchTabsText)
+                                        .textFieldStyle(.plain)
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.primary)
+                                        .focused($isSearchTabsFocused)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: 600)
+                            #if os(macOS)
+                            .background(Color(nsColor: NSColor(white: 0.2, alpha: 0.95)))
+                            #elseif os(iOS)
+                            .background(Color(uiColor: UIColor(white: 0.2, alpha: 0.95)))
+                            #endif
+                            .cornerRadius(24)
+                            
+                            Spacer()
+                        }
+                        .padding(.bottom, 30)
+                    }
+                }
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
@@ -207,30 +249,6 @@ struct UnifiedCanvasView: View {
 
                 // 注意：RN 内容层已移至每个 TabCardView 内部
                 // 每个 Tab 都有独立的 RCTRootView，实现真正的缩放
-
-                // Search Tabs 搜索框 - 仅在 Overview 模式显示
-                if case .overview = viewModel.canvasMode {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 14))
-
-                        TextField("Search Tabs", text: $searchTabsText)
-                            .textFieldStyle(.plain)
-                            .frame(width: 150)
-                            .focused($isSearchTabsFocused)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    #if os(macOS)
-                    .background(Color(nsColor: NSColor.controlBackgroundColor).opacity(0.9))
-                    #elseif os(iOS)
-                    .background(Color(uiColor: UIColor.systemBackground).opacity(0.9))
-                    #endif
-                    .cornerRadius(8)
-                    .padding(.top, 10)
-                    .padding(.trailing, 10)
-                }
             }
             .toolbar {
                 ToolbarItemGroup(placement: .principal) {
