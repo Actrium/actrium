@@ -116,7 +116,7 @@ const TestComponent = (props: any) => {
 
 // 导入完整版 ActrApp 组件（使用 rill/askit）
 let Component;
-const USE_TEST_COMPONENT = false; // 🟢 使用 ActrApp + GuestAppView
+const USE_TEST_COMPONENT = false; // 🟢 切回正式组件测试逻辑
 
 // 🔴 全局 props 缓存 - 防止 React Native bridge 传入空 props
 let lastValidProps: any = null;
