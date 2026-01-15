@@ -24,7 +24,8 @@ try {
 import { logger } from './src/logger';
 const log = logger.child('index');
 log.debug('console.assert type (after guard): ' + typeof console.assert);
-log.notice('🚀 开始执行 - ActrApp 版本');
+import { initDatabase } from './src/libs/Sqlite.init';
+initDatabase();
 
 import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';

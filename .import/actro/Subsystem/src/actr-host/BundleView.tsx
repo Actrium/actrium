@@ -115,7 +115,7 @@ const LocalEngineView: React.FC<{
 const EngineView = LocalEngineView;
 
 import type { ComponentMap } from 'rill';
-import { ThemeView, StepList, UserAvatar, ChatBubble, PanelMarker } from 'askit';
+import { ThemeView, StepList, UserAvatar, ChatBubble, PanelMarker, MyTouchableOpacity } from 'askit';
 import { createEngineAdapter } from 'askit/core';
 
 const log = logger.child('BundleView');
@@ -154,6 +154,7 @@ export const hostComponents: ComponentMap = {
   StepList: StepList as unknown as React.ComponentType<Record<string, unknown>>,
   UserAvatar: UserAvatar as unknown as React.ComponentType<Record<string, unknown>>,
   ChatBubble: ChatBubble as unknown as React.ComponentType<Record<string, unknown>>,
+  MyTouchableOpacity: MyTouchableOpacity as unknown as React.ComponentType<Record<string, unknown>>,
   // Panel 架构组件
   PanelMarker: PanelMarker as unknown as React.ComponentType<Record<string, unknown>>,
 };
