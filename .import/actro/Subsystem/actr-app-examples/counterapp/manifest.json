@@ -3,8 +3,8 @@
   "version": "3.0.0",
   "description": "Interactive Counter Test App - usePanels Hook Mode",
   "entry": "unified-app.js",
-  "leftPanelDefaultVisible": true,
-  "rightPanelDefaultVisible": true,
+  "leftPanelDefaultVisible": false,
+  "rightPanelDefaultVisible": false,
   "contract": {
     "name": "ask",
     "version": 1
@@ -12,7 +12,7 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "dist/unified-app.js": "f046729a72fc30a2e50fe88f30ed5416497874ca412c25b1e27bf20339d967cb"
+      "dist/unified-app.js": "d66f0f28da34fefc4063aca799c4359e9c3a768878246a873ac01eeac9e1e512"
     }
   }
 }

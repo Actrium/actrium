@@ -16,6 +16,6 @@
       "askit": ["../../../../askit/src/index.guest.ts"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../../src/actr-host/main"],
   "exclude": ["**/node_modules/**"]
 }
