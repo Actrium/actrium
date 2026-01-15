@@ -22,7 +22,7 @@ def use_canvas_react_native
   )
 
   # rill native sandbox (JSI)
-  pod 'RillSandboxNative', :path => 'RCTNApps/node_modules/rill/native/platform'
+  pod 'RillSandboxNative', :path => 'RCTNApps/node_modules/rill/native'
 end
 
 target 'Canvas' do
