@@ -171,13 +171,13 @@ private struct FocusModeNavigationBar: View {
         HStack(spacing: 0) {
             // 左侧：显示所有标签页按钮
             Button(action: toggleOverviewMode) {
-                Image(systemName: "house")
+                Image(systemName: "rectangle.grid.2x2.fill")
                     .font(.system(size: 16))
                     .foregroundColor(.primary)
                     .frame(width: 44, height: tabHeight)
             }
             .buttonStyle(.plain)
-            .background(Color(white: 0.15))
+            .background(Color(hex: "#D1D1D6"))
             
             // 中间：标签页列表
             ScrollView(.horizontal, showsIndicators: false) {
@@ -208,30 +208,30 @@ private struct FocusModeNavigationBar: View {
                     }) {
                         Image(systemName: "plus")
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                             .frame(width: 36, height: tabHeight)
                     }
                     .buttonStyle(.plain)
-                    .background(Color(white: 0.15))
+                    .background(Color(hex: "#D1D1D6"))
                 }
             }
             .frame(maxWidth: .infinity)
-            .background(Color(white: 0.15))
+            .background(Color(hex: "#D1D1D6"))
             
             // 右侧：设置按钮
             Button(action: {
                 // TODO: 打开设置
             }) {
-                Image(systemName: "gearshape")
+                Image(systemName: "line.3.horizontal")
                     .font(.system(size: 16))
                     .foregroundColor(.primary)
                     .frame(width: 44, height: tabHeight)
             }
             .buttonStyle(.plain)
-            .background(Color(white: 0.15))
+            .background(Color(hex: "#D1D1D6"))
         }
         .frame(height: tabHeight)
-        .background(Color(white: 0.15))
+        .background(Color(hex: "#D1D1D6"))
     }
 }
 
@@ -269,21 +269,23 @@ private struct TabItemView: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(width: width, height: 32)
+        .frame(width: width, height: 36) // 高度与 tabHeight 一致，填满导航栏
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isActive ? Color(white: 0.25) : Color(white: 0.18))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isActive ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+            // 使用 UnevenRoundedRectangle 实现顶部圆角 14pt，底部无圆角
+            UnevenRoundedRectangle(
+                topLeadingRadius: 14,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 14
+            )
+            .fill(isActive ? Color.white : Color(hex: "#E6E6E6"))
         )
         .contentShape(Rectangle())
         .onTapGesture {
             onSelect()
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 1) // 左右间距 2pt (1pt + 1pt)
+        .padding(.bottom, 0) // 底部无间距，紧贴导航栏底部
     }
 }
 
