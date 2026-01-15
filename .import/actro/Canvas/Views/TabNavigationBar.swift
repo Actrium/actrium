@@ -167,6 +167,14 @@ private struct FocusModeNavigationBar: View {
     let calculateTabWidth: () -> CGFloat
     let toggleOverviewMode: () -> Void
     
+    // 计算是否需要滚动
+    private var needsScrolling: Bool {
+        let availableWidth = UIScreen.main.bounds.width - 44 - 44 - 36 // 减去左侧按钮、右侧按钮、新建按钮
+        let tabWidth = calculateTabWidth()
+        let totalTabsWidth = CGFloat(viewModel.tabs.count) * (tabWidth + 2) // 每个 tab 加上间距
+        return totalTabsWidth > availableWidth
+    }
+    
     var body: some View {
         HStack(spacing: 0) {
             // 左侧：显示所有标签页按钮
@@ -180,31 +188,39 @@ private struct FocusModeNavigationBar: View {
             .background(Color(hex: "#D1D1D6"))
             
             // 中间：标签页列表
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(viewModel.tabs) { tab in
-                        TabItemView(
-                            tab: tab,
-                            isActive: tab.id == viewModel.currentTabId,
-                            isHovered: tab.id == hoveredTabId,
-                            width: calculateTabWidth(),
-                            onSelect: {
-                                viewModel.switchToTab(id: tab.id)
-                            },
-                            onClose: {
-                                if viewModel.tabs.count > 1 {
-                                    viewModel.closeTab(id: tab.id)
-                                }
-                            }
-                        )
-                        .onHover { hovering in
-                            hoveredTabId = hovering ? tab.id : nil
-                        }
+            if needsScrolling {
+                // 需要滚动时：ScrollView，添加按钮固定在外部
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        tabsContent
                     }
-                    
-                    // 新建标签按钮
-                    Button(action: {
+                }
+                .frame(maxWidth: .infinity)
+                .background(Color(hex: "#D1D1D6"))
+                
+                // 新建标签按钮（固定在右侧）
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
                         let _ = viewModel.addNewTab()
+                    }
+                }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.primary)
+                        .frame(width: 36, height: tabHeight)
+                }
+                .buttonStyle(.plain)
+                .background(Color(hex: "#D1D1D6"))
+            } else {
+                // 不需要滚动时：添加按钮紧跟在最后一个页签后
+                HStack(spacing: 0) {
+                    tabsContent
+                    
+                    // 新建标签按钮（紧挨最后一个页签）
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            let _ = viewModel.addNewTab()
+                        }
                     }) {
                         Image(systemName: "plus")
                             .font(.system(size: 14, weight: .medium))
@@ -213,10 +229,12 @@ private struct FocusModeNavigationBar: View {
                     }
                     .buttonStyle(.plain)
                     .background(Color(hex: "#D1D1D6"))
+                    
+                    Spacer()
                 }
+                .frame(maxWidth: .infinity)
+                .background(Color(hex: "#D1D1D6"))
             }
-            .frame(maxWidth: .infinity)
-            .background(Color(hex: "#D1D1D6"))
             
             // 右侧：设置按钮
             Button(action: {
@@ -232,6 +250,31 @@ private struct FocusModeNavigationBar: View {
         }
         .frame(height: tabHeight)
         .background(Color(hex: "#D1D1D6"))
+    }
+    
+    // 标签页内容
+    @ViewBuilder
+    private var tabsContent: some View {
+        ForEach(viewModel.tabs) { tab in
+            TabItemView(
+                tab: tab,
+                isActive: tab.id == viewModel.currentTabId,
+                isHovered: tab.id == hoveredTabId,
+                width: calculateTabWidth(),
+                onSelect: {
+                    viewModel.switchToTab(id: tab.id)
+                },
+                onClose: {
+                    if viewModel.tabs.count > 1 {
+                        viewModel.closeTab(id: tab.id)
+                    }
+                }
+            )
+            .onHover { hovering in
+                hoveredTabId = hovering ? tab.id : nil
+            }
+            .transition(.move(edge: .leading).combined(with: .opacity))
+        }
     }
 }
 
