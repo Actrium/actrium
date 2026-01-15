@@ -220,9 +220,10 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             }
         }
 
-        // Single tab mode - 只传递当前 tab
+        // Single tab mode - 包装成数组以兼容旧版 JS 逻辑
         return [
             "singleTabMode": true,
+            "tabs": [tabDict],
             "tab": tabDict,
             "currentTabId": tab.id.uuidString,
             "isLeftPanelVisible": viewModel.isLeftPanelVisible(for: tab.id),
