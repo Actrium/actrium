@@ -6,9 +6,10 @@
     "build": "bun ../../../../rill/src/cli/index.ts build src/unified-app.tsx -o unified-app.js --footer ../../../../askit/src/cli/actr-footer.js --no-minify --dev"
   },
   "dependencies": {
-    "rill": "file:../../../../rill",
     "askit": "file:../../../../askit",
-    "react": "^19.0.0"
+    "dayjs": "^1.11.19",
+    "react": "^19.0.0",
+    "rill": "file:../../../../rill"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
