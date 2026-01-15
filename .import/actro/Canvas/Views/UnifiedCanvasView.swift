@@ -168,7 +168,6 @@ struct UnifiedCanvasView: View {
                 // 防止 scale 为 0 导致奇异矩阵
                 .scaleEffect(max(transform.scale, 0.001), anchor: .topLeading)
                 .offset(x: transform.offset.x, y: transform.offset.y)
-                .animation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0), value: viewModel.canvasMode)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     // Focus 模式下点击内容区域取消地址栏编辑
