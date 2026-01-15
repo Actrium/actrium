@@ -24,7 +24,7 @@ extension Tag {
         guard let hex = color else {
             return .accentColor
         }
-        return Color(hex: hex) ?? .accentColor
+        return Color(hex: hex)
     }
 
     /// Default colors for new tags
@@ -54,13 +54,15 @@ extension Tag {
 // MARK: - Color Extension
 
 extension Color {
-    init?(hex: String) {
+    init(hex: String) {
         var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
 
         var rgb: UInt64 = 0
         guard Scanner(string: hexSanitized).scanHexInt64(&rgb) else {
-            return nil
+            // 解析失败，返回默认灰色
+            self.init(white: 0.5)
+            return
         }
 
         let length = hexSanitized.count
@@ -78,7 +80,8 @@ extension Color {
                 opacity: Double(rgb & 0x000000FF) / 255.0
             )
         } else {
-            return nil
+            // 不支持的格式，返回默认灰色
+            self.init(white: 0.5)
         }
     }
 }
