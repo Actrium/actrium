@@ -88,6 +88,21 @@ class BrowserViewModel: ObservableObject {
     @discardableResult
     func addNewTab() -> Tab {
         logger.debug("🆕 开始创建新标签页...")
+        
+        // 🔴 开发调试：优先加载 counterapp 开发目录作为新 tab
+        let counterAppDevPath = "/Users/example-dev-5/Projects/askaway-ipad/Subsystem/actr-app-examples/counterapp"
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
+            logger.debug("🔄 [addNewTab] 从 counterapp 开发目录创建新 tab")
+            let url = URL(fileURLWithPath: counterAppDevPath)
+            Task { @MainActor [weak self] in
+                self?.loadFromDevDirectory(url)
+            }
+            // 返回占位 tab（会被 loadFromDevDirectory 创建的 tab 替换）
+            return Tab(title: "Loading...", htmlContent: "")
+        }
+        
+        // Fallback: 创建默认 tab
         let newTab = Tab(
             title: "New Tab \(tabs.count + 1)",
             htmlContent: """
