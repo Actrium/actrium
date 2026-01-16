@@ -3,15 +3,19 @@
 //  Canvas
 //
 //  Controls mode transition animation state between Focus and Overview modes.
-//  Uses CALayer for high-performance animation without SwiftUI redraw overhead.
+//  Works with VirtualGrid (AnimationLayerNSView) for high-performance animation.
+//
+//  VirtualGrid Approach:
+//  - VirtualGrid mirrors the real Grid layout exactly (positions, cardSize)
+//  - Each card slot displays Tab thumbnail from TabSnapshotCache
+//  - Animation drives scale/offset transform via CVDisplayLink
+//  - VirtualGrid shows during transition, hides when complete
 //
 //  Focus → Overview:
-//    Pure Zoom animation: Zoom out Overview snapshot from targetScale to 1.0
-//    (Overview screenshot shrinks from card-fills-screen to full grid view)
+//    Pure Zoom: Zoom out from targetScale (card fills viewport) to 1.0 (full grid)
 //
 //  Overview → Focus:
-//    Phase 1: Zoom in Overview snapshot until target card fills screen
-//    Phase 2: Cross-Dissolve to Focus snapshot
+//    Pure Zoom: Zoom in from 1.0 to targetScale (target card fills viewport)
 //
 
 import SwiftUI
@@ -74,18 +78,6 @@ final class ModeTransitionController: ObservableObject {
 
     // MARK: - Private Animation State (NOT @Published to avoid SwiftUI redraw)
 
-    /// Primary image (source snapshot)
-    private var primaryImage: NSImage?
-
-    /// Secondary image (target snapshot for cross-dissolve)
-    private var secondaryImage: NSImage?
-
-    /// Current primary opacity
-    private var primaryOpacity: Float = 0
-
-    /// Current secondary opacity
-    private var secondaryOpacity: Float = 0
-
     /// Current animation scale
     private var currentScale: CGFloat = 1.0
 
@@ -99,9 +91,6 @@ final class ModeTransitionController: ObservableObject {
 
     /// Total animation duration in seconds
     private var totalDuration: CFTimeInterval = ModeTransitionConstants.totalTransitionDuration
-
-    /// Zoom phase duration ratio (0-1)
-    private let zoomPhaseRatio: Double = 0.5
 
     /// Completion callback
     private var onTransitionComplete: (() -> Void)?
@@ -188,26 +177,16 @@ final class ModeTransitionController: ObservableObject {
         )
 
         // Setup initial state: Start zoomed in (card fills viewport)
-        primaryImage = overviewSnapshot
-        secondaryImage = nil
-        primaryOpacity = 1.0
-        secondaryOpacity = 0.0
+        // Note: VirtualGrid uses cached thumbnails directly, no screenshots needed
         currentScale = targetScale
         currentOffset = targetOffset
         currentStage = .zoom
 
-        // Setup CALayer
-        animationLayerView?.setPrimaryImage(primaryImage)
-        animationLayerView?.setSecondaryImage(secondaryImage)
-        animationLayerView?.updateAnimationState(
-            primaryOpacity: primaryOpacity,
-            secondaryOpacity: secondaryOpacity,
-            scale: currentScale,
-            offset: currentOffset
-        )
+        // Setup VirtualGrid: show and apply initial transform
+        animationLayerView?.show()
+        animationLayerView?.applyTransform(scale: currentScale, offset: currentOffset)
 
-        NSLog("🎬 ModeTransitionController: primaryImage=%@, targetScale=%.2f, targetOffset=(%.1f, %.1f)",
-              primaryImage != nil ? "YES (\(primaryImage!.size))" : "nil",
+        NSLog("🎬 ModeTransitionController: Focus→Overview targetScale=%.2f, targetOffset=(%.1f, %.1f)",
               targetScale, targetOffset.x, targetOffset.y)
 
         // Start animation
@@ -255,28 +234,16 @@ final class ModeTransitionController: ObservableObject {
         targetScale = min(scaleX, scaleY)
 
         // Setup initial state: Start at scale 1.0, offset (0,0) - full Overview visible
-        primaryImage = overviewSnapshot
-        secondaryImage = TabSnapshotCacheManager.shared.fullScreenSnapshot(for: tabId)
-            ?? TabSnapshotCacheManager.shared.filteredThumbnail(for: tabId)
-        primaryOpacity = 1.0
-        secondaryOpacity = 0.0
+        // Note: VirtualGrid uses cached thumbnails directly, no screenshots needed
         currentScale = 1.0
         currentOffset = .zero
         currentStage = .zoom
 
-        // Setup CALayer
-        animationLayerView?.setPrimaryImage(primaryImage)
-        animationLayerView?.setSecondaryImage(secondaryImage)
-        animationLayerView?.updateAnimationState(
-            primaryOpacity: primaryOpacity,
-            secondaryOpacity: secondaryOpacity,
-            scale: currentScale,
-            offset: currentOffset
-        )
+        // Setup VirtualGrid: show and apply initial transform
+        animationLayerView?.show()
+        animationLayerView?.applyTransform(scale: currentScale, offset: currentOffset)
 
-        NSLog("🎬 ModeTransitionController: primaryImage=%@, secondaryImage=%@, targetScale=%.2f, cardRect=(%.1f, %.1f, %.1f, %.1f)",
-              primaryImage != nil ? "YES (\(primaryImage!.size))" : "nil",
-              secondaryImage != nil ? "YES (\(secondaryImage!.size))" : "nil",
+        NSLog("🎬 ModeTransitionController: Overview→Focus targetScale=%.2f, cardRect=(%.1f, %.1f, %.1f, %.1f)",
               targetScale, cardRect.origin.x, cardRect.origin.y, cardRect.width, cardRect.height)
 
         // Start animation
@@ -380,13 +347,8 @@ final class ModeTransitionController: ObservableObject {
             return
         }
 
-        // Update CALayer directly (no SwiftUI redraw!)
-        animationLayerView?.updateAnimationState(
-            primaryOpacity: primaryOpacity,
-            secondaryOpacity: secondaryOpacity,
-            scale: currentScale,
-            offset: currentOffset
-        )
+        // Update VirtualGrid transform directly (no SwiftUI redraw!)
+        animationLayerView?.applyTransform(scale: currentScale, offset: currentOffset)
 
         // Check if animation is complete
         if totalProgress >= 1.0 {
@@ -406,9 +368,8 @@ final class ModeTransitionController: ObservableObject {
         phase = .focusToOverview(fromTabId: tabId, progress: easedProgress)
 
         // Pure Zoom: Use entire animation duration (0% - 100%)
+        // VirtualGrid uses thumbnails, no opacity changes needed
         currentStage = .zoom
-        primaryOpacity = 1.0
-        secondaryOpacity = 0.0
 
         // Interpolate scale: targetScale → 1.0
         currentScale = targetScale - (targetScale - 1.0) * CGFloat(easedProgress)
@@ -426,8 +387,8 @@ final class ModeTransitionController: ObservableObject {
     }
 
     /// Overview → Focus animation update
-    /// Phase 1 (0-50%): Zoom in until target card fills screen
-    /// Phase 2 (50-100%): Cross-Dissolve to Focus snapshot
+    /// Pure Zoom: Zoom in from scale 1.0 to targetScale
+    /// VirtualGrid uses thumbnails, no cross-dissolve needed
     private func updateOverviewToFocusAnimation(tabId: UUID, progress: Double) {
         // Apply easing
         let easedProgress = easeInOutCubic(progress)
@@ -440,38 +401,17 @@ final class ModeTransitionController: ObservableObject {
             y: -cardRectInViewport.origin.y * targetScale
         )
 
-        if progress < zoomPhaseRatio {
-            // Phase 1: Zoom in (0% - 50%)
-            currentStage = .zoom
-            let phaseProgress = progress / zoomPhaseRatio
-            let easedPhaseProgress = easeInOutCubic(phaseProgress)
+        // Pure Zoom: Use entire animation duration
+        currentStage = .zoom
 
-            primaryOpacity = 1.0
-            secondaryOpacity = 0.0
+        // Interpolate scale: 1.0 → targetScale
+        currentScale = 1.0 + (targetScale - 1.0) * CGFloat(easedProgress)
 
-            // Interpolate scale: 1.0 → targetScale
-            currentScale = 1.0 + (targetScale - 1.0) * CGFloat(easedPhaseProgress)
-
-            // Interpolate offset: (0,0) → targetOffset
-            currentOffset = CGPoint(
-                x: targetOffset.x * CGFloat(easedPhaseProgress),
-                y: targetOffset.y * CGFloat(easedPhaseProgress)
-            )
-
-        } else {
-            // Phase 2: Cross-Dissolve (50% - 100%)
-            currentStage = .dissolve
-            let phaseProgress = (progress - zoomPhaseRatio) / (1.0 - zoomPhaseRatio)
-            let easedPhaseProgress = easeInOutCubic(phaseProgress)
-
-            // Cross-dissolve from zoomed Overview to Focus snapshot
-            primaryOpacity = Float(1.0 - easedPhaseProgress)
-            secondaryOpacity = Float(easedPhaseProgress)
-
-            // Keep at target scale and offset during dissolve
-            currentScale = targetScale
-            currentOffset = targetOffset
-        }
+        // Interpolate offset: (0,0) → targetOffset
+        currentOffset = CGPoint(
+            x: targetOffset.x * CGFloat(easedProgress),
+            y: targetOffset.y * CGFloat(easedProgress)
+        )
     }
 
     /// Ease-in-out cubic easing function
@@ -494,10 +434,6 @@ final class ModeTransitionController: ObservableObject {
     private func resetState() {
         phase = .idle
         isInteractionLocked = false
-        primaryImage = nil
-        secondaryImage = nil
-        primaryOpacity = 0
-        secondaryOpacity = 0
         currentScale = 1.0
         currentOffset = .zero
         currentStage = .zoom
@@ -508,8 +444,8 @@ final class ModeTransitionController: ObservableObject {
         cardRectInViewport = .zero
         viewportSize = .zero
 
-        // Reset CALayer
-        animationLayerView?.resetState()
+        // Reset VirtualGrid
+        animationLayerView?.reset()
     }
 }
 
