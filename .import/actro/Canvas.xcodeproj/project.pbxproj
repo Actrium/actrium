@@ -432,7 +432,8 @@
 					"\"$(PODS_ROOT)/Headers/Private/Yoga\"",
 					"$(SRCROOT)/Canvas/Native/RillSandbox",
 				);
-				INFOPLIST_KEY_NSCameraUsageDescription = "应用扫码需要相机权限";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -602,7 +603,8 @@
 					"\"$(PODS_ROOT)/Headers/Private/Yoga\"",
 					"$(SRCROOT)/Canvas/Native/RillSandbox",
 				);
-				INFOPLIST_KEY_NSCameraUsageDescription = "应用扫码需要相机权限";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

@@ -43,9 +43,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
               />
             )}
             {tab.systemAppType === 'bookmarks' && (
-              <BookmarksApp
-                bookmarks={tab.bookmarks ?? []}
-              />
+              <BookmarksApp />
             )}
           </React.Suspense>
         </View>
@@ -134,9 +132,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                 />
               )}
               {tab.systemAppType === 'bookmarks' && (
-                <BookmarksApp
-                  bookmarks={tab.bookmarks ?? []}
-                />
+                <BookmarksApp />
               )}
             </React.Suspense>
           </View>
