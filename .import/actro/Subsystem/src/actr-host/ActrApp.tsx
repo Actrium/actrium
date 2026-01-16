@@ -726,7 +726,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     if (hasExplicitSize) {
       return {
         width: containerWidth,
-        height: containerHeight,
+        // height: containerHeight,
+        flex: 1,
         position: 'relative' as const,
       };
     }
@@ -1053,7 +1054,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
           const tabContainerStyle = hasExplicitSize
             ? {
                 width: containerWidth,
-                height: containerHeight,
+                // height: containerHeight,
+                flex: 1,
                 ...displayStyle,
               }
             : [StyleSheet.absoluteFill, displayStyle];
