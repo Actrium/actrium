@@ -89,75 +89,25 @@ class BrowserViewModel: ObservableObject {
     func addNewTab() -> Tab {
         logger.debug("🆕 开始创建新标签页...")
         
-        // 🔴 开发调试：优先加载 counterapp 开发目录作为新 tab
-        let counterAppDevPath = "/Users/example-dev-5/Projects/askaway-ipad/Subsystem/actr-app-examples/counterapp"
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
-            logger.debug("🔄 [addNewTab] 从 counterapp 开发目录创建新 tab")
-            let url = URL(fileURLWithPath: counterAppDevPath)
-            Task { @MainActor [weak self] in
-                self?.loadFromDevDirectory(url)
-            }
-            // 返回占位 tab（会被 loadFromDevDirectory 创建的 tab 替换）
-            return Tab(title: "Loading...", htmlContent: "")
-        }
-        
-        // Fallback: 创建默认 tab
+        // 创建默认 RN 标签页（与应用启动时相同）
         let newTab = Tab(
-            title: "New Tab \(tabs.count + 1)",
+            title: "human in loop - coding for ever",
             htmlContent: """
                 <!DOCTYPE html>
                 <html>
-                <head>
-                    <meta charset="utf-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                        body {
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                            padding: 40px;
-                            color: #ffffff;
-                            margin: 0;
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 100vh;
-                            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
-                        }
-                        .container {
-                            max-width: 800px;
-                            text-align: center;
-                        }
-                        h1 {
-                            color: #e06c75;
-                            font-size: 2.5em;
-                            margin-bottom: 20px;
-                        }
-                        p {
-                            line-height: 1.8;
-                            font-size: 1.2em;
-                            color: #abb2bf;
-                        }
-                        .tab-number {
-                            color: #c678dd;
-                            font-weight: bold;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>📄 New Tab</h1>
-                        <p>This is <span class="tab-number">Tab #\(tabs.count + 1)</span></p>
-                        <p>Start typing in the address bar to navigate to a new page.</p>
-                    </div>
-                </body>
+                ...
                 </html>
-                """
+                """,
+            // 🟢 Trick: 给一个空脚本，强制 SwiftUI 认为这是一个 RN 标签页
+            // 这样即使 content 是 HTML，外面也会包裹住 ActrApp 的 RN 壳子（地址栏等）
+            unifiedScript: "/* welcome page shell */"
         )
         tabs.append(newTab)
         currentTabId = newTab.id
-
-        // 简化：直接添加到末尾
         tabSlotPositions[newTab.id] = tabs.count - 1
+        
+        // 自动进入 Focus 模式
+        canvasMode = .focus(tabId: newTab.id)
 
         logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
         return newTab
