@@ -68,11 +68,8 @@ struct WorkspaceMainView: View {
     @State private var isOverviewResizing: Bool = false
     @State private var lastKnownViewportSize: CGSize = .zero
 
-    // 🔧 Animation Layer Debug Mode
-    @State private var animationDebugMode: Bool = false
-    @State private var animationDebugScale: CGFloat = 1.0
-    @State private var animationDebugImage: NSImage?
-    @State private var isCapturingScreenshot: Bool = false  // 截图时临时隐藏 Search Tabs
+    // 🔧 VirtualGrid Debug Mode
+    @State private var virtualGridDebugMode: Bool = false
 
     // 根据搜索文本过滤 tabs
     private var filteredTabs: [Tab] {
@@ -299,19 +296,20 @@ struct WorkspaceMainView: View {
                     }
                 }
 
-                // 🔑 Animation 层：两阶段动画（Zoom + Cross-Dissolve）
-                // 在 Live 层之上，过渡期间显示快照动画，完成后消失
-                // 使用 CALayer 实现高性能动画，避免 SwiftUI 重绘开销
+                // 🔑 Animation 层：VirtualGrid 方案
+                // 与真实 Grid 布局完全一致的虚拟网格，使用 Tab 缩略图
+                // 动画时覆盖真实 Grid，完成后隐藏
                 AnimationLayerRepresentable(
                     controller: modeTransitionController,
-                    viewportOffset: 0,  // Animation layer is already in viewport area
-                    viewportSize: safeViewportSize,
-                    debugMode: animationDebugMode,
-                    debugScale: animationDebugScale,
-                    debugCardRect: gridResult.positions.first.map { pos in
-                        CGRect(x: pos.x, y: pos.y, width: gridResult.cardWidth, height: gridResult.cardHeight)
-                    } ?? .zero,
-                    debugImage: animationDebugImage
+                    canvasSize: gridResult.canvasSize,
+                    cardSize: CGSize(width: gridResult.cardWidth, height: gridResult.cardHeight),
+                    cards: buildVirtualGridCards(
+                        tabs: filteredTabs,
+                        positions: gridResult.positions,
+                        tabSlotPositions: filteredTabPositions
+                    ),
+                    transform: transform,
+                    isVisible: virtualGridDebugMode || modeTransitionController.phase.isTransitioning
                 )
                 .frame(width: safeViewportSize.width, height: safeViewportSize.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -359,8 +357,8 @@ struct WorkspaceMainView: View {
                 // 注意：RN 内容层已移至每个 TabPanel 内部
                 // 每个 Tab 都有独立的 RCTRootView，实现真正的缩放
 
-                // Search Tabs 搜索框 - 仅在 Overview 模式显示，截图时隐藏
-                if case .overview = viewModel.canvasMode, !isCapturingScreenshot {
+                // Search Tabs 搜索框 - 仅在 Overview 模式显示
+                if case .overview = viewModel.canvasMode {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
@@ -385,33 +383,19 @@ struct WorkspaceMainView: View {
                     .padding(.trailing, 10)
                 }
 
-                // 🔧 Animation Debug Panel - 浮动调试面板
+                // 🔧 VirtualGrid Debug Panel - 浮动调试面板
                 if case .overview = viewModel.canvasMode {
                     VStack {
                         Spacer()
                         HStack(spacing: 12) {
-                            Toggle(isOn: $animationDebugMode) {
-                                Text("Debug")
+                            Toggle(isOn: $virtualGridDebugMode) {
+                                Text("VirtualGrid")
                             }
                             .toggleStyle(.switch)
 
-                            if animationDebugMode {
-                                Text("Scale:")
-                                Slider(value: $animationDebugScale, in: 1.0...5.0)
-                                    .frame(width: 150)
-                                Text(String(format: "%.2f", animationDebugScale))
-                                    .monospacedDigit()
-                                    .frame(width: 40)
-
-                                Button("📸") {
-                                    isCapturingScreenshot = true
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        let size = CGSize(width: max(viewportSize.width, 1), height: max(viewportSize.height, 1))
-                                        animationDebugImage = captureViewportSnapshot(viewportSize: size)
-                                        isCapturingScreenshot = false
-                                        NSLog("🔧 Debug screenshot captured: %@", animationDebugImage != nil ? "OK" : "nil")
-                                    }
-                                }
+                            if virtualGridDebugMode {
+                                Text("Cards: \(filteredTabs.count)")
+                                    .foregroundColor(.secondary)
                             }
                         }
                         .padding(.horizontal, 16)
@@ -420,22 +404,6 @@ struct WorkspaceMainView: View {
                         .cornerRadius(10)
                         .shadow(radius: 4)
                         .padding(.bottom, 20)
-                    }
-                    .onChange(of: animationDebugMode) { _, isOn in
-                        if isOn {
-                            // Auto-capture when entering debug mode
-                            isCapturingScreenshot = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                let size = CGSize(width: max(viewportSize.width, 1), height: max(viewportSize.height, 1))
-                                animationDebugImage = captureViewportSnapshot(viewportSize: size)
-                                isCapturingScreenshot = false
-                                NSLog("🔧 Debug mode ON, screenshot: %@", animationDebugImage != nil ? "OK" : "nil")
-                            }
-                        } else {
-                            animationDebugImage = nil
-                            animationDebugScale = 1.0
-                            NSLog("🔧 Debug mode OFF")
-                        }
                     }
                 }
 
@@ -558,45 +526,14 @@ struct WorkspaceMainView: View {
                     }
                     .help("标签总览 (⌘⇧\\)")
 
-                    // 🔧 Debug: Animation Layer Scale Slider
+                    // 🔧 VirtualGrid Debug Toggle
                     Divider()
 
-                    Toggle(isOn: $animationDebugMode) {
-                        Image(systemName: "slider.horizontal.3")
+                    Toggle(isOn: $virtualGridDebugMode) {
+                        Image(systemName: "square.grid.2x2")
                     }
                     .toggleStyle(.button)
-                    .help("Animation Debug")
-                    .onChange(of: animationDebugMode) { _, isOn in
-                        if isOn {
-                            // Auto-capture when entering debug mode
-                            isCapturingScreenshot = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                let size = CGSize(width: max(viewportSize.width, 1), height: max(viewportSize.height, 1))
-                                animationDebugImage = captureViewportSnapshot(viewportSize: size)
-                                isCapturingScreenshot = false
-                            }
-                        } else {
-                            animationDebugImage = nil
-                            animationDebugScale = 1.0
-                        }
-                    }
-
-                    if animationDebugMode {
-                        Slider(value: $animationDebugScale, in: 1.0...5.0)
-                            .frame(width: 100)
-                            .help("Scale: \(String(format: "%.2f", animationDebugScale))")
-
-                        Button("📸") {
-                            // Capture fresh screenshot
-                            isCapturingScreenshot = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                let size = CGSize(width: max(viewportSize.width, 1), height: max(viewportSize.height, 1))
-                                animationDebugImage = captureViewportSnapshot(viewportSize: size)
-                                isCapturingScreenshot = false
-                            }
-                        }
-                        .help("Capture Screenshot")
-                    }
+                    .help("Show VirtualGrid")
                 }
                 }  // end if !useNativeToolbar
             }
@@ -1200,6 +1137,38 @@ struct WorkspaceMainView: View {
     private let floatingTitleBarHeight: CGFloat = 24
 
     /// 计算间距（卡片之间）和垂直边距
+    // MARK: - VirtualGrid Helper
+
+    /// 构建 VirtualGrid 卡片信息数组
+    /// - Parameters:
+    ///   - tabs: Tab 列表
+    ///   - positions: Grid 布局位置数组
+    ///   - tabSlotPositions: Tab ID 到槽位索引的映射
+    /// - Returns: VirtualGridCardInfo 数组
+    private func buildVirtualGridCards(
+        tabs: [Tab],
+        positions: [CGPoint],
+        tabSlotPositions: [UUID: Int]
+    ) -> [VirtualGridCardInfo] {
+        return tabs.compactMap { tab in
+            guard let slotIndex = tabSlotPositions[tab.id],
+                  slotIndex < positions.count else {
+                return nil
+            }
+
+            // 从 TabSnapshotCache 获取缩略图
+            let thumbnail = TabSnapshotCacheManager.shared.filteredThumbnail(for: tab.id)
+
+            return VirtualGridCardInfo(
+                tabId: tab.id,
+                position: positions[slotIndex],
+                thumbnail: thumbnail
+            )
+        }
+    }
+
+    // MARK: - Spacing Calculation
+
     /// - 水平间距 = windowWidth / (卡片数 × 3) × 2.5，下限 40px（2.5x 原值）
     /// - 垂直间距 = 基础间距 + 悬浮标题栏高度（为标题栏留出空间）
     /// - 垂直边距 = 基础间距 × 1.25 + 悬浮标题栏高度
