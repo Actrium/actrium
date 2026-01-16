@@ -239,6 +239,7 @@ private struct FocusModeNavigationBar: View {
             // 右侧：设置按钮
             Button(action: {
                 // TODO: 打开设置
+                viewModel.toggleLeftPanelForCurrentTab()
             }) {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 16))
