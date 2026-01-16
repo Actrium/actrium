@@ -3,74 +3,82 @@
 //  Canvas
 //
 //  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  动画层 - Focus/Overview 模式切换的两阶段动画
+//  动画层 - VirtualGrid 方案
 //  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//
-//  设计目标：
-//  - 使用 CALayer 实现高性能动画，避免 SwiftUI 状态变化触发视图树重绘
-//  - 通过快照 + 变换实现平滑的缩放/淡入淡出过渡
 //
 //  架构：
 //  ┌─────────────────────────────────────────────────────────────────┐
 //  │  AnimationLayerNSView (NSView, isFlipped=true)                  │
-//  │  ├── backgroundLayer: 背景色填充层 (默认隐藏)                     │
-//  │  └── containerLayer: 内容容器层 (承载缩放/平移变换)                │
-//  │      ├── primaryLayer: 主截图层 (Overview 或 Focus 快照)         │
-//  │      └── secondaryLayer: 次截图层 (Cross-dissolve 用)           │
+//  │  ├── backgroundLayer: 背景色填充层 (窗口背景色)                   │
+//  │  └── virtualGridLayer: 虚拟网格层 (与真实 Grid 布局完全一致)       │
+//  │      ├── cardSlot[tab0.id]: Tab 0 的缩略图                       │
+//  │      ├── cardSlot[tab1.id]: Tab 1 的缩略图                       │
+//  │      └── ...                                                    │
 //  └─────────────────────────────────────────────────────────────────┘
 //
-//  变换公式：
-//  - 目标：将 cardRect 区域缩放填满整个视口
-//  - scale = min(viewport.width / card.width, viewport.height / card.height)
-//  - offset = -cardRect.origin * scale
-//  - 变换：先缩放(原点)，后平移 → Point(x,y) → (x*scale + offset.x, y*scale + offset.y)
+//  设计原则：
+//  - VirtualGrid 与真实 Grid 布局完全同步 (positions, cardWidth, cardHeight)
+//  - 直接使用 TabSnapshotCache 中的缩略图，无需截取整个视口
+//  - virtualGridLayer 的变换与真实 canvas 的变换完全一致
+//  - 动画时 VirtualGrid 覆盖真实 Grid，动画完成后隐藏
 //
-//  使用方式：
-//  1. WorkspaceMainView 中嵌入 AnimationLayerRepresentable
-//  2. ModeTransitionController 通过 animationLayerView 引用直接操作 CALayer
-//  3. 调试模式：通过 debugShowWithScale(_:cardRect:) 手动控制显示
+//  数据流：
+//  1. WorkspaceMainView 计算 gridResult (positions, cardWidth, cardHeight, canvasSize)
+//  2. 同步到 AnimationLayerRepresentable
+//  3. AnimationLayerNSView 更新 cardSlot 的 frame 和 contents
+//  4. 动画时应用与 canvas 相同的 transform
 //
 
 import SwiftUI
 import QuartzCore
 
+// MARK: - Virtual Grid Card Info
+
+/// 单个卡片槽位的信息
+struct VirtualGridCardInfo: Equatable {
+    let tabId: UUID
+    let position: CGPoint      // 卡片在 canvas 坐标系中的位置
+    let thumbnail: NSImage?    // 缩略图 (来自 TabSnapshotCache)
+}
+
 // MARK: - Animation Layer NSView
 
-/// 高性能动画层 - 使用 CALayer 绑过 SwiftUI 状态更新
+/// 高性能动画层 - VirtualGrid 方案
 ///
-/// Layer 层级：
-/// - backgroundLayer: 窗口背景色填充 (动画/调试时才显示)
-/// - containerLayer: 内容容器，承载缩放+平移变换
-///   - primaryLayer: 主截图 (Overview 快照)
-///   - secondaryLayer: 次截图 (Focus 快照，用于 Cross-dissolve)
+/// 使用 CALayer 构建与真实 Grid 布局完全一致的虚拟网格，
+/// 每个卡片槽位显示对应 Tab 的缩略图。
 final class AnimationLayerNSView: NSView {
 
     // MARK: - CALayer 层级
 
-    /// 背景层 - 填充窗口背景色，默认 opacity=0 隐藏
+    /// 背景层 - 填充窗口背景色
     private let backgroundLayer = CALayer()
 
-    /// 容器层 - 承载缩放和平移变换，anchorPoint=(0,0) 即左上角
-    private let containerLayer = CALayer()
+    /// 虚拟网格层 - 承载所有卡片槽位，接受 canvas 变换
+    private let virtualGridLayer = CALayer()
 
-    /// 主截图层 - 显示 Overview 网格快照
-    private let primaryLayer = CALayer()
+    /// 卡片槽位层 - 按 Tab ID 索引
+    private var cardSlotLayers: [UUID: CALayer] = [:]
 
-    /// 次截图层 - 显示 Focus 快照，用于 Cross-dissolve 过渡
-    private let secondaryLayer = CALayer()
+    // MARK: - Grid 布局数据
 
-    // MARK: - 视口配置
+    /// Canvas 尺寸 (网格内容的总大小)
+    private var canvasSize: CGSize = .zero
 
-    /// 视口相对窗口左边缘的偏移量 (即侧边栏宽度)
-    private var viewportOffset: CGFloat = 0
+    /// 卡片尺寸
+    private var cardSize: CGSize = .zero
 
-    /// 视口尺寸 (主内容区大小)
-    private var viewportSize: CGSize = .zero
+    /// 当前显示的卡片信息
+    private var currentCards: [VirtualGridCardInfo] = []
+
+    // MARK: - 状态
+
+    /// 是否可见
+    private var isVisible: Bool = false
 
     // MARK: - 坐标系
 
     /// 使用翻转坐标系匹配 SwiftUI (原点在左上角)
-    /// 注意：CALayer 的 anchorPoint Y 轴仍然是底部为 0
     override var isFlipped: Bool { true }
 
     // MARK: - Initialization
@@ -85,43 +93,22 @@ final class AnimationLayerNSView: NSView {
         setupLayers()
     }
 
-    /// 初始化 CALayer 层级结构
+    /// 初始化 CALayer 层级
     private func setupLayers() {
         wantsLayer = true
         layer?.masksToBounds = true
 
         // ━━━━ 背景层 ━━━━
-        // 填充窗口背景色，默认隐藏 (opacity=0)
-        // 仅在动画播放或调试模式时显示
         backgroundLayer.backgroundColor = NSColor.windowBackgroundColor.cgColor
         backgroundLayer.opacity = 0
         layer?.addSublayer(backgroundLayer)
 
-        // ━━━━ 容器层 ━━━━
-        // 承载所有内容的变换 (缩放 + 平移)
-        // anchorPoint=(0,0) 表示以左上角为变换原点
-        // masksToBounds=false 允许缩放时内容溢出边界
-        containerLayer.masksToBounds = false
-        containerLayer.anchorPoint = .zero
-        containerLayer.position = .zero
-        layer?.addSublayer(containerLayer)
-
-        // ━━━━ 截图层 ━━━━
-        // contentsGravity=.topLeft 确保图片从左上角开始绘制
-        primaryLayer.contentsGravity = .topLeft
-        primaryLayer.masksToBounds = false
-        containerLayer.addSublayer(primaryLayer)
-
-        secondaryLayer.contentsGravity = .topLeft
-        secondaryLayer.masksToBounds = false
-        containerLayer.addSublayer(secondaryLayer)
-
-        // 禁用 CALayer 隐式动画，我们手动控制每一帧
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        primaryLayer.opacity = 0
-        secondaryLayer.opacity = 0
-        CATransaction.commit()
+        // ━━━━ 虚拟网格层 ━━━━
+        // anchorPoint=(0,0) 以左上角为变换原点，与 SwiftUI 的 .topLeading 一致
+        virtualGridLayer.anchorPoint = .zero
+        virtualGridLayer.position = .zero
+        virtualGridLayer.opacity = 0
+        layer?.addSublayer(virtualGridLayer)
     }
 
     override func layout() {
@@ -133,196 +120,170 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        let bounds = self.bounds
-
-        // Background fills entire view
+        // 背景层填满整个视图
         backgroundLayer.frame = bounds
 
-        // Container starts at viewport offset, sized to viewport
-        containerLayer.frame = CGRect(
-            x: viewportOffset,
-            y: 0,
-            width: viewportSize.width > 0 ? viewportSize.width : bounds.width - viewportOffset,
-            height: viewportSize.height > 0 ? viewportSize.height : bounds.height
-        )
-
-        // Image layers fill container
-        let containerBounds = containerLayer.bounds
-        primaryLayer.frame = containerBounds
-        secondaryLayer.frame = containerBounds
+        // 虚拟网格层使用 canvasSize
+        virtualGridLayer.frame = CGRect(origin: .zero, size: canvasSize)
 
         CATransaction.commit()
     }
 
-    // MARK: - Configuration
+    // MARK: - Public API: Grid 配置
 
-    /// Configure viewport layout
+    /// 配置网格布局
     /// - Parameters:
-    ///   - offset: Horizontal offset from left edge (sidebar width)
-    ///   - size: Viewport size
-    func configureViewport(offset: CGFloat, size: CGSize) {
-        self.viewportOffset = offset
-        self.viewportSize = size
-        updateLayerFrames()
-    }
+    ///   - canvasSize: Canvas 总尺寸
+    ///   - cardSize: 卡片尺寸 (width, height)
+    func configureGrid(canvasSize: CGSize, cardSize: CGSize) {
+        self.canvasSize = canvasSize
+        self.cardSize = cardSize
 
-    // MARK: - Public API
-
-    /// Set primary image
-    func setPrimaryImage(_ image: NSImage?) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        primaryLayer.contents = image
+        virtualGridLayer.frame = CGRect(origin: .zero, size: canvasSize)
         CATransaction.commit()
     }
 
-    /// Set secondary image
-    func setSecondaryImage(_ image: NSImage?) {
+    /// 更新卡片数据
+    /// - Parameter cards: 所有卡片的信息 (tabId, position, thumbnail)
+    func updateCards(_ cards: [VirtualGridCardInfo]) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        secondaryLayer.contents = image
+
+        let newTabIds = Set(cards.map { $0.tabId })
+        let existingTabIds = Set(cardSlotLayers.keys)
+
+        // 移除不再存在的卡片
+        for tabId in existingTabIds.subtracting(newTabIds) {
+            cardSlotLayers[tabId]?.removeFromSuperlayer()
+            cardSlotLayers.removeValue(forKey: tabId)
+        }
+
+        // 添加或更新卡片
+        for card in cards {
+            let slotLayer: CALayer
+            if let existing = cardSlotLayers[card.tabId] {
+                slotLayer = existing
+            } else {
+                slotLayer = CALayer()
+                slotLayer.contentsGravity = .resizeAspectFill
+                slotLayer.masksToBounds = true
+                slotLayer.cornerRadius = 8  // 与 TabPanel 的圆角一致
+                virtualGridLayer.addSublayer(slotLayer)
+                cardSlotLayers[card.tabId] = slotLayer
+            }
+
+            // 更新 frame 和内容
+            slotLayer.frame = CGRect(origin: card.position, size: cardSize)
+            slotLayer.contents = card.thumbnail
+        }
+
+        currentCards = cards
         CATransaction.commit()
+
+        NSLog("🎴 VirtualGrid: Updated %d cards, cardSize=%.0fx%.0f",
+              cards.count, cardSize.width, cardSize.height)
     }
 
-    /// 更新动画状态 (每帧调用)
-    ///
-    /// 由 ModeTransitionController 的 CVDisplayLink 回调驱动
-    ///
+    // MARK: - Public API: 变换控制
+
+    /// 应用 Canvas 变换 (与真实 Grid 的变换完全一致)
     /// - Parameters:
-    ///   - primaryOpacity: 主截图层透明度 (0-1)
-    ///   - secondaryOpacity: 次截图层透明度 (0-1)，用于 Cross-dissolve
     ///   - scale: 缩放因子
-    ///   - offset: 平移偏移量 (像素)
-    ///
-    /// 变换公式：
-    /// ```
-    /// 最终位置 = 原始位置 × scale + offset
-    /// ```
-    /// 要让 cardRect.origin 移动到 (0,0)：
-    /// ```
-    /// offset = -cardRect.origin × scale
-    /// ```
-    func updateAnimationState(
-        primaryOpacity: Float,
-        secondaryOpacity: Float,
-        scale: CGFloat,
-        offset: CGPoint
-    ) {
+    ///   - offset: 平移偏移量
+    func applyTransform(scale: CGFloat, offset: CGPoint) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        // 动画时显示背景层
-        let isAnimating = primaryOpacity > 0 || secondaryOpacity > 0
-        backgroundLayer.opacity = isAnimating ? 1.0 : 0
-
-        primaryLayer.opacity = primaryOpacity
-        secondaryLayer.opacity = secondaryOpacity
-
-        // 应用变换：先缩放(以原点为中心)，再平移
-        // CATransform3D 的矩阵乘法顺序是 Translate × Scale
-        // 对于点 (x,y)：先缩放 → (x×scale, y×scale)，再平移 → (x×scale+offset.x, y×scale+offset.y)
         var transform = CATransform3DIdentity
         transform = CATransform3DScale(transform, scale, scale, 1.0)
-        transform = CATransform3DTranslate(transform, offset.x, offset.y, 0)
-        containerLayer.transform = transform
+        transform = CATransform3DTranslate(transform, offset.x / scale, offset.y / scale, 0)
+        virtualGridLayer.transform = transform
 
         CATransaction.commit()
     }
 
-    /// Reset animation state (hide layers, reset transform)
-    func resetState() {
+    // MARK: - Public API: 显示/隐藏
+
+    /// 显示动画层
+    func show() {
+        guard !isVisible else { return }
+        isVisible = true
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-
-        backgroundLayer.opacity = 0
-        primaryLayer.opacity = 0
-        secondaryLayer.opacity = 0
-        primaryLayer.contents = nil
-        secondaryLayer.contents = nil
-        containerLayer.transform = CATransform3DIdentity
-
-        CATransaction.commit()
-    }
-
-    // MARK: - 调试 API
-
-    /// 调试模式：显示动画层并应用指定缩放
-    ///
-    /// 用于手动观察动画层的缩放效果，由底部浮动面板的滑条控制
-    ///
-    /// - Parameters:
-    ///   - scale: 缩放因子 (1.0 = 完整 Overview, targetScale = 卡片填满视口)
-    ///   - cardRect: 目标卡片在视口坐标系中的矩形位置
-    ///
-    /// 工作原理：
-    /// ```
-    /// scale=1.0 时：offset=(0,0)，显示完整 Overview 网格
-    /// scale=2.0 时：offset=(-cardRect.x×2, -cardRect.y×2)，卡片开始放大
-    /// scale=targetScale 时：卡片正好填满整个视口
-    /// ```
-    func debugShowWithScale(_ scale: CGFloat, cardRect: CGRect) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-
-        // 显示背景和主截图层
         backgroundLayer.opacity = 1.0
-        primaryLayer.opacity = 1.0
-        secondaryLayer.opacity = 0
-
-        // 计算偏移量：让 cardRect 的左上角在缩放后位于视口原点
-        // offset = -cardRect.origin × scale
-        let offset = CGPoint(
-            x: -cardRect.origin.x * scale,
-            y: -cardRect.origin.y * scale
-        )
-
-        // 应用变换
-        var transform = CATransform3DIdentity
-        transform = CATransform3DScale(transform, scale, scale, 1.0)
-        transform = CATransform3DTranslate(transform, offset.x, offset.y, 0)
-        containerLayer.transform = transform
-
+        virtualGridLayer.opacity = 1.0
         CATransaction.commit()
 
-        NSLog("🎚️ AnimationLayer debug: scale=%.3f, cardRect=(%.1f, %.1f, %.1f, %.1f), offset=(%.1f, %.1f)",
-              scale, cardRect.origin.x, cardRect.origin.y, cardRect.width, cardRect.height,
-              offset.x, offset.y)
+        NSLog("🎬 VirtualGrid: Show")
     }
 
-    /// 隐藏调试视图
-    func debugHide() {
-        resetState()
+    /// 隐藏动画层
+    func hide() {
+        guard isVisible else { return }
+        isVisible = false
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        backgroundLayer.opacity = 0
+        virtualGridLayer.opacity = 0
+        CATransaction.commit()
+
+        NSLog("🎬 VirtualGrid: Hide")
+    }
+
+    /// 重置状态
+    func reset() {
+        hide()
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        virtualGridLayer.transform = CATransform3DIdentity
+        CATransaction.commit()
+    }
+
+    // MARK: - Debug API
+
+    /// 调试：获取当前状态信息
+    func debugInfo() -> String {
+        return """
+        VirtualGrid Debug:
+        - isVisible: \(isVisible)
+        - canvasSize: \(canvasSize)
+        - cardSize: \(cardSize)
+        - cardCount: \(cardSlotLayers.count)
+        - transform: scale=\(virtualGridLayer.transform.m11), tx=\(virtualGridLayer.transform.m41), ty=\(virtualGridLayer.transform.m42)
+        """
     }
 }
 
 // MARK: - SwiftUI Representable
 
-/// SwiftUI wrapper for AnimationLayerNSView
+/// SwiftUI 包装器
 struct AnimationLayerRepresentable: NSViewRepresentable {
-    /// Reference to the controller for accessing the NSView
+
+    /// ModeTransitionController 引用 (用于存储 NSView 引用)
     let controller: ModeTransitionController
 
-    /// Viewport offset from left edge (sidebar width)
-    let viewportOffset: CGFloat
+    /// Canvas 尺寸
+    let canvasSize: CGSize
 
-    /// Viewport size
-    let viewportSize: CGSize
+    /// 卡片尺寸
+    let cardSize: CGSize
 
-    /// Debug mode: show animation layer with slider-controlled scale
-    let debugMode: Bool
+    /// 卡片信息列表
+    let cards: [VirtualGridCardInfo]
 
-    /// Debug scale value (1.0 = overview, targetScale = focus)
-    let debugScale: CGFloat
+    /// Canvas 变换
+    let transform: (scale: CGFloat, offset: CGPoint)
 
-    /// Card rect for debug mode (first tab card position in viewport)
-    let debugCardRect: CGRect
-
-    /// Screenshot image for debug mode
-    let debugImage: NSImage?
+    /// 是否显示
+    let isVisible: Bool
 
     func makeNSView(context: Context) -> AnimationLayerNSView {
         let view = AnimationLayerNSView(frame: .zero)
-        // Store reference in controller
         DispatchQueue.main.async {
             controller.animationLayerView = view
         }
@@ -330,97 +291,32 @@ struct AnimationLayerRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: AnimationLayerNSView, context: Context) {
-        // Update viewport configuration
-        nsView.configureViewport(offset: viewportOffset, size: viewportSize)
+        // 更新网格配置
+        nsView.configureGrid(canvasSize: canvasSize, cardSize: cardSize)
 
-        // Handle debug mode
-        if debugMode {
-            if let image = debugImage {
-                nsView.setPrimaryImage(image)
-            }
-            nsView.debugShowWithScale(debugScale, cardRect: debugCardRect)
+        // 更新卡片数据
+        nsView.updateCards(cards)
+
+        // 应用变换
+        nsView.applyTransform(scale: transform.scale, offset: transform.offset)
+
+        // 显示/隐藏
+        if isVisible {
+            nsView.show()
+        } else {
+            nsView.hide()
         }
-    }
-}
-
-// MARK: - Convenience initializer for non-debug mode
-extension AnimationLayerRepresentable {
-    init(controller: ModeTransitionController, viewportOffset: CGFloat, viewportSize: CGSize) {
-        self.controller = controller
-        self.viewportOffset = viewportOffset
-        self.viewportSize = viewportSize
-        self.debugMode = false
-        self.debugScale = 1.0
-        self.debugCardRect = .zero
-        self.debugImage = nil
     }
 }
 
 // MARK: - Animation Constants
 
-/// Constants for mode transition animations
+/// 动画常量
 enum ModeTransitionConstants {
-    /// Total transition duration (both phases combined)
-    /// DEBUG: 10x slower for observation (normal: 0.6)
+    /// 动画总时长 (调试: 6.0s, 正常: 0.6s)
     static let totalTransitionDuration: Double = 6.0
 
-    /// Spring animation response (for reference, not used in manual animation)
+    /// Spring 响应参数
     static let springResponse: Double = 0.35
-
-    /// Spring animation damping
     static let springDamping: Double = 1.0
-
-    /// Legacy: Animation Layer duration (equals total duration)
-    static let animationDuration: Double = totalTransitionDuration
-
-    /// Blur radius for Overview mode thumbnails
-    static let overviewBlurRadius: CGFloat = 4.0
-
-    /// Saturation for Overview mode thumbnails (0.0-1.0)
-    static let overviewSaturation: Double = 0.7
-
-    /// Blur radius for Focus mode (clear)
-    static let focusBlurRadius: CGFloat = 0.0
-
-    /// Saturation for Focus mode (full color)
-    static let focusSaturation: Double = 1.0
-}
-
-// MARK: - Legacy SwiftUI View (for reference/fallback)
-
-/// Legacy SwiftUI Animation Layer (kept for reference)
-/// Use AnimationLayerRepresentable instead for better performance
-struct AnimationLayerLegacy: View {
-    let primaryImage: NSImage?
-    let secondaryImage: NSImage?
-    let primaryOpacity: Double
-    let secondaryOpacity: Double
-    let scale: CGFloat
-    let anchor: UnitPoint
-    let frameSize: CGSize
-
-    var body: some View {
-        ZStack {
-            if let image = primaryImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: frameSize.width, height: frameSize.height)
-                    .clipped()
-                    .opacity(primaryOpacity)
-            }
-            if let image = secondaryImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: frameSize.width, height: frameSize.height)
-                    .clipped()
-                    .opacity(secondaryOpacity)
-            }
-        }
-        .scaleEffect(scale, anchor: anchor)
-        .frame(width: frameSize.width, height: frameSize.height)
-        .clipped()
-        .allowsHitTesting(false)
-    }
 }
