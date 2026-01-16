@@ -4,7 +4,7 @@
   "description": "Canvas Subsystem - React Native runtime for actr apps and system apps",
   "main": "index.ts",
   "scripts": {
-    "start": "react-native start --verbose",
+    "start": "react-native start --verbose --reset-cache",
     "log": "bun log-server.ts",
     "dev": "bun scripts/dev.ts",
     "typecheck": "tsc --noEmit",
