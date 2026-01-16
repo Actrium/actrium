@@ -61,7 +61,7 @@ final class CanvasReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelega
         // 开发时强制走 Metro（支持热重载）；Debug 环境不回退到离线 actr.jsbundle（避免落到过期 bundle 导致"白屏无渲染"）
         // 🟢 特别注意：在 iPad 真机调试时，RCTBundleURLProvider 对 IP:端口 的解析不稳定
         // 直接构造 URL 是确保 iPad 能精准连接到 Mac Metro (8082) 的最可靠方式
-        let packagerHost = "10.30.3.87"
+        let packagerHost = "localhost" // 或者填写 Mac 的局域网 IP 地址
         let port = 8082
         let url = URL(string: "http://\(packagerHost):\(port)/index.bundle?platform=ios&dev=true&minify=false")
         
