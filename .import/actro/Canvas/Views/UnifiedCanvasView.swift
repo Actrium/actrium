@@ -333,17 +333,15 @@ struct UnifiedCanvasView: View {
             }
         }
         .onAppear {
-            // 🔴 开发调试：如果设置了启动时进入 Focus 模式，直接切换
-            if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
+            // 启动时默认进入 Focus 模式（如果有 tab）
+            if let tabId = viewModel.currentTabId {
                 logger.notice("🚀 [UnifiedCanvasView] 启动时直接进入 Focus 模式")
                 DispatchQueue.main.async {
                     withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
                         viewModel.canvasMode = .focus(tabId: tabId)
                     }
-                    viewModel.shouldStartInFocusMode = false  // 重置标志
                 }
             }
-            // Note: canvasMode defaults to .overview, no need to set explicitly
 
             #if os(macOS)
             // 监听 ESC 键（仅 macOS）

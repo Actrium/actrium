@@ -26,9 +26,6 @@ class BrowserViewModel: ObservableObject {
     // MARK: - Tab Groups
     @Published var tabGroups: [TabGroup] = []
 
-    // 🔴 开发调试：启动时直接进入 Focus 模式
-    @Published var shouldStartInFocusMode: Bool = false
-
     /// Canvas display mode (Overview vs Focus)
     /// Stored here to survive view recreation when DevTools layout changes
     @Published var canvasMode: CanvasMode = .overview
@@ -48,15 +45,13 @@ class BrowserViewModel: ObservableObject {
 
     init() {
         // 🔴 开发调试：优先加载 counterapp 开发目录作为启动 tab (Focus 模式)
-        // let counterAppDevPath = "/Users/example-dev-5/Projects/askaway-ipad/Subsystem/actr-app-examples/counterapp"
-        let counterAppDevPath = "/Users/example-dev-4/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"
+        let counterAppDevPath = "/Users/example-dev-5/Projects/askaway-ipad/Subsystem/actr-app-examples/counterapp"
+        // let counterAppDevPath = "/Users/example-dev-4/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
             logger.debug("🔄 [BrowserViewModel] 启动时直接加载 counterapp 开发目录 (Focus 模式)")
             // Initialize slot positions
             initializeSlotPositions()
-            // 🔴 Focus 模式：启动时直接进入全屏 Focus 模式
-            shouldStartInFocusMode = true
 
             // 延迟加载开发目录，避免在 SwiftUI 初始化期间阻塞主线程
             let url = URL(fileURLWithPath: counterAppDevPath)
@@ -1128,6 +1123,9 @@ class BrowserViewModel: ObservableObject {
         currentTabId = newTab.id
         tabSlotPositions[newTab.id] = tabs.count - 1
         leftPanelVisibility[newTab.id] = leftPanelDefaultVisible
+        
+        // 自动进入 Focus 模式
+        canvasMode = .focus(tabId: newTab.id)
 
         logger.notice(" 已加载 .actr：\(title)")
 
