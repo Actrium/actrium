@@ -25,17 +25,16 @@ import QuartzCore
 // MARK: - Transition Phase
 
 /// Represents the current phase of mode transition
+/// NOTE: Does NOT contain progress to avoid triggering SwiftUI redraws every frame
 enum TransitionPhase: Equatable {
     /// No transition in progress
     case idle
 
     /// Transitioning from Focus to Overview mode
-    /// progress: 0.0 = Focus, 1.0 = Overview
-    case focusToOverview(fromTabId: UUID, progress: Double)
+    case focusToOverview(fromTabId: UUID)
 
     /// Transitioning from Overview to Focus mode
-    /// progress: 0.0 = Overview, 1.0 = Focus
-    case overviewToFocus(toTabId: UUID, progress: Double)
+    case overviewToFocus(toTabId: UUID)
 
     var isTransitioning: Bool {
         switch self {
@@ -45,13 +44,6 @@ enum TransitionPhase: Equatable {
     }
 }
 
-// MARK: - Animation Stage
-
-/// Two-stage animation phases
-enum AnimationStage {
-    case zoom       // Phase 1: Zoom in/out
-    case dissolve   // Phase 2: Cross-Dissolve
-}
 
 // MARK: - Mode Transition Controller
 
@@ -60,6 +52,11 @@ enum AnimationStage {
 @MainActor
 final class ModeTransitionController: ObservableObject {
 
+    // MARK: - Animation Toggle
+
+    /// 🔧 调试开关：设为 false 可完全禁用动画，直接切换模式
+    static var animationEnabled: Bool = true
+
     // MARK: - Published Properties (only for state that SwiftUI needs to observe)
 
     /// Current transition phase
@@ -67,9 +64,6 @@ final class ModeTransitionController: ObservableObject {
 
     /// Whether user interaction should be locked during transition
     @Published private(set) var isInteractionLocked: Bool = false
-
-    /// Current animation stage (for external observers)
-    @Published private(set) var currentStage: AnimationStage = .zoom
 
     // MARK: - CALayer Animation View
 
@@ -110,6 +104,9 @@ final class ModeTransitionController: ObservableObject {
     /// Viewport size
     private var viewportSize: CGSize = .zero
 
+    /// Overview transform (scale and offset for centered Overview mode)
+    private var overviewTransform: (scale: CGFloat, offset: CGPoint) = (1.0, .zero)
+
     /// CVDisplayLink for vsync-aligned animation
     private var displayLink: CVDisplayLink?
 
@@ -133,19 +130,28 @@ final class ModeTransitionController: ObservableObject {
     /// Start Focus → Overview transition
     /// - Parameters:
     ///   - tabId: The tab being transitioned from
-    ///   - cardRect: The card's rect in viewport coordinates (after transform)
+    ///   - cardRect: The card's rect in canvas coordinates (before transform)
     ///   - viewportSize: The viewport size
+    ///   - overviewTransform: The final transform for Overview mode (scale and centered offset)
     ///   - overviewSnapshot: Snapshot of the Overview grid (target state)
     ///   - onComplete: Callback when animation completes
     func startFocusToOverviewTransition(
         tabId: UUID,
         cardRect: CGRect,
         viewportSize: CGSize,
+        overviewTransform: (scale: CGFloat, offset: CGPoint),
         overviewSnapshot: NSImage?,
         onComplete: @escaping () -> Void
     ) {
         guard !phase.isTransitioning else {
             NSLog("⚠️ ModeTransitionController: Already transitioning, ignoring")
+            return
+        }
+
+        // 🔧 动画禁用时，直接调用完成回调
+        if !Self.animationEnabled {
+            NSLog("🎬 ModeTransitionController: Animation DISABLED, direct switch Focus → Overview")
+            onComplete()
             return
         }
 
@@ -157,9 +163,9 @@ final class ModeTransitionController: ObservableObject {
               NSStringFromSize(NSSizeFromCGSize(viewportSize)))
 
         sourceTabId = tabId
-        onTransitionComplete = onComplete
         self.cardRectInViewport = cardRect
         self.viewportSize = viewportSize
+        self.overviewTransform = overviewTransform
 
         // Lock interaction
         isInteractionLocked = true
@@ -177,39 +183,60 @@ final class ModeTransitionController: ObservableObject {
         )
 
         // Setup initial state: Start zoomed in (card fills viewport)
-        // Note: VirtualGrid uses cached thumbnails directly, no screenshots needed
         currentScale = targetScale
         currentOffset = targetOffset
-        currentStage = .zoom
 
-        // Setup VirtualGrid: show and apply initial transform
-        animationLayerView?.show()
-        animationLayerView?.applyTransform(scale: currentScale, offset: currentOffset)
+        // 🔑 关键：在显示动画层之前就设置 phase
+        // 这样当 showWithTransform() 使动画层可见后，即使 SwiftUI 触发更新
+        // updateNSView 也会因为 phase.isTransitioning 而跳过，避免重置状态
+        phase = .focusToOverview(fromTabId: tabId)
+
+        // Setup VirtualGrid: 使用原子性方法避免闪烁
+        // Focus → Overview: 初始圆角为 0（Focus 模式无圆角）
+        // 🔑 showWithTransform 在一个 CATransaction 中完成所有设置
+        if let animView = animationLayerView {
+            NSLog("🎬 ModeTransitionController: animationLayerView OK, calling showWithTransform")
+            animView.setAnimationDirection(.focusToOverview)
+            animView.showWithTransform(scale: currentScale, offset: currentOffset, cornerRadius: 0)
+        } else {
+            NSLog("⚠️ ModeTransitionController: animationLayerView is NIL! Animation will fail")
+        }
 
         NSLog("🎬 ModeTransitionController: Focus→Overview targetScale=%.2f, targetOffset=(%.1f, %.1f)",
               targetScale, targetOffset.x, targetOffset.y)
 
+        // 切换 canvasMode，真实的 Overview 视图在动画层下方准备好
+        onComplete()
+
         // Start animation
-        phase = .focusToOverview(fromTabId: tabId, progress: 0)
         startAnimation()
     }
 
     /// Start Overview → Focus transition
     /// - Parameters:
     ///   - tabId: The tab to focus on
-    ///   - cardRect: The card's rect in viewport coordinates (after transform)
+    ///   - cardRect: The card's rect in canvas coordinates (before transform)
     ///   - viewportSize: The viewport size
+    ///   - overviewTransform: The current transform for Overview mode (scale and centered offset)
     ///   - overviewSnapshot: Snapshot of the current Overview grid
     ///   - onComplete: Callback when animation completes
     func startOverviewToFocusTransition(
         tabId: UUID,
         cardRect: CGRect,
         viewportSize: CGSize,
+        overviewTransform: (scale: CGFloat, offset: CGPoint),
         overviewSnapshot: NSImage?,
         onComplete: @escaping () -> Void
     ) {
         guard !phase.isTransitioning else {
             NSLog("⚠️ ModeTransitionController: Already transitioning, ignoring")
+            return
+        }
+
+        // 🔧 动画禁用时，直接调用完成回调
+        if !Self.animationEnabled {
+            NSLog("🎬 ModeTransitionController: Animation DISABLED, direct switch Overview → Focus")
+            onComplete()
             return
         }
 
@@ -221,9 +248,9 @@ final class ModeTransitionController: ObservableObject {
               NSStringFromSize(NSSizeFromCGSize(viewportSize)))
 
         targetTabId = tabId
-        onTransitionComplete = onComplete
         self.cardRectInViewport = cardRect
         self.viewportSize = viewportSize
+        self.overviewTransform = overviewTransform
 
         // Lock interaction
         isInteractionLocked = true
@@ -233,21 +260,28 @@ final class ModeTransitionController: ObservableObject {
         let scaleY = viewportSize.height / max(cardRect.height, 1)
         targetScale = min(scaleX, scaleY)
 
-        // Setup initial state: Start at scale 1.0, offset (0,0) - full Overview visible
-        // Note: VirtualGrid uses cached thumbnails directly, no screenshots needed
-        currentScale = 1.0
-        currentOffset = .zero
-        currentStage = .zoom
+        // Setup initial state: Start at Overview transform (centered)
+        currentScale = overviewTransform.scale
+        currentOffset = overviewTransform.offset
 
-        // Setup VirtualGrid: show and apply initial transform
-        animationLayerView?.show()
-        animationLayerView?.applyTransform(scale: currentScale, offset: currentOffset)
+        // 🔑 关键：在显示动画层之前就设置 phase
+        // 这样当 showWithTransform() 使动画层可见后，即使 SwiftUI 触发更新
+        // updateNSView 也会因为 phase.isTransitioning 而跳过，避免重置状态
+        phase = .overviewToFocus(toTabId: tabId)
+
+        // Setup VirtualGrid: 使用原子性方法避免闪烁
+        // Overview → Focus: 初始圆角为 10（Overview 模式有圆角）
+        // 🔑 showWithTransform 在一个 CATransaction 中完成所有设置
+        animationLayerView?.setAnimationDirection(.overviewToFocus)
+        animationLayerView?.showWithTransform(scale: currentScale, offset: currentOffset, cornerRadius: 10)
 
         NSLog("🎬 ModeTransitionController: Overview→Focus targetScale=%.2f, cardRect=(%.1f, %.1f, %.1f, %.1f)",
               targetScale, cardRect.origin.x, cardRect.origin.y, cardRect.width, cardRect.height)
 
+        // 切换 canvasMode，真实的 Focus 视图在动画层下方准备好
+        onComplete()
+
         // Start animation
-        phase = .overviewToFocus(toTabId: tabId, progress: 0)
         startAnimation()
     }
 
@@ -336,19 +370,43 @@ final class ModeTransitionController: ObservableObject {
             lastLogTime = now
         }
 
-        switch phase {
-        case .focusToOverview(let tabId, _):
-            updateFocusToOverviewAnimation(tabId: tabId, progress: totalProgress)
+        // Calculate eased progress
+        let easedProgress = easeOutCubic(totalProgress)
 
-        case .overviewToFocus(let tabId, _):
-            updateOverviewToFocusAnimation(tabId: tabId, progress: totalProgress)
+        switch phase {
+        case .focusToOverview:
+            updateFocusToOverviewAnimation(easedProgress: easedProgress)
+
+        case .overviewToFocus:
+            updateOverviewToFocusAnimation(easedProgress: easedProgress)
 
         case .idle:
             return
         }
 
-        // Update VirtualGrid transform directly (no SwiftUI redraw!)
-        animationLayerView?.applyTransform(scale: currentScale, offset: currentOffset)
+        // 🔑 新方案：动画层全程保持可见，最后瞬间消失
+        // opacity: 全程 1，动画完成时变 0
+        // cornerRadius: Overview(10) → Focus(0) 或 Focus(0) → Overview(10)
+        let opacity: Double = totalProgress < 1.0 ? 1.0 : 0.0
+
+        let cornerRadius: CGFloat
+        switch phase {
+        case .overviewToFocus:
+            // Overview → Focus: 圆角从 10 变为 0
+            cornerRadius = 10.0 * (1.0 - CGFloat(easedProgress))
+        case .focusToOverview:
+            // Focus → Overview: 圆角从 0 变为 10
+            cornerRadius = 10.0 * CGFloat(easedProgress)
+        case .idle:
+            cornerRadius = 10.0
+        }
+
+        animationLayerView?.applyTransform(
+            scale: currentScale,
+            offset: currentOffset,
+            opacity: CGFloat(opacity),
+            cornerRadius: cornerRadius
+        )
 
         // Check if animation is complete
         if totalProgress >= 1.0 {
@@ -359,76 +417,85 @@ final class ModeTransitionController: ObservableObject {
     }
 
     /// Focus → Overview animation update
-    /// Pure Zoom animation: Zoom out from targetScale to 1.0 (Overview snapshot shrinking)
-    /// Uses entire duration for zoom, no Cross-Dissolve phase
-    private func updateFocusToOverviewAnimation(tabId: UUID, progress: Double) {
-        // Apply easing
-        let easedProgress = easeInOutCubic(progress)
-
-        phase = .focusToOverview(fromTabId: tabId, progress: easedProgress)
-
-        // Pure Zoom: Use entire animation duration (0% - 100%)
-        // VirtualGrid uses thumbnails, no opacity changes needed
-        currentStage = .zoom
-
-        // Interpolate scale: targetScale → 1.0
-        currentScale = targetScale - (targetScale - 1.0) * CGFloat(easedProgress)
-
-        // Interpolate offset: targetOffset → (0,0)
-        // targetOffset = -cardRect.origin * targetScale
-        let targetOffset = CGPoint(
+    /// Pure Zoom animation: Zoom out from targetScale to overviewTransform.scale
+    /// NOTE: easedProgress 已在调用方计算，这里直接使用
+    private func updateFocusToOverviewAnimation(easedProgress: Double) {
+        // Start state (Focus): zoomed in on card
+        let startScale = targetScale
+        let startOffset = CGPoint(
             x: -cardRectInViewport.origin.x * targetScale,
             y: -cardRectInViewport.origin.y * targetScale
         )
+
+        // End state (Overview): overviewTransform (includes centering offset)
+        let endScale = overviewTransform.scale
+        let endOffset = overviewTransform.offset
+
+        // Interpolate scale: startScale → endScale
+        currentScale = startScale + (endScale - startScale) * CGFloat(easedProgress)
+
+        // Interpolate offset: startOffset → endOffset
         currentOffset = CGPoint(
-            x: targetOffset.x * (1.0 - CGFloat(easedProgress)),
-            y: targetOffset.y * (1.0 - CGFloat(easedProgress))
+            x: startOffset.x + (endOffset.x - startOffset.x) * CGFloat(easedProgress),
+            y: startOffset.y + (endOffset.y - startOffset.y) * CGFloat(easedProgress)
         )
     }
 
     /// Overview → Focus animation update
-    /// Pure Zoom: Zoom in from scale 1.0 to targetScale
-    /// VirtualGrid uses thumbnails, no cross-dissolve needed
-    private func updateOverviewToFocusAnimation(tabId: UUID, progress: Double) {
-        // Apply easing
-        let easedProgress = easeInOutCubic(progress)
+    /// Pure Zoom: Zoom in from overviewTransform to Focus (targetScale)
+    /// NOTE: easedProgress 已在调用方计算，这里直接使用
+    private func updateOverviewToFocusAnimation(easedProgress: Double) {
+        // Start state (Overview): overviewTransform (includes centering offset)
+        let startScale = overviewTransform.scale
+        let startOffset = overviewTransform.offset
 
-        phase = .overviewToFocus(toTabId: tabId, progress: easedProgress)
-
-        // Calculate target offset (card should be at origin when fully zoomed)
-        let targetOffset = CGPoint(
+        // End state (Focus): zoomed in on card
+        let endScale = targetScale
+        let endOffset = CGPoint(
             x: -cardRectInViewport.origin.x * targetScale,
             y: -cardRectInViewport.origin.y * targetScale
         )
 
-        // Pure Zoom: Use entire animation duration
-        currentStage = .zoom
+        // Interpolate scale: startScale → endScale
+        currentScale = startScale + (endScale - startScale) * CGFloat(easedProgress)
 
-        // Interpolate scale: 1.0 → targetScale
-        currentScale = 1.0 + (targetScale - 1.0) * CGFloat(easedProgress)
-
-        // Interpolate offset: (0,0) → targetOffset
+        // Interpolate offset: startOffset → endOffset
         currentOffset = CGPoint(
-            x: targetOffset.x * CGFloat(easedProgress),
-            y: targetOffset.y * CGFloat(easedProgress)
+            x: startOffset.x + (endOffset.x - startOffset.x) * CGFloat(easedProgress),
+            y: startOffset.y + (endOffset.y - startOffset.y) * CGFloat(easedProgress)
         )
     }
 
-    /// Ease-in-out cubic easing function
-    private func easeInOutCubic(_ t: Double) -> Double {
-        if t < 0.5 {
-            return 4 * t * t * t
-        } else {
-            return 1 - pow(-2 * t + 2, 3) / 2
-        }
+    /// Ease-out cubic: 快速启动，缓慢结束（类似 Safari）
+    private func easeOutCubic(_ t: Double) -> Double {
+        let t1 = 1.0 - t
+        return 1.0 - t1 * t1 * t1
     }
 
     private func completeTransition() {
         NSLog("✅ ModeTransitionController: Transition complete")
 
-        let completion = onTransitionComplete
+        // 🔑 新方案：canvasMode 已在动画开始时切换
+        // 动画层已完全透明（opacity=0），直接隐藏并重置状态
+        stopDisplayLink()
+        animationLayerView?.hide()
         resetState()
-        completion?()
+    }
+
+    /// 淡出完成后重置状态（不再调用 hide/reset，因为 fadeOut 已处理）
+    private func resetStateAfterFadeOut() {
+        phase = .idle
+        isInteractionLocked = false
+        currentScale = 1.0
+        currentOffset = .zero
+        onTransitionComplete = nil
+        sourceTabId = nil
+        targetTabId = nil
+        targetScale = 1.0
+        cardRectInViewport = .zero
+        viewportSize = .zero
+        overviewTransform = (1.0, .zero)
+        // 注意：不调用 animationLayerView?.reset()，因为 fadeOut 已经处理了隐藏和 transform 重置
     }
 
     private func resetState() {
@@ -436,13 +503,13 @@ final class ModeTransitionController: ObservableObject {
         isInteractionLocked = false
         currentScale = 1.0
         currentOffset = .zero
-        currentStage = .zoom
         onTransitionComplete = nil
         sourceTabId = nil
         targetTabId = nil
         targetScale = 1.0
         cardRectInViewport = .zero
         viewportSize = .zero
+        overviewTransform = (1.0, .zero)
 
         // Reset VirtualGrid
         animationLayerView?.reset()
@@ -455,24 +522,12 @@ extension ModeTransitionController {
     /// Check if currently transitioning to/from a specific tab
     func isTransitioning(tabId: UUID) -> Bool {
         switch phase {
-        case .focusToOverview(let fromTabId, _):
+        case .focusToOverview(let fromTabId):
             return fromTabId == tabId
-        case .overviewToFocus(let toTabId, _):
+        case .overviewToFocus(let toTabId):
             return toTabId == tabId
         case .idle:
             return false
-        }
-    }
-
-    /// Get current transition progress (0-1) or nil if not transitioning
-    var currentProgress: Double? {
-        switch phase {
-        case .focusToOverview(_, let progress):
-            return progress
-        case .overviewToFocus(_, let progress):
-            return progress
-        case .idle:
-            return nil
         }
     }
 }

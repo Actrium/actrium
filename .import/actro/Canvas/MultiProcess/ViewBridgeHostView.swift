@@ -561,7 +561,7 @@ final class ViewBridgeCoordinator {
                 // 在 resize 开始时截取快照，存入 TabSnapshotCacheManager
                 // 复用模式切换的快照存储（基于当前视口尺寸，通常是大视口 = Slot A）
                 if let snapshot = hostView.captureSnapshot() {
-                    TabSnapshotCacheManager.shared.setFullScreenSnapshot(snapshot, for: tabId)
+                    TabSnapshotCacheManager.shared.setFocusSnapshot(snapshot, for: tabId)
                     WindowResizeState.shared.activeTabId = tabId
                     WindowResizeState.shared.isWaitingForSizeApplied = true
                 }
@@ -1025,14 +1025,12 @@ final class ViewBridgeHostViewManager {
     // MARK: - Snapshot Management
 
     /// Take a snapshot of the ViewBridge content for Overview mode
-    /// Also stores in TabSnapshotCacheManager for V3.0 transition animations
+    /// Note: TabSnapshotCacheManager is now managed by WorkspaceMainView.exitToOverview()
     func takeSnapshot(for tabId: UUID) {
         guard let hostView = hostViews[tabId] else { return }
         if let snapshot = hostView.captureSnapshot() {
-            // Legacy: store in local cache
+            // Legacy: store in local cache only
             snapshots[tabId] = snapshot
-            // V3.0: also store in TabSnapshotCacheManager for animation layer
-            TabSnapshotCacheManager.shared.setFullScreenSnapshot(snapshot, for: tabId)
         }
     }
 
@@ -1055,6 +1053,10 @@ final class ViewBridgeHostViewManager {
 private class ContainerView: NSView {
     override var isFlipped: Bool { true }
 
+    /// 是否允许 hit testing（由 SwiftUI 通过 userInteractionEnabled 控制）
+    /// Overview 模式下设为 false，让手势穿透到下层的 Grid
+    var allowsHitTesting: Bool = true
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -1075,6 +1077,15 @@ private class ContainerView: NSView {
             hostView.applyFrameSize(newSize)
         }
     }
+
+    /// 重写 hitTest 以支持条件性手势穿透
+    /// Overview 模式下返回 nil，让事件传递到下层视图
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if !allowsHitTesting {
+            return nil  // 穿透到下层
+        }
+        return super.hitTest(point)
+    }
 }
 
 // MARK: - Persistent ViewBridge View
@@ -1087,9 +1098,12 @@ struct PersistentViewBridgeView: NSViewRepresentable {
     let serviceBundleIdentifier: String
     let coordinator: ViewBridgeCoordinator
     let size: CGSize
+    /// 是否允许 hit testing（Overview 模式下为 false，让手势穿透）
+    var allowsHitTesting: Bool = true
 
     func makeNSView(context: Context) -> NSView {
         let container = ContainerView(frame: NSRect(origin: .zero, size: size))
+        container.allowsHitTesting = allowsHitTesting
         coordinator.tabId = tabId
 
         // 从 Manager 获取持久化的 hostView
@@ -1129,6 +1143,11 @@ struct PersistentViewBridgeView: NSViewRepresentable {
         // 确保 coordinator.tabId 已设置
         if coordinator.tabId == nil {
             coordinator.tabId = tabId
+        }
+
+        // 🔑 更新 hit testing 状态（Overview 模式下禁用，让手势穿透）
+        if let containerView = container as? ContainerView {
+            containerView.allowsHitTesting = allowsHitTesting
         }
 
         // 🔑 关键：不要用 `size` 参数覆盖 SwiftUI 分配的 frame！
@@ -1256,13 +1275,25 @@ struct UnifiedReactNativeLayer: View {
     let coordinator: ViewBridgeCoordinator
 
     /// 当前尺寸
+    /// 🔑 过渡期间保持 Focus 尺寸，避免闪烁（因为动画层会遮盖）
     private var currentSize: CGSize {
-        isFocused ? viewportSize : cardSize
+        // 过渡期间：保持大尺寸，让动画层遮盖
+        // 非过渡期间：根据 isFocused 选择尺寸
+        if isTransitioning {
+            return viewportSize  // 始终使用 Focus 尺寸
+        }
+        return isFocused ? viewportSize : cardSize
     }
 
     /// 当前位置（左上角）
+    /// 🔑 过渡期间保持 Focus 位置，避免闪烁（因为动画层会遮盖）
     private var currentPosition: CGPoint {
-        isFocused ? .zero : cardPosition
+        // 过渡期间：保持原点位置，让动画层遮盖
+        // 非过渡期间：根据 isFocused 选择位置
+        if isTransitioning {
+            return .zero  // 始终使用 Focus 位置
+        }
+        return isFocused ? .zero : cardPosition
     }
 
     // XPC 状态
@@ -1297,7 +1328,8 @@ struct UnifiedReactNativeLayer: View {
                     tabId: tab.id,
                     serviceBundleIdentifier: serviceId,
                     coordinator: coordinator,
-                    size: currentSize  // 🔑 尺寸随模式变化：Focus=viewportSize, Overview=cardSize
+                    size: currentSize,  // 🔑 尺寸随模式变化：Focus=viewportSize, Overview=cardSize
+                    allowsHitTesting: isFocused && !isTransitioning  // 🔑 Overview 模式禁用，让手势穿透到 Grid
                 )
                 .frame(width: currentSize.width, height: currentSize.height, alignment: .topLeading)
                 .onAppear {
@@ -1332,7 +1364,7 @@ struct UnifiedReactNativeLayer: View {
             if isFocused && !isTransitioning,
                resizeState.isWaitingForSizeApplied,
                resizeState.activeTabId == tab.id,
-               let snapshot = TabSnapshotCacheManager.shared.fullScreenSnapshot(for: tab.id) {
+               let snapshot = TabSnapshotCacheManager.shared.focusSnapshot(for: tab.id) {
                 Image(nsImage: snapshot)
                     .resizable()
                     .interpolation(.high)
@@ -1632,10 +1664,10 @@ struct ViewBridgeMultiProcessTabView: View {
             }
 
             // 拖动 resize 时的快照遮罩层
-            // 复用 TabSnapshotCacheManager 的 Slot A (fullScreenSnapshot)
+            // 复用 TabSnapshotCacheManager 的 Slot A (focusSnapshot)
             if resizeState.isWaitingForSizeApplied,
                resizeState.activeTabId == tab.id,
-               let snapshot = TabSnapshotCacheManager.shared.fullScreenSnapshot(for: tab.id) {
+               let snapshot = TabSnapshotCacheManager.shared.focusSnapshot(for: tab.id) {
                 Image(nsImage: snapshot)
                     .resizable()
                     .interpolation(.high)
