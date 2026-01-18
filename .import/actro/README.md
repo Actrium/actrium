@@ -7,7 +7,7 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 ## Features
 
 - **React Development Experience**: Write guests using JSX and Hooks
-- **Complete Sandbox Isolation**: Pluggable JSEngineProvider (QuickJS, VM, Worker), guest crashes don't affect the host
+- **Complete Sandbox Isolation**: Pluggable JSEngineProvider (QuickJS, VM, WASM), guest crashes don't affect the host
 - **Lightweight and Efficient**: No WebView overhead, native rendering performance
 - **Unified Bridge Layer**: Type-safe serialization with automatic callback lifecycle management
 - **Flexible Extension**: Supports registering custom business components
@@ -21,11 +21,10 @@ rill/
 ├── /devtools        # Development tools
 ├── /sandbox         # Sandbox providers (auto-detect)
 ├── /sandbox/native  # Native sandbox (JSC/QuickJS)
-├── /sandbox/web     # Web sandbox (Worker)
+├── /sandbox/web     # Web sandbox (WASM)
 └── /cli             # CLI build tools
 ```
 
-> Note: `rill/let` is a deprecated alias for `rill/sdk`.
 
 ## Quick Start
 
@@ -107,13 +106,13 @@ export default function MyGuest() {
 
 ```bash
 # Build bundle
-bun run rill/cli build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 
 # Development mode
-bun run rill/cli build src/guest.tsx --watch --no-minify --sourcemap
+bunx rill build src/guest.tsx --watch --no-minify --sourcemap
 
 # Analyze bundle
-bun run rill/cli analyze dist/bundle.js
+bunx rill analyze dist/bundle.js
 ```
 
 ## Architecture
@@ -148,7 +147,7 @@ bun run rill/cli analyze dist/bundle.js
 | Runtime | `rill` | Host runtime: Engine, EngineView, Receiver |
 | Guest SDK | `rill/sdk` | Guest development kit: components, hooks |
 | DevTools | `rill/devtools` | Debug tools: operation logging, tree inspection |
-| CLI | `rill/cli` | Guest bundler (Bun-based) |
+| CLI | `rill` (bin) / `rill/cli` | Guest bundler (Bun-based) |
 
 ## API
 
