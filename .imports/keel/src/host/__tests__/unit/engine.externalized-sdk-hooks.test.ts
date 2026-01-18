@@ -3,19 +3,19 @@ import { Engine } from '../../engine';
 import { createMockJSEngineProvider } from '../test-utils';
 
 /**
- * Verifies IIFE/externalized bundle path: Guest reads hooks from globalThis.RillLet.
- * Previously these were null because createRillSDKModule() set them to null.
+ * Verifies IIFE/externalized bundle path: Guest reads hooks from globalThis.RillSDK.
+ * Previously these were broken because SDK globals were resolved from the wrong realm.
  */
-describe('Engine - externalized @rill/let hooks', () => {
-  it('should expose non-null hooks on global RillLet (externalized bundles)', async () => {
+describe('Engine - externalized rill/sdk hooks', () => {
+  it('should expose hooks on global RillSDK (externalized bundles)', async () => {
     const engine = new Engine({ quickjs: createMockJSEngineProvider(), debug: false });
 
-    // This code simulates an externalized guest bundle that reads from global RillLet directly.
+    // This code simulates an externalized guest bundle that reads from global RillSDK directly.
     await engine.loadBundle(`
       globalThis.__HOOK_TYPES = {
-        useHostEvent: typeof RillLet.useHostEvent,
-        useConfig: typeof RillLet.useConfig,
-        useSendToHost: typeof RillLet.useSendToHost
+        useHostEvent: typeof RillSDK.useHostEvent,
+        useConfig: typeof RillSDK.useConfig,
+        useSendToHost: typeof RillSDK.useSendToHost
       };
     `);
 

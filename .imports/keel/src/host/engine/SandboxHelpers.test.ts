@@ -9,7 +9,6 @@ import {
   CONSOLE_SETUP_CODE,
   createCommonJSGlobals,
   createReactNativeShim,
-  createRillSDKModule,
   formatArg,
   formatConsoleArgs,
   formatWithPlaceholders,
@@ -256,31 +255,6 @@ describe('SandboxHelpers', () => {
     test('should handle empty args', () => {
       const result = formatConsoleArgs([]);
       expect(result).toEqual([]);
-    });
-  });
-
-  describe('createRillSDKModule()', () => {
-    test('should create module with component names', () => {
-      const module = createRillSDKModule();
-
-      expect(module.View).toBe('View');
-      expect(module.Text).toBe('Text');
-      expect(module.Image).toBe('Image');
-      expect(module.ScrollView).toBe('ScrollView');
-      expect(module.TouchableOpacity).toBe('TouchableOpacity');
-      expect(module.Button).toBe('Button');
-      expect(module.ActivityIndicator).toBe('ActivityIndicator');
-      expect(module.FlatList).toBe('FlatList');
-      expect(module.TextInput).toBe('TextInput');
-      expect(module.Switch).toBe('Switch');
-    });
-
-    test('should expose host hooks as functions (lazy until runtime injection)', () => {
-      const module = createRillSDKModule();
-
-      expect(typeof module.useHostEvent).toBe('function');
-      expect(typeof module.useConfig).toBe('function');
-      expect(typeof module.useSendToHost).toBe('function');
     });
   });
 

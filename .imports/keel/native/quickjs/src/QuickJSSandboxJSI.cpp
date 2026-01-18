@@ -10,7 +10,6 @@ static int g_sandboxFuncCounter = 0;
 
 // Static members for HostFunctionData class
 JSClassID QuickJSSandboxContext::hostFunctionDataClassID_ = 0;
-bool QuickJSSandboxContext::classRegistered_ = false;
 
 void QuickJSSandboxContext::hostFunctionDataFinalizer(JSRuntime *rt,
                                                       JSValue val) {
@@ -27,14 +26,20 @@ void QuickJSSandboxContext::hostFunctionDataFinalizer(JSRuntime *rt,
 }
 
 void QuickJSSandboxContext::ensureClassRegistered() {
-  if (!classRegistered_) {
+  if (hostFunctionDataClassID_ == 0) {
     JS_NewClassID(&hostFunctionDataClassID_);
+  }
+
+  // IMPORTANT: register on *each* JSRuntime (createRuntime() creates new runtimes).
+  if (!JS_IsRegisteredClass(qjsRuntime_, hostFunctionDataClassID_)) {
     JSClassDef classDef = {
         .class_name = "HostFunctionData",
         .finalizer = hostFunctionDataFinalizer,
     };
-    JS_NewClass(qjsRuntime_, hostFunctionDataClassID_, &classDef);
-    classRegistered_ = true;
+    if (JS_NewClass(qjsRuntime_, hostFunctionDataClassID_, &classDef) < 0) {
+      throw jsi::JSError(*hostRuntime_,
+                         "Failed to register HostFunctionData class");
+    }
   }
 }
 
@@ -119,9 +124,6 @@ void QuickJSSandboxContext::installConsole() {
   // Run console setup script
   JSValue result = JS_Eval(qjsContext_, consoleScript, strlen(consoleScript),
                            "<console>", JS_EVAL_TYPE_GLOBAL);
-  if (JS_IsException(result)) {
-    JS_FreeValue(qjsContext_, result);
-  }
   JS_FreeValue(qjsContext_, result);
 }
 
@@ -553,6 +555,13 @@ QuickJSSandboxRuntime::QuickJSSandboxRuntime(jsi::Runtime &hostRuntime,
     throw jsi::JSError(hostRuntime, "Failed to create QuickJS runtime");
   }
 
+  // Match the reference QuickJSRuntime defaults used elsewhere in the repo.
+  // These settings shouldn't be required, but they help avoid runtime-specific
+  // edge cases and keep behavior consistent.
+  JS_SetMaxStackSize(qjsRuntime_, 1024 * 1024 * 1024); // 1GB
+  JS_SetCanBlock(qjsRuntime_, true);
+  JS_SetRuntimeInfo(qjsRuntime_, "RillQuickJSSandbox");
+
   // Set memory limit (optional)
   JS_SetMemoryLimit(qjsRuntime_, 256 * 1024 * 1024); // 256MB
 }
@@ -564,6 +573,26 @@ void QuickJSSandboxRuntime::dispose() {
   if (disposed_)
     return;
   disposed_ = true;
+
+  // Drain pending jobs (promises, etc.) before tearing down contexts/runtime.
+  // This mirrors QuickJSRuntime::~QuickJSRuntime() and avoids freeing a runtime
+  // while jobs are still queued.
+  if (qjsRuntime_) {
+    for (;;) {
+      JSContext *ctx1 = nullptr;
+      int ret = JS_ExecutePendingJob(qjsRuntime_, &ctx1);
+      if (ret == 0) {
+        break;
+      }
+      if (ret < 0) {
+        // Best-effort: clear the exception and keep draining remaining jobs.
+        if (ctx1) {
+          JSValue exception = JS_GetException(ctx1);
+          JS_FreeValue(ctx1, exception);
+        }
+      }
+    }
+  }
 
   for (auto &ctx : contexts_) {
     ctx->dispose();
@@ -687,6 +716,12 @@ void QuickJSSandboxModule::install(jsi::Runtime &runtime) {
   jsi::Object moduleObj = jsi::Object::createFromHostObject(runtime, module);
   runtime.global().setProperty(runtime, "__QuickJSSandboxJSI",
                                std::move(moduleObj));
+  std::cout << "[QuickJSSandbox] Installed __QuickJSSandboxJSI" << std::endl;
+}
+
+// Wrapper function for external linkage (avoids JSValue symbol conflicts)
+void installQuickJSSandbox(jsi::Runtime &runtime) {
+  QuickJSSandboxModule::install(runtime);
 }
 
 } // namespace quickjs_sandbox

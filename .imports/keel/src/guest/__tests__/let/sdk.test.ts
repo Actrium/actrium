@@ -10,9 +10,11 @@ import * as React from 'react';
 
 // Set environment flag BEFORE any SDK imports
 (globalThis as Record<string, unknown>).__RILL_GUEST_ENV__ = true;
+// Provide React hooks for SDK hooks tests (sdk reads hooks from globalThis.React)
+(globalThis as Record<string, unknown>).React = React;
 
 // Dynamic import to ensure env flag is set first
-const sdkImport = import('../../let/index');
+const sdkImport = import('../../../sdk/index');
 
 // ============ Virtual components tests ============
 

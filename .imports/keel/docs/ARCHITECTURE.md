@@ -73,17 +73,15 @@ rill/
 │   │   └── preset/        # Default component presets
 │   │
 │   ├── guest/             # Guest-side code
-│   │   ├── let/           # Guest SDK (rill/let)
-│   │   │   ├── index.ts   # SDK exports
-│   │   │   ├── sdk.ts     # Hooks implementation
-│   │   │   └── types.ts   # Type definitions
-│   │   ├── runtime/       # Guest runtime
+│   │   ├── bundle.ts      # Guest runtime entry (sets global React/RillSDK/Reconciler)
+│   │   ├── runtime/       # Guest runtime modules
 │   │   │   └── reconciler/  # Custom reconciler
-│   │   └── build/         # Built runtime bundle
+│   │   └── build/         # Built runtime bundle (GUEST_BUNDLE_CODE)
 │   │
-│   ├── guest-bundle/      # Guest bundle entry
-│   │   ├── entry.ts       # Bundle entry point
-│   │   └── build/         # Auto-generated bundle output
+│   ├── sdk/               # Guest SDK (rill/sdk)
+│   │   ├── index.ts       # SDK exports
+│   │   ├── sdk.ts         # Hooks/components implementation
+│   │   └── types.ts       # Type definitions
 │   │
 │   ├── shared/            # Shared utilities
 │   │   ├── index.ts       # Exports
@@ -270,7 +268,7 @@ engine.destroy();
 
 ```typescript
 // src/sdk/index.ts - Guest SDK exports
-import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/let';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/sdk';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -326,17 +324,17 @@ CLI uses **Bun.build** for guest bundle compilation:
 ```typescript
 // src/cli/build.ts
 export async function build(options: BuildOptions): Promise<void> {
-  const result = await Bun.build({
-    entrypoints: [entryPath],
-    target: 'browser',
-    format: 'cjs',
-    minify,
-    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/let'],
-    define: {
-      'process.env.NODE_ENV': '"production"',
-      __DEV__: 'false',
-    },
-  });
+	  const result = await Bun.build({
+	    entrypoints: [entryPath],
+	    target: 'browser',
+	    format: 'cjs',
+	    minify,
+	    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/sdk'],
+	    define: {
+	      'process.env.NODE_ENV': '"production"',
+	      __DEV__: 'false',
+	    },
+	  });
 
   // Post-process: wrap with runtime inject
   // Strict dependency guard check
@@ -348,13 +346,13 @@ export async function build(options: BuildOptions): Promise<void> {
 
 ```bash
 # Build bundle
-bun run rill/cli build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 
 # Development mode
-bun run rill/cli build src/guest.tsx --watch --no-minify --sourcemap
+bunx rill build src/guest.tsx --watch --no-minify --sourcemap
 
 # Analyze bundle
-bun run rill/cli analyze dist/bundle.js
+bunx rill analyze dist/bundle.js
 ```
 
 ---

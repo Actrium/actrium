@@ -15,6 +15,7 @@
  * Platform availability and communication:
  * - VM: Node.js / Bun only (native vm module)
  * - JSC: Apple platforms only via JSI (zero binary overhead)
+ * - Hermes: Via JSI when RILL_SANDBOX_ENGINE=hermes (isolated Hermes runtime)
  * - QuickJS: Cross-platform native via JSI (iOS, Android, macOS, Windows)
  * - WasmQuickJS: Web via JS↔WASM, React Native via JSI↔WASM
  */
@@ -23,6 +24,8 @@ export enum SandboxType {
   VM = 'vm',
   /** JavaScriptCore via JSI (Apple platforms only, zero binary overhead) */
   JSC = 'jsc',
+  /** Hermes via JSI (when RILL_SANDBOX_ENGINE=hermes) */
+  Hermes = 'hermes',
   /** QuickJS via JSI (cross-platform native) */
   QuickJS = 'quickjs',
   /** QuickJS via WASM (Web: JS↔WASM, React Native: JSI↔WASM) */
@@ -50,6 +53,27 @@ export interface JSEngineContext {
    * @returns A Promise that resolves with the result of the last expression.
    */
   evalAsync?: (code: string) => Promise<unknown>;
+
+  /**
+   * Synchronously evaluates precompiled Hermes bytecode.
+   * Only available when using Hermes sandbox engine.
+   *
+   * Benefits:
+   * - Skips parsing and compilation phases
+   * - Faster startup for static guest code
+   * - Suitable for pre-known guest bundles
+   *
+   * Usage:
+   * ```bash
+   * # Compile JS to Hermes bytecode
+   * hermesc -emit-binary -O -out guest.hbc guest.js
+   * ```
+   *
+   * @param bytecode The precompiled Hermes bytecode (.hbc format).
+   * @returns The result of the last executed expression.
+   * @throws Error if bytecode format is invalid or sandbox is not Hermes.
+   */
+  evalBytecode?: (bytecode: ArrayBuffer) => unknown;
 
   /**
    * Sets a global variable in the sandbox's global scope synchronously.

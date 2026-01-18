@@ -12,9 +12,9 @@
 type ReactElement = any;
 
 import React from 'react';
+import type { GuestElement } from '../../../sdk/types';
+import { isGuestReactElement } from '../../../sdk/types';
 import type { SerializedValue } from '../../../shared';
-import type { GuestElement } from '../../let/types';
-import { isGuestReactElement } from '../../let/types';
 import { serializeProps } from './guest-encoder';
 
 // ============================================

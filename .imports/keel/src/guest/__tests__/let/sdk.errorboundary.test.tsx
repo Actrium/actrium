@@ -10,7 +10,7 @@ describe('RillErrorBoundary', () => {
   let React: typeof import('react');
   let TestRenderer: typeof import('react-test-renderer');
   let act: typeof import('react-test-renderer').act;
-  let sdk: typeof import('../../let/sdk');
+  let sdk: typeof import('../../../sdk/sdk');
 
   afterAll(() => {
     // Cleanup globalThis.React
@@ -26,7 +26,7 @@ describe('RillErrorBoundary', () => {
     // Set React on globalThis for RillErrorBoundary
     (globalThis as Record<string, unknown>).React = React;
 
-    sdk = await import('../../let/sdk');
+    sdk = await import('../../../sdk/sdk');
   });
 
   afterEach(() => {

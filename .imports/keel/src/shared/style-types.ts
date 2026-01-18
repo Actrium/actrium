@@ -1,11 +1,8 @@
 /**
  * Shared Style Type Definitions
  *
- * Shared between Guest (@rill/let) and Host (runtime) sides.
+ * Shared between Guest (rill/sdk) and Host (runtime) sides.
  * These types define the style system used across the boundary.
- *
- * Note: If @rill/let needs to be published independently, these types
- * should be bundled/inlined during the build process.
  */
 
 // ============================================

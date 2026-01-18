@@ -16,11 +16,13 @@ RCT_EXPORT_MODULE()
   return NO;
 }
 
-RCT_EXPORT_METHOD(log:(NSString *)message)
+// Use a blocking synchronous method so logs are flushed even if the app crashes.
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(log:(NSString *)message)
 {
   // Write directly to stderr (captured by terminal)
   fprintf(stderr, "%s\n", [message UTF8String]);
   fflush(stderr);
+  return @YES;
 }
 
 @end
@@ -32,7 +34,13 @@ RCT_EXPORT_METHOD(log:(NSString *)message)
   self.moduleName = @"RillMacOSTest";
   // You can add your custom initial props in the dictionary below.
   // They will be passed down to the ViewController used by React Native.
-  self.initialProps = @{};
+  NSString *sandboxTarget =
+      [[NSProcessInfo processInfo] environment][@"RILL_SANDBOX_TARGET"];
+  if (sandboxTarget != nil && [sandboxTarget length] > 0) {
+    self.initialProps = @{@"rillSandbox" : sandboxTarget};
+  } else {
+    self.initialProps = @{};
+  }
   self.dependencyProvider = [RCTAppDependencyProvider new];
   
   return [super applicationDidFinishLaunching:notification];
@@ -45,6 +53,17 @@ RCT_EXPORT_METHOD(log:(NSString *)message)
 
 - (NSURL *)bundleURL
 {
+  NSString *useBundled =
+      [[NSProcessInfo processInfo] environment][@"RILL_E2E_USE_BUNDLED_JS"];
+  if (useBundled != nil && [useBundled length] > 0 &&
+      ![useBundled isEqualToString:@"0"]) {
+    NSURL *url = [[NSBundle mainBundle] URLForResource:@"main"
+                                        withExtension:@"jsbundle"];
+    if (url != nil) {
+      return url;
+    }
+  }
+
 #if DEBUG
   return [[RCTBundleURLProvider sharedSettings] jsBundleURLForBundleRoot:@"index"];
 #else

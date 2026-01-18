@@ -12,19 +12,18 @@ Rill uses a **two-phase architecture** to run guest code in a sandboxed environm
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        BUILD PHASE                               │
-│  src/guest-bundle/entry.ts  ──[bun build]──>  build/bundle.ts   │
-│       (React + Reconciler + Bridge)              (270KB string)  │
+│  src/guest/bundle.ts  ──[bun build]──>  src/guest/build/bundle.ts│
+│   (React + SDK + Reconciler + Bridge)          (injectable string)│
 └─────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       RUNTIME PHASE                              │
 │  Engine.loadBundle()                                             │
-│    1. evalCode(CONSOLE_SETUP_CODE)     → console.log/warn/error │
-│    2. evalCode(RUNTIME_HELPERS_CODE)   → __callbacks, __useHostEvent │
-│    3. evalCode(ALL_SHIMS)              → React, require() shim   │
-│    4. evalCode(GUEST_BUNDLE_CODE)      → RillReconciler.render() │
-│    5. evalCode(userBundle)             → User's guest component  │
+│    1. injectPolyfills()                → timers/require/module/exports │
+│    2. evalCode(GUEST_BUNDLE_CODE)      → React/RillSDK/RillReconciler  │
+│    3. injectRuntimeAPI()               → __sendToHost/__getConfig/etc.│
+│    4. evalCode(userBundle)             → User's guest component        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -32,28 +31,28 @@ Rill uses a **two-phase architecture** to run guest code in a sandboxed environm
 
 ```
 src/
-├── guest-bundle/              # Guest runtime bundle (auto-build)
-│   ├── entry.ts               # Bundle entry point (source)
-│   └── build/
-│       └── bundle.ts          # Auto-generated build output (DO NOT EDIT)
+├── sdk/                       # Guest SDK (rill/sdk)
+│   ├── index.ts               # Public exports (components, hooks, types)
+│   ├── sdk.ts                 # Components + hooks implementation
+│   └── types.ts               # Guest-facing types
 │
-├── guest/                     # Guest-side code
-│   ├── let/                   # User-facing SDK (rill/let)
-│   │   ├── index.ts           # Public exports (View, Text, hooks)
-│   │   ├── sdk.ts             # Components and hooks implementation
-│   │   └── types.ts           # User-facing types
-│   ├── runtime/               # Guest runtime
+├── guest/                     # Guest runtime bundle (auto-build)
+│   ├── bundle.ts              # Bundle entry point (source)
+│   ├── runtime/               # Guest runtime modules
 │   │   ├── init.ts            # Environment initialization
+│   │   ├── globals-setup.ts   # console + host event helpers + callbacks
+│   │   ├── react-global.ts    # exposes React/JSX runtimes on globalThis
 │   │   └── reconciler/        # React reconciler implementation
 │   │       ├── index.ts       # Public API (render, unmount, etc.)
 │   │       ├── host-config.ts # react-reconciler host configuration
 │   │       ├── reconciler-manager.ts  # Reconciler instance management
 │   │       ├── operation-collector.ts # Operation batching
 │   │       ├── element-transform.ts   # Guest element transformation
-│   │       ├── guest-encoder.ts   # Props serialization
-│   │       ├── devtools.ts    # DevTools integration
-│   │       └── types.ts       # Reconciler types
-│   └── build/                 # Built runtime output
+│   │       ├── guest-encoder.ts       # Props serialization
+│   │       ├── devtools.ts            # DevTools integration
+│   │       └── types.ts               # Reconciler types
+│   └── build/
+│       └── bundle.ts          # Auto-generated `GUEST_BUNDLE_CODE` (DO NOT EDIT)
 │
 ├── shared/                    # Shared protocol layer
 │   ├── index.ts               # Protocol exports
@@ -77,27 +76,26 @@ src/
 bun scripts/build-guest-bundle.ts
 ```
 
-**Input**: `src/guest-bundle/entry.ts`
-**Output**: `src/guest-bundle/build/bundle.ts`
+**Input**: `src/guest/bundle.ts`
+**Output**: `src/guest/build/bundle.ts`
 
 The build process:
-1. Bundles `entry.ts` with all dependencies (React, react-reconciler, bridge protocol)
-2. Minifies to IIFE format (~270KB)
-3. Prepends environment initialization code
+1. Bundles `src/guest/bundle.ts` with all dependencies (React, rill/sdk, reconciler, shared protocol)
+2. Minifies to IIFE format
+3. Transpiles to ES5 (for wider guest-engine compatibility)
 4. Wraps in TypeScript export as `GUEST_BUNDLE_CODE`
 
 ### What Gets Bundled
 
 ```
-entry.ts
-├── init.ts                    # Sets up __RILL_GUEST_ENV__, __callbacks
-├── reconciler/index.ts        # Reconciler public API
-│   ├── reconciler-manager.ts  # render(), unmount(), unmountAll()
-│   ├── host-config.ts         # react-reconciler configuration
-│   └── operation-collector.ts # Operation batching
-├── bridge/*                   # Shared protocol (CallbackRegistry, TypeRules)
-├── react                      # React 19 runtime
-└── react-reconciler           # Custom renderer foundation
+bundle.ts
+├── runtime/init.ts            # Sets up __RILL_GUEST_ENV__, __callbacks
+├── runtime/globals-setup.ts   # console + host event helpers
+├── runtime/react-global.ts    # React/JSX globals
+├── ../sdk/*                   # rill/sdk (Guest SDK)
+├── runtime/reconciler/*       # Reconciler implementation
+├── ../shared/*                # Shared protocol (CallbackRegistry, TypeRules)
+└── react / react-reconciler   # React runtime + renderer foundation
 ```
 
 ## Runtime Phase: The State Machine
@@ -150,7 +148,31 @@ globalThis.RillReconciler = {
 };
 ```
 
-### 5. User Bundle
+### 5. Component Name Globals (injectRuntimeAPI)
+
+Engine injects each registered component name as a global variable, with the value being the name string itself:
+
+```javascript
+// For each component registered in ComponentRegistry:
+globalThis.View = 'View';
+globalThis.Text = 'Text';
+globalThis.Image = 'Image';
+// ... etc.
+```
+
+This allows user bundles to use **variable mode** instead of **string mode**:
+
+```javascript
+// Variable mode (recommended) - validated at compile time
+h(View, { style: styles.container }, children);
+
+// String mode - only validated at runtime
+h('View', { style: styles.container }, children);
+```
+
+The `rill/cli build` command automatically transforms JSX to variable mode.
+
+### 6. User Bundle
 
 ```javascript
 // User's compiled guest code
@@ -236,9 +258,9 @@ Original function in user component
 - **`src/sdk/`**: User-facing API - what developers import in their guest code
 - **`src/guest/`**: Runtime internals - bundled and injected by the engine
 
-Users import from `rill/let`:
+Users import from `rill/sdk`:
 ```tsx
-import { View, Text, useHostEvent } from 'rill/let';
+import { View, Text, useHostEvent } from 'rill/sdk';
 ```
 
 They never directly use `render()`, `CallbackRegistry`, etc. - those are runtime internals.
@@ -255,22 +277,21 @@ This ensures both sides use identical serialization logic.
 
 | File | Role |
 |------|------|
-| `guest-bundle/entry.ts` | Bundle entry point, exports to `globalThis.RillReconciler` |
-| `guest-bundle/init.ts` | Environment setup before any React code runs |
-| `guest-bundle/build/bundle.ts` | Auto-generated, contains bundled guest runtime |
-| `guest-bundle/reconciler/host-config.ts` | react-reconciler configuration |
-| `guest-bundle/reconciler/reconciler-manager.ts` | Manages reconciler instances, public API |
-| `guest-bundle/reconciler/operation-collector.ts` | Batches operations before sending |
-| `host/Engine.ts` | Loads bundle, injects code, manages sandbox lifecycle |
-| `guest/shims/*.ts` | React hooks and JSX runtime shims |
-| `guest/globals-setup.ts` | Console and runtime helper setup |
+| `src/guest/bundle.ts` | Guest runtime entry: exposes `React`/`RillSDK`/`RillReconciler` globals |
+| `src/guest/runtime/init.ts` | Environment setup before any React code runs (guest markers, callbacks) |
+| `src/guest/runtime/globals-setup.ts` | Console and runtime helpers (HostEvent, callbacks, etc.) |
+| `src/guest/runtime/react-global.ts` | Exposes React/JSX runtimes on `globalThis` |
+| `src/guest/runtime/reconciler/*` | react-reconciler config + instance management + op encoding |
+| `src/sdk/*` | Guest SDK (`rill/sdk`): components, hooks, RemoteRef, ErrorBoundary |
+| `src/guest/build/bundle.ts` | Auto-generated: injectable `GUEST_BUNDLE_CODE` |
+| `src/host/Engine.ts` | Loads Guest bundle, injects APIs, manages sandbox lifecycle |
 
 ## Regenerating the Guest Bundle
 
 After modifying any file in `src/guest/` or `src/shared/`:
 
 ```bash
-bun src/scripts/build-guest.ts
+bun scripts/build-guest-bundle.ts
 ```
 
 This regenerates `src/guest/build/bundle.ts`. The file should be committed to version control.

@@ -6,7 +6,7 @@
 
 - 模块白名单（requireWhitelist）
   - 在创建 Engine 时传入 `requireWhitelist`。仅允许guest bundle `require()` 这些模块。
-  - 默认白名单：`react`、`react-native`、`react/jsx-runtime`、`rill/let`。
+  - 默认白名单：`react`、`react-native`、`react/jsx-runtime`、`rill/sdk`。
 - 执行超时
   - 使用 `timeout` 选项（默认 5000ms）。QuickJS `eval` 为同步执行，无法被强制中断，该超时保护为“尽力而为”。若需严格 CPU 时间切片，请考虑 worker/线程隔离。
 - 错误分类
@@ -36,7 +36,7 @@
 
 - 沙箱
   - 生产环境推荐使用 `JSEngineProvider` 实现（如 QuickJS WASM），保障与宿主隔离。
-  - 支持的沙箱模式：`'vm'` (Node.js VM)、`'worker'` (Web Worker)、`'none'` (无沙箱)
+  - 支持的沙箱模式：`'vm'` (Node.js VM)、`'jsc'` (JSC via JSI)、`'quickjs'` (QuickJS via JSI)、`'wasm-quickjs'` (QuickJS WASM)、`'none'` (无沙箱)
 - 模块访问
   - 尽量精简白名单，避免暴露 Node 内置或动态加载能力。
 - 回调
@@ -86,7 +86,7 @@
 const metrics: Array<{ name: string; value: number; extra?: Record<string, unknown> }> = [];
 const engine = new Engine({
   provider: myJSEngineProvider, // 可选
-  sandbox: 'vm', // 可选: 'vm' | 'worker' | 'none'
+  sandbox: 'quickjs', // 可选: 'vm' | 'jsc' | 'quickjs' | 'wasm-quickjs' | 'none'
   onMetric: (n, v, e) => metrics.push({ name: n, value: v, extra: e })
 });
 ```
@@ -101,13 +101,13 @@ const health = engine.getHealth();
 
 - Analyze 白名单扫描
 ```bash
-bun run rill/cli analyze dist/bundle.js # 默认只警告
+bunx rill analyze dist/bundle.js # 默认只警告
 ```
 代码方式（带选项）:
 ```ts
 import { analyze } from 'rill/cli';
 await analyze('dist/bundle.js', {
-  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/let'],
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/sdk'],
   failOnViolation: true,
   treatEvalAsViolation: true,
   treatDynamicNonLiteralAsViolation: true,
@@ -116,7 +116,7 @@ await analyze('dist/bundle.js', {
 
 - 构建 Guest Bundle
 ```bash
-bun run rill/cli build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 ```
 
 ## 9. 常见问题

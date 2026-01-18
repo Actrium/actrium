@@ -216,7 +216,6 @@ const EXTERNALS: Record<string, string> = {
   'react/jsx-dev-runtime': 'ReactJSXDevRuntime',
   'react-native': 'ReactNative',
   'rill/sdk': 'RillSDK',
-  '@rill/let': 'RillLet', // deprecated alias
 };
 
 /**
@@ -435,7 +434,7 @@ ${footerCode}
   if (strict) {
     try {
       await analyze(targetPath, {
-        whitelist: ['react', 'react-native', 'react/jsx-runtime', '@rill/let'],
+        whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/sdk'],
         failOnViolation: true,
         treatEvalAsViolation: true,
         treatDynamicNonLiteralAsViolation: true,
@@ -457,13 +456,6 @@ ${footerCode}
       ReactJSXDevRuntime: { jsx: () => ({}), jsxs: () => ({}) },
       ReactNative: {},
       RillReconciler: { render: () => {}, unmount: () => {} },
-      RillLet: {
-        View: 'View',
-        Text: 'Text',
-        useHostEvent: () => {},
-        useConfig: () => ({}),
-        useSendToHost: () => () => {},
-      },
       RillSDK: {
         View: 'View',
         Text: 'Text',
@@ -491,7 +483,6 @@ ${footerCode}
       if (name === 'react/jsx-dev-runtime') return mockGlobals.ReactJSXDevRuntime;
       if (name === 'react-native') return mockGlobals.ReactNative;
       if (name === 'rill/sdk') return mockGlobals.RillSDK;
-      if (name === '@rill/let') return mockGlobals.RillLet;
       return {};
     };
     const globalNames = ['require', ...Object.keys(mockGlobals)];
@@ -562,7 +553,7 @@ export async function analyze(
   ] as string[]);
 
   const whitelist = new Set(
-    options?.whitelist ?? ['react', 'react-native', 'react/jsx-runtime', '@rill/let']
+    options?.whitelist ?? ['react', 'react-native', 'react/jsx-runtime', 'rill/sdk']
   );
 
   const violations: string[] = Array.from(found).filter((m) => {

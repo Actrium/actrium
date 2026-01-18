@@ -55,7 +55,7 @@ describe('CLI Build - Error Handling', () => {
       fs.writeFileSync(
         path.join(srcDir, 'broken.tsx'),
         `
-        import { View } from '@rill/let';
+        import { View } from 'rill/sdk';
         export default function Broken() {
           return <View>{ // unclosed bracket
         }
@@ -150,7 +150,7 @@ describe('CLI Build - Error Handling', () => {
       fs.writeFileSync(
         path.join(srcDir, 'valid.tsx'),
         `
-        import { View, Text } from '@rill/let';
+        import { View, Text } from 'rill/sdk';
         export default function Valid() {
           return <View><Text>Valid</Text></View>;
         }
@@ -189,7 +189,7 @@ describe('CLI Build - Error Handling', () => {
       fs.writeFileSync(
         path.join(srcDir, 'component.tsx'),
         `
-        import { View, Text } from '@rill/let';
+        import { View, Text } from 'rill/sdk';
         export default function Component() {
           return <View><Text>Test</Text></View>;
         }
@@ -277,7 +277,7 @@ describe('CLI Build - Error Handling', () => {
       fs.writeFileSync(
         path.join(srcDir, 'component.tsx'),
         `
-        import { View, Text, TouchableOpacity } from '@rill/let';
+        import { View, Text, TouchableOpacity } from 'rill/sdk';
         export default function Component() {
           const handlePress = () => console.log('pressed');
           return (
@@ -327,7 +327,7 @@ describe('CLI Build - Error Handling', () => {
 
       // Should wrap in function that receives globals
       expect(bundleContent).toContain('function(');
-      expect(bundleContent).toMatch(/React|ReactNative|RillLet/);
+      expect(bundleContent).toMatch(/React|ReactNative|RillSDK/);
     });
   });
 
@@ -339,7 +339,7 @@ describe('CLI Build - Error Handling', () => {
       fs.writeFileSync(
         path.join(srcDir, 'component.tsx'),
         `
-        import { View, Text } from '@rill/let';
+        import { View, Text } from 'rill/sdk';
         export default function Component() {
           return <View><Text>Test</Text></View>;
         }
@@ -386,7 +386,7 @@ describe('CLI Build - Error Handling', () => {
       fs.writeFileSync(
         path.join(srcDir, 'component.tsx'),
         `
-        import { View, Text } from '@rill/let';
+        import { View, Text } from 'rill/sdk';
         export default function Component() {
           return <View><Text>Test Component</Text></View>;
         }

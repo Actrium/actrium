@@ -43,28 +43,17 @@ interface ReactHooks {
 }
 
 /**
- * Get React hooks from runtime-injected global or module system
- * React is injected by the rill reconciler when running in sandbox
+ * Get React hooks from runtime-injected global.
+ *
+ * In rill sandbox, React is provided by the Guest runtime bundle via `globalThis.React`.
  */
 function getReactHooks(): ReactHooks {
-  // 1. Try runtime-injected global (sandbox environment)
   const g = globalThis as { React?: ReactHooks };
   if (g.React && typeof g.React.useEffect === 'function') {
     return g.React as ReactHooks;
   }
 
-  // 2. Try require (for testing/development outside sandbox)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const React = require('react');
-    if (React && typeof React.useEffect === 'function') {
-      return React as ReactHooks;
-    }
-  } catch {
-    // React not available
-  }
-
-  // 3. Fallback: hooks not available (will fail at runtime if used)
+  // Fallback: hooks not available (will fail at runtime if used)
   const throwUnavailable = (hook: string) => () => {
     throw new Error(`[rill/sdk] ${hook} not available. Ensure running in rill sandbox.`);
   };
@@ -79,15 +68,6 @@ function getReactHooks(): ReactHooks {
 
 // ============ Component Definitions ============
 // In sandbox: string identifiers (virtual components)
-// Outside sandbox: re-export react-native components
-
-/**
- * Check if running inside rill sandbox
- * Guest init sets __RILL_GUEST_ENV__ = true
- */
-function isInSandbox(): boolean {
-  return (globalThis as { __RILL_GUEST_ENV__?: boolean }).__RILL_GUEST_ENV__ === true;
-}
 
 // Component names list - single source of truth
 const COMPONENT_NAMES = [
@@ -123,35 +103,14 @@ const COMPONENT_NAMES = [
 type ComponentName = (typeof COMPONENT_NAMES)[number];
 
 /**
- * Get components - either virtual (sandbox) or real (react-native)
+ * Get components (virtual components in sandbox)
  */
-function getComponents(): Record<ComponentName, unknown> {
-  if (isInSandbox()) {
-    // In sandbox: use string identifiers
-    const result = {} as Record<ComponentName, string>;
-    for (const name of COMPONENT_NAMES) {
-      result[name] = name;
-    }
-    return result;
+function getComponents(): Record<ComponentName, string> {
+  const result = {} as Record<ComponentName, string>;
+  for (const name of COMPONENT_NAMES) {
+    result[name] = name;
   }
-
-  // Outside sandbox: use real react-native components
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const RN = require('react-native');
-    const result = {} as Record<ComponentName, unknown>;
-    for (const name of COMPONENT_NAMES) {
-      result[name] = RN[name];
-    }
-    return result;
-  } catch {
-    // react-native not available, fall back to virtual components
-    const result = {} as Record<ComponentName, string>;
-    for (const name of COMPONENT_NAMES) {
-      result[name] = name;
-    }
-    return result;
-  }
+  return result;
 }
 
 /**
@@ -222,33 +181,7 @@ function getAPIs() {
     // Animation
     Animated: {},
   };
-
-  if (isInSandbox()) {
-    return stubs;
-  }
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const RN = require('react-native');
-    return {
-      StyleSheet: RN.StyleSheet ?? stubs.StyleSheet,
-      Easing: RN.Easing ?? stubs.Easing,
-      Platform: RN.Platform ?? stubs.Platform,
-      Dimensions: RN.Dimensions ?? stubs.Dimensions,
-      PixelRatio: RN.PixelRatio ?? stubs.PixelRatio,
-      Appearance: RN.Appearance ?? stubs.Appearance,
-      I18nManager: RN.I18nManager ?? stubs.I18nManager,
-      AppState: RN.AppState ?? stubs.AppState,
-      Keyboard: RN.Keyboard ?? stubs.Keyboard,
-      Alert: RN.Alert ?? stubs.Alert,
-      Linking: RN.Linking ?? stubs.Linking,
-      Share: RN.Share ?? stubs.Share,
-      Vibration: RN.Vibration ?? stubs.Vibration,
-      Animated: RN.Animated ?? stubs.Animated,
-    };
-  } catch {
-    return stubs;
-  }
+  return stubs;
 }
 
 /**
@@ -259,21 +192,7 @@ function getRNHooks() {
     useColorScheme: () => 'light' as 'light' | 'dark' | null,
     useWindowDimensions: () => ({ width: 0, height: 0, scale: 1, fontScale: 1 }),
   };
-
-  if (isInSandbox()) {
-    return stubs;
-  }
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const RN = require('react-native');
-    return {
-      useColorScheme: RN.useColorScheme ?? stubs.useColorScheme,
-      useWindowDimensions: RN.useWindowDimensions ?? stubs.useWindowDimensions,
-    };
-  } catch {
-    return stubs;
-  }
+  return stubs;
 }
 
 const _components = getComponents();

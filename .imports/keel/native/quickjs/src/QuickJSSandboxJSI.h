@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../jsi/jsi.h"
+#include <jsi/jsi.h>
 #include <memory>
 #include <mutex>
 #include <quickjs.h>
@@ -57,7 +57,6 @@ private:
 
   // JS class for HostFunctionData opaque storage
   static JSClassID hostFunctionDataClassID_;
-  static bool classRegistered_;
   static void hostFunctionDataFinalizer(JSRuntime *rt, JSValue val);
   void ensureClassRegistered();
 

@@ -96,55 +96,6 @@ export function formatConsoleArgs(args: unknown[]): unknown[] {
 }
 
 /**
- * Create RillSDK module object
- */
-export function createRillSDKModule() {
-  return {
-    // React Native components (as string names)
-    View: 'View',
-    Text: 'Text',
-    Image: 'Image',
-    ScrollView: 'ScrollView',
-    TouchableOpacity: 'TouchableOpacity',
-    Button: 'Button',
-    ActivityIndicator: 'ActivityIndicator',
-    FlatList: 'FlatList',
-    TextInput: 'TextInput',
-    Switch: 'Switch',
-
-    // Host communication hooks
-    // These must exist for IIFE/externalized bundles that read from global RillSDK/RillLet.
-    // They resolve their implementations lazily from runtime-injected globals.
-    useHostEvent: (eventName: string, callback: (payload: unknown) => void) => {
-      const fn = (globalThis as unknown as { __useHostEvent?: unknown }).__useHostEvent;
-      if (typeof fn !== 'function') {
-        throw new Error('[rill] __useHostEvent is not available yet');
-      }
-      return (fn as (name: string, cb: (payload: unknown) => void) => () => void)(
-        eventName,
-        callback
-      );
-    },
-    useConfig: () => {
-      const fn = (globalThis as unknown as { __getConfig?: unknown }).__getConfig;
-      if (typeof fn !== 'function') {
-        throw new Error('[rill] __getConfig is not available yet');
-      }
-      return (fn as () => unknown)();
-    },
-    useSendToHost: () => {
-      return (eventName: string, payload?: unknown) => {
-        const fn = (globalThis as unknown as { __sendEventToHost?: unknown }).__sendEventToHost;
-        if (typeof fn !== 'function') {
-          throw new Error('[rill] __sendEventToHost is not available yet');
-        }
-        return (fn as (eventName: string, payload?: unknown) => void)(eventName, payload);
-      };
-    },
-  };
-}
-
-/**
  * Create minimal CommonJS globals
  */
 export function createCommonJSGlobals() {

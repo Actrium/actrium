@@ -3,7 +3,7 @@ import { DefaultProvider } from '../../../sandbox/index';
 import { Engine } from '../../engine';
 
 // Check if a timeout-capable provider is available
-// VMProvider uses node:vm timeout, WorkerProvider requires async cancellation
+// VMProvider uses node:vm timeout; Web/WASM providers don't have hard interrupts.
 const testProvider = DefaultProvider.create({ timeout: 100 });
 const canInterruptLoop = testProvider.constructor.name === 'VMProvider';
 

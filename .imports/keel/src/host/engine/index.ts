@@ -18,7 +18,6 @@ export {
   CONSOLE_SETUP_CODE,
   createCommonJSGlobals,
   createReactNativeShim,
-  createRillSDKModule,
   formatArg,
   formatConsoleArgs,
   formatWithPlaceholders,

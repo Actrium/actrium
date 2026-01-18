@@ -111,14 +111,9 @@ fi
 # 3. Browser E2E Tests (Playwright)
 # ============================================
 if [[ "$RUN_E2E" == true ]]; then
-  # Web Worker E2E
-  if [[ -f "$ROOT_DIR/tests/e2e-sandbox-web/run-tests.sh" ]]; then
-    run_suite "E2E: Web Worker Sandbox" "bash $ROOT_DIR/tests/e2e-sandbox-web/run-tests.sh"
-  fi
-
-  # WASM E2E
+  # WASM E2E (Web)
   if [[ -f "$ROOT_DIR/tests/e2e-wasm-sandbox/run-tests.sh" ]]; then
-    run_suite "E2E: WASM Sandbox" "bash $ROOT_DIR/tests/e2e-wasm-sandbox/run-tests.sh"
+    run_suite "E2E: Web (WASM Sandbox)" "bash $ROOT_DIR/tests/e2e-wasm-sandbox/run-tests.sh"
   fi
 fi
 

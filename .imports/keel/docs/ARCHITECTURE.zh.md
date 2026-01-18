@@ -73,17 +73,15 @@ rill/
 │   │   └── preset/        # 默认组件预设
 │   │
 │   ├── guest/             # Guest 端代码
-│   │   ├── let/           # Guest SDK (rill/let)
-│   │   │   ├── index.ts   # SDK 导出
-│   │   │   ├── sdk.ts     # Hooks 实现
-│   │   │   └── types.ts   # 类型定义
-│   │   ├── runtime/       # Guest 运行时
+│   │   ├── bundle.ts      # Guest 运行时入口（设置 React/RillSDK/Reconciler 全局）
+│   │   ├── runtime/       # Guest 运行时模块
 │   │   │   └── reconciler/  # 自定义渲染器
-│   │   └── build/         # 构建后的运行时
+│   │   └── build/         # 构建后的运行时（GUEST_BUNDLE_CODE）
 │   │
-│   ├── guest-bundle/      # Guest bundle 入口
-│   │   ├── entry.ts       # Bundle 入口点
-│   │   └── build/         # 自动生成的 bundle 输出
+│   ├── sdk/               # Guest SDK (rill/sdk)
+│   │   ├── index.ts       # SDK 导出
+│   │   ├── sdk.ts         # Hooks/组件实现
+│   │   └── types.ts       # 类型定义
 │   │
 │   ├── shared/            # 共享工具
 │   │   ├── index.ts       # 导出
@@ -270,7 +268,7 @@ engine.destroy();
 
 ```typescript
 // src/sdk/index.ts - Guest SDK 导出
-import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/let';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig, useSendToHost } from 'rill/sdk';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -326,17 +324,17 @@ CLI 使用 **Bun.build** 编译 Guest Bundle：
 ```typescript
 // src/cli/build.ts
 export async function build(options: BuildOptions): Promise<void> {
-  const result = await Bun.build({
-    entrypoints: [entryPath],
-    target: 'browser',
-    format: 'cjs',
-    minify,
-    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/let'],
-    define: {
-      'process.env.NODE_ENV': '"production"',
-      __DEV__: 'false',
-    },
-  });
+	  const result = await Bun.build({
+	    entrypoints: [entryPath],
+	    target: 'browser',
+	    format: 'cjs',
+	    minify,
+	    external: ['react', 'react/jsx-runtime', 'react-native', 'rill/sdk'],
+	    define: {
+	      'process.env.NODE_ENV': '"production"',
+	      __DEV__: 'false',
+	    },
+	  });
 
   // 后处理：包装运行时注入
   // 严格依赖检查
@@ -348,13 +346,13 @@ export async function build(options: BuildOptions): Promise<void> {
 
 ```bash
 # 构建 bundle
-bun run rill/cli build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 
 # 开发模式
-bun run rill/cli build src/guest.tsx --watch --no-minify --sourcemap
+bunx rill build src/guest.tsx --watch --no-minify --sourcemap
 
 # 分析 bundle
-bun run rill/cli analyze dist/bundle.js
+bunx rill analyze dist/bundle.js
 ```
 
 ---
