@@ -1,5 +1,5 @@
 /**
- * @rill/let Type Definitions
+ * rill/sdk Type Definitions
  *
  * Types for Guest-side SDK and Reconciler
  * 通信相关类型从 bridge/types.ts 重新导出
@@ -39,9 +39,9 @@ export type {
   SerializedValueObject,
   TextOperation,
   UpdateOperation,
-} from '../../shared';
+} from '../shared';
 // Re-export type guards from Bridge
-export { isSerializedFunction, operationHasProps } from '../../shared';
+export { isSerializedFunction, operationHasProps } from '../shared';
 
 // ============================================
 // Guest Element Types (let 特有)
@@ -168,7 +168,7 @@ export type {
   TextLayoutLine,
   TextStyle,
   ViewStyle,
-} from '../../shared/style-types';
+} from '../shared/style-types';
 
 // ============================================
 // Remote Ref Types (跨沙箱组件引用)

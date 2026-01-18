@@ -4,6 +4,7 @@
  * 展示 Rill SDK 的基本用法
  */
 
+import { useState } from 'react';
 import {
   ScrollView,
   Text,
@@ -12,8 +13,7 @@ import {
   useHostEvent,
   useSendToHost,
   View,
-} from '@rill/let';
-import { useState } from 'react';
+} from 'rill/sdk';
 
 interface Config {
   title?: string;

@@ -3,11 +3,18 @@
  *
  * Native JS sandbox for React Native using JSI bindings.
  *
- * Provides two implementations:
+ * Provides three implementations:
+ * - Hermes: When RILL_SANDBOX_ENGINE=hermes (isolated Hermes runtime)
  * - QuickJS: Cross-platform (iOS, Android, macOS, Windows)
  * - JSC: Apple platforms only (iOS, macOS, tvOS, visionOS) - zero binary overhead
  */
 
+export {
+  getHermesModule,
+  type HermesContextNative,
+  type HermesRuntimeNative,
+  isHermesAvailable,
+} from './HermesModule';
 export {
   getJSCModule,
   isJSCAvailable,
@@ -51,10 +58,17 @@ export interface SandboxModule {
  * Get the best available sandbox module for the current platform
  *
  * Priority:
- * 1. JSC (Apple platforms - zero overhead)
- * 2. QuickJS (cross-platform)
+ * 1. Hermes (when RILL_SANDBOX_ENGINE=hermes)
+ * 2. JSC (Apple platforms - zero overhead)
+ * 3. QuickJS (cross-platform)
  */
 export function getSandboxModule(): SandboxModule | null {
+  // Hermes sandbox (when built with RILL_SANDBOX_ENGINE=hermes)
+  const hermesModule = getHermesModuleSafe();
+  if (hermesModule) {
+    return hermesModule;
+  }
+
   // Prefer JSC on Apple platforms (uses system JSC, no binary overhead)
   const jscModule = getJSCModuleSafe();
   if (jscModule) {
@@ -70,12 +84,26 @@ export function getSandboxModule(): SandboxModule | null {
   return null;
 }
 
+function getHermesModuleSafe(): SandboxModule | null {
+  try {
+    if (
+      typeof global !== 'undefined' &&
+      global.__HermesSandboxJSI !== undefined &&
+      global.__HermesSandboxJSI.isAvailable()
+    ) {
+      return global.__HermesSandboxJSI as SandboxModule;
+    }
+  } catch {
+    // Not available
+  }
+  return null;
+}
+
 function getJSCModuleSafe(): SandboxModule | null {
   try {
     if (
       typeof global !== 'undefined' &&
       global.__JSCSandboxJSI !== undefined &&
-      typeof global.__JSCSandboxJSI.isAvailable === 'function' &&
       global.__JSCSandboxJSI.isAvailable()
     ) {
       return global.__JSCSandboxJSI as SandboxModule;
@@ -91,7 +119,6 @@ function getQuickJSModuleSafe(): SandboxModule | null {
     if (
       typeof global !== 'undefined' &&
       global.__QuickJSSandboxJSI !== undefined &&
-      typeof global.__QuickJSSandboxJSI.isAvailable === 'function' &&
       global.__QuickJSSandboxJSI.isAvailable()
     ) {
       return global.__QuickJSSandboxJSI as SandboxModule;

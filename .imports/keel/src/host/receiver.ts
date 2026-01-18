@@ -46,6 +46,10 @@ export class Receiver {
   private attributionTracker: AttributionTracker;
   private nodeMap = new Map<number, NodeInstance>();
   private rootChildren: number[] = [];
+  // O(1) lookup index for rootChildren (Set mirrors array for fast has/delete)
+  private rootChildrenSet = new Set<number>();
+  // O(1) lookup index for node children (nodeId -> Set of childIds)
+  private nodeChildrenSet = new Map<number, Set<number>>();
   // Reverse index: childId -> parentId (0 means root). Keeps DELETE/REMOVE O(1).
   private parentByChildId = new Map<number, number>();
   // Remote Ref 支持：节点 ID → React ref 映射
@@ -330,6 +334,8 @@ export class Receiver {
       registeredFnIds: fnIds ? new Set(fnIds) : undefined,
     };
     this.nodeMap.set(op.id, node);
+    // Initialize O(1) children lookup Set
+    this.nodeChildrenSet.set(op.id, new Set());
   }
 
   /**
@@ -398,14 +404,17 @@ export class Receiver {
     }
 
     if (op.parentId === 0) {
-      // Append to root container
-      if (!this.rootChildren.includes(op.childId)) {
+      // Append to root container - O(1) check with Set
+      if (!this.rootChildrenSet.has(op.childId)) {
         this.rootChildren.push(op.childId);
+        this.rootChildrenSet.add(op.childId);
       }
     } else {
       const parent = this.nodeMap.get(op.parentId);
-      if (parent && !parent.children.includes(op.childId)) {
+      const childrenSet = this.nodeChildrenSet.get(op.parentId);
+      if (parent && childrenSet && !childrenSet.has(op.childId)) {
         parent.children.push(op.childId);
+        childrenSet.add(op.childId);
       }
     }
 
@@ -418,18 +427,29 @@ export class Receiver {
    */
   private handleInsert(op: Extract<Operation, { op: 'INSERT' }>): void {
     if (op.parentId === 0) {
-      // Insert into root container
-      const existingIndex = this.rootChildren.indexOf(op.childId);
-      if (existingIndex !== -1) {
-        this.rootChildren.splice(existingIndex, 1);
+      // Insert into root container - O(1) check with Set
+      if (this.rootChildrenSet.has(op.childId)) {
+        // Remove from current position (need indexOf here, but only when exists)
+        const existingIndex = this.rootChildren.indexOf(op.childId);
+        if (existingIndex !== -1) {
+          this.rootChildren.splice(existingIndex, 1);
+        }
+      } else {
+        this.rootChildrenSet.add(op.childId);
       }
       this.rootChildren.splice(op.index, 0, op.childId);
     } else {
       const parent = this.nodeMap.get(op.parentId);
-      if (parent) {
-        const existingIndex = parent.children.indexOf(op.childId);
-        if (existingIndex !== -1) {
-          parent.children.splice(existingIndex, 1);
+      const childrenSet = this.nodeChildrenSet.get(op.parentId);
+      if (parent && childrenSet) {
+        if (childrenSet.has(op.childId)) {
+          // Remove from current position (need indexOf here, but only when exists)
+          const existingIndex = parent.children.indexOf(op.childId);
+          if (existingIndex !== -1) {
+            parent.children.splice(existingIndex, 1);
+          }
+        } else {
+          childrenSet.add(op.childId);
         }
         parent.children.splice(op.index, 0, op.childId);
       }
@@ -443,17 +463,23 @@ export class Receiver {
    */
   private handleRemove(op: Extract<Operation, { op: 'REMOVE' }>): void {
     if (op.parentId === 0) {
-      const index = this.rootChildren.indexOf(op.childId);
-      if (index !== -1) {
-        this.rootChildren.splice(index, 1);
+      // O(1) check before O(n) indexOf
+      if (this.rootChildrenSet.has(op.childId)) {
+        const index = this.rootChildren.indexOf(op.childId);
+        if (index !== -1) {
+          this.rootChildren.splice(index, 1);
+        }
+        this.rootChildrenSet.delete(op.childId);
       }
     } else {
       const parent = this.nodeMap.get(op.parentId);
-      if (parent) {
+      const childrenSet = this.nodeChildrenSet.get(op.parentId);
+      if (parent && childrenSet && childrenSet.has(op.childId)) {
         const index = parent.children.indexOf(op.childId);
         if (index !== -1) {
           parent.children.splice(index, 1);
         }
+        childrenSet.delete(op.childId);
       }
     }
 
@@ -472,25 +498,41 @@ export class Receiver {
 
     const parentId = this.parentByChildId.get(op.id);
     if (parentId === 0) {
-      const rootIndex = this.rootChildren.indexOf(op.id);
-      if (rootIndex !== -1) this.rootChildren.splice(rootIndex, 1);
+      if (this.rootChildrenSet.has(op.id)) {
+        const rootIndex = this.rootChildren.indexOf(op.id);
+        if (rootIndex !== -1) this.rootChildren.splice(rootIndex, 1);
+        this.rootChildrenSet.delete(op.id);
+      }
       this.parentByChildId.delete(op.id);
     } else if (typeof parentId === 'number') {
       const parent = this.nodeMap.get(parentId);
-      if (parent) {
+      const childrenSet = this.nodeChildrenSet.get(parentId);
+      if (parent && childrenSet && childrenSet.has(op.id)) {
         const idx = parent.children.indexOf(op.id);
         if (idx !== -1) parent.children.splice(idx, 1);
+        childrenSet.delete(op.id);
       }
       this.parentByChildId.delete(op.id);
     } else {
-      // Fallback (protocol violation): scan all parents.
-      const rootIndex = this.rootChildren.indexOf(op.id);
-      if (rootIndex !== -1) {
-        this.rootChildren.splice(rootIndex, 1);
+      // Fallback (protocol violation): scan all parents using Set for O(1) check
+      if (this.rootChildrenSet.has(op.id)) {
+        const rootIndex = this.rootChildren.indexOf(op.id);
+        if (rootIndex !== -1) {
+          this.rootChildren.splice(rootIndex, 1);
+        }
+        this.rootChildrenSet.delete(op.id);
       }
-      for (const node of this.nodeMap.values()) {
-        const idx = node.children.indexOf(op.id);
-        if (idx !== -1) node.children.splice(idx, 1);
+      // Only scan nodes that might contain this child
+      for (const [nodeId, childrenSet] of this.nodeChildrenSet) {
+        if (childrenSet.has(op.id)) {
+          const node = this.nodeMap.get(nodeId);
+          if (node) {
+            const idx = node.children.indexOf(op.id);
+            if (idx !== -1) node.children.splice(idx, 1);
+          }
+          childrenSet.delete(op.id);
+          break; // Tree: single parent, can stop after finding
+        }
       }
       this.parentByChildId.delete(op.id);
     }
@@ -523,6 +565,8 @@ export class Receiver {
 
     // 清理 Remote Ref
     this.refMap.delete(id);
+    // Clean up O(1) children lookup Set
+    this.nodeChildrenSet.delete(id);
 
     this.nodeMap.delete(id);
   }
@@ -545,6 +589,8 @@ export class Receiver {
       for (const childId of op.childIds) {
         this.parentByChildId.set(childId, 0);
       }
+      // Update O(1) lookup Set
+      this.rootChildrenSet = nextSet;
     } else {
       const parent = this.nodeMap.get(op.parentId);
       if (parent) {
@@ -560,6 +606,8 @@ export class Receiver {
         for (const childId of op.childIds) {
           this.parentByChildId.set(childId, op.parentId);
         }
+        // Update O(1) lookup Set
+        this.nodeChildrenSet.set(op.parentId, nextSet);
       }
     }
   }
@@ -766,6 +814,8 @@ export class Receiver {
   clear(): void {
     this.nodeMap.clear();
     this.rootChildren = [];
+    this.rootChildrenSet.clear();
+    this.nodeChildrenSet.clear();
     this.parentByChildId.clear();
     this.refMap.clear();
   }

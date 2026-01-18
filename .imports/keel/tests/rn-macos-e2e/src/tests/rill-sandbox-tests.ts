@@ -1,12 +1,14 @@
 import { Platform } from 'react-native';
 import { registerTest } from '../runner/registry';
 import { expect } from '../runner/expect';
+import { nativeLog } from '../native-logger';
 
 // These tests run inside the real RN app runtime.
 // They validate that native JSI bindings are injected (global.__*SandboxJSI) and functional.
 
 interface SandboxContext {
   eval(code: string): unknown;
+  evalBytecode?(bytecode: ArrayBuffer): unknown;
   setGlobal(name: string, value: unknown): void;
   getGlobal(name: string): unknown;
   dispose(): void;
@@ -28,9 +30,11 @@ declare global {
   var __JSCSandboxJSI: SandboxModule | undefined;
   // eslint-disable-next-line no-var
   var __QuickJSSandboxJSI: SandboxModule | undefined;
+  // eslint-disable-next-line no-var
+  var __HermesSandboxJSI: SandboxModule | undefined;
 }
 
-export type SandboxTarget = 'quickjs' | 'jsc' | 'auto';
+export type SandboxTarget = 'quickjs' | 'jsc' | 'hermes' | 'auto';
 
 function getModule(target: SandboxTarget): SandboxModule {
   const mod =
@@ -38,11 +42,13 @@ function getModule(target: SandboxTarget): SandboxModule {
       ? global.__JSCSandboxJSI
       : target === 'quickjs'
         ? global.__QuickJSSandboxJSI
-        : global.__JSCSandboxJSI ?? global.__QuickJSSandboxJSI;
+        : target === 'hermes'
+          ? global.__HermesSandboxJSI
+          : global.__HermesSandboxJSI ?? global.__JSCSandboxJSI ?? global.__QuickJSSandboxJSI;
 
   if (!mod) {
     throw new Error(
-      `JSI module not injected. target=${target} (expected global.__JSCSandboxJSI or global.__QuickJSSandboxJSI)`
+      `JSI module not injected. target=${target} (expected global.__HermesSandboxJSI, global.__JSCSandboxJSI, or global.__QuickJSSandboxJSI)`
     );
   }
   return mod;
@@ -66,14 +72,17 @@ export function registerRillSandboxTests(target: SandboxTarget) {
     run() {
       const hasJSC = typeof global.__JSCSandboxJSI !== 'undefined';
       const hasQuickJS = typeof global.__QuickJSSandboxJSI !== 'undefined';
+      const hasHermes = typeof global.__HermesSandboxJSI !== 'undefined';
 
       if (target === 'jsc') {
         expect(hasJSC).toBe(true);
       } else if (target === 'quickjs') {
         expect(hasQuickJS).toBe(true);
+      } else if (target === 'hermes') {
+        expect(hasHermes).toBe(true);
       } else {
         // auto: at least one should exist
-        expect(hasJSC || hasQuickJS).toBe(true);
+        expect(hasHermes || hasJSC || hasQuickJS).toBe(true);
       }
     },
   });
@@ -85,15 +94,22 @@ export function registerRillSandboxTests(target: SandboxTarget) {
     run() {
       const mod = getModule(target);
 
+      nativeLog(`[rill-e2e][smoke-eval] begin target=${target}`);
       expect(typeof mod.isAvailable).toBe('function');
       expect(mod.isAvailable()).toBe(true);
 
+      nativeLog('[rill-e2e][smoke-eval] createRuntime');
       const runtime = mod.createRuntime({ timeout: 1000 });
+      nativeLog('[rill-e2e][smoke-eval] createContext');
       const ctx = runtime.createContext();
+      nativeLog('[rill-e2e][smoke-eval] eval');
       const v = ctx.eval('1 + 2');
+      nativeLog(`[rill-e2e][smoke-eval] eval result=${String(v)}`);
       expect(v).toBe(3);
+      nativeLog('[rill-e2e][smoke-eval] dispose');
       ctx.dispose();
       runtime.dispose();
+      nativeLog('[rill-e2e][smoke-eval] done');
     },
   });
 
@@ -650,6 +666,108 @@ export function registerRillSandboxTests(target: SandboxTarget) {
       expect(rendered.__rillTypeMarker).toBe('__rill_react_element__');
       expect(rendered.type).toBe('View');
       expect((rendered.props as Record<string, unknown>).message).toBe('rendered with host-call');
+
+      ctx.dispose();
+      runtime.dispose();
+    },
+  });
+
+  // ============================================
+  // Bytecode tests (Hermes-specific)
+  // ============================================
+
+  registerTest({
+    id: 'bytecode/hermes-only',
+    name: 'Bytecode: evalBytecode only available on Hermes',
+    tags: ['bytecode'],
+    run() {
+      const mod = getModule(target);
+      const runtime = mod.createRuntime({ timeout: 5000 });
+      const ctx = runtime.createContext();
+
+      if (target === 'hermes') {
+        // Hermes should have evalBytecode
+        expect(typeof ctx.evalBytecode).toBe('function');
+      } else {
+        // JSC and QuickJS should not have evalBytecode
+        expect(ctx.evalBytecode).toBe(undefined);
+      }
+
+      ctx.dispose();
+      runtime.dispose();
+    },
+  });
+
+  registerTest({
+    id: 'bytecode/invalid-throws',
+    name: 'Bytecode: invalid bytecode throws error',
+    tags: ['bytecode'],
+    run() {
+      if (target !== 'hermes') {
+        // Skip for non-Hermes targets
+        return;
+      }
+
+      const mod = getModule(target);
+      const runtime = mod.createRuntime({ timeout: 5000 });
+      const ctx = runtime.createContext();
+
+      if (!ctx.evalBytecode) {
+        throw new Error('evalBytecode not available on Hermes sandbox');
+      }
+
+      // Create invalid bytecode (random bytes)
+      const invalidBytecode = new ArrayBuffer(16);
+      const view = new Uint8Array(invalidBytecode);
+      for (let i = 0; i < 16; i++) {
+        view[i] = i;
+      }
+
+      let threw = false;
+      try {
+        ctx.evalBytecode(invalidBytecode);
+      } catch (e) {
+        threw = true;
+        nativeLog(`[bytecode/invalid-throws] Expected error: ${String(e)}`);
+      }
+
+      expect(threw).toBe(true);
+
+      ctx.dispose();
+      runtime.dispose();
+    },
+  });
+
+  registerTest({
+    id: 'bytecode/empty-throws',
+    name: 'Bytecode: empty bytecode throws error',
+    tags: ['bytecode'],
+    run() {
+      if (target !== 'hermes') {
+        // Skip for non-Hermes targets
+        return;
+      }
+
+      const mod = getModule(target);
+      const runtime = mod.createRuntime({ timeout: 5000 });
+      const ctx = runtime.createContext();
+
+      if (!ctx.evalBytecode) {
+        throw new Error('evalBytecode not available on Hermes sandbox');
+      }
+
+      // Create empty bytecode
+      const emptyBytecode = new ArrayBuffer(0);
+
+      let threw = false;
+      try {
+        ctx.evalBytecode(emptyBytecode);
+      } catch (e) {
+        threw = true;
+        nativeLog(`[bytecode/empty-throws] Expected error: ${String(e)}`);
+      }
+
+      expect(threw).toBe(true);
 
       ctx.dispose();
       runtime.dispose();

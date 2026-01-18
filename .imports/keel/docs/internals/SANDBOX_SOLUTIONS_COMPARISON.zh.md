@@ -1,15 +1,16 @@
 # Rill 沙箱方案对比（最终版）
 
-## 📊 4 种核心 Provider
+## 📊 5 种核心 Provider
 
-Rill 只提供 **4 种经过验证的沙箱方案**，全部支持**方案 B**（高性能直接对象传递）：
+Rill 只提供 **5 种经过验证的沙箱方案**，全部支持**方案 B**（高性能直接对象传递）：
 
 | Provider | 平台 | 隔离性 | 传递能力 | 体积 | 性能 | 推荐度 |
 |----------|------|--------|---------|------|------|--------|
-| **JSC Native** | iOS/macOS | 🟢🟢🟢🟢🟢 | 🟢🟢🟢🟢🟢 | 0 KB | 🟢🟢🟢🟢🟢 | ⭐⭐⭐⭐⭐ |
-| **QuickJS Native** | RN 全平台 | 🟢🟢🟢🟢🟢 | 🟢🟢🟢🟢🟢 | ~200 KB | 🟢🟢🟢🟢 | ⭐⭐⭐⭐⭐ |
-| **QuickJS Native WASM** ✨ | Web | 🟢🟢🟢🟢 | 🟢🟢🟢🟢🟢 | ~300 KB | 🟢🟢🟢🟢 | ⭐⭐⭐⭐⭐ |
-| **Node VM** | Node/Bun | 🟢🟢🟢🟢 | 🟢🟢🟢🟢🟢 | 0 KB | 🟢🟢🟢🟢🟢 | ⭐⭐⭐⭐⭐ |
+| **JSC Native** | iOS/macOS | Full | Full | 0 KB | Excellent | ⭐⭐⭐⭐⭐ |
+| **Hermes Native** ✨ | RN (Hermes) | Full | Full | 0 KB | Excellent | ⭐⭐⭐⭐⭐ |
+| **QuickJS Native** | RN 全平台 | Full | Full | ~200 KB | Very Good | ⭐⭐⭐⭐⭐ |
+| **QuickJS Native WASM** | Web | Strong | Full | ~300 KB | Very Good | ⭐⭐⭐⭐⭐ |
+| **Node VM** | Node/Bun | Strong | Full | 0 KB | Excellent | ⭐⭐⭐⭐⭐ |
 
 **核心特性**：
 - ✅ 所有方案都支持传递函数、循环引用、复杂对象
@@ -42,7 +43,56 @@ const engine = new Engine({
 
 ---
 
-## 2️⃣ QuickJS Native
+## 2️⃣ Hermes Native ✨
+
+**特点**：
+- 平台：React Native with Hermes runtime
+- 技术：Hermes + JSI（隔离的 Hermes 运行时）
+- 体积：0 KB（复用应用的 Hermes 引擎）
+
+**优势**：
+- ✅ 零额外体积（复用应用的 Hermes）
+- ✅ 性能优秀
+- ✅ 完整的 JSI（可传递任意对象）
+- ✅ **字节码预编译支持**（`evalBytecode`）
+
+**独有特性 - 字节码预编译**：
+
+Hermes 支持 AOT（Ahead-of-Time）编译。使用 `hermesc` 将 JS 预编译为字节码：
+
+```bash
+# 将 JS 编译为 Hermes 字节码
+hermesc -emit-binary -O -out guest.hbc guest.js
+```
+
+```typescript
+// 加载并执行预编译字节码
+const bytecode = await fetch('guest.hbc').then(r => r.arrayBuffer());
+
+if (context.evalBytecode) {
+  context.evalBytecode(bytecode);  // 跳过解析/编译
+}
+```
+
+| 方法 | 解析 | 编译 | 执行 |
+|------|------|------|------|
+| `eval(source)` | ✓ | ✓ | ✓ |
+| `evalBytecode(hbc)` | - | - | ✓ |
+
+**使用**：
+```typescript
+import { HermesProvider } from 'rill/sandbox/native';
+
+const engine = new Engine({
+  provider: new HermesProvider({ timeout: 5000 })
+});
+```
+
+**注意**：需要在原生构建时设置 `RILL_SANDBOX_ENGINE=hermes`。
+
+---
+
+## 3️⃣ QuickJS Native
 
 **特点**：
 - 平台：iOS、Android、macOS、Windows
@@ -65,7 +115,7 @@ const engine = new Engine({
 
 ---
 
-## 3️⃣ QuickJS Native WASM ✨
+## 4️⃣ QuickJS Native WASM
 
 **特点**：
 - 平台：Web（浏览器）
@@ -101,7 +151,7 @@ cd rill/native/quickjs
 
 ---
 
-## 4️⃣ Node VM
+## 5️⃣ Node VM
 
 **特点**：
 - 平台：Node.js、Bun
@@ -171,6 +221,7 @@ const provider = new VMProvider({ timeout: 5000 });
 | Provider | 首次加载 | 后续加载 |
 |----------|---------|---------|
 | JSC Native | < 1ms | < 1ms |
+| Hermes Native | < 1ms | < 1ms |
 | QuickJS Native | < 5ms | < 1ms |
 | QuickJS WASM | ~80ms | ~10ms (缓存) |
 | Node VM | < 1ms | < 1ms |
@@ -180,6 +231,7 @@ const provider = new VMProvider({ timeout: 5000 });
 | Provider | Host → Guest | Guest → Host |
 |----------|-------------|-------------|
 | JSC Native | < 0.01ms | < 0.01ms |
+| Hermes Native | < 0.01ms | < 0.01ms |
 | QuickJS Native | < 0.02ms | < 0.02ms |
 | QuickJS WASM | ~0.05ms | ~0.05ms |
 | Node VM | < 0.01ms | < 0.01ms |
@@ -189,6 +241,7 @@ const provider = new VMProvider({ timeout: 5000 });
 | Provider | 基础占用 | 每个实例 |
 |----------|---------|---------|
 | JSC Native | 0 MB | ~2 MB |
+| Hermes Native | 0 MB | ~2 MB |
 | QuickJS Native | ~5 MB | ~3 MB |
 | QuickJS WASM | ~5 MB | ~3 MB |
 | Node VM | 0 MB | ~2 MB |
@@ -198,7 +251,7 @@ const provider = new VMProvider({ timeout: 5000 });
 ## 🔧 DefaultProvider 策略
 
 ```typescript
-import { DefaultProvider } from 'rill/sandbox';
+import { DefaultProvider, SandboxType } from 'rill/sandbox';
 
 // 自动选择最佳 Provider
 const provider = DefaultProvider.create({
@@ -206,12 +259,20 @@ const provider = DefaultProvider.create({
   wasmPath: '/assets/quickjs_sandbox.wasm' // Web 专用
 });
 
+// 或强制指定沙箱类型
+const hermesProvider = DefaultProvider.create({
+  sandbox: SandboxType.Hermes
+});
+
 /**
- * 选择逻辑：
- * 1. Node/Bun → VMProvider
- * 2. Web → QuickJSNativeWASMProvider
- * 3. RN iOS/macOS → JSCProvider
- * 4. RN Android → QuickJSProvider
+ * 自动选择逻辑（React Native）：
+ * 1. HermesProvider（当 RILL_SANDBOX_ENGINE=hermes）
+ * 2. JSCProvider（Apple 平台）
+ * 3. QuickJSProvider（全平台）
+ *
+ * 其他平台：
+ * - Node/Bun → VMProvider
+ * - Web → QuickJSNativeWASMProvider
  */
 ```
 
@@ -221,7 +282,7 @@ const provider = DefaultProvider.create({
 
 ### ✅ 设计原则
 
-1. **简单**：只有 4 种方案，无降级、无 fallback
+1. **简单**：只有 5 种方案，无降级、无 fallback
 2. **安全**：全部强隔离，可用或不可用，无中间状态
 3. **高性能**：全部支持方案 B（直接传递对象）
 4. **统一**：Web 和 RN 用同一套 C++ 代码（QuickJS WASM）
@@ -235,9 +296,8 @@ const provider = DefaultProvider.create({
 
 ### 📍 不再提供的方案
 
-以下方案因不符合设计原则而移除：
+以下方案不符合设计原则（无法传递函数和循环引用），不再作为推荐方案：
 
-- ❌ **Web Worker**：无法传递函数和循环引用
 - ❌ **Proxy Sandbox**：弱隔离，有逃逸风险
 - ❌ **quickjs-emscripten**：第三方 wrapper，维护成本高
 

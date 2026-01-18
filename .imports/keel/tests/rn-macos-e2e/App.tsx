@@ -22,8 +22,8 @@ const MARKER_END = '>>>RILL_TEST_END<<<';
 const MARKER_RESULT = '>>>RILL_TEST_RESULT<<<';
 
 function normalizeTarget(v: unknown): SandboxTarget {
-  if (v === 'quickjs' || v === 'jsc' || v === 'auto') return v;
-  return 'jsc'; // Default to JSC on macOS
+  if (v === 'quickjs' || v === 'jsc' || v === 'hermes' || v === 'auto') return v;
+  return 'auto'; // Default to auto-detect injected JSI module
 }
 
 export default function App(props: { rillSandbox?: string } = {}) {

@@ -8,8 +8,12 @@
 import React from 'react';
 import Reconciler from 'react-reconciler';
 import { DefaultEventPriority } from 'react-reconciler/constants';
+import type {
+  SerializedCreateOperation,
+  SerializedUpdateOperation,
+  VNode,
+} from '../../../sdk/types';
 import type { CallbackRegistry, SendToHost } from '../../../shared';
-import type { SerializedCreateOperation, SerializedUpdateOperation, VNode } from '../../let/types';
 import { isDevToolsEnabled, type RenderTiming, sendDevToolsMessage } from './devtools';
 import { serializeProps } from './guest-encoder';
 import { OperationCollector } from './operation-collector';

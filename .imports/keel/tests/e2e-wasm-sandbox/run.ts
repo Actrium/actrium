@@ -7,6 +7,7 @@
 import { spawn } from 'child_process';
 import { copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import net from 'net';
 
 const ROOT = join(import.meta.dir, '../..');
 const E2E_DIR = import.meta.dir;
@@ -39,9 +40,25 @@ async function main() {
   // Copy WASM files
   await copyWASMFiles();
 
+  // Pick a free port (Bun.serve({ port: 0 }) can fail in some environments)
+  const port = await new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Failed to acquire a free TCP port')));
+        return;
+      }
+      const selectedPort = address.port;
+      server.close((err) => (err ? reject(err) : resolve(selectedPort)));
+    });
+  });
+
   // Start Bun server
   const server = Bun.serve({
-    port: 0,
+    port,
     hostname: '127.0.0.1',
 
     async fetch(req) {
@@ -77,7 +94,6 @@ async function main() {
     },
   });
 
-  const port = server.port;
   console.log(`Server started on http://127.0.0.1:${port}`);
 
   // Run Playwright

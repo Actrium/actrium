@@ -36,7 +36,6 @@ import { DiagnosticsCollector } from './engine/DiagnosticsCollector';
 import {
   createCommonJSGlobals,
   createReactNativeShim,
-  createRillSDKModule,
   formatConsoleArgs,
 } from './engine/SandboxHelpers';
 import { DEVTOOLS_SHIM } from './engine/shims';
@@ -157,7 +156,7 @@ export class Engine implements IEngine {
       'react-native',
       'react/jsx-runtime',
       'react/jsx-dev-runtime',
-      '@rill/let',
+      'rill/sdk',
       'rill/reconciler',
     ]);
     // Provide a safe fallback logger if console is not available
@@ -192,6 +191,10 @@ export class Engine implements IEngine {
     if (!this.options.provider) {
       // JS-side可视化全局可用性，便于在 Metro/Console 看到（仅 debug 输出，避免误判为错误）
       if (this.options.debug) {
+        const hermesGlobalType =
+          typeof (globalThis as Record<string, unknown>).__HermesSandboxJSI !== 'undefined'
+            ? typeof (globalThis as Record<string, unknown>).__HermesSandboxJSI
+            : 'undefined';
         const jscGlobalType =
           typeof (globalThis as Record<string, unknown>).__JSCSandboxJSI !== 'undefined'
             ? typeof (globalThis as Record<string, unknown>).__JSCSandboxJSI
@@ -201,6 +204,7 @@ export class Engine implements IEngine {
             ? typeof (globalThis as Record<string, unknown>).__QuickJSSandboxJSI
             : 'undefined';
         this.options.logger.log('[rill] Sandbox globals', {
+          __HermesSandboxJSI: hermesGlobalType,
           __JSCSandboxJSI: jscGlobalType,
           __QuickJSSandboxJSI: quickjsGlobalType,
         });
@@ -318,7 +322,7 @@ export class Engine implements IEngine {
       // Execute with timeout protection
       // Note: Hard timeout enforcement depends on the provider:
       // - VMProvider: Uses vm.Script timeout (hard interrupt)
-      // - WorkerProvider: Web Worker sandbox (async-only)
+      // - QuickJSNativeWASMProvider: WASM (no hard interrupt)
       // - QuickJSProvider/JSCProvider: Native JSI implementation dependent
       //
       // The timer below serves as a fallback safety net for async providers
@@ -554,14 +558,29 @@ export class Engine implements IEngine {
     const injectGuestBundle = async () => {
       try {
         // Check if already injected (e.g., from previous load)
-        const alreadyInjected = this.context?.getGlobal('__REACT_SHIM__');
-        if (alreadyInjected === true) {
+        // Use presence of core globals instead of __REACT_SHIM__ because that flag
+        // may be false when using real React (not a shim).
+        const alreadyInjected = this.context?.getGlobal('RillSDK');
+        if (alreadyInjected) {
           if (debug) logger.log(`[rill:${this.id}] Guest bundle already injected, skipping`);
           return;
         }
 
         // Single eval for entire Guest bundle
         await this.evalCode(GUEST_BUNDLE_CODE);
+
+        // Ensure globals are also available as top-level identifiers in sandbox contexts that
+        // don't map globalThis properties to lexical/global bindings (e.g., our test mock provider).
+        // This keeps externalized bundles working when they reference `RillSDK` directly.
+        const sdk = this.context?.getGlobal('RillSDK');
+        if (sdk) {
+          setGlobalWithLog('RillSDK', sdk);
+        }
+
+        const reconciler = this.context?.getGlobal('RillReconciler');
+        if (reconciler) {
+          setGlobalWithLog('RillReconciler', reconciler);
+        }
 
         if (debug) logger.log(`[rill:${this.id}] Guest bundle injected (shims + reconciler)`);
       } catch (e) {
@@ -570,87 +589,10 @@ export class Engine implements IEngine {
       }
     };
 
-    // Inject RillSDK as global variable for IIFE bundles
-    // Bundle format: (function(ReactJSXRuntime, React, RillSDK) { ... })(ReactJSXRuntime, React, RillSDK)
-    const RillSDKModule = createRillSDKModule();
-    setGlobalWithLog('RillSDK', RillSDKModule);
-
     // Provide minimal CommonJS globals for bundles built as CJS
     const cjsGlobals = createCommonJSGlobals();
     setGlobalWithLog('module', cjsGlobals.module);
     setGlobalWithLog('exports', cjsGlobals.exports);
-
-    // Provide @rill/let global for bundles built as external (CLI)
-    // IMPORTANT: render/unmount/unmountAll must use sandbox's RillReconciler instance
-    // to ensure reconcilerMap state is shared with Guest code
-    const getSandboxReconciler = (): RillReconcilerGlobal | undefined =>
-      this.context?.getGlobal('RillReconciler') as RillReconcilerGlobal | undefined;
-
-    const wrapRender = (...args: unknown[]) => {
-      try {
-        const el = args[0] as {
-          type?: unknown;
-          __rillTypeMarker?: string;
-          __rillFragmentType?: string;
-          props?: Record<string, unknown>;
-        };
-        const info = [
-          `elementType=${typeof el}`,
-          `type=${String(el?.type)}`,
-          `marker=${String(el?.__rillTypeMarker)}`,
-          `fragment=${String(el?.__rillFragmentType)}`,
-          `propsKeys=${el?.props ? Object.keys(el.props).join(',') : 'null'}`,
-          `sendToHostType=${typeof args[1]}`,
-        ].join(' | ');
-        if (debug) logger.log(`[rill:${this.id}] RillLet.render called | ${info}`);
-      } catch {
-        if (debug) logger.log(`[rill:${this.id}] RillLet.render called (log format failed)`);
-      }
-      try {
-        const reconciler = getSandboxReconciler();
-        if (!reconciler?.render) {
-          throw new Error('[rill] RillReconciler not found in sandbox');
-        }
-        const ret = reconciler.render(args[0], args[1]);
-        if (debug) logger.log(`[rill:${this.id}] RillReconciler.render returned`);
-        return ret;
-      } catch (e) {
-        logger.error(`[rill:${this.id}] RillLet.render error`, e);
-        throw e;
-      }
-    };
-
-    const wrapUnmount = (sendToHost?: unknown) => {
-      if (debug) logger.log(`[rill:${this.id}] RillLet.unmount called`);
-      const reconciler = getSandboxReconciler();
-      return reconciler?.unmount?.(sendToHost);
-    };
-
-    const wrapUnmountAll = () => {
-      if (debug) logger.log(`[rill:${this.id}] RillLet.unmountAll called`);
-      const reconciler = getSandboxReconciler();
-      return reconciler?.unmountAll?.();
-    };
-
-    // invokeCallback/hasCallback use Engine's callbackRegistry (not reconciler's)
-    const invokeCallback = (fnId: string, args: unknown[]) => {
-      return this.callbackRegistry.invoke(fnId, args);
-    };
-    const hasCallback = (fnId: string) => {
-      return this.callbackRegistry.has(fnId);
-    };
-
-    const RillLetModule =
-      this.context.getGlobal?.('RillLet') ||
-      ({
-        ...RillSDKModule,
-        render: wrapRender,
-        unmount: wrapUnmount,
-        unmountAll: wrapUnmountAll,
-        invokeCallback,
-        hasCallback,
-      } as unknown);
-    setGlobalWithLog('RillLet', RillLetModule);
 
     const engineId = this.id;
 
@@ -670,6 +612,24 @@ export class Engine implements IEngine {
     });
     setGlobalWithLog('__console_info', (...args: unknown[]) => {
       if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatConsoleArgs(args));
+    });
+
+    // Inject timer polyfills using TimerManager
+    // IMPORTANT: Must be injected BEFORE Guest Bundle so that reconciler can use globalThis.setTimeout
+    setGlobalWithLog('setTimeout', this.timerManager.createSetTimeoutPolyfill());
+    setGlobalWithLog('clearTimeout', this.timerManager.createClearTimeoutPolyfill());
+    setGlobalWithLog('setInterval', this.timerManager.createSetIntervalPolyfill());
+    setGlobalWithLog('clearInterval', this.timerManager.createClearIntervalPolyfill());
+
+    // queueMicrotask
+    setGlobalWithLog('queueMicrotask', (fn: () => void) => {
+      nativeQueueMicrotask(() => {
+        try {
+          fn();
+        } catch (error) {
+          logger.error('[Guest] queueMicrotask error:', error);
+        }
+      });
     });
 
     // Inject Guest Bundle (includes shims, console, runtime helpers, reconciler)
@@ -771,47 +731,13 @@ export class Engine implements IEngine {
           };
           return { ...GuestReconciler, render, scheduleRender };
         }
-        case '@rill/let':
-          // Guest SDK module - provides component names (strings), host hooks, and reconciler
-          // Component names are used by rill reconciler to look up registered components
-          // Host communication hooks are accessed lazily from sandbox globals
-          return {
-            // React Native components (as string names)
-            View: 'View',
-            Text: 'Text',
-            Image: 'Image',
-            ScrollView: 'ScrollView',
-            TouchableOpacity: 'TouchableOpacity',
-            Button: 'Button',
-            ActivityIndicator: 'ActivityIndicator',
-            FlatList: 'FlatList',
-            TextInput: 'TextInput',
-            Switch: 'Switch',
-            // Host communication hooks (lazily accessed from sandbox globals)
-            useHostEvent: this.context?.getGlobal('__useHostEvent'),
-            useConfig: this.context?.getGlobal('__getConfig'),
-            useSendToHost: () => this.context?.getGlobal('__sendEventToHost'),
-            // Reconciler functions - use sandbox's RillReconciler instance
-            // This ensures reconcilerMap state is shared with Guest code
-            render: (element: unknown, sendToHost: unknown) => {
-              const reconciler = this.context?.getGlobal('RillReconciler') as
-                | RillReconcilerGlobal
-                | undefined;
-              return reconciler?.render?.(element, sendToHost);
-            },
-            unmount: (sendToHost: unknown) => {
-              const reconciler = this.context?.getGlobal('RillReconciler') as
-                | RillReconcilerGlobal
-                | undefined;
-              return reconciler?.unmount?.(sendToHost);
-            },
-            unmountAll: () => {
-              const reconciler = this.context?.getGlobal('RillReconciler') as
-                | RillReconcilerGlobal
-                | undefined;
-              return reconciler?.unmountAll?.();
-            },
-          };
+        case 'rill/sdk': {
+          const sdk = this.context?.getGlobal('RillSDK');
+          if (!sdk) {
+            throw new Error('[rill] RillSDK not found in Guest. Did injectPolyfills fail?');
+          }
+          return sdk;
+        }
         default:
           throw new Error(`[rill] Unsupported require("${moduleName}")`);
       }
@@ -819,23 +745,6 @@ export class Engine implements IEngine {
 
     // React/JSX shims are already injected before require was set up
     // No need for lazy getters - Guest has its own React implementation
-
-    // Inject timer polyfills using TimerManager
-    setGlobalWithLog('setTimeout', this.timerManager.createSetTimeoutPolyfill());
-    setGlobalWithLog('clearTimeout', this.timerManager.createClearTimeoutPolyfill());
-    setGlobalWithLog('setInterval', this.timerManager.createSetIntervalPolyfill());
-    setGlobalWithLog('clearInterval', this.timerManager.createClearIntervalPolyfill());
-
-    // queueMicrotask
-    setGlobalWithLog('queueMicrotask', (fn: () => void) => {
-      nativeQueueMicrotask(() => {
-        try {
-          fn();
-        } catch (error) {
-          logger.error('[Guest] queueMicrotask error:', error);
-        }
-      });
-    });
 
     // Unhandled Promise Rejection monitoring
     // This catches Promise rejections that are not handled with .catch()
@@ -1091,6 +1000,18 @@ export class Engine implements IEngine {
     if (debug) {
       logger.log(
         `[rill:${this.id}] injectRuntimeAPI: skipping RillSDK hooks update (available via require())`
+      );
+    }
+
+    // Inject registered component names as global variables
+    // Guest scripts use these directly: h(View, ...), h(Text, ...), etc.
+    const componentNames = this.registry.getRegisteredNames();
+    for (const name of componentNames) {
+      this.context.setGlobal(name, name);
+    }
+    if (debug && componentNames.length > 0) {
+      logger.log(
+        `[rill:${this.id}] injectRuntimeAPI: injected component globals: ${componentNames.join(', ')}`
       );
     }
 

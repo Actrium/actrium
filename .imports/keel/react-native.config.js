@@ -1,6 +1,7 @@
-// Native sandbox is optional - most users only need rill/let (pure JS SDK)
+// Native sandbox is optional - most users only need rill/sdk (pure JS SDK)
 // Set platforms to null to disable auto-linking
-// For native sandbox users: manually add RillSandboxNative.podspec to Podfile
+// For native sandbox users (RN): manually add `pod 'RillSandboxNative', :path => '../node_modules/rill/native'`
+// and follow docs/NATIVE_SANDBOX_INTEGRATION.zh.md
 module.exports = {
   dependency: {
     platforms: {

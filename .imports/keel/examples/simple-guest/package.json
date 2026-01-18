@@ -7,10 +7,10 @@
     "build:dev": "rill build src/index.tsx -o dist/bundle.js --no-minify --sourcemap"
   },
   "dependencies": {
-    "@rill/let": "workspace:*"
+    "rill": "workspace:*",
+    "react": "^19.0.0"
   },
   "devDependencies": {
-    "@rill/cli": "workspace:*",
     "@types/react": "^19.0.0",
     "typescript": "^5.3.0"
   }

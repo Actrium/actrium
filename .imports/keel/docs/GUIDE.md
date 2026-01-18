@@ -35,7 +35,7 @@ npm install rill
 
 ```tsx
 // src/guest.tsx
-import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/let';
+import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/sdk';
 
 interface Config {
   title: string;
@@ -64,7 +64,7 @@ export default function MyGuest() {
 ### 3. Build Guest
 
 ```bash
-bun run rill/cli build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 ```
 
 ### 4. Use in Host Application
@@ -117,11 +117,11 @@ my-guest/
 ```json
 {
   "name": "my-guest",
-  "version": "1.0.0",
-  "scripts": {
-    "build": "bun run rill/cli build src/guest.tsx -o dist/bundle.js",
-    "watch": "bun run rill/cli build src/guest.tsx -o dist/bundle.js --watch"
-  },
+	  "version": "1.0.0",
+	  "scripts": {
+	    "build": "rill build src/guest.tsx -o dist/bundle.js",
+	    "watch": "rill build src/guest.tsx -o dist/bundle.js --watch"
+	  },
   "devDependencies": {
     "rill": "^1.0.0",
     "typescript": "^5.0.0"
@@ -151,7 +151,7 @@ my-guest/
 Virtual components are string identifiers that are transformed into operation instructions during build:
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/let';
+import { View, Text, Image, ScrollView, TouchableOpacity } from 'rill/sdk';
 
 function MyComponent() {
   return (
@@ -176,7 +176,7 @@ function MyComponent() {
 #### useConfig - Get Configuration
 
 ```tsx
-import { useConfig } from 'rill/let';
+import { useConfig } from 'rill/sdk';
 
 interface Config {
   userId: string;
@@ -200,7 +200,7 @@ function Guest() {
 
 ```tsx
 import { useState } from 'react';
-import { View, Text, useHostEvent } from 'rill/let';
+import { View, Text, useHostEvent } from 'rill/sdk';
 
 function Guest() {
   const [refreshCount, setRefreshCount] = useState(0);
@@ -219,7 +219,7 @@ function Guest() {
 #### useSendToHost - Send Events to Host
 
 ```tsx
-import { TouchableOpacity, Text, useSendToHost } from 'rill/let';
+import { TouchableOpacity, Text, useSendToHost } from 'rill/sdk';
 
 function Guest() {
   const sendToHost = useSendToHost();
@@ -241,7 +241,7 @@ function Guest() {
 Call methods on host component instances (like `focus()`, `scrollTo()`):
 
 ```tsx
-import { useRemoteRef, View, TextInput, TouchableOpacity, Text, TextInputRef } from 'rill/let';
+import { useRemoteRef, View, TextInput, TouchableOpacity, Text, TextInputRef } from 'rill/sdk';
 
 function Guest() {
   const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
@@ -311,7 +311,7 @@ Use FlatList for rendering long lists:
 
 ```tsx
 import { useState } from 'react';
-import { View, Text, FlatList } from 'rill/let';
+import { View, Text, FlatList } from 'rill/sdk';
 
 interface Item {
   id: string;

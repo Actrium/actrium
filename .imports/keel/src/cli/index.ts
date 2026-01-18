@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Rill CLI
  *
@@ -66,7 +66,7 @@ program
     'react',
     'react-native',
     'react/jsx-runtime',
-    '@rill/let',
+    'rill/sdk',
   ])
   .option('--fail-on-violation', 'Fail when non-whitelisted deps are found')
   .option('--treat-eval-as-violation', 'Treat eval() usage as violation')
@@ -139,8 +139,7 @@ program
         },
         dependencies: {
           react: '^18.0.0',
-          '@rill/let': 'latest',
-          '@rill/cli': 'latest',
+          rill: 'latest',
         },
       };
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
@@ -174,10 +173,6 @@ program
               noPropertyAccessFromIndexSignature: true,
               verbatimModuleSyntax: true,
               types: ['bun-types'],
-              paths: {
-                // Type-only mapping for IDE support
-                '@rill/let': ['node_modules/@rill/let/src/index.ts'],
-              },
             },
             include: ['src'],
           },
@@ -191,7 +186,7 @@ program
     const guestPath = path.join(srcDir, 'guest.tsx');
     if (!fs.existsSync(guestPath)) {
       const guest = `import * as React from 'react';
-import { View, Text } from '@rill/let';
+import { View, Text } from 'rill/sdk';
 
 export default function Guest() {
   return (

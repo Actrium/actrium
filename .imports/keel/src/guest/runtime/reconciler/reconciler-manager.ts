@@ -9,8 +9,8 @@
 // biome-ignore lint/suspicious/noExplicitAny: Internal type alias for flexibility
 type ReactElement = any;
 
+import type { GuestElement } from '../../../sdk/types';
 import { type CallbackRegistry, CallbackRegistryImpl, type SendToHost } from '../../../shared';
-import type { GuestElement } from '../../let/types';
 import { transformGuestElement } from './element-transform';
 import { createReconciler } from './host-config';
 import type { RillReconciler, RootContainer } from './types';
@@ -36,7 +36,7 @@ interface ReconcilerInstance {
  *
  * Stored on globalThis for idempotent initialization:
  * - Engine may inject GUEST_BUNDLE_CODE first
- * - Then bundle.js (containing guest-bundle) executes
+ * - Then user guest bundle executes
  * - Both should share the same reconcilerMap instance
  */
 const globals = globalThis as Record<string, unknown>;

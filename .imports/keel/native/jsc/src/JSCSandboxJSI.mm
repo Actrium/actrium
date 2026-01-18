@@ -832,4 +832,9 @@ void JSCSandboxModule::install(jsi::Runtime &runtime) {
                                std::move(moduleObj));
 }
 
+// Wrapper function for external linkage (avoids JSValue symbol conflicts)
+void installJSCSandbox(jsi::Runtime &runtime) {
+  JSCSandboxModule::install(runtime);
+}
+
 } // namespace jsc_sandbox

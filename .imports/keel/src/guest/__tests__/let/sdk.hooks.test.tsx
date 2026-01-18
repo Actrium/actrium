@@ -10,7 +10,7 @@ describe('SDK Hooks', () => {
   let React: typeof import('react');
   let TestRenderer: typeof import('react-test-renderer');
   let act: typeof import('react-test-renderer').act;
-  let sdk: typeof import('../../let/sdk');
+  let sdk: typeof import('../../../sdk/sdk');
 
   beforeAll(async () => {
     React = await import('react');
@@ -21,7 +21,7 @@ describe('SDK Hooks', () => {
     // Set React on globalThis for SDK (especially RillErrorBoundary)
     (globalThis as Record<string, unknown>).React = React;
 
-    sdk = await import('../../let/sdk');
+    sdk = await import('../../../sdk/sdk');
   });
 
   describe('useHostEvent()', () => {

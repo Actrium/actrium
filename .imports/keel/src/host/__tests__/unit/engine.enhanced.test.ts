@@ -7,7 +7,7 @@ function buildBundle(code: string) {
   return `
     var _React = require('react');
     var _jsx = require('react/jsx-runtime');
-    var _rill = require('@rill/let');
+    var _rill = require('rill/sdk');
     ${code}
   `;
 }

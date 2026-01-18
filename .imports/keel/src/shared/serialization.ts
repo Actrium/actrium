@@ -17,20 +17,50 @@ export interface CircularRef {
  * 创建编码函数
  * 使用 TypeRules 遍历匹配并编码值
  * 自动检测循环引用，避免无限递归
+ *
+ * 性能优化：
+ * - 原始类型快速路径（跳过规则遍历）
+ * - 复用 WeakSet 避免重复分配
+ * - 按类型预分组规则减少匹配次数
  */
 export function createEncoder(
   typeRules: TypeRule[],
   context: TypeRuleContext
 ): (value: unknown) => unknown {
-  // 每次顶层调用时的 seen 集合（用于检测循环引用）
-  let seen: WeakSet<object> | null = null;
-  let depth = 0;
+  // 预分组规则：按类型快速分派
+  const functionRules = typeRules.filter((r) => r.name === 'function');
+  const promiseRules = typeRules.filter((r) => r.name === 'promise');
+  const dateRules = typeRules.filter((r) => r.name === 'date');
+  // 排除需要递归处理的规则（array、object）- 由本模块带循环引用检测的逻辑处理
+  const objectRules = typeRules.filter(
+    (r) =>
+      r.name !== 'function' &&
+      r.name !== 'promise' &&
+      r.name !== 'date' &&
+      r.name !== 'null-undefined' &&
+      r.name !== 'primitives' &&
+      r.name !== 'array' &&
+      r.name !== 'object'
+  );
+
+  // 复用 WeakSet 检测循环引用
+  const seenPool = new WeakSet<object>();
 
   const encode = (value: unknown): unknown => {
-    // 非对象类型直接处理
-    if (value === null || typeof value !== 'object') {
-      // 遍历类型规则，找到第一个匹配的规则
-      for (const rule of typeRules) {
+    // 快速路径：null/undefined 直接返回
+    if (value === null || value === undefined) {
+      return value;
+    }
+
+    // 快速路径：原始类型直接返回（跳过规则遍历）
+    const type = typeof value;
+    if (type === 'boolean' || type === 'number' || type === 'string') {
+      return value;
+    }
+
+    // 函数类型：直接使用函数规则
+    if (type === 'function') {
+      for (const rule of functionRules) {
         if (rule.match(value)) {
           return rule.encode ? rule.encode(value, context) : value;
         }
@@ -38,44 +68,52 @@ export function createEncoder(
       return value;
     }
 
-    // 对象类型：检测循环引用
-    const obj = value as object;
+    // 对象类型
+    if (type === 'object') {
+      // Promise 检查（叶子对象，不需要循环引用检测）
+      if (value instanceof Promise) {
+        for (const rule of promiseRules) {
+          if (rule.match(value)) {
+            return rule.encode ? rule.encode(value, context) : value;
+          }
+        }
+      }
 
-    // 顶层调用时初始化 seen
-    if (depth === 0) {
-      seen = new WeakSet();
-    }
+      // Date 检查（叶子对象，不需要循环引用检测）
+      if (value instanceof Date) {
+        for (const rule of dateRules) {
+          if (rule.match(value)) {
+            return rule.encode ? rule.encode(value, context) : value;
+          }
+        }
+      }
 
-    // 检测循环引用
-    if (seen!.has(obj)) {
-      return { __type: 'circular' } as CircularRef;
-    }
-
-    // 标记为已访问
-    seen!.add(obj);
-    depth++;
-
-    try {
-      // 遍历类型规则，找到第一个匹配的规则
-      for (const rule of typeRules) {
+      // 其他对象规则（ArrayBuffer、TypedArray 等叶子对象）
+      for (const rule of objectRules) {
         if (rule.match(value)) {
           return rule.encode ? rule.encode(value, context) : value;
         }
       }
 
-      // 未匹配任何规则 - 如果是普通对象，递归编码其属性
+      // 未匹配任何规则 - 需要递归遍历，进行循环引用检测
+      const obj = value as object;
+
+      if (seenPool.has(obj)) {
+        return { __type: 'circular' } as CircularRef;
+      }
+
+      seenPool.add(obj);
+
+      // 普通对象：递归编码其属性
       if (!Array.isArray(value)) {
         return encodeObject(value as Record<string, unknown>, encode);
       }
 
-      return value;
-    } finally {
-      depth--;
-      // 顶层调用结束时清理
-      if (depth === 0) {
-        seen = null;
-      }
+      // 数组：递归编码元素
+      return (value as unknown[]).map(encode);
     }
+
+    return value;
   };
 
   return encode;

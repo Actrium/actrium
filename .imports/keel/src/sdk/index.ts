@@ -1,11 +1,10 @@
 /**
- * @rill/let
+ * rill/sdk
  *
  * Guest-side SDK for rill - runs inside sandbox
  * Provides virtual components, hooks for Guest development
- * Named after applet, servlet, pagelet - a small, embeddable unit
  *
- * Note: Runtime internals (render, unmount, CallbackRegistry) are in src/guest/runtime/
+ * Note: Guest runtime internals (reconciler/bridge) are in src/guest/runtime/
  */
 
 // Component prop types and event types

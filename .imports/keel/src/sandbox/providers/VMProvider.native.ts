@@ -8,7 +8,7 @@ import type { JSEngineProvider } from '../types/provider';
 export class VMProvider implements JSEngineProvider {
   constructor(_options?: { timeout?: number }) {
     throw new Error(
-      '[VMProvider] Requires Node.js vm module. Use QuickJSProvider or WorkerProvider.'
+      '[VMProvider] Requires Node.js vm module. Use JSCProvider/QuickJSProvider/HermesProvider in React Native.'
     );
   }
 

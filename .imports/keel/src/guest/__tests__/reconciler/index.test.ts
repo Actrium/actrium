@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import type { OperationBatch, SendToHost } from '../../let/types';
+import type { OperationBatch, SendToHost } from '../../../sdk/types';
 import {
   CallbackRegistry,
   createReconciler,

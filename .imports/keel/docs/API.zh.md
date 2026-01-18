@@ -20,7 +20,7 @@ rill/
 
 ---
 
-## Guest SDK (rill/let)
+## Guest SDK (rill/sdk)
 
 Guest 开发者使用的 SDK，在沙箱环境中运行。
 
@@ -29,7 +29,7 @@ Guest 开发者使用的 SDK，在沙箱环境中运行。
 虚组件是字符串标识符，在打包时被 JSX 转换为操作指令。
 
 ```tsx
-import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, Button, Switch, ActivityIndicator } from 'rill/let';
+import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, Button, Switch, ActivityIndicator } from 'rill/sdk';
 ```
 
 #### View
@@ -215,7 +215,7 @@ import { View, Text, Image, ScrollView, TouchableOpacity, TextInput, FlatList, B
 监听宿主事件。
 
 ```tsx
-import { useHostEvent } from 'rill/let';
+import { useHostEvent } from 'rill/sdk';
 
 function Guest() {
   useHostEvent<{ force: boolean }>('REFRESH', (payload) => {
@@ -236,7 +236,7 @@ function Guest() {
 获取初始配置。
 
 ```tsx
-import { useConfig } from 'rill/let';
+import { useConfig } from 'rill/sdk';
 
 interface Config {
   theme: 'light' | 'dark';
@@ -259,7 +259,7 @@ function Guest() {
 向宿主发送事件。
 
 ```tsx
-import { useSendToHost } from 'rill/let';
+import { useSendToHost } from 'rill/sdk';
 
 function Guest() {
   const sendToHost = useSendToHost();
@@ -281,7 +281,7 @@ function Guest() {
 创建远程引用，用于调用 Host 组件实例方法。
 
 ```tsx
-import { useRemoteRef, TextInput, TextInputRef } from 'rill/let';
+import { useRemoteRef, TextInput, TextInputRef } from 'rill/sdk';
 
 function Guest() {
   const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
@@ -327,7 +327,7 @@ function Guest() {
 Guest 端错误边界组件，捕获渲染错误。
 
 ```tsx
-import { RillErrorBoundary, View, Text } from 'rill/let';
+import { RillErrorBoundary, View, Text } from 'rill/sdk';
 
 function App() {
   return (
@@ -555,13 +555,13 @@ devtools.reset();
 
 ```bash
 # 构建 Guest Bundle
-bun run rill/cli build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 
 # 监听模式
-bun run rill/cli build src/guest.tsx --watch --no-minify --sourcemap
+bunx rill build src/guest.tsx --watch --no-minify --sourcemap
 
 # 分析 Bundle
-bun run rill/cli analyze dist/bundle.js
+bunx rill analyze dist/bundle.js
 ```
 
 ### 编程接口
@@ -579,7 +579,7 @@ await build({
 });
 
 await analyze('dist/bundle.js', {
-  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/let'],
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/sdk'],
   failOnViolation: true,
 });
 ```
@@ -697,11 +697,58 @@ interface JSEngineRuntime {
 
 interface JSEngineContext {
   eval(code: string): Promise<unknown>;
+  evalBytecode?(bytecode: ArrayBuffer): unknown;  // 仅 Hermes
   set(name: string, value: unknown): void;
   get(name: string): unknown;
   dispose(): void;
 }
 ```
+
+### Hermes 字节码预编译
+
+Hermes 沙箱支持 AOT（Ahead-of-Time）字节码编译，以提升启动性能。
+
+**编译 JS 为 Hermes 字节码：**
+
+```bash
+# 使用 hermesc（来自 React Native 的 Hermes）
+hermesc -emit-binary -O -out guest.hbc guest.js
+```
+
+**在沙箱中执行字节码：**
+
+```typescript
+// 加载预编译字节码
+const bytecode = await fetch('guest.hbc').then(r => r.arrayBuffer());
+
+// 创建 Hermes 沙箱上下文
+const runtime = provider.createRuntime();
+const context = runtime.createContext();
+
+// 执行字节码（跳过解析/编译）
+if (context.evalBytecode) {
+  context.evalBytecode(bytecode);
+} else {
+  // 非 Hermes Provider 回退到源码执行
+  context.eval(sourceCode);
+}
+```
+
+**优势：**
+- 跳过解析和编译阶段
+- 静态 Guest 代码启动更快
+- 适用于预知的 Guest Bundle 和服务端下发更新包
+
+**限制：**
+- 仅 Hermes 沙箱可用（JSC/QuickJS 不支持）
+- 字节码需与 Hermes 引擎版本匹配
+- 无法使用 source map 调试
+
+| 场景 | 推荐方式 |
+|------|----------|
+| 静态 Guest 模块（构建时已知） | `evalBytecode` + 预编译 |
+| 动态 Guest 代码（运行时生成） | `eval` |
+| 服务端下发更新包 | `evalBytecode` + 下发 .hbc |
 
 ---
 

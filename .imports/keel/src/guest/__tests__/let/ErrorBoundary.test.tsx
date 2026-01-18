@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 describe('RillErrorBoundary', () => {
   let React: typeof import('react');
-  let RillErrorBoundary: typeof import('../../let/sdk').RillErrorBoundary;
+  let RillErrorBoundary: typeof import('../../../sdk/sdk').RillErrorBoundary;
 
   afterAll(() => {
     // Cleanup globalThis.React
@@ -13,7 +13,7 @@ describe('RillErrorBoundary', () => {
     React = await import('react');
     // Set React on globalThis for RillErrorBoundary
     (globalThis as Record<string, unknown>).React = React;
-    const sdk = await import('../../let/sdk');
+    const sdk = await import('../../../sdk/sdk');
     RillErrorBoundary = sdk.RillErrorBoundary;
   });
 

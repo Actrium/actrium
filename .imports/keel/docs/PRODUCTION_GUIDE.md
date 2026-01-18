@@ -6,7 +6,7 @@ This guide summarizes recommended settings and operational practices to run Rill
 
 - Require whitelist
   - Pass `requireWhitelist` in EngineOptions when creating Engine. Only these modules can be `require()`ed by the guest bundle.
-  - Default whitelist: `react`, `react-native`, `react/jsx-runtime`, `rill/let`.
+  - Default whitelist: `react`, `react-native`, `react/jsx-runtime`, `rill/sdk`.
 - Execution timeout
   - Use `timeout` option (default 5000ms). QuickJS `eval` is synchronous and cannot be forcibly interrupted; this timeout is "best-effort". Consider worker/thread isolation if strict CPU time slicing is required.
 - Error classification
@@ -36,7 +36,7 @@ This guide summarizes recommended settings and operational practices to run Rill
 
 - Sandbox
   - Use a `JSEngineProvider` implementation (like QuickJS WASM) in production to ensure isolation from the host.
-  - Supported sandbox modes: `'vm'` (Node.js VM), `'worker'` (Web Worker), `'none'` (no sandbox)
+  - Supported sandbox modes: `'vm'` (Node.js VM), `'jsc'` (JSC via JSI), `'quickjs'` (QuickJS via JSI), `'wasm-quickjs'` (QuickJS WASM), `'none'` (no sandbox)
 - Module access
   - Keep whitelist minimal; do not expose Node built-ins or dynamic loaders to the guest.
 - Callbacks
@@ -86,7 +86,7 @@ This guide summarizes recommended settings and operational practices to run Rill
 const metrics: Array<{ name: string; value: number; extra?: Record<string, unknown> }> = [];
 const engine = new Engine({
   provider: myJSEngineProvider, // Optional
-  sandbox: 'vm', // Optional: 'vm' | 'worker' | 'none'
+  sandbox: 'quickjs', // Optional: 'vm' | 'jsc' | 'quickjs' | 'wasm-quickjs' | 'none'
   onMetric: (n, v, e) => metrics.push({ name: n, value: v, extra: e })
 });
 ```
@@ -101,13 +101,13 @@ const health = engine.getHealth();
 
 - Analyze with whitelist scanning
 ```bash
-bun run rill/cli analyze dist/bundle.js # default warnings only
+bunx rill analyze dist/bundle.js # default warnings only
 ```
 Programmatic (options):
 ```ts
 import { analyze } from 'rill/cli';
 await analyze('dist/bundle.js', {
-  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/let'],
+  whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/sdk'],
   failOnViolation: true,
   treatEvalAsViolation: true,
   treatDynamicNonLiteralAsViolation: true,
@@ -116,7 +116,7 @@ await analyze('dist/bundle.js', {
 
 - Build guest bundle
 ```bash
-bun run rill/cli build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 ```
 
 ## 9. Troubleshooting
@@ -125,4 +125,3 @@ bun run rill/cli build src/guest.tsx -o dist/bundle.js
   - Vitest maps `react-native` to a lightweight stub via an alias. This does not affect production bundles.
 - Syntax errors like "Expected 'from', got 'typeOf'"
   - Ensure type-only imports are separated and lint rule is enabled.
-

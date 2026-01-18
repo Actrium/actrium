@@ -28,14 +28,19 @@ interface JSCRuntimeNative {
 
 /**
  * Check if JSC native module is available
+ *
+ * Note: We use try-catch instead of typeof checks because JSI HostObjects
+ * may not return 'function' for typeof when accessing their properties.
  */
 export function isJSCAvailable(): boolean {
-  return (
-    typeof global !== 'undefined' &&
-    global.__JSCSandboxJSI !== undefined &&
-    typeof global.__JSCSandboxJSI.isAvailable === 'function' &&
-    global.__JSCSandboxJSI.isAvailable()
-  );
+  try {
+    if (typeof global === 'undefined' || global.__JSCSandboxJSI === undefined) {
+      return false;
+    }
+    return global.__JSCSandboxJSI.isAvailable();
+  } catch {
+    return false;
+  }
 }
 
 /**
