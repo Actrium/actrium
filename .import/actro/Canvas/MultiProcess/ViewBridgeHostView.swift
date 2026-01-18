@@ -524,7 +524,8 @@ final class ViewBridgeCoordinator {
     var tabId: UUID?
 
     /// 当前 viewport 尺寸 - 存储在 coordinator 中以便闭包能访问最新值
-    var currentViewportSize: CGSize = CGSize(width: 100, height: 100)
+    /// 默认值 50x50 反映 Overview 模式下可能的小卡片尺寸
+    var currentViewportSize: CGSize = CGSize(width: 50, height: 50)
     /// 上次发送 tabConfig 时的尺寸 - 用于防止重复发送
     var lastSentConfigSize: CGSize?
     /// 上次发送 containerSizeChanged 时的尺寸 - 用于防止重复发送
@@ -1115,8 +1116,14 @@ struct PersistentViewBridgeView: NSViewRepresentable {
         )
 
         // 设置连接建立回调
+        // 🔑 直接在这里设置 hasConnection，因为 onAppear 中的 setupConnectionCallback
+        // 可能在连接建立后才执行（时序问题）
         hostView.onConnectionEstablished = { [weak coordinator] in
-            coordinator?.onConnectionEstablished?()
+            guard let coordinator = coordinator else { return }
+            NSLog("🔗 [PersistentView] Connection established for tab %@, setting hasConnection=true",
+                  String(tabId.uuidString.prefix(8)))
+            coordinator.hasConnection = true
+            coordinator.onConnectionEstablished?()
         }
 
         // 如果 hostView 已有 superview（被重用），先移除
@@ -1300,6 +1307,8 @@ struct UnifiedReactNativeLayer: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var hasValidConfigSent = false
+    /// 🔑 触发 SwiftUI 重渲染的状态（coordinator 变化不会自动触发）
+    @State private var serviceAllocated = false
 
     // 监听 resize 状态，用于显示快照遮罩
     @ObservedObject private var resizeState = WindowResizeState.shared
@@ -1307,9 +1316,9 @@ struct UnifiedReactNativeLayer: View {
     // 调试模式开关
     private static let showDebugGrid = false
 
-    /// 检查 service 是否已分配
+    /// 检查 service 是否已分配（使用 @State 触发 SwiftUI 重渲染）
     private var isServiceAllocated: Bool {
-        coordinator.allocatedServiceId != nil
+        serviceAllocated && coordinator.allocatedServiceId != nil
     }
 
     var body: some View {
@@ -1412,13 +1421,21 @@ struct UnifiedReactNativeLayer: View {
     }
 
     /// 检查 coordinator 中的 viewportSize 是否有效 - 用于闭包中访问最新值
+    /// 注意：使用宽松的阈值 (> 10)，因为在 Overview 模式下 cardSize 可能很小
+    /// 但仍需要发送 tabConfig 让 RN 能渲染内容
     private var isCoordinatorViewportSizeValid: Bool {
-        coordinator.currentViewportSize.width > 100 && coordinator.currentViewportSize.height > 100
+        coordinator.currentViewportSize.width > 10 && coordinator.currentViewportSize.height > 10
     }
 
     private func allocateServiceIfNeeded() {
         if coordinator.allocatedServiceId != nil {
-            // 已分配，设置 XPC ready listener
+            // 已分配，确保 @State 同步
+            if !serviceAllocated {
+                serviceAllocated = true
+            }
+            // 🔑 快速路径：检查是否已预热，直接标记 ready
+            checkPrewarmStatusAndSetReady()
+            // 设置 XPC ready listener（备用）
             setupXPCReadyListener()
             return
         }
@@ -1429,12 +1446,32 @@ struct UnifiedReactNativeLayer: View {
                 fingerprint: fingerprint
             )
             coordinator.allocatedServiceId = serviceId
-            // 新分配，设置 XPC ready listener
+            // 🔑 触发 SwiftUI 重渲染
+            serviceAllocated = true
+            // 🔑 快速路径：检查是否已预热
+            checkPrewarmStatusAndSetReady()
+            // 设置 XPC ready listener（备用）
             setupXPCReadyListener()
         } catch let error as XPCServicePoolError {
             errorMessage = error.localizedDescription
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 🔥 快速路径：如果 Service 已预热，直接标记 ready 并尝试发送 config
+    private func checkPrewarmStatusAndSetReady() {
+        guard let serviceId = coordinator.allocatedServiceId else { return }
+
+        // 检查 Service 是否已 ready（通过预热或之前的连接）
+        if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
+            if !coordinator.xpcServiceReady {
+                coordinator.xpcServiceReady = true
+                NSLog("🔥 [Prewarm] Service %@ already ready, fast path enabled",
+                      serviceId.components(separatedBy: ".").last ?? "")
+            }
+            // 立即尝试发送 config（如果连接也已建立）
+            sendTabConfigIfReady()
         }
     }
 
@@ -1444,12 +1481,8 @@ struct UnifiedReactNativeLayer: View {
             return
         }
 
-        // 先检查 service 是否已经 ready（解决竞态条件：新 Tab 错过 ready 通知）
-        if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
-            coordinator.xpcServiceReady = true
-            sendTabConfigIfReady()
-            // 仍然设置监听器，以防 service 重启
-        }
+        // 🔥 快速路径已在 checkPrewarmStatusAndSetReady 中处理
+        // 这里仅设置监听器作为备用（处理 Service 重启等情况）
 
         // 监听 com.canvas.xpcServiceReady（无后缀），通过 userInfo.bundleId 过滤
         coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
@@ -1475,21 +1508,39 @@ struct UnifiedReactNativeLayer: View {
             sendTabConfigIfReady()
         }
 
-        // 检查连接是否已建立
+        // 检查连接是否已建立（通过 hasRemoteViewController 判断）
         if coordinator.hostView?.hasRemoteViewController == true && !coordinator.hasConnection {
             coordinator.onConnectionEstablished?()
+        }
+
+        // 🔑 如果 hasConnection 已经是 true（由 PersistentViewBridgeView.makeNSView 设置），
+        // 且 xpcServiceReady，直接发送 tabConfig
+        if coordinator.hasConnection && coordinator.xpcServiceReady {
+            NSLog("🔗 [setupConnectionCallback] Connection already established, sending config")
+            sendTabConfigIfReady()
         }
     }
 
     private func sendTabConfigIfReady() {
         // 使用 coordinator 中的 viewportSize，因为这个方法可能从闭包中被调用
         let currentSize = coordinator.currentViewportSize
+        let tabIdShort = String(tab.id.uuidString.prefix(8))
 
         // 检查 coordinator 中的 viewportSize 是否有效（不是初始的 100x100）
-        guard isCoordinatorViewportSizeValid else { return }
+        guard isCoordinatorViewportSizeValid else {
+            NSLog("⚠️ [sendTabConfig] tab=%@ SKIP: viewportSize invalid (%.0fx%.0f)",
+                  tabIdShort, currentSize.width, currentSize.height)
+            return
+        }
 
         guard coordinator.hasConnection && coordinator.xpcServiceReady,
-              let serviceId = coordinator.allocatedServiceId else { return }
+              let serviceId = coordinator.allocatedServiceId else {
+            NSLog("⚠️ [sendTabConfig] tab=%@ SKIP: hasConnection=%d, xpcReady=%d, serviceId=%@",
+                  tabIdShort, coordinator.hasConnection ? 1 : 0,
+                  coordinator.xpcServiceReady ? 1 : 0,
+                  coordinator.allocatedServiceId ?? "nil")
+            return
+        }
 
         // 防止重复发送相同尺寸的 config
         if coordinator.lastSentConfigSize == currentSize {
@@ -1513,6 +1564,11 @@ struct UnifiedReactNativeLayer: View {
         if let systemTabType = tab.systemTabType {
             tabConfig["systemAppType"] = systemTabType.rawValue
         }
+
+        NSLog("📤 [sendTabConfig] tab=%@ service=%@ size=%.0fx%.0f systemAppType=%@",
+              tabIdShort, serviceId.components(separatedBy: ".").last ?? "",
+              currentSize.width, currentSize.height,
+              tab.systemTabType?.rawValue ?? "nil")
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
            let jsonString = String(data: jsonData, encoding: .utf8) {
@@ -1553,8 +1609,13 @@ struct ViewBridgeTabView: NSViewRepresentable {
         view.coordinator = coordinator
         coordinator.hostView = view
         // 设置连接建立回调
+        // 🔑 直接在这里设置 hasConnection，因为 onAppear 中的 setupConnectionCallback
+        // 可能在连接建立后才执行（时序问题）
         view.onConnectionEstablished = { [weak coordinator] in
-            coordinator?.onConnectionEstablished?()
+            guard let coordinator = coordinator else { return }
+            NSLog("🔗 [TabView] Connection established, setting hasConnection=true")
+            coordinator.hasConnection = true
+            coordinator.onConnectionEstablished?()
         }
         return view
     }
@@ -1638,6 +1699,12 @@ struct ViewBridgeMultiProcessTabView: View {
                         // 只有当 XPC service 也准备好后才发送 config
                         sendTabConfigIfReady()
                     }
+
+                    // 🔑 检查连接是否已建立（可能在 onAppear 之前就建立了）
+                    if coordinator.hasConnection && coordinator.xpcServiceReady {
+                        NSLog("🔗 [MultiProcess.onAppear] Connection already established, sending config")
+                        sendTabConfigIfReady()
+                    }
                 }
                 .onChange(of: tab.unifiedScript) { _, _ in
                     sendTabConfigToService()
@@ -1694,6 +1761,8 @@ struct ViewBridgeMultiProcessTabView: View {
             }
             if let serviceId = coordinator.allocatedServiceId {
                 setupConnectionBindingListener(for: serviceId)
+                // 🔥 快速路径：检查是否已预热
+                checkPrewarmStatusAndSetReady(serviceId: serviceId)
             }
             return
         }
@@ -1704,11 +1773,25 @@ struct ViewBridgeMultiProcessTabView: View {
             serviceAllocated = true
             if let serviceId = coordinator.allocatedServiceId {
                 setupConnectionBindingListener(for: serviceId)
+                // 🔥 快速路径：检查是否已预热
+                checkPrewarmStatusAndSetReady(serviceId: serviceId)
             }
         } catch let error as XPCServicePoolError {
             errorMessage = error.localizedDescription
         } catch {
             errorMessage = "Failed to allocate RN process: \(error.localizedDescription)"
+        }
+    }
+
+    /// 🔥 快速路径：如果 Service 已预热，直接标记 ready
+    private func checkPrewarmStatusAndSetReady(serviceId: String) {
+        if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
+            if !coordinator.xpcServiceReady {
+                coordinator.xpcServiceReady = true
+                NSLog("🔥 [MultiProcess.Prewarm] Service %@ already ready, fast path enabled",
+                      serviceId.components(separatedBy: ".").last ?? "")
+            }
+            sendTabConfigIfReady()
         }
     }
 
@@ -1722,12 +1805,8 @@ struct ViewBridgeMultiProcessTabView: View {
             return
         }
 
-        // 先检查 service 是否已经 ready（解决竞态条件：新 Tab 错过 ready 通知）
-        if XPCServicePool.shared.isServiceReady(bundleIdentifier: expectedBundleId) {
-            coordinator.xpcServiceReady = true
-            sendTabConfigIfReady()
-            // 仍然设置监听器，以防 service 重启
-        }
+        // 🔥 快速路径已在 checkPrewarmStatusAndSetReady 中处理
+        // 这里仅设置监听器作为备用
 
         coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.canvas.xpcServiceReady"),

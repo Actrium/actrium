@@ -250,8 +250,6 @@ private class ResizableContainerView: NSView {
     /// Note: We do NOT resize the jail view - it's meant to be a large buffer.
     /// Container positioning within jail handles the visual alignment.
     private func syncJailSize(superview: NSView, desiredSize: NSSize) {
-        let currentJailSize = superview.bounds.size
-
         // Clamp to a safe upper bound
         let clamped = NSSize(
             width: min(desiredSize.width, Self.maxJailSize.width),
@@ -364,8 +362,14 @@ private class ResizableContainerView: NSView {
 // MARK: - Metro Config (received from Host via DistributedNotificationCenter)
 
 /// Holds Metro bundler configuration received from Canvas Host
-/// Updated dynamically when Host's MetroManager broadcasts config
+/// - Primary: Read from shared UserDefaults on startup (no delay)
+/// - Secondary: Listen for broadcast notifications (runtime updates)
 private enum MetroConfig {
+    /// App Group for shared config
+    private static let appGroupId = "group.chat.askaway.canvas"
+    private static let metroHostKey = "metro.host"
+    private static let metroPortKey = "metro.port"
+
     /// Default Metro host (fallback if no config received)
     static var host: String = "127.0.0.1"
     static var port: UInt16 = 8081
@@ -374,7 +378,25 @@ private enum MetroConfig {
         "\(host):\(port)"
     }
 
-    /// Update config from notification userInfo
+    /// Load config from shared UserDefaults (called on XPC Service startup)
+    /// This is the primary method - no need to wait for broadcast
+    static func loadFromSharedDefaults() {
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId) else {
+            debugLog("MetroConfig: Cannot access shared UserDefaults")
+            return
+        }
+
+        if let savedHost = sharedDefaults.string(forKey: metroHostKey), !savedHost.isEmpty {
+            host = savedHost
+        }
+        let savedPort = sharedDefaults.integer(forKey: metroPortKey)
+        if savedPort > 0 {
+            port = UInt16(savedPort)
+        }
+        debugLog("MetroConfig loaded from UserDefaults: \(hostString)")
+    }
+
+    /// Update config from notification userInfo (runtime updates)
     static func update(from userInfo: [AnyHashable: Any]?) {
         guard let info = userInfo else { return }
         if let host = info["host"] as? String {
@@ -385,7 +407,7 @@ private enum MetroConfig {
         } else if let port = info["port"] as? Int {
             Self.port = UInt16(port)
         }
-        debugLog("MetroConfig updated: \(Self.hostString)")
+        debugLog("MetroConfig updated via notification: \(Self.hostString)")
     }
 }
 
@@ -693,6 +715,9 @@ private class ServiceReactNativeHost {
     }
 
     private func setupTabConfigListener() {
+        // Load Metro config from shared UserDefaults immediately (no wait for broadcast)
+        MetroConfig.loadFromSharedDefaults()
+
         // Listen for tab config with service-specific notification
         let notificationName = "com.canvas.tabConfig.\(serviceBundleId)"
         tabConfigObserver = DistributedNotificationCenter.default().addObserver(
@@ -703,7 +728,7 @@ private class ServiceReactNativeHost {
             self?.handleTabConfigNotification(notification)
         }
 
-        // Listen for Metro config broadcasts from Host
+        // Listen for Metro config broadcasts from Host (for runtime updates)
         metroConfigObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.canvas.metro.config"),
             object: nil,
@@ -875,13 +900,32 @@ private class ServiceReactNativeHost {
     }
 
     private func handleTabConfigNotification(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let configJson = userInfo["config"] as? String,
-              let configData = configJson.data(using: .utf8),
-              let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any],
-              let tabId = config["tabId"] as? String else {
+        NSLog("[XPC] 📥 handleTabConfigNotification received")
+
+        guard let userInfo = notification.userInfo else {
+            NSLog("[XPC] ⚠️ handleTabConfigNotification: userInfo is nil")
             return
         }
+
+        guard let configJson = userInfo["config"] as? String else {
+            let keysStr = userInfo.keys.map { String(describing: $0) }.joined(separator: ", ")
+            NSLog("[XPC] ⚠️ handleTabConfigNotification: config not found in userInfo, keys: %@", keysStr)
+            return
+        }
+
+        guard let configData = configJson.data(using: .utf8),
+              let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] else {
+            NSLog("[XPC] ⚠️ handleTabConfigNotification: failed to parse JSON")
+            return
+        }
+
+        guard let tabId = config["tabId"] as? String else {
+            NSLog("[XPC] ⚠️ handleTabConfigNotification: tabId not found in config")
+            return
+        }
+
+        let systemAppType = config["systemAppType"] as? String ?? "nil"
+        NSLog("[XPC] 📥 tabConfig for tab=%@ systemAppType=%@", String(tabId.prefix(8)), systemAppType)
 
         // Stop retry timer once we receive first config
         hasReceivedTabConfig = true
@@ -889,14 +933,22 @@ private class ServiceReactNativeHost {
         // Try to find existing entry, or assign a pending entry
         let entry: TabViewControllerEntry?
         if let existing = getTabEntry(tabId: tabId) {
+            NSLog("[XPC] ✅ Found existing entry for tab=%@", String(tabId.prefix(8)))
             entry = existing
         } else {
             // First config for this tabId - assign a pending entry
             entry = assignPendingEntry(tabId: tabId)
+            if entry != nil {
+                NSLog("[XPC] ✅ Assigned pending entry for tab=%@", String(tabId.prefix(8)))
+            } else {
+                NSLog("[XPC] ⚠️ No pending entry available for tab=%@ (pendingEntries empty)", String(tabId.prefix(8)))
+            }
         }
 
         if let entry = entry {
             applyConfigToEntry(entry, config: config)
+        } else {
+            NSLog("[XPC] ⚠️ Cannot apply config - no entry for tab=%@", String(tabId.prefix(8)))
         }
     }
 
@@ -1258,11 +1310,17 @@ private func setupReactNativeContent(for entry: TabViewControllerEntry) {
 
 /// Create RCTRootView with the received config (called when tab config arrives)
 private func createRootViewWithConfig(for entry: TabViewControllerEntry, config: [String: Any]) {
+    let logTabId = config["tabId"] as? String ?? entry.internalId
+    let logSystemAppType = config["systemAppType"] as? String ?? "nil"
+    NSLog("[XPC] 🔧 createRootViewWithConfig: tab=%@ systemAppType=%@", String(logTabId.prefix(8)), logSystemAppType)
+
     guard entry.rootView == nil else {
+        NSLog("[XPC] ⚠️ createRootViewWithConfig: rootView already exists for tab=%@", String(logTabId.prefix(8)))
         return
     }
 
     guard let container = entry.containerView else {
+        NSLog("[XPC] ⚠️ createRootViewWithConfig: containerView is nil for tab=%@", String(logTabId.prefix(8)))
         return
     }
 
@@ -1291,27 +1349,8 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         vc.setValue(NSValue(size: containerSize), forKey: "preferredContentSize")
     }
 
-    // Check if this is startPage - use NativeDebugView for debugging
-    let systemAppType = config["systemAppType"] as? String
-    if systemAppType == "startPage" {
-        // Check if NativeDebugView already exists (avoid creating duplicates)
-        if container.subviews.contains(where: { $0 is NativeDebugView }) {
-            container.applyHostSize(containerSize)
-            return
-        }
-
-        // Apply Host size first
-        container.applyHostSize(containerSize)
-
-        // Create native debug view instead of RCTRootView
-        let debugView = NativeDebugView(frame: CGRect(origin: .zero, size: containerSize))
-        debugView.autoresizingMask = []
-        container.addSubview(debugView)
-        container.setRNView(debugView)
-        return
-    }
-
     // Build initial properties from config
+    let systemAppType = config["systemAppType"] as? String
     let tabId = config["tabId"] as? String ?? entry.internalId
     var tabDict: [String: Any] = [
         "id": tabId,
@@ -1343,11 +1382,11 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         for: entry,
         initialProperties: initialProperties
     ) else {
+        NSLog("[XPC] ⚠️ createRootViewWithConfig: createRootView returned nil for tab=%@", String(logTabId.prefix(8)))
         return
     }
 
-    // Apply Host size
-    container.applyHostSize(containerSize)
+    NSLog("[XPC] ✅ RCTRootView created for tab=%@ size=%.0fx%.0f", String(logTabId.prefix(8)), containerSize.width, containerSize.height)
 
     // Set RCTRootView frame to fill container
     let targetFrame = CGRect(origin: .zero, size: containerSize)
@@ -1355,6 +1394,13 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     rnView.autoresizingMask = []
     container.addSubview(rnView)
     container.setRNView(rnView)
+
+    // Apply Host size AFTER rnView is set (applyHostSize updates rnView.frame)
+    container.applyHostSize(containerSize)
+
+    // Force layout to ensure RN content is visible immediately
+    container.needsLayout = true
+    container.layoutSubtreeIfNeeded()
 
     // Size change callback
     container.onSizeChanged = { [weak entry] newSize in

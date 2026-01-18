@@ -2494,22 +2494,9 @@ private struct OverviewViewBridgeContainer: View {
                 // Focus 模式：透明占位
                 Color.clear
             } else {
-                // Overview 模式：背景色占位
+                // Overview 模式：透明占位
                 // 实际的 ViewBridge 内容在 canvas 外由 UnifiedReactNativeLayer 渲染
-                // 这里只显示背景色，作为卡片的视觉边界
-                ZStack {
-                    Color(red: 0.12, green: 0.15, blue: 0.22)
-
-                    // 显示尺寸信息（调试用）
-                    VStack(spacing: 4) {
-                        Text(String(format: "Size: %.0f × %.0f", renderSize.width, renderSize.height))
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
-                            .foregroundColor(.green)
-                        Text("(ViewBridge in canvas-external layer)")
-                            .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.5))
-                    }
-                }
+                Color.clear
             }
         }
         .onAppear {
