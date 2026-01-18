@@ -4,15 +4,30 @@ import AppKit
 // MARK: - Favicon Cache
 
 /// Simple in-memory cache for favicons to avoid repeated network requests
-private actor FaviconCache {
+/// Uses a thread-safe dictionary for synchronous access from main thread
+private final class FaviconCache: @unchecked Sendable {
     static let shared = FaviconCache()
-    private var cache: [String: NSImage] = [:]
 
-    func get(_ host: String) -> NSImage? {
-        cache[host]
+    private var cache: [String: NSImage] = [:]
+    private let lock = NSLock()
+
+    private init() {}
+
+    /// Synchronous get - safe to call from main thread without await
+    func getSync(_ host: String) -> NSImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[host]
+    }
+
+    /// Async get for compatibility
+    func get(_ host: String) async -> NSImage? {
+        getSync(host)
     }
 
     func set(_ host: String, image: NSImage) {
+        lock.lock()
+        defer { lock.unlock() }
         cache[host] = image
     }
 }
@@ -1392,29 +1407,31 @@ private class TabRowView: NSView {
             iconView.heightAnchor.constraint(equalToConstant: 16)
         ])
 
-        // Set default icon first
-        iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
-        iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+        // Try to get favicon from cache synchronously for web tabs
+        var usedCachedFavicon = false
+        if case .web(let url) = tab.contentType, let host = url.host {
+            // Synchronous cache check - avoids flicker when favicon is already cached!
+            if let cachedImage = FaviconCache.shared.getSync(host) {
+                iconView.image = cachedImage
+                iconView.contentTintColor = nil
+                usedCachedFavicon = true
+            }
+        }
 
-        // Load favicon for web tabs (with caching)
-        if case .web(let url) = tab.contentType,
-           let host = url.host {
+        // Set default icon if no cached favicon was found
+        if !usedCachedFavicon {
+            iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
+            iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+        }
+
+        // Fetch favicon asynchronously for web tabs if not cached
+        if case .web(let url) = tab.contentType, let host = url.host, !usedCachedFavicon {
             Task {
-                // Check cache first
-                if let cachedImage = await FaviconCache.shared.get(host) {
-                    await MainActor.run {
-                        iconView.image = cachedImage
-                        iconView.contentTintColor = nil
-                    }
-                    return
-                }
-
-                // Fetch from network
                 guard let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32") else { return }
                 do {
                     let (data, _) = try await URLSession.shared.data(from: faviconURL)
                     if let image = NSImage(data: data) {
-                        await FaviconCache.shared.set(host, image: image)
+                        FaviconCache.shared.set(host, image: image)
                         await MainActor.run {
                             iconView.image = image
                             iconView.contentTintColor = nil

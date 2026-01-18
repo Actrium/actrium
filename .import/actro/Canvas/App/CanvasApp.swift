@@ -524,6 +524,15 @@ struct CanvasApp: App {
         }
         #endif
 
+        // 🔥 Prewarm all XPC Services for faster tab creation
+        // This starts the RN runtime in advance, reducing first-tab latency
+        Task { @MainActor in
+            // Verify service bundles exist
+            _ = XPCServicePool.shared.verifyServiceBundles()
+            // Start prewarming all services
+            XPCServicePool.shared.prewarmAllServices()
+        }
+
         // Initialize TabProcessManager early
         _ = TabProcessManager.shared
 

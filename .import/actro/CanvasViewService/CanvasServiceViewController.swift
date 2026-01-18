@@ -52,7 +52,10 @@ private func debugLog(_ message: String) {
 private class NativeDebugView: NSView {
     private let sizeLabel: NSTextField
     private let titleLabel: NSTextField
-    private var lastUpdateTime: Date = Date()
+    private var lastDisplayedSize: CGSize = .zero
+
+    /// 使用 flipped 坐标系以匹配 Host 端
+    override var isFlipped: Bool { true }
 
     override init(frame frameRect: NSRect) {
         // Title label
@@ -62,7 +65,7 @@ private class NativeDebugView: NSView {
         titleLabel.alignment = .center
 
         // Size label
-        sizeLabel = NSTextField(labelWithString: "Size: --")
+        sizeLabel = NSTextField(labelWithString: "Size: -- × --")
         sizeLabel.font = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
         sizeLabel.textColor = .systemGreen
         sizeLabel.alignment = .center
@@ -71,12 +74,14 @@ private class NativeDebugView: NSView {
 
         wantsLayer = true
         layer?.backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1.0).cgColor
+        // 禁用 layer 隐式动画
+        layer?.actions = ["bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
 
         addSubview(titleLabel)
         addSubview(sizeLabel)
 
+        // Display initial size
         updateSizeDisplay()
-        debugLog("📐 [NativeDebugView] Created with frame: \(frameRect)")
     }
 
     required init?(coder: NSCoder) {
@@ -104,12 +109,15 @@ private class NativeDebugView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         let oldSize = frame.size
-        super.setFrameSize(newSize)
+        guard oldSize != newSize else { return }
 
-        if oldSize != newSize {
-            updateSizeDisplay()
-            debugLog("📐 [NativeDebugView] setFrameSize: \(oldSize) -> \(newSize)")
-        }
+        // 禁用 Core Animation 隐式动画
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        super.setFrameSize(newSize)
+        CATransaction.commit()
+
+        updateSizeDisplay()
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
@@ -118,9 +126,9 @@ private class NativeDebugView: NSView {
     }
 
     private func updateSizeDisplay() {
-        let now = Date()
-        let elapsed = now.timeIntervalSince(lastUpdateTime)
-        lastUpdateTime = now
+        // 只在尺寸真正变化时才更新
+        guard lastDisplayedSize != bounds.size else { return }
+        lastDisplayedSize = bounds.size
 
         let sizeText = String(format: "Size: %.0f × %.0f", bounds.width, bounds.height)
         sizeLabel.stringValue = sizeText
@@ -129,8 +137,6 @@ private class NativeDebugView: NSView {
         // Re-center the label
         let centerX = bounds.midX
         sizeLabel.frame.origin.x = centerX - sizeLabel.frame.width / 2
-
-        debugLog("📐 [NativeDebugView] updateSizeDisplay: \(bounds.size) (elapsed: \(String(format: "%.3f", elapsed))s)")
     }
 }
 
@@ -141,13 +147,24 @@ private class NativeDebugView: NSView {
 /// Key insight: ViewBridge updates the superview's bounds, so we use Auto Layout
 /// to pin this view to the superview and automatically follow size changes.
 private class ResizableContainerView: NSView {
+    /// 使用 flipped 坐标系以匹配 Host 端 (ContainerView.isFlipped = true)
+    /// 这确保子视图从左上角开始布局，而不是左下角
+    override var isFlipped: Bool { true }
+
     private var rnView: NSView?
     var onSizeChanged: ((CGSize) -> Void)?
     private var cumulativeMagnification: CGFloat = 0
     private var superviewFrameObserver: NSObjectProtocol?
+    private static let maxJailSize: NSSize = ResizableContainerView.computeMaximumJailSize()
+    private var lastJailResizeRequest: NSSize = .zero
+    private var isApplyingHostSize: Bool = false
 
     /// The tabId this container belongs to (for 1:1:1 mapping)
     var tabId: String?
+
+    /// Track whether we've received a valid size from Host (via containerSizeChanged or tabConfig)
+    /// Before this, the container uses a placeholder size and should NOT propagate it to children
+    var hasReceivedHostSize: Bool = false
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -158,7 +175,6 @@ private class ResizableContainerView: NSView {
     /// containerSizeChanged notifications from Host.
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
-        debugLog("[\(tabId?.prefix(8) ?? "?")] viewDidMoveToSuperview: superview=\(String(describing: superview))")
 
         // Clean up old observer
         if let observer = superviewFrameObserver {
@@ -168,14 +184,12 @@ private class ResizableContainerView: NSView {
 
         guard let superview = superview else { return }
 
-        debugLog("[\(tabId?.prefix(8) ?? "?")] Superview bounds: \(superview.bounds.size) (ignored - using Host's containerSize)")
-
         // Use autoresizing mask for flexible positioning, but NOT for size
         // Size is controlled by Host's containerSizeChanged notification
         translatesAutoresizingMaskIntoConstraints = true
         autoresizingMask = []  // Don't auto-resize with superview
 
-        // Log superview frame changes for debugging, but don't use them for sizing
+        // When superview (ViewBridge jail) changes size, keep our origin aligned to top edge (non-flipped superview)
         superview.postsFrameChangedNotifications = true
         superviewFrameObserver = NotificationCenter.default.addObserver(
             forName: NSView.frameDidChangeNotification,
@@ -183,7 +197,9 @@ private class ResizableContainerView: NSView {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, let superview = self.superview else { return }
-            debugLog("[\(self.tabId?.prefix(8) ?? "?")] Superview frame changed: \(superview.bounds.size) (ignored)")
+            // 避免在 applyHostSize 内部触发的 superview resize 导致重入/抖动
+            guard !self.isApplyingHostSize else { return }
+            self.syncOriginWithSuperview(superview)
         }
     }
 
@@ -192,23 +208,117 @@ private class ResizableContainerView: NSView {
     var authorizedSize: NSSize?
 
     override func setFrameSize(_ newSize: NSSize) {
-        // Filter out sizes that are likely canvas-scaled
-        // Only accept sizes from Host's containerSizeChanged or tabConfig
-        // Heuristic: if size is larger than 3000 in either dimension, it's probably scaled
-        // (Retina displays can have viewport sizes up to ~2500, but canvas-scaled is 3000+)
-        let isLikelyScaled = newSize.width > 3000 || newSize.height > 3000
+        // 基础过滤：避免异常尺寸把视图系统拖死
+        guard newSize.width > 0 && newSize.height > 0 else { return }
+        guard newSize.width <= 16384 && newSize.height <= 16384 else { return }
 
-        if isLikelyScaled {
-            debugLog("[\(tabId?.prefix(8) ?? "?")] Container setFrameSize: \(newSize) (REJECTED - likely canvas-scaled)")
+        // 一旦收到 Host 的权威尺寸，只允许该尺寸（避免 ViewBridge/jail 的非预期 setFrame 形成抖动/闭环）
+        if hasReceivedHostSize, let authorizedSize {
+            guard abs(newSize.width - authorizedSize.width) < 0.5,
+                  abs(newSize.height - authorizedSize.height) < 0.5 else {
+                return
+            }
+        }
+
+        // Skip if size unchanged
+        guard frame.size != newSize else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        super.setFrameSize(newSize)
+        rnView?.frame = bounds
+        CATransaction.commit()
+    }
+
+    /// Reference to the ViewController for updating preferredContentSize dynamically
+    weak var viewController: AnyObject?
+
+    /// Keep Container at jail origin (0,0) - NSRemoteView displays from this position
+    private func syncOriginWithSuperview(_ superview: NSView) {
+        guard hasReceivedHostSize else { return }
+
+        // Container must stay at (0,0) because NSRemoteView displays jail content from origin
+        guard frame.origin.x != 0 || frame.origin.y != 0 else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        super.setFrameOrigin(NSPoint(x: 0, y: 0))
+        CATransaction.commit()
+    }
+
+    /// Notify ViewBridge of desired content size via preferredContentSize.
+    /// Note: We do NOT resize the jail view - it's meant to be a large buffer.
+    /// Container positioning within jail handles the visual alignment.
+    private func syncJailSize(superview: NSView, desiredSize: NSSize) {
+        // Clamp to a safe upper bound
+        let clamped = NSSize(
+            width: min(desiredSize.width, Self.maxJailSize.width),
+            height: min(desiredSize.height, Self.maxJailSize.height)
+        )
+
+        // 去重：同一尺寸不重复请求（0.5px 容差）
+        guard abs(clamped.width - lastJailResizeRequest.width) > 0.5 ||
+              abs(clamped.height - lastJailResizeRequest.height) > 0.5 else {
             return
         }
+        lastJailResizeRequest = clamped
 
-        debugLog("[\(tabId?.prefix(8) ?? "?")] Container setFrameSize: \(newSize)")
+        // 只更新 preferredContentSize，不修改 jail view 尺寸
+        // Jail view 是 ViewBridge 的内部缓冲区，应该保持大尺寸
+        if let vc = viewController {
+            vc.setValue(NSValue(size: clamped), forKey: "preferredContentSize")
+        }
+    }
+
+    private static func computeMaximumJailSize() -> NSSize {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else {
+            return NSSize(width: 4096, height: 4096)
+        }
+
+        var maxWidth: CGFloat = 0
+        var maxHeight: CGFloat = 0
+        for screen in screens {
+            let size = screen.frame.size
+            maxWidth = max(maxWidth, size.width)
+            maxHeight = max(maxHeight, size.height)
+        }
+
+        // 防御性上限：避免异常值导致 ViewBridge jail 被扩到不可控
+        maxWidth = min(maxWidth, 16384)
+        maxHeight = min(maxHeight, 16384)
+
+        return NSSize(width: maxWidth, height: maxHeight)
+    }
+
+    /// Called when Host sends a valid size (via containerSizeChanged or tabConfig)
+    /// This marks the container as ready to propagate sizes to children
+    func applyHostSize(_ newSize: NSSize) {
+        hasReceivedHostSize = true
+        authorizedSize = newSize
+
+        // 禁用 AppKit/Core Animation 隐式动画
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        if let superview {
+            isApplyingHostSize = true
+            // 通知 ViewBridge 我们需要的尺寸
+            syncJailSize(superview: superview, desiredSize: newSize)
+            isApplyingHostSize = false
+        }
+
+        // Container 始终放在 Jail 的原点 (0,0)
+        // NSRemoteView 从 Jail 的 (0,0) 开始显示，所以 Container 必须在这个位置
+        // 之前尝试将 Container 放在 Jail "顶部"（originY = jailHeight - containerHeight）
+        // 但这导致 NSRemoteView 看到的大部分区域是空白
+        super.setFrameOrigin(NSPoint(x: 0, y: 0))
         super.setFrameSize(newSize)
 
-        if let rnView = rnView {
-            rnView.frame = bounds
-        }
+        // 触发子视图更新
+        rnView?.frame = bounds
+
+        CATransaction.commit()
 
         if newSize.width > 0 && newSize.height > 0 {
             onSizeChanged?(newSize)
@@ -252,8 +362,14 @@ private class ResizableContainerView: NSView {
 // MARK: - Metro Config (received from Host via DistributedNotificationCenter)
 
 /// Holds Metro bundler configuration received from Canvas Host
-/// Updated dynamically when Host's MetroManager broadcasts config
+/// - Primary: Read from shared UserDefaults on startup (no delay)
+/// - Secondary: Listen for broadcast notifications (runtime updates)
 private enum MetroConfig {
+    /// App Group for shared config
+    private static let appGroupId = "group.chat.askaway.canvas"
+    private static let metroHostKey = "metro.host"
+    private static let metroPortKey = "metro.port"
+
     /// Default Metro host (fallback if no config received)
     static var host: String = "127.0.0.1"
     static var port: UInt16 = 8081
@@ -262,7 +378,25 @@ private enum MetroConfig {
         "\(host):\(port)"
     }
 
-    /// Update config from notification userInfo
+    /// Load config from shared UserDefaults (called on XPC Service startup)
+    /// This is the primary method - no need to wait for broadcast
+    static func loadFromSharedDefaults() {
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId) else {
+            debugLog("MetroConfig: Cannot access shared UserDefaults")
+            return
+        }
+
+        if let savedHost = sharedDefaults.string(forKey: metroHostKey), !savedHost.isEmpty {
+            host = savedHost
+        }
+        let savedPort = sharedDefaults.integer(forKey: metroPortKey)
+        if savedPort > 0 {
+            port = UInt16(savedPort)
+        }
+        debugLog("MetroConfig loaded from UserDefaults: \(hostString)")
+    }
+
+    /// Update config from notification userInfo (runtime updates)
     static func update(from userInfo: [AnyHashable: Any]?) {
         guard let info = userInfo else { return }
         if let host = info["host"] as? String {
@@ -273,7 +407,7 @@ private enum MetroConfig {
         } else if let port = info["port"] as? Int {
             Self.port = UInt16(port)
         }
-        debugLog("MetroConfig updated: \(Self.hostString)")
+        debugLog("MetroConfig updated via notification: \(Self.hostString)")
     }
 }
 
@@ -323,6 +457,8 @@ private class TabViewControllerEntry {
     let internalId: String
 
     weak var containerView: ResizableContainerView?
+    /// Reference to the ViewController (runtime-created Objective-C class)
+    weak var viewController: AnyObject?
     var rootView: RCTRootView?
     var currentProperties: [String: Any] = [:]
     var containerSize: CGSize = .zero
@@ -337,10 +473,12 @@ private class TabViewControllerEntry {
     /// Whether this entry is waiting for its first tabConfig from Host
     var isPending: Bool { tabId == nil }
 
-    init(internalId: String, containerView: ResizableContainerView) {
+    init(internalId: String, containerView: ResizableContainerView, viewController: AnyObject? = nil) {
         self.internalId = internalId
         self.containerView = containerView
+        self.viewController = viewController
         containerView.tabId = internalId  // Use internal ID for logging initially
+        containerView.viewController = viewController  // Enable dynamic preferredContentSize updates
         debugLog("[pending:\(internalId.prefix(8))] TabViewControllerEntry created (waiting for Host tabId)")
     }
 
@@ -381,6 +519,13 @@ private class ServiceReactNativeHost {
     private var pendingSizeChanges: [String: CGSize] = [:]
 
     private let registryLock = NSLock()
+
+    /// 去抖动：待处理的尺寸更新
+    private var pendingSizeUpdate: (tabId: String, size: CGSize)?
+    /// 去抖动：定时器
+    private var sizeDebounceTimer: Timer?
+    /// 去抖动间隔 - 等待尺寸稳定后再应用
+    private static let sizeDebounceInterval: TimeInterval = 0.025  // 25ms
 
     /// This service's bundle identifier for notification routing
     let serviceBundleId: String
@@ -438,12 +583,10 @@ private class ServiceReactNativeHost {
             tabRegistry[hostTabId] = entry
             registryLock.unlock()
 
-            debugLog("[\(hostTabId.prefix(8))] Bound to connection \(internalId.prefix(8)), registry count: \(tabRegistry.count), pending count: \(pendingEntries.count)")
             if let size = pendingSize {
-                debugLog("[\(hostTabId.prefix(8))] 📐 Applying cached container size after bind: \(size)")
                 entry.containerSize = size
                 entry.hasPendingSizeApplied = true
-                entry.containerView?.setFrameSize(size)
+                entry.containerView?.applyHostSize(size)
                 updateDimensionsForEntry(entry)
             }
             return
@@ -454,30 +597,27 @@ private class ServiceReactNativeHost {
             registryLock.unlock()
             entry.assignTabId(hostTabId)
             if let size = pendingSize {
-                debugLog("[\(hostTabId.prefix(8))] 📐 Applying cached size to existing entry: \(size)")
                 entry.containerSize = size
                 entry.hasPendingSizeApplied = true
-                entry.containerView?.setFrameSize(size)
+                entry.containerView?.applyHostSize(size)
                 updateDimensionsForEntry(entry)
             }
             return
         }
 
         registryLock.unlock()
-        debugLog("⚠️ [\(hostTabId.prefix(8))] bindHostTabId: no pending entry for internalId \(internalId.prefix(8))")
     }
 
     // MARK: - Tab Registry (1:1:1 Mapping)
 
     /// Register a new Tab's ViewController (initially as pending)
     /// The entry will be moved to tabRegistry when Host sends tabConfig with real tabId
-    func registerPendingEntry(internalId: String, containerView: ResizableContainerView) -> TabViewControllerEntry {
+    func registerPendingEntry(internalId: String, containerView: ResizableContainerView, viewController: AnyObject? = nil) -> TabViewControllerEntry {
         registryLock.lock()
         defer { registryLock.unlock() }
 
-        let entry = TabViewControllerEntry(internalId: internalId, containerView: containerView)
+        let entry = TabViewControllerEntry(internalId: internalId, containerView: containerView, viewController: viewController)
         pendingEntries[internalId] = entry
-        debugLog("[pending:\(internalId.prefix(8))] Entry registered, pending count: \(pendingEntries.count)")
         return entry
     }
 
@@ -488,7 +628,6 @@ private class ServiceReactNativeHost {
 
         // Try to find by internalId in pending
         if let entry = pendingEntries.removeValue(forKey: internalId) {
-            debugLog("[pending:\(internalId.prefix(8))] Pending entry removed")
             // Also remove from tabRegistry if it was assigned
             if let tabId = entry.tabId {
                 tabRegistry.removeValue(forKey: tabId)
@@ -500,7 +639,6 @@ private class ServiceReactNativeHost {
         for (tabId, entry) in tabRegistry {
             if entry.internalId == internalId {
                 tabRegistry.removeValue(forKey: tabId)
-                debugLog("[\(tabId.prefix(8))] Entry removed from registry")
                 return
             }
         }
@@ -527,7 +665,6 @@ private class ServiceReactNativeHost {
         // Find the oldest pending entry (FIFO)
         guard let (internalId, entry) = pendingEntries.first else {
             registryLock.unlock()
-            debugLog("⚠️ No pending entries to assign tabId: \(tabId.prefix(8))")
             return nil
         }
 
@@ -543,15 +680,12 @@ private class ServiceReactNativeHost {
 
         registryLock.unlock()
 
-        debugLog("[\(tabId.prefix(8))] Assigned to pending entry, registry count: \(tabRegistry.count), pending count: \(pendingEntries.count)")
-
         // Apply pending size change if any (outside lock)
         if let size = pendingSize {
-            debugLog("[\(tabId.prefix(8))] 📐 Applying cached container size: \(size)")
             entry.containerSize = size
             entry.hasPendingSizeApplied = true
             if let container = entry.containerView {
-                container.setFrameSize(size)
+                container.applyHostSize(size)
             }
         }
 
@@ -581,10 +715,11 @@ private class ServiceReactNativeHost {
     }
 
     private func setupTabConfigListener() {
+        // Load Metro config from shared UserDefaults immediately (no wait for broadcast)
+        MetroConfig.loadFromSharedDefaults()
+
         // Listen for tab config with service-specific notification
         let notificationName = "com.canvas.tabConfig.\(serviceBundleId)"
-        debugLog("📡 Setting up listener for: \(notificationName)")
-
         tabConfigObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(notificationName),
             object: nil,
@@ -593,7 +728,7 @@ private class ServiceReactNativeHost {
             self?.handleTabConfigNotification(notification)
         }
 
-        // Listen for Metro config broadcasts from Host
+        // Listen for Metro config broadcasts from Host (for runtime updates)
         metroConfigObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.canvas.metro.config"),
             object: nil,
@@ -603,7 +738,6 @@ private class ServiceReactNativeHost {
             // Create RCTBridge after Metro config is received
             self?.ensureBridgeCreated()
         }
-        debugLog("📡 Setting up Metro config listener")
 
         // Listen for container size changes from Host (service-specific notification)
         let containerSizeName = "com.canvas.containerSizeChanged.\(serviceBundleId)"
@@ -612,10 +746,8 @@ private class ServiceReactNativeHost {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            debugLog("📐 [SERVICE] Received containerSizeChanged notification: \(notification.userInfo ?? [:])")
             self?.handleContainerSizeChanged(notification)
         }
-        debugLog("📡 Setting up container size listener: \(containerSizeName)")
 
         // Listen for explicit tabId binding from Host (connection-aware)
         let bindName = "com.canvas.bindTab.\(serviceBundleId)"
@@ -629,7 +761,6 @@ private class ServiceReactNativeHost {
                   let internalId = info["internalId"] as? String else { return }
             self?.bind(hostTabId: tabId, toInternalId: internalId)
         }
-        debugLog("📡 Setting up bindTab listener: \(bindName)")
 
         // Listen for pending tabId from Host (sent before connection request)
         let pendingTabIdName = "com.canvas.pendingTabId.\(serviceBundleId)"
@@ -645,9 +776,7 @@ private class ServiceReactNativeHost {
             self.pendingTabIdLock.lock()
             self.pendingTabIdQueue.append(tabId)
             self.pendingTabIdLock.unlock()
-            debugLog("📡 Received pendingTabId: \(tabId.prefix(8)), queue size: \(self.pendingTabIdQueue.count)")
         }
-        debugLog("📡 Setting up pendingTabId listener: \(pendingTabIdName)")
 
         // Notify Host that this service is ready (with retry until tab config received)
         postXPCServiceReady()
@@ -663,31 +792,83 @@ private class ServiceReactNativeHost {
               let tabId = sizeInfo["tabId"] as? String,
               let width = sizeInfo["width"] as? Double,
               let height = sizeInfo["height"] as? Double else {
-            debugLog("⚠️ handleContainerSizeChanged: failed to parse notification: \(notification.userInfo ?? [:])")
             return
         }
 
-        let newSize = CGSize(width: width, height: height)
+        // Extract requestId for log correlation
+        let requestId = sizeInfo["requestId"] as? String ?? "?"
 
-        // Find the entry for this tab
+        // 取整，避免浮点精度问题
+        let newSize = CGSize(width: round(width), height: round(height))
+
+        // 注意：DistributedNotificationCenter 的回调已经在 main queue 上执行
+        // 不需要再 DispatchQueue.main.async，这样可以减少一个 run loop 周期的延迟
+
+        // 去重：相同尺寸不重复处理（拖拽时重复通知很多）
+        if let entry = self.getTabEntry(tabId: tabId) {
+            if entry.containerSize == newSize {
+                NSLog("📐 [SVC] containerSizeChanged SKIPPED (same size): req=%@ tab=%@ size=%.0fx%.0f",
+                      requestId, String(tabId.prefix(8)), newSize.width, newSize.height)
+                return
+            }
+            NSLog("📐 [SVC] containerSizeChanged APPLYING: req=%@ tab=%@ oldSize=%.0fx%.0f newSize=%.0fx%.0f",
+                  requestId, String(tabId.prefix(8)), entry.containerSize.width, entry.containerSize.height,
+                  newSize.width, newSize.height)
+        } else {
+            NSLog("📐 [SVC] containerSizeChanged NO ENTRY: req=%@ tab=%@ size=%.0fx%.0f (caching)",
+                  requestId, String(tabId.prefix(8)), newSize.width, newSize.height)
+        }
+
+        // 直接应用尺寸（同步），不再去抖动（Host 端已经节流 25ms，无需双重延迟）
+        self.applySizeUpdate(tabId: tabId, size: newSize, requestId: requestId)
+    }
+
+    /// 应用尺寸更新（同步，无延迟）
+    private func applySizeUpdate(tabId: String, size: CGSize, requestId: String = "?") {
         if let entry = getTabEntry(tabId: tabId) {
-            let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
-            debugLog("[\(logId)] 📐 Container size changed via notification: \(newSize)")
+            // 检查尺寸是否真的变化了（早期过滤）
+            guard entry.containerSize != size else { return }
 
-            // Update container view frame
-            if let container = entry.containerView {
-                container.setFrameSize(newSize)
+            // 🔑 关键：立即更新 entry.containerSize，防止竞态条件
+            // 如果等待 applyHostSize 的回调链来更新，后续快速到达的通知
+            // 可能在回调执行前检查状态，导致错误的 "same size" 判断
+            entry.containerSize = size
+
+            // 先更新 viewController 的 preferredContentSize
+            // 这会让 ViewBridge 知道我们需要更大的 jail view
+            if let vc = entry.viewController {
+                vc.setValue(NSValue(size: size), forKey: "preferredContentSize")
             }
 
-            // Update entry's container size and RN dimensions
-            updateContainerSize(for: entry, size: newSize)
+            if let container = entry.containerView {
+                // applyHostSize → setFrameSize → onSizeChanged → updateContainerSize
+                container.applyHostSize(size)
+            }
+
+            // 通知 Host 尺寸更新完成（事件驱动，替代固定延迟）
+            postSizeApplied(tabId: tabId, size: size, requestId: requestId)
         } else {
-            // Entry not yet registered - cache the size for later
+            // Entry not yet registered - cache for later
             registryLock.lock()
-            pendingSizeChanges[tabId] = newSize
+            pendingSizeChanges[tabId] = size
             registryLock.unlock()
-            debugLog("[pending:\(tabId.prefix(8))] 📐 Cached container size for later: \(newSize)")
         }
+    }
+
+    /// 通知 Host 端尺寸更新已完成
+    private func postSizeApplied(tabId: String, size: CGSize, requestId: String = "?") {
+        let notificationName = "com.canvas.sizeApplied.\(serviceBundleId)"
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(notificationName),
+            object: nil,
+            userInfo: [
+                "tabId": tabId,
+                "width": size.width,
+                "height": size.height,
+                "requestId": requestId
+            ],
+            deliverImmediately: true
+        )
     }
 
     private func postXPCServiceReady() {
@@ -697,7 +878,6 @@ private class ServiceReactNativeHost {
             userInfo: ["bundleId": serviceBundleId],
             deliverImmediately: true
         )
-        debugLog("📤 Posted xpcServiceReady with bundleId: \(serviceBundleId)")
     }
 
     /// Retry sending xpcServiceReady every 500ms until first tab config is received
@@ -720,43 +900,61 @@ private class ServiceReactNativeHost {
     }
 
     private func handleTabConfigNotification(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let configJson = userInfo["config"] as? String,
-              let configData = configJson.data(using: .utf8),
-              let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any],
-              let tabId = config["tabId"] as? String else {
-            debugLog("⚠️ Invalid tab config notification (missing tabId)")
+        NSLog("[XPC] 📥 handleTabConfigNotification received")
+
+        guard let userInfo = notification.userInfo else {
+            NSLog("[XPC] ⚠️ handleTabConfigNotification: userInfo is nil")
             return
         }
+
+        guard let configJson = userInfo["config"] as? String else {
+            let keysStr = userInfo.keys.map { String(describing: $0) }.joined(separator: ", ")
+            NSLog("[XPC] ⚠️ handleTabConfigNotification: config not found in userInfo, keys: %@", keysStr)
+            return
+        }
+
+        guard let configData = configJson.data(using: .utf8),
+              let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] else {
+            NSLog("[XPC] ⚠️ handleTabConfigNotification: failed to parse JSON")
+            return
+        }
+
+        guard let tabId = config["tabId"] as? String else {
+            NSLog("[XPC] ⚠️ handleTabConfigNotification: tabId not found in config")
+            return
+        }
+
+        let systemAppType = config["systemAppType"] as? String ?? "nil"
+        NSLog("[XPC] 📥 tabConfig for tab=%@ systemAppType=%@", String(tabId.prefix(8)), systemAppType)
 
         // Stop retry timer once we receive first config
         hasReceivedTabConfig = true
 
-        debugLog("📥 Received config for tab: \(tabId.prefix(8))")
-
         // Try to find existing entry, or assign a pending entry
         let entry: TabViewControllerEntry?
         if let existing = getTabEntry(tabId: tabId) {
+            NSLog("[XPC] ✅ Found existing entry for tab=%@", String(tabId.prefix(8)))
             entry = existing
         } else {
             // First config for this tabId - assign a pending entry
             entry = assignPendingEntry(tabId: tabId)
+            if entry != nil {
+                NSLog("[XPC] ✅ Assigned pending entry for tab=%@", String(tabId.prefix(8)))
+            } else {
+                NSLog("[XPC] ⚠️ No pending entry available for tab=%@ (pendingEntries empty)", String(tabId.prefix(8)))
+            }
         }
 
         if let entry = entry {
             applyConfigToEntry(entry, config: config)
         } else {
-            debugLog("⚠️ Tab \(tabId.prefix(8)) has no pending entry to assign")
+            NSLog("[XPC] ⚠️ Cannot apply config - no entry for tab=%@", String(tabId.prefix(8)))
         }
     }
 
     private func applyConfigToEntry(_ entry: TabViewControllerEntry, config: [String: Any]) {
-        let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
-        debugLog("[\(logId)] Applying config: \(config["title"] ?? "?")")
-
         // If RCTRootView not ready yet, create it now (event-driven)
         guard entry.rootView != nil else {
-            debugLog("[\(logId)] RootView not ready, creating now with config")
             createRootViewWithConfig(for: entry, config: config)
             return
         }
@@ -774,7 +972,6 @@ private class ServiceReactNativeHost {
         // System app type
         if let systemAppType = config["systemAppType"] as? String {
             tabDict["systemAppType"] = systemAppType
-            debugLog("[\(logId)] System app: \(systemAppType)")
         }
 
         // Scripts
@@ -808,27 +1005,16 @@ private class ServiceReactNativeHost {
 
         entry.currentProperties = properties
 
-        // Debug: Log the properties being set
-        let systemAppType = (tabDict["systemAppType"] as? String) ?? "nil"
-        debugLog("[\(logId)] Setting appProperties: systemAppType=\(systemAppType), rootView=\(entry.rootView != nil ? "exists" : "nil")")
-
         if let rootView = entry.rootView {
             rootView.appProperties = properties
-            debugLog("[\(logId)] appProperties updated (systemAppType=\(systemAppType))")
 
             // RN bridge may still be loading, re-apply properties multiple times to ensure render
-            // This is needed because RCTRootView.setAppProperties only calls runApplication
-            // when bridge.valid && !bridge.loading
             for delay in [0.3, 0.8, 1.5] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak entry] in
                     guard let entry = entry, let rootView = entry.rootView else { return }
-                    let props = entry.currentProperties
-                    rootView.appProperties = props
-                    debugLog("[\(logId)] appProperties re-applied after \(delay)s delay")
+                    rootView.appProperties = entry.currentProperties
                 }
             }
-        } else {
-            debugLog("[\(logId)] ⚠️ rootView is nil, cannot update appProperties")
         }
 
         // Update RN dimensions
@@ -840,14 +1026,10 @@ private class ServiceReactNativeHost {
     /// Create a new RCTRootView for a specific Tab
     /// Each Tab gets its own RCTRootView, sharing the same RCTBridge
     func createRootView(for entry: TabViewControllerEntry, initialProperties: [String: Any]) -> RCTRootView? {
-        let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
-        debugLog("[\(logId)] Creating RCTRootView")
-
         // Ensure RCTBridge is created (should have been done when Metro config was received)
         ensureBridgeCreated()
 
         guard let factory = factory else {
-            debugLog("[\(logId)] ⚠️ Factory not created yet - waiting for Metro config")
             return nil
         }
 
@@ -863,7 +1045,6 @@ private class ServiceReactNativeHost {
         )
 
         guard let rootView = view as? RCTRootView else {
-            debugLog("[\(logId)] ⚠️ Failed to create RCTRootView")
             return nil
         }
 
@@ -871,17 +1052,15 @@ private class ServiceReactNativeHost {
         rootView.backgroundColor = NSColor.clear
         entry.rootView = rootView
 
-        debugLog("[\(logId)] RCTRootView created successfully")
-
         return rootView
     }
 
     /// Update container size for a specific Tab
     func updateContainerSize(for entry: TabViewControllerEntry, size: CGSize) {
         guard size.width > 0 && size.height > 0 else { return }
+        // 防止重复更新相同尺寸
+        guard entry.containerSize != size else { return }
 
-        let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
-        debugLog("[\(logId)] updateContainerSize: \(entry.containerSize) -> \(size)")
         entry.containerSize = size
 
         var properties = entry.currentProperties
@@ -984,7 +1163,8 @@ public func registerCanvasServiceViewController() {
         containerView.autoresizingMask = []
 
         // Register as pending entry (will be assigned real tabId when Host sends config)
-        let entry = host.registerPendingEntry(internalId: internalId, containerView: containerView)
+        // Pass viewController (self_) so we can update preferredContentSize later
+        let entry = host.registerPendingEntry(internalId: internalId, containerView: containerView, viewController: self_)
         entry.containerSize = CGSize(width: initialWidth, height: initialHeight)
 
         // Get the pending tabId from the queue (Host sends this before connection request)
@@ -1014,9 +1194,13 @@ public func registerCanvasServiceViewController() {
 
         self_.setValue(containerView, forKey: "view")
 
-        let targetSize = NSSize(width: initialWidth, height: initialHeight)
+        // 初始 preferredContentSize 设置为较小值，避免 loadView 时崩溃
+        // 当收到 Host 的实际尺寸后，会动态扩展 jail view
+        // 注意：太大的初始值（>4096）会导致 ViewBridge layout loop 崩溃
+        let initialSize = NSSize(width: 1920, height: 1200)
         if self_.responds(to: NSSelectorFromString("setPreferredContentSize:")) {
-            self_.setValue(NSValue(size: targetSize), forKey: "preferredContentSize")
+            self_.setValue(NSValue(size: initialSize), forKey: "preferredContentSize")
+            debugLog("[pending:\(internalId.prefix(8))] Set initial preferredContentSize: \(initialSize)")
         }
 
         // Setup React Native content for this Tab
@@ -1026,13 +1210,10 @@ public func registerCanvasServiceViewController() {
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
 
     // remoteViewSizeDidChange: - ViewBridge calls this when host resizes
-    // NOTE: ViewBridge passes the SCALED size (including canvas transform), which is wrong
-    // We ignore this and rely on Host's containerSizeChanged notification for correct logical size
-    let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { self_, size in
-        let tabId = logId(self_)
-        debugLog("[\(tabId.prefix(8))] remoteViewSizeDidChange: \(size) (ignored - using Host's containerSize)")
-        // Do NOT resize the view here - ViewBridge size includes canvas scale transform
-        // Size is managed by Host's containerSizeChanged notification instead
+    // DISABLED: 使用 containerSizeChanged notification 作为唯一的尺寸同步路径
+    // 避免两条路径互相干扰导致的"拖尾"效果
+    let sizeDidChangeBlock: @convention(block) (AnyObject, NSSize) -> Void = { _, _ in
+        // 忽略 ViewBridge 的尺寸回调，只使用 containerSizeChanged notification
     }
     let sizeDidChangeImp = imp_implementationWithBlock(sizeDidChangeBlock)
     class_addMethod(newClass, NSSelectorFromString("remoteViewSizeDidChange:"), sizeDidChangeImp, "v@:{CGSize=dd}")
@@ -1057,15 +1238,10 @@ public func registerCanvasServiceViewController() {
     }
     class_addMethod(newClass, NSSelectorFromString("setHostTabId:"), imp_implementationWithBlock(setHostTabIdBlock), "v@:@")
 
-    // setPreferredContentSize: - ViewBridge may call this when host changes size
-    // NOTE: Like remoteViewSizeDidChange:, this includes canvas scale transform
-    // We ignore this and rely on Host's containerSizeChanged notification
-    let setPreferredSizeBlock: @convention(block) (AnyObject, NSSize) -> Void = { self_, size in
-        let tabId = logId(self_)
-        debugLog("[\(tabId.prefix(8))] setPreferredContentSize: \(size) (ignored - using Host's containerSize)")
-        // Do NOT resize the view here - ViewBridge size includes canvas scale transform
-    }
-    class_addMethod(newClass, NSSelectorFromString("setPreferredContentSize:"), imp_implementationWithBlock(setPreferredSizeBlock), "v@:{CGSize=dd}")
+    // NOTE: We do NOT override setPreferredContentSize:
+    // Let the superclass (NSServiceViewController) handle it naturally.
+    // This is critical - overriding and ignoring it prevents ViewBridge from
+    // knowing our preferred size, causing jail view to stay at 1280x720.
 
     // remoteViewSize
     let remoteViewSizeBlock: @convention(block) (AnyObject) -> CGSize = { self_ in
@@ -1110,14 +1286,9 @@ public func registerCanvasServiceViewController() {
 
 /// Setup loading indicator for a Tab entry (RCTRootView created when config arrives)
 private func setupReactNativeContent(for entry: TabViewControllerEntry) {
-    let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
-
     guard let containerView = entry.containerView else {
-        debugLog("[\(logId)] ⚠️ containerView is nil")
         return
     }
-
-    debugLog("[\(logId)] Setting up loading indicator (waiting for tab config)")
 
     // Loading indicator - will be removed when RCTRootView is created
     let loadingLabel = NSTextField(labelWithString: "Waiting for tab config...")
@@ -1139,15 +1310,17 @@ private func setupReactNativeContent(for entry: TabViewControllerEntry) {
 
 /// Create RCTRootView with the received config (called when tab config arrives)
 private func createRootViewWithConfig(for entry: TabViewControllerEntry, config: [String: Any]) {
-    let logId = entry.tabId?.prefix(8) ?? entry.internalId.prefix(8)
+    let logTabId = config["tabId"] as? String ?? entry.internalId
+    let logSystemAppType = config["systemAppType"] as? String ?? "nil"
+    NSLog("[XPC] 🔧 createRootViewWithConfig: tab=%@ systemAppType=%@", String(logTabId.prefix(8)), logSystemAppType)
 
     guard entry.rootView == nil else {
-        debugLog("[\(logId)] RootView already exists, skipping creation")
+        NSLog("[XPC] ⚠️ createRootViewWithConfig: rootView already exists for tab=%@", String(logTabId.prefix(8)))
         return
     }
 
     guard let container = entry.containerView else {
-        debugLog("[\(logId)] ⚠️ containerView is nil")
+        NSLog("[XPC] ⚠️ createRootViewWithConfig: containerView is nil for tab=%@", String(logTabId.prefix(8)))
         return
     }
 
@@ -1161,42 +1334,23 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     // 3. container.bounds.size (fallback)
     var containerSize: CGSize
     if entry.hasPendingSizeApplied {
-        // Use size from pending size change (already applied in assignPendingEntry)
         containerSize = entry.containerSize
-        debugLog("[\(logId)] Using entry.containerSize (from pending): \(containerSize)")
     } else if let width = config["containerWidth"] as? Double,
               let height = config["containerHeight"] as? Double,
               width > 0 && height > 0 {
         containerSize = CGSize(width: width, height: height)
-        debugLog("[\(logId)] Using container size from config: \(containerSize)")
     } else {
         containerSize = container.bounds.size
-        debugLog("[\(logId)] Using container bounds size: \(containerSize)")
     }
     entry.containerSize = containerSize
 
-    // Check if this is startPage - use NativeDebugView for debugging
-    let systemAppType = config["systemAppType"] as? String
-    if systemAppType == "startPage" {
-        debugLog("[\(logId)] 🔧 Using NativeDebugView for startPage (size debugging)")
-
-        // Sync container size first if it differs from bounds
-        if container.bounds.size != containerSize {
-            debugLog("[\(logId)] Updating container frame to match config size: \(containerSize)")
-            container.setFrameSize(containerSize)
-        }
-
-        // Create native debug view instead of RCTRootView
-        let debugView = NativeDebugView(frame: CGRect(origin: .zero, size: containerSize))
-        debugView.autoresizingMask = [.width, .height]
-        container.addSubview(debugView)
-        container.setRNView(debugView)  // Use same slot for cleanup
-
-        debugLog("[\(logId)] NativeDebugView created and added to container, frame: \(debugView.frame)")
-        return
+    // Update viewController's preferredContentSize to match
+    if let vc = entry.viewController {
+        vc.setValue(NSValue(size: containerSize), forKey: "preferredContentSize")
     }
 
     // Build initial properties from config
+    let systemAppType = config["systemAppType"] as? String
     let tabId = config["tabId"] as? String ?? entry.internalId
     var tabDict: [String: Any] = [
         "id": tabId,
@@ -1205,7 +1359,6 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     ]
     if let systemAppType = systemAppType {
         tabDict["systemAppType"] = systemAppType
-        debugLog("[\(logId)] Creating RootView with systemAppType: \(systemAppType)")
     }
     if let unifiedScript = config["unifiedScript"] as? String {
         tabDict["unifiedScript"] = unifiedScript
@@ -1225,38 +1378,35 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         "containerHeight": containerSize.height
     ]
 
-    debugLog("[\(logId)] Creating RCTRootView, size: \(containerSize)")
-
     guard let rnView = ServiceReactNativeHost.shared.createRootView(
         for: entry,
         initialProperties: initialProperties
     ) else {
-        debugLog("[\(logId)] ⚠️ Failed to create RCTRootView")
+        NSLog("[XPC] ⚠️ createRootViewWithConfig: createRootView returned nil for tab=%@", String(logTabId.prefix(8)))
         return
     }
 
-    // Sync container size first if it differs from bounds
-    if container.bounds.size != containerSize {
-        debugLog("[\(logId)] Updating container frame to match config size: \(containerSize)")
-        container.setFrameSize(containerSize)
-    }
+    NSLog("[XPC] ✅ RCTRootView created for tab=%@ size=%.0fx%.0f", String(logTabId.prefix(8)), containerSize.width, containerSize.height)
 
     // Set RCTRootView frame to fill container
     let targetFrame = CGRect(origin: .zero, size: containerSize)
     rnView.frame = targetFrame
-    rnView.autoresizingMask = [.width, .height]
+    rnView.autoresizingMask = []
     container.addSubview(rnView)
     container.setRNView(rnView)
 
-    debugLog("[\(logId)] RCTRootView frame set to: \(rnView.frame)")
+    // Apply Host size AFTER rnView is set (applyHostSize updates rnView.frame)
+    container.applyHostSize(containerSize)
+
+    // Force layout to ensure RN content is visible immediately
+    container.needsLayout = true
+    container.layoutSubtreeIfNeeded()
 
     // Size change callback
     container.onSizeChanged = { [weak entry] newSize in
         guard let entry = entry else { return }
         ServiceReactNativeHost.shared.updateContainerSize(for: entry, size: newSize)
     }
-
-    debugLog("[\(logId)] RCTRootView created and added to container")
 
     // Send initial dimensions after bridge is ready
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak entry] in
