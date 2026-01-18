@@ -5,13 +5,16 @@
 //  Host view that displays content from a ViewBridge XPC service.
 //  Uses NSRemoteViewController to request and embed remote views.
 //
-//  双层架构 (Dual-Layer Architecture):
-//  - Real Layer: 始终以 viewport size 渲染 RemoteView
-//  - Scale Layer: 使用截图 + scaleEffect 实现缩放动画
-//  - Focus/Overview 切换使用截图过渡，避免 RemoteView resize
+//  新架构：Remote view size 跟随 TabPanel 实际尺寸
+//  - Focus 模式：接近全屏尺寸
+//  - Overview 模式：卡片尺寸
+//  - 动画过程：尺寸平滑过渡
+//  - RN 自适应布局
 //
 
 import Cocoa
+import SwiftUI
+import Combine
 
 // MARK: - ViewBridge Host View
 
@@ -39,22 +42,27 @@ public class ViewBridgeHostView: NSView {
     /// Accessible by coordinator for sending size notifications
     var currentContentSize: CGSize = CGSize(width: 1280, height: 720)
 
-    /// Callback when remote view content changes (for updating Scale layer screenshots)
-    var onContentChange: (() -> Void)?
-
     /// Callback when XPC connection is established
     public var onConnectionEstablished: (() -> Void)?
+
+    /// Check if remote view controller is connected (public accessor)
+    public var hasRemoteViewController: Bool {
+        remoteViewController != nil
+    }
 
     /// Reference to coordinator for lifecycle management
     /// When SwiftUI replaces the view, we only disconnect if coordinator.hostView still points to us
     weak var coordinator: ViewBridgeCoordinator?
 
-    /// 节流：上次更新时间
-    private var lastResizeTime: Date = .distantPast
-    /// 节流：待处理的尺寸更新
-    private var pendingResize: CGSize?
-    /// 节流：定时器
-    private var resizeThrottleTimer: Timer?
+    /// 防重复：上次发送的尺寸
+    private var lastSentNotificationSize: CGSize?
+
+    /// Resize start size capture
+    private var resizeStartContentSize: NSSize?
+
+    /// 使用 flipped 坐标系，与 ContainerView 和 SwiftUI 保持一致
+    /// 确保 remoteView 从左上角 (0,0) 开始正确布局
+    public override var isFlipped: Bool { true }
 
     // MARK: - Initialization
 
@@ -103,12 +111,23 @@ public class ViewBridgeHostView: NSView {
         setupView()
     }
 
+    // MARK: - Coordinate System
+
+    // 注意：ViewBridgeHostView 使用标准 AppKit 坐标系
+    // ContainerView 是 flipped 的，所以 hostView 会被放在左上角
+    // 但 hostView 内部使用标准坐标系，这样 NSRemoteView 的内容才能正确显示
+
     // MARK: - Setup
 
     private func setupView() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        layer?.masksToBounds = true  // 裁剪超出部分
+        layer?.masksToBounds = true  // 裁剪超出边界的内容，避免拖尾
+        // 禁用 layer 隐式动画
+        layer?.actions = ["bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
+
+        // Disable automatic subview resizing to allow manual control in updateRemoteViewLayout
+        autoresizesSubviews = false
 
         // Add loading indicator
         let indicator = NSProgressIndicator()
@@ -133,6 +152,27 @@ public class ViewBridgeHostView: NSView {
         loadingIndicator = indicator
         statusLabel = label
 
+        // Register for live resize notifications to capture start size
+        NotificationCenter.default.addObserver(forName: .windowLiveResizeStarted, object: nil, queue: .main) { [weak self] _ in
+            guard let self = self else { return }
+            // Capture size at start of drag
+            self.resizeStartContentSize = self.bounds.size
+            // Also ensure we set this immediately to prevent initial jump
+            if let remoteView = self.remoteViewController?.view {
+                // Force sync immediate state
+                let current = remoteView.frame.size
+                if current.width > 0 && current.height > 0 {
+                     self.resizeStartContentSize = current
+                }
+            }
+        }
+        
+        NotificationCenter.default.addObserver(forName: .windowLiveResizeEnded, object: nil, queue: .main) { [weak self] _ in
+            self?.resizeStartContentSize = nil
+            // Force a final layout update to restore full size
+            self?.needsLayout = true
+        }
+
         NSLog("ViewBridgeHostView: Initialized for service \(serviceBundleIdentifier)")
     }
 
@@ -143,17 +183,39 @@ public class ViewBridgeHostView: NSView {
         return currentContentSize
     }
 
-    /// Layout handled by Auto Layout constraints
+    /// 布局时确保 remoteView 填满整个 hostView
     public override func layout() {
         super.layout()
-        // NSRemoteView size is managed by Auto Layout constraints
-        // No manual frame setting needed - ViewBridge propagates size to service automatically
+        updateRemoteViewLayout()
     }
 
     /// 接受外部尺寸设置
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        // Manually update layout since autoresizesSubviews is false
+        updateRemoteViewLayout()
     }
+
+    /// Update remote view frame to fill bounds
+    private func updateRemoteViewLayout() {
+        guard let remoteView = remoteViewController?.view else { return }
+
+        // 🔑 关键：忽略无效的 0x0 尺寸
+        // 当 hostView 从一个容器移到另一个容器时（Overview ↔ Focus 切换），
+        // bounds.size 会暂时变为 0x0，不应该用这个无效尺寸更新 remoteView
+        guard bounds.size.width > 0 && bounds.size.height > 0 else {
+            return
+        }
+
+        // 强制从 (0,0) 开始，确保填满整个 hostView
+        let expectedFrame = NSRect(origin: .zero, size: bounds.size)
+        if remoteView.frame != expectedFrame {
+            remoteView.frame = expectedFrame
+            NSLog("🔧 [RemoteView] frame updated: %@ -> %@, hostView.bounds=%@",
+                  NSStringFromRect(remoteView.frame), NSStringFromRect(expectedFrame), NSStringFromRect(bounds))
+        }
+    }
+
 
     // MARK: - View Lifecycle
 
@@ -262,30 +324,50 @@ public class ViewBridgeHostView: NSView {
 
         let remoteView = vc.view
 
-        // Use Auto Layout to embed NSRemoteView
-        // Key insight: ViewBridge updates the superview's bounds, so the service's
-        // view (pinned to its superview) will automatically follow size changes.
-        remoteView.translatesAutoresizingMaskIntoConstraints = false
+        // 使用 autoresizingMask 而非 Auto Layout
+        // Auto Layout 与 flipped 坐标系可能有交互问题
+        let targetFrame = NSRect(origin: .zero, size: currentContentSize)
+        remoteView.frame = targetFrame
+        // Disable autoresizing mask as we manage layout manually
+        remoteView.autoresizingMask = [] 
         addSubview(remoteView)
 
-        NSLayoutConstraint.activate([
-            remoteView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            remoteView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            remoteView.topAnchor.constraint(equalTo: topAnchor),
-            remoteView.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
+        // Configure ViewBridge content size range
+        let maxSize = CGSize(width: 4096, height: 4096)
+        let minSize = CGSize(width: 50, height: 50)
+        let updateSelector = NSSelectorFromString("updateContentMinSize:maxSize:")
+
+        // Try to set size range on VC
+        if vc.responds(to: updateSelector) {
+            let method = (vc as AnyObject).method(for: updateSelector)
+            typealias UpdateSizeFunc = @convention(c) (AnyObject, Selector, CGSize, CGSize) -> Void
+            let updateFunc = unsafeBitCast(method, to: UpdateSizeFunc.self)
+            updateFunc(vc as AnyObject, updateSelector, minSize, maxSize)
+        }
+
+        // Try to set size range on View
+        if remoteView.responds(to: updateSelector) {
+            let method = remoteView.method(for: updateSelector)
+            typealias UpdateSizeFunc = @convention(c) (AnyObject, Selector, CGSize, CGSize) -> Void
+            let updateFunc = unsafeBitCast(method, to: UpdateSizeFunc.self)
+            updateFunc(remoteView, updateSelector, minSize, maxSize)
+        }
+
+        // Try to set on VC.remoteView property
+        let remoteViewSelector = NSSelectorFromString("remoteView")
+        if vc.responds(to: remoteViewSelector),
+           let actualRemoteView = vc.perform(remoteViewSelector)?.takeUnretainedValue() as? NSView,
+           actualRemoteView.responds(to: updateSelector) {
+            let method = actualRemoteView.method(for: updateSelector)
+            typealias UpdateSizeFunc = @convention(c) (AnyObject, Selector, CGSize, CGSize) -> Void
+            let updateFunc = unsafeBitCast(method, to: UpdateSizeFunc.self)
+            updateFunc(actualRemoteView, updateSelector, minSize, maxSize)
+        }
 
         // 确保 ViewBridgeHostView 自身也使用正确的尺寸
         super.setFrameSize(currentContentSize)
 
-        NSLog("ViewBridgeHostView: Remote view embedded with Auto Layout constraints, size=\(currentContentSize)")
-
-        // 将 Host 侧的 tabId 显式绑定到 Service 连接，避免 FIFO 错绑
-        if let tabId = coordinator?.tabId {
-            fputs("🔗 ViewBridgeHostView: remote VC received for tab \(tabId.uuidString.prefix(8))\n", stderr)
-        } else {
-            fputs("⚠️ ViewBridgeHostView: cannot bind tabId (nil)\n", stderr)
-        }
+        NSLog("ViewBridgeHostView: Remote view embedded, size=%.0fx%.0f", currentContentSize.width, currentContentSize.height)
 
         // 通知连接已建立
         onConnectionEstablished?()
@@ -293,100 +375,26 @@ public class ViewBridgeHostView: NSView {
 
     // MARK: - Content Size Management
 
-    /// 节流间隔（毫秒）- 防止 resize storm
-    private static let resizeThrottleInterval: TimeInterval = 0.05  // 50ms
-
-    /// Update the content size
-    /// 使用节流机制防止 resize storm
-    public func updateContentSize(_ newSize: CGSize) {
-        // Validate reasonable size
-        guard newSize.width >= 50 && newSize.height >= 50 &&
-              newSize.width <= 4096 && newSize.height <= 4096 else {
-            return
-        }
-
-        // Ignore small changes (< 1px)
-        let sizeDiff = abs(newSize.width - currentContentSize.width) + abs(newSize.height - currentContentSize.height)
-        guard sizeDiff >= 1 else {
-            return
-        }
-
-        // 节流：如果距离上次更新时间太短，延迟处理
-        let now = Date()
-        let timeSinceLastResize = now.timeIntervalSince(lastResizeTime)
-
-        if timeSinceLastResize < Self.resizeThrottleInterval {
-            // 记录待处理的尺寸，稍后处理
-            pendingResize = newSize
-            scheduleThrottledResize()
-            return
-        }
-
-        // 立即应用尺寸更新
-        applyContentSize(newSize)
-    }
-
-    /// 调度节流后的 resize
-    private func scheduleThrottledResize() {
-        // 如果已有定时器，不重复创建
-        guard resizeThrottleTimer == nil else { return }
-
-        resizeThrottleTimer = Timer.scheduledTimer(withTimeInterval: Self.resizeThrottleInterval, repeats: false) { [weak self] _ in
-            guard let self = self, let pendingSize = self.pendingResize else { return }
-            self.resizeThrottleTimer = nil
-            self.pendingResize = nil
-            self.applyContentSize(pendingSize)
-        }
-    }
-
-    /// 实际应用尺寸更新
-    /// With Auto Layout, ViewBridge automatically propagates size changes to the service.
-    /// The service's ResizableContainerView is pinned to its superview bounds.
-    private func applyContentSize(_ newSize: CGSize) {
-        lastResizeTime = Date()
+    /// 更新本地 frame 和 preferredContentSize
+    /// 由 coordinator.applyViewportSize 调用，不发送通知（通知由 coordinator 统一处理）
+    func applyFrameSize(_ newSize: CGSize) {
         currentContentSize = newSize
 
-        NSLog("📐 ViewBridgeHostView.applyContentSize: %.0fx%.0f, serviceBundleId=%@", newSize.width, newSize.height, serviceBundleIdentifier)
+        // 更新自身 frame 和 remoteView frame（直接同步设置，避免异步积压）
+        if bounds.size != newSize {
+            setFrameSize(newSize)
+        }
 
-        // 通知 intrinsicContentSize 变化并触发重新布局
-        // Auto Layout constraints will propagate the size to NSRemoteView,
-        // which ViewBridge then syncs to the service's superview.
-        invalidateIntrinsicContentSize()
-        needsLayout = true
+        // 强制更新 remoteView frame，即使 bounds 相同（确保 resize 结束后 remoteView 正确填满）
+        updateRemoteViewLayout()
 
-        // Force layout update to propagate size change immediately
+        // 同步到 NSRemoteViewController
         if let vc = remoteViewController {
-            vc.view.needsLayout = true
-            vc.view.layoutSubtreeIfNeeded()
-        }
-
-        // Send size via DistributedNotificationCenter
-        // This is the primary size sync mechanism now (Auto Layout is disabled)
-        // Use service-specific notification name for XPC service compatibility
-        if let tabId = coordinator?.tabId?.uuidString {
-            let sizeInfo: [String: Any] = [
-                "tabId": tabId,
-                "width": newSize.width,
-                "height": newSize.height
-            ]
-            // Serialize to JSON string for cross-process compatibility
-            if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                // Use service-specific notification name (same pattern as tabConfig)
-                let notificationName = "com.canvas.containerSizeChanged.\(serviceBundleIdentifier)"
-                NSLog("📐 [HOST] Sending containerSizeChanged: name=%@, size=%.0fx%.0f", notificationName, newSize.width, newSize.height)
-                DistributedNotificationCenter.default().postNotificationName(
-                    NSNotification.Name(notificationName),
-                    object: nil,
-                    userInfo: ["sizeInfo": jsonString],
-                    deliverImmediately: true
-                )
-                NSLog("📐 [HOST] Posted containerSizeChanged: tab=%@, size=%.0fx%.0f", String(tabId.prefix(8)), newSize.width, newSize.height)
+            let current = vc.preferredContentSize
+            if abs(current.width - newSize.width) > 0.5 || abs(current.height - newSize.height) > 0.5 {
+                vc.preferredContentSize = newSize
             }
-        } else {
-            NSLog("⚠️ [HOST] Cannot send containerSizeChanged - no tabId (coordinator=%d)", coordinator != nil ? 1 : 0)
         }
-        fflush(stderr)
     }
 
     private func handleError(_ message: String) {
@@ -417,8 +425,6 @@ public class ViewBridgeHostView: NSView {
     }
 
     deinit {
-        resizeThrottleTimer?.invalidate()
-        resizeThrottleTimer = nil
         // Only disconnect if the coordinator still points to us
         // When SwiftUI replaces the view, coordinator.hostView will point to the new view
         if coordinator == nil || coordinator?.hostView === self {
@@ -477,11 +483,32 @@ extension ViewBridgeHostView {
 
 // MARK: - SwiftUI Wrapper
 
-import SwiftUI
-import Combine
+// MARK: - Live Resize State
+
+/// 全局窗口 resize 状态 - 拖动期间抑制跨进程 IPC 通知
+final class WindowResizeState: ObservableObject {
+    static let shared = WindowResizeState()
+    private init() {}
+
+    /// 是否正在 live resize（拖动窗口边缘）
+    @Published var isLiveResizing: Bool = false
+
+    /// 当前正在 resize 的 tab ID（用于匹配遮罩显示）- Focus 模式
+    @Published var activeTabId: UUID?
+
+    /// 是否正在等待 Service 端的 sizeApplied 通知
+    /// true = 显示快照遮罩，false = 隐藏遮罩
+    @Published var isWaitingForSizeApplied: Bool = false
+}
+
+extension Notification.Name {
+    static let windowLiveResizeStarted = Notification.Name("windowLiveResizeStarted")
+    static let windowLiveResizeEnded = Notification.Name("windowLiveResizeEnded")
+}
 
 /// Coordinator that holds reference to ViewBridgeHostView
-/// 管理 XPC 连接状态和截图，生命周期由 ViewBridgeCoordinatorManager 管理
+/// 管理 XPC 连接状态，生命周期由 ViewBridgeCoordinatorManager 管理
+/// 集中处理所有尺寸同步逻辑 - 这是 Host 端尺寸更新的唯一入口
 final class ViewBridgeCoordinator {
     weak var hostView: ViewBridgeHostView?
     /// Callback when XPC connection is established
@@ -493,42 +520,379 @@ final class ViewBridgeCoordinator {
     var hasConnection: Bool = false
     var xpcReadyObserver: NSObjectProtocol?
     var connectionCreatedObserver: NSObjectProtocol?
+    var liveResizeEndedObserver: NSObjectProtocol?
     var tabId: UUID?
 
-    /// 双层架构：Scale Layer 使用的截图（Overview 模式下显示）
-    /// 在 Focus -> Overview 切换时拍摄
-    var cachedSnapshot: NSImage?
+    /// 当前 viewport 尺寸 - 存储在 coordinator 中以便闭包能访问最新值
+    /// 默认值 50x50 反映 Overview 模式下可能的小卡片尺寸
+    var currentViewportSize: CGSize = CGSize(width: 50, height: 50)
+    /// 上次发送 tabConfig 时的尺寸 - 用于防止重复发送
+    var lastSentConfigSize: CGSize?
+    /// 上次发送 containerSizeChanged 时的尺寸 - 用于防止重复发送
+    private var lastSentContainerSize: CGSize?
 
-    /// Capture and cache a snapshot for Scale Layer
-    func captureAndCacheSnapshot() -> NSImage? {
-        cachedSnapshot = hostView?.captureSnapshot()
-        return cachedSnapshot
+    /// 节流：上次更新时间
+    private var lastUpdateTime: Date = .distantPast
+    /// 节流：待处理的尺寸更新
+    private var pendingSize: CGSize?
+    /// 节流：定时器
+    private var throttleTimer: Timer?
+    /// 节流间隔 - 限制发送频率（约 40fps）
+    private static let throttleInterval: TimeInterval = 0.025  // 25ms
+
+    // MARK: - 集中的尺寸更新入口
+
+    /// Live resize 开始监听器
+    private var liveResizeStartedObserver: NSObjectProtocol?
+
+    /// 设置 live resize 监听器（只设置一次）
+    private func setupLiveResizeObserverIfNeeded() {
+        // 设置 resize 开始监听器
+        if liveResizeStartedObserver == nil {
+            liveResizeStartedObserver = NotificationCenter.default.addObserver(
+                forName: .windowLiveResizeStarted,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self = self,
+                      let hostView = self.hostView,
+                      let tabId = self.tabId,
+                      hostView.window != nil else { return }  // 只有可见的 hostView 才截取快照
+
+                // 在 resize 开始时截取快照，存入 TabSnapshotCacheManager
+                // 复用模式切换的快照存储（基于当前视口尺寸，通常是大视口 = Slot A）
+                if let snapshot = hostView.captureSnapshot() {
+                    TabSnapshotCacheManager.shared.setFocusSnapshot(snapshot, for: tabId)
+                    WindowResizeState.shared.activeTabId = tabId
+                    WindowResizeState.shared.isWaitingForSizeApplied = true
+                }
+            }
+        }
+
+        // 设置 resize 结束监听器
+        // 不直接读取尺寸！SwiftUI layout 可能还没完成
+        // 而是启动 debounce 机制，等待尺寸稳定后再发送
+        if liveResizeEndedObserver == nil {
+            liveResizeEndedObserver = NotificationCenter.default.addObserver(
+                forName: .windowLiveResizeEnded,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self = self else { return }
+
+                // 标记进入 debounce 状态
+                self.isWaitingForFinalSize = true
+
+                // 启动 NSView frame 变化监听器
+                // 这可以捕获 SwiftUI GeometryReader 可能遗漏的 frame 更新
+                self.setupFrameChangeObserverIfNeeded()
+
+                // 启动 debounce 定时器
+                self.scheduleFinalSizeDebounce()
+            }
+        }
+
+        // 设置 sizeApplied 监听器（Service 尺寸更新完成后清除快照）
+        setupSizeAppliedListenerIfNeeded()
     }
 
-    /// Get cached snapshot (for Scale Layer display)
-    func getCachedSnapshot() -> NSImage? {
-        return cachedSnapshot
+    /// sizeApplied 监听器（Service 完成尺寸更新后的通知）
+    private var sizeAppliedObserver: NSObjectProtocol?
+
+    /// hostView frame 变化监听器（捕获 SwiftUI GeometryReader 可能遗漏的变化）
+    private var frameDidChangeObserver: NSObjectProtocol?
+
+    /// 是否处于 resize 结束后的 debounce 期
+    private var isWaitingForFinalSize = false
+    /// 最终尺寸 debounce 定时器
+    private var finalSizeDebounceTimer: Timer?
+    /// Debounce 时间（等待尺寸稳定）
+    private static let finalSizeDebounceInterval: TimeInterval = 0.30  // 300ms
+
+    /// 上次发送尺寸的时间（用于检测是否需要补发）
+    private var lastSizeNotificationTime: Date = .distantPast
+    /// 补发窗口期（在此时间内收到新尺寸变化，需要补发）
+    private static let resendWindowInterval: TimeInterval = 1.0  // 1 秒内的变化需要补发
+
+    /// 设置 hostView frame 变化监听器
+    /// 在 debounce 期间捕获任何 frame 变化，并重置 debounce 定时器
+    private func setupFrameChangeObserverIfNeeded() {
+        // 移除旧的监听器
+        if let observer = frameDidChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            frameDidChangeObserver = nil
+        }
+
+        guard let hostView = hostView else { return }
+
+        // 启用 frame 变化通知
+        hostView.postsFrameChangedNotifications = true
+
+        frameDidChangeObserver = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification,
+            object: hostView,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  self.isWaitingForFinalSize,
+                  let view = notification.object as? NSView else { return }
+
+            let newSize = view.bounds.size
+            // 忽略无效尺寸
+            guard newSize.width > 50 && newSize.height > 50 else { return }
+
+            // Frame 变化了，重置 debounce 定时器
+            self.currentViewportSize = newSize
+            self.scheduleFinalSizeDebounce()
+        }
+    }
+
+    /// 移除 frame 变化监听器
+    private func removeFrameChangeObserver() {
+        if let observer = frameDidChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            frameDidChangeObserver = nil
+        }
+    }
+
+    /// 设置 sizeApplied 监听器（事件驱动清除快照）
+    private func setupSizeAppliedListenerIfNeeded() {
+        guard sizeAppliedObserver == nil,
+              let serviceId = allocatedServiceId else { return }
+
+        let notificationName = "com.canvas.sizeApplied.\(serviceId)"
+        sizeAppliedObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(notificationName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let userInfo = notification.userInfo,
+                  let notifyTabId = userInfo["tabId"] as? String,
+                  notifyTabId == self.tabId?.uuidString else { return }
+
+            // Extract requestId for log correlation
+            let requestId = userInfo["requestId"] as? String ?? "?"
+            let width = userInfo["width"] as? Double ?? 0
+            let height = userInfo["height"] as? Double ?? 0
+            NSLog("📐 [HOST←SVC] sizeApplied req=%@ size=%.0fx%.0f", requestId, width, height)
+
+            // 取消超时定时器（如果有）
+            self.snapshotTimeoutTimer?.invalidate()
+            self.snapshotTimeoutTimer = nil
+
+            // Service 已完成尺寸更新，关闭快照遮罩
+            if WindowResizeState.shared.isWaitingForSizeApplied {
+                WindowResizeState.shared.isWaitingForSizeApplied = false
+            }
+        }
+    }
+
+    /// 快照清除超时定时器（备用方案）
+    private var snapshotTimeoutTimer: Timer?
+
+    /// 启动快照超时定时器（备用方案，防止 Service 通知丢失）
+    private func scheduleSnapshotTimeout() {
+        snapshotTimeoutTimer?.invalidate()
+        snapshotTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { _ in
+            if WindowResizeState.shared.isWaitingForSizeApplied {
+                WindowResizeState.shared.isWaitingForSizeApplied = false
+            }
+        }
+    }
+
+    /// 启动最终尺寸 debounce 定时器
+    /// 在 debounce 期间如果有新尺寸变化，定时器会被重置
+    /// 当定时器触发时（尺寸稳定），发送最终尺寸到 Service
+    private func scheduleFinalSizeDebounce() {
+        finalSizeDebounceTimer?.invalidate()
+        finalSizeDebounceTimer = Timer.scheduledTimer(withTimeInterval: Self.finalSizeDebounceInterval, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+
+            self.isWaitingForFinalSize = false
+
+            // 优先从 hostView 的实际 bounds 获取尺寸（比 SwiftUI state 更准确）
+            // SwiftUI GeometryReader 可能滞后于实际窗口 frame
+            var finalSize = self.currentViewportSize
+
+            if let hostView = self.hostView {
+                // 检查 hostView 的 superview（SwiftUI 容器）的尺寸
+                if let superview = hostView.superview {
+                    let containerSize = superview.bounds.size
+                    if containerSize.width > finalSize.width || containerSize.height > finalSize.height {
+                        finalSize = containerSize
+                    }
+                }
+
+                // 备用检查：hostView 自身的 bounds
+                let actualBounds = hostView.bounds.size
+                if actualBounds.width > finalSize.width || actualBounds.height > finalSize.height {
+                    finalSize = actualBounds
+                }
+            }
+
+            // 验证并发送
+            if finalSize.width > 50 && finalSize.height > 50 {
+                // 同步更新 coordinator 状态
+                self.currentViewportSize = finalSize
+                self.lastSentContainerSize = finalSize
+                self.lastSizeNotificationTime = Date()
+                self.sendContainerSizeNotification(size: finalSize)
+
+                // 同时更新本地 frame
+                self.hostView?.applyFrameSize(finalSize)
+            }
+
+            // 移除 frame 变化监听器（debounce 结束）
+            self.removeFrameChangeObserver()
+
+            // 启动 sizeApplied 超时定时器
+            self.scheduleSnapshotTimeout()
+        }
+    }
+
+    /// 统一的尺寸更新方法 - 所有尺寸变化都应该通过这个方法
+    /// 使用节流机制限制发送频率，大变化立即应用
+    /// 必须在主线程调用
+    func updateViewportSize(_ newSize: CGSize) {
+        // 确保监听器已设置
+        setupLiveResizeObserverIfNeeded()
+        // 确保在主线程执行
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.updateViewportSize(newSize)
+            }
+            return
+        }
+
+        // 取整，避免浮点精度问题导致频繁微小更新
+        let roundedSize = CGSize(
+            width: round(newSize.width),
+            height: round(newSize.height)
+        )
+
+        // 验证尺寸合法性
+        guard roundedSize.width >= 50 && roundedSize.height >= 50 &&
+              roundedSize.width <= 4096 && roundedSize.height <= 4096 else {
+            return
+        }
+
+        // 忽略相同尺寸（取整后比较）
+        guard roundedSize != currentViewportSize else {
+            // 如果处于 debounce 状态但尺寸没变，仍需重置 debounce 定时器
+            // 这处理了 SwiftUI 可能多次发送相同尺寸的情况
+            if isWaitingForFinalSize {
+                scheduleFinalSizeDebounce()
+            }
+            return
+        }
+
+        // 更新本地状态
+        let previousSize = currentViewportSize
+        currentViewportSize = roundedSize
+
+        // 如果处于 resize 结束后的 debounce 状态，重置 debounce 定时器
+        // 这确保我们等待 SwiftUI 布局完全稳定后再发送最终尺寸
+        if isWaitingForFinalSize {
+            scheduleFinalSizeDebounce()
+            // 本地 frame 更新仍需执行
+            hostView?.applyFrameSize(roundedSize)
+            return
+        }
+
+        // 检查是否需要补发：如果刚刚发送过通知（1秒内），但又收到新尺寸变化
+        // 这处理了 debounce 触发后 SwiftUI 仍在更新的情况
+        let timeSinceLastNotification = Date().timeIntervalSince(lastSizeNotificationTime)
+        if timeSinceLastNotification < Self.resendWindowInterval {
+            // 在补发窗口期内收到新尺寸，重新启动 debounce
+            isWaitingForFinalSize = true
+            setupFrameChangeObserverIfNeeded()
+            scheduleFinalSizeDebounce()
+            hostView?.applyFrameSize(roundedSize)
+            return
+        }
+
+        // 大变化（> 50px）立即应用
+        let sizeDiff = abs(roundedSize.width - previousSize.width) + abs(roundedSize.height - previousSize.height)
+        let isLargeChange = sizeDiff > 50
+        let now = Date()
+        let timeSinceLastUpdate = now.timeIntervalSince(lastUpdateTime)
+
+        if isLargeChange || timeSinceLastUpdate >= Self.throttleInterval {
+            // 立即应用 - 同时清除待处理的旧尺寸，防止定时器发送过时数据
+            pendingSize = nil
+            throttleTimer?.invalidate()
+            throttleTimer = nil
+            applyViewportSize(roundedSize)
+        } else {
+            // 节流：记录待处理的尺寸，稍后处理
+            pendingSize = roundedSize
+            scheduleThrottledUpdate()
+        }
+    }
+
+    /// 调度节流后的更新（必须在主线程调用）
+    private func scheduleThrottledUpdate() {
+        guard throttleTimer == nil else { return }
+
+        // 确保 Timer 在主线程的 RunLoop 上调度
+        throttleTimer = Timer.scheduledTimer(withTimeInterval: Self.throttleInterval, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self = self, let pendingSize = self.pendingSize else { return }
+                self.throttleTimer = nil
+                self.pendingSize = nil
+                self.applyViewportSize(pendingSize)
+            }
+        }
+    }
+
+    /// 实际应用尺寸更新（必须在主线程调用）
+    private func applyViewportSize(_ size: CGSize) {
+        lastUpdateTime = Date()
+
+        // 1. 更新 hostView 的本地 frame（始终执行，保证视觉同步）
+        hostView?.applyFrameSize(size)
+
+        // 2. 如果正在 live resize，跳过跨进程通知（提升拖动流畅度）
+        //    最终尺寸会在 windowDidEndLiveResize 时发送
+        if WindowResizeState.shared.isLiveResizing {
+            return
+        }
+
+        // 3. 发送 containerSizeChanged 通知到 Service（防重复）
+        guard size != lastSentContainerSize else { return }
+        lastSentContainerSize = size
+        sendContainerSizeNotification(size: size)
+    }
+
+    func captureSnapshot() -> NSImage? {
+        return hostView?.captureSnapshot()
     }
 
     /// Send a containerSizeChanged notification to the XPC service
-    /// This is used to ensure the service has the correct size after it's fully ready
-    func sendContainerSizeNotification(size: CGSize) {
+    /// 内部方法 - 由 applyViewportSize 调用
+    private func sendContainerSizeNotification(size: CGSize) {
         guard let tabId = tabId,
               let serviceId = allocatedServiceId else {
             NSLog("⚠️ [Coordinator] Cannot send containerSizeChanged - no tabId or serviceId")
             return
         }
 
+        // Generate request UUID for correlation between Host and Service logs
+        let requestId = UUID().uuidString.prefix(8)
+
         let sizeInfo: [String: Any] = [
             "tabId": tabId.uuidString,
             "width": size.width,
-            "height": size.height
+            "height": size.height,
+            "requestId": String(requestId)  // UUID for log correlation
         ]
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
            let jsonString = String(data: jsonData, encoding: .utf8) {
             let notificationName = "com.canvas.containerSizeChanged.\(serviceId)"
-            NSLog("📐 [Coordinator] Sending containerSizeChanged: size=%.0fx%.0f", size.width, size.height)
+            NSLog("📐 [HOST→SVC] containerSizeChanged req=%@ tab=%@ size=%.0fx%.0f",
+                  String(requestId), String(tabId.uuidString.prefix(8)), size.width, size.height)
             DistributedNotificationCenter.default().postNotificationName(
                 NSNotification.Name(notificationName),
                 object: nil,
@@ -540,6 +904,19 @@ final class ViewBridgeCoordinator {
 
     /// 清理 XPC 资源
     func cleanup() {
+        // 清理节流定时器
+        throttleTimer?.invalidate()
+        throttleTimer = nil
+        pendingSize = nil
+
+        // 清理 final size debounce 定时器
+        finalSizeDebounceTimer?.invalidate()
+        finalSizeDebounceTimer = nil
+        isWaitingForFinalSize = false
+
+        // 清理 frame 变化监听器
+        removeFrameChangeObserver()
+
         if let observer = xpcReadyObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
             xpcReadyObserver = nil
@@ -548,6 +925,20 @@ final class ViewBridgeCoordinator {
             DistributedNotificationCenter.default().removeObserver(observer)
             connectionCreatedObserver = nil
         }
+        if let observer = liveResizeStartedObserver {
+            NotificationCenter.default.removeObserver(observer)
+            liveResizeStartedObserver = nil
+        }
+        if let observer = liveResizeEndedObserver {
+            NotificationCenter.default.removeObserver(observer)
+            liveResizeEndedObserver = nil
+        }
+        if let observer = sizeAppliedObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            sizeAppliedObserver = nil
+        }
+        snapshotTimeoutTimer?.invalidate()
+        snapshotTimeoutTimer = nil
         // 断开 ViewBridge 连接
         hostView?.disconnect()
         hostView = nil
@@ -569,11 +960,11 @@ final class ViewBridgeCoordinator {
 /// Manager that holds coordinators for all tabs
 /// 不使用 @Published 避免在 view body 评估时触发状态更新
 final class ViewBridgeCoordinatorManager: ObservableObject {
-    /// Singleton instance for global access
-    static let shared = ViewBridgeCoordinatorManager()
-
     // 不使用 @Published - coordinators 的变化不需要触发 UI 更新
     private var coordinators: [UUID: ViewBridgeCoordinator] = [:]
+
+    /// Singleton for global access (used in mode switching)
+    static let shared = ViewBridgeCoordinatorManager()
 
     func coordinator(for tabId: UUID) -> ViewBridgeCoordinator {
         if let existing = coordinators[tabId] {
@@ -581,158 +972,623 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
         }
         let newCoordinator = ViewBridgeCoordinator()
         coordinators[tabId] = newCoordinator
-        fputs("📦 CoordinatorManager: created coordinator for tab \(tabId.uuidString.prefix(8))\n", stderr)
         return newCoordinator
     }
 
     func removeCoordinator(for tabId: UUID) {
-        if coordinators.removeValue(forKey: tabId) != nil {
-            fputs("🗑️ CoordinatorManager: removed coordinator for tab \(tabId.uuidString.prefix(8))\n", stderr)
-        }
+        coordinators.removeValue(forKey: tabId)
     }
 }
 
 // MARK: - ViewBridge Host View Manager
 
-/// 持久化的 ViewBridge 容器，包含 hostView
-/// 将容器也保存在 Manager 中，避免 SwiftUI 销毁容器导致 hostView 变成"孤儿"
-final class ViewBridgeContainer: NSView {
-    let hostView: ViewBridgeHostView
-
-    init(hostView: ViewBridgeHostView, size: CGSize) {
-        self.hostView = hostView
-        super.init(frame: NSRect(origin: .zero, size: size))
-        wantsLayer = true
-
-        hostView.frame = bounds
-        hostView.autoresizingMask = [.width, .height]
-        addSubview(hostView)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
-
-/// 全局管理 ViewBridgeHostView 和容器，避免视图重建时丢失 XPC 连接
+/// 全局管理 ViewBridgeHostView 实例，避免视图重建时丢失 XPC 连接
 /// 类似 WebViewHolderManager 的模式
-/// 关键改进：将容器也保存在 Manager 中，避免 hostView 变成"孤儿"导致 ViewBridge 断开
 @MainActor
 final class ViewBridgeHostViewManager {
     static let shared = ViewBridgeHostViewManager()
-    private var containers: [UUID: ViewBridgeContainer] = [:]
+    private var hostViews: [UUID: ViewBridgeHostView] = [:]
+    /// Cached snapshots for Overview mode
+    private var snapshots: [UUID: NSImage] = [:]
 
     private init() {}
 
-    /// Get or create a ViewBridgeContainer for a tab
-    /// 返回整个容器，而不仅仅是 hostView
-    func container(for tabId: UUID, serviceBundleIdentifier: String, coordinator: ViewBridgeCoordinator, size: CGSize) -> ViewBridgeContainer {
-        if let existing = containers[tabId] {
+    /// Get or create a ViewBridgeHostView for a tab
+    func hostView(for tabId: UUID, serviceBundleIdentifier: String, coordinator: ViewBridgeCoordinator, contentSize: CGSize) -> ViewBridgeHostView {
+        if let existing = hostViews[tabId] {
             // Update coordinator reference
-            existing.hostView.coordinator = coordinator
-            coordinator.hostView = existing.hostView
+            existing.coordinator = coordinator
+            coordinator.hostView = existing
+            // 通过 coordinator 统一处理尺寸更新（包括通知 Service）
+            coordinator.updateViewportSize(contentSize)
             return existing
         }
 
-        let hostView = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: size)
-        hostView.coordinator = coordinator
-        coordinator.hostView = hostView
-
-        // 设置连接建立回调 - 这是关键！没有这个设置，hasConnection 永远不会变成 true
-        hostView.onConnectionEstablished = { [weak coordinator] in
-            fputs("🔗 ViewBridgeHostViewManager: Connection established, forwarding to coordinator\n", stderr)
-            coordinator?.onConnectionEstablished?()
-        }
-
-        let container = ViewBridgeContainer(hostView: hostView, size: size)
-        containers[tabId] = container
-        fputs("🏠 ViewBridgeHostViewManager: Created container for tab \(tabId.uuidString.prefix(8))\n", stderr)
-        return container
+        let new = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: contentSize)
+        new.coordinator = coordinator
+        coordinator.hostView = new
+        hostViews[tabId] = new
+        return new
     }
 
     /// Get existing host view without creating a new one
     func existingHostView(for tabId: UUID) -> ViewBridgeHostView? {
-        containers[tabId]?.hostView
+        hostViews[tabId]
     }
 
     func remove(tabId: UUID) {
-        if let removed = containers.removeValue(forKey: tabId) {
-            removed.hostView.disconnect()
-            fputs("🏠 ViewBridgeHostViewManager: Removed container for tab \(tabId.uuidString.prefix(8))\n", stderr)
+        if let removed = hostViews.removeValue(forKey: tabId) {
+            removed.disconnect()
         }
+        snapshots.removeValue(forKey: tabId)
+    }
+
+    // MARK: - Snapshot Management
+
+    /// Take a snapshot of the ViewBridge content for Overview mode
+    /// Note: TabSnapshotCacheManager is now managed by WorkspaceMainView.exitToOverview()
+    func takeSnapshot(for tabId: UUID) {
+        guard let hostView = hostViews[tabId] else { return }
+        if let snapshot = hostView.captureSnapshot() {
+            // Legacy: store in local cache only
+            snapshots[tabId] = snapshot
+        }
+    }
+
+    /// Get cached snapshot for Overview mode
+    /// Returns from TabSnapshotCacheManager (V3.0) if available, falls back to local cache
+    func snapshot(for tabId: UUID) -> NSImage? {
+        // V3.0: prefer filtered thumbnail from TabSnapshotCacheManager
+        if let filtered = TabSnapshotCacheManager.shared.filteredThumbnail(for: tabId) {
+            return filtered
+        }
+        // Fallback to local cache (legacy)
+        return snapshots[tabId]
     }
 }
 
-// MARK: - Persistent ViewBridge Representable
+// MARK: - Container View
+
+/// 容器视图（使用 flipped 坐标系以匹配 SwiftUI）
+/// SwiftUI 使用原点在左上角的坐标系，NSView 需要匹配
+private class ContainerView: NSView {
+    override var isFlipped: Bool { true }
+
+    /// 是否允许 hit testing（由 SwiftUI 通过 userInteractionEnabled 控制）
+    /// Overview 模式下设为 false，让手势穿透到下层的 Grid
+    var allowsHitTesting: Bool = true
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        layer?.actions = ["bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
+        // 让子视图随容器 resize
+        autoresizesSubviews = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        // 当 SwiftUI 改变容器尺寸时，更新 hostView
+        if let hostView = subviews.first as? ViewBridgeHostView {
+            hostView.applyFrameSize(newSize)
+        }
+    }
+
+    /// 重写 hitTest 以支持条件性手势穿透
+    /// Overview 模式下返回 nil，让事件传递到下层视图
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if !allowsHitTesting {
+            return nil  // 穿透到下层
+        }
+        return super.hitTest(point)
+    }
+}
+
+// MARK: - Persistent ViewBridge View
 
 /// 持久化的 ViewBridge 视图包装器
-/// 使用双层容器模式：
-/// - Wrapper (NSView): 由 SwiftUI 管理，可以被销毁
-/// - Container (ViewBridgeContainer): 由 Manager 持久化，永不销毁
-/// - HostView (ViewBridgeHostView): 始终是 Container 的子视图，永不变成"孤儿"
+/// 使用 ViewBridgeHostViewManager 获取持久化的 hostView，避免 SwiftUI 重建时丢失 XPC 连接
+/// 类似 PersistentWebView 的模式
 struct PersistentViewBridgeView: NSViewRepresentable {
     let tabId: UUID
     let serviceBundleIdentifier: String
     let coordinator: ViewBridgeCoordinator
     let size: CGSize
+    /// 是否允许 hit testing（Overview 模式下为 false，让手势穿透）
+    var allowsHitTesting: Bool = true
 
     func makeNSView(context: Context) -> NSView {
-        // 创建一个 wrapper 视图，它会被 SwiftUI 管理
-        let wrapper = NSView(frame: NSRect(origin: .zero, size: size))
-        wrapper.wantsLayer = true
+        let container = ContainerView(frame: NSRect(origin: .zero, size: size))
+        container.allowsHitTesting = allowsHitTesting
+        coordinator.tabId = tabId
 
-        // 从 Manager 获取持久化的 container（包含 hostView）
-        let container = ViewBridgeHostViewManager.shared.container(
+        // 从 Manager 获取持久化的 hostView
+        let hostView = ViewBridgeHostViewManager.shared.hostView(
             for: tabId,
             serviceBundleIdentifier: serviceBundleIdentifier,
             coordinator: coordinator,
-            size: size
+            contentSize: size
         )
 
-        // 将 container 添加到 wrapper
-        // 当 wrapper 被销毁时，container 只是从 wrapper 移除，但仍保存在 Manager 中
-        container.frame = wrapper.bounds
-        container.autoresizingMask = [.width, .height]
-        wrapper.addSubview(container)
-
-        fputs("🆕 PersistentViewBridgeView.makeNSView: tab=\(tabId.uuidString.prefix(8)), size=\(size)\n", stderr)
-        return wrapper
-    }
-
-    func updateNSView(_ wrapper: NSView, context: Context) {
-        guard size.width > 0 && size.height > 0 else { return }
-
-        let targetFrame = NSRect(origin: .zero, size: size)
-        if wrapper.frame != targetFrame {
-            wrapper.frame = targetFrame
+        // 设置连接建立回调
+        // 🔑 直接在这里设置 hasConnection，因为 onAppear 中的 setupConnectionCallback
+        // 可能在连接建立后才执行（时序问题）
+        hostView.onConnectionEstablished = { [weak coordinator] in
+            guard let coordinator = coordinator else { return }
+            NSLog("🔗 [PersistentView] Connection established for tab %@, setting hasConnection=true",
+                  String(tabId.uuidString.prefix(8)))
+            coordinator.hasConnection = true
+            coordinator.onConnectionEstablished?()
         }
 
-        // 确保 container 和 hostView 有正确的尺寸
-        if let container = wrapper.subviews.first as? ViewBridgeContainer {
-            if container.frame != targetFrame {
-                container.frame = targetFrame
-            }
-            if container.hostView.frame != targetFrame {
-                container.hostView.frame = targetFrame
-            }
-            container.hostView.updateContentSize(size)
+        // 如果 hostView 已有 superview（被重用），先移除
+        let wasReused = hostView.superview != nil
+        if wasReused {
+            NSLog("🔄 [PersistentView] hostView reused for tab %@, old superview=%@",
+                  String(tabId.uuidString.prefix(8)), String(describing: hostView.superview))
+            hostView.removeFromSuperview()
+        }
+
+        // 使用 autoresizingMask - 强制从 (0,0) 开始
+        hostView.frame = NSRect(origin: .zero, size: container.bounds.size)
+        hostView.autoresizingMask = [.width, .height]
+        container.addSubview(hostView)
+
+        NSLog("🔧 [PersistentView] makeNSView: tab=%@, containerSize=%@, hostView.frame=%@, hasRemote=%d",
+              String(tabId.uuidString.prefix(8)), NSStringFromSize(size),
+              NSStringFromRect(hostView.frame), hostView.hasRemoteViewController ? 1 : 0)
+
+        return container
+    }
+
+    func updateNSView(_ container: NSView, context: Context) {
+        // 确保 coordinator.tabId 已设置
+        if coordinator.tabId == nil {
+            coordinator.tabId = tabId
+        }
+
+        // 🔑 更新 hit testing 状态（Overview 模式下禁用，让手势穿透）
+        if let containerView = container as? ContainerView {
+            containerView.allowsHitTesting = allowsHitTesting
+        }
+
+        // 🔑 关键：不要用 `size` 参数覆盖 SwiftUI 分配的 frame！
+        // SwiftUI 会自动设置 NSView 的 frame，我们应该使用它分配的尺寸
+        let actualSize = container.bounds.size
+        guard actualSize.width > 50 && actualSize.height > 50 else { return }
+
+        // 更新 hostView frame 使用 SwiftUI 分配的实际尺寸
+        if let hostView = container.subviews.first as? ViewBridgeHostView {
+            hostView.applyFrameSize(actualSize)
+            // 通知 coordinator 实际尺寸（用于同步到 Service）
+            coordinator.updateViewportSize(actualSize)
         }
     }
 
-    static func dismantleNSView(_ wrapper: NSView, coordinator: ()) {
-        // wrapper 被销毁时，container 会从 wrapper 移除
-        // 但 container 仍保存在 Manager 中，hostView 仍是 container 的子视图
-        // 因此 hostView 永远不会变成"孤儿"，XPC 连接不会断开
-        fputs("⚠️ PersistentViewBridgeView.dismantleNSView: wrapper destroyed, container stays in manager\n", stderr)
+    static func dismantleNSView(_ container: NSView, coordinator: ()) {
+        // 不移除 hostView - 它由 Manager 持有
+        // 下次 makeNSView 时会重用同一个 hostView
+        fputs("⚠️ PersistentViewBridgeView.dismantleNSView called (hostView retained by manager)\n", stderr)
+    }
+}
+
+// MARK: - Nine Grid Debug Overlay
+
+/// 九宫格调试视图 - 用于可视化视口位置
+struct NineGridDebugOverlay: View {
+    let size: CGSize
+
+    var body: some View {
+        ZStack {
+            // 网格线
+            Canvas { context, canvasSize in
+                let cellWidth = canvasSize.width / 3
+                let cellHeight = canvasSize.height / 3
+
+                // 绘制竖线
+                for i in 1..<3 {
+                    let x = cellWidth * CGFloat(i)
+                    var path = Path()
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: canvasSize.height))
+                    context.stroke(path, with: .color(.red.opacity(0.5)), lineWidth: 2)
+                }
+
+                // 绘制横线
+                for i in 1..<3 {
+                    let y = cellHeight * CGFloat(i)
+                    var path = Path()
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: canvasSize.width, y: y))
+                    context.stroke(path, with: .color(.red.opacity(0.5)), lineWidth: 2)
+                }
+
+                // 绘制边框
+                let borderPath = Path(CGRect(x: 1, y: 1, width: canvasSize.width - 2, height: canvasSize.height - 2))
+                context.stroke(borderPath, with: .color(.red), lineWidth: 2)
+
+                // 中心十字
+                let centerX = canvasSize.width / 2
+                let centerY = canvasSize.height / 2
+                var crossPath = Path()
+                crossPath.move(to: CGPoint(x: centerX - 20, y: centerY))
+                crossPath.addLine(to: CGPoint(x: centerX + 20, y: centerY))
+                crossPath.move(to: CGPoint(x: centerX, y: centerY - 20))
+                crossPath.addLine(to: CGPoint(x: centerX, y: centerY + 20))
+                context.stroke(crossPath, with: .color(.blue), lineWidth: 2)
+            }
+
+            // 格子编号
+            VStack(spacing: 0) {
+                ForEach(0..<3) { row in
+                    HStack(spacing: 0) {
+                        ForEach(0..<3) { col in
+                            let index = row * 3 + col + 1
+                            Text("\(index)")
+                                .font(.system(size: 48, weight: .bold))
+                                .foregroundColor(.red.opacity(0.3))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                }
+            }
+
+            // 尺寸信息
+            VStack {
+                HStack {
+                    Spacer()
+                    Text(String(format: "%.0f × %.0f", size.width, size.height))
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.red.opacity(0.7))
+                        .cornerRadius(4)
+                        .padding(8)
+                }
+                Spacer()
+            }
+        }
+        // 约束 frame 为 size，避免继承父视图的尺寸导致网格过大
+        .frame(width: size.width, height: size.height)
+        .allowsHitTesting(false) // 不阻止交互
+    }
+}
+
+// MARK: - Unified React Native Layer
+
+/// 统一的 ViewBridge 内容层 - 始终渲染，永不销毁
+///
+/// 🔑 核心设计：解决模式切换时 ViewBridge 连接断开的问题
+/// - PersistentViewBridgeView 始终挂载，hostView 永不从容器中移除
+/// - scale 始终为 1，不使用 scaleEffect
+/// - 尺寸根据模式变化（Media Query 风格，Service 端渲染对应尺寸内容）
+/// - Focus 模式：size=viewportSize, position=(0,0)
+/// - Overview 模式：size=cardSize, position=cardPosition
+/// - 动画切换期间：opacity=0，由 Animation 层快照遮盖
+struct UnifiedReactNativeLayer: View {
+    let tab: Tab
+    let fingerprint: String
+    let viewportSize: CGSize      // Focus 模式的尺寸（全屏）
+    let cardSize: CGSize          // Overview 模式的尺寸（卡片大小）
+    let cardPosition: CGPoint     // Overview 模式的位置（卡片左上角）
+    let isFocused: Bool           // 是否处于 Focus 模式
+    let isTransitioning: Bool     // 是否正在过渡动画中
+    let coordinator: ViewBridgeCoordinator
+
+    /// 当前尺寸
+    /// 🔑 过渡期间保持 Focus 尺寸，避免闪烁（因为动画层会遮盖）
+    private var currentSize: CGSize {
+        // 过渡期间：保持大尺寸，让动画层遮盖
+        // 非过渡期间：根据 isFocused 选择尺寸
+        if isTransitioning {
+            return viewportSize  // 始终使用 Focus 尺寸
+        }
+        return isFocused ? viewportSize : cardSize
+    }
+
+    /// 当前位置（左上角）
+    /// 🔑 过渡期间保持 Focus 位置，避免闪烁（因为动画层会遮盖）
+    private var currentPosition: CGPoint {
+        // 过渡期间：保持原点位置，让动画层遮盖
+        // 非过渡期间：根据 isFocused 选择位置
+        if isTransitioning {
+            return .zero  // 始终使用 Focus 位置
+        }
+        return isFocused ? .zero : cardPosition
+    }
+
+    // XPC 状态
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @State private var hasValidConfigSent = false
+    /// 🔑 触发 SwiftUI 重渲染的状态（coordinator 变化不会自动触发）
+    @State private var serviceAllocated = false
+
+    // 监听 resize 状态，用于显示快照遮罩
+    @ObservedObject private var resizeState = WindowResizeState.shared
+
+    // 调试模式开关
+    private static let showDebugGrid = false
+
+    /// 检查 service 是否已分配（使用 @State 触发 SwiftUI 重渲染）
+    private var isServiceAllocated: Bool {
+        serviceAllocated && coordinator.allocatedServiceId != nil
+    }
+
+    var body: some View {
+        // 🔍 调试日志
+        let _ = NSLog("🔍 [UnifiedRN] body: tab=%@, isFocused=%d, transitioning=%d, size=%.0fx%.0f, pos=(%.0f,%.0f)",
+                      String(tab.id.uuidString.prefix(8)),
+                      isFocused ? 1 : 0,
+                      isTransitioning ? 1 : 0,
+                      currentSize.width, currentSize.height,
+                      currentPosition.x, currentPosition.y)
+
+        ZStack(alignment: .topLeading) {
+            // 🔑 关键：始终渲染 PersistentViewBridgeView，尺寸随模式变化（Media Query 风格）
+            if ViewBridgeHostView.isAvailable, isServiceAllocated, let serviceId = coordinator.allocatedServiceId {
+                PersistentViewBridgeView(
+                    tabId: tab.id,
+                    serviceBundleIdentifier: serviceId,
+                    coordinator: coordinator,
+                    size: currentSize,  // 🔑 尺寸随模式变化：Focus=viewportSize, Overview=cardSize
+                    allowsHitTesting: isFocused && !isTransitioning  // 🔑 Overview 模式禁用，让手势穿透到 Grid
+                )
+                .frame(width: currentSize.width, height: currentSize.height, alignment: .topLeading)
+                .onAppear {
+                    isLoading = false
+                    if coordinator.hostView?.hasRemoteViewController == true && !coordinator.hasConnection {
+                        coordinator.hasConnection = true
+                    }
+                    if coordinator.hasConnection && coordinator.xpcServiceReady && isCoordinatorViewportSizeValid {
+                        sendTabConfigIfReady()
+                    }
+                }
+            } else if !ViewBridgeHostView.isAvailable {
+                Text("ViewBridge not available")
+                    .foregroundColor(.secondary)
+                    .frame(width: currentSize.width, height: currentSize.height)
+            } else if let error = errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+                    .frame(width: currentSize.width, height: currentSize.height)
+            } else {
+                ProgressView("Allocating process...")
+                    .controlSize(.regular)
+                    .frame(width: currentSize.width, height: currentSize.height)
+            }
+
+            // 九宫格调试 overlay（仅 Focus 模式且非过渡期间）
+            if Self.showDebugGrid && isFocused && !isTransitioning {
+                NineGridDebugOverlay(size: currentSize)
+            }
+
+            // 拖动 resize 时的快照遮罩层（仅 Focus 模式）
+            if isFocused && !isTransitioning,
+               resizeState.isWaitingForSizeApplied,
+               resizeState.activeTabId == tab.id,
+               let snapshot = TabSnapshotCacheManager.shared.focusSnapshot(for: tab.id) {
+                Image(nsImage: snapshot)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: currentSize.width, height: currentSize.height)
+                    .clipped()
+                    .allowsHitTesting(false)
+            }
+
+        }
+        .frame(width: currentSize.width, height: currentSize.height, alignment: .topLeading)
+        // 🔑 使用 position 定位：Focus=(0,0), Overview=卡片位置
+        // position 使用中心点坐标
+        .position(
+            x: currentPosition.x + currentSize.width / 2,
+            y: currentPosition.y + currentSize.height / 2
+        )
+        // 🔑 禁用 Live 层的所有隐式动画（由 Animation 层快照遮盖）
+        .animation(nil, value: currentSize)
+        .animation(nil, value: currentPosition)
+        .animation(nil, value: isTransitioning)
+        // 🔑 过渡期间完全透明，动画结束后才显示
+        .opacity(isTransitioning ? 0 : 1)
+        // Focus 模式下允许交互
+        .allowsHitTesting(isFocused && !isTransitioning)
+        .onAppear {
+            coordinator.tabId = tab.id
+            coordinator.currentViewportSize = currentSize
+            setupConnectionCallback()
+            allocateServiceIfNeeded()
+            if coordinator.hasConnection && coordinator.xpcServiceReady && isCoordinatorViewportSizeValid {
+                sendTabConfigIfReady()
+            }
+        }
+        // 🔑 监听尺寸变化（模式切换时）
+        .onChange(of: currentSize) { _, newSize in
+            guard newSize.width > 50 && newSize.height > 50 else { return }
+            coordinator.updateViewportSize(newSize)
+        }
+    }
+
+    /// 检查 viewportSize 是否有效（不是初始的 100x100）- 用于直接访问 view 的 viewportSize
+    private var isViewportSizeValid: Bool {
+        viewportSize.width > 100 && viewportSize.height > 100
+    }
+
+    /// 检查 coordinator 中的 viewportSize 是否有效 - 用于闭包中访问最新值
+    /// 注意：使用宽松的阈值 (> 10)，因为在 Overview 模式下 cardSize 可能很小
+    /// 但仍需要发送 tabConfig 让 RN 能渲染内容
+    private var isCoordinatorViewportSizeValid: Bool {
+        coordinator.currentViewportSize.width > 10 && coordinator.currentViewportSize.height > 10
+    }
+
+    private func allocateServiceIfNeeded() {
+        if coordinator.allocatedServiceId != nil {
+            // 已分配，确保 @State 同步
+            if !serviceAllocated {
+                serviceAllocated = true
+            }
+            // 🔑 快速路径：检查是否已预热，直接标记 ready
+            checkPrewarmStatusAndSetReady()
+            // 设置 XPC ready listener（备用）
+            setupXPCReadyListener()
+            return
+        }
+
+        do {
+            let serviceId = try XPCServicePool.shared.allocateService(
+                for: tab.id,
+                fingerprint: fingerprint
+            )
+            coordinator.allocatedServiceId = serviceId
+            // 🔑 触发 SwiftUI 重渲染
+            serviceAllocated = true
+            // 🔑 快速路径：检查是否已预热
+            checkPrewarmStatusAndSetReady()
+            // 设置 XPC ready listener（备用）
+            setupXPCReadyListener()
+        } catch let error as XPCServicePoolError {
+            errorMessage = error.localizedDescription
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 🔥 快速路径：如果 Service 已预热，直接标记 ready 并尝试发送 config
+    private func checkPrewarmStatusAndSetReady() {
+        guard let serviceId = coordinator.allocatedServiceId else { return }
+
+        // 检查 Service 是否已 ready（通过预热或之前的连接）
+        if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
+            if !coordinator.xpcServiceReady {
+                coordinator.xpcServiceReady = true
+                NSLog("🔥 [Prewarm] Service %@ already ready, fast path enabled",
+                      serviceId.components(separatedBy: ".").last ?? "")
+            }
+            // 立即尝试发送 config（如果连接也已建立）
+            sendTabConfigIfReady()
+        }
+    }
+
+    private func setupXPCReadyListener() {
+        guard coordinator.xpcReadyObserver == nil,
+              let serviceId = coordinator.allocatedServiceId else {
+            return
+        }
+
+        // 🔥 快速路径已在 checkPrewarmStatusAndSetReady 中处理
+        // 这里仅设置监听器作为备用（处理 Service 重启等情况）
+
+        // 监听 com.canvas.xpcServiceReady（无后缀），通过 userInfo.bundleId 过滤
+        coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.xpcServiceReady"),
+            object: nil,
+            queue: .main
+        ) { [serviceId] notification in
+            // 只处理来自目标 service 的通知
+            guard let userInfo = notification.userInfo,
+                  let bundleId = userInfo["bundleId"] as? String,
+                  bundleId == serviceId else { return }
+
+            // 标记到 pool，供后续新 Tab 查询
+            XPCServicePool.shared.markServiceReady(bundleIdentifier: serviceId)
+            coordinator.xpcServiceReady = true
+            sendTabConfigIfReady()
+        }
+    }
+
+    private func setupConnectionCallback() {
+        coordinator.onConnectionEstablished = {
+            coordinator.hasConnection = true
+            sendTabConfigIfReady()
+        }
+
+        // 检查连接是否已建立（通过 hasRemoteViewController 判断）
+        if coordinator.hostView?.hasRemoteViewController == true && !coordinator.hasConnection {
+            coordinator.onConnectionEstablished?()
+        }
+
+        // 🔑 如果 hasConnection 已经是 true（由 PersistentViewBridgeView.makeNSView 设置），
+        // 且 xpcServiceReady，直接发送 tabConfig
+        if coordinator.hasConnection && coordinator.xpcServiceReady {
+            NSLog("🔗 [setupConnectionCallback] Connection already established, sending config")
+            sendTabConfigIfReady()
+        }
+    }
+
+    private func sendTabConfigIfReady() {
+        // 使用 coordinator 中的 viewportSize，因为这个方法可能从闭包中被调用
+        let currentSize = coordinator.currentViewportSize
+        let tabIdShort = String(tab.id.uuidString.prefix(8))
+
+        // 检查 coordinator 中的 viewportSize 是否有效（不是初始的 100x100）
+        guard isCoordinatorViewportSizeValid else {
+            NSLog("⚠️ [sendTabConfig] tab=%@ SKIP: viewportSize invalid (%.0fx%.0f)",
+                  tabIdShort, currentSize.width, currentSize.height)
+            return
+        }
+
+        guard coordinator.hasConnection && coordinator.xpcServiceReady,
+              let serviceId = coordinator.allocatedServiceId else {
+            NSLog("⚠️ [sendTabConfig] tab=%@ SKIP: hasConnection=%d, xpcReady=%d, serviceId=%@",
+                  tabIdShort, coordinator.hasConnection ? 1 : 0,
+                  coordinator.xpcServiceReady ? 1 : 0,
+                  coordinator.allocatedServiceId ?? "nil")
+            return
+        }
+
+        // 防止重复发送相同尺寸的 config
+        if coordinator.lastSentConfigSize == currentSize {
+            return
+        }
+        coordinator.lastSentConfigSize = currentSize
+
+        // 发送 tab config - 使用 coordinator 中的最新尺寸
+        var tabConfig: [String: Any] = [
+            "tabId": tab.id.uuidString,
+            "title": tab.title,
+            "backgroundColor": tab.backgroundColor,
+            "containerWidth": currentSize.width,
+            "containerHeight": currentSize.height
+        ]
+
+        // Add optional scripts
+        if let unifiedScript = tab.unifiedScript {
+            tabConfig["unifiedScript"] = unifiedScript
+        }
+        if let systemTabType = tab.systemTabType {
+            tabConfig["systemAppType"] = systemTabType.rawValue
+        }
+
+        NSLog("📤 [sendTabConfig] tab=%@ service=%@ size=%.0fx%.0f systemAppType=%@",
+              tabIdShort, serviceId.components(separatedBy: ".").last ?? "",
+              currentSize.width, currentSize.height,
+              tab.systemTabType?.rawValue ?? "nil")
+
+        if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            let notificationName = "com.canvas.tabConfig.\(serviceId)"
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name(notificationName),
+                object: nil,
+                userInfo: ["config": jsonString],
+                deliverImmediately: true
+            )
+        }
     }
 }
 
 /// SwiftUI wrapper for ViewBridgeHostView
-/// Real Layer: 始终以 viewport size 渲染 RemoteView
+/// Remote view size 跟随 TabPanel 实际尺寸
 /// 支持从进程池分配独立的 XPC service
 struct ViewBridgeTabView: NSViewRepresentable {
     let tabId: UUID
-    let contentSize: CGSize  // Remote view 渲染尺寸（viewport size）
+    let contentSize: CGSize  // TabPanel 实际尺寸
     let coordinator: ViewBridgeCoordinator
     let serviceBundleIdentifier: String  // 从进程池分配的 bundle id
 
@@ -753,17 +1609,24 @@ struct ViewBridgeTabView: NSViewRepresentable {
         view.coordinator = coordinator
         coordinator.hostView = view
         // 设置连接建立回调
+        // 🔑 直接在这里设置 hasConnection，因为 onAppear 中的 setupConnectionCallback
+        // 可能在连接建立后才执行（时序问题）
         view.onConnectionEstablished = { [weak coordinator] in
-            coordinator?.onConnectionEstablished?()
+            guard let coordinator = coordinator else { return }
+            NSLog("🔗 [TabView] Connection established, setting hasConnection=true")
+            coordinator.hasConnection = true
+            coordinator.onConnectionEstablished?()
         }
         return view
     }
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
+        fputs("📐 ViewBridgeTabView.updateNSView: contentSize=\(contentSize)\n", stderr)
         // Ensure coordinator reference is set
         nsView.coordinator = coordinator
         coordinator.hostView = nsView
-        nsView.updateContentSize(contentSize)
+        // 统一由 coordinator 发送 containerSizeChanged（HostView 只做本地尺寸更新）
+        coordinator.updateViewportSize(contentSize)
     }
 
     static func dismantleNSView(_ nsView: ViewBridgeHostView, coordinator: ()) {
@@ -777,7 +1640,7 @@ struct ViewBridgeTabView: NSViewRepresentable {
 // MARK: - ViewBridge Multi-Process Tab View
 
 /// A view that displays tab content via ViewBridge XPC service
-/// Real Layer: 始终以 viewport size 渲染 RemoteView（双层架构）
+/// Remote view size 跟随 TabPanel 实际尺寸，RN 自适应
 ///
 /// 多进程架构：基于应用指纹分配进程
 /// - 相同应用（fingerprint 相同）= 共享同一个 RCTViewService 进程
@@ -786,7 +1649,7 @@ struct ViewBridgeTabView: NSViewRepresentable {
 struct ViewBridgeMultiProcessTabView: View {
     let tab: Tab
     let fingerprint: String  // 应用指纹
-    let containerSize: CGSize  // Remote view 渲染尺寸（viewport size）
+    let containerSize: CGSize  // TabPanel 实际尺寸
     let coordinator: ViewBridgeCoordinator
     var isFocused: Bool = false  // 是否当前 focused
 
@@ -796,6 +1659,9 @@ struct ViewBridgeMultiProcessTabView: View {
     // 用于触发 UI 刷新的状态（coordinator 变化不会自动触发 SwiftUI 刷新）
     @State private var serviceAllocated = false
 
+    // 监听 resize 状态，用于显示快照遮罩
+    @ObservedObject private var resizeState = WindowResizeState.shared
+
     init(tab: Tab, fingerprint: String, containerSize: CGSize, coordinator: ViewBridgeCoordinator, isFocused: Bool = false) {
         self.tab = tab
         self.fingerprint = fingerprint
@@ -804,8 +1670,6 @@ struct ViewBridgeMultiProcessTabView: View {
         self.isFocused = isFocused
         // 设置 coordinator 的 tabId
         coordinator.tabId = tab.id
-        fputs("🔵 ViewBridgeMultiProcessTabView.init: tab=\(tab.id.uuidString.prefix(8)), fingerprint=\(fingerprint.prefix(16)), containerSize=\(containerSize)\n", stderr)
-        fflush(stderr)
     }
 
     var body: some View {
@@ -813,21 +1677,18 @@ struct ViewBridgeMultiProcessTabView: View {
             // 多进程架构：基于应用指纹分配进程
             // 使用 serviceAllocated 触发 UI 刷新，实际 serviceId 从 coordinator 获取
             if ViewBridgeHostView.isAvailable, serviceAllocated, let serviceId = coordinator.allocatedServiceId {
-                // Real Layer: 使用持久化的 ViewBridgeHostView，避免 SwiftUI 重建时丢失 XPC 连接
-                PersistentViewBridgeView(
+                ViewBridgeTabView(
                     tabId: tab.id,
-                    serviceBundleIdentifier: serviceId,
+                    contentSize: containerSize,
                     coordinator: coordinator,
-                    size: containerSize
+                    serviceBundleIdentifier: serviceId
                 )
                 // 稳定的 id 确保 View 不会因为 containerSize 变化而被重建
                 .id(tab.id)
-                // frame 使用完整 containerSize（viewport size）
                 .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
                 .clipped()
                 .onAppear {
                     isLoading = false
-                    fputs("📤 [HOST] PersistentViewBridgeView.onAppear: tab=\(tab.id.uuidString.prefix(8)), service=\(serviceId.components(separatedBy: ".").last ?? ""), containerSize=\(containerSize)\n", stderr)
 
                     // 设置 XPC service ready 监听器（如果还没设置）
                     setupXPCReadyListener()
@@ -835,8 +1696,13 @@ struct ViewBridgeMultiProcessTabView: View {
                     // 设置连接建立回调
                     coordinator.onConnectionEstablished = {
                         coordinator.hasConnection = true
-                        fputs("📤 [HOST] XPC connection established for tab: \(tab.id.uuidString.prefix(8))\n", stderr)
                         // 只有当 XPC service 也准备好后才发送 config
+                        sendTabConfigIfReady()
+                    }
+
+                    // 🔑 检查连接是否已建立（可能在 onAppear 之前就建立了）
+                    if coordinator.hasConnection && coordinator.xpcServiceReady {
+                        NSLog("🔗 [MultiProcess.onAppear] Connection already established, sending config")
                         sendTabConfigIfReady()
                     }
                 }
@@ -845,15 +1711,6 @@ struct ViewBridgeMultiProcessTabView: View {
                 }
                 .onChange(of: isFocused) { _, newValue in
                     if newValue && coordinator.hasConnection {
-                        fputs("📤 Tab became focused, re-sending config: \(tab.id.uuidString.prefix(8))\n", stderr)
-                        sendTabConfigToService()
-                    }
-                }
-                .onChange(of: containerSize) { oldSize, newSize in
-                    // containerSize 变化时重新发送 tabConfig（确保 Service 获得正确尺寸）
-                    // 这处理了初始 viewportSize 为 (1,1) 然后变为正确值的情况
-                    guard newSize.width > 10 && newSize.height > 10 else { return }
-                    if coordinator.hasConnection && coordinator.xpcServiceReady {
                         sendTabConfigToService()
                     }
                 }
@@ -865,14 +1722,28 @@ struct ViewBridgeMultiProcessTabView: View {
             } else {
                 // 等待进程池分配
                 ProgressView("Allocating process...")
+                    .controlSize(.regular)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
             if isLoading && serviceAllocated && errorMessage == nil {
                 loadingView
             }
+
+            // 拖动 resize 时的快照遮罩层
+            // 复用 TabSnapshotCacheManager 的 Slot A (focusSnapshot)
+            if resizeState.isWaitingForSizeApplied,
+               resizeState.activeTabId == tab.id,
+               let snapshot = TabSnapshotCacheManager.shared.focusSnapshot(for: tab.id) {
+                Image(nsImage: snapshot)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: containerSize.width, height: containerSize.height)
+                    .clipped()
+                    .allowsHitTesting(false)
+            }
         }
-        // 双层架构：Real Layer 使用完整 viewport size
         .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
         .onAppear {
             allocateServiceIfNeeded()
@@ -890,24 +1761,37 @@ struct ViewBridgeMultiProcessTabView: View {
             }
             if let serviceId = coordinator.allocatedServiceId {
                 setupConnectionBindingListener(for: serviceId)
+                // 🔥 快速路径：检查是否已预热
+                checkPrewarmStatusAndSetReady(serviceId: serviceId)
             }
             return
         }
 
         do {
             coordinator.allocatedServiceId = try XPCServicePool.shared.allocateService(for: tab.id, fingerprint: fingerprint)
-            fputs("📦 Tab \(tab.id.uuidString.prefix(8)) allocated service: \(coordinator.allocatedServiceId ?? "nil") for fingerprint: \(fingerprint.prefix(16))\n", stderr)
             // 触发 SwiftUI 重新渲染
             serviceAllocated = true
             if let serviceId = coordinator.allocatedServiceId {
                 setupConnectionBindingListener(for: serviceId)
+                // 🔥 快速路径：检查是否已预热
+                checkPrewarmStatusAndSetReady(serviceId: serviceId)
             }
         } catch let error as XPCServicePoolError {
             errorMessage = error.localizedDescription
-            fputs("❌ Tab \(tab.id.uuidString.prefix(8)) allocation failed: \(error.localizedDescription)\n", stderr)
         } catch {
             errorMessage = "Failed to allocate RN process: \(error.localizedDescription)"
-            fputs("❌ Tab \(tab.id.uuidString.prefix(8)) allocation failed: \(error.localizedDescription)\n", stderr)
+        }
+    }
+
+    /// 🔥 快速路径：如果 Service 已预热，直接标记 ready
+    private func checkPrewarmStatusAndSetReady(serviceId: String) {
+        if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
+            if !coordinator.xpcServiceReady {
+                coordinator.xpcServiceReady = true
+                NSLog("🔥 [MultiProcess.Prewarm] Service %@ already ready, fast path enabled",
+                      serviceId.components(separatedBy: ".").last ?? "")
+            }
+            sendTabConfigIfReady()
         }
     }
 
@@ -918,18 +1802,17 @@ struct ViewBridgeMultiProcessTabView: View {
 
         // Get the allocated service bundle identifier from coordinator
         guard let expectedBundleId = coordinator.allocatedServiceId else {
-            NSLog("⚠️ [HOST] Cannot setup XPC ready listener - no service allocated")
             return
         }
 
-        NSLog("📡 [HOST] Setting up XPC ready listener for tab: %@, expecting bundleId: %@",
-              String(tab.id.uuidString.prefix(8)), expectedBundleId)
+        // 🔥 快速路径已在 checkPrewarmStatusAndSetReady 中处理
+        // 这里仅设置监听器作为备用
 
         coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.canvas.xpcServiceReady"),
             object: nil,
             queue: .main
-        ) { [coordinator, expectedBundleId, tab] notification in
+        ) { [coordinator, expectedBundleId] notification in
             // Filter by bundle identifier - only accept notifications from our target service
             guard let userInfo = notification.userInfo,
                   let notifyingBundleId = userInfo["bundleId"] as? String,
@@ -937,11 +1820,10 @@ struct ViewBridgeMultiProcessTabView: View {
                 return
             }
 
-            NSLog("📡 [HOST] Received xpcServiceReady notification for tab: %@ from: %@",
-                  String(tab.id.uuidString.prefix(8)), notifyingBundleId)
+            // 标记到 pool，供后续新 Tab 查询
+            XPCServicePool.shared.markServiceReady(bundleIdentifier: expectedBundleId)
 
             // Broadcast Metro config to XPC service before it creates RCTBridge
-            // This ensures the service uses the correct Metro port
             Task { @MainActor in
                 if let port = MetroManager.shared.actualPort {
                     let config: [String: Any] = [
@@ -954,7 +1836,6 @@ struct ViewBridgeMultiProcessTabView: View {
                         userInfo: config,
                         deliverImmediately: true
                     )
-                    NSLog("📡 [HOST] Broadcasted Metro config to XPC: %@:%d", MetroManager.shared.address, port)
                 }
             }
 
@@ -972,19 +1853,16 @@ struct ViewBridgeMultiProcessTabView: View {
             forName: NSNotification.Name("com.canvas.xpcConnectionCreated"),
             object: nil,
             queue: .main
-        ) { [coordinator, tabId = tab.id] notification in
+        ) { [weak coordinator, tabId = tab.id] notification in
+            _ = coordinator  // silence unused capture warning
             guard let info = notification.userInfo,
                   let bundleId = info["bundleId"] as? String,
                   bundleId == serviceId,
                   let internalId = info["internalId"] as? String else { return }
 
             // CRITICAL: Only process if this notification is for OUR tab
-            // Service includes the tabId it received via pendingTabId notification
             if let notificationTabId = info["tabId"] as? String {
-                guard notificationTabId == tabId.uuidString else {
-                    fputs("🔗 [HOST] Ignoring xpcConnectionCreated for different tab: \(notificationTabId.prefix(8)) (we are \(tabId.uuidString.prefix(8)))\n", stderr)
-                    return
-                }
+                guard notificationTabId == tabId.uuidString else { return }
             }
 
             let bindName = "com.canvas.bindTab.\(serviceId)"
@@ -998,42 +1876,21 @@ struct ViewBridgeMultiProcessTabView: View {
                 userInfo: bindInfo,
                 deliverImmediately: true
             )
-            fputs("🔗 [HOST] Bound tab \(tabId.uuidString.prefix(8)) to connection \(internalId.prefix(8)) via \(bindName)\n", stderr)
         }
     }
 
     /// 仅当 ViewBridge 连接和 XPC service listener 都就绪时才发送 config
     private func sendTabConfigIfReady() {
-        NSLog("🔍 [HOST] sendTabConfigIfReady: hasConnection=%d, xpcServiceReady=%d", coordinator.hasConnection ? 1 : 0, coordinator.xpcServiceReady ? 1 : 0)
         guard coordinator.hasConnection && coordinator.xpcServiceReady else {
-            NSLog("⏳ [HOST] Not ready yet - waiting for both connection and XPC service ready")
             return
         }
-        // 只有当 containerSize 有效时才发送 tabConfig
-        // 如果 containerSize 无效，onChange(of: containerSize) 会在它变为有效时触发发送
-        guard containerSize.width > 10 && containerSize.height > 10 else {
-            NSLog("⏳ [HOST] Connection ready but containerSize invalid (%.0fx%.0f) - waiting for valid size",
-                  containerSize.width, containerSize.height)
-            return
-        }
-        NSLog("✅ [HOST] Both ready, sending tab config now!")
         sendTabConfigToService()
-
-        // After tabConfig is sent, also send current size as containerSizeChanged
-        // This ensures the Service gets the size when it's fully ready to receive notifications
-        // Earlier notifications may have been missed during XPC service startup
-        // Use hostView's currentContentSize at dispatch time to get the latest size
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [coordinator] in
-            if let currentSize = coordinator.hostView?.currentContentSize {
-                coordinator.sendContainerSizeNotification(size: currentSize)
-            }
-        }
     }
 
     private var loadingView: some View {
         VStack(spacing: 12) {
             ProgressView()
-                .scaleEffect(0.8)
+                .controlSize(.small)
             Text("Connecting to ViewBridge service...")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
@@ -1062,11 +1919,8 @@ struct ViewBridgeMultiProcessTabView: View {
     private func sendTabConfigToService() {
         // Get the target service bundle identifier from coordinator
         guard let targetServiceId = coordinator.allocatedServiceId else {
-            fputs("⚠️ [HOST] Cannot send tab config - no service allocated\n", stderr)
             return
         }
-
-        fputs("📤 [HOST] sendTabConfigToService: tabId=\(tab.id.uuidString.prefix(8)), containerSize=\(containerSize), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), targetService=\(targetServiceId)\n", stderr)
 
         // Build tab config dictionary
         var tabConfig: [String: Any] = [
@@ -1097,14 +1951,9 @@ struct ViewBridgeMultiProcessTabView: View {
         }
 
         // Serialize to JSON and send using service-specific notification name
-        // Format: com.canvas.tabConfig.<bundleId>
         if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
            let jsonString = String(data: jsonData, encoding: .utf8) {
-            fputs("📤 Tab config JSON: \(jsonString.prefix(200))...\n", stderr)
-
             let notificationName = "com.canvas.tabConfig.\(targetServiceId)"
-            fputs("📤 Posting to notification: \(notificationName)\n", stderr)
-
             DistributedNotificationCenter.default().postNotificationName(
                 NSNotification.Name(notificationName),
                 object: nil,
@@ -1129,57 +1978,5 @@ struct ViewBridgeMultiProcessTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
-    }
-}
-
-// MARK: - Focused React Native Overlay
-
-/// Focus 模式下的全屏 React Native 内容层（Real Layer）
-/// 双层架构：此层始终以 viewport size 渲染，不受 canvas scaleEffect 影响
-struct FocusedReactNativeOverlay: View {
-    let tab: Tab
-    let fingerprint: String
-    let viewportSize: CGSize
-    let coordinator: ViewBridgeCoordinator
-
-    var body: some View {
-        ViewBridgeMultiProcessTabView(
-            tab: tab,
-            fingerprint: fingerprint,
-            containerSize: viewportSize,
-            coordinator: coordinator,
-            isFocused: true
-        )
-        .id(tab.id)
-        .frame(width: viewportSize.width, height: viewportSize.height)
-    }
-}
-
-// MARK: - Scale Layer Thumbnail View
-
-/// Overview 模式下的缩略图层（Scale Layer）
-/// 使用截图 + scaleEffect 实现平滑的 Focus/Overview 切换动画
-struct ViewBridgeThumbnailView: View {
-    let tabId: UUID
-    let screenshot: NSImage?
-    let thumbnailSize: CGSize
-
-    var body: some View {
-        if let image = screenshot {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: thumbnailSize.width, height: thumbnailSize.height)
-                .clipped()
-        } else {
-            // Placeholder when no screenshot available
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: thumbnailSize.width, height: thumbnailSize.height)
-                .overlay(
-                    ProgressView()
-                        .scaleEffect(0.8)
-                )
-        }
     }
 }

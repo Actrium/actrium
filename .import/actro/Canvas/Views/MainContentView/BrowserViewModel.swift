@@ -26,7 +26,7 @@ class BrowserViewModel: ObservableObject {
     @Published var tabGroups: [TabGroup] = []
 
     // 🔴 开发调试：启动时直接进入 Focus 模式
-    @Published var shouldStartInFocusMode: Bool = false
+    @Published var shouldStartInFocusMode: Bool = true
 
     /// Canvas display mode (Overview vs Focus)
     /// Stored here to survive view recreation when DevTools layout changes

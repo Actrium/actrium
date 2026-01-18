@@ -412,10 +412,25 @@ class MetroManager: ObservableObject {
         logs.removeAll()
     }
 
+    /// App Group for shared Metro config (XPC Service can read on startup)
+    private static let appGroupId = "group.chat.askaway.canvas"
+    private static let metroHostKey = "metro.host"
+    private static let metroPortKey = "metro.port"
+
     /// Broadcast Metro config to XPC services via DistributedNotificationCenter
+    /// Also writes to shared UserDefaults for XPC Services to query on startup
     private func broadcastMetroConfig() {
         guard let port = actualPort else { return }
 
+        // 1. Write to shared UserDefaults (for XPC Service startup query)
+        if let sharedDefaults = UserDefaults(suiteName: Self.appGroupId) {
+            sharedDefaults.set(address, forKey: Self.metroHostKey)
+            sharedDefaults.set(Int(port), forKey: Self.metroPortKey)
+            sharedDefaults.synchronize()
+            os_log(.info, log: logger, "Wrote Metro config to shared UserDefaults: %{public}@:%{public}d", address, port)
+        }
+
+        // 2. Broadcast notification (for runtime updates)
         let config: [String: Any] = [
             "host": address,
             "port": port
@@ -429,6 +444,12 @@ class MetroManager: ObservableObject {
         )
 
         os_log(.info, log: logger, "Broadcasted Metro config: %{public}@:%{public}d", address, port)
+    }
+
+    /// Re-broadcast Metro config (called when XPC Service starts and may have missed initial broadcast)
+    func reBroadcastConfig() {
+        guard state.isRunning else { return }
+        broadcastMetroConfig()
     }
 }
 

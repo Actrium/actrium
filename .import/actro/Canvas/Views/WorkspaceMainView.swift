@@ -5,6 +5,12 @@ private let logger = AppLogger.ui
 import AppKit
 import UniformTypeIdentifiers
 
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let toggleFocusOverviewRequested = Notification.Name("toggleFocusOverviewRequested")
+}
+
 // MARK: - Main View
 
 /// 大画布架构 - 统一的 Canvas 视图
@@ -51,6 +57,14 @@ struct WorkspaceMainView: View {
     @FocusState private var isFindBarFocused: Bool
     @StateObject private var viewBridgeCoordinatorManager = ViewBridgeCoordinatorManager()
 
+    // 模式切换过渡控制器
+    @StateObject private var modeTransitionController = ModeTransitionController()
+
+    // Overview 模式下 resize 时的快照遮盖
+    @State private var overviewResizeSnapshot: NSImage?
+    @State private var isOverviewResizing: Bool = false
+    @State private var lastKnownViewportSize: CGSize = .zero
+
     // 根据搜索文本过滤 tabs
     private var filteredTabs: [Tab] {
         guard !searchTabsText.isEmpty else {
@@ -85,6 +99,15 @@ struct WorkspaceMainView: View {
             width: max(viewportSize.width, 1),
             height: max(viewportSize.height, 1)
         )
+
+        // 更新最后已知的视口尺寸（用于 resize 时截图）
+        let _ = {
+            if safeViewportSize != lastKnownViewportSize {
+                DispatchQueue.main.async {
+                    lastKnownViewportSize = safeViewportSize
+                }
+            }
+        }()
 
         // Toolbar height estimation (for grid layout calculations)
         let toolbarHeight: CGFloat = 52
@@ -164,7 +187,8 @@ struct WorkspaceMainView: View {
                 // 防止 scale 为 0 导致奇异矩阵
                 .scaleEffect(max(transform.scale, 0.001), anchor: .topLeading)
                 .offset(x: transform.offset.x, y: transform.offset.y)
-                .animation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0), value: viewModel.canvasMode)
+                // 🔑 禁用 SwiftUI 默认动画，由 ModeTransitionController 手动控制
+                .animation(nil, value: viewModel.canvasMode)
                 .contentShape(Rectangle())
                 // 地址栏退出焦点已由全局鼠标事件监听处理（mouseEventMonitor）
 
@@ -217,8 +241,117 @@ struct WorkspaceMainView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
 
-                // React Native 的 Real Layer 已整合到 TabPanel 中
-                // 不再使用独立的 FocusedReactNativeOverlay，避免 XPC 连接生命周期问题
+                // 🔑 Live 层：统一的 ViewBridge 内容层（canvas 变换之外）
+                // 始终渲染，不论 Focus/Overview 模式，避免模式切换时连接断开
+                // 注意：Live 层在 canvas 外部，需要将 canvas 坐标转换为视口坐标
+                ForEach(viewModel.tabs.filter { tab in
+                    if case .reactNative = tab.contentType { return true }
+                    return false
+                }) { tab in
+                    if case .reactNative(let fingerprint) = tab.contentType {
+                        let isFocused = {
+                            if case .focus(let focusedId) = viewModel.canvasMode {
+                                return focusedId == tab.id
+                            }
+                            return false
+                        }()
+
+                        // 计算卡片在 canvas 坐标系中的位置和尺寸
+                        let slotPosition = filteredTabPositions[tab.id] ?? 0
+                        let canvasCardTopLeft = slotPosition < gridResult.positions.count
+                            ? gridResult.positions[slotPosition]
+                            : .zero
+                        let canvasCardSize = CGSize(
+                            width: gridResult.cardWidth,
+                            height: gridResult.cardHeight
+                        )
+
+                        // 🔑 将 canvas 坐标转换为视口坐标
+                        // Live 层在 canvas 外部，需要手动应用 canvas transform
+                        let viewportCardPosition = CGPoint(
+                            x: canvasCardTopLeft.x * transform.scale + transform.offset.x,
+                            y: canvasCardTopLeft.y * transform.scale + transform.offset.y
+                        )
+                        let viewportCardSize = CGSize(
+                            width: canvasCardSize.width * transform.scale,
+                            height: canvasCardSize.height * transform.scale
+                        )
+
+                        UnifiedReactNativeLayer(
+                            tab: tab,
+                            fingerprint: fingerprint,
+                            viewportSize: safeViewportSize,
+                            cardSize: viewportCardSize,
+                            cardPosition: viewportCardPosition,
+                            isFocused: isFocused,
+                            isTransitioning: modeTransitionController.phase.isTransitioning,
+                            coordinator: viewBridgeCoordinatorManager.coordinator(for: tab.id)
+                        )
+                    }
+                }
+
+                // Search Tabs 搜索框 - 仅在 Overview 模式显示
+                // 放在 AnimationLayer 之前，让动画层能遮盖它
+                if case .overview = viewModel.canvasMode {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 14))
+
+                        TextField("Search Tabs", text: $searchTabsText)
+                            .textFieldStyle(.plain)
+                            .frame(width: 150)
+                            .focused($isSearchTabsFocused)
+                            .onAppear {
+                                if shouldAutoFocusSearchTabs {
+                                    shouldAutoFocusSearchTabs = false
+                                    isSearchTabsFocused = true
+                                }
+                            }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(nsColor: NSColor.controlBackgroundColor).opacity(0.9))
+                    .cornerRadius(8)
+                    .padding(.top, 10)
+                    .padding(.trailing, 10)
+                }
+
+                // 🔑 Animation 层：VirtualGrid 方案
+                // 与真实 Grid 布局完全一致的虚拟网格，使用 Tab 缩略图
+                // 动画时覆盖真实 Grid 和 Search Tabs，完成后隐藏
+                // 注意：实际变换由 ModeTransitionController 通过 CVDisplayLink 驱动
+                // 注意：canvasSize 必须与 TabGridView 的 frame 一致（gridResult.canvasSize）
+                AnimationLayerRepresentable(
+                    controller: modeTransitionController,
+                    canvasSize: canvasSize,  // 使用 gridResult.canvasSize，与 TabGridView 一致
+                    cardSize: CGSize(width: gridResult.cardWidth, height: gridResult.cardHeight),
+                    cards: buildVirtualGridCards(
+                        tabs: filteredTabs,
+                        positions: gridResult.positions,
+                        tabSlotPositions: filteredTabPositions,
+                        cardWidth: gridResult.cardWidth,
+                        cardHeight: gridResult.cardHeight
+                    ),
+                    isVisible: modeTransitionController.phase.isTransitioning
+                )
+                .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(false)
+                // 🔑 确保动画层在所有其他内容之上（包括 Live 层的 NSView）
+                .zIndex(1000)
+
+                // 🔑 Overview 模式下 resize 时的快照遮盖层
+                // 避免拖动窗口大小时出现渲染空白撕裂
+                if isOverviewResizing, let snapshot = overviewResizeSnapshot {
+                    Image(nsImage: snapshot)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                        .clipped()
+                        .allowsHitTesting(false)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
@@ -246,35 +379,6 @@ struct WorkspaceMainView: View {
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // 注意：RN 内容层已移至每个 TabPanel 内部
-                // 每个 Tab 都有独立的 RCTRootView，实现真正的缩放
-
-                // Search Tabs 搜索框 - 仅在 Overview 模式显示
-                if case .overview = viewModel.canvasMode {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 14))
-
-                        TextField("Search Tabs", text: $searchTabsText)
-                            .textFieldStyle(.plain)
-                            .frame(width: 150)
-                            .focused($isSearchTabsFocused)
-                            .onAppear {
-                                if shouldAutoFocusSearchTabs {
-                                    shouldAutoFocusSearchTabs = false
-                                    isSearchTabsFocused = true
-                                }
-                            }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(nsColor: NSColor.controlBackgroundColor).opacity(0.9))
-                    .cornerRadius(8)
-                    .padding(.top, 10)
-                    .padding(.trailing, 10)
-                }
 
                 // Toolbar 底部分隔线（最上层，通栏）
                 VStack {
@@ -397,20 +501,41 @@ struct WorkspaceMainView: View {
                 }
                 }  // end if !useNativeToolbar
             }
+        // 🔑 处理原生 toolbar 按钮的模式切换请求（通过 ModeTransitionController）
+        .onReceive(NotificationCenter.default.publisher(for: .toggleFocusOverviewRequested)) { _ in
+            toggleFocusOverview()
+        }
+        // 🔑 Overview 模式下窗口 resize 时显示快照遮盖
+        .onReceive(NotificationCenter.default.publisher(for: .windowLiveResizeStarted)) { _ in
+            guard case .overview = viewModel.canvasMode else { return }
+            // 截取当前视口快照
+            overviewResizeSnapshot = captureViewportSnapshot(viewportSize: lastKnownViewportSize)
+            isOverviewResizing = true
+            NSLog("📸 Overview resize started - snapshot captured, viewportSize=%.0fx%.0f",
+                  lastKnownViewportSize.width, lastKnownViewportSize.height)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .windowLiveResizeEnded)) { _ in
+            guard isOverviewResizing else { return }
+            // 延迟清除遮盖，等待渲染完成
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                isOverviewResizing = false
+                overviewResizeSnapshot = nil
+                NSLog("📸 Overview resize ended - snapshot cleared")
+            }
+        }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 从 Focus 切换到 Overview 时，先截图当前页面
             if case .focus(let focusedTabId) = oldValue, case .overview = newValue {
                 if let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }) {
                     switch tab.contentType {
                     case .web:
-                        // Web tab: 使用 WebViewHolderManager 截图
+                        // Web tab: 异步截图
                         Task {
                             await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
                         }
                     case .reactNative:
-                        // React Native tab: 使用 ViewBridgeCoordinator 截图（双层架构）
-                        let coordinator = ViewBridgeCoordinatorManager.shared.coordinator(for: focusedTabId)
-                        _ = coordinator.captureAndCacheSnapshot()
+                        // ViewBridge tab: 同步截图
+                        ViewBridgeHostViewManager.shared.takeSnapshot(for: focusedTabId)
                     case .empty:
                         break
                     }
@@ -433,22 +558,9 @@ struct WorkspaceMainView: View {
             fflush(stderr)
 
             // Setup native titlebar toggle callback
-            TitlebarManager.shared.onToggleFocusOverview = { [weak viewModel] in
-                guard let viewModel = viewModel else { return }
-                switch viewModel.canvasMode {
-                case .focus:
-                    withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                        viewModel.canvasMode = .overview
-                    }
-                case .overview:
-                    // Find target tab to focus
-                    if let tabId = viewModel.currentTabId ?? viewModel.tabs.first?.id {
-                        viewModel.currentTabId = tabId
-                        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                            viewModel.canvasMode = .focus(tabId: tabId)
-                        }
-                    }
-                }
+            // 🔑 发送通知由 view 处理，确保通过 ModeTransitionController 进行过渡
+            TitlebarManager.shared.onToggleFocusOverview = {
+                NotificationCenter.default.post(name: .toggleFocusOverviewRequested, object: nil)
             }
 
             // 🔴 开发调试：如果设置了启动时进入 Focus 模式，延迟切换
@@ -469,12 +581,15 @@ struct WorkspaceMainView: View {
             // Note: canvasMode defaults to .overview, no need to set explicitly
 
             // ━━━━ Mode Switching Trigger #1: 键盘快捷键 ━━━━
-            // Cmd+Shift+\ (keyCode 42) → toggleFocusOverview()
+            // Cmd+Shift+\ (keyCode 42) → 发送通知 → toggleFocusOverview()
+            // 🔑 重要：不能直接调用 toggleFocusOverview()，因为 closure 捕获的是旧的 View 状态
+            // 必须通过通知让 .onReceive 在 SwiftUI 更新周期中调用，确保使用最新的 viewportSize
             // 参见 MARK: - Mode Switching (统一入口)
             keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 let cmdShift: NSEvent.ModifierFlags = [.command, .shift]
                 if event.keyCode == 42 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(cmdShift) {
-                    toggleFocusOverview()
+                    // 发送通知，与原生工具栏按钮使用相同的代码路径
+                    NotificationCenter.default.post(name: .toggleFocusOverviewRequested, object: nil)
                     return nil
                 }
 
@@ -640,6 +755,12 @@ struct WorkspaceMainView: View {
         // 已经在目标 Focus 状态，无需切换
         guard viewModel.canvasMode != .focus(tabId: tabId) else { return }
 
+        // 过渡进行中，忽略
+        guard !modeTransitionController.phase.isTransitioning else {
+            fputs("🟢 enterFocus() IGNORED (transition in progress)\n", stderr)
+            return
+        }
+
         // 防抖：忽略 0.5 秒内的重复切换
         if !skipDebounce {
             let now = Date()
@@ -658,18 +779,67 @@ struct WorkspaceMainView: View {
         // 同步设置 currentTabId，确保地址栏和内容显示同一个 tab
         viewModel.currentTabId = tabId
 
-        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-            viewModel.canvasMode = .focus(tabId: tabId)
+        // 🔑 计算卡片在视口中的位置（用于 Zoom 动画）
+        let safeViewportSize = CGSize(
+            width: max(viewportSize.width, 1),
+            height: max(viewportSize.height, 1)
+        )
+        let cardAspectRatio = safeViewportSize.width / safeViewportSize.height
+        let gridResult = gridLayout(
+            for: safeViewportSize,
+            cardAspectRatio: cardAspectRatio,
+            cardCount: filteredTabs.count
+        )
+
+        // 计算卡片在 canvas 坐标系中的 rect（VirtualGrid 使用 canvas 坐标）
+        let slotIndex = filteredTabPositions[tabId] ?? 0
+        let canvasCardPosition = slotIndex < gridResult.positions.count
+            ? gridResult.positions[slotIndex]
+            : .zero
+        let canvasCardRect = CGRect(
+            x: canvasCardPosition.x,
+            y: canvasCardPosition.y,
+            width: gridResult.cardWidth,
+            height: gridResult.cardHeight
+        )
+
+        // 🔑 从缓存获取 Overview 快照（在上次 exitToOverview 时设置的卡片尺寸截图）
+        // 注意：不要截取 viewport，因为 Overview 模式下 viewport 显示的是整个网格，不是单个卡片
+        let overviewSnapshot = TabSnapshotCacheManager.shared.overviewSnapshot(for: tabId)
+
+        // 🔑 计算当前 Overview 模式的 transform（用于动画起点）
+        let overviewTransform = calculateOverviewTransform(
+            canvasSize: gridResult.canvasSize,
+            viewportSize: safeViewportSize
+        )
+
+        // 🔑 使用 ModeTransitionController 管理过渡动画
+        // 传递 canvas 坐标的 cardRect，与 VirtualGrid 坐标系一致
+        // 注意：canvasMode 在动画完成后才切换，避免动画期间触发 SwiftUI 重绘
+        modeTransitionController.startOverviewToFocusTransition(
+            tabId: tabId,
+            cardRect: canvasCardRect,
+            viewportSize: safeViewportSize,
+            overviewTransform: overviewTransform,
+            overviewSnapshot: overviewSnapshot
+        ) { [weak viewModel] in
+            // 动画完成后切换 canvasMode
+            viewModel?.canvasMode = .focus(tabId: tabId)
         }
     }
 
     /// 退出到 Overview 模式
     private func exitToOverview() {
         // 记住当前 focused 的 tab（在切换前）
-        if case .focus(let currentTabId) = viewModel.canvasMode {
-            lastFocusedTabId = currentTabId
-        } else {
+        guard case .focus(let currentTabId) = viewModel.canvasMode else {
             // 已经在 Overview 模式
+            return
+        }
+        lastFocusedTabId = currentTabId
+
+        // 过渡进行中，忽略
+        guard !modeTransitionController.phase.isTransitioning else {
+            fputs("🔴 exitToOverview() IGNORED (transition in progress)\n", stderr)
             return
         }
 
@@ -683,9 +853,142 @@ struct WorkspaceMainView: View {
 
         fputs("🔴 exitToOverview()\n", stderr)
 
-        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-            viewModel.canvasMode = .overview
+        // 🔑 截取当前 Focus 模式下的 Tab 内容快照（大图）
+        // 这是 Focus → Overview 动画的起点画面
+        // 注意：applyBlur=false 确保同步设置，动画开始时立即可用
+        let focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize)
+        if let snapshot = focusSnapshot {
+            TabSnapshotCacheManager.shared.setFocusSnapshot(snapshot, for: currentTabId, applyBlur: false)
+
+            // 同时设置 Overview 快照（缩放到卡片尺寸）
+            // 先计算卡片尺寸
+            let safeViewportSizeForCard = CGSize(
+                width: max(viewportSize.width, 1),
+                height: max(viewportSize.height, 1)
+            )
+            let cardAspectRatio = safeViewportSizeForCard.width / safeViewportSizeForCard.height
+            let gridResultForCard = gridLayout(
+                for: safeViewportSizeForCard,
+                cardAspectRatio: cardAspectRatio,
+                cardCount: filteredTabs.count
+            )
+            let cardSize = CGSize(width: gridResultForCard.cardWidth, height: gridResultForCard.cardHeight)
+            // applyBlur=false 确保同步设置
+            TabSnapshotCacheManager.shared.setOverviewSnapshot(snapshot, for: currentTabId, targetSize: cardSize, applyBlur: false)
         }
+
+        // 🔑 计算卡片在 Overview 模式下视口中的位置（用于 Zoom 动画）
+        let safeViewportSize = CGSize(
+            width: max(viewportSize.width, 1),
+            height: max(viewportSize.height, 1)
+        )
+        let cardAspectRatio = safeViewportSize.width / safeViewportSize.height
+        let gridResult = gridLayout(
+            for: safeViewportSize,
+            cardAspectRatio: cardAspectRatio,
+            cardCount: filteredTabs.count
+        )
+
+        // 计算卡片在 canvas 坐标系中的 rect（VirtualGrid 使用 canvas 坐标）
+        let slotIndex = filteredTabPositions[currentTabId] ?? 0
+        let canvasCardPosition = slotIndex < gridResult.positions.count
+            ? gridResult.positions[slotIndex]
+            : .zero
+        let canvasCardRect = CGRect(
+            x: canvasCardPosition.x,
+            y: canvasCardPosition.y,
+            width: gridResult.cardWidth,
+            height: gridResult.cardHeight
+        )
+
+        // 🔑 计算 Overview 模式的 transform（用于动画终点）
+        let overviewTransform = calculateOverviewTransform(
+            canvasSize: gridResult.canvasSize,
+            viewportSize: safeViewportSize
+        )
+
+        // 🔑 使用 ModeTransitionController 管理过渡动画
+        // 注意：canvasMode 在动画完成后才切换，避免动画期间触发 SwiftUI 重绘
+        // 这与 enterFocus() 保持一致的模式
+        modeTransitionController.startFocusToOverviewTransition(
+            tabId: currentTabId,
+            cardRect: canvasCardRect,
+            viewportSize: safeViewportSize,
+            overviewTransform: overviewTransform,
+            overviewSnapshot: nil  // VirtualGrid 方案使用缩略图，不需要截图
+        ) { [weak viewModel] in
+            // 动画完成后切换 canvasMode
+            viewModel?.canvasMode = .overview
+        }
+    }
+
+    /// 截取当前视口的快照（用于过渡动画）
+    /// 只截取视口区域，不包括侧边栏和工具栏
+    /// 优化：直接截取视口区域，避免截取整个窗口再裁剪
+    /// - Parameter viewportSize: 视口尺寸
+    private func captureViewportSnapshot(viewportSize: CGSize) -> NSImage? {
+        let startTime = CACurrentMediaTime()
+
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
+              let contentView = window.contentView else {
+            return nil
+        }
+
+        // 计算视口在窗口内容视图中的区域
+        let windowSize = contentView.bounds.size
+        let sidebarWidth = windowSize.width - viewportSize.width
+
+        // contentView 可能包含 toolbar (高度差 = toolbar 高度)
+        // 需要根据 contentView 的坐标系确定视口的 y 位置
+        let toolbarHeight = windowSize.height - viewportSize.height
+        let isFlipped = contentView.isFlipped
+
+        // 排除顶部 1px 的 toolbar 分隔线
+        let separatorHeight: CGFloat = 1
+
+        // 视口的 y 坐标：
+        // - 非 flipped (原点左下角): y = 0 (视口在底部)，排除顶部分隔线需要减少 height
+        // - flipped (原点左上角): y = toolbarHeight + 1 (跳过分隔线)
+        let viewportY: CGFloat = isFlipped ? (toolbarHeight + separatorHeight) : 0
+        let captureHeight: CGFloat = viewportSize.height - separatorHeight
+
+        let captureRect = CGRect(
+            x: sidebarWidth,
+            y: viewportY,
+            width: viewportSize.width,
+            height: captureHeight
+        )
+
+        NSLog("📸 captureViewportSnapshot: windowSize=%.0fx%.0f, viewportSize=%.0fx%.0f, toolbarHeight=%.0f, isFlipped=%d, captureRect=(%.0f,%.0f,%.0f,%.0f)",
+              windowSize.width, windowSize.height,
+              viewportSize.width, viewportSize.height,
+              toolbarHeight, isFlipped ? 1 : 0,
+              captureRect.origin.x, captureRect.origin.y, captureRect.width, captureRect.height)
+
+        // 直接为截取区域创建 bitmap
+        guard let bitmapRep = contentView.bitmapImageRepForCachingDisplay(in: captureRect) else {
+            return nil
+        }
+
+        let cacheTime = CACurrentMediaTime()
+        contentView.cacheDisplay(in: captureRect, to: bitmapRep)
+        let captureTime = CACurrentMediaTime()
+
+        // 创建完整 viewportSize 的图像，绘制时拉伸填满（排除的 1px 几乎不可见）
+        let image = NSImage(size: viewportSize)
+        image.lockFocus()
+        if let ctx = NSGraphicsContext.current {
+            ctx.imageInterpolation = .high
+            bitmapRep.draw(in: NSRect(origin: .zero, size: viewportSize))
+        }
+        image.unlockFocus()
+
+        let endTime = CACurrentMediaTime()
+        NSLog("📸 captureViewportSnapshot: %.1fms (cache: %.1fms)",
+              (endTime - startTime) * 1000,
+              (captureTime - cacheTime) * 1000)
+
+        return image
     }
 
     /// 确定 Focus 目标 tab
@@ -840,10 +1143,130 @@ struct WorkspaceMainView: View {
 
     // MARK: - Grid Layout Calculations
 
-    /// 悬浮标题栏高度（Overview 模式下显示在卡片上方）
-    private let floatingTitleBarHeight: CGFloat = 24
+    /// 悬浮标题栏高度（Overview 模式下显示在卡片上方）- 使用共享样式
+    private var floatingTitleBarHeight: CGFloat { CardStyle.titleBarHeight }
 
     /// 计算间距（卡片之间）和垂直边距
+    // MARK: - VirtualGrid Helper
+
+    /// 构建 VirtualGrid 卡片信息数组
+    /// - Parameters:
+    ///   - tabs: Tab 列表
+    ///   - positions: Grid 布局位置数组
+    ///   - tabSlotPositions: Tab ID 到槽位索引的映射
+    /// - Returns: VirtualGridCardInfo 数组
+    /// [+] 按钮的固定 UUID
+    private static let addButtonUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+
+    /// 缓存的 [+] 按钮图像及其尺寸（避免每次 body 评估时重新创建）
+    private static var cachedAddButtonImage: (image: NSImage, size: CGSize)?
+
+    private func buildVirtualGridCards(
+        tabs: [Tab],
+        positions: [CGPoint],
+        tabSlotPositions: [UUID: Int],
+        cardWidth: CGFloat,
+        cardHeight: CGFloat
+    ) -> [VirtualGridCardInfo] {
+        let cacheManager = TabSnapshotCacheManager.shared
+
+        var cards = tabs.compactMap { tab -> VirtualGridCardInfo? in
+            guard let slotIndex = tabSlotPositions[tab.id],
+                  slotIndex < positions.count else {
+                return nil
+            }
+
+            // 从 TabSnapshotCache 获取双缓冲快照
+            let focusSnapshot = cacheManager.focusSnapshot(for: tab.id)
+            let overviewSnapshot = cacheManager.overviewSnapshot(for: tab.id)
+
+            return VirtualGridCardInfo(
+                tabId: tab.id,
+                position: positions[slotIndex],
+                focusSnapshot: focusSnapshot,
+                overviewSnapshot: overviewSnapshot,
+                title: tab.title
+            )
+        }
+
+        // 添加 [+] 按钮卡片（在最后一个位置）
+        // [+] 按钮没有标题栏
+        let addButtonIndex = tabs.count
+        if addButtonIndex < positions.count {
+            let addButtonImage = createAddButtonImage(width: cardWidth, height: cardHeight)
+            cards.append(VirtualGridCardInfo(
+                tabId: Self.addButtonUUID,
+                position: positions[addButtonIndex],
+                focusSnapshot: addButtonImage,
+                overviewSnapshot: addButtonImage,
+                title: ""  // [+] 按钮无标题
+            ))
+        }
+
+        return cards
+    }
+
+    /// 创建 [+] 按钮的图像（匹配 NewTabPanel 的外观）
+    /// 使用静态缓存，只在尺寸变化时才重新创建
+    /// - Parameters:
+    ///   - width: 卡片宽度
+    ///   - height: 卡片高度
+    /// - Returns: 渲染后的图像
+    private func createAddButtonImage(width: CGFloat, height: CGFloat) -> NSImage {
+        let size = CGSize(width: width, height: height)
+
+        // 检查缓存：如果尺寸相同，直接返回缓存的图像
+        if let cached = Self.cachedAddButtonImage,
+           abs(cached.size.width - size.width) < 1 && abs(cached.size.height - size.height) < 1 {
+            return cached.image
+        }
+
+        // 创建新图像
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        let rect = NSRect(origin: .zero, size: size)
+        let cornerRadius = CardStyle.cornerRadius
+
+        // 背景：深灰色 (匹配 NSColor(white: 0.15, alpha: 1.0))
+        let backgroundPath = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+        NSColor(white: 0.15, alpha: 1.0).setFill()
+        backgroundPath.fill()
+
+        // 边框：白色 0.15 透明度
+        NSColor.white.withAlphaComponent(0.15).setStroke()
+        backgroundPath.lineWidth = 1.0
+        backgroundPath.stroke()
+
+        // + 号：使用 SF Symbol "plus"
+        // 计算 + 号尺寸：与真实 NewTabPanel 的 48pt 字体大小成比例
+        // 真实卡片通常约 300px 宽，48pt 约为 16%
+        let plusSize = min(width, height) * 0.16
+        let plusConfig = NSImage.SymbolConfiguration(pointSize: plusSize, weight: .regular)
+        if let plusImage = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+            .withSymbolConfiguration(plusConfig) {
+            // 居中绘制
+            let plusRect = NSRect(
+                x: (size.width - plusImage.size.width) / 2,
+                y: (size.height - plusImage.size.height) / 2,
+                width: plusImage.size.width,
+                height: plusImage.size.height
+            )
+            // 设置白色 0.5 透明度
+            NSColor.white.withAlphaComponent(0.5).set()
+            plusImage.draw(in: plusRect, from: .zero, operation: .sourceOver, fraction: 0.5)
+        }
+
+        image.unlockFocus()
+
+        // 缓存新创建的图像
+        Self.cachedAddButtonImage = (image: image, size: size)
+
+        return image
+    }
+
+    // MARK: - Spacing Calculation
+
     /// - 水平间距 = windowWidth / (卡片数 × 3) × 2.5，下限 40px（2.5x 原值）
     /// - 垂直间距 = 基础间距 + 悬浮标题栏高度（为标题栏留出空间）
     /// - 垂直边距 = 基础间距 × 1.25 + 悬浮标题栏高度
@@ -1158,14 +1581,14 @@ private struct SlotView: View {
                 Group {
                     if isDragSource {
                         // 拖动源：蓝色虚线
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
                             .strokeBorder(
                                 Color.blue.opacity(0.6),
                                 style: StrokeStyle(lineWidth: 2, dash: [5, 5])
                             )
                     } else if isDropTarget {
                         // 目标：绿色实线
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
                             .strokeBorder(
                                 Color.green.opacity(0.7),
                                 style: StrokeStyle(lineWidth: 2)
@@ -1631,8 +2054,8 @@ private struct TabPanel: View {
     let onClose: () -> Void
     var onNavigate: ((URL) -> Void)?
 
-    // 悬浮标题栏高度（固定值，Overview 模式下显示在卡片上方）
-    private let floatingTitleBarHeight: CGFloat = 24
+    // 悬浮标题栏高度 - 使用共享样式
+    private var floatingTitleBarHeight: CGFloat { CardStyle.titleBarHeight }
 
     var body: some View {
         let _ = NSLog("🔄 [TABCARD-BODY] TabPanel.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
@@ -1649,14 +2072,14 @@ private struct TabPanel: View {
             // 圆角仅 Overview 模式显示，Focus 模式不要圆角
             contentView
                 .frame(width: panelWidth, height: panelHeight)
-                .cornerRadius(isFocused ? 0 : 10)
+                .cornerRadius(isFocused ? 0 : CardStyle.cornerRadius)
                 .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
 
             // 悬浮标题栏 - 仅 Overview 模式显示（Focus 模式隐藏）
             if !isFocused {
                 floatingTitleBarView
                     .frame(width: cardWidth, height: floatingTitleBarHeight)
-                    .offset(y: -floatingTitleBarHeight - 4)  // 悬浮在卡片上方，留 4px 间隙
+                    .offset(y: -floatingTitleBarHeight - CardStyle.titleBarGap)
             }
         }
         // 被拖动的卡片：隐藏（由拖拽预览显示）
@@ -1671,7 +2094,15 @@ private struct TabPanel: View {
                 return 1.0  // 默认完全不透明
             }
         }())
-        // 整个卡片作为拖动源
+        // 整个卡片作为交互区域
+        .contentShape(Rectangle())
+        // Overview 模式下点击进入 Focus
+        .onTapGesture {
+            if !isFocused {
+                onSelect()
+            }
+        }
+        // 整个卡片作为拖动源（Overview 模式下长按拖动）
         .onDrag {
             if isFocused {
                 return NSItemProvider()
@@ -1683,29 +2114,12 @@ private struct TabPanel: View {
         }
     }
 
-    // 悬浮标题栏视图（简化版，仅包含标题和关闭按钮）
+    // 悬浮标题栏视图（简化版，仅包含标题和关闭按钮）- 使用共享样式
     private var floatingTitleBarView: some View {
-        HStack(spacing: 8) {
-            // 关闭按钮
-            Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-            .buttonStyle(.plain)
-
-            // 标题
-            Text(tab.title.isEmpty ? "New Tab" : tab.title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.9))
-                .lineLimit(1)
-
-            Spacer()
-        }
-        .padding(.horizontal, 8)
+        CardStyle.floatingTitleBar(title: tab.title, onClose: onClose)
     }
 
-    // 拖动预览视图 - 显示卡片 + 悬浮标题栏
+    // 拖动预览视图 - 显示卡片 + 悬浮标题栏（使用共享样式）
     private var dragPreviewView: some View {
         ZStack(alignment: .top) {
             // 卡片主体
@@ -1716,29 +2130,22 @@ private struct TabPanel: View {
                     .foregroundColor(.white.opacity(0.3))
             }
             .frame(width: cardWidth, height: cardHeight)
-            .cornerRadius(10)
+            .cornerRadius(CardStyle.cornerRadius)
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
                     .stroke(Color.white.opacity(0.3), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
 
-            // 悬浮标题栏
-            HStack(spacing: 8) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.6))
-
-                Text(tab.title.isEmpty ? "New Tab" : tab.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
-                    .lineLimit(1)
-
+            // 悬浮标题栏 - 使用共享样式
+            HStack(spacing: CardStyle.titleBarItemSpacing) {
+                CardStyle.closeIcon()
+                CardStyle.titleText(tab.title)
                 Spacer()
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, CardStyle.titleBarHorizontalPadding)
             .frame(width: cardWidth, height: floatingTitleBarHeight)
-            .offset(y: -floatingTitleBarHeight - 4)
+            .offset(y: -floatingTitleBarHeight - CardStyle.titleBarGap)
         }
     }
 
@@ -1774,31 +2181,19 @@ private struct TabPanel: View {
             // 多态渲染：根据 contentType 选择渲染引擎
             switch tab.contentType {
             case .reactNative(let fingerprint):
-                // React Native 应用 - 单一 ViewBridge 实例策略
-                // ViewBridge 始终存在于 TabPanel 中，避免 XPC 连接生命周期问题
-                // 使用 ZStack + opacity 控制显示，而不是条件渲染
-                ZStack {
-                    // ViewBridge 始终存在（保持 XPC 连接）
-                    // Focus 模式下可见，Overview 模式下隐藏
-                    ViewBridgeMultiProcessTabView(
-                        tab: tab,
-                        fingerprint: fingerprint,
-                        containerSize: viewportSize,
-                        coordinator: viewBridgeCoordinator,
-                        isFocused: isFocused
-                    )
-                    .id(tab.id)
-                    .opacity(isFocused ? 1.0 : 0.0)
-
-                    // Overview 模式下显示截图缩略图
-                    if !isFocused {
-                        ViewBridgeThumbnailView(
-                            tabId: tab.id,
-                            screenshot: viewBridgeCoordinator.getCachedSnapshot(),
-                            thumbnailSize: CGSize(width: cardWidth, height: cardHeight)
-                        )
-                    }
-                }
+                // React Native 应用 - 使用 ViewBridge XPC
+                // Media Query 风格的双层架构：
+                // - Overview 模式：在 canvas 内渲染小尺寸 ViewBridge（Service 端渲染 Overview 风格内容）
+                // - Focus 模式：由 FocusedReactNativeOverlay 在 canvas 外独立渲染（大尺寸）
+                //   (因为 scaleEffect 对 NSViewRepresentable 不生效)
+                OverviewViewBridgeContainer(
+                    tab: tab,
+                    fingerprint: fingerprint,
+                    renderSize: renderSize,
+                    isFocused: isFocused,
+                    coordinator: viewBridgeCoordinator
+                )
+                .frame(width: renderSize.width, height: renderSize.height)
 
             case .web(let url):
                 // Web 内容 - 使用 WKWebView
@@ -1816,10 +2211,8 @@ private struct TabPanel: View {
             }
         }
         .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onSelect()
-        }
+        // 注意：不要在这里添加 .onTapGesture，会与外层的 .onDrag 冲突
+        // tap 手势在 TabPanel body 层统一处理
     }
 }
 
@@ -1871,9 +2264,9 @@ private struct NewTabPanel: View {
                 .foregroundColor(.white.opacity(0.5))
         }
         .frame(width: cardWidth, height: cardHeight)
-        .cornerRadius(10)
+        .cornerRadius(CardStyle.cornerRadius)
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
@@ -2076,6 +2469,55 @@ struct QRCodeToolbarButton: View {
         let nsImage = NSImage(size: rep.size)
         nsImage.addRepresentation(rep)
         qrImage = nsImage
+    }
+}
+
+// MARK: - Overview ViewBridge Container
+
+/// Overview 模式下的 ViewBridge 占位容器
+///
+/// 🔑 新架构：不再渲染 PersistentViewBridgeView
+/// ViewBridge 内容由 UnifiedReactNativeLayer 在 canvas 外统一渲染
+/// 这个容器只显示背景色作为占位，确保卡片有正确的视觉边界
+private struct OverviewViewBridgeContainer: View {
+    let tab: Tab
+    let fingerprint: String
+    let renderSize: CGSize
+    let isFocused: Bool
+    let coordinator: ViewBridgeCoordinator
+
+    var body: some View {
+        // 🔑 关键：不再渲染 PersistentViewBridgeView
+        // ViewBridge 连接由 UnifiedReactNativeLayer 始终保持，这里只是占位
+        Group {
+            if isFocused {
+                // Focus 模式：透明占位
+                Color.clear
+            } else {
+                // Overview 模式：透明占位
+                // 实际的 ViewBridge 内容在 canvas 外由 UnifiedReactNativeLayer 渲染
+                Color.clear
+            }
+        }
+        .onAppear {
+            allocateServiceIfNeeded()
+        }
+    }
+
+    private func allocateServiceIfNeeded() {
+        // 分配 service - 由 UnifiedReactNativeLayer 使用
+        guard coordinator.allocatedServiceId == nil else { return }
+
+        do {
+            let serviceId = try XPCServicePool.shared.allocateService(
+                for: tab.id,
+                fingerprint: fingerprint
+            )
+            coordinator.allocatedServiceId = serviceId
+            coordinator.tabId = tab.id
+        } catch {
+            NSLog("⚠️ OverviewViewBridgeContainer: Failed to allocate service: \(error)")
+        }
     }
 }
 
