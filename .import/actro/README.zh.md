@@ -7,7 +7,7 @@
 ## 特性
 
 - **React 开发体验**：使用 JSX 和 Hooks 编写 Guest
-- **完整沙箱隔离**：可插拔的 JSEngineProvider（QuickJS、VM、Worker），Guest 崩溃不影响 Host
+- **完整沙箱隔离**：可插拔的 JSEngineProvider（QuickJS、VM、WASM），Guest 崩溃不影响 Host
 - **轻量高效**：无 WebView 开销，原生渲染性能
 - **统一桥接层**：类型安全的序列化，自动回调生命周期管理
 - **灵活扩展**：支持注册自定义业务组件
@@ -21,11 +21,10 @@ rill/
 ├── /devtools        # 开发工具
 ├── /sandbox         # 沙箱提供者 (自动检测)
 ├── /sandbox/native  # 原生沙箱 (JSC/QuickJS)
-├── /sandbox/web     # Web 沙箱 (Worker)
+├── /sandbox/web     # Web 沙箱 (WASM)
 └── /cli             # CLI 构建工具
 ```
 
-> 注意：`rill/let` 是 `rill/sdk` 的已弃用别名。
 
 ## 快速开始
 
@@ -79,6 +78,8 @@ function App() {
 }
 ```
 
+> React Native 原生 JSI 沙箱集成（JSC/Hermes/QuickJS）见：`docs/NATIVE_SANDBOX_INTEGRATION.zh.md`。
+
 ### Guest 开发
 
 ```tsx
@@ -107,13 +108,13 @@ export default function MyGuest() {
 
 ```bash
 # 构建 bundle
-bun run rill/cli build src/guest.tsx -o dist/bundle.js
+bunx rill build src/guest.tsx -o dist/bundle.js
 
 # 开发模式
-bun run rill/cli build src/guest.tsx --watch --no-minify --sourcemap
+bunx rill build src/guest.tsx --watch --no-minify --sourcemap
 
 # 分析 bundle
-bun run rill/cli analyze dist/bundle.js
+bunx rill analyze dist/bundle.js
 ```
 
 ## 架构
@@ -148,7 +149,7 @@ bun run rill/cli analyze dist/bundle.js
 | Runtime | `rill` | Host 运行时：Engine、EngineView、Receiver |
 | Guest SDK | `rill/sdk` | Guest 开发套件：组件、Hooks |
 | DevTools | `rill/devtools` | 调试工具：操作日志、树形检查 |
-| CLI | `rill/cli` | Guest 打包器（基于 Bun） |
+| CLI | `rill` (bin) / `rill/cli` | Guest 打包器（基于 Bun） |
 
 ## API
 
