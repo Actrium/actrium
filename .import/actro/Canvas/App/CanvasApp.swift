@@ -509,24 +509,24 @@ struct CanvasApp: App {
         // Suppress common system warnings in development
         UserDefaults.standard.set(false, forKey: "NSConstraintBasedLayoutLogUnsatisfiable")
 
-        #if DEBUG
-        logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
-
-        // Auto-start Metro bundler in Debug mode
+        // 🔥 Prewarm XPC Services for faster tab creation
+        // Only prewarm slot 0 (system apps) + slot 1 (app reserve)
+        // In DEBUG mode: wait for Metro to start first, then prewarm
         Task { @MainActor in
+            #if DEBUG
+            logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
+
+            // Auto-start Metro bundler in Debug mode (must complete before XPC prewarm)
             do {
                 logger.info("🚀 Auto-starting Metro bundler...")
                 try await MetroManager.shared.start()
                 logger.info("✅ Metro bundler started on port \(MetroManager.shared.actualPort ?? 0)")
             } catch {
                 logger.error("❌ Failed to auto-start Metro: \(error.localizedDescription)")
+                // Continue with prewarm anyway - user can manually start Metro later
             }
-        }
-        #endif
+            #endif
 
-        // 🔥 Prewarm XPC Services for faster tab creation
-        // Only prewarm slot 0 (system apps) + slot 1 (app reserve)
-        Task { @MainActor in
             // Verify service bundles exist
             _ = XPCServicePool.shared.verifyServiceBundles()
             // Prewarm initial services (slot 0 + 1)
