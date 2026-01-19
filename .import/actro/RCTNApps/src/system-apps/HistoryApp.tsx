@@ -12,7 +12,7 @@ import {
   NativeModules,
 } from 'react-native';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
-import { CompactSystemAppView, COMPACT_MODE_THRESHOLD } from './CompactSystemAppView';
+import { CompactSystemAppView } from './CompactSystemAppView';
 
 // Native module for history actions
 const HistoryModule = NativeModules.HistoryModule;
@@ -22,6 +22,7 @@ interface HistoryAppProps {
   groups: HistoryGroupData[];
   containerWidth?: number;
   containerHeight?: number;
+  isOverviewMode?: boolean;
 }
 
 // Group items by date
@@ -65,23 +66,10 @@ function formatTime(timestamp: number): string {
   });
 }
 
-export default function HistoryApp({ items, groups, containerWidth, containerHeight }: HistoryAppProps) {
+export default function HistoryApp({ items, groups, containerWidth, containerHeight, isOverviewMode }: HistoryAppProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Compact mode for small container sizes (Overview mode)
-  const isCompactMode = containerWidth !== undefined && containerWidth < COMPACT_MODE_THRESHOLD;
-
-  if (isCompactMode) {
-    return (
-      <CompactSystemAppView
-        icon="🕐"
-        title="History"
-        subtitle={`${items.length} items`}
-      />
-    );
-  }
-
-  // Filter items based on search
+  // All hooks must be called before any conditional returns (React hooks rules)
   const filteredItems = useMemo(() => {
     if (!searchQuery) return items;
     const query = searchQuery.toLowerCase();
@@ -92,6 +80,17 @@ export default function HistoryApp({ items, groups, containerWidth, containerHei
   }, [items, searchQuery]);
 
   const groupedItems = useMemo(() => groupByDate(filteredItems), [filteredItems]);
+
+  // Compact mode controlled by isOverviewMode prop (when in Tab Overview Card mode)
+  if (isOverviewMode) {
+    return (
+      <CompactSystemAppView
+        icon="🕐"
+        title="History"
+        subtitle={`${items.length} items`}
+      />
+    );
+  }
 
   const handleOpenItem = (item: HistoryItemData) => {
     HistoryModule?.openHistoryItem?.(item.id, item.appURL);

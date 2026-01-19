@@ -545,10 +545,14 @@ struct WorkspaceMainView: View {
             // 进入 Overview 模式时标记需要自动聚焦搜索框
             if case .overview = newValue {
                 shouldAutoFocusSearchTabs = true
+                // Notify all ViewBridge coordinators that we're in overview mode
+                ViewBridgeCoordinatorManager.shared.setOverviewMode(true)
             } else {
                 // 离开 Overview 模式时清空搜索文本
                 searchTabsText = ""
                 isSearchTabsFocused = false
+                // Notify all ViewBridge coordinators that we're in focus mode
+                ViewBridgeCoordinatorManager.shared.setOverviewMode(false)
             }
         }
         // shouldAutoFocusAddressBar 的处理移到 AddressBarContainer 的 onAppear 中

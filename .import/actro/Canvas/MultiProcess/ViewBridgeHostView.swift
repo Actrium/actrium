@@ -484,6 +484,9 @@ final class ViewBridgeCoordinator {
     var liveResizeEndedObserver: NSObjectProtocol?
     var tabId: UUID?
 
+    /// Whether the tab is in Overview mode (for compact view in system apps)
+    var isOverviewMode: Bool = false
+
     /// 当前 viewport 尺寸 - 存储在 coordinator 中以便闭包能访问最新值
     /// 默认值 50x50 反映 Overview 模式下可能的小卡片尺寸
     var currentViewportSize: CGSize = CGSize(width: 50, height: 50)
@@ -846,7 +849,8 @@ final class ViewBridgeCoordinator {
             "tabId": tabId.uuidString,
             "width": size.width,
             "height": size.height,
-            "requestId": String(requestId)  // UUID for log correlation
+            "requestId": String(requestId),  // UUID for log correlation
+            "isOverviewMode": isOverviewMode
         ]
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
@@ -938,6 +942,37 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
 
     func removeCoordinator(for tabId: UUID) {
         coordinators.removeValue(forKey: tabId)
+    }
+
+    /// Update isOverviewMode for all coordinators and notify their services
+    func setOverviewMode(_ isOverview: Bool) {
+        for (tabId, coordinator) in coordinators {
+            coordinator.isOverviewMode = isOverview
+            // Send containerSizeChanged notification with updated isOverviewMode
+            if coordinator.hasConnection, let serviceId = coordinator.allocatedServiceId {
+                let requestId = UUID().uuidString.prefix(8)
+                let size = coordinator.currentViewportSize
+                let sizeInfo: [String: Any] = [
+                    "tabId": tabId.uuidString,
+                    "width": size.width,
+                    "height": size.height,
+                    "requestId": String(requestId),
+                    "isOverviewMode": isOverview
+                ]
+                if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    let notificationName = "com.canvas.containerSizeChanged.\(serviceId)"
+                    NSLog("📐 [HOST→SVC] isOverviewMode changed req=%@ tab=%@ isOverview=%@",
+                          String(requestId), String(tabId.uuidString.prefix(8)), isOverview ? "true" : "false")
+                    DistributedNotificationCenter.default().postNotificationName(
+                        NSNotification.Name(notificationName),
+                        object: nil,
+                        userInfo: ["sizeInfo": jsonString],
+                        deliverImmediately: true
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1515,7 +1550,8 @@ struct UnifiedReactNativeLayer: View {
             "title": tab.title,
             "backgroundColor": tab.backgroundColor,
             "containerWidth": currentSize.width,
-            "containerHeight": currentSize.height
+            "containerHeight": currentSize.height,
+            "isOverviewMode": coordinator.isOverviewMode
         ]
 
         // Add optional scripts
@@ -1889,7 +1925,8 @@ struct ViewBridgeMultiProcessTabView: View {
             "title": tab.title,
             "backgroundColor": tab.backgroundColor,
             "containerWidth": containerSize.width,
-            "containerHeight": containerSize.height
+            "containerHeight": containerSize.height,
+            "isOverviewMode": coordinator.isOverviewMode
         ]
 
         // Add optional scripts
