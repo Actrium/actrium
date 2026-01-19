@@ -185,29 +185,9 @@ class NativeLogger: NSObject {
     }
 
     private static func sendToRemote(level: String, message: String) {
-        #if !DEBUG
-        return
-        #else
-        guard let url = URL(string: logServerURL) else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 2.0
-
-        let body: [String: Any] = [
-            "level": level,
-            "msg": "[XPC] \(message)",
-            "source": "xpc-native"
-        ]
-
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
-        } catch {
-            // Silent failure
-        }
-        #endif
+        // Disabled: Remote log server causes "Connection refused" noise when not running
+        // The DevTools Console receives logs via DistributedNotificationCenter (sendToHost)
+        // which is more reliable and doesn't require a separate server process
     }
 
     @objc
