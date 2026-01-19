@@ -176,7 +176,7 @@ class CALayerHostDisplayView: NSView {
 
     private func setupLayer() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.backgroundColor = NSColor(white: 0.12, alpha: 1.0).cgColor
     }
 
     private func setupTracking() {
@@ -279,7 +279,7 @@ class CALayerHostDisplayView: NSView {
         currentContextId = 0
         hostLayer?.removeFromSuperlayer()
         hostLayer = nil
-        layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.2, alpha: 1.0).cgColor
+        layer?.backgroundColor = NSColor(white: 0.12, alpha: 1.0).cgColor
     }
 
     override func layout() {

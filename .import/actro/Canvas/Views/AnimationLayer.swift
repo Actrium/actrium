@@ -64,9 +64,6 @@ final class AnimationLayerNSView: NSView {
     /// 背景层 - 填充窗口背景色
     private let backgroundLayer = CALayer()
 
-    /// 调试网格层 - 显示网格线用于区分动画层
-    private let debugGridLayer = CAShapeLayer()
-
     /// 虚拟网格层 - 承载所有卡片槽位，接受 canvas 变换
     private let virtualGridLayer = CALayer()
 
@@ -147,12 +144,6 @@ final class AnimationLayerNSView: NSView {
         backgroundLayer.opacity = 0  // 初始隐藏，与 isVisible=false 保持一致
         layer?.addSublayer(backgroundLayer)
 
-        // ━━━━ 调试网格层 (蓝色网格线，区分动画层) ━━━━
-        debugGridLayer.strokeColor = NSColor.systemBlue.withAlphaComponent(0.3).cgColor
-        debugGridLayer.fillColor = nil
-        debugGridLayer.lineWidth = 1.0
-        layer?.addSublayer(debugGridLayer)
-
         // ━━━━ 虚拟网格层 (包含卡片槽位，整体缩放) ━━━━
         // anchorPoint = (0,0) 表示从左上角进行缩放变换
         virtualGridLayer.anchorPoint = CGPoint(x: 0, y: 0)
@@ -174,40 +165,12 @@ final class AnimationLayerNSView: NSView {
         // 背景层填满整个视图
         backgroundLayer.frame = bounds
 
-        // 调试网格层填满整个视图
-        debugGridLayer.frame = bounds
-        updateDebugGridPath()
-
         // 虚拟网格层：使用 canvasSize，从 (0,0) 开始
         // 注意：设置 bounds 而不是 frame，因为 anchorPoint=(0,0) 时 frame 和 bounds 的关系不同
         virtualGridLayer.bounds = CGRect(origin: .zero, size: canvasSize.width > 0 ? canvasSize : bounds.size)
         virtualGridLayer.position = .zero
 
         CATransaction.commit()
-    }
-
-    /// 更新调试网格路径
-    private func updateDebugGridPath() {
-        let gridSpacing: CGFloat = 50
-        let path = CGMutablePath()
-
-        // 垂直线
-        var x: CGFloat = 0
-        while x <= bounds.width {
-            path.move(to: CGPoint(x: x, y: 0))
-            path.addLine(to: CGPoint(x: x, y: bounds.height))
-            x += gridSpacing
-        }
-
-        // 水平线
-        var y: CGFloat = 0
-        while y <= bounds.height {
-            path.move(to: CGPoint(x: 0, y: y))
-            path.addLine(to: CGPoint(x: bounds.width, y: y))
-            y += gridSpacing
-        }
-
-        debugGridLayer.path = path
     }
 
     // MARK: - Public API: Grid 配置
@@ -514,7 +477,6 @@ final class AnimationLayerNSView: NSView {
 
         // 4. 最后设置 opacity 使其可见
         backgroundLayer.opacity = 1.0
-        debugGridLayer.opacity = 0
         virtualGridLayer.opacity = 1.0
 
         // 5. 确保动画层在所有其他内容之上
@@ -543,7 +505,6 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         backgroundLayer.opacity = 1.0
-        debugGridLayer.opacity = 0  // 网格线已关闭
         virtualGridLayer.opacity = 1.0
 
         // 确保所有卡片的 crossfade 状态正确（防止 SwiftUI 更新时机问题）
@@ -562,7 +523,6 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         backgroundLayer.opacity = 0
-        debugGridLayer.opacity = 0
         virtualGridLayer.opacity = 0
         CATransaction.commit()
 

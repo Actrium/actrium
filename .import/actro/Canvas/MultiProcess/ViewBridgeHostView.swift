@@ -35,8 +35,6 @@ public class ViewBridgeHostView: NSView {
 
     /// Loading state
     private var isLoading = false
-    private var loadingIndicator: NSProgressIndicator?
-    private var statusLabel: NSTextField?
 
     /// Current content size - 跟随 TabPanel 实际尺寸
     /// Accessible by coordinator for sending size notifications
@@ -121,36 +119,13 @@ public class ViewBridgeHostView: NSView {
 
     private func setupView() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        layer?.backgroundColor = NSColor(white: 0.12, alpha: 1.0).cgColor  // Match content background
         layer?.masksToBounds = true  // 裁剪超出边界的内容，避免拖尾
         // 禁用 layer 隐式动画
         layer?.actions = ["bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
 
         // Disable automatic subview resizing to allow manual control in updateRemoteViewLayout
         autoresizesSubviews = false
-
-        // Add loading indicator
-        let indicator = NSProgressIndicator()
-        indicator.style = .spinning
-        indicator.controlSize = .regular
-        indicator.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(indicator)
-
-        let label = NSTextField(labelWithString: "Connecting to ViewBridge service...")
-        label.font = NSFont.systemFont(ofSize: 12)
-        label.textColor = NSColor.secondaryLabelColor
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-
-        NSLayoutConstraint.activate([
-            indicator.centerXAnchor.constraint(equalTo: centerXAnchor),
-            indicator.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -10),
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.topAnchor.constraint(equalTo: indicator.bottomAnchor, constant: 10)
-        ])
-
-        loadingIndicator = indicator
-        statusLabel = label
 
         // Register for live resize notifications to capture start size
         NotificationCenter.default.addObserver(forName: .windowLiveResizeStarted, object: nil, queue: .main) { [weak self] _ in
@@ -237,8 +212,6 @@ public class ViewBridgeHostView: NSView {
         }
 
         isLoading = true
-        loadingIndicator?.startAnimation(nil)
-        statusLabel?.stringValue = "Connecting to ViewBridge service..."
 
         NSLog("ViewBridgeHostView: Requesting \(serviceViewControllerClassName) from \(serviceBundleIdentifier)")
 
@@ -301,7 +274,6 @@ public class ViewBridgeHostView: NSView {
 
     private func handleConnectionResult(viewController: NSViewController?, error: Error?) {
         isLoading = false
-        loadingIndicator?.stopAnimation(nil)
 
         if let error = error {
             handleError("Connection failed: \(error.localizedDescription)")
@@ -314,10 +286,6 @@ public class ViewBridgeHostView: NSView {
         }
 
         NSLog("ViewBridgeHostView: Received remote view controller: \(type(of: vc))")
-
-        // Remove loading UI
-        loadingIndicator?.removeFromSuperview()
-        statusLabel?.removeFromSuperview()
 
         // Embed the remote view controller's view
         remoteViewController = vc
@@ -399,14 +367,7 @@ public class ViewBridgeHostView: NSView {
 
     private func handleError(_ message: String) {
         NSLog("ViewBridgeHostView: Error - \(message)")
-
         isLoading = false
-        loadingIndicator?.stopAnimation(nil)
-        statusLabel?.stringValue = "Error: \(message)"
-        statusLabel?.textColor = NSColor.systemRed
-
-        // Show error state
-        layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.1).cgColor
     }
 
     // MARK: - Cleanup
