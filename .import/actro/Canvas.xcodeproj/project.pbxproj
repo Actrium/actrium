@@ -280,8 +280,8 @@
 				A6274D0DD8056ADF6067F790 /* [CP] Copy Pods Resources */,
 				B00C1EAF2D3E4F5A6B7C8D9E /* Bundle ActrApp JS (actr.jsbundle) */,
 				B34F77E92F042239002AF804 /* Embed XPC Services */,
-				B34F77EA2F042240002AF804 /* Generate XPC Service Pool */,
 				1241ABEDE13A6757BB09D04A /* [CP] Embed Pods Frameworks */,
+				B34F77EA2F042240002AF804 /* Generate XPC Service Pool */,
 			);
 			buildRules = (
 			);
