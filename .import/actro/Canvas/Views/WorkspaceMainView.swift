@@ -2080,12 +2080,23 @@ private struct TabPanel: View {
                 .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
 
             // 悬浮标题栏 - 仅 Overview 模式显示（Focus 模式隐藏）
+            // offset 不改变 hit test 区域，所以需要在标题栏上单独处理点击
             if !isFocused {
                 floatingTitleBarView
                     .frame(width: cardWidth, height: floatingTitleBarHeight)
+                    .background(Color.clear)  // 透明背景以捕获点击
+                    .contentShape(Rectangle())  // 扩展点击区域
                     .offset(y: -floatingTitleBarHeight - CardStyle.titleBarGap)
+                    .allowsHitTesting(true)
             }
         }
+        // 扩展 ZStack 的 contentShape 来包括标题栏区域
+        .contentShape(
+            Rectangle().size(
+                width: cardWidth,
+                height: isFocused ? cardHeight : cardHeight + floatingTitleBarHeight + CardStyle.titleBarGap
+            ).offset(y: isFocused ? 0 : -(floatingTitleBarHeight + CardStyle.titleBarGap))
+        )
         // 被拖动的卡片：隐藏（由拖拽预览显示）
         .opacity(isBeingDragged ? 0.001 : 1.0)
         // hover 时半透明，交换过程中淡入到完全不透明
