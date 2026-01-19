@@ -452,6 +452,9 @@ private class ServiceReactNativeHost {
 
         #if DEBUG
         RCTRedBoxSetEnabled(false)
+        // Disable default packager server access check (we use dynamic port, not 8081)
+        // This prevents "Connection refused" errors to localhost:8081/status
+        RCTBundleURLProviderAllowPackagerServerAccess(false)
         #endif
 
         // Setup listeners first - RCTBridge will be created after Metro config is received
