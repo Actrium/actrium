@@ -166,10 +166,20 @@ class BrowserViewModel: ObservableObject {
         // 如果关闭的是当前标签，切换到相邻标签
         if currentTabId == id {
             if let index = tabs.firstIndex(where: { $0.id == id }) {
+                var nextTabId: UUID? = nil
                 if index > 0 {
-                    currentTabId = tabs[index - 1].id
+                    nextTabId = tabs[index - 1].id
                 } else if index < tabs.count - 1 {
-                    currentTabId = tabs[index + 1].id
+                    nextTabId = tabs[index + 1].id
+                }
+                
+                if let nextId = nextTabId {
+                    // 如果处于 Focus 模式，则关闭当前 tab 后自动切换到相邻 tab 的 Focus 模式
+                    if canvasMode.isInFocusMode {
+                        switchToTab(id: nextId)
+                    } else {
+                        currentTabId = nextId
+                    }
                 }
             }
         }
