@@ -55,7 +55,8 @@ struct WorkspaceMainView: View {
     @State private var findResultCount: Int = 0
     @State private var findCurrentIndex: Int = 0
     @FocusState private var isFindBarFocused: Bool
-    @StateObject private var viewBridgeCoordinatorManager = ViewBridgeCoordinatorManager()
+    // Use shared singleton to ensure setOverviewMode works correctly
+    private var viewBridgeCoordinatorManager: ViewBridgeCoordinatorManager { ViewBridgeCoordinatorManager.shared }
 
     // 模式切换过渡控制器
     @StateObject private var modeTransitionController = ModeTransitionController()
@@ -545,44 +546,27 @@ struct WorkspaceMainView: View {
             // 进入 Overview 模式时标记需要自动聚焦搜索框
             if case .overview = newValue {
                 shouldAutoFocusSearchTabs = true
-                // Notify all ViewBridge coordinators that we're in overview mode
-                ViewBridgeCoordinatorManager.shared.setOverviewMode(true)
             } else {
                 // 离开 Overview 模式时清空搜索文本
                 searchTabsText = ""
                 isSearchTabsFocused = false
-                // Notify all ViewBridge coordinators that we're in focus mode
-                ViewBridgeCoordinatorManager.shared.setOverviewMode(false)
             }
+            // Note: isOverviewMode 由 ViewBridgeCoordinatorManager 订阅 canvasMode 自动同步
         }
         // shouldAutoFocusAddressBar 的处理移到 AddressBarContainer 的 onAppear 中
         // 这样当地址栏实际渲染时才触发，无需延迟
         .onAppear {
-            fputs("🟡 onAppear: shouldStartInFocusMode=\(viewModel.shouldStartInFocusMode), currentTabId=\(viewModel.currentTabId?.uuidString.prefix(8) ?? "nil")\n", stderr)
-            fflush(stderr)
-
             // Setup native titlebar toggle callback
             // 🔑 发送通知由 view 处理，确保通过 ModeTransitionController 进行过渡
             TitlebarManager.shared.onToggleFocusOverview = {
                 NotificationCenter.default.post(name: .toggleFocusOverviewRequested, object: nil)
             }
 
-            // 🔴 开发调试：如果设置了启动时进入 Focus 模式，延迟切换
-            // 延迟切换确保渲染进程完全初始化后再切换模式
-            // 注意：不要在这里立即修改 @Published 属性，否则会触发视图重建
-            if viewModel.shouldStartInFocusMode, let tabId = viewModel.currentTabId {
-                logger.notice("🚀 [WorkspaceMainView] 启动时延迟进入 Focus 模式")
-                fputs("🟡 onAppear: scheduling focus mode after 1.5s\n", stderr)
-                fflush(stderr)
-                // 使用本地变量捕获标志，延迟后再重置，避免立即触发视图重建
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    fputs("🟡 onAppear delayed: entering focus mode now\n", stderr)
-                    fflush(stderr)
-                    viewModel.shouldStartInFocusMode = false
-                    enterFocus(tabId: tabId, skipDebounce: true)
-                }
-            }
-            // Note: canvasMode defaults to .overview, no need to set explicitly
+            // 🔑 绑定 XPCBridgeService 到 ViewModel（集中状态管理）
+            // XPCBridgeService 订阅 canvasMode 变化，自动同步 isOverviewMode
+            XPCBridgeService.shared.bindToViewModel(viewModel)
+            // 同时保持 ViewBridgeCoordinatorManager 的绑定（向后兼容，逐步迁移）
+            ViewBridgeCoordinatorManager.shared.bindToViewModel(viewModel)
 
             // ━━━━ Mode Switching Trigger #1: 键盘快捷键 ━━━━
             // Cmd+Shift+\ (keyCode 42) → 发送通知 → toggleFocusOverview()
@@ -2070,33 +2054,29 @@ private struct TabPanel: View {
         let panelWidth = cardWidth
         let panelHeight = cardHeight
 
-        // 使用 ZStack 允许标题栏悬浮在卡片上方
-        ZStack(alignment: .top) {
-            // 卡片主体（纯内容）
-            // 圆角仅 Overview 模式显示，Focus 模式不要圆角
-            contentView
-                .frame(width: panelWidth, height: panelHeight)
-                .cornerRadius(isFocused ? 0 : CardStyle.cornerRadius)
-                .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
-
-            // 悬浮标题栏 - 仅 Overview 模式显示（Focus 模式隐藏）
-            // offset 不改变 hit test 区域，所以需要在标题栏上单独处理点击
-            if !isFocused {
-                floatingTitleBarView
-                    .frame(width: cardWidth, height: floatingTitleBarHeight)
-                    .background(Color.clear)  // 透明背景以捕获点击
-                    .contentShape(Rectangle())  // 扩展点击区域
-                    .offset(y: -floatingTitleBarHeight - CardStyle.titleBarGap)
-                    .allowsHitTesting(true)
+        // 卡片主体（纯内容）
+        // 圆角仅 Overview 模式显示，Focus 模式不要圆角
+        // 使用 overlay 放置标题栏，这样标题栏有独立的 hit test 区域
+        contentView
+            .frame(width: panelWidth, height: panelHeight)
+            .cornerRadius(isFocused ? 0 : CardStyle.cornerRadius)
+            .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
+            // 只有卡片主体响应 onTapGesture（不包括标题栏）
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if !isFocused {
+                    onSelect()
+                }
             }
-        }
-        // 扩展 ZStack 的 contentShape 来包括标题栏区域
-        .contentShape(
-            Rectangle().size(
-                width: cardWidth,
-                height: isFocused ? cardHeight : cardHeight + floatingTitleBarHeight + CardStyle.titleBarGap
-            ).offset(y: isFocused ? 0 : -(floatingTitleBarHeight + CardStyle.titleBarGap))
-        )
+            // 悬浮标题栏 - 使用 overlay，让标题栏在卡片上方有独立的 hit test 区域
+            .overlay(alignment: .top) {
+                if !isFocused {
+                    floatingTitleBarView
+                        .frame(width: cardWidth, height: floatingTitleBarHeight)
+                        // 将标题栏移动到卡片上方（在内容区域之外）
+                        .offset(y: -(floatingTitleBarHeight + CardStyle.titleBarGap))
+                }
+            }
         // 被拖动的卡片：隐藏（由拖拽预览显示）
         .opacity(isBeingDragged ? 0.001 : 1.0)
         // hover 时半透明，交换过程中淡入到完全不透明
@@ -2109,14 +2089,6 @@ private struct TabPanel: View {
                 return 1.0  // 默认完全不透明
             }
         }())
-        // 整个卡片作为交互区域
-        .contentShape(Rectangle())
-        // Overview 模式下点击进入 Focus
-        .onTapGesture {
-            if !isFocused {
-                onSelect()
-            }
-        }
         // 整个卡片作为拖动源（Overview 模式下长按拖动）
         .onDrag {
             if isFocused {
