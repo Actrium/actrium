@@ -412,19 +412,42 @@ private class ServiceReactNativeHost {
         debugLog("Shared RCTBridge created")
     }
 
+    /// Track which internalIds have already been bound to prevent duplicate bindings
+    /// When multiple tabs share same XPC service, they may all try to bind the same connection
+    private var boundInternalIds: Set<String> = []
+
     /// Bind host tabId to a specific pending entry (by internalId) to avoid FIFO 误绑
     func bind(hostTabId: String, toInternalId internalId: String) {
+        NSLog("[XPC] 🔗 bind: hostTabId=%@ internalId=%@", String(hostTabId.prefix(8)), String(internalId.prefix(8)))
+
         var pendingSize: CGSize?
 
         registryLock.lock()
+
+        // Log current state
+        NSLog("[XPC] 🔗 bind state: pendingEntries=%d, tabRegistry=%d, boundInternalIds=%d",
+              pendingEntries.count, tabRegistry.count, boundInternalIds.count)
+
+        // Check if this internalId was already bound - prevent duplicate bindings
+        // This can happen when multiple tabs share same XPC service and all send bindTab
+        if boundInternalIds.contains(internalId) {
+            NSLog("[XPC] 🔗 bind: internalId=%@ already bound, ignoring duplicate from hostTabId=%@",
+                  String(internalId.prefix(8)), String(hostTabId.prefix(8)))
+            registryLock.unlock()
+            return
+        }
+
         if let size = pendingSizeChanges.removeValue(forKey: hostTabId) {
             pendingSize = size
         }
 
         // Prefer pending entry that matches the connection internalId
         if let entry = pendingEntries.removeValue(forKey: internalId) {
+            NSLog("[XPC] 🔗 bind: found pending entry for internalId=%@, assigning hostTabId=%@",
+                  String(internalId.prefix(8)), String(hostTabId.prefix(8)))
             entry.assignTabId(hostTabId)
             tabRegistry[hostTabId] = entry
+            boundInternalIds.insert(internalId)  // Mark as bound
             registryLock.unlock()
 
             if let size = pendingSize {
@@ -438,6 +461,7 @@ private class ServiceReactNativeHost {
 
         // Already registered? Update tabId on container for consistency
         if let entry = tabRegistry[hostTabId] {
+            NSLog("[XPC] 🔗 bind: hostTabId=%@ already in tabRegistry", String(hostTabId.prefix(8)))
             registryLock.unlock()
             entry.assignTabId(hostTabId)
             if let size = pendingSize {
@@ -449,6 +473,8 @@ private class ServiceReactNativeHost {
             return
         }
 
+        NSLog("[XPC] ⚠️ bind: no entry found for internalId=%@ or hostTabId=%@",
+              String(internalId.prefix(8)), String(hostTabId.prefix(8)))
         registryLock.unlock()
     }
 
@@ -500,14 +526,20 @@ private class ServiceReactNativeHost {
     private func assignPendingEntry(tabId: String) -> TabViewControllerEntry? {
         registryLock.lock()
 
+        // Log current state for debugging
+        NSLog("[XPC] 🔍 assignPendingEntry: tabId=%@, pendingEntries=%d, tabRegistry=%d",
+              String(tabId.prefix(8)), pendingEntries.count, tabRegistry.count)
+
         // If already registered, return existing
         if let existing = tabRegistry[tabId] {
+            NSLog("[XPC] 🔍 assignPendingEntry: already in tabRegistry")
             registryLock.unlock()
             return existing
         }
 
         // Find the oldest pending entry (FIFO)
         guard let (internalId, entry) = pendingEntries.first else {
+            NSLog("[XPC] ⚠️ assignPendingEntry: pendingEntries is EMPTY!")
             registryLock.unlock()
             return nil
         }
@@ -550,11 +582,35 @@ private class ServiceReactNativeHost {
     private let pendingTabIdLock = NSLock()
 
     /// Get the next pending tabId from the queue (FIFO)
+    /// Waits briefly for pendingTabId notification to arrive if queue is empty
     func dequeueNextPendingTabId() -> String? {
+        // First try without waiting
         pendingTabIdLock.lock()
-        defer { pendingTabIdLock.unlock() }
-        guard !pendingTabIdQueue.isEmpty else { return nil }
-        return pendingTabIdQueue.removeFirst()
+        if !pendingTabIdQueue.isEmpty {
+            let tabId = pendingTabIdQueue.removeFirst()
+            pendingTabIdLock.unlock()
+            return tabId
+        }
+        pendingTabIdLock.unlock()
+
+        // Wait briefly for notification to arrive (DistributedNotificationCenter is async)
+        // This handles the race condition where loadView is called before pendingTabId arrives
+        for _ in 0..<10 {  // Wait up to 100ms total
+            // Yield to let notifications be processed
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+
+            pendingTabIdLock.lock()
+            if !pendingTabIdQueue.isEmpty {
+                let tabId = pendingTabIdQueue.removeFirst()
+                pendingTabIdLock.unlock()
+                NSLog("[XPC] ✅ dequeueNextPendingTabId: found tabId after waiting")
+                return tabId
+            }
+            pendingTabIdLock.unlock()
+        }
+
+        NSLog("[XPC] ⚠️ dequeueNextPendingTabId: no tabId after waiting 100ms")
+        return nil
     }
 
     private func setupTabConfigListener() {
