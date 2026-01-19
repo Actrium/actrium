@@ -45,101 +45,6 @@ private func debugLog(_ message: String) {
     }
 }
 
-// MARK: - Native Debug View
-
-/// A native debug view that displays current size information
-/// Used to debug ViewBridge size sync without React Native involvement
-private class NativeDebugView: NSView {
-    private let sizeLabel: NSTextField
-    private let titleLabel: NSTextField
-    private var lastDisplayedSize: CGSize = .zero
-
-    /// 使用 flipped 坐标系以匹配 Host 端
-    override var isFlipped: Bool { true }
-
-    override init(frame frameRect: NSRect) {
-        // Title label
-        titleLabel = NSTextField(labelWithString: "Native Debug View")
-        titleLabel.font = NSFont.boldSystemFont(ofSize: 18)
-        titleLabel.textColor = .white
-        titleLabel.alignment = .center
-
-        // Size label
-        sizeLabel = NSTextField(labelWithString: "Size: -- × --")
-        sizeLabel.font = NSFont.monospacedSystemFont(ofSize: 24, weight: .medium)
-        sizeLabel.textColor = .systemGreen
-        sizeLabel.alignment = .center
-
-        super.init(frame: frameRect)
-
-        wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1.0).cgColor
-        // 禁用 layer 隐式动画
-        layer?.actions = ["bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
-
-        addSubview(titleLabel)
-        addSubview(sizeLabel)
-
-        // Display initial size
-        updateSizeDisplay()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layout() {
-        super.layout()
-
-        let centerX = bounds.midX
-        let centerY = bounds.midY
-
-        titleLabel.sizeToFit()
-        titleLabel.frame.origin = CGPoint(
-            x: centerX - titleLabel.frame.width / 2,
-            y: centerY + 20
-        )
-
-        sizeLabel.sizeToFit()
-        sizeLabel.frame.origin = CGPoint(
-            x: centerX - sizeLabel.frame.width / 2,
-            y: centerY - 30
-        )
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        let oldSize = frame.size
-        guard oldSize != newSize else { return }
-
-        // 禁用 Core Animation 隐式动画
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        super.setFrameSize(newSize)
-        CATransaction.commit()
-
-        updateSizeDisplay()
-    }
-
-    override func resizeSubviews(withOldSize oldSize: NSSize) {
-        super.resizeSubviews(withOldSize: oldSize)
-        updateSizeDisplay()
-    }
-
-    private func updateSizeDisplay() {
-        // 只在尺寸真正变化时才更新
-        guard lastDisplayedSize != bounds.size else { return }
-        lastDisplayedSize = bounds.size
-
-        let sizeText = String(format: "Size: %.0f × %.0f", bounds.width, bounds.height)
-        sizeLabel.stringValue = sizeText
-        sizeLabel.sizeToFit()
-
-        // Re-center the label
-        let centerX = bounds.midX
-        sizeLabel.frame.origin.x = centerX - sizeLabel.frame.width / 2
-    }
-}
-
 // MARK: - Resizable Container View
 
 /// Container view for each Tab's RCTRootView
@@ -466,9 +371,6 @@ private class TabViewControllerEntry {
 
     /// Whether a pending size change was applied from containerSizeChanged notification
     var hasPendingSizeApplied: Bool = false
-
-    /// Loading indicator shown while waiting for tab config
-    weak var loadingLabel: NSTextField?
 
     /// Whether this entry is waiting for its first tabConfig from Host
     var isPending: Bool { tabId == nil }
@@ -1288,27 +1190,11 @@ public func registerCanvasServiceViewController() {
 
 // MARK: - React Native Content Setup
 
-/// Setup loading indicator for a Tab entry (RCTRootView created when config arrives)
+/// Setup container for a Tab entry (RCTRootView created when config arrives)
 private func setupReactNativeContent(for entry: TabViewControllerEntry) {
-    guard let containerView = entry.containerView else {
+    guard entry.containerView != nil else {
         return
     }
-
-    // Loading indicator - will be removed when RCTRootView is created
-    let loadingLabel = NSTextField(labelWithString: "Waiting for tab config...")
-    loadingLabel.font = NSFont.systemFont(ofSize: 14)
-    loadingLabel.textColor = NSColor.secondaryLabelColor
-    loadingLabel.alignment = .center
-    loadingLabel.translatesAutoresizingMaskIntoConstraints = false
-    containerView.addSubview(loadingLabel)
-    NSLayoutConstraint.activate([
-        loadingLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-        loadingLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor)
-    ])
-
-    // Store reference for later removal
-    entry.loadingLabel = loadingLabel
-
     // RCTRootView will be created when tab config is received (event-driven)
 }
 
@@ -1327,10 +1213,6 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         NSLog("[XPC] ⚠️ createRootViewWithConfig: containerView is nil for tab=%@", String(logTabId.prefix(8)))
         return
     }
-
-    // Remove loading indicator
-    entry.loadingLabel?.removeFromSuperview()
-    entry.loadingLabel = nil
 
     // Get container size - priority:
     // 1. entry.containerSize if already set by pending size change (most up-to-date)
