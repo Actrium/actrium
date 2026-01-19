@@ -19,3 +19,9 @@ export { StepList } from './StepList/StepList.guest';
 export { ThemeView } from './ThemeView/ThemeView.guest';
 export { UserAvatar } from './UserAvatar/UserAvatar.guest';
 export { MyTouchableOpacity } from './MyTouchableOpacity/MyTouchableOpacity.guest';
+export {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuText,
+  DropdownMenuSubText,
+} from './DropdownMenu/DropdownMenu.guest';
