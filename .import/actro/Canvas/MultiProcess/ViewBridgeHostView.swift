@@ -1350,6 +1350,10 @@ struct UnifiedReactNativeLayer: View {
     let isTransitioning: Bool     // 是否正在过渡动画中
     let coordinator: ViewBridgeCoordinator
 
+    // System app data (for StartPageApp)
+    var bookmarks: [[String: Any]] = []
+    var recentHistory: [[String: Any]] = []
+
     /// 当前尺寸
     /// 🔑 过渡期间保持 Focus 尺寸，避免闪烁（因为动画层会遮盖）
     private var currentSize: CGSize {
@@ -1636,10 +1640,19 @@ struct UnifiedReactNativeLayer: View {
             tabConfig["systemAppType"] = systemTabType.rawValue
         }
 
-        NSLog("📤 [sendTabConfig] tab=%@ service=%@ size=%.0fx%.0f systemAppType=%@",
+        // Add system app data (for StartPageApp)
+        if !bookmarks.isEmpty {
+            tabConfig["bookmarks"] = bookmarks
+        }
+        if !recentHistory.isEmpty {
+            tabConfig["recentHistory"] = recentHistory
+        }
+
+        NSLog("📤 [sendTabConfig] tab=%@ service=%@ size=%.0fx%.0f systemAppType=%@ bookmarks=%d history=%d",
               tabIdShort, serviceId.components(separatedBy: ".").last ?? "",
               currentSize.width, currentSize.height,
-              tab.systemTabType?.rawValue ?? "nil")
+              tab.systemTabType?.rawValue ?? "nil",
+              bookmarks.count, recentHistory.count)
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
            let jsonString = String(data: jsonData, encoding: .utf8) {
