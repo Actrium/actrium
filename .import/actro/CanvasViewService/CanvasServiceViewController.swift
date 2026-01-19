@@ -712,16 +712,21 @@ private class ServiceReactNativeHost {
         // 注意：DistributedNotificationCenter 的回调已经在 main queue 上执行
         // 不需要再 DispatchQueue.main.async，这样可以减少一个 run loop 周期的延迟
 
-        // 去重：相同尺寸不重复处理（拖拽时重复通知很多）
+        // 去重：相同尺寸且 isOverviewMode 未变化时不重复处理
         if let entry = self.getTabEntry(tabId: tabId) {
-            if entry.containerSize == newSize {
-                NSLog("📐 [SVC] containerSizeChanged SKIPPED (same size): req=%@ tab=%@ size=%.0fx%.0f",
-                      requestId, String(tabId.prefix(8)), newSize.width, newSize.height)
+            let currentOverviewMode = entry.currentProperties["isOverviewMode"] as? Bool ?? false
+            let sizeUnchanged = entry.containerSize == newSize
+            let overviewUnchanged = currentOverviewMode == isOverviewMode
+
+            if sizeUnchanged && overviewUnchanged {
+                NSLog("📐 [SVC] containerSizeChanged SKIPPED (same size & mode): req=%@ tab=%@ size=%.0fx%.0f isOverview=%@",
+                      requestId, String(tabId.prefix(8)), newSize.width, newSize.height, isOverviewMode ? "true" : "false")
                 return
             }
-            NSLog("📐 [SVC] containerSizeChanged APPLYING: req=%@ tab=%@ oldSize=%.0fx%.0f newSize=%.0fx%.0f",
+            NSLog("📐 [SVC] containerSizeChanged APPLYING: req=%@ tab=%@ oldSize=%.0fx%.0f newSize=%.0fx%.0f isOverview=%@ (sizeChanged=%@ modeChanged=%@)",
                   requestId, String(tabId.prefix(8)), entry.containerSize.width, entry.containerSize.height,
-                  newSize.width, newSize.height)
+                  newSize.width, newSize.height, isOverviewMode ? "true" : "false",
+                  sizeUnchanged ? "NO" : "YES", overviewUnchanged ? "NO" : "YES")
         } else {
             NSLog("📐 [SVC] containerSizeChanged NO ENTRY: req=%@ tab=%@ size=%.0fx%.0f (caching)",
                   requestId, String(tabId.prefix(8)), newSize.width, newSize.height)

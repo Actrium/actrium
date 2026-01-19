@@ -485,8 +485,8 @@ final class ViewBridgeCoordinator {
     var tabId: UUID?
 
     /// Whether the tab is in Overview mode (for compact view in system apps)
-    /// Default to true since app starts in Overview mode
-    var isOverviewMode: Bool = true
+    /// Default to false since BrowserViewModel.init sets canvasMode = .focus
+    var isOverviewMode: Bool = false
 
     /// 当前 viewport 尺寸 - 存储在 coordinator 中以便闭包能访问最新值
     /// 默认值 50x50 反映 Overview 模式下可能的小卡片尺寸
@@ -495,6 +495,12 @@ final class ViewBridgeCoordinator {
     var lastSentConfigSize: CGSize?
     /// 上次发送 containerSizeChanged 时的尺寸 - 用于防止重复发送
     private var lastSentContainerSize: CGSize?
+
+    /// Reset lastSentContainerSize to force re-send notification
+    /// Called when isOverviewMode changes to ensure Service receives the update
+    func resetLastSentContainerSize() {
+        lastSentContainerSize = nil
+    }
 
     /// 节流：上次更新时间
     private var lastUpdateTime: Date = .distantPast
@@ -924,17 +930,51 @@ final class ViewBridgeCoordinator {
 }
 
 /// Manager that holds coordinators for all tabs
-/// 不使用 @Published 避免在 view body 评估时触发状态更新
+/// 集中管理 isOverviewMode 状态，订阅 BrowserViewModel.canvasMode 的变化
+/// 所有组件应该从这里获取/更新 isOverviewMode，而不是分散管理
 final class ViewBridgeCoordinatorManager: ObservableObject {
     // 不使用 @Published - coordinators 的变化不需要触发 UI 更新
     private var coordinators: [UUID: ViewBridgeCoordinator] = [:]
 
     /// Global overview mode state - used when creating new coordinators
-    /// Default true since app starts in Overview mode
-    private var currentOverviewMode: Bool = true
+    /// 由 canvasMode 订阅自动更新，外部不应直接修改
+    /// 默认 false 因为 BrowserViewModel.init 中设置 canvasMode = .focus
+    private(set) var currentOverviewMode: Bool = false
 
-    /// Singleton for global access (used in mode switching)
+    /// Combine subscription for canvasMode changes
+    private var canvasModeSubscription: AnyCancellable?
+
+    /// Singleton for global access
     static let shared = ViewBridgeCoordinatorManager()
+
+    /// 绑定到 BrowserViewModel，订阅 canvasMode 变化
+    /// 应该在 app 启动时调用一次
+    func bindToViewModel(_ viewModel: any CanvasModePublisher) {
+        // 取消之前的订阅（如果有）
+        canvasModeSubscription?.cancel()
+
+        // 立即同步当前状态（Focus 模式 → isOverviewMode = false）
+        // 注意：必须调用 updateOverviewMode 来更新已存在的 coordinators
+        let isOverview = !viewModel.canvasMode.isInFocusMode
+        NSLog("📐 [ViewBridgeCoordinatorManager] bindToViewModel: canvasMode.isInFocusMode=%@, isOverview=%@, currentOverviewMode=%@",
+              viewModel.canvasMode.isInFocusMode ? "true" : "false",
+              isOverview ? "true" : "false",
+              currentOverviewMode ? "true" : "false")
+
+        // 强制更新（即使值相同），确保已存在的 coordinators 也被更新
+        forceUpdateOverviewMode(isOverview)
+
+        // 订阅 canvasMode 变化
+        canvasModeSubscription = viewModel.canvasModePublisher
+            .dropFirst() // 跳过初始值（已经在上面同步了）
+            .sink { [weak self] newMode in
+                let isOverview = !newMode.isInFocusMode
+                self?.updateOverviewMode(isOverview)
+            }
+
+        NSLog("📐 [ViewBridgeCoordinatorManager] Bound to ViewModel, isOverviewMode=%@",
+              isOverview ? "true" : "false")
+    }
 
     func coordinator(for tabId: UUID) -> ViewBridgeCoordinator {
         if let existing = coordinators[tabId] {
@@ -951,13 +991,36 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
         coordinators.removeValue(forKey: tabId)
     }
 
-    /// Update isOverviewMode for all coordinators and notify their services
-    func setOverviewMode(_ isOverview: Bool) {
+    /// 内部方法：更新所有 coordinators 的 isOverviewMode 并通知 services
+    /// 由 canvasMode 订阅自动调用，外部不应直接调用
+    private func updateOverviewMode(_ isOverview: Bool) {
+        // 避免重复更新
+        guard currentOverviewMode != isOverview else { return }
+        applyOverviewMode(isOverview)
+    }
+
+    /// 强制更新所有 coordinators 的 isOverviewMode（不检查当前值）
+    /// 用于初始绑定时确保已存在的 coordinators 也被更新
+    private func forceUpdateOverviewMode(_ isOverview: Bool) {
+        applyOverviewMode(isOverview)
+    }
+
+    /// 实际执行 isOverviewMode 更新的核心逻辑
+    private func applyOverviewMode(_ isOverview: Bool) {
         // Update global state for newly created coordinators
         currentOverviewMode = isOverview
+        NSLog("📐 [applyOverviewMode] isOverview=%@ coordinatorCount=%d", isOverview ? "true" : "false", coordinators.count)
 
         for (tabId, coordinator) in coordinators {
+            NSLog("📐 [applyOverviewMode] tab=%@ hasConnection=%@ serviceId=%@",
+                  String(tabId.uuidString.prefix(8)),
+                  coordinator.hasConnection ? "true" : "false",
+                  coordinator.allocatedServiceId ?? "nil")
             coordinator.isOverviewMode = isOverview
+            // Reset lastSentContainerSize to force re-send notification
+            // This handles the race condition where size change notification was sent
+            // before isOverviewMode was updated
+            coordinator.resetLastSentContainerSize()
             // Send containerSizeChanged notification with updated isOverviewMode
             if coordinator.hasConnection, let serviceId = coordinator.allocatedServiceId {
                 let requestId = UUID().uuidString.prefix(8)
@@ -1561,7 +1624,8 @@ struct UnifiedReactNativeLayer: View {
             "backgroundColor": tab.backgroundColor,
             "containerWidth": currentSize.width,
             "containerHeight": currentSize.height,
-            "isOverviewMode": coordinator.isOverviewMode
+            // 🔑 从状态管理器读取最新状态，而不是 coordinator 本地缓存
+            "isOverviewMode": ViewBridgeCoordinatorManager.shared.currentOverviewMode
         ]
 
         // Add optional scripts
@@ -1936,7 +2000,8 @@ struct ViewBridgeMultiProcessTabView: View {
             "backgroundColor": tab.backgroundColor,
             "containerWidth": containerSize.width,
             "containerHeight": containerSize.height,
-            "isOverviewMode": coordinator.isOverviewMode
+            // 🔑 从状态管理器读取最新状态，而不是 coordinator 本地缓存
+            "isOverviewMode": ViewBridgeCoordinatorManager.shared.currentOverviewMode
         ]
 
         // Add optional scripts
