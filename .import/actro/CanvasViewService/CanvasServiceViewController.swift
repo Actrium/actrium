@@ -718,6 +718,10 @@ private class ServiceReactNativeHost {
         // Load Metro config from shared UserDefaults immediately (no wait for broadcast)
         MetroConfig.loadFromSharedDefaults()
 
+        // 🔥 PERF: Create RCTBridge immediately - don't wait for metro.config broadcast
+        // Metro config is already in UserDefaults, Bridge creation is the bottleneck
+        ensureBridgeCreated()
+
         // Listen for tab config with service-specific notification
         let notificationName = "com.canvas.tabConfig.\(serviceBundleId)"
         tabConfigObserver = DistributedNotificationCenter.default().addObserver(
