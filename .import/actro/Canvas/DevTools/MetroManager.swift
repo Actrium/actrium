@@ -30,6 +30,17 @@ class MetroManager: ObservableObject {
     @Published private(set) var watchFolders: [WatchFolder] = []
     @Published private(set) var actualPort: UInt16?  // Assigned by kernel, parsed from Metro output
 
+    /// System startup readiness flag
+    /// Set to true after Metro starts and XPC Services are prewarmed
+    /// UI should wait for this before creating RN tabs
+    @Published private(set) var isSystemReady: Bool = false
+
+    /// Mark system as ready (called after Metro + XPC prewarm complete)
+    func markSystemReady() {
+        isSystemReady = true
+        os_log(.info, log: logger, "System marked as ready - Metro and XPC Services initialized")
+    }
+
     struct LogEntry: Identifiable {
         let id = UUID()
         let timestamp: Date
@@ -313,6 +324,11 @@ class MetroManager: ObservableObject {
                     // Check for success
                     for pattern in successPatterns {
                         if line.contains(pattern) {
+                            // Parse actual port from Metro output (e.g., "Metro waiting on http://127.0.0.1:49758")
+                            if let actualPort = self.parsePortFromOutput(line) {
+                                self.actualPort = actualPort
+                                os_log(.info, log: logger, "Metro actual port parsed from output: %{public}d", actualPort)
+                            }
                             self.startupContinuation?.resume(returning: .success)
                             self.startupContinuation = nil
                             return
@@ -390,6 +406,20 @@ class MetroManager: ObservableObject {
             process.terminate()
             throw MetroError.failedToStart
         }
+    }
+
+    /// Parse port number from Metro output line
+    /// Handles formats like: "Metro waiting on http://127.0.0.1:49758" or "Dev server ready at http://localhost:8081"
+    private func parsePortFromOutput(_ line: String) -> UInt16? {
+        // Match port number after colon in URL pattern (e.g., ":49758" or ":8081")
+        let pattern = #":(\d{4,5})(?:[/\s]|$)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let portRange = Range(match.range(at: 1), in: line),
+              let port = UInt16(line[portRange]) else {
+            return nil
+        }
+        return port
     }
 
     private func appendLog(_ message: String, isError: Bool = false) {
