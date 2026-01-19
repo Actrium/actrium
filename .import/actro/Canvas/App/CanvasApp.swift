@@ -146,41 +146,12 @@ struct BrowserWindowView: View {
     @StateObject private var viewModel = BrowserViewModel()
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
-    @ObservedObject private var metro = MetroManager.shared
     @State private var hasHandledLaunchURL = false
     @State private var hasAppliedDebugConfig = false
 
     var body: some View {
-        // Wait for system readiness before showing full UI
-        // This ensures Metro is running and XPC Services are prewarmed
-        Group {
-            #if DEBUG
-            if metro.isSystemReady {
-                mainContent
-            } else {
-                startupLoadingView
-            }
-            #else
-            // In Release mode, system is always "ready" (no Metro needed)
-            mainContent
-            #endif
-        }
-    }
-
-    /// Loading view shown during Metro/XPC startup
-    private var startupLoadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(1.5)
-            Text("Starting Canvas...")
-                .font(.headline)
-                .foregroundColor(.secondary)
-            Text("Initializing Metro bundler")
-                .font(.caption)
-                .foregroundColor(.secondary.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
+        // No longer wait for Metro - apps load from local bundles
+        mainContent
     }
 
     /// Main browser content
@@ -554,20 +525,10 @@ struct CanvasApp: App {
 
         // 🔥 Prewarm XPC Services for faster tab creation
         // Only prewarm slot 0 (system apps) + slot 1 (app reserve)
-        // In DEBUG mode: wait for Metro to start first, then prewarm
+        // Metro is no longer auto-started - apps load from local bundles
         Task { @MainActor in
             #if DEBUG
             logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
-
-            // Auto-start Metro bundler in Debug mode (must complete before XPC prewarm)
-            do {
-                logger.info("🚀 Auto-starting Metro bundler...")
-                try await MetroManager.shared.start()
-                logger.info("✅ Metro bundler started on port \(MetroManager.shared.actualPort ?? 0)")
-            } catch {
-                logger.error("❌ Failed to auto-start Metro: \(error.localizedDescription)")
-                // Continue with prewarm anyway - user can manually start Metro later
-            }
             #endif
 
             // Verify service bundles exist
@@ -575,8 +536,6 @@ struct CanvasApp: App {
             // Prewarm initial services and WAIT for slot 0 (system apps) to be ready
             await XPCServicePool.shared.prewarmInitialServicesAsync()
 
-            // Mark system as ready - UI can now safely create RN tabs
-            MetroManager.shared.markSystemReady()
             logger.info("✅ System startup complete - ready to create tabs")
         }
 
