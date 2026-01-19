@@ -703,6 +703,8 @@ private class ServiceReactNativeHost {
 
         // Extract requestId for log correlation
         let requestId = sizeInfo["requestId"] as? String ?? "?"
+        // Extract isOverviewMode for compact view in system apps
+        let isOverviewMode = sizeInfo["isOverviewMode"] as? Bool ?? false
 
         // 取整，避免浮点精度问题
         let newSize = CGSize(width: round(width), height: round(height))
@@ -726,19 +728,32 @@ private class ServiceReactNativeHost {
         }
 
         // 直接应用尺寸（同步），不再去抖动（Host 端已经节流 25ms，无需双重延迟）
-        self.applySizeUpdate(tabId: tabId, size: newSize, requestId: requestId)
+        self.applySizeUpdate(tabId: tabId, size: newSize, requestId: requestId, isOverviewMode: isOverviewMode)
     }
 
     /// 应用尺寸更新（同步，无延迟）
-    private func applySizeUpdate(tabId: String, size: CGSize, requestId: String = "?") {
+    private func applySizeUpdate(tabId: String, size: CGSize, requestId: String = "?", isOverviewMode: Bool? = nil) {
         if let entry = getTabEntry(tabId: tabId) {
-            // 检查尺寸是否真的变化了（早期过滤）
-            guard entry.containerSize != size else { return }
+            // 检查尺寸或 isOverviewMode 是否真的变化了
+            let sizeChanged = entry.containerSize != size
+            let overviewChanged = isOverviewMode != nil && entry.currentProperties["isOverviewMode"] as? Bool != isOverviewMode
+
+            guard sizeChanged || overviewChanged else { return }
 
             // 🔑 关键：立即更新 entry.containerSize，防止竞态条件
             // 如果等待 applyHostSize 的回调链来更新，后续快速到达的通知
             // 可能在回调执行前检查状态，导致错误的 "same size" 判断
             entry.containerSize = size
+
+            // Update isOverviewMode in RN props if provided
+            if let isOverview = isOverviewMode {
+                var properties = entry.currentProperties
+                properties["isOverviewMode"] = isOverview
+                properties["containerWidth"] = size.width
+                properties["containerHeight"] = size.height
+                entry.currentProperties = properties
+                entry.rootView?.appProperties = properties
+            }
 
             // 先更新 viewController 的 preferredContentSize
             // 这会让 ViewBridge 知道我们需要更大的 jail view
@@ -1261,7 +1276,8 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         "isLeftPanelVisible": config["leftPanelVisible"] as? Bool ?? true,
         "isRightPanelVisible": config["rightPanelVisible"] as? Bool ?? true,
         "containerWidth": containerSize.width,
-        "containerHeight": containerSize.height
+        "containerHeight": containerSize.height,
+        "isOverviewMode": config["isOverviewMode"] as? Bool ?? false
     ]
 
     guard let rnView = ServiceReactNativeHost.shared.createRootView(

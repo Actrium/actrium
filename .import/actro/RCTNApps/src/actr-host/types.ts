@@ -73,4 +73,6 @@ export type TabRouterProps = ActrProps & {
   // Native 传递的容器尺寸（确保窗口缩小时 RN 能感知）
   containerWidth?: number;
   containerHeight?: number;
+  // Overview mode flag - true when in Tab Overview Card mode
+  isOverviewMode?: boolean;
 };

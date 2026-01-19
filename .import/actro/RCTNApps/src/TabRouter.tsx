@@ -47,7 +47,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
-    const { isLeftPanelVisible = true, isRightPanelVisible = true, containerWidth, containerHeight } = props;
+    const { isLeftPanelVisible = true, isRightPanelVisible = true, containerWidth, containerHeight, isOverviewMode } = props;
 
     // System app tab
     if (tab.systemAppType) {
@@ -66,6 +66,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                 groups={tab.historyGroups ?? []}
                 containerWidth={containerWidth}
                 containerHeight={containerHeight}
+                isOverviewMode={isOverviewMode}
               />
             )}
             {tab.systemAppType === 'bookmarks' && (
@@ -73,6 +74,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                 bookmarks={tab.bookmarks ?? []}
                 containerWidth={containerWidth}
                 containerHeight={containerHeight}
+                isOverviewMode={isOverviewMode}
               />
             )}
             {tab.systemAppType === 'debug' && (
@@ -90,6 +92,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                 recentHistory={tab.recentHistory ?? []}
                 containerWidth={containerWidth}
                 containerHeight={containerHeight}
+                isOverviewMode={isOverviewMode}
               />
             )}
           </React.Suspense>
@@ -127,7 +130,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
     effectiveProps = cachedValidProps;
   }
 
-  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth, containerHeight } = effectiveProps || {};
+  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth, containerHeight, isOverviewMode } = effectiveProps || {};
 
   if (!tabs.length) {
     return <View style={styles.empty} />;
@@ -178,6 +181,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                   groups={tab.historyGroups ?? []}
                   containerWidth={containerWidth}
                   containerHeight={containerHeight}
+                  isOverviewMode={isOverviewMode}
                 />
               )}
               {tab.systemAppType === 'bookmarks' && (
@@ -185,6 +189,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                   bookmarks={tab.bookmarks ?? []}
                   containerWidth={containerWidth}
                   containerHeight={containerHeight}
+                  isOverviewMode={isOverviewMode}
                 />
               )}
               {tab.systemAppType === 'debug' && (
@@ -202,6 +207,7 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                   recentHistory={tab.recentHistory ?? []}
                   containerWidth={containerWidth}
                   containerHeight={containerHeight}
+                  isOverviewMode={isOverviewMode}
                 />
               )}
             </React.Suspense>
