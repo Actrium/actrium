@@ -484,23 +484,6 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		A318BE4DEB50012C148469D1 /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-frameworks-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
 		A6274D0DD8056ADF6067F790 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
