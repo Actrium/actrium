@@ -12,6 +12,7 @@ import {
   NativeModules,
 } from 'react-native';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
+import { CompactSystemAppView, COMPACT_MODE_THRESHOLD } from './CompactSystemAppView';
 
 // Native module for history actions
 const HistoryModule = NativeModules.HistoryModule;
@@ -19,6 +20,8 @@ const HistoryModule = NativeModules.HistoryModule;
 interface HistoryAppProps {
   items: HistoryItemData[];
   groups: HistoryGroupData[];
+  containerWidth?: number;
+  containerHeight?: number;
 }
 
 // Group items by date
@@ -62,8 +65,21 @@ function formatTime(timestamp: number): string {
   });
 }
 
-export default function HistoryApp({ items, groups }: HistoryAppProps) {
+export default function HistoryApp({ items, groups, containerWidth, containerHeight }: HistoryAppProps) {
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Compact mode for small container sizes (Overview mode)
+  const isCompactMode = containerWidth !== undefined && containerWidth < COMPACT_MODE_THRESHOLD;
+
+  if (isCompactMode) {
+    return (
+      <CompactSystemAppView
+        icon="🕐"
+        title="History"
+        subtitle={`${items.length} items`}
+      />
+    );
+  }
 
   // Filter items based on search
   const filteredItems = useMemo(() => {
