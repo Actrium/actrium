@@ -393,6 +393,8 @@ private class ServiceReactNativeHost {
         // Disable default packager server access check (we use dynamic port, not 8081)
         // This prevents "Connection refused" errors to localhost:8081/status
         RCTBundleURLProviderAllowPackagerServerAccess(false)
+        // Disable Inspector/Debugger connection to prevent localhost:8081 connection attempts
+        RCTInspectorDevServerHelper.disableDebugger()
         #endif
 
         // Setup listeners and create RCTBridge (loads from local bundle)
