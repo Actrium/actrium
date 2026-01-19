@@ -54,14 +54,10 @@ post_install do |installer|
       config.build_settings['CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF'] = 'NO'
       config.build_settings['GCC_WARN_64_TO_32_BIT_CONVERSION'] = 'NO'
 
-      # Disable packager connection attempts to localhost:8081
-      # This prevents "Connection refused" errors when Metro is not running
-      # See: https://github.com/facebook/react-native/issues/24272
-      # See: https://github.com/facebook/react-native/issues/46144
-      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
-      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'RCT_ENABLE_INSPECTOR=0'
-      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'RCT_REMOTE_PROFILE=0'
-      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'ENABLE_PACKAGER_CONNECTION=0'
+      # Note: Tried RCT_ENABLE_INSPECTOR=0 and ENABLE_PACKAGER_CONNECTION=0 to disable
+      # localhost:8081 connections, but it causes Hermes Inspector crash at startup.
+      # The 8081 connection errors are cosmetic - they don't affect functionality.
+      # Keeping the default settings for now.
     end
   end
 end
