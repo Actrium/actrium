@@ -8,7 +8,7 @@ require File.join(rctnapps_path, 'node_modules', 'react-native-macos', 'scripts'
 
 prepare_react_native_project!
 
-# rill sandbox engine: JSC for guest sandbox (Hermes is main runtime)
+# rill sandbox engine: JSC for guest sandbox
 ENV['RILL_SANDBOX_ENGINE'] = 'jsc'
 
 # Shared React Native configuration
@@ -18,8 +18,8 @@ def use_canvas_react_native
 
   use_react_native!(
     path: 'RCTNApps/node_modules/react-native-macos',
-    # Hermes as main runtime (Bridgeless / New Architecture)
-    hermes_enabled: true,
+    # JSC runtime (Hermes has @rpath issues with XPC Service on macOS)
+    hermes_enabled: false,
     fabric_enabled: ENV['RCT_NEW_ARCH_ENABLED'] == '1',
     # React Native JS 工程所在目录（包含 package.json）
     app_path: File.join(__dir__, 'RCTNApps')
