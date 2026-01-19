@@ -29,28 +29,12 @@ log.notice('🚀 开始执行 - ActrApp 版本');
 import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';
 
-// 🔴 统一日志工具 - 输出到:
-// 1. 远程日志服务器 (node log-server.js, 端口 9999)
-// 2. Xcode 原生控制台 (通过 NativeLogger)
+// 🔴 统一日志工具 - 输出到 Xcode 原生控制台 (通过 NativeLogger)
+// 远程日志服务器已禁用（避免大量 connection refused 错误）
 const NativeLogger = NativeModules.NativeLogger;
-const LOG_SERVER = 'http://localhost:9999/log';
 
 const sendLog = (level: string, msg: string) => {
-  // 发送到远程日志服务器（注意：某些 runtime/离线 bundle 场景下 `fetch` 可能不存在，必须保护）
-  try {
-    const fetchFn = (globalThis as any).fetch as unknown;
-    if (typeof fetchFn === 'function') {
-      (fetchFn as any)(LOG_SERVER, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level, msg }),
-      })?.catch?.(() => {}); // 静默失败
-    }
-  } catch {
-    // ignore
-  }
-
-  // 同时输出到 Xcode
+  // 输出到 Xcode 原生控制台
   try {
     if (level === 'error') {
       NativeLogger?.error?.(msg);
