@@ -64,11 +64,15 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
               <HistoryApp
                 items={tab.historyItems ?? []}
                 groups={tab.historyGroups ?? []}
+                containerWidth={containerWidth}
+                containerHeight={containerHeight}
               />
             )}
             {tab.systemAppType === 'bookmarks' && (
               <BookmarksApp
                 bookmarks={tab.bookmarks ?? []}
+                containerWidth={containerWidth}
+                containerHeight={containerHeight}
               />
             )}
             {tab.systemAppType === 'debug' && (
@@ -84,6 +88,8 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
               <StartPageApp
                 bookmarks={tab.bookmarks ?? []}
                 recentHistory={tab.recentHistory ?? []}
+                containerWidth={containerWidth}
+                containerHeight={containerHeight}
               />
             )}
           </React.Suspense>
@@ -170,11 +176,15 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                 <HistoryApp
                   items={tab.historyItems ?? []}
                   groups={tab.historyGroups ?? []}
+                  containerWidth={containerWidth}
+                  containerHeight={containerHeight}
                 />
               )}
               {tab.systemAppType === 'bookmarks' && (
                 <BookmarksApp
                   bookmarks={tab.bookmarks ?? []}
+                  containerWidth={containerWidth}
+                  containerHeight={containerHeight}
                 />
               )}
               {tab.systemAppType === 'debug' && (
@@ -190,6 +200,8 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
                 <StartPageApp
                   bookmarks={tab.bookmarks ?? []}
                   recentHistory={tab.recentHistory ?? []}
+                  containerWidth={containerWidth}
+                  containerHeight={containerHeight}
                 />
               )}
             </React.Suspense>
@@ -213,7 +225,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1a1a2a',
+    backgroundColor: '#1f1f1f',
   },
   loadingText: {
     color: '#888',
@@ -223,7 +235,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1e40af',
+    backgroundColor: '#1f1f1f',
   },
   xpcLoadingTitle: {
     color: '#fff',
