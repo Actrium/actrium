@@ -314,11 +314,16 @@ private struct LiquidGlassToolbar: View {
     @State private var hasInputActivity: Bool = false
 
     // Safari 风格地址栏规则：
-    // 1) 非编辑态只显示 host（去掉 scheme 和 www.）
+    // 1) 非编辑态只显示 host（去掉 scheme 和 www.），系统应用显示 about:xxx
     // 2) 点击/快捷键进入编辑态时，切换为完整 URL 并全选
     // 3) 编辑过程中不被外部的 URL/Title 变化覆盖，失焦后恢复精简展示
     private func displayText(for tab: Tab?) -> String {
         guard let tab = tab else { return "" }
+        // System tabs: show about:xxx (e.g., "about:history")
+        if let systemType = tab.systemTabType {
+            return systemType.aboutURL.absoluteString
+        }
+        // Web content: show host only
         if case .web = tab.contentType, let url = tab.url {
             let host = url.host ?? url.absoluteString
             return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
@@ -327,7 +332,13 @@ private struct LiquidGlassToolbar: View {
     }
 
     private func editingText(for tab: Tab?) -> String {
-        if let url = tab?.url {
+        guard let tab = tab else { return "" }
+        // System tabs: use aboutURL
+        if let systemType = tab.systemTabType {
+            return systemType.aboutURL.absoluteString
+        }
+        // Other tabs with URL
+        if let url = tab.url {
             return url.absoluteString
         }
         return displayText(for: tab)

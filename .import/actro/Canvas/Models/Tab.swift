@@ -31,6 +31,7 @@ enum TabContentType: Equatable {
 }
 
 /// System tab types for built-in pages (like Chrome's chrome://history)
+/// Uses about: URL scheme (e.g., about:history, about:bookmarks)
 enum SystemTabType: String, Codable {
     case history
     case bookmarks
@@ -52,6 +53,35 @@ enum SystemTabType: String, Codable {
         case .bookmarks: return "bookmark"
         case .debug: return "ladybug"
         case .startPage: return "house"
+        }
+    }
+
+    /// The about: URL for this system tab type
+    /// e.g., about:history, about:bookmarks, about:blank
+    var aboutURL: URL {
+        let path: String
+        switch self {
+        case .history: path = "history"
+        case .bookmarks: path = "bookmarks"
+        case .debug: path = "debug"
+        case .startPage: path = "blank"
+        }
+        return URL(string: "about:\(path)")!
+    }
+
+    /// Parse a URL to get the corresponding SystemTabType
+    /// Returns nil if the URL is not a valid about: URL for system apps
+    static func from(url: URL) -> SystemTabType? {
+        guard url.scheme == "about" else { return nil }
+        // about: URLs have the path in the "path" component (e.g., about:history -> path = "history")
+        // Note: URL(string: "about:history")?.path returns "history"
+        let path = url.path.isEmpty ? url.absoluteString.replacingOccurrences(of: "about:", with: "") : url.path
+        switch path {
+        case "history": return .history
+        case "bookmarks": return .bookmarks
+        case "debug": return .debug
+        case "blank": return .startPage
+        default: return nil
         }
     }
 }
