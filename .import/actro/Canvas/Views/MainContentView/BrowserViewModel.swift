@@ -141,11 +141,20 @@ class BrowserViewModel: ObservableObject {
 
         // 如果关闭的是当前标签，切换到相邻标签
         if currentTabId == id {
+            let wasInFocusMode = canvasMode.isInFocusMode
             if let index = tabs.firstIndex(where: { $0.id == id }) {
+                var newTabId: UUID?
                 if index > 0 {
-                    currentTabId = tabs[index - 1].id
+                    newTabId = tabs[index - 1].id
                 } else if index < tabs.count - 1 {
-                    currentTabId = tabs[index + 1].id
+                    newTabId = tabs[index + 1].id
+                }
+                if let newTabId {
+                    currentTabId = newTabId
+                    // Preserve Focus mode when closing current tab
+                    if wasInFocusMode {
+                        canvasMode = .focus(tabId: newTabId)
+                    }
                 }
             }
         }
