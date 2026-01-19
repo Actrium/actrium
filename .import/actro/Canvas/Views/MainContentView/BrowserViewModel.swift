@@ -112,9 +112,10 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             return existingTab
         }
 
-        // Create new system tab
+        // Create new system tab with about: URL
         let newTab = Tab(
             title: type.title,
+            url: type.aboutURL,
             systemTabType: type,
             backgroundColor: "#1e1e1e"  // Dark background for system tabs
         )
@@ -123,7 +124,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         tabSlotPositions[newTab.id] = tabs.count - 1
         canvasMode = .focus(tabId: newTab.id)
 
-        logger.notice(" 已创建系统标签: \(type.title), 位置: \(self.tabs.count - 1)")
+        logger.notice("📱 已创建系统标签: \(type.title) (\(type.aboutURL.absoluteString)), 位置: \(self.tabs.count - 1)")
         return newTab
     }
 
@@ -626,6 +627,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
     }
 
     /// 导航当前 Tab 到指定 URL 或应用 ID
+    /// - 如果输入是 about: URL，导航到对应系统应用
     /// - 如果输入是 http/https URL，作为 Web 内容加载
     /// - 否则作为 app id 处理（暂不实现）
     func navigateCurrentTab(to input: String) {
@@ -639,6 +641,24 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
         // 检查是否为 URL
         if let url = parseURL(trimmed) {
+            // Check if it's an about: URL for system apps
+            if let systemType = SystemTabType.from(url: url) {
+                logger.notice("📱 [navigateCurrentTab] 导航到系统应用: \(url.absoluteString)")
+                // Update Tab to system app
+                tabs[index].systemTabType = systemType
+                tabs[index].url = url
+                tabs[index].title = systemType.title
+                // Clear web/RN content
+                tabs[index].unifiedScript = nil
+                tabs[index].leftPanelScript = nil
+                tabs[index].rightPanelScript = nil
+                tabs[index].guestScript = nil
+                tabs[index].htmlContent = nil
+                tabs[index].contractName = nil
+                objectWillChange.send()
+                return
+            }
+
             logger.notice("🌐 [navigateCurrentTab] 导航到 URL: \(url.absoluteString)")
             // 更新 Tab 为 Web 内容
             tabs[index].url = url
@@ -658,11 +678,11 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
     }
 
     /// 解析 URL 字符串
-    /// - 如果是 http/https，直接解析
+    /// - 如果是 about:/http/https，直接解析
     /// - 如果看起来像域名（包含 .），添加 https:// 前缀
     private func parseURL(_ input: String) -> URL? {
-        // 已经是完整 URL
-        if input.hasPrefix("http://") || input.hasPrefix("https://") {
+        // 已经是完整 URL (http/https/about)
+        if input.hasPrefix("http://") || input.hasPrefix("https://") || input.hasPrefix("about:") {
             return URL(string: input)
         }
 
