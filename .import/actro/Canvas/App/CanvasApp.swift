@@ -146,10 +146,45 @@ struct BrowserWindowView: View {
     @StateObject private var viewModel = BrowserViewModel()
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
+    @ObservedObject private var metro = MetroManager.shared
     @State private var hasHandledLaunchURL = false
     @State private var hasAppliedDebugConfig = false
 
     var body: some View {
+        // Wait for system readiness before showing full UI
+        // This ensures Metro is running and XPC Services are prewarmed
+        Group {
+            #if DEBUG
+            if metro.isSystemReady {
+                mainContent
+            } else {
+                startupLoadingView
+            }
+            #else
+            // In Release mode, system is always "ready" (no Metro needed)
+            mainContent
+            #endif
+        }
+    }
+
+    /// Loading view shown during Metro/XPC startup
+    private var startupLoadingView: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.5)
+            Text("Starting Canvas...")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            Text("Initializing Metro bundler")
+                .font(.caption)
+                .foregroundColor(.secondary.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    /// Main browser content
+    private var mainContent: some View {
         ContentView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
             .focusedSceneValue(\.browserViewModel, viewModel)
             .onAppear {
@@ -261,6 +296,14 @@ struct BrowserWindowView: View {
                     url = URL(fileURLWithPath: urlString)
                 }
 
+                // Check if it's a web URL (http/https)
+                if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+                    // Navigate current tab to web URL
+                    viewModel.navigateCurrentTab(to: urlString)
+                    return
+                }
+
+                // Otherwise treat as local file path
                 var isDirectory: ObjCBool = false
                 if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
                     if isDirectory.boolValue {
@@ -529,8 +572,12 @@ struct CanvasApp: App {
 
             // Verify service bundles exist
             _ = XPCServicePool.shared.verifyServiceBundles()
-            // Prewarm initial services (slot 0 + 1)
-            XPCServicePool.shared.prewarmInitialServices()
+            // Prewarm initial services and WAIT for slot 0 (system apps) to be ready
+            await XPCServicePool.shared.prewarmInitialServicesAsync()
+
+            // Mark system as ready - UI can now safely create RN tabs
+            MetroManager.shared.markSystemReady()
+            logger.info("✅ System startup complete - ready to create tabs")
         }
 
         // Initialize TabProcessManager early
