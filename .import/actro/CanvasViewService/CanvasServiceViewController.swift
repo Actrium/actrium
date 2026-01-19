@@ -872,7 +872,7 @@ private class ServiceReactNativeHost {
         var tabDict: [String: Any] = [
             "id": tabId,
             "title": config["title"] as? String ?? "Untitled",
-            "backgroundColor": config["backgroundColor"] as? String ?? "#1a1a2e"
+            "backgroundColor": config["backgroundColor"] as? String ?? "#1f1f1f"
         ]
 
         // System app type
@@ -1241,7 +1241,7 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     var tabDict: [String: Any] = [
         "id": tabId,
         "title": config["title"] as? String ?? "Tab",
-        "backgroundColor": config["backgroundColor"] as? String ?? "#1e40af"
+        "backgroundColor": config["backgroundColor"] as? String ?? "#1f1f1f"
     ]
     if let systemAppType = systemAppType {
         tabDict["systemAppType"] = systemAppType
