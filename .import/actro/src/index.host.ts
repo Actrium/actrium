@@ -45,6 +45,10 @@ export {
   ThemeView,
   UserAvatar,
   MyTouchableOpacity,
+   DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuText,
+  DropdownMenuSubText,
 } from './ui/index.host';
 
 // Panel utilities (Host-only)
