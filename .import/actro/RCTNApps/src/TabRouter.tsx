@@ -20,12 +20,8 @@ const StartPageApp = React.lazy(() => import('./system-apps/StartPageApp'));
 // Props cache for bridge stability
 let cachedValidProps: TabRouterProps | null = null;
 
-// Loading fallback
-const LoadingFallback = () => (
-  <View style={styles.loading}>
-    <Text style={styles.loadingText}>Loading...</Text>
-  </View>
-);
+// Loading fallback - empty view to avoid "Loading..." text flash
+const LoadingFallback = () => <View style={styles.loading} />;
 
 export const TabRouter: React.FC<TabRouterProps> = (props) => {
   // Debug: Log props received - use NativeModules for visibility
@@ -229,13 +225,7 @@ const styles = StyleSheet.create({
   },
   loading: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: '#1f1f1f',
-  },
-  loadingText: {
-    color: '#888',
-    fontSize: 14,
   },
   xpcLoading: {
     flex: 1,

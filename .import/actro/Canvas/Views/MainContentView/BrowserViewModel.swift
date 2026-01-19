@@ -15,8 +15,19 @@ enum CanvasMode: Equatable {
     }
 }
 
+/// Protocol for objects that publish canvasMode changes
+/// Used by ViewBridgeCoordinatorManager to subscribe to mode changes
+protocol CanvasModePublisher: AnyObject {
+    var canvasMode: CanvasMode { get }
+    var canvasModePublisher: AnyPublisher<CanvasMode, Never> { get }
+}
+
 @MainActor
-class BrowserViewModel: ObservableObject {
+class BrowserViewModel: ObservableObject, CanvasModePublisher {
+    // MARK: - CanvasModePublisher conformance
+    var canvasModePublisher: AnyPublisher<CanvasMode, Never> {
+        $canvasMode.eraseToAnyPublisher()
+    }
     @Published var tabs: [Tab] = []
     @Published var currentTabId: UUID?
     // 默认所有标签页左侧面板可见；仅在用户切换时记录覆盖值
