@@ -87,8 +87,10 @@ extension CardStyle {
         HStack(spacing: titleBarItemSpacing) {
             Button(action: onClose) {
                 closeIcon()
+                    .frame(width: 20, height: 20)
             }
             .buttonStyle(.plain)
+            .contentShape(Rectangle())
 
             titleText(title, placeholder: placeholder)
 

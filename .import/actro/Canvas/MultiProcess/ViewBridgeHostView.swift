@@ -485,7 +485,8 @@ final class ViewBridgeCoordinator {
     var tabId: UUID?
 
     /// Whether the tab is in Overview mode (for compact view in system apps)
-    var isOverviewMode: Bool = false
+    /// Default to true since app starts in Overview mode
+    var isOverviewMode: Bool = true
 
     /// 当前 viewport 尺寸 - 存储在 coordinator 中以便闭包能访问最新值
     /// 默认值 50x50 反映 Overview 模式下可能的小卡片尺寸
