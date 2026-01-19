@@ -929,6 +929,10 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     // 不使用 @Published - coordinators 的变化不需要触发 UI 更新
     private var coordinators: [UUID: ViewBridgeCoordinator] = [:]
 
+    /// Global overview mode state - used when creating new coordinators
+    /// Default true since app starts in Overview mode
+    private var currentOverviewMode: Bool = true
+
     /// Singleton for global access (used in mode switching)
     static let shared = ViewBridgeCoordinatorManager()
 
@@ -937,6 +941,8 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
             return existing
         }
         let newCoordinator = ViewBridgeCoordinator()
+        // Set isOverviewMode based on current global state
+        newCoordinator.isOverviewMode = currentOverviewMode
         coordinators[tabId] = newCoordinator
         return newCoordinator
     }
@@ -947,6 +953,9 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
 
     /// Update isOverviewMode for all coordinators and notify their services
     func setOverviewMode(_ isOverview: Bool) {
+        // Update global state for newly created coordinators
+        currentOverviewMode = isOverview
+
         for (tabId, coordinator) in coordinators {
             coordinator.isOverviewMode = isOverview
             // Send containerSizeChanged notification with updated isOverviewMode
