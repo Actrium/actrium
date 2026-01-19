@@ -264,58 +264,6 @@ private class ResizableContainerView: NSView {
     }
 }
 
-// MARK: - Metro Config (received from Host via DistributedNotificationCenter)
-
-/// Holds Metro bundler configuration received from Canvas Host
-/// - Primary: Read from shared UserDefaults on startup (no delay)
-/// - Secondary: Listen for broadcast notifications (runtime updates)
-private enum MetroConfig {
-    /// App Group for shared config
-    private static let appGroupId = "group.chat.askaway.canvas"
-    private static let metroHostKey = "metro.host"
-    private static let metroPortKey = "metro.port"
-
-    /// Default Metro host (fallback if no config received)
-    static var host: String = "127.0.0.1"
-    static var port: UInt16 = 8081
-
-    static var hostString: String {
-        "\(host):\(port)"
-    }
-
-    /// Load config from shared UserDefaults (called on XPC Service startup)
-    /// This is the primary method - no need to wait for broadcast
-    static func loadFromSharedDefaults() {
-        guard let sharedDefaults = UserDefaults(suiteName: appGroupId) else {
-            debugLog("MetroConfig: Cannot access shared UserDefaults")
-            return
-        }
-
-        if let savedHost = sharedDefaults.string(forKey: metroHostKey), !savedHost.isEmpty {
-            host = savedHost
-        }
-        let savedPort = sharedDefaults.integer(forKey: metroPortKey)
-        if savedPort > 0 {
-            port = UInt16(savedPort)
-        }
-        debugLog("MetroConfig loaded from UserDefaults: \(hostString)")
-    }
-
-    /// Update config from notification userInfo (runtime updates)
-    static func update(from userInfo: [AnyHashable: Any]?) {
-        guard let info = userInfo else { return }
-        if let host = info["host"] as? String {
-            Self.host = host
-        }
-        if let port = info["port"] as? UInt16 {
-            Self.port = port
-        } else if let port = info["port"] as? Int {
-            Self.port = UInt16(port)
-        }
-        debugLog("MetroConfig updated via notification: \(Self.hostString)")
-    }
-}
-
 // MARK: - React Native Factory Delegate
 
 private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegate {
@@ -330,18 +278,8 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
     }
 
     override func bundleURL() -> URL? {
-        #if DEBUG
-        // Use Metro config received from Host (or fallback to default)
-        return RCTBundleURLProvider.jsBundleURL(
-            forBundleRoot: "index",
-            packagerHost: MetroConfig.hostString,
-            enableDev: true,
-            enableMinification: false,
-            inlineSourceMap: false
-        )
-        #else
+        // Always load from local bundle file (no Metro dev server dependency)
         return Bundle.main.url(forResource: "main.rctnapp", withExtension: "jsbundle")
-        #endif
     }
 
     override func sourceURL(for bridge: RCTBridge) -> URL? {
@@ -457,17 +395,16 @@ private class ServiceReactNativeHost {
         RCTBundleURLProviderAllowPackagerServerAccess(false)
         #endif
 
-        // Setup listeners first - RCTBridge will be created after Metro config is received
+        // Setup listeners and create RCTBridge (loads from local bundle)
         setupTabConfigListener()
-        debugLog("Waiting for Metro config before creating RCTBridge...")
     }
 
-    /// Create RCTBridge after Metro config is received
+    /// Create RCTBridge (loads from local bundle file)
     private func ensureBridgeCreated() {
         guard !bridgeCreated else { return }
         bridgeCreated = true
 
-        debugLog("Creating RCTBridge with Metro config: \(MetroConfig.hostString)")
+        debugLog("Creating RCTBridge (loading from local bundle)")
         factoryDelegate = ServiceReactNativeFactoryDelegate()
         factory = RCTReactNativeFactory(delegate: factoryDelegate!)
         debugLog("Shared RCTBridge created")
@@ -599,7 +536,6 @@ private class ServiceReactNativeHost {
 
     // MARK: - Tab Config IPC
 
-    private var metroConfigObserver: NSObjectProtocol?
     private var containerSizeObserver: NSObjectProtocol?
     private var bindTabObserver: NSObjectProtocol?
     private var pendingTabIdObserver: NSObjectProtocol?
@@ -620,11 +556,7 @@ private class ServiceReactNativeHost {
     }
 
     private func setupTabConfigListener() {
-        // Load Metro config from shared UserDefaults immediately (no wait for broadcast)
-        MetroConfig.loadFromSharedDefaults()
-
-        // 🔥 PERF: Create RCTBridge immediately - don't wait for metro.config broadcast
-        // Metro config is already in UserDefaults, Bridge creation is the bottleneck
+        // Create RCTBridge immediately - apps load from local bundles (no Metro dependency)
         ensureBridgeCreated()
 
         // Listen for tab config with service-specific notification
@@ -635,17 +567,6 @@ private class ServiceReactNativeHost {
             queue: .main
         ) { [weak self] notification in
             self?.handleTabConfigNotification(notification)
-        }
-
-        // Listen for Metro config broadcasts from Host (for runtime updates)
-        metroConfigObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.canvas.metro.config"),
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            MetroConfig.update(from: notification.userInfo)
-            // Create RCTBridge after Metro config is received
-            self?.ensureBridgeCreated()
         }
 
         // Listen for container size changes from Host (service-specific notification)

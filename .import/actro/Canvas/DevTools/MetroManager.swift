@@ -30,17 +30,6 @@ class MetroManager: ObservableObject {
     @Published private(set) var watchFolders: [WatchFolder] = []
     @Published private(set) var actualPort: UInt16?  // Assigned by kernel, parsed from Metro output
 
-    /// System startup readiness flag
-    /// Set to true after Metro starts and XPC Services are prewarmed
-    /// UI should wait for this before creating RN tabs
-    @Published private(set) var isSystemReady: Bool = false
-
-    /// Mark system as ready (called after Metro + XPC prewarm complete)
-    func markSystemReady() {
-        isSystemReady = true
-        os_log(.info, log: logger, "System marked as ready - Metro and XPC Services initialized")
-    }
-
     struct LogEntry: Identifiable {
         let id = UUID()
         let timestamp: Date
