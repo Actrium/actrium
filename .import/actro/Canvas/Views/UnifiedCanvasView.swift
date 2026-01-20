@@ -156,7 +156,8 @@ struct UnifiedCanvasView: View {
                         viewModel.swapSlotPositions(tabId1: tabId1, tabId2: tabId2)
                     },
                     onNewTab: {
-                        viewModel.addNewTab()
+                        // 新建按钮在 Overview 模式下只创建 tab，不切换到 Focus
+                        viewModel.addNewTab(focus: viewModel.canvasMode.isInFocusMode)
                     },
                     onCloseTab: { tabId in
                         withAnimation {
@@ -305,7 +306,8 @@ struct UnifiedCanvasView: View {
 
                     Button(action: {
                         withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                            _ = viewModel.addNewTab()
+                            // Toolbar 新建：在 Overview 下不自动进入 Focus
+                            _ = viewModel.addNewTab(focus: viewModel.canvasMode.isInFocusMode)
                         }
                     }) {
                         Image(systemName: "plus")
