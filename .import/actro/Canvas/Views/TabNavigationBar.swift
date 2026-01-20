@@ -7,6 +7,7 @@ struct TabNavigationBar: View {
     
     @State private var hoveredTabId: UUID?
     @State private var draggedTabId: UUID?
+    @State private var showSettings: Bool = false
     
     private let tabHeight: CGFloat = 44
     private let maxTabWidth: CGFloat = 240
@@ -20,20 +21,48 @@ struct TabNavigationBar: View {
     }
     
     var body: some View {
-        if isInOverviewMode {
-            // Overview 模式的导航栏
-            OverviewNavigationBar(onBack: {
-                toggleOverviewMode()
-            }, height: tabHeight)
-        } else {
-            // Focus 模式的导航栏（标签页列表）
-            FocusModeNavigationBar(
-                viewModel: viewModel,
-                hoveredTabId: $hoveredTabId,
-                tabHeight: tabHeight,
-                calculateTabWidth: calculateTabWidth,
-                toggleOverviewMode: toggleOverviewMode
-            )
+        ZStack {
+            if isInOverviewMode {
+                // Overview 模式的导航栏
+                OverviewNavigationBar(onBack: {
+                    toggleOverviewMode()
+                }, height: tabHeight, openSettings: { showSettings = true })
+            } else {
+                // Focus 模式的导航栏（标签页列表）
+                FocusModeNavigationBar(
+                    viewModel: viewModel,
+                    hoveredTabId: $hoveredTabId,
+                    tabHeight: tabHeight,
+                    calculateTabWidth: calculateTabWidth,
+                    toggleOverviewMode: toggleOverviewMode,
+                    openSettings: { showSettings = true }
+                )
+            }
+
+            // 居中圆角设置弹窗覆盖层
+            if showSettings {
+                Color.black.opacity(0.45)
+                    .edgesIgnoringSafeArea(.all)
+                    .transition(.opacity)
+                    .onTapGesture {
+                        withAnimation(.easeInOut) { showSettings = false }
+                    }
+
+                VStack {
+                    Spacer()
+
+                    SettingsView()
+                        .frame(maxWidth: 520, maxHeight: 820)
+                        .background(Color.clear)
+                        .cornerRadius(22)
+                        .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 40)
+                .transition(.scale.combined(with: .opacity))
+                .zIndex(1)
+            }
         }
     }
     
@@ -70,6 +99,7 @@ struct TabNavigationBar: View {
 private struct OverviewNavigationBar: View {
     let onBack: () -> Void
     let height: CGFloat
+    let openSettings: () -> Void
     @State private var selectedTab: OverviewTab = .active
 
     enum OverviewTab {
@@ -152,7 +182,7 @@ private struct OverviewNavigationBar: View {
 
             // 右侧：仅显示设置图标（白色）
             Button(action: {
-                // TODO: 打开设置
+                openSettings()
             }) {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 20, weight: .regular))
@@ -174,6 +204,7 @@ private struct FocusModeNavigationBar: View {
     let tabHeight: CGFloat
     let calculateTabWidth: () -> CGFloat
     let toggleOverviewMode: () -> Void
+    let openSettings: () -> Void
     
     // 计算是否需要滚动
     private var needsScrolling: Bool {
@@ -244,8 +275,7 @@ private struct FocusModeNavigationBar: View {
             
             // 右侧：设置按钮
             Button(action: {
-                // TODO: 打开设置
-                viewModel.toggleLeftPanelForCurrentTab()
+                openSettings()
             }) {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 16))
