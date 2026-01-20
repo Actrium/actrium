@@ -86,7 +86,7 @@ class BrowserViewModel: ObservableObject {
     }
     
     @discardableResult
-    func addNewTab() -> Tab {
+    func addNewTab(focus: Bool = true) -> Tab {
         logger.debug("🆕 开始创建新标签页...")
         
         // 创建默认 RN 标签页（与应用启动时相同）
@@ -105,9 +105,11 @@ class BrowserViewModel: ObservableObject {
         tabs.append(newTab)
         currentTabId = newTab.id
         tabSlotPositions[newTab.id] = tabs.count - 1
-        
-        // 自动进入 Focus 模式
-        canvasMode = .focus(tabId: newTab.id)
+
+        // 根据调用者意图决定是否进入 Focus 模式（某些 UI 场景希望保持 Overview）
+        if focus {
+            canvasMode = .focus(tabId: newTab.id)
+        }
 
         logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
         return newTab
