@@ -200,9 +200,8 @@ private struct FocusModeNavigationBar: View {
                 
                 // 新建标签按钮（固定在右侧）
                 Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        let _ = viewModel.addNewTab()
-                    }
+                    let newTab = viewModel.addNewTab(focus: false)
+                    viewModel.switchToTab(id: newTab.id)
                 }) {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .medium))
@@ -218,9 +217,8 @@ private struct FocusModeNavigationBar: View {
                     
                     // 新建标签按钮（紧挨最后一个页签）
                     Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            let _ = viewModel.addNewTab()
-                        }
+                        let newTab = viewModel.addNewTab()
+                        viewModel.switchToTab(id: newTab.id)
                     }) {
                         Image(systemName: "plus")
                             .font(.system(size: 14, weight: .medium))
