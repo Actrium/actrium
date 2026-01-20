@@ -8,7 +8,7 @@ struct TabNavigationBar: View {
     @State private var hoveredTabId: UUID?
     @State private var draggedTabId: UUID?
     
-    private let tabHeight: CGFloat = 36
+    private let tabHeight: CGFloat = 44
     private let maxTabWidth: CGFloat = 240
     private let minTabWidth: CGFloat = 120
     
@@ -24,7 +24,7 @@ struct TabNavigationBar: View {
             // Overview 模式的导航栏
             OverviewNavigationBar(onBack: {
                 toggleOverviewMode()
-            })
+            }, height: tabHeight)
         } else {
             // Focus 模式的导航栏（标签页列表）
             FocusModeNavigationBar(
@@ -38,7 +38,7 @@ struct TabNavigationBar: View {
     }
     
     private func calculateTabWidth() -> CGFloat {
-        let availableWidth = UIScreen.main.bounds.width - 44 - 44 - 36 // 减去左右按钮和新建按钮的宽度
+        let availableWidth = UIScreen.main.bounds.width - 44 - 44 - tabHeight // 减去左右按钮和新建按钮的宽度
         let tabCount = CGFloat(viewModel.tabs.count)
         let calculatedWidth = availableWidth / tabCount
         return min(max(calculatedWidth, minTabWidth), maxTabWidth)
@@ -66,95 +66,103 @@ struct TabNavigationBar: View {
     }
 }
 
-/// Overview 模式的导航栏
+/// Overview 模式的导航栏（中间改为“活跃”，图标在上文字在下，选中使用 accentColor，未选中使用 gray）
 private struct OverviewNavigationBar: View {
     let onBack: () -> Void
-    @State private var selectedTab: OverviewTab = .allTabs
-    
+    let height: CGFloat
+    @State private var selectedTab: OverviewTab = .active
+
     enum OverviewTab {
-        case allTabs, bookmarks
+        case active, bookmarks
     }
-    
+
     var body: some View {
         HStack(spacing: 0) {
-            // 左侧：返回按钮
+            // 左侧：返回按钮（文字与图标为白色）
             Button(action: onBack) {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 20, weight: .regular))
                     Text("返回")
-                        .font(.system(size: 15))
+                        .font(.system(size: 20, weight: .regular))
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 18)
             }
             .buttonStyle(.plain)
-            
+
             Spacer()
-            
-            // 中间：所有页签/书签切换
-            HStack(spacing: 0) {
-                Button(action: {
-                    selectedTab = .allTabs
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.grid.2x2")
-                            .font(.system(size: 14))
-                        Text("所有页签")
-                            .font(.system(size: 14))
+
+            // 中间：活跃 / 书签 切换（SwitchButton 风格）
+            // 图标在上、文字在下；选中使用 accentColor，未选中使用 gray；高亮背景在选中项下平滑移动
+            GeometryReader { geo in
+                let totalWidth = min(geo.size.width, 144)
+                let segmentHeight: CGFloat = height
+                let segmentCount: CGFloat = 2
+                let segmentWidth = totalWidth / segmentCount
+                ZStack(alignment: .center) {
+                    // 背景大胶囊
+                    Capsule()
+                        .fill(Color(hex: "#3C3C4399"))
+                        .frame(width: totalWidth, height: segmentHeight)
+
+                    // 可移动的选中高亮胶囊
+                    Capsule()
+                        .fill(Color(hex: "#121216"))
+                        .frame(width: segmentWidth - 8, height: segmentHeight - 8)
+                        .offset(x: selectedTab == .active ? -segmentWidth/2 : segmentWidth/2)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: selectedTab)
+
+                    // 按钮堆栈
+                    HStack(spacing: 0) {
+                        Button(action: { selectedTab = .active }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "rectangle.grid.1x2.fill")
+                                    .font(.system(size: 14))
+                                Text("活跃")
+                                    .font(.system(size: 8))
+                            }
+                            .frame(width: segmentWidth, height: segmentHeight)
+                            .foregroundColor(selectedTab == .active ? Color.accentColor : Color.gray)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(action: {
+                            selectedTab = .bookmarks
+                            // TODO: 实现书签页切换
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "book.fill")
+                                    .font(.system(size: 14))
+                                Text("书签")
+                                    .font(.system(size: 8))
+                            }
+                            .frame(width: segmentWidth, height: segmentHeight)
+                            .foregroundColor(selectedTab == .bookmarks ? Color.accentColor : Color.gray)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(
-                        selectedTab == .allTabs ? Color.white.opacity(0.2) : Color.clear
-                    )
-                    .cornerRadius(8)
+                    .frame(width: totalWidth, height: height)
                 }
-                .buttonStyle(.plain)
-                
-                Button(action: {
-                    selectedTab = .bookmarks
-                    // TODO: 实现书签页切换
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bookmark")
-                            .font(.system(size: 14))
-                        Text("书签")
-                            .font(.system(size: 14))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(
-                        selectedTab == .bookmarks ? Color.white.opacity(0.2) : Color.clear
-                    )
-                    .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
+                .frame(width: totalWidth, height: height)
             }
-            .padding(4)
-            .background(Color(white: 0.2).opacity(0.5))
-            .cornerRadius(10)
-            
+            .frame(width: 144, height: height)
+
             Spacer()
-            
-            // 右侧：设置按钮
+
+            // 右侧：仅显示设置图标（白色）
             Button(action: {
                 // TODO: 打开设置
             }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 14))
-                    Text("设置")
-                        .font(.system(size: 15))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 21.5)
+                    .frame(height: height)
             }
             .buttonStyle(.plain)
         }
-        .frame(height: 36)
+        .frame(height: height)
         .background(Color(white: 0.15))
     }
 }
@@ -169,7 +177,7 @@ private struct FocusModeNavigationBar: View {
     
     // 计算是否需要滚动
     private var needsScrolling: Bool {
-        let availableWidth = UIScreen.main.bounds.width - 44 - 44 - 36 // 减去左侧按钮、右侧按钮、新建按钮
+        let availableWidth = UIScreen.main.bounds.width - 44 - 44 - tabHeight // 减去左侧按钮、右侧按钮、新建按钮
         let tabWidth = calculateTabWidth()
         let totalTabsWidth = CGFloat(viewModel.tabs.count) * (tabWidth + 2) // 每个 tab 加上间距
         return totalTabsWidth > availableWidth
@@ -206,7 +214,7 @@ private struct FocusModeNavigationBar: View {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.primary)
-                        .frame(width: 36, height: tabHeight)
+                        .frame(width: tabHeight, height: tabHeight)
                 }
                 .buttonStyle(.plain)
                 .background(Color(hex: "#D1D1D6"))
@@ -223,7 +231,7 @@ private struct FocusModeNavigationBar: View {
                         Image(systemName: "plus")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.primary)
-                            .frame(width: 36, height: tabHeight)
+                            .frame(width: tabHeight, height: tabHeight)
                     }
                     .buttonStyle(.plain)
                     .background(Color(hex: "#D1D1D6"))
@@ -260,6 +268,7 @@ private struct FocusModeNavigationBar: View {
                 isActive: tab.id == viewModel.currentTabId,
                 isHovered: tab.id == hoveredTabId,
                 width: calculateTabWidth(),
+                tabHeight: tabHeight,
                 onSelect: {
                     viewModel.switchToTab(id: tab.id)
                 },
@@ -283,6 +292,7 @@ private struct TabItemView: View {
     let isActive: Bool
     let isHovered: Bool
     let width: CGFloat
+    let tabHeight: CGFloat
     let onSelect: () -> Void
     let onClose: () -> Void
     
@@ -311,7 +321,7 @@ private struct TabItemView: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(width: width, height: 36) // 高度与 tabHeight 一致，填满导航栏
+                .frame(width: width, height: tabHeight) // 高度与 tabHeight 一致，填满导航栏
         .background(
             // 使用 UnevenRoundedRectangle 实现顶部圆角 14pt，底部无圆角
             UnevenRoundedRectangle(
@@ -334,5 +344,5 @@ private struct TabItemView: View {
 #Preview {
     let vm = BrowserViewModel()
     return TabNavigationBar(viewModel: vm, showAllTabs: .constant(false))
-        .frame(height: 36)
+        .frame(height: 44)
 }
