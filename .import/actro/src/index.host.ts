@@ -34,6 +34,7 @@ export type {
   ToastPosition,
   // UserAvatar
   UserAvatarProps,
+  MyTouchableOpacityProps,
 } from './types';
 // UI Components
 export {
@@ -43,6 +44,11 @@ export {
   StepList,
   ThemeView,
   UserAvatar,
+  MyTouchableOpacity,
+   DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuText,
+  DropdownMenuSubText,
 } from './ui/index.host';
 
 // Panel utilities (Host-only)
