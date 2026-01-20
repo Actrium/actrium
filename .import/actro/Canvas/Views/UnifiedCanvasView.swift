@@ -1241,9 +1241,10 @@ private struct TabCardView: View {
     // 悬浮标题栏高度（固定值，Overview 模式下显示在卡片上方）
     private let floatingTitleBarHeight: CGFloat = 24
 
+    @ViewBuilder
     var body: some View {
         // 使用 ZStack 允许标题栏悬浮在卡片上方
-        ZStack(alignment: .top) {
+        let base = ZStack(alignment: .top) {
             // 卡片主体（纯内容）
             // 圆角仅 Overview 模式显示，Focus 模式不要圆角
             contentView
@@ -1263,22 +1264,23 @@ private struct TabCardView: View {
         // hover 时半透明，交换过程中淡入到完全不透明
         .opacity({
             if isSwapping {
-                return 1.0  // 交换中：淡入到完全不透明
+                return 1.0
             } else if isHovering && !isBeingDragged && !isFocused {
-                return 0.5  // hover 时半透明
+                return 0.5
             } else {
-                return 1.0  // 默认完全不透明
+                return 1.0
             }
         }())
-        // 整个卡片作为拖动源
-        .onDrag {
-            if isFocused {
-                return NSItemProvider()
+
+        // 仅在非 Focus 模式下附加拖拽手势（避免在 Focus 模式响应长按拖拽）
+        if isFocused {
+            base
+        } else {
+            base.onDrag {
+                return onDragStart()
+            } preview: {
+                dragPreviewView
             }
-            return onDragStart()
-        } preview: {
-            // 自定义拖动预览：整个卡片内容
-            dragPreviewView
         }
     }
 
