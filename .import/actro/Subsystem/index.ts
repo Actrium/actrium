@@ -34,7 +34,7 @@ import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-
 // 1. 远程日志服务器 (node log-server.js, 端口 9999)
 // 2. Xcode 原生控制台 (通过 NativeLogger)
 const NativeLogger = NativeModules.NativeLogger;
-const LOG_SERVER = 'http://localhost:9999/log';
+const LOG_SERVER = 'http://10.10.20.223:9999/log';
 
 const sendLog = (level: string, msg: string) => {
   // 发送到远程日志服务器（注意：某些 runtime/离线 bundle 场景下 `fetch` 可能不存在，必须保护）

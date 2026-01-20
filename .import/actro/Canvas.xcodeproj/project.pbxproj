@@ -434,6 +434,8 @@
 				);
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置以支持发送位置附件";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "我们需要访问您的相册以选择照片";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -605,6 +607,8 @@
 				);
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置以支持发送位置附件";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "我们需要访问您的相册以选择照片";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
