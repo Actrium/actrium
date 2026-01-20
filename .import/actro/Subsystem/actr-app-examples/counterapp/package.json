@@ -6,10 +6,10 @@
     "build": "bun ../../../../rill/src/cli/index.ts build src/unified-app.tsx -o unified-app.js --footer ../../../../askit/src/cli/actr-footer.js --no-minify --dev"
   },
   "dependencies": {
-    "askit": "github:GoAskAway/askit#0.1.0",
+    "askit": "file:../../../../askit",
     "dayjs": "^1.11.19",
     "react": "^19.0.0",
-    "rill": "github:GoAskAway/rill#main"
+    "rill": "file:../../../../rill"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
