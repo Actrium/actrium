@@ -146,6 +146,9 @@ struct BrowserWindowView: View {
 
 @main
 struct CanvasApp: App {
+    // 注入自定义 AppDelegate 以满足 React Native 原生层对 window 属性的依赖
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     // Shared view models for history/bookmarks (global across all windows)
     @StateObject private var historyVM = HistoryViewModel()
     @StateObject private var bookmarkVM = BookmarkViewModel()
