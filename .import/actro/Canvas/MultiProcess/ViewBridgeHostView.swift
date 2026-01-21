@@ -490,9 +490,48 @@ final class ViewBridgeCoordinator {
     var onConnectionEstablished: (() -> Void)?
 
     // XPC 状态 - 移到这里避免 SwiftUI @State 被重置
-    var allocatedServiceId: String?
-    var xpcServiceReady: Bool = false
-    var hasConnection: Bool = false
+    // 🔑 四个条件都满足时才能发送初始 config：
+    //    1. allocatedServiceId != nil（已分配 XPC Service）
+    //    2. xpcServiceReady == true（Service 已 ready）
+    //    3. hasConnection == true（ViewBridge 连接已建立）
+    //    4. currentViewportSize 有效（> 10x10）
+
+    /// 已分配的 XPC Service ID
+    /// 使用 didSet 在分配后自动尝试发送初始 config
+    var allocatedServiceId: String? {
+        didSet {
+            if allocatedServiceId != nil && oldValue == nil {
+                let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
+                let serviceShort = allocatedServiceId?.components(separatedBy: ".").last ?? "nil"
+                fputs("🎯 [Coordinator] allocatedServiceId=\(serviceShort) for tab=\(tabIdShort)\n", stderr)
+                trySendInitialConfig()
+            }
+        }
+    }
+
+    /// XPC Service 是否已 ready（收到 xpcServiceReady 通知）
+    /// 使用 didSet 在状态变化时自动尝试发送初始 config
+    var xpcServiceReady: Bool = false {
+        didSet {
+            if xpcServiceReady && !oldValue {
+                let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
+                fputs("📡 [Coordinator] xpcServiceReady=true for tab=\(tabIdShort)\n", stderr)
+                trySendInitialConfig()
+            }
+        }
+    }
+
+    /// ViewBridge 连接是否已建立
+    /// 使用 didSet 在状态变化时自动尝试发送初始 config
+    var hasConnection: Bool = false {
+        didSet {
+            if hasConnection && !oldValue {
+                let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
+                fputs("🔗 [Coordinator] hasConnection=true for tab=\(tabIdShort)\n", stderr)
+                trySendInitialConfig()
+            }
+        }
+    }
     var xpcReadyObserver: NSObjectProtocol?
     var connectionCreatedObserver: NSObjectProtocol?
     var liveResizeEndedObserver: NSObjectProtocol?
@@ -504,7 +543,19 @@ final class ViewBridgeCoordinator {
 
     /// 当前 viewport 尺寸 - 存储在 coordinator 中以便闭包能访问最新值
     /// 默认值 50x50 反映 Overview 模式下可能的小卡片尺寸
-    var currentViewportSize: CGSize = CGSize(width: 50, height: 50)
+    /// 使用 didSet 在尺寸首次变为有效值时尝试发送初始 config
+    var currentViewportSize: CGSize = CGSize(width: 50, height: 50) {
+        didSet {
+            // 只在尺寸从无效变为有效时触发（避免频繁触发）
+            let wasValid = oldValue.width > 10 && oldValue.height > 10
+            let isValid = currentViewportSize.width > 10 && currentViewportSize.height > 10
+            if isValid && !wasValid {
+                let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
+                fputs("📐 [Coordinator] viewportSize valid for tab=\(tabIdShort): \(Int(currentViewportSize.width))x\(Int(currentViewportSize.height))\n", stderr)
+                trySendInitialConfig()
+            }
+        }
+    }
     /// 上次发送 tabConfig 时的尺寸 - 用于防止重复发送
     var lastSentConfigSize: CGSize?
     /// 上次发送 containerSizeChanged 时的尺寸 - 用于防止重复发送
@@ -516,29 +567,30 @@ final class ViewBridgeCoordinator {
         lastSentContainerSize = nil
     }
 
-    /// 🔑 尝试发送初始 tab config（当连接建立时调用）
-    /// 检查 hasConnection 和 xpcServiceReady，如果都为 true，立即发送 config
-    /// 这解决了 `onConnectionEstablished` 回调可能为 nil 的时序问题
+    /// 🔑 尝试发送初始 tab config
+    /// 检查四个条件：allocatedServiceId、xpcServiceReady、hasConnection、viewportSize
+    /// 任何一个 didSet 触发时都会调用此方法，当所有条件满足时发送 config
     func trySendInitialConfig() {
-        guard hasConnection && xpcServiceReady else {
-            NSLog("⚠️ [Coordinator] trySendInitialConfig: not ready - hasConnection=\(hasConnection ? 1 : 0), xpcReady=\(xpcServiceReady ? 1 : 0)")
-            return
-        }
-
+        let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
         let size = currentViewportSize
-        guard size.width > 10 && size.height > 10 else {
-            NSLog("⚠️ [Coordinator] trySendInitialConfig: invalid size \(Int(size.width))x\(Int(size.height))")
-            return
-        }
+        let sizeValid = size.width > 10 && size.height > 10
+
+        // 打印当前状态
+        fputs("🔍 [Coordinator] trySendInitialConfig tab=\(tabIdShort): serviceId=\(allocatedServiceId != nil ? "✓" : "✗"), xpcReady=\(xpcServiceReady ? "✓" : "✗"), conn=\(hasConnection ? "✓" : "✗"), size=\(sizeValid ? "✓" : "✗")(\(Int(size.width))x\(Int(size.height)))\n", stderr)
+
+        // 检查四个条件
+        guard allocatedServiceId != nil else { return }
+        guard hasConnection else { return }
+        guard xpcServiceReady else { return }
+        guard sizeValid else { return }
 
         // 防止重复发送
         guard size != lastSentContainerSize else {
-            NSLog("ℹ️ [Coordinator] trySendInitialConfig: size unchanged, skipping")
+            fputs("ℹ️ [Coordinator] trySendInitialConfig tab=\(tabIdShort): already sent, skipping\n", stderr)
             return
         }
 
-        let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
-        NSLog("🚀 [Coordinator] trySendInitialConfig: sending config for tab=\(tabIdShort), size=\(Int(size.width))x\(Int(size.height))")
+        fputs("🚀 [Coordinator] trySendInitialConfig: ALL CONDITIONS MET for tab=\(tabIdShort), size=\(Int(size.width))x\(Int(size.height))\n", stderr)
         lastSentContainerSize = size
         sendContainerSizeNotification(size: size)
     }

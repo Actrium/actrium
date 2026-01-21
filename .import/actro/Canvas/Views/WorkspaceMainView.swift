@@ -95,10 +95,13 @@ struct WorkspaceMainView: View {
                   viewportSize.width, viewportSize.height, String(describing: viewModel.canvasMode))
         }()
 
-        // Safe viewport size (avoid zero dimensions)
+        // Safe viewport size (avoid zero/small dimensions that cause layout issues)
+        // 使用更大的最小值，避免极端宽高比导致 cardHeight 异常大
+        // 当 viewportSize.width=0 时，cardAspectRatio=1/100=0.01，cardHeight=120/0.01=12000
+        // 这会导致 ViewBridge 的 NSServiceViewControllerWindow 布局循环错误
         let safeViewportSize = CGSize(
-            width: max(viewportSize.width, 1),
-            height: max(viewportSize.height, 1)
+            width: max(viewportSize.width, 100),
+            height: max(viewportSize.height, 100)
         )
 
         // 更新最后已知的视口尺寸（用于 resize 时截图）
@@ -124,18 +127,20 @@ struct WorkspaceMainView: View {
             let canvasSize = gridResult.canvasSize
 
             // 计算变换
+            // 使用 safeViewportSize 避免 viewportSize=0 导致 scale=0.001
+            // scale=0.001 会导致 ViewBridge 窗口计算出极端尺寸
             let transform: (scale: CGFloat, offset: CGPoint) = {
                 switch viewModel.canvasMode {
                 case .overview:
                     return calculateOverviewTransform(
                         canvasSize: canvasSize,
-                        viewportSize: viewportSize
+                        viewportSize: safeViewportSize
                     )
                 case .focus(let tabId):
                     return calculateFocusTransform(
                         for: tabId,
                         gridResult: gridResult,
-                        viewportSize: viewportSize,
+                        viewportSize: safeViewportSize,
                         titleBarRatio: titleBarRatio
                     )
                 }
@@ -771,8 +776,8 @@ struct WorkspaceMainView: View {
 
         // 🔑 计算卡片在视口中的位置（用于 Zoom 动画）
         let safeViewportSize = CGSize(
-            width: max(viewportSize.width, 1),
-            height: max(viewportSize.height, 1)
+            width: max(viewportSize.width, 100),
+            height: max(viewportSize.height, 100)
         )
         let cardAspectRatio = safeViewportSize.width / safeViewportSize.height
         let gridResult = gridLayout(
@@ -853,8 +858,8 @@ struct WorkspaceMainView: View {
             // 同时设置 Overview 快照（缩放到卡片尺寸）
             // 先计算卡片尺寸
             let safeViewportSizeForCard = CGSize(
-                width: max(viewportSize.width, 1),
-                height: max(viewportSize.height, 1)
+                width: max(viewportSize.width, 100),
+                height: max(viewportSize.height, 100)
             )
             let cardAspectRatio = safeViewportSizeForCard.width / safeViewportSizeForCard.height
             let gridResultForCard = gridLayout(
@@ -869,8 +874,8 @@ struct WorkspaceMainView: View {
 
         // 🔑 计算卡片在 Overview 模式下视口中的位置（用于 Zoom 动画）
         let safeViewportSize = CGSize(
-            width: max(viewportSize.width, 1),
-            height: max(viewportSize.height, 1)
+            width: max(viewportSize.width, 100),
+            height: max(viewportSize.height, 100)
         )
         let cardAspectRatio = safeViewportSize.width / safeViewportSize.height
         let gridResult = gridLayout(
