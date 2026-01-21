@@ -255,11 +255,8 @@ public struct IPCConfiguration: Sendable {
 
 // MARK: - Feature Flags
 
-/// Feature flags for gradual rollout
+/// Feature flags for IPC subsystem
 public struct IPCFeatureFlags: Sendable {
-    /// Use new NSXPCConnection transport (vs DistributedNotification)
-    public let useXPCConnection: Bool
-
     /// Enable request coalescing
     public let enableCoalescing: Bool
 
@@ -273,13 +270,11 @@ public struct IPCFeatureFlags: Sendable {
     public let enableTracing: Bool
 
     public init(
-        useXPCConnection: Bool = true,
         enableCoalescing: Bool = true,
         enableBackpressure: Bool = true,
         enableMetrics: Bool = true,
         enableTracing: Bool = true
     ) {
-        self.useXPCConnection = useXPCConnection
         self.enableCoalescing = enableCoalescing
         self.enableBackpressure = enableBackpressure
         self.enableMetrics = enableMetrics
@@ -289,18 +284,9 @@ public struct IPCFeatureFlags: Sendable {
     public static let `default` = IPCFeatureFlags()
 
     public static let testing = IPCFeatureFlags(
-        useXPCConnection: true,
         enableCoalescing: true,
         enableBackpressure: true,
         enableMetrics: true,
         enableTracing: true
-    )
-
-    public static let legacy = IPCFeatureFlags(
-        useXPCConnection: false,
-        enableCoalescing: false,
-        enableBackpressure: false,
-        enableMetrics: false,
-        enableTracing: false
     )
 }

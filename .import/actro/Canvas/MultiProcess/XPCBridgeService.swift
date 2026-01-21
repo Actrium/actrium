@@ -10,12 +10,6 @@
 //  3. 自动 Defer - 目标未就绪时自动缓存，就绪后自动发送
 //  4. Pull 模式 - XPC 服务启动时主动注册，发送时从状态管理器读取最新状态
 //
-//  迁移说明：
-//  - 通过 IPCBridgeAdapter 支持新旧两种传输方式
-//  - Feature flag `useXPCConnection` 控制是否使用 NSXPCConnection
-//  - 旧路径：DistributedNotificationCenter（默认）
-//  - 新路径：NSXPCConnection via IPC module
-//
 
 import Foundation
 import Combine
@@ -23,8 +17,7 @@ import AppKit
 
 // MARK: - 进程隔离标识符
 
-/// 主进程唯一标识符，用于隔离多个 Canvas 实例的 DistributedNotification
-/// 所有 XPC 通知名称都包含此 ID，确保不同 Canvas 进程的通知不会互相干扰
+/// 主进程唯一标识符，用于隔离多个 Canvas 实例
 let CanvasHostProcessId = ProcessInfo.processInfo.processIdentifier
 
 // MARK: - 数据结构
@@ -71,7 +64,7 @@ struct XPCTabState {
     var isServiceReady: Bool = false
     var isConnected: Bool = false
     var lastSentSize: CGSize?
-    var connectionId: String?  // 用于多连接路由
+    var connectionId: String?
 
     var isReady: Bool {
         serviceId != nil && isServiceReady && isConnected
@@ -102,29 +95,18 @@ final class XPCBridgeService: ObservableObject {
     static let shared = XPCBridgeService()
 
     private init() {
-        setupNotificationListeners()
-        // Setup IPC adapter endpoint listener if XPC enabled
-        if ipcAdapter.isXPCEnabled {
-            ipcAdapter.setupEndpointListener()
-        }
-        NSLog("📡 [XPCBridgeService] Initialized (useXPCConnection=%@)",
-              ipcAdapter.isXPCEnabled ? "true" : "false")
+        ipcAdapter.setupEndpointListener()
+        NSLog("📡 [XPCBridgeService] Initialized")
     }
 
     // MARK: - IPC Integration
 
-    /// Adapter for new IPC module (feature flag controlled)
+    /// Adapter for IPC module
     private let ipcAdapter = IPCBridgeAdapter.shared
-
-    /// Whether to use new XPC transport (feature flag)
-    var useXPCConnection: Bool {
-        ipcAdapter.isXPCEnabled
-    }
 
     // MARK: - 核心状态（单一数据源）
 
     /// 当前 Canvas 模式：false = Focus, true = Overview
-    /// 由 canvasMode 订阅自动更新
     private(set) var isOverviewMode: Bool = false
 
     /// 每个 Tab 的 XPC 状态
@@ -140,28 +122,19 @@ final class XPCBridgeService: ObservableObject {
 
     private var canvasModeSubscription: AnyCancellable?
 
-    // MARK: - Notification Observers
-
-    private var xpcReadyObserver: NSObjectProtocol?
-    private var connectionCreatedObserver: NSObjectProtocol?
-    private var sizeAppliedObserver: NSObjectProtocol?
-
     // MARK: - 公开 API：生命周期管理
 
     /// 绑定到 BrowserViewModel，订阅 canvasMode 变化
-    /// 应该在 App 启动时调用一次
     func bindToViewModel(_ viewModel: CanvasModePublisher) {
         canvasModeSubscription?.cancel()
 
-        // 立即同步当前状态
         let newOverviewMode = !viewModel.canvasMode.isInFocusMode
-        NSLog("📡 [XPCBridgeService] bindToViewModel: canvasMode.isInFocusMode=%@, isOverviewMode=%@",
+        NSLog("📡 [XPCBridgeService] bindToViewModel: isInFocusMode=%@, isOverviewMode=%@",
               viewModel.canvasMode.isInFocusMode ? "true" : "false",
               newOverviewMode ? "true" : "false")
 
         updateOverviewMode(newOverviewMode)
 
-        // 订阅后续变化
         canvasModeSubscription = viewModel.canvasModePublisher
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -172,17 +145,13 @@ final class XPCBridgeService: ObservableObject {
     }
 
     /// 为 Tab 分配 XPC 服务
-    /// 返回分配的 serviceId
     func allocateService(for tabId: UUID, fingerprint: String) throws -> String {
-        // 检查是否已分配
         if let existing = tabStates[tabId]?.serviceId {
             return existing
         }
 
-        // 委托给 XPCServicePool 进行实际分配
         let serviceId = try XPCServicePool.shared.allocateService(for: tabId, fingerprint: fingerprint)
 
-        // 初始化 Tab 状态
         var state = tabStates[tabId] ?? XPCTabState()
         state.serviceId = serviceId
         state.isServiceReady = serviceReadyStates[serviceId] ?? false
@@ -206,10 +175,7 @@ final class XPCBridgeService: ObservableObject {
               String(tabId.uuidString.prefix(8)), connectionId ?? "nil",
               state.isReady ? "true" : "false")
 
-        // Forward to IPC adapter
         ipcAdapter.markTabConnected(tabId, connectionId: connectionId)
-
-        // 检查是否有待发送的请求
         flushPendingRequests(for: tabId)
     }
 
@@ -217,15 +183,12 @@ final class XPCBridgeService: ObservableObject {
     func releaseTab(_ tabId: UUID) {
         guard let state = tabStates[tabId] else { return }
 
-        // 释放 XPCServicePool 中的分配
         if state.serviceId != nil {
             XPCServicePool.shared.releaseService(for: tabId)
         }
 
-        // Forward to IPC adapter
         ipcAdapter.releaseTab(tabId)
 
-        // 清理状态
         tabStates.removeValue(forKey: tabId)
         pendingRequests.removeValue(forKey: tabId)
 
@@ -235,7 +198,6 @@ final class XPCBridgeService: ObservableObject {
     // MARK: - 公开 API：发送请求
 
     /// 发送 Tab 配置
-    /// 如果目标未就绪，自动缓存并在就绪后发送
     func sendTabConfig(_ config: XPCTabConfig) {
         let tabId = config.tabId
         let tabIdShort = String(tabId.uuidString.prefix(8))
@@ -246,7 +208,7 @@ final class XPCBridgeService: ObservableObject {
             return
         }
 
-        guard state.isReady, let serviceId = state.serviceId else {
+        guard state.isReady else {
             NSLog("⚠️ [XPCBridgeService] sendTabConfig: tab=%@ NOT READY (service=%@, connected=%@, serviceReady=%@), deferring",
                   tabIdShort,
                   state.serviceId ?? "nil",
@@ -256,54 +218,45 @@ final class XPCBridgeService: ObservableObject {
             return
         }
 
-        // 发送配置
-        doSendTabConfig(config, serviceId: serviceId)
+        doSendTabConfig(config)
     }
 
     /// 发送容器尺寸变化
-    /// 如果目标未就绪，自动缓存
     func sendContainerSizeChanged(tabId: UUID, size: CGSize, requestId: String = UUID().uuidString.prefix(8).description) {
         let tabIdShort = String(tabId.uuidString.prefix(8))
 
-        guard let state = tabStates[tabId], state.isReady, let serviceId = state.serviceId else {
+        guard let state = tabStates[tabId], state.isReady else {
             NSLog("⚠️ [XPCBridgeService] sendContainerSizeChanged: tab=%@ NOT READY, deferring", tabIdShort)
             appendPendingRequest(tabId: tabId, request: .sizeChange(size, requestId))
             return
         }
 
-        // 检查是否与上次发送的相同
         if let lastSize = state.lastSentSize, lastSize == size {
             NSLog("📡 [XPCBridgeService] sendContainerSizeChanged: tab=%@ SKIP (same size)", tabIdShort)
             return
         }
 
-        // 更新状态
         var updatedState = state
         updatedState.lastSentSize = size
         tabStates[tabId] = updatedState
 
-        // 发送
-        doSendContainerSizeChanged(tabId: tabId, size: size, serviceId: serviceId, requestId: requestId)
+        doSendContainerSizeChanged(tabId: tabId, size: size, requestId: requestId)
     }
 
     // MARK: - 公开 API：状态查询
 
-    /// 获取当前 isOverviewMode（供发送配置时使用）
     var currentOverviewMode: Bool {
         isOverviewMode
     }
 
-    /// 获取 Tab 的 XPC 状态
     func tabState(for tabId: UUID) -> XPCTabState? {
         tabStates[tabId]
     }
 
-    /// 检查 Tab 是否就绪
     func isTabReady(_ tabId: UUID) -> Bool {
         tabStates[tabId]?.isReady ?? false
     }
 
-    /// 获取 Tab 的 serviceId
     func serviceId(for tabId: UUID) -> String? {
         tabStates[tabId]?.serviceId
     }
@@ -316,34 +269,29 @@ final class XPCBridgeService: ObservableObject {
         isOverviewMode = newValue
         NSLog("📡 [XPCBridgeService] updateOverviewMode: %@", newValue ? "true" : "false")
 
-        // 通知所有已就绪的 Tab
         for (tabId, state) in tabStates where state.isReady {
-            if let serviceId = state.serviceId, let lastSize = state.lastSentSize {
+            if let lastSize = state.lastSentSize {
                 doSendContainerSizeChanged(
                     tabId: tabId,
                     size: lastSize,
-                    serviceId: serviceId,
                     requestId: "mode-\(UUID().uuidString.prefix(8))"
                 )
             }
         }
     }
 
-    private func markServiceReady(_ serviceId: String) {
+    func markServiceReady(_ serviceId: String) {
         guard serviceReadyStates[serviceId] != true else { return }
 
         serviceReadyStates[serviceId] = true
         NSLog("📡 [XPCBridgeService] markServiceReady: %@", serviceId.components(separatedBy: ".").last ?? "")
 
-        // Forward to IPC adapter
         ipcAdapter.markServiceReady(serviceId)
 
-        // 更新使用该服务的所有 Tab
         for (tabId, var state) in tabStates where state.serviceId == serviceId {
             state.isServiceReady = true
             tabStates[tabId] = state
 
-            // 检查是否可以发送待处理请求
             if state.isReady {
                 flushPendingRequests(for: tabId)
             }
@@ -355,7 +303,6 @@ final class XPCBridgeService: ObservableObject {
     private func appendPendingRequest(tabId: UUID, request: XPCPendingRequest) {
         var requests = pendingRequests[tabId] ?? []
 
-        // 对于 sizeChange，只保留最新的
         if case .sizeChange = request {
             requests.removeAll { if case .sizeChange = $0 { return true } else { return false } }
         }
@@ -366,7 +313,7 @@ final class XPCBridgeService: ObservableObject {
 
     private func flushPendingRequests(for tabId: UUID) {
         guard let requests = pendingRequests[tabId], !requests.isEmpty else { return }
-        guard let state = tabStates[tabId], state.isReady, let serviceId = state.serviceId else { return }
+        guard let state = tabStates[tabId], state.isReady else { return }
 
         NSLog("📡 [XPCBridgeService] flushPendingRequests: tab=%@ count=%d",
               String(tabId.uuidString.prefix(8)), requests.count)
@@ -376,143 +323,39 @@ final class XPCBridgeService: ObservableObject {
         for request in requests {
             switch request {
             case .tabConfig(let config):
-                doSendTabConfig(config, serviceId: serviceId)
+                doSendTabConfig(config)
             case .sizeChange(let size, let requestId):
-                doSendContainerSizeChanged(tabId: tabId, size: size, serviceId: serviceId, requestId: requestId)
+                doSendContainerSizeChanged(tabId: tabId, size: size, requestId: requestId)
             }
         }
     }
 
     // MARK: - 内部方法：实际发送
 
-    private func doSendTabConfig(_ config: XPCTabConfig, serviceId: String) {
+    private func doSendTabConfig(_ config: XPCTabConfig) {
         let tabIdShort = String(config.tabId.uuidString.prefix(8))
 
-        NSLog("📤 [XPCBridgeService] sendTabConfig: tab=%@ service=%@ size=%.0fx%.0f isOverviewMode=%@ useXPC=%@",
-              tabIdShort, serviceId.components(separatedBy: ".").last ?? "",
-              config.containerSize.width, config.containerSize.height,
-              isOverviewMode ? "true" : "false",
-              useXPCConnection ? "true" : "false")
+        NSLog("📤 [XPCBridgeService] sendTabConfig: tab=%@ size=%.0fx%.0f isOverviewMode=%@",
+              tabIdShort, config.containerSize.width, config.containerSize.height,
+              isOverviewMode ? "true" : "false")
 
-        // Forward to IPC adapter (handles feature flag internally)
         ipcAdapter.sendTabConfig(config, isOverviewMode: isOverviewMode)
-
-        // Legacy path: DistributedNotificationCenter (always send for now during migration)
-        let dict = config.toDictionary(isOverviewMode: isOverviewMode)
-
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: dict),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            NSLog("❌ [XPCBridgeService] doSendTabConfig: JSON serialization failed")
-            return
-        }
-
-        let notificationName = "com.canvas.tabConfig.\(CanvasHostProcessId).\(serviceId)"
-
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name(notificationName),
-            object: nil,
-            userInfo: ["config": jsonString],
-            deliverImmediately: true
-        )
     }
 
-    private func doSendContainerSizeChanged(tabId: UUID, size: CGSize, serviceId: String, requestId: String) {
+    private func doSendContainerSizeChanged(tabId: UUID, size: CGSize, requestId: String) {
         let tabIdShort = String(tabId.uuidString.prefix(8))
 
-        NSLog("📐 [XPCBridgeService] sendContainerSizeChanged: tab=%@ size=%.0fx%.0f isOverviewMode=%@ useXPC=%@",
-              tabIdShort, size.width, size.height, isOverviewMode ? "true" : "false",
-              useXPCConnection ? "true" : "false")
+        NSLog("📐 [XPCBridgeService] sendContainerSizeChanged: tab=%@ size=%.0fx%.0f isOverviewMode=%@",
+              tabIdShort, size.width, size.height, isOverviewMode ? "true" : "false")
 
-        // Forward to IPC adapter (handles feature flag internally)
-        // Convert requestId string to Int for IPC module
         let reqIdInt = Int(requestId.filter { $0.isNumber }) ?? 0
         ipcAdapter.sendContainerSizeChanged(tabId: tabId, size: size, requestId: reqIdInt)
-
-        // Legacy path: DistributedNotificationCenter (always send for now during migration)
-        let sizeInfo: [String: Any] = [
-            "tabId": tabId.uuidString,
-            "width": size.width,
-            "height": size.height,
-            "requestId": requestId,
-            "isOverviewMode": isOverviewMode
-        ]
-
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            NSLog("❌ [XPCBridgeService] doSendContainerSizeChanged: JSON serialization failed")
-            return
-        }
-
-        let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
-
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name(notificationName),
-            object: nil,
-            userInfo: ["sizeInfo": jsonString],
-            deliverImmediately: true
-        )
-    }
-
-    // MARK: - 通知监听
-
-    private func setupNotificationListeners() {
-        // 监听 XPC Service 就绪通知
-        // 使用 hostProcessId 过滤，只处理属于本进程的 XPC Service 通知
-        xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.canvas.xpcServiceReady"),
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let bundleId = notification.userInfo?["bundleId"] as? String else { return }
-            // 过滤：只处理属于本进程的通知
-            if let hostPid = notification.userInfo?["hostProcessId"] as? Int32,
-               hostPid != CanvasHostProcessId {
-                return  // 忽略其他 Canvas 进程的通知
-            }
-            Task { @MainActor in
-                self?.markServiceReady(bundleId)
-            }
-        }
-
-        // 监听连接创建通知（用于多连接路由）
-        connectionCreatedObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.canvas.xpcConnectionCreated"),
-            object: nil,
-            queue: .main
-        ) { notification in
-            guard let bundleId = notification.userInfo?["bundleId"] as? String,
-                  let internalId = notification.userInfo?["internalId"] as? String else { return }
-            // 过滤：只处理属于本进程的通知
-            if let hostPid = notification.userInfo?["hostProcessId"] as? Int32,
-               hostPid != CanvasHostProcessId {
-                return
-            }
-            NSLog("📡 [XPCBridgeService] xpcConnectionCreated: bundleId=%@ internalId=%@",
-                  bundleId.components(separatedBy: ".").last ?? "", internalId)
-            // TODO: 用于多连接路由，目前暂不处理
-        }
-    }
-
-    deinit {
-        if let observer = xpcReadyObserver {
-            DistributedNotificationCenter.default().removeObserver(observer)
-        }
-        if let observer = connectionCreatedObserver {
-            DistributedNotificationCenter.default().removeObserver(observer)
-        }
-        if let observer = sizeAppliedObserver {
-            DistributedNotificationCenter.default().removeObserver(observer)
-        }
     }
 }
 
 // MARK: - 向后兼容：ViewBridgeCoordinatorManager 代理
 
 extension XPCBridgeService {
-    /// 为了向后兼容，提供与 ViewBridgeCoordinatorManager 相同的接口
-    /// 逐步迁移后可以移除
-
-    /// 获取或创建 coordinator（委托给 ViewBridgeCoordinatorManager）
     func coordinator(for tabId: UUID) -> ViewBridgeCoordinator {
         ViewBridgeCoordinatorManager.shared.coordinator(for: tabId)
     }
