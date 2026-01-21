@@ -10,9 +10,9 @@
 		442EB4E3928B6CB9A596ED32 /* libPods-Canvas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 54BE6183EA33DF557E1EAE93 /* libPods-Canvas.a */; };
 		45693714731FFE1094AABA6D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9E8F106EEB5ACFC4B33B67C7 /* PrivacyInfo.xcprivacy */; };
 		E55904C52F1643D700514034 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = E55904C42F1643D700514034 /* Highlightr */; };
-		E55D4C992F2075570071A2DF /* A1SDK in Frameworks */ = {isa = PBXBuildFile; productRef = E55D4C982F2075570071A2DF /* A1SDK */; };
-		E55D4C9C2F20756C0071A2DF /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = E55D4C9B2F20756C0071A2DF /* Kingfisher */; };
 		E56636802F16656400534265 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E566367F2F16656400534265 /* ZIPFoundation */; };
+		E5700B492F20ABA80033B7CE /* A1SDK in Frameworks */ = {isa = PBXBuildFile; productRef = E5700B482F20ABA80033B7CE /* A1SDK */; };
+		E5700B4C2F20ABB80033B7CE /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = E5700B4B2F20ABB80033B7CE /* Kingfisher */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,10 +37,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				E55904C52F1643D700514034 /* Highlightr in Frameworks */,
-				E55D4C992F2075570071A2DF /* A1SDK in Frameworks */,
+				E5700B492F20ABA80033B7CE /* A1SDK in Frameworks */,
 				E56636802F16656400534265 /* ZIPFoundation in Frameworks */,
 				442EB4E3928B6CB9A596ED32 /* libPods-Canvas.a in Frameworks */,
-				E55D4C9C2F20756C0071A2DF /* Kingfisher in Frameworks */,
+				E5700B4C2F20ABB80033B7CE /* Kingfisher in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -107,8 +107,8 @@
 			packageProductDependencies = (
 				E55904C42F1643D700514034 /* Highlightr */,
 				E566367F2F16656400534265 /* ZIPFoundation */,
-				E55D4C982F2075570071A2DF /* A1SDK */,
-				E55D4C9B2F20756C0071A2DF /* Kingfisher */,
+				E5700B482F20ABA80033B7CE /* A1SDK */,
+				E5700B4B2F20ABB80033B7CE /* Kingfisher */,
 			);
 			productName = Canvas;
 			productReference = E55901A52F163A5B00514034 /* Canvas.app */;
@@ -141,8 +141,8 @@
 			packageReferences = (
 				E55904C32F1643D700514034 /* XCRemoteSwiftPackageReference "Highlightr" */,
 				E566367E2F16656400534265 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
-				E55D4C972F2075570071A2DF /* XCLocalSwiftPackageReference "../a1-sdk-swift" */,
-				E55D4C9A2F20756C0071A2DF /* XCRemoteSwiftPackageReference "Kingfisher" */,
+				E5700B472F20ABA80033B7CE /* XCLocalSwiftPackageReference "../a1-sdk-swift" */,
+				E5700B4A2F20ABB80033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E55901A62F163A5B00514034 /* Products */;
@@ -679,7 +679,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		E55D4C972F2075570071A2DF /* XCLocalSwiftPackageReference "../a1-sdk-swift" */ = {
+		E5700B472F20ABA80033B7CE /* XCLocalSwiftPackageReference "../a1-sdk-swift" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../a1-sdk-swift";
 		};
@@ -694,20 +694,20 @@
 				minimumVersion = 2.3.0;
 			};
 		};
-		E55D4C9A2F20756C0071A2DF /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/onevcat/Kingfisher.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 8.6.2;
-			};
-		};
 		E566367E2F16656400534265 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 0.9.20;
+			};
+		};
+		E5700B4A2F20ABB80033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/onevcat/Kingfisher.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.6.2;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -718,19 +718,19 @@
 			package = E55904C32F1643D700514034 /* XCRemoteSwiftPackageReference "Highlightr" */;
 			productName = Highlightr;
 		};
-		E55D4C982F2075570071A2DF /* A1SDK */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = A1SDK;
-		};
-		E55D4C9B2F20756C0071A2DF /* Kingfisher */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = E55D4C9A2F20756C0071A2DF /* XCRemoteSwiftPackageReference "Kingfisher" */;
-			productName = Kingfisher;
-		};
 		E566367F2F16656400534265 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = E566367E2F16656400534265 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		E5700B482F20ABA80033B7CE /* A1SDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = A1SDK;
+		};
+		E5700B4B2F20ABB80033B7CE /* Kingfisher */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E5700B4A2F20ABB80033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */;
+			productName = Kingfisher;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
