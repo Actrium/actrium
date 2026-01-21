@@ -3,7 +3,7 @@
 //  CanvasViewService
 //
 //  XPC listener for receiving commands from Host.
-//  Uses anonymous listener with endpoint exported via DistributedNotification.
+//  Uses standard NSXPCListener.service() for XPC Services.
 //
 
 import Foundation
@@ -12,7 +12,7 @@ import AppKit
 // MARK: - Service XPC Listener
 
 /// XPC listener for the Service side
-/// Creates an anonymous listener and exports endpoint to Host via notification
+/// Uses standard XPC Service listener pattern
 public final class ServiceXPCListener: NSObject {
     // MARK: - Singleton
 
@@ -20,7 +20,7 @@ public final class ServiceXPCListener: NSObject {
 
     // MARK: - Properties
 
-    /// The anonymous XPC listener
+    /// The XPC service listener
     private var listener: NSXPCListener?
 
     /// Connection to Host for callbacks
@@ -38,9 +38,6 @@ public final class ServiceXPCListener: NSObject {
 
     /// Whether the listener has been started
     private(set) var isListening = false
-
-    /// Whether XPC mode is enabled (vs DistributedNotification fallback)
-    private(set) var isXPCEnabled = false
 
     // MARK: - Initialization
 
@@ -64,7 +61,7 @@ public final class ServiceXPCListener: NSObject {
     // MARK: - Lifecycle
 
     /// Start the XPC listener
-    /// Creates an anonymous listener and exports its endpoint
+    /// Uses NSXPCListener.service() for standard XPC Service pattern
     public func start() {
         guard !isListening else {
             NSLog("[ServiceXPC] Already listening")
@@ -73,16 +70,12 @@ public final class ServiceXPCListener: NSObject {
 
         NSLog("[ServiceXPC] Starting XPC listener for service: %@", serviceBundleId)
 
-        // Create anonymous listener
-        listener = NSXPCListener.anonymous()
+        // Use standard XPC Service listener
+        listener = NSXPCListener.service()
         listener?.delegate = self
         listener?.resume()
 
         isListening = true
-        isXPCEnabled = true
-
-        // Export endpoint via notification
-        exportEndpoint()
 
         NSLog("[ServiceXPC] XPC listener started")
     }
@@ -99,64 +92,14 @@ public final class ServiceXPCListener: NSObject {
         hostConnection = nil
 
         isListening = false
-        isXPCEnabled = false
 
         NSLog("[ServiceXPC] XPC listener stopped")
     }
 
-    // MARK: - Endpoint Export
-
-    /// Export the listener endpoint via DistributedNotification
-    /// Host will receive this and connect using the endpoint
-    private func exportEndpoint() {
-        guard let listener = listener else {
-            NSLog("[ServiceXPC] Cannot export endpoint - no listener")
-            return
-        }
-
-        let endpoint = listener.endpoint
-
-        // Archive endpoint for transfer
-        do {
-            let data = try NSKeyedArchiver.archivedData(
-                withRootObject: endpoint,
-                requiringSecureCoding: true
-            )
-            let base64 = data.base64EncodedString()
-
-            // Post notification with endpoint
-            var userInfo: [String: Any] = [
-                "bundleId": serviceBundleId,
-                "endpoint": base64,
-                "processId": ProcessInfo.processInfo.processIdentifier
-            ]
-
-            if let hostPid = hostProcessId {
-                userInfo["hostProcessId"] = hostPid
-            }
-
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name("com.canvas.xpcEndpoint"),
-                object: nil,
-                userInfo: userInfo,
-                deliverImmediately: true
-            )
-
-            NSLog("[ServiceXPC] Endpoint exported via notification")
-        } catch {
-            NSLog("[ServiceXPC] Failed to archive endpoint: %@", error.localizedDescription)
-        }
-    }
-
-    /// Re-export endpoint with host process ID
+    /// Set host process ID for isolation
     public func setHostProcessId(_ pid: Int32) {
         self.hostProcessId = pid
         requestHandler.setHostProcessId(pid)
-
-        // Re-export endpoint with host PID
-        if isListening {
-            exportEndpoint()
-        }
     }
 
     // MARK: - Host Callbacks
@@ -182,8 +125,8 @@ public final class ServiceXPCListener: NSObject {
 
     /// Notify Host that size has been applied
     public func notifySizeApplied(tabId: String, size: CGSize, requestId: Int) {
-        sendToHost { proxy in
-            proxy.sizeDidApply(tabId: tabId, width: size.width, height: size.height, requestId: requestId)
+        sendToHost { (proxy: CanvasServiceXPCProtocol) in
+            proxy.sizeDidApply(tabId: tabId, width: Double(size.width), height: Double(size.height), requestId: requestId)
         }
     }
 
@@ -285,22 +228,14 @@ extension ServiceXPCListener: NSXPCListenerDelegate {
 
         hostConnection = nil
 
-        // Re-export endpoint in case Host wants to reconnect
-        if isListening {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.exportEndpoint()
-            }
-        }
+        // With standard XPC Service pattern, Host will automatically
+        // reconnect when it creates a new NSXPCConnection to the service
     }
 
     private func notifyServiceReady() {
-        sendToHost { [weak self] proxy in
+        sendToHost { [weak self] (proxy: CanvasServiceXPCProtocol) in
             guard let self = self else { return }
-            let ready = ServiceXPCServiceReady(
-                bundleId: self.serviceBundleId,
-                processId: ProcessInfo.processInfo.processIdentifier
-            )
-            proxy.serviceDidBecomeReady(ready)
+            proxy.serviceDidBecomeReady(bundleId: self.serviceBundleId)
         }
     }
 }

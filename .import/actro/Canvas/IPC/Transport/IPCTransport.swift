@@ -80,8 +80,7 @@ public protocol IPCTransport: AnyObject, Sendable {
 public enum IPCTransportFactory {
     /// Create the default transport based on configuration
     public static func create(configuration: IPCConfiguration) -> any IPCTransport {
-        // TODO: Return XPCConnectionTransport when fully implemented
-        return MockTransport()
+        return XPCConnectionTransport(configuration: configuration)
     }
 
     /// Create a mock transport for testing

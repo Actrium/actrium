@@ -95,7 +95,6 @@ final class XPCBridgeService: ObservableObject {
     static let shared = XPCBridgeService()
 
     private init() {
-        ipcAdapter.setupEndpointListener()
         NSLog("📡 [XPCBridgeService] Initialized")
     }
 
