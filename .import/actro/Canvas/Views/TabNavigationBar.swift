@@ -38,31 +38,9 @@ struct TabNavigationBar: View {
                     openSettings: { showSettings = true }
                 )
             }
-
-            // 居中圆角设置弹窗覆盖层
-            if showSettings {
-                Color.black.opacity(0.45)
-                    .edgesIgnoringSafeArea(.all)
-                    .transition(.opacity)
-                    .onTapGesture {
-                        withAnimation(.easeInOut) { showSettings = false }
-                    }
-
-                VStack {
-                    Spacer()
-
-                    SettingsView()
-                        .frame(maxWidth: 520, maxHeight: 820)
-                        .background(Color.clear)
-                        .cornerRadius(22)
-                        .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
-
-                    Spacer()
-                }
-                .padding(.horizontal, 40)
-                .transition(.scale.combined(with: .opacity))
-                .zIndex(1)
-            }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
     }
     
