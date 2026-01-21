@@ -22,10 +22,8 @@ target 'Canvas' do
   pod 'react-native-geolocation-service', :path => 'Subsystem/node_modules/react-native-geolocation-service'
   pod 'react-native-image-resizer', :path => 'Subsystem/node_modules/@bam.tech/react-native-image-resizer'
 
-  # 根据环境变量决定是否启用新架构 / Fabric
-  flags = get_default_flags()
-
-  # NOTE: deprecated - no longer depend on react-native-jsc-sandbox / react-native-quickjs
+  # 强制使用旧架构（Bridge模式）
+  ENV['RCT_NEW_ARCH_ENABLED'] = '0'  # 或者完全不设置这个变量
 
   use_react_native!(
     path: react_native_path,

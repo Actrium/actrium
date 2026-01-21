@@ -70,6 +70,14 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
         let coordinator = context.coordinator
         let newFrame = CGRect(origin: .zero, size: containerSize)
 
+        // 检查 isLeftPanelVisible 是否变化（立即更新，不等待 debounce）
+        let currentIsLeftPanelVisible = viewModel.isLeftPanelVisible(for: tab.id)
+        if coordinator.lastLeftPanelVisible != currentIsLeftPanelVisible {
+            coordinator.lastLeftPanelVisible = currentIsLeftPanelVisible
+            rootView.appProperties = self.makeProperties()
+            logger.debug("[SingleTabRootView] isLeftPanelVisible 变化，立即更新 props: \(currentIsLeftPanelVisible)")
+        }
+
         // 首次设置：确保 layer 和约束正确配置
         if coordinator.lastUpdatedSize == .zero {
             setupRootViewOnce(rootView, frame: newFrame)
@@ -244,6 +252,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
         // 节流相关状态
         var lastUpdateTime: CFAbsoluteTime = 0
         var lastUpdatedSize: CGSize = .zero
+        var lastLeftPanelVisible: Bool? = nil  // 跟踪左侧面板可见性变化
         var pendingSize: CGSize?
         var throttleWorkItem: DispatchWorkItem?
         var dragEndWorkItem: DispatchWorkItem?
