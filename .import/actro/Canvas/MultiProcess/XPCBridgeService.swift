@@ -10,6 +10,12 @@
 //  3. 自动 Defer - 目标未就绪时自动缓存，就绪后自动发送
 //  4. Pull 模式 - XPC 服务启动时主动注册，发送时从状态管理器读取最新状态
 //
+//  迁移说明：
+//  - 通过 IPCBridgeAdapter 支持新旧两种传输方式
+//  - Feature flag `useXPCConnection` 控制是否使用 NSXPCConnection
+//  - 旧路径：DistributedNotificationCenter（默认）
+//  - 新路径：NSXPCConnection via IPC module
+//
 
 import Foundation
 import Combine
@@ -97,7 +103,22 @@ final class XPCBridgeService: ObservableObject {
 
     private init() {
         setupNotificationListeners()
-        NSLog("📡 [XPCBridgeService] Initialized")
+        // Setup IPC adapter endpoint listener if XPC enabled
+        if ipcAdapter.isXPCEnabled {
+            ipcAdapter.setupEndpointListener()
+        }
+        NSLog("📡 [XPCBridgeService] Initialized (useXPCConnection=%@)",
+              ipcAdapter.isXPCEnabled ? "true" : "false")
+    }
+
+    // MARK: - IPC Integration
+
+    /// Adapter for new IPC module (feature flag controlled)
+    private let ipcAdapter = IPCBridgeAdapter.shared
+
+    /// Whether to use new XPC transport (feature flag)
+    var useXPCConnection: Bool {
+        ipcAdapter.isXPCEnabled
     }
 
     // MARK: - 核心状态（单一数据源）
@@ -185,6 +206,9 @@ final class XPCBridgeService: ObservableObject {
               String(tabId.uuidString.prefix(8)), connectionId ?? "nil",
               state.isReady ? "true" : "false")
 
+        // Forward to IPC adapter
+        ipcAdapter.markTabConnected(tabId, connectionId: connectionId)
+
         // 检查是否有待发送的请求
         flushPendingRequests(for: tabId)
     }
@@ -197,6 +221,9 @@ final class XPCBridgeService: ObservableObject {
         if state.serviceId != nil {
             XPCServicePool.shared.releaseService(for: tabId)
         }
+
+        // Forward to IPC adapter
+        ipcAdapter.releaseTab(tabId)
 
         // 清理状态
         tabStates.removeValue(forKey: tabId)
@@ -308,6 +335,9 @@ final class XPCBridgeService: ObservableObject {
         serviceReadyStates[serviceId] = true
         NSLog("📡 [XPCBridgeService] markServiceReady: %@", serviceId.components(separatedBy: ".").last ?? "")
 
+        // Forward to IPC adapter
+        ipcAdapter.markServiceReady(serviceId)
+
         // 更新使用该服务的所有 Tab
         for (tabId, var state) in tabStates where state.serviceId == serviceId {
             state.isServiceReady = true
@@ -357,6 +387,17 @@ final class XPCBridgeService: ObservableObject {
 
     private func doSendTabConfig(_ config: XPCTabConfig, serviceId: String) {
         let tabIdShort = String(config.tabId.uuidString.prefix(8))
+
+        NSLog("📤 [XPCBridgeService] sendTabConfig: tab=%@ service=%@ size=%.0fx%.0f isOverviewMode=%@ useXPC=%@",
+              tabIdShort, serviceId.components(separatedBy: ".").last ?? "",
+              config.containerSize.width, config.containerSize.height,
+              isOverviewMode ? "true" : "false",
+              useXPCConnection ? "true" : "false")
+
+        // Forward to IPC adapter (handles feature flag internally)
+        ipcAdapter.sendTabConfig(config, isOverviewMode: isOverviewMode)
+
+        // Legacy path: DistributedNotificationCenter (always send for now during migration)
         let dict = config.toDictionary(isOverviewMode: isOverviewMode)
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: dict),
@@ -366,10 +407,6 @@ final class XPCBridgeService: ObservableObject {
         }
 
         let notificationName = "com.canvas.tabConfig.\(CanvasHostProcessId).\(serviceId)"
-        NSLog("📤 [XPCBridgeService] sendTabConfig: tab=%@ service=%@ size=%.0fx%.0f isOverviewMode=%@",
-              tabIdShort, serviceId.components(separatedBy: ".").last ?? "",
-              config.containerSize.width, config.containerSize.height,
-              isOverviewMode ? "true" : "false")
 
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
@@ -382,6 +419,16 @@ final class XPCBridgeService: ObservableObject {
     private func doSendContainerSizeChanged(tabId: UUID, size: CGSize, serviceId: String, requestId: String) {
         let tabIdShort = String(tabId.uuidString.prefix(8))
 
+        NSLog("📐 [XPCBridgeService] sendContainerSizeChanged: tab=%@ size=%.0fx%.0f isOverviewMode=%@ useXPC=%@",
+              tabIdShort, size.width, size.height, isOverviewMode ? "true" : "false",
+              useXPCConnection ? "true" : "false")
+
+        // Forward to IPC adapter (handles feature flag internally)
+        // Convert requestId string to Int for IPC module
+        let reqIdInt = Int(requestId.filter { $0.isNumber }) ?? 0
+        ipcAdapter.sendContainerSizeChanged(tabId: tabId, size: size, requestId: reqIdInt)
+
+        // Legacy path: DistributedNotificationCenter (always send for now during migration)
         let sizeInfo: [String: Any] = [
             "tabId": tabId.uuidString,
             "width": size.width,
@@ -397,8 +444,6 @@ final class XPCBridgeService: ObservableObject {
         }
 
         let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
-        NSLog("📐 [XPCBridgeService] sendContainerSizeChanged: tab=%@ size=%.0fx%.0f isOverviewMode=%@",
-              tabIdShort, size.width, size.height, isOverviewMode ? "true" : "false")
 
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
