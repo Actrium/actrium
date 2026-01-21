@@ -399,6 +399,22 @@ private class ServiceReactNativeHost {
 
         // Setup listeners and create RCTBridge (loads from local bundle)
         setupTabConfigListener()
+
+        // Start XPC listener for new IPC module
+        startXPCListener()
+    }
+
+    /// Start the XPC listener for new IPC module
+    /// This enables direct XPC communication alongside legacy DistributedNotification
+    private func startXPCListener() {
+        // Set ourselves as the delegate to receive XPC requests
+        let listener = ServiceXPCListener.shared
+        listener.requestHandler.delegate = self
+
+        // Start listening (creates anonymous listener and exports endpoint)
+        listener.start()
+
+        debugLog("XPC listener started for service: \(serviceBundleId)")
     }
 
     /// Create RCTBridge (loads from local bundle file)
@@ -1077,6 +1093,71 @@ private class ServiceReactNativeHost {
         ]
 
         bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["didUpdateDimensions", dimensions], completion: nil)
+    }
+}
+
+// MARK: - ServiceRequestHandlerDelegate
+
+extension ServiceReactNativeHost: ServiceRequestHandlerDelegate {
+    func handleTabConfig(_ config: [String: Any], completion: @escaping (Bool, String?) -> Void) {
+        // Forward to existing handleTabConfig logic
+        guard let tabId = config["tabId"] as? String else {
+            completion(false, "Missing tabId")
+            return
+        }
+
+        let tabIdShort = String(tabId.prefix(8))
+        debugLog("[\(tabIdShort)] handleTabConfig via XPC delegate")
+
+        // Stop retry timer once we receive first config
+        hasReceivedTabConfig = true
+
+        // Try to find existing entry, or assign a pending entry
+        let entry: TabViewControllerEntry?
+        if let existing = getTabEntry(tabId: tabId) {
+            debugLog("[XPC] ✅ Found existing entry for tab=\(tabIdShort)")
+            entry = existing
+        } else {
+            // First config for this tabId - assign a pending entry
+            entry = assignPendingEntry(tabId: tabId)
+            if entry != nil {
+                debugLog("[XPC] ✅ Assigned pending entry for tab=\(tabIdShort)")
+            } else {
+                debugLog("[XPC] ⚠️ No pending entry available for tab=\(tabIdShort)")
+            }
+        }
+
+        if let entry = entry {
+            applyConfigToEntry(entry, config: config)
+            completion(true, nil)
+        } else {
+            completion(false, "No entry for tab")
+        }
+    }
+
+    func handleContainerSizeChanged(
+        tabId: String,
+        size: CGSize,
+        requestId: Int,
+        isOverviewMode: Bool,
+        completion: @escaping (Bool, String?) -> Void
+    ) {
+        let tabIdShort = String(tabId.prefix(8))
+        debugLog("[\(tabIdShort)] handleContainerSizeChanged via XPC delegate: \(size.width)x\(size.height)")
+
+        // Use existing size update logic
+        applySizeUpdate(tabId: tabId, size: size, requestId: "\(requestId)", isOverviewMode: isOverviewMode)
+        completion(true, nil)
+    }
+
+    func handleBindTab(hostTabId: String, internalId: String, completion: @escaping (Bool) -> Void) {
+        let hostShort = String(hostTabId.prefix(8))
+        let internalShort = String(internalId.prefix(8))
+        debugLog("[XPC] handleBindTab via delegate: host=\(hostShort) internal=\(internalShort)")
+
+        // Use existing bind logic
+        bind(hostTabId: hostTabId, toInternalId: internalId)
+        completion(true)
     }
 }
 

@@ -27,7 +27,8 @@ public final class ServiceXPCListener: NSObject {
     private var hostConnection: NSXPCConnection?
 
     /// Request handler for processing incoming requests
-    private let requestHandler: ServiceRequestHandler
+    /// Exposed for delegate assignment
+    let requestHandler: ServiceRequestHandler
 
     /// Service bundle identifier
     private let serviceBundleId: String
