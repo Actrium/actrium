@@ -130,6 +130,12 @@ final class BookmarkViewModel: ObservableObject {
         selectedTagIds.removeAll()
     }
 
+    /// Clear all bookmarks (including tag associations)
+    func clearAllBookmarks() {
+        bookmarkRepo.clearAll()
+        loadAll()
+    }
+
     // MARK: - Private Methods
 
     private func performFilter(query: String, tagIds: Set<UUID>) {

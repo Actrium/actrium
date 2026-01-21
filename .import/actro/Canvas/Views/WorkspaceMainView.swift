@@ -1414,6 +1414,7 @@ private struct TabGridView: View {
     @State private var draggingTabId: UUID?
     @State private var hoveringOverTabId: UUID?
     @State private var swappingTabId: UUID?  // 正在交换过程中的卡片（用于淡入动画）
+    @State private var isDraggingActive = false  // 跟踪拖动是否正在进行（用于抑制点击）
 
     // 固定的槽位索引（拖动开始时记录，不随 tabs 交换而改变）
     @State private var dragSourceSlotIndexFixed: Int?  // 拖动源槽位 a
@@ -1492,6 +1493,7 @@ private struct TabGridView: View {
                             hoveringOverTabId = nil
 
                             // 设置新的拖动状态
+                            isDraggingActive = true
                             draggingTabId = tab.id
                             dragSourceSlotIndexFixed = tabSlotPositions[tab.id]
                             return NSItemProvider(object: tab.id.uuidString as NSString)
@@ -1524,6 +1526,7 @@ private struct TabGridView: View {
 
                             // 延迟清除状态
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                isDraggingActive = false
                                 draggingTabId = nil
                                 swappingTabId = nil
                                 dragSourceSlotIndexFixed = nil
@@ -2070,6 +2073,8 @@ private struct TabPanel: View {
     let onClose: () -> Void
     var onNavigate: ((URL) -> Void)?
 
+    @State private var isLocalDragging = false  // 本地拖动状态，用于抑制点击手势
+
     // 悬浮标题栏高度 - 使用共享样式
     private var floatingTitleBarHeight: CGFloat { CardStyle.titleBarHeight }
 
@@ -2092,7 +2097,8 @@ private struct TabPanel: View {
             // 只有卡片主体响应 onTapGesture（不包括标题栏）
             .contentShape(Rectangle())
             .onTapGesture {
-                if !isFocused {
+                // 抑制拖动过程中的点击手势
+                if !isFocused && !isBeingDragged && !isLocalDragging {
                     onSelect()
                 }
             }
@@ -2122,10 +2128,21 @@ private struct TabPanel: View {
             if isFocused {
                 return NSItemProvider()
             }
+            // 设置本地拖动状态，抑制点击手势
+            isLocalDragging = true
             return onDragStart()
         } preview: {
             // 自定义拖动预览：整个卡片内容
             dragPreviewView
+        }
+        // 监听外部拖动状态变化，重置本地拖动状态
+        .onChange(of: isBeingDragged) { _, newValue in
+            if !newValue {
+                // 外部拖动结束时，重置本地拖动状态
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isLocalDragging = false
+                }
+            }
         }
     }
 
