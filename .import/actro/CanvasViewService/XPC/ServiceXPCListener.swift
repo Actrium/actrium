@@ -3,7 +3,7 @@
 //  CanvasViewService
 //
 //  XPC listener for receiving commands from Host.
-//  Uses standard NSXPCListener.service() for XPC Services.
+//  Uses anonymous listener since Service runs via ViewBridge (not standard XPC Service entry).
 //
 
 import Foundation
@@ -12,7 +12,7 @@ import AppKit
 // MARK: - Service XPC Listener
 
 /// XPC listener for the Service side
-/// Uses standard XPC Service listener pattern
+/// Uses anonymous listener pattern for ViewBridge-based services
 public final class ServiceXPCListener: NSObject {
     // MARK: - Singleton
 
@@ -20,7 +20,7 @@ public final class ServiceXPCListener: NSObject {
 
     // MARK: - Properties
 
-    /// The XPC service listener
+    /// The anonymous XPC listener
     private var listener: NSXPCListener?
 
     /// Connection to Host for callbacks
@@ -61,7 +61,7 @@ public final class ServiceXPCListener: NSObject {
     // MARK: - Lifecycle
 
     /// Start the XPC listener
-    /// Uses NSXPCListener.service() for standard XPC Service pattern
+    /// Uses anonymous listener since ViewBridge services can't use NSXPCListener.service()
     public func start() {
         guard !isListening else {
             NSLog("[ServiceXPC] Already listening")
@@ -70,12 +70,15 @@ public final class ServiceXPCListener: NSObject {
 
         NSLog("[ServiceXPC] Starting XPC listener for service: %@", serviceBundleId)
 
-        // Use standard XPC Service listener
-        listener = NSXPCListener.service()
+        // Use anonymous listener (ViewBridge services aren't standard XPC Services)
+        listener = NSXPCListener.anonymous()
         listener?.delegate = self
         listener?.resume()
 
         isListening = true
+
+        // Export endpoint via notification so Host can connect
+        exportEndpoint()
 
         NSLog("[ServiceXPC] XPC listener started")
     }
@@ -96,10 +99,53 @@ public final class ServiceXPCListener: NSObject {
         NSLog("[ServiceXPC] XPC listener stopped")
     }
 
-    /// Set host process ID for isolation
+    // MARK: - Endpoint Export
+
+    /// Export the listener endpoint via DistributedNotification
+    private func exportEndpoint() {
+        guard let listener = listener else { return }
+
+        do {
+            let data = try NSKeyedArchiver.archivedData(
+                withRootObject: listener.endpoint,
+                requiringSecureCoding: true
+            )
+
+            var userInfo: [String: Any] = [
+                "bundleId": serviceBundleId,
+                "endpoint": data.base64EncodedString(),
+                "processId": ProcessInfo.processInfo.processIdentifier
+            ]
+
+            if let hostPid = hostProcessId {
+                userInfo["hostProcessId"] = hostPid
+            }
+
+            // Use host PID for process isolation if known
+            let notificationName = hostProcessId.map { "com.canvas.xpcEndpoint.\($0)" }
+                ?? "com.canvas.xpcEndpoint"
+
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name(notificationName),
+                object: nil,
+                userInfo: userInfo,
+                deliverImmediately: true
+            )
+
+            NSLog("[ServiceXPC] Endpoint exported (notification: %@)", notificationName)
+        } catch {
+            NSLog("[ServiceXPC] Failed to export endpoint: %@", error.localizedDescription)
+        }
+    }
+
+    /// Set host process ID and re-export endpoint
     public func setHostProcessId(_ pid: Int32) {
         self.hostProcessId = pid
         requestHandler.setHostProcessId(pid)
+
+        if isListening {
+            exportEndpoint()
+        }
     }
 
     // MARK: - Host Callbacks
@@ -228,8 +274,12 @@ extension ServiceXPCListener: NSXPCListenerDelegate {
 
         hostConnection = nil
 
-        // With standard XPC Service pattern, Host will automatically
-        // reconnect when it creates a new NSXPCConnection to the service
+        // Re-export endpoint so Host can reconnect
+        if isListening {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.exportEndpoint()
+            }
+        }
     }
 
     private func notifyServiceReady() {
