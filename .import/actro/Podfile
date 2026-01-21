@@ -3,6 +3,10 @@ subsystem_path = File.join(__dir__, 'Subsystem')
 # incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
 react_native_path = 'Subsystem/node_modules/react-native'
 
+# 在这里设置禁用标志
+# 禁用 VisionCamera 与 worklets（帧处理器）的关联
+$VCEnableFrameProcessors = false 
+
 # Require react_native_pods via a stable absolute path.
 require File.join(subsystem_path, 'node_modules', 'react-native', 'scripts', 'react_native_pods')
 
@@ -21,6 +25,10 @@ target 'Canvas' do
   pod 'react-native-maps', :path => 'Subsystem/node_modules/react-native-maps'
   pod 'react-native-geolocation-service', :path => 'Subsystem/node_modules/react-native-geolocation-service'
   pod 'react-native-image-resizer', :path => 'Subsystem/node_modules/@bam.tech/react-native-image-resizer'
+  pod 'BVLinearGradient', :path => 'Subsystem/node_modules/react-native-linear-gradient'
+  pod 'NitroSound', :path => 'Subsystem/node_modules/react-native-nitro-sound'
+  pod 'NitroModules', :path => 'Subsystem/node_modules/react-native-nitro-modules'
+  # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 强制使用旧架构（Bridge模式）
   ENV['RCT_NEW_ARCH_ENABLED'] = '0'  # 或者完全不设置这个变量
