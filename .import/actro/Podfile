@@ -3,6 +3,9 @@ subsystem_path = File.join(__dir__, 'Subsystem')
 # incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
 react_native_path = 'Subsystem/node_modules/react-native'
 
+# 设置 NODE_PATH 环境变量，使 Node.js 能够找到 Subsystem 下的 node_modules
+ENV['NODE_PATH'] = File.join(__dir__, 'Subsystem', 'node_modules')
+
 # 在这里设置禁用标志
 # 禁用 VisionCamera 与 worklets（帧处理器）的关联
 $VCEnableFrameProcessors = false 
