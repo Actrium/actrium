@@ -1,87 +1,64 @@
 import SwiftUI
 
 struct SettingsView: View {
-    var body: some View {
-        ZStack {
-            Color(.systemGray3).edgesIgnoringSafeArea(.all)
-
-            VStack {
-                Spacer().frame(height: 40)
-
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("设置")
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 18)
-
-                    VStack(spacing: 14) {
-                        SettingsRowView(iconName: "person.circle", title: "Account")
-
-                        VStack(spacing: 8) {
-                            SettingsRowView(iconName: "paintbrush", title: "外观")
-                            Divider().background(Color(.sRGB, white: 0.18, opacity: 1))
-                            SettingsRowView(iconName: "globe", title: "语言")
-                            Divider().background(Color(.sRGB, white: 0.18, opacity: 1))
-                            SettingsRowView(iconName: "shield", title: "隐私与安全")
-                            Divider().background(Color(.sRGB, white: 0.18, opacity: 1))
-                            SettingsRowView(iconName: "questionmark.circle", title: "帮助")
-                            Divider().background(Color(.sRGB, white: 0.18, opacity: 1))
-                            SettingsRowView(iconName: "bubble.left.and.bubble.right", title: "反馈")
-                            Divider().background(Color(.sRGB, white: 0.18, opacity: 1))
-                            SettingsRowView(iconName: "app", title: "AskAway", trailingText: "V 0.0.0")
-                        }
-                        .background(Color(.sRGB, white: 0.07, opacity: 1))
-                        .cornerRadius(14)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                    }
-                    .padding(.horizontal, 8)
-
-                    Spacer()
-
-                    // Logout button
-                    Button(action: {
-                        // TODO: implement logout action
-                    }) {
-                        HStack {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(Color(.sRGB, white: 0.12, opacity: 1))
-                                    .frame(width: 36, height: 36)
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
-                                    .foregroundColor(Color(.systemRed))
-                            }
-
-                            Text("退出登录")
-                                .foregroundColor(Color(.systemRed))
-                                .font(.system(size: 16, weight: .semibold))
-
-                            Spacer()
-                        }
-                        .padding()
-                        .background(Color(.sRGB, white: 0.08, opacity: 1))
-                        .cornerRadius(18)
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 26)
-                }
-                .frame(maxWidth: 420)
-                .padding(.vertical, 14)
-                .background(Color.black)
-                .cornerRadius(22)
-                .shadow(color: Color(.sRGB, white: 0, opacity: 0.25), radius: 8, x: 0, y: 6)
-                .padding(.horizontal, 36)
-
-                Spacer()
-            }
-        }
+    var divider: some View {
+        return Color(hex: "#404042")
+            .padding(.leading, 16 + 36)
+            .padding(.trailing, 16)
+            .frame(height: 1)
     }
-}
-
-struct SettingsView_Previews: PreviewProvider {
-    static var previews: some View {
-        SettingsView()
-            .previewLayout(.sizeThatFits)
-            .frame(width: 600, height: 900)
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("设置")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 18)
+            
+            VStack(spacing: 18) {
+                ASUserInfoSection(
+                    isLoggedIn: false,
+                    currentUser: nil,
+                    onTap: {
+//                        if loginManager.isLoggedIn {
+//                            showUserDetail = true
+//                        } else {
+//                            loginManager.showLogin(.loginView)
+//                        }
+                    }
+                )
+                
+                VStack(spacing: 8) {
+                    SettingsRowView(iconName: "circle.lefthalf.filled.righthalf.striped.horizontal", title: "外观")
+                    divider
+                    SettingsRowView(iconName: "globe.asia.australia.fill", title: "语言")
+                    divider
+                    SettingsRowView(iconName: "checkmark.shield.fill", title: "隐私与安全")
+                    divider
+                    SettingsRowView(iconName: "questionmark.circle", title: "帮助")
+                    divider
+                    SettingsRowView(iconName: "ellipsis.bubble.fill", title: "反馈")
+                    divider
+                    SettingsRowView(iconName: "as.logo", title: "AskAway", trailingText: "V 0.0.0")
+                }
+                .background(Color(hex: "#2C2C2D"))
+                .cornerRadius(26)
+            }
+            
+            Spacer()
+            
+            // Logout button
+            SettingsRowView(
+                iconName: "rectangle.portrait.and.arrow.right.fill",
+                title: "退出登录",
+                showChevron: false,
+                foregroundColor: Color(hex: "#FF453A")
+            )
+            .background(Color(hex: "#2C2C2D"))
+            .cornerRadius(26)
+        }
+        .padding(EdgeInsets(top: 34, leading: 30, bottom: 27, trailing: 30))
+        .cornerRadius(34)
+        .background(Color.black)
     }
 }
