@@ -11,8 +11,6 @@
 		45693714731FFE1094AABA6D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9E8F106EEB5ACFC4B33B67C7 /* PrivacyInfo.xcprivacy */; };
 		E55904C52F1643D700514034 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = E55904C42F1643D700514034 /* Highlightr */; };
 		E56636802F16656400534265 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E566367F2F16656400534265 /* ZIPFoundation */; };
-		E5700B492F20ABA80033B7CE /* A1SDK in Frameworks */ = {isa = PBXBuildFile; productRef = E5700B482F20ABA80033B7CE /* A1SDK */; };
-		E5700B4C2F20ABB80033B7CE /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = E5700B4B2F20ABB80033B7CE /* Kingfisher */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -440,8 +438,8 @@
 				);
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access to record your voice messages.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置以支持发送位置附件";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access to record your voice messages.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "我们需要访问您的相册以选择照片";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -614,8 +612,8 @@
 				);
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access to record your voice messages.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置以支持发送位置附件";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need microphone access to record your voice messages.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "我们需要访问您的相册以选择照片";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -695,14 +693,6 @@
 				minimumVersion = 0.9.20;
 			};
 		};
-		E5700B4A2F20ABB80033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/onevcat/Kingfisher.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 8.6.2;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -715,15 +705,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E566367E2F16656400534265 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
-		};
-		E5700B482F20ABA80033B7CE /* A1SDK */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = A1SDK;
-		};
-		E5700B4B2F20ABB80033B7CE /* Kingfisher */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = E5700B4A2F20ABB80033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */;
-			productName = Kingfisher;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
