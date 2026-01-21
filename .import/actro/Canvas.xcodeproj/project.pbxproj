@@ -7,12 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0598D56EFEC8808740A9695B /* libPods-CanvasViewService.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 52FE8881EF533F65E9BE8AEC /* libPods-CanvasViewService.a */; };
 		1A2B3C4D5E6F7890ABCD0001 /* CanvasIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0002 /* CanvasIPC */; };
+		457EEA1F5D65241F37B32E2D /* libPods-Canvas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 68501CEF0142AD9A599B85C8 /* libPods-Canvas.a */; };
 		B3312B262F066DB70018A0B4 /* CanvasViewService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
-		C6646A8EF8C6A45E425F2542 /* libPods-Canvas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */; };
+		F2DA039040BAE7C3F6B2D28C /* libPods-CanvasViewService.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 58C5049ADC7AD124D63CC153 /* libPods-CanvasViewService.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -99,21 +99,18 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTabRenderer.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.debug.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.debug.xcconfig"; sourceTree = "<group>"; };
-		52FE8881EF533F65E9BE8AEC /* libPods-CanvasViewService.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasViewService.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		453DB22E380EBC5CF3E87FBC /* Pods-CanvasViewService.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasViewService.debug.xcconfig"; path = "Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService.debug.xcconfig"; sourceTree = "<group>"; };
+		58C5049ADC7AD124D63CC153 /* libPods-CanvasViewService.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasViewService.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTabRenderer.release.xcconfig"; path = "Target Support Files/Pods-CanvasTabRenderer/Pods-CanvasTabRenderer.release.xcconfig"; sourceTree = "<group>"; };
-		8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Canvas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		988CAD86E1193EE66F00D50D /* Pods-Canvas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.release.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.release.xcconfig"; sourceTree = "<group>"; };
+		68501CEF0142AD9A599B85C8 /* libPods-Canvas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Canvas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		89B514D408E702A02C0609E2 /* Pods-CanvasViewService.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasViewService.release.xcconfig"; path = "Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService.release.xcconfig"; sourceTree = "<group>"; };
+		A807C4A936C422853EAA4882 /* Pods-Canvas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.release.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.release.xcconfig"; sourceTree = "<group>"; };
 		B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasViewService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		B38A7F072ECA222600B4185F /* Gemfile */ = {isa = PBXFileReference; lastKnownFileType = text; path = Gemfile; sourceTree = "<group>"; };
 		B3E458A02EC731A30014D74C /* Canvas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Canvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B3E458AF2EC731A40014D74C /* CanvasTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B3E458B92EC731A40014D74C /* CanvasUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		EA6D3FCD880A6135F2FEC821 /* Pods-CanvasViewService.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasViewService.debug.xcconfig"; path = "Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService.debug.xcconfig"; sourceTree = "<group>"; };
-		F1C6C8F4CB35C6799FCF3D80 /* Pods-CanvasViewService.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasViewService.release.xcconfig"; path = "Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService.release.xcconfig"; sourceTree = "<group>"; };
-		F75455EB7E76C1DE30CF29D2 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
+		E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -163,7 +160,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0598D56EFEC8808740A9695B /* libPods-CanvasViewService.a in Frameworks */,
+				F2DA039040BAE7C3F6B2D28C /* libPods-CanvasViewService.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -173,7 +170,7 @@
 			files = (
 				1A2B3C4D5E6F7890ABCD0001 /* CanvasIPC in Frameworks */,
 				B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */,
-				C6646A8EF8C6A45E425F2542 /* libPods-Canvas.a in Frameworks */,
+				457EEA1F5D65241F37B32E2D /* libPods-Canvas.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -194,12 +191,11 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		116FFB0824C93328CDC9F03A /* Frameworks */ = {
+		349156444B47045588D99DFC /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				8F29D310EEFE3C3AE5EE107D /* libPods-Canvas.a */,
-				18D87CE152650549521F22EF /* libPods-CanvasTabRenderer.a */,
-				52FE8881EF533F65E9BE8AEC /* libPods-CanvasViewService.a */,
+				68501CEF0142AD9A599B85C8 /* libPods-Canvas.a */,
+				58C5049ADC7AD124D63CC153 /* libPods-CanvasViewService.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -207,13 +203,11 @@
 		50AD95B7B3434865B5C8389F /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				F75455EB7E76C1DE30CF29D2 /* Pods-Canvas.debug.xcconfig */,
-				988CAD86E1193EE66F00D50D /* Pods-Canvas.release.xcconfig */,
 				B38A7F072ECA222600B4185F /* Gemfile */,
-				2BCBCC4AD82332F73C8E0854 /* Pods-CanvasTabRenderer.debug.xcconfig */,
-				7BCAB6F57FB369FD26292805 /* Pods-CanvasTabRenderer.release.xcconfig */,
-				EA6D3FCD880A6135F2FEC821 /* Pods-CanvasViewService.debug.xcconfig */,
-				F1C6C8F4CB35C6799FCF3D80 /* Pods-CanvasViewService.release.xcconfig */,
+				E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */,
+				A807C4A936C422853EAA4882 /* Pods-Canvas.release.xcconfig */,
+				453DB22E380EBC5CF3E87FBC /* Pods-CanvasViewService.debug.xcconfig */,
+				89B514D408E702A02C0609E2 /* Pods-CanvasViewService.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -228,7 +222,7 @@
 				B3E458A12EC731A30014D74C /* Products */,
 				5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */,
 				50AD95B7B3434865B5C8389F /* Pods */,
-				116FFB0824C93328CDC9F03A /* Frameworks */,
+				349156444B47045588D99DFC /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -250,11 +244,11 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = B3312B282F066DB70018A0B4 /* Build configuration list for PBXNativeTarget "CanvasViewService" */;
 			buildPhases = (
-				CCBE62BF17A9A575DEF45F78 /* [CP] Check Pods Manifest.lock */,
+				2E9082A2A7BE1102B2074EAE /* [CP] Check Pods Manifest.lock */,
 				B3312B172F066DB70018A0B4 /* Sources */,
 				B3312B182F066DB70018A0B4 /* Frameworks */,
 				B3312B192F066DB70018A0B4 /* Resources */,
-				795A595AC6301A86DB610CFE /* [CP] Copy Pods Resources */,
+				5D734BB00FC54E42D7283398 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -272,15 +266,15 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = B3E458C32EC731A40014D74C /* Build configuration list for PBXNativeTarget "Canvas" */;
 			buildPhases = (
-				0AA179162A414B3F92450497 /* [CP] Check Pods Manifest.lock */,
+				CBA3BCE34D80E77B0AABEFD0 /* [CP] Check Pods Manifest.lock */,
 				B3E4589C2EC731A30014D74C /* Sources */,
 				B3E4589D2EC731A30014D74C /* Frameworks */,
 				B3E4589E2EC731A30014D74C /* Resources */,
 				B3E78A802F03A100001F9589 /* Embed Helper Apps */,
-				A6274D0DD8056ADF6067F790 /* [CP] Copy Pods Resources */,
 				B34F77E92F042239002AF804 /* Embed XPC Services */,
-				1241ABEDE13A6757BB09D04A /* [CP] Embed Pods Frameworks */,
 				B34F77EA2F042240002AF804 /* Generate XPC Service Pool */,
+				0E1F624A3E53A57A3C81E878 /* [CP] Embed Pods Frameworks */,
+				27C094760F5BAB6CDDABDD2E /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -427,29 +421,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		0AA179162A414B3F92450497 /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-Canvas-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		1241ABEDE13A6757BB09D04A /* [CP] Embed Pods Frameworks */ = {
+		0E1F624A3E53A57A3C81E878 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -466,24 +438,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		795A595AC6301A86DB610CFE /* [CP] Copy Pods Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Copy Pods Resources";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		A6274D0DD8056ADF6067F790 /* [CP] Copy Pods Resources */ = {
+		27C094760F5BAB6CDDABDD2E /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -498,6 +453,45 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		2E9082A2A7BE1102B2074EAE /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-CanvasViewService-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		5D734BB00FC54E42D7283398 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		B34F77EA2F042240002AF804 /* Generate XPC Service Pool */ = {
@@ -519,7 +513,7 @@
 			shellScript = "# Generate XPC Service Pool (RCTViewService0-3)\n\"${SRCROOT}/scripts/generate_xpc_pool.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		CCBE62BF17A9A575DEF45F78 /* [CP] Check Pods Manifest.lock */ = {
+		CBA3BCE34D80E77B0AABEFD0 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -534,7 +528,7 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-CanvasViewService-checkManifestLockResult.txt",
+				"$(DERIVED_FILE_DIR)/Pods-Canvas-checkManifestLockResult.txt",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -616,7 +610,7 @@
 /* Begin XCBuildConfiguration section */
 		B3312B292F066DB70018A0B4 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = EA6D3FCD880A6135F2FEC821 /* Pods-CanvasViewService.debug.xcconfig */;
+			baseConfigurationReference = 453DB22E380EBC5CF3E87FBC /* Pods-CanvasViewService.debug.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_ENTITLEMENTS = CanvasViewService/CanvasViewService.entitlements;
@@ -648,7 +642,7 @@
 		};
 		B3312B2A2F066DB70018A0B4 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = F1C6C8F4CB35C6799FCF3D80 /* Pods-CanvasViewService.release.xcconfig */;
+			baseConfigurationReference = 89B514D408E702A02C0609E2 /* Pods-CanvasViewService.release.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_ENTITLEMENTS = CanvasViewService/CanvasViewService.entitlements;
@@ -811,7 +805,7 @@
 		};
 		B3E458C42EC731A40014D74C /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = F75455EB7E76C1DE30CF29D2 /* Pods-Canvas.debug.xcconfig */;
+			baseConfigurationReference = E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -845,7 +839,7 @@
 		};
 		B3E458C52EC731A40014D74C /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 988CAD86E1193EE66F00D50D /* Pods-Canvas.release.xcconfig */;
+			baseConfigurationReference = A807C4A936C422853EAA4882 /* Pods-Canvas.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
