@@ -1171,18 +1171,14 @@ public func registerCanvasServiceViewController() {
     class_addMethod(newClass, NSSelectorFromString("disconnect"), imp_implementationWithBlock(disconnectBlock), "v@:")
 
     // dealloc - cleanup when ViewController is destroyed
+    // Note: Do NOT manually call super dealloc - ARC handles it automatically after this block returns
     let deallocBlock: @convention(block) (AnyObject) -> Void = { self_ in
         if let tabIdObj = object_getIvar(self_, tabIdIvar) as? NSString {
             let internalId = tabIdObj as String
             debugLog("[\(logId(self_).prefix(8))] ViewController dealloc (internal \(internalId.prefix(8)))")
             ServiceReactNativeHost.shared.unregisterEntry(internalId: internalId)
         }
-        if let superClass = class_getSuperclass(object_getClass(self_)),
-           let superMethod = class_getMethodImplementation(superClass, NSSelectorFromString("dealloc")) {
-            var superStruct = objc_super(receiver: Unmanaged.passUnretained(self_), super_class: superClass)
-            let superDealloc = unsafeBitCast(superMethod, to: (@convention(c) (UnsafeMutablePointer<objc_super>, Selector) -> Void).self)
-            superDealloc(&superStruct, NSSelectorFromString("dealloc"))
-        }
+        // ARC will call [super dealloc] automatically
     }
     class_addMethod(newClass, NSSelectorFromString("dealloc"), imp_implementationWithBlock(deallocBlock), "v@:")
 

@@ -140,6 +140,13 @@ final class BookmarkRepository {
         )
     }
 
+    /// Clear all bookmarks (including tag associations)
+    func clearAll() {
+        db.execute("DELETE FROM bookmark_tags")
+        db.execute("DELETE FROM bookmarks")
+        db.execute("VACUUM")
+    }
+
     // MARK: - Helpers
 
     private func mapRowToBookmark(_ row: [String: Any], tags: [Tag]) -> Bookmark {

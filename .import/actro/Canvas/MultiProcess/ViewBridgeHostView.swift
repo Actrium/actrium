@@ -62,6 +62,20 @@ public class ViewBridgeHostView: NSView {
     /// 确保 remoteView 从左上角 (0,0) 开始正确布局
     public override var isFlipped: Bool { true }
 
+    /// 是否允许 hit testing（Overview 模式下为 false，让手势穿透到下层 Grid）
+    /// 从 coordinator.isOverviewMode 获取状态
+    var allowsHitTesting: Bool = true
+
+    /// Override hitTest to allow events to pass through in Overview mode
+    /// This enables tab dragging in Overview mode
+    public override func hitTest(_ point: NSPoint) -> NSView? {
+        // In Overview mode, let events pass through to the underlying Grid
+        if !allowsHitTesting {
+            return nil
+        }
+        return super.hitTest(point)
+    }
+
     // MARK: - Initialization
 
     /// Initialize with service configuration
@@ -500,6 +514,33 @@ final class ViewBridgeCoordinator {
     /// Called when isOverviewMode changes to ensure Service receives the update
     func resetLastSentContainerSize() {
         lastSentContainerSize = nil
+    }
+
+    /// 🔑 尝试发送初始 tab config（当连接建立时调用）
+    /// 检查 hasConnection 和 xpcServiceReady，如果都为 true，立即发送 config
+    /// 这解决了 `onConnectionEstablished` 回调可能为 nil 的时序问题
+    func trySendInitialConfig() {
+        guard hasConnection && xpcServiceReady else {
+            NSLog("⚠️ [Coordinator] trySendInitialConfig: not ready - hasConnection=\(hasConnection ? 1 : 0), xpcReady=\(xpcServiceReady ? 1 : 0)")
+            return
+        }
+
+        let size = currentViewportSize
+        guard size.width > 10 && size.height > 10 else {
+            NSLog("⚠️ [Coordinator] trySendInitialConfig: invalid size \(Int(size.width))x\(Int(size.height))")
+            return
+        }
+
+        // 防止重复发送
+        guard size != lastSentContainerSize else {
+            NSLog("ℹ️ [Coordinator] trySendInitialConfig: size unchanged, skipping")
+            return
+        }
+
+        let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
+        NSLog("🚀 [Coordinator] trySendInitialConfig: sending config for tab=\(tabIdShort), size=\(Int(size.width))x\(Int(size.height))")
+        lastSentContainerSize = size
+        sendContainerSizeNotification(size: size)
     }
 
     /// 节流：上次更新时间
@@ -1063,11 +1104,13 @@ final class ViewBridgeHostViewManager {
     private init() {}
 
     /// Get or create a ViewBridgeHostView for a tab
-    func hostView(for tabId: UUID, serviceBundleIdentifier: String, coordinator: ViewBridgeCoordinator, contentSize: CGSize) -> ViewBridgeHostView {
+    func hostView(for tabId: UUID, serviceBundleIdentifier: String, coordinator: ViewBridgeCoordinator, contentSize: CGSize, allowsHitTesting: Bool = true) -> ViewBridgeHostView {
         if let existing = hostViews[tabId] {
             // Update coordinator reference
             existing.coordinator = coordinator
             coordinator.hostView = existing
+            // Update hit testing state (Overview mode disables hit testing)
+            existing.allowsHitTesting = allowsHitTesting
             // 通过 coordinator 统一处理尺寸更新（包括通知 Service）
             coordinator.updateViewportSize(contentSize)
             return existing
@@ -1075,6 +1118,7 @@ final class ViewBridgeHostViewManager {
 
         let new = ViewBridgeHostView(serviceBundleIdentifier: serviceBundleIdentifier, initialContentSize: contentSize)
         new.coordinator = coordinator
+        new.allowsHitTesting = allowsHitTesting
         coordinator.hostView = new
         hostViews[tabId] = new
         return new
@@ -1181,17 +1225,22 @@ struct PersistentViewBridgeView: NSViewRepresentable {
             for: tabId,
             serviceBundleIdentifier: serviceBundleIdentifier,
             coordinator: coordinator,
-            contentSize: size
+            contentSize: size,
+            allowsHitTesting: allowsHitTesting
         )
 
         // 设置连接建立回调
         // 🔑 直接在这里设置 hasConnection，因为 onAppear 中的 setupConnectionCallback
         // 可能在连接建立后才执行（时序问题）
+        // 🔑 同时调用 trySendInitialConfig()，确保即使 onConnectionEstablished 为 nil 也能发送 config
         hostView.onConnectionEstablished = { [weak coordinator] in
             guard let coordinator = coordinator else { return }
             NSLog("🔗 [PersistentView] Connection established for tab %@, setting hasConnection=true",
                   String(tabId.uuidString.prefix(8)))
             coordinator.hasConnection = true
+            // 先尝试直接发送 config（解决 onConnectionEstablished 可能为 nil 的时序问题）
+            coordinator.trySendInitialConfig()
+            // 再调用可选的回调（UnifiedReactNativeLayer 可能设置了额外的处理）
             coordinator.onConnectionEstablished?()
         }
 
@@ -1233,6 +1282,8 @@ struct PersistentViewBridgeView: NSViewRepresentable {
 
         // 更新 hostView frame 使用 SwiftUI 分配的实际尺寸
         if let hostView = container.subviews.first as? ViewBridgeHostView {
+            // Update hit testing state on hostView as well
+            hostView.allowsHitTesting = allowsHitTesting
             hostView.applyFrameSize(actualSize)
             // 通知 coordinator 实际尺寸（用于同步到 Service）
             coordinator.updateViewportSize(actualSize)
@@ -1470,6 +1521,10 @@ struct UnifiedReactNativeLayer: View {
         .animation(nil, value: isTransitioning)
         // 🔑 过渡期间完全透明，动画结束后才显示
         .opacity(isTransitioning ? 0 : 1)
+        // 🔑 z-index 控制：Overview 模式放在 TabGridView 下面，让拖拽手势穿透
+        // Focus 模式放在上面，让用户与 React Native 内容交互
+        // 注意：不要依赖 isTransitioning，否则过渡期间会导致 Focus 模式下内容被遮挡
+        .zIndex(isFocused ? 100 : -100)
         // Focus 模式下允许交互
         .allowsHitTesting(isFocused && !isTransitioning)
         .onAppear {
