@@ -39,10 +39,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				E55904C52F1643D700514034 /* Highlightr in Frameworks */,
-				E5700B492F20ABA80033B7CE /* A1SDK in Frameworks */,
 				E56636802F16656400534265 /* ZIPFoundation in Frameworks */,
 				442EB4E3928B6CB9A596ED32 /* libPods-Canvas.a in Frameworks */,
-				E5700B4C2F20ABB80033B7CE /* Kingfisher in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -109,8 +107,6 @@
 			packageProductDependencies = (
 				E55904C42F1643D700514034 /* Highlightr */,
 				E566367F2F16656400534265 /* ZIPFoundation */,
-				E5700B482F20ABA80033B7CE /* A1SDK */,
-				E5700B4B2F20ABB80033B7CE /* Kingfisher */,
 			);
 			productName = Canvas;
 			productReference = E55901A52F163A5B00514034 /* Canvas.app */;
@@ -143,8 +139,6 @@
 			packageReferences = (
 				E55904C32F1643D700514034 /* XCRemoteSwiftPackageReference "Highlightr" */,
 				E566367E2F16656400534265 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
-				E5700B472F20ABA80033B7CE /* XCLocalSwiftPackageReference "../a1-sdk-swift" */,
-				E5700B4A2F20ABB80033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E55901A62F163A5B00514034 /* Products */;
@@ -683,13 +677,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		E5700B472F20ABA80033B7CE /* XCLocalSwiftPackageReference "../a1-sdk-swift" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../a1-sdk-swift";
-		};
-/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		E55904C32F1643D700514034 /* XCRemoteSwiftPackageReference "Highlightr" */ = {
