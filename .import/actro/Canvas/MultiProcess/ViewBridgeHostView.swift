@@ -231,15 +231,16 @@ public class ViewBridgeHostView: NSView {
 
         // Send tabId to Service BEFORE requesting connection
         // This allows Service to associate the upcoming connection with the correct tabId
+        // 同时发送 hostProcessId，用于进程隔离
         if let tabId = coordinator?.tabId?.uuidString {
             let notificationName = "com.canvas.pendingTabId.\(serviceBundleIdentifier)"
             DistributedNotificationCenter.default().postNotificationName(
                 NSNotification.Name(notificationName),
                 object: nil,
-                userInfo: ["tabId": tabId],
+                userInfo: ["tabId": tabId, "hostProcessId": CanvasHostProcessId],
                 deliverImmediately: true
             )
-            fputs("📤 [HOST] Sent pendingTabId: \(tabId.prefix(8)) to \(serviceBundleIdentifier)\n", stderr)
+            fputs("📤 [HOST] Sent pendingTabId: \(tabId.prefix(8)) to \(serviceBundleIdentifier) (pid=\(CanvasHostProcessId))\n", stderr)
         }
 
         // Load ViewBridge framework
@@ -724,7 +725,7 @@ final class ViewBridgeCoordinator {
         guard sizeAppliedObserver == nil,
               let serviceId = allocatedServiceId else { return }
 
-        let notificationName = "com.canvas.sizeApplied.\(serviceId)"
+        let notificationName = "com.canvas.sizeApplied.\(CanvasHostProcessId).\(serviceId)"
         sizeAppliedObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(notificationName),
             object: nil,
@@ -955,7 +956,7 @@ final class ViewBridgeCoordinator {
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
            let jsonString = String(data: jsonData, encoding: .utf8) {
-            let notificationName = "com.canvas.containerSizeChanged.\(serviceId)"
+            let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
             NSLog("📐 [HOST→SVC] containerSizeChanged req=%@ tab=%@ size=%.0fx%.0f",
                   String(requestId), String(tabId.uuidString.prefix(8)), size.width, size.height)
             DistributedNotificationCenter.default().postNotificationName(
@@ -1127,7 +1128,7 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
                 ]
                 if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
                    let jsonString = String(data: jsonData, encoding: .utf8) {
-                    let notificationName = "com.canvas.containerSizeChanged.\(serviceId)"
+                    let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
                     NSLog("📐 [HOST→SVC] isOverviewMode changed req=%@ tab=%@ isOverview=%@",
                           String(requestId), String(tabId.uuidString.prefix(8)), isOverview ? "true" : "false")
                     DistributedNotificationCenter.default().postNotificationName(
@@ -1664,7 +1665,7 @@ struct UnifiedReactNativeLayer: View {
         // 🔥 快速路径已在 checkPrewarmStatusAndSetReady 中处理
         // 这里仅设置监听器作为备用（处理 Service 重启等情况）
 
-        // 监听 com.canvas.xpcServiceReady（无后缀），通过 userInfo.bundleId 过滤
+        // 监听 com.canvas.xpcServiceReady（无后缀），通过 userInfo.bundleId 和 hostProcessId 过滤
         coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.canvas.xpcServiceReady"),
             object: nil,
@@ -1674,6 +1675,11 @@ struct UnifiedReactNativeLayer: View {
             guard let userInfo = notification.userInfo,
                   let bundleId = userInfo["bundleId"] as? String,
                   bundleId == serviceId else { return }
+            // 过滤：只处理属于本进程的通知
+            if let hostPid = userInfo["hostProcessId"] as? Int32,
+               hostPid != CanvasHostProcessId {
+                return
+            }
 
             // 标记到 pool，供后续新 Tab 查询
             XPCServicePool.shared.markServiceReady(bundleIdentifier: serviceId)
@@ -1763,7 +1769,7 @@ struct UnifiedReactNativeLayer: View {
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
            let jsonString = String(data: jsonData, encoding: .utf8) {
-            let notificationName = "com.canvas.tabConfig.\(serviceId)"
+            let notificationName = "com.canvas.tabConfig.\(CanvasHostProcessId).\(serviceId)"
             DistributedNotificationCenter.default().postNotificationName(
                 NSNotification.Name(notificationName),
                 object: nil,
@@ -2010,6 +2016,11 @@ struct ViewBridgeMultiProcessTabView: View {
                   notifyingBundleId == expectedBundleId else {
                 return
             }
+            // 过滤：只处理属于本进程的通知
+            if let hostPid = userInfo["hostProcessId"] as? Int32,
+               hostPid != CanvasHostProcessId {
+                return
+            }
 
             // 标记到 pool，供后续新 Tab 查询
             XPCServicePool.shared.markServiceReady(bundleIdentifier: expectedBundleId)
@@ -2050,13 +2061,18 @@ struct ViewBridgeMultiProcessTabView: View {
                   let bundleId = info["bundleId"] as? String,
                   bundleId == serviceId,
                   let internalId = info["internalId"] as? String else { return }
+            // 过滤：只处理属于本进程的通知
+            if let hostPid = info["hostProcessId"] as? Int32,
+               hostPid != CanvasHostProcessId {
+                return
+            }
 
             // CRITICAL: Only process if this notification is for OUR tab
             if let notificationTabId = info["tabId"] as? String {
                 guard notificationTabId == tabId.uuidString else { return }
             }
 
-            let bindName = "com.canvas.bindTab.\(serviceId)"
+            let bindName = "com.canvas.bindTab.\(CanvasHostProcessId).\(serviceId)"
             let bindInfo: [String: Any] = [
                 "tabId": tabId.uuidString,
                 "internalId": internalId
@@ -2146,7 +2162,7 @@ struct ViewBridgeMultiProcessTabView: View {
         // Serialize to JSON and send using service-specific notification name
         if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
            let jsonString = String(data: jsonData, encoding: .utf8) {
-            let notificationName = "com.canvas.tabConfig.\(targetServiceId)"
+            let notificationName = "com.canvas.tabConfig.\(CanvasHostProcessId).\(targetServiceId)"
             DistributedNotificationCenter.default().postNotificationName(
                 NSNotification.Name(notificationName),
                 object: nil,
