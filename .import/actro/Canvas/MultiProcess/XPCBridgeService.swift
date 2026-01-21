@@ -15,6 +15,12 @@ import Foundation
 import Combine
 import AppKit
 
+// MARK: - 进程隔离标识符
+
+/// 主进程唯一标识符，用于隔离多个 Canvas 实例的 DistributedNotification
+/// 所有 XPC 通知名称都包含此 ID，确保不同 Canvas 进程的通知不会互相干扰
+let CanvasHostProcessId = ProcessInfo.processInfo.processIdentifier
+
 // MARK: - 数据结构
 
 /// Tab 配置数据
@@ -359,7 +365,7 @@ final class XPCBridgeService: ObservableObject {
             return
         }
 
-        let notificationName = "com.canvas.tabConfig.\(serviceId)"
+        let notificationName = "com.canvas.tabConfig.\(CanvasHostProcessId).\(serviceId)"
         NSLog("📤 [XPCBridgeService] sendTabConfig: tab=%@ service=%@ size=%.0fx%.0f isOverviewMode=%@",
               tabIdShort, serviceId.components(separatedBy: ".").last ?? "",
               config.containerSize.width, config.containerSize.height,
@@ -390,7 +396,7 @@ final class XPCBridgeService: ObservableObject {
             return
         }
 
-        let notificationName = "com.canvas.containerSizeChanged.\(serviceId)"
+        let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
         NSLog("📐 [XPCBridgeService] sendContainerSizeChanged: tab=%@ size=%.0fx%.0f isOverviewMode=%@",
               tabIdShort, size.width, size.height, isOverviewMode ? "true" : "false")
 
@@ -406,12 +412,18 @@ final class XPCBridgeService: ObservableObject {
 
     private func setupNotificationListeners() {
         // 监听 XPC Service 就绪通知
+        // 使用 hostProcessId 过滤，只处理属于本进程的 XPC Service 通知
         xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.canvas.xpcServiceReady"),
             object: nil,
             queue: .main
         ) { [weak self] notification in
             guard let bundleId = notification.userInfo?["bundleId"] as? String else { return }
+            // 过滤：只处理属于本进程的通知
+            if let hostPid = notification.userInfo?["hostProcessId"] as? Int32,
+               hostPid != CanvasHostProcessId {
+                return  // 忽略其他 Canvas 进程的通知
+            }
             Task { @MainActor in
                 self?.markServiceReady(bundleId)
             }
@@ -425,6 +437,11 @@ final class XPCBridgeService: ObservableObject {
         ) { notification in
             guard let bundleId = notification.userInfo?["bundleId"] as? String,
                   let internalId = notification.userInfo?["internalId"] as? String else { return }
+            // 过滤：只处理属于本进程的通知
+            if let hostPid = notification.userInfo?["hostProcessId"] as? Int32,
+               hostPid != CanvasHostProcessId {
+                return
+            }
             NSLog("📡 [XPCBridgeService] xpcConnectionCreated: bundleId=%@ internalId=%@",
                   bundleId.components(separatedBy: ".").last ?? "", internalId)
             // TODO: 用于多连接路由，目前暂不处理

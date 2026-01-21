@@ -576,6 +576,10 @@ private class ServiceReactNativeHost {
     private var readyNotificationTimer: Timer?
     private var hasReceivedTabConfig = false
 
+    /// 主进程的 PID，用于进程隔离通知
+    /// 从 pendingTabId 通知中获取，确保只处理来自正确主进程的通知
+    private(set) var hostProcessId: Int32?
+
     /// Queue of pending tabIds sent by Host before connection request
     /// Used to associate each loadView call with the correct Host tabId
     private var pendingTabIdQueue: [String] = []
@@ -651,6 +655,7 @@ private class ServiceReactNativeHost {
         }
 
         // Listen for pending tabId from Host (sent before connection request)
+        // 同时提取 hostProcessId 用于进程隔离
         let pendingTabIdName = "com.canvas.pendingTabId.\(serviceBundleId)"
         pendingTabIdObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(pendingTabIdName),
@@ -661,6 +666,19 @@ private class ServiceReactNativeHost {
                   let userInfo = notification.userInfo,
                   let tabId = userInfo["tabId"] as? String else { return }
 
+            // 提取 hostProcessId（第一次收到时设置，后续忽略不同 PID 的通知）
+            if let pid = userInfo["hostProcessId"] as? Int32 {
+                if self.hostProcessId == nil {
+                    self.hostProcessId = pid
+                    NSLog("[XPC] 📌 hostProcessId set to %d", pid)
+                    // 收到 hostProcessId 后，重新设置带 PID 的通知监听器
+                    self.setupProcessIsolatedListeners()
+                } else if self.hostProcessId != pid {
+                    // 忽略来自其他主进程的通知
+                    return
+                }
+            }
+
             self.pendingTabIdLock.lock()
             self.pendingTabIdQueue.append(tabId)
             self.pendingTabIdLock.unlock()
@@ -669,6 +687,55 @@ private class ServiceReactNativeHost {
         // Notify Host that this service is ready (with retry until tab config received)
         postXPCServiceReady()
         startReadyNotificationRetry()
+    }
+
+    /// 设置带进程隔离的通知监听器（在收到 hostProcessId 后调用）
+    private func setupProcessIsolatedListeners() {
+        guard let pid = hostProcessId else { return }
+
+        // 移除旧的不带 PID 的监听器
+        if let observer = tabConfigObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
+        if let observer = containerSizeObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
+        if let observer = bindTabObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
+
+        // 使用带 PID 的通知名称重新设置监听器
+        let tabConfigName = "com.canvas.tabConfig.\(pid).\(serviceBundleId)"
+        tabConfigObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(tabConfigName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleTabConfigNotification(notification)
+        }
+
+        let containerSizeName = "com.canvas.containerSizeChanged.\(pid).\(serviceBundleId)"
+        containerSizeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(containerSizeName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleContainerSizeChanged(notification)
+        }
+
+        let bindTabName = "com.canvas.bindTab.\(pid).\(serviceBundleId)"
+        bindTabObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(bindTabName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let info = notification.userInfo,
+                  let tabId = info["tabId"] as? String,
+                  let internalId = info["internalId"] as? String else { return }
+            self?.bind(hostTabId: tabId, toInternalId: internalId)
+        }
+
+        NSLog("[XPC] 📡 Process-isolated listeners setup for pid=%d", pid)
     }
 
     private func handleContainerSizeChanged(_ notification: Notification) {
@@ -765,7 +832,13 @@ private class ServiceReactNativeHost {
 
     /// 通知 Host 端尺寸更新已完成
     private func postSizeApplied(tabId: String, size: CGSize, requestId: String = "?") {
-        let notificationName = "com.canvas.sizeApplied.\(serviceBundleId)"
+        // 使用带 hostProcessId 的通知名称（如果已设置）
+        let notificationName: String
+        if let pid = hostProcessId {
+            notificationName = "com.canvas.sizeApplied.\(pid).\(serviceBundleId)"
+        } else {
+            notificationName = "com.canvas.sizeApplied.\(serviceBundleId)"
+        }
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
             object: nil,
@@ -780,10 +853,15 @@ private class ServiceReactNativeHost {
     }
 
     private func postXPCServiceReady() {
+        // 包含 hostProcessId（如果已设置），用于主进程过滤
+        var userInfo: [String: Any] = ["bundleId": serviceBundleId]
+        if let pid = hostProcessId {
+            userInfo["hostProcessId"] = pid
+        }
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name("com.canvas.xpcServiceReady"),
             object: nil,
-            userInfo: ["bundleId": serviceBundleId],
+            userInfo: userInfo,
             deliverImmediately: true
         )
     }
@@ -1086,12 +1164,16 @@ public func registerCanvasServiceViewController() {
 
         // Inform Host about this connection so it can bind tabId -> internalId explicitly
         // Include the tabId so Host can filter notifications for its own tab
+        // Include hostProcessId for process isolation
         var userInfo: [String: Any] = [
             "bundleId": host.serviceBundleId,
             "internalId": internalId
         ]
         if let tabId = pendingTabId {
             userInfo["tabId"] = tabId
+        }
+        if let pid = host.hostProcessId {
+            userInfo["hostProcessId"] = pid
         }
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name("com.canvas.xpcConnectionCreated"),
