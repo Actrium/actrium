@@ -42,38 +42,55 @@ public protocol CanvasHostXPCProtocol {
 // MARK: - Service → Host Protocol
 
 /// Protocol for Service-to-Host XPC callbacks
-/// Must match CanvasServiceXPCProtocol in Canvas/IPC/Protocol/CanvasXPCProtocol.swift
+/// Must match CanvasServiceXPCProtocol in Canvas/IPC/Protocol/CanvasXPCProtocol.swift exactly
 @objc(CanvasServiceXPCProtocol)
 public protocol CanvasServiceXPCProtocol {
-    /// Notify Host that Service is ready
-    /// - Parameters:
-    ///   - ready: Service ready info (NSSecureCoding)
-    func serviceDidBecomeReady(_ ready: ServiceXPCServiceReady)
+    /// Service has become ready
+    /// - Parameter bundleId: The service's bundle identifier
+    func serviceDidBecomeReady(bundleId: String)
 
-    /// Notify Host that size has been applied
+    /// Container size has been applied
     /// - Parameters:
-    ///   - tabId: The tab ID
+    ///   - tabId: The tab that applied the size
     ///   - width: Applied width
     ///   - height: Applied height
-    ///   - requestId: Original request ID for correlation
-    func sizeDidApply(tabId: String, width: CGFloat, height: CGFloat, requestId: Int)
+    ///   - requestId: The request ID for correlation
+    func sizeDidApply(tabId: String, width: Double, height: Double, requestId: Int)
 
-    /// Request Host to open a URL
+    /// Request to open a URL from the service
     /// - Parameters:
-    ///   - url: URL string to open
-    ///   - tabId: Source tab ID
+    ///   - url: The URL to open
+    ///   - tabId: The tab that made the request
     func requestOpenURL(_ url: String, fromTab tabId: String)
 
-    /// Report an error to Host
-    /// - Parameter error: Error info (NSSecureCoding)
+    /// Report an error from the service
+    /// - Parameter error: Error information
     func reportError(_ error: ServiceXPCServiceError)
+
+    /// Tab content has loaded
+    /// - Parameters:
+    ///   - tabId: The tab that loaded
+    ///   - title: The page title (if available)
+    func tabDidLoad(tabId: String, title: String?)
+
+    /// Tab is requesting focus
+    /// - Parameter tabId: The tab requesting focus
+    func tabRequestsFocus(tabId: String)
+
+    /// Console log from the service
+    /// - Parameters:
+    ///   - level: Log level (debug, info, warn, error)
+    ///   - message: Log message
+    ///   - tabId: Source tab (if applicable)
+    func consoleLog(level: String, message: String, tabId: String?)
 }
 
 // MARK: - NSSecureCoding Models
 
 /// Tab configuration for XPC transfer
 /// Must match IPCXPCTabConfig in Canvas/IPC/Protocol/XPCSecureModels.swift
-@objc(ServiceXPCTabConfig)
+/// @objc name must match exactly for NSSecureCoding across XPC
+@objc(IPCXPCTabConfig)
 public final class ServiceXPCTabConfig: NSObject, NSSecureCoding {
     public static var supportsSecureCoding: Bool { true }
 
@@ -128,7 +145,8 @@ public final class ServiceXPCTabConfig: NSObject, NSSecureCoding {
 
 /// Container size for XPC transfer
 /// Must match IPCXPCContainerSize in Canvas/IPC/Protocol/XPCSecureModels.swift
-@objc(ServiceXPCContainerSize)
+/// @objc name must match exactly for NSSecureCoding across XPC
+@objc(IPCXPCContainerSize)
 public final class ServiceXPCContainerSize: NSObject, NSSecureCoding {
     public static var supportsSecureCoding: Bool { true }
 
@@ -174,7 +192,8 @@ public final class ServiceXPCContainerSize: NSObject, NSSecureCoding {
 
 /// Service ready notification
 /// Must match IPCXPCServiceReady in Canvas/IPC/Protocol/XPCSecureModels.swift
-@objc(ServiceXPCServiceReady)
+/// @objc name must match exactly for NSSecureCoding across XPC
+@objc(IPCXPCServiceReady)
 public final class ServiceXPCServiceReady: NSObject, NSSecureCoding {
     public static var supportsSecureCoding: Bool { true }
 
@@ -209,7 +228,8 @@ public final class ServiceXPCServiceReady: NSObject, NSSecureCoding {
 
 /// Service error for XPC transfer
 /// Must match IPCXPCServiceError in Canvas/IPC/Protocol/XPCSecureModels.swift
-@objc(ServiceXPCServiceError)
+/// @objc name must match exactly for NSSecureCoding across XPC
+@objc(IPCXPCServiceError)
 public final class ServiceXPCServiceError: NSObject, NSSecureCoding {
     public static var supportsSecureCoding: Bool { true }
 
@@ -289,20 +309,6 @@ public enum ServiceXPCInterfaceFactory {
     /// Create interface for Service → Host protocol
     public static func createServiceToHostInterface() -> NSXPCInterface {
         let interface = NSXPCInterface(with: CanvasServiceXPCProtocol.self)
-
-        // Whitelist allowed classes for serviceDidBecomeReady:
-        let readyClasses = NSSet(array: [
-            ServiceXPCServiceReady.self,
-            NSString.self,
-            NSNumber.self,
-            NSDate.self
-        ])
-        interface.setClasses(
-            readyClasses as! Set<AnyHashable>,
-            for: #selector(CanvasServiceXPCProtocol.serviceDidBecomeReady(_:)),
-            argumentIndex: 0,
-            ofReply: false
-        )
 
         // Whitelist allowed classes for reportError:
         let errorClasses = NSSet(array: [
