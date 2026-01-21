@@ -22,6 +22,9 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
     private var connections: [String: NSXPCConnection] = [:]
     private var connectionQueue = DispatchQueue(label: "com.canvas.xpc.connection")
 
+    /// Stored endpoints for anonymous listener connections
+    private var endpoints: [String: NSXPCListenerEndpoint] = [:]
+
     /// Host process ID for isolation
     private let hostProcessId: Int32
 
@@ -44,6 +47,73 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
         super.init()
 
         self.hostCallbackHandler = XPCHostCallbackHandler(transport: self)
+        setupEndpointListener()
+    }
+
+    // MARK: - Endpoint Management
+
+    /// Store an endpoint for a service (used for anonymous listener pattern)
+    public func storeEndpoint(_ endpoint: NSXPCListenerEndpoint, for serviceId: String) {
+        lock.lock()
+        endpoints[serviceId] = endpoint
+        lock.unlock()
+
+        IPCLogger.shared.info(
+            "Stored endpoint for service",
+            category: .connection,
+            serviceId: serviceId
+        )
+    }
+
+    /// Setup listener for endpoint notifications from Service
+    private func setupEndpointListener() {
+        let notificationName = "com.canvas.xpcEndpoint.\(hostProcessId)"
+
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(notificationName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleEndpointNotification(notification)
+        }
+
+        // Also listen for generic endpoint notifications (before host PID is known)
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.xpcEndpoint"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleEndpointNotification(notification)
+        }
+
+        NSLog("📡 [XPCTransport] Listening for endpoints (pid=%d)", hostProcessId)
+    }
+
+    private func handleEndpointNotification(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let bundleId = userInfo["bundleId"] as? String,
+              let endpointBase64 = userInfo["endpoint"] as? String,
+              let endpointData = Data(base64Encoded: endpointBase64) else {
+            return
+        }
+
+        // Verify this is for our process if hostProcessId is included
+        if let notificationHostPid = userInfo["hostProcessId"] as? Int32,
+           notificationHostPid != hostProcessId {
+            return
+        }
+
+        // Decode endpoint
+        guard let endpoint = try? NSKeyedUnarchiver.unarchivedObject(
+            ofClass: NSXPCListenerEndpoint.self,
+            from: endpointData
+        ) else {
+            NSLog("❌ [XPCTransport] Failed to decode endpoint for %@", bundleId)
+            return
+        }
+
+        NSLog("📡 [XPCTransport] Received endpoint for %@", bundleId.components(separatedBy: ".").last ?? "")
+        storeEndpoint(endpoint, for: bundleId)
     }
 
     // MARK: - IPCTransport
@@ -62,7 +132,18 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
             lock.unlock()
             return // Already connected
         }
+
+        // Check for stored endpoint
+        let endpoint = endpoints[serviceId]
         lock.unlock()
+
+        // Wait for endpoint if not available (ViewBridge services use anonymous listeners)
+        let resolvedEndpoint: NSXPCListenerEndpoint?
+        if endpoint == nil {
+            resolvedEndpoint = await waitForEndpoint(serviceId: serviceId, timeout: 5.0)
+        } else {
+            resolvedEndpoint = endpoint
+        }
 
         // Create connection on dedicated queue
         let connection = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NSXPCConnection, Error>) in
@@ -72,7 +153,16 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
                     return
                 }
 
-                let conn = NSXPCConnection(serviceName: serviceId)
+                let conn: NSXPCConnection
+                if let ep = resolvedEndpoint {
+                    // Use endpoint for anonymous listener connection
+                    conn = NSXPCConnection(listenerEndpoint: ep)
+                    NSLog("📡 [XPCTransport] Connecting via endpoint to %@", serviceId.components(separatedBy: ".").last ?? "")
+                } else {
+                    // Fallback to service name (standard XPC Service)
+                    conn = NSXPCConnection(serviceName: serviceId)
+                    NSLog("📡 [XPCTransport] Connecting via serviceName to %@", serviceId.components(separatedBy: ".").last ?? "")
+                }
 
                 // Configure interfaces
                 conn.remoteObjectInterface = XPCInterfaceFactory.hostInterface()
@@ -108,6 +198,26 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
             category: .connection,
             serviceId: serviceId
         )
+    }
+
+    /// Wait for endpoint to be received
+    private func waitForEndpoint(serviceId: String, timeout: TimeInterval) async -> NSXPCListenerEndpoint? {
+        let startTime = Date()
+        let checkInterval: TimeInterval = 0.1
+
+        while Date().timeIntervalSince(startTime) < timeout {
+            lock.lock()
+            if let endpoint = endpoints[serviceId] {
+                lock.unlock()
+                return endpoint
+            }
+            lock.unlock()
+
+            try? await Task.sleep(nanoseconds: UInt64(checkInterval * 1_000_000_000))
+        }
+
+        NSLog("⚠️ [XPCTransport] Timeout waiting for endpoint: %@", serviceId.components(separatedBy: ".").last ?? "")
+        return nil
     }
 
     public func disconnect(from serviceId: String) async {
