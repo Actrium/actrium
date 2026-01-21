@@ -39,7 +39,6 @@ Subsystem/actr-app-examples/**/unified-app.js
 *.tmp
 *.temp
 Subsystem/bun.lock
-Subsystem/package-lock.json
 
 # TestFlight 上传脚本敏感文件
 Scripts/.config
