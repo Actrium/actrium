@@ -14,6 +14,6 @@ cd askit && bun install
 4. 执行命令
 
 ```shell
-cd Subsystem && npm install && npm run ln
+cd Subsystem && npm install
 cd .. && pod install
 ```

@@ -31,6 +31,7 @@ target 'Canvas' do
   pod 'BVLinearGradient', :path => 'Subsystem/node_modules/react-native-linear-gradient'
   pod 'NitroSound', :path => 'Subsystem/node_modules/react-native-nitro-sound'
   pod 'NitroModules', :path => 'Subsystem/node_modules/react-native-nitro-modules'
+  pod 'RNCClipboard', :path => 'Subsystem/node_modules/@react-native-clipboard/clipboard'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 强制使用旧架构（Bridge模式）

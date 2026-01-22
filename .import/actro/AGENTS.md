@@ -1,12 +1,21 @@
-### 基本设定
+<!-- OPENSPEC:START -->
+# OpenSpec Instructions
 
-1. 当前是一个只针对 Ipad 环境的应用，由 Swift + React native 构建
-2. `Subsystem` 是 rn 的部分（包含 rn 部分的系统应用，host，guest）
-3. `Subsystem/src/actr-host` 是 host 的部分
-4. `Subsystem/actr-app-examples/counterapp` 是 guest 的部分
+These instructions are for AI assistants working in this project.
 
+Always open `@/openspec/AGENTS.md` when the request:
+- Mentions planning or proposals (words like proposal, spec, change, plan)
+- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
+- Sounds ambiguous and you need the authoritative spec before coding
 
-改动注意事项：
-1. 删除文件必须和我确认，禁止执行 `rm -rf`
-2. 不要移除文件内的注释代码
+Use `@/openspec/AGENTS.md` to learn:
+- How to create and apply change proposals
+- Spec format and conventions
+- Project structure and guidelines
 
+Keep this managed block so 'openspec update' can refresh the instructions.
+
+<!-- OPENSPEC:END -->
+
+重点注意：
+1. 除非我特别要求，否则在生成 Spec 时只需关注业务逻辑和技术决策，忽略 UI 细节
