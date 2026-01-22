@@ -545,7 +545,12 @@ public final class IPCInteractionManager: ObservableObject {
 
         switch stateString {
         case "ready":
-            let transition = await stateMachine.markReady()
+            // State machine requires: idle → connecting → ready
+            // If in idle state, we need to first transition to connecting
+            if previousState == .idle {
+                await stateMachine.connect()  // idle → connecting
+            }
+            let transition = await stateMachine.markReady()  // connecting → ready
             if transition.wasSuccessful {
                 connectedServices.insert(serviceId)
                 IPCLogger.shared.info(
@@ -555,6 +560,12 @@ public final class IPCInteractionManager: ObservableObject {
                 )
                 // Flush any pending requests for this service
                 flushPendingRequestsForService(serviceId)
+            } else {
+                IPCLogger.shared.warning(
+                    "State machine transition failed: \(previousState) → ready (current: \(await stateMachine.state))",
+                    category: .connection,
+                    serviceId: serviceId
+                )
             }
 
         case "error", "busy":
