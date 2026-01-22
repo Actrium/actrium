@@ -179,6 +179,7 @@ if (USE_TEST_COMPONENT) {
     const OriginalComponent = Component;
     Component = (props: any) => {
       nlog('🎨 [Wrapper] TabRouter 开始渲染');
+      // console.error(props.isLeftPanelVisible, '????')
       try {
         return React.createElement(ErrorBoundary, null, React.createElement(OriginalComponent, props));
       } catch (renderError: any) {
