@@ -176,12 +176,21 @@ public final class ServiceXPCListener: NSObject {
     }
 
     /// Set host process ID and re-export endpoint
+    /// Also triggers state reporting since we now know where to send it
     public func setHostProcessId(_ pid: Int32) {
+        let isFirstSet = (hostProcessId == nil)
         self.hostProcessId = pid
         requestHandler.setHostProcessId(pid)
+        xpcLog("setHostProcessId: \(pid) (firstSet=\(isFirstSet))")
 
         if isListening {
             exportEndpoint()
+
+            // If this is the first time setting hostProcessId and service is already ready,
+            // report state now (since earlier reportState calls were skipped due to nil hostProcessId)
+            if isFirstSet {
+                reportState(.ready)
+            }
         }
     }
 
