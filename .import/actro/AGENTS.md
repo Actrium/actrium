@@ -17,5 +17,5 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
-重点注意：
-1. 除非我特别要求，否则在生成 Spec 时只需关注业务逻辑和技术决策，忽略 UI 细节
+## 重点约束 (Focus Constraint)
+- 除非我特别要求，否则在生成 Spec 时只需关注业务逻辑和技术决策，忽略 UI 细节
