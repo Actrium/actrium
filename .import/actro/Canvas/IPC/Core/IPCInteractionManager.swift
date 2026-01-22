@@ -63,6 +63,14 @@ public final class IPCInteractionManager: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
+    // MARK: - Service State Listening
+
+    /// Observer for XPC service state notifications
+    private var serviceStateObserver: NSObjectProtocol?
+
+    /// Pending requests queue (when state machine not ready)
+    private var pendingRequestsByService: [String: [PendingIPCRequest]] = [:]
+
     // MARK: - Request Tracking
 
     /// In-flight request count
@@ -84,6 +92,7 @@ public final class IPCInteractionManager: ObservableObject {
         self.backpressureHandler = IPCBackpressureHandler()
 
         setupObservability()
+        setupServiceStateListener()
     }
 
     // MARK: - Configuration
@@ -477,6 +486,157 @@ public final class IPCInteractionManager: ObservableObject {
         tabStates[tabId]?.serviceId
     }
 
+    // MARK: - Service State Listening
+
+    /// Setup listener for XPC service state notifications
+    /// XPC services report their state changes via DistributedNotification
+    private func setupServiceStateListener() {
+        let hostProcessId = configuration.hostProcessId
+        let notificationName = "com.canvas.serviceState.\(hostProcessId)"
+
+        serviceStateObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(notificationName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                self?.handleServiceStateNotification(notification)
+            }
+        }
+
+        IPCLogger.shared.info(
+            "Service state listener setup for pid=\(hostProcessId)",
+            category: .lifecycle
+        )
+    }
+
+    /// Handle state notification from XPC service
+    private func handleServiceStateNotification(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let serviceId = userInfo["serviceId"] as? String,
+              let stateString = userInfo["state"] as? String else {
+            return
+        }
+
+        let timestamp = userInfo["timestamp"] as? String ?? "unknown"
+
+        IPCLogger.shared.info(
+            "Service state received: \(stateString)",
+            category: .connection,
+            serviceId: serviceId,
+            metadata: ["timestamp": timestamp]
+        )
+
+        Task {
+            await updateStateMachine(serviceId: serviceId, stateString: stateString)
+        }
+    }
+
+    /// Update state machine based on service state report
+    private func updateStateMachine(serviceId: String, stateString: String) async {
+        // Ensure state machine exists
+        if connectionStates[serviceId] == nil {
+            connectionStates[serviceId] = IPCConnectionStateMachine(serviceId: serviceId)
+        }
+
+        guard let stateMachine = connectionStates[serviceId] else { return }
+
+        let previousState = await stateMachine.state
+
+        switch stateString {
+        case "ready":
+            let transition = await stateMachine.markReady()
+            if transition.wasSuccessful {
+                connectedServices.insert(serviceId)
+                IPCLogger.shared.info(
+                    "State machine transition: \(previousState) → ready",
+                    category: .connection,
+                    serviceId: serviceId
+                )
+                // Flush any pending requests for this service
+                flushPendingRequestsForService(serviceId)
+            }
+
+        case "error", "busy":
+            let transition = await stateMachine.markInterrupted()
+            if transition.wasSuccessful {
+                IPCLogger.shared.warning(
+                    "State machine transition: \(previousState) → interrupted (\(stateString))",
+                    category: .connection,
+                    serviceId: serviceId
+                )
+            }
+
+        case "terminating":
+            let transition = await stateMachine.markInvalidated(reason: "Service terminating")
+            if transition.wasSuccessful {
+                connectedServices.remove(serviceId)
+                IPCLogger.shared.warning(
+                    "State machine transition: \(previousState) → invalidated",
+                    category: .connection,
+                    serviceId: serviceId
+                )
+            }
+
+        default:
+            IPCLogger.shared.warning(
+                "Unknown service state: \(stateString)",
+                category: .connection,
+                serviceId: serviceId
+            )
+        }
+    }
+
+    /// Flush pending requests for a service when it becomes ready
+    private func flushPendingRequestsForService(_ serviceId: String) {
+        guard let pending = pendingRequestsByService[serviceId], !pending.isEmpty else { return }
+
+        pendingRequestsByService.removeValue(forKey: serviceId)
+
+        IPCLogger.shared.debug(
+            "Flushing \(pending.count) pending requests for service",
+            category: .queue,
+            serviceId: serviceId
+        )
+
+        for request in pending {
+            switch request {
+            case .tabConfig(let config):
+                Task {
+                    await sendTabConfigInternal(config, serviceId: serviceId)
+                }
+            case .sizeChange(let size, let requestId):
+                // Size changes are also queued in pendingByTab with tabId context
+                // Skip here since they'll be flushed via flushPendingRequests(for:)
+                IPCLogger.shared.debug(
+                    "Skipping size change in service flush (handled by tab pending queue)",
+                    category: .queue,
+                    serviceId: serviceId,
+                    metadata: ["size": "\(size.width)x\(size.height)", "requestId": "\(requestId)"]
+                )
+            }
+        }
+    }
+
+    /// Queue a request for later when service becomes ready
+    private func queueRequestForService(_ request: PendingIPCRequest, serviceId: String) {
+        var pending = pendingRequestsByService[serviceId] ?? []
+
+        // For size changes, replace existing
+        if case .sizeChange = request {
+            pending.removeAll { if case .sizeChange = $0 { return true } else { return false } }
+        }
+
+        pending.append(request)
+        pendingRequestsByService[serviceId] = pending
+
+        IPCLogger.shared.debug(
+            "Request queued (state machine not ready)",
+            category: .queue,
+            serviceId: serviceId
+        )
+    }
+
     // MARK: - Private Implementation
 
     private func setupObservability() {
@@ -561,11 +721,24 @@ public final class IPCInteractionManager: ObservableObject {
     }
 
     private func sendTabConfigInternal(_ config: IPCXPCTabConfig, serviceId: String) async {
-        // In the legacy implementation, this sends via DistributedNotificationCenter
-        // Here we log and delegate to transport layer
+        // 🔑 State machine check: only send when state is ready
+        if let stateMachine = connectionStates[serviceId] {
+            let canSend = await stateMachine.canAcceptRequests
+            if !canSend {
+                // Queue request for later
+                queueRequestForService(.tabConfig(config), serviceId: serviceId)
+                IPCLogger.shared.warning(
+                    "Tab config queued: state machine not ready",
+                    category: .request,
+                    serviceId: serviceId,
+                    metadata: ["tabId": config.tabId, "state": "\(await stateMachine.state)"]
+                )
+                return
+            }
+        }
 
         IPCLogger.shared.debug(
-            "Sending tab config",
+            "Sending tab config (state=ready)",
             category: .request,
             serviceId: serviceId,
             metadata: [
@@ -607,8 +780,25 @@ public final class IPCInteractionManager: ObservableObject {
         serviceId: String,
         requestId: Int
     ) async {
+        // 🔑 State machine check: only send when state is ready
+        if let stateMachine = connectionStates[serviceId] {
+            let canSend = await stateMachine.canAcceptRequests
+            if !canSend {
+                IPCLogger.shared.warning(
+                    "Container size NOT sent: state machine not ready (will use tab pending queue)",
+                    category: .request,
+                    serviceId: serviceId,
+                    tabId: tabId,
+                    metadata: ["size": "\(size.width)x\(size.height)", "state": "\(await stateMachine.state)"]
+                )
+                // Note: size changes are queued via pendingByTab, not pendingRequestsByService
+                // The caller (sendContainerSizeChanged) handles queueing
+                return
+            }
+        }
+
         IPCLogger.shared.debug(
-            "Sending container size",
+            "Sending container size (state=ready)",
             category: .request,
             serviceId: serviceId,
             tabId: tabId,

@@ -800,12 +800,18 @@ final class ViewBridgeCoordinator {
             if finalSize.width > 50 && finalSize.height > 50 {
                 // 同步更新 coordinator 状态
                 self.currentViewportSize = finalSize
-                self.lastSentContainerSize = finalSize
-                self.lastSizeNotificationTime = Date()
-                self.sendContainerSizeNotification(size: finalSize)
 
                 // 同时更新本地 frame
                 self.hostView?.applyFrameSize(finalSize)
+
+                // 🔑 检查四个条件都满足才能发送通知
+                guard self.allocatedServiceId != nil,
+                      self.hasConnection,
+                      self.xpcServiceReady else { return }
+
+                self.lastSentContainerSize = finalSize
+                self.lastSizeNotificationTime = Date()
+                self.sendContainerSizeNotification(size: finalSize)
             }
 
             // 移除 frame 变化监听器（debounce 结束）
@@ -924,7 +930,13 @@ final class ViewBridgeCoordinator {
             return
         }
 
-        // 3. 发送 containerSizeChanged 通知到 Service（防重复）
+        // 3. 🔑 检查四个条件都满足才能发送通知
+        //    否则由 didSet 触发的 trySendInitialConfig 会处理
+        guard allocatedServiceId != nil else { return }
+        guard hasConnection else { return }
+        guard xpcServiceReady else { return }
+
+        // 4. 发送 containerSizeChanged 通知到 Service（防重复）
         guard size != lastSentContainerSize else { return }
         lastSentContainerSize = size
         sendContainerSizeNotification(size: size)
@@ -936,36 +948,26 @@ final class ViewBridgeCoordinator {
 
     /// Send a containerSizeChanged notification to the XPC service
     /// 内部方法 - 由 applyViewportSize 调用
+    /// 🔑 使用 IPCBridgeAdapter 发送，状态机会自动校验
     private func sendContainerSizeNotification(size: CGSize) {
-        guard let tabId = tabId,
-              let serviceId = allocatedServiceId else {
-            NSLog("⚠️ [Coordinator] Cannot send containerSizeChanged - no tabId or serviceId")
+        guard let tabId = tabId else {
+            NSLog("⚠️ [Coordinator] Cannot send containerSizeChanged - no tabId")
             return
         }
 
-        // Generate request UUID for correlation between Host and Service logs
-        let requestId = UUID().uuidString.prefix(8)
+        // Generate request ID for log correlation
+        let requestId = Int.random(in: 10000...99999)
 
-        let sizeInfo: [String: Any] = [
-            "tabId": tabId.uuidString,
-            "width": size.width,
-            "height": size.height,
-            "requestId": String(requestId),  // UUID for log correlation
-            "isOverviewMode": isOverviewMode
-        ]
+        NSLog("📐 [HOST→SVC] containerSizeChanged via IPCBridgeAdapter req=%d tab=%@ size=%.0fx%.0f",
+              requestId, String(tabId.uuidString.prefix(8)), size.width, size.height)
 
-        if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
-            NSLog("📐 [HOST→SVC] containerSizeChanged req=%@ tab=%@ size=%.0fx%.0f",
-                  String(requestId), String(tabId.uuidString.prefix(8)), size.width, size.height)
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name(notificationName),
-                object: nil,
-                userInfo: ["sizeInfo": jsonString],
-                deliverImmediately: true
-            )
-        }
+        // 🔑 使用 IPCBridgeAdapter 发送，状态机会在 IPCInteractionManager 内部校验
+        // 如果状态机不是 ready 状态，请求会被自动队列化
+        IPCBridgeAdapter.shared.sendContainerSizeChanged(
+            tabId: tabId,
+            size: size,
+            requestId: requestId
+        )
     }
 
     /// 清理 XPC 资源
@@ -1291,6 +1293,10 @@ struct PersistentViewBridgeView: NSViewRepresentable {
             NSLog("🔗 [PersistentView] Connection established for tab %@, setting hasConnection=true",
                   String(tabId.uuidString.prefix(8)))
             coordinator.hasConnection = true
+
+            // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
+            IPCBridgeAdapter.shared.markTabConnected(tabId)
+
             // 先尝试直接发送 config（解决 onConnectionEstablished 可能为 nil 的时序问题）
             coordinator.trySendInitialConfig()
             // 再调用可选的回调（UnifiedReactNativeLayer 可能设置了额外的处理）
@@ -1522,6 +1528,8 @@ struct UnifiedReactNativeLayer: View {
                     isLoading = false
                     if coordinator.hostView?.hasRemoteViewController == true && !coordinator.hasConnection {
                         coordinator.hasConnection = true
+                        // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
+                        IPCBridgeAdapter.shared.markTabConnected(tab.id)
                     }
                     if coordinator.hasConnection && coordinator.xpcServiceReady && isCoordinatorViewportSizeValid {
                         sendTabConfigIfReady()
@@ -1648,6 +1656,8 @@ struct UnifiedReactNativeLayer: View {
         if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
             if !coordinator.xpcServiceReady {
                 coordinator.xpcServiceReady = true
+                // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
+                IPCBridgeAdapter.shared.markServiceReady(serviceId)
                 NSLog("🔥 [Prewarm] Service %@ already ready, fast path enabled",
                       serviceId.components(separatedBy: ".").last ?? "")
             }
@@ -1683,6 +1693,8 @@ struct UnifiedReactNativeLayer: View {
 
             // 标记到 pool，供后续新 Tab 查询
             XPCServicePool.shared.markServiceReady(bundleIdentifier: serviceId)
+            // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
+            IPCBridgeAdapter.shared.markServiceReady(serviceId)
             coordinator.xpcServiceReady = true
             sendTabConfigIfReady()
         }
@@ -1808,10 +1820,12 @@ struct ViewBridgeTabView: NSViewRepresentable {
         // 设置连接建立回调
         // 🔑 直接在这里设置 hasConnection，因为 onAppear 中的 setupConnectionCallback
         // 可能在连接建立后才执行（时序问题）
-        view.onConnectionEstablished = { [weak coordinator] in
+        view.onConnectionEstablished = { [weak coordinator, tabId] in
             guard let coordinator = coordinator else { return }
             NSLog("🔗 [TabView] Connection established, setting hasConnection=true")
             coordinator.hasConnection = true
+            // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
+            IPCBridgeAdapter.shared.markTabConnected(tabId)
             coordinator.onConnectionEstablished?()
         }
         return view
@@ -1891,8 +1905,10 @@ struct ViewBridgeMultiProcessTabView: View {
                     setupXPCReadyListener()
 
                     // 设置连接建立回调
-                    coordinator.onConnectionEstablished = {
+                    coordinator.onConnectionEstablished = { [tab] in
                         coordinator.hasConnection = true
+                        // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
+                        IPCBridgeAdapter.shared.markTabConnected(tab.id)
                         // 只有当 XPC service 也准备好后才发送 config
                         sendTabConfigIfReady()
                     }
@@ -1985,6 +2001,8 @@ struct ViewBridgeMultiProcessTabView: View {
         if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
             if !coordinator.xpcServiceReady {
                 coordinator.xpcServiceReady = true
+                // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
+                IPCBridgeAdapter.shared.markServiceReady(serviceId)
                 NSLog("🔥 [MultiProcess.Prewarm] Service %@ already ready, fast path enabled",
                       serviceId.components(separatedBy: ".").last ?? "")
             }
@@ -2024,6 +2042,9 @@ struct ViewBridgeMultiProcessTabView: View {
 
             // 标记到 pool，供后续新 Tab 查询
             XPCServicePool.shared.markServiceReady(bundleIdentifier: expectedBundleId)
+
+            // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
+            IPCBridgeAdapter.shared.markServiceReady(expectedBundleId)
 
             // Broadcast Metro config to XPC service before it creates RCTBridge
             Task { @MainActor in
