@@ -687,6 +687,8 @@ private class ServiceReactNativeHost {
                 if self.hostProcessId == nil {
                     self.hostProcessId = pid
                     NSLog("[XPC] 📌 hostProcessId set to %d", pid)
+                    // Set hostProcessId on XPC listener for state reporting
+                    ServiceXPCListener.shared.setHostProcessId(pid)
                     // 收到 hostProcessId 后，重新设置带 PID 的通知监听器
                     self.setupProcessIsolatedListeners()
                 } else if self.hostProcessId != pid {
@@ -1347,6 +1349,12 @@ public func registerCanvasServiceViewController() {
 
     objc_registerClassPair(newClass)
     debugLog("CanvasServiceViewController class registered")
+
+    // 🔑 Early initialization of ServiceReactNativeHost
+    // This ensures pendingTabId listener is set up BEFORE any ViewController requests
+    // Without this, pendingTabId notifications sent by Host would be missed
+    _ = ServiceReactNativeHost.shared
+    debugLog("ServiceReactNativeHost early init done, pendingTabId listener active")
 }
 
 // MARK: - React Native Content Setup

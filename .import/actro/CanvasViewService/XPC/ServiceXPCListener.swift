@@ -185,6 +185,53 @@ public final class ServiceXPCListener: NSObject {
         }
     }
 
+    // MARK: - State Reporting
+
+    /// Service state for reporting to Host
+    public enum ServiceState: String, Sendable {
+        case ready = "ready"
+        case busy = "busy"
+        case error = "error"
+        case terminating = "terminating"
+    }
+
+    /// Current service state
+    private var currentState: ServiceState = .ready
+
+    /// Report current state to Host via DistributedNotification
+    /// Host's IPCInteractionManager listens for this and updates its state machine
+    public func reportState(_ state: ServiceState, details: [String: Any]? = nil) {
+        currentState = state
+
+        guard let hostPid = hostProcessId else {
+            xpcLog("reportState: no hostProcessId, skipping state report")
+            return
+        }
+
+        var userInfo: [String: Any] = [
+            "state": state.rawValue,
+            "serviceId": serviceBundleId,
+            "processId": ProcessInfo.processInfo.processIdentifier,
+            "timestamp": ISO8601DateFormatter().string(from: Date())
+        ]
+
+        if let details = details {
+            userInfo["details"] = details
+        }
+
+        // Use host PID for process isolation
+        let notificationName = "com.canvas.serviceState.\(hostPid)"
+
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(notificationName),
+            object: nil,
+            userInfo: userInfo,
+            deliverImmediately: true
+        )
+
+        xpcLog("reportState: \(state.rawValue) sent to Host (pid=\(hostPid))")
+    }
+
     // MARK: - Host Callbacks
 
     /// Send a callback to Host
@@ -301,6 +348,9 @@ extension ServiceXPCListener: NSXPCListenerDelegate {
         // Connection was interrupted but may reconnect
         NSLog("[ServiceXPC] Handling connection interruption")
 
+        // Report interrupted state to Host
+        reportState(.error, details: ["reason": "connection_interrupted"])
+
         // Notify any waiters that the connection is temporarily unavailable
         // The connection will auto-reconnect when Host makes a new call
     }
@@ -308,6 +358,9 @@ extension ServiceXPCListener: NSXPCListenerDelegate {
     private func handleConnectionInvalidation() {
         // Connection is permanently closed
         NSLog("[ServiceXPC] Handling connection invalidation")
+
+        // Report terminating state to Host
+        reportState(.terminating, details: ["reason": "connection_invalidated"])
 
         hostConnection = nil
 
@@ -320,6 +373,10 @@ extension ServiceXPCListener: NSXPCListenerDelegate {
     }
 
     private func notifyServiceReady() {
+        // Report state to Host via DistributedNotification (state machine driven)
+        reportState(.ready)
+
+        // Also send via XPC callback for backward compatibility
         sendToHost { [weak self] (proxy: CanvasServiceXPCProtocol) in
             guard let self = self else { return }
             proxy.serviceDidBecomeReady(bundleId: self.serviceBundleId)

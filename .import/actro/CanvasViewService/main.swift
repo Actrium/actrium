@@ -40,6 +40,7 @@ do {
 fflush(stderr)
 
 // Register our view controller class before starting the service
+// This also initializes ServiceReactNativeHost early to set up pendingTabId listener
 registerCanvasServiceViewController()
 
 // Load ViewBridge framework
