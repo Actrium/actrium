@@ -1,0 +1,14 @@
+/* Español (es) */
+
+/* Permiso de ubicación */
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Utilizaremos su ubicación para brindarle servicios de navegación y guía turística más precisos.";
+"NSLocationWhenInUseUsageDescription" = "Utilizaremos su ubicación para brindarle servicios de navegación y guía turística más precisos.";
+
+/* Permiso de micrófono */
+"NSMicrophoneUsageDescription" = "Después de encender el micrófono, puede hacer preguntas con voz para obtener servicios de IA más convenientes.";
+
+/* Permiso de cámara */
+"NSCameraUsageDescription" = "Active los permisos de cámara para tomar fotos y videos y obtener una experiencia de interacción de IA más rica.";
+/* Permiso de biblioteca de fotos */
+"NSPhotoLibraryUsageDescription" = "Permitir el acceso a tu biblioteca de fotos para seleccionar imágenes a subir.";
+"NSPhotoLibraryAddUsageDescription" = "Permitir que la app guarde fotos en tu biblioteca para cargas o guardados.";

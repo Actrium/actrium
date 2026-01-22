@@ -33,6 +33,9 @@ target 'Canvas' do
   pod 'NitroModules', :path => 'Subsystem/node_modules/react-native-nitro-modules'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
+  # 微信 SDK
+  pod 'WechatOpenSDK-XCFramework'
+
   # 强制使用旧架构（Bridge模式）
   ENV['RCT_NEW_ARCH_ENABLED'] = '0'  # 或者完全不设置这个变量
 

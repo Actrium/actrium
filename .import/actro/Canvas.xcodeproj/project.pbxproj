@@ -13,6 +13,7 @@
 		E56636802F16656400534265 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E566367F2F16656400534265 /* ZIPFoundation */; };
 		E57012CD2F20D8BD0033B7CE /* A1SDK in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CC2F20D8BD0033B7CE /* A1SDK */; };
 		E57012D02F20D8DD0033B7CE /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CF2F20D8DD0033B7CE /* Kingfisher */; };
+		E572DEE52F221B84001D2A56 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E572DEE42F221B84001D2A56 /* MarkdownUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,9 +24,22 @@
 		E55901A52F163A5B00514034 /* Canvas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Canvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		E572DEB22F21FCBC001D2A56 /* Exceptions for "Canvas" folder in "Canvas" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = E55901A42F163A5B00514034 /* Canvas */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		E55901A72F163A5B00514034 /* Canvas */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				E572DEB22F21FCBC001D2A56 /* Exceptions for "Canvas" folder in "Canvas" target */,
+			);
 			path = Canvas;
 			sourceTree = "<group>";
 		};
@@ -39,6 +53,7 @@
 				E55904C52F1643D700514034 /* Highlightr in Frameworks */,
 				E57012CD2F20D8BD0033B7CE /* A1SDK in Frameworks */,
 				E56636802F16656400534265 /* ZIPFoundation in Frameworks */,
+				E572DEE52F221B84001D2A56 /* MarkdownUI in Frameworks */,
 				442EB4E3928B6CB9A596ED32 /* libPods-Canvas.a in Frameworks */,
 				E57012D02F20D8DD0033B7CE /* Kingfisher in Frameworks */,
 			);
@@ -109,6 +124,7 @@
 				E566367F2F16656400534265 /* ZIPFoundation */,
 				E57012CC2F20D8BD0033B7CE /* A1SDK */,
 				E57012CF2F20D8DD0033B7CE /* Kingfisher */,
+				E572DEE42F221B84001D2A56 /* MarkdownUI */,
 			);
 			productName = Canvas;
 			productReference = E55901A52F163A5B00514034 /* Canvas.app */;
@@ -135,6 +151,13 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
+				ja,
+				es,
+				ko,
+				"zh-Hant",
+				ru,
+				fr,
 			);
 			mainGroup = E559019C2F163A5B00514034;
 			minimizedProjectReferenceProxies = 1;
@@ -143,6 +166,7 @@
 				E566367E2F16656400534265 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				E57012CB2F20D8BD0033B7CE /* XCRemoteSwiftPackageReference "a1-sdk-swift" */,
 				E57012CE2F20D8DD0033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */,
+				E572DEE32F221B83001D2A56 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E55901A62F163A5B00514034 /* Products */;
@@ -351,6 +375,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = Canvas/Canvas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7EARH3U976;
@@ -440,6 +465,7 @@
 					"\"$(PODS_ROOT)/Headers/Private/Yoga\"",
 					"$(SRCROOT)/Canvas/Native/RillSandbox",
 				);
+				INFOPLIST_FILE = Canvas/Info.plist;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置以支持发送位置附件";
@@ -525,6 +551,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = Canvas/Canvas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7EARH3U976;
@@ -614,6 +641,7 @@
 					"\"$(PODS_ROOT)/Headers/Private/Yoga\"",
 					"$(SRCROOT)/Canvas/Native/RillSandbox",
 				);
+				INFOPLIST_FILE = Canvas/Info.plist;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置以支持发送位置附件";
@@ -713,6 +741,14 @@
 				minimumVersion = 8.6.2;
 			};
 		};
+		E572DEE32F221B83001D2A56 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -735,6 +771,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E57012CE2F20D8DD0033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */;
 			productName = Kingfisher;
+		};
+		E572DEE42F221B84001D2A56 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E572DEE32F221B83001D2A56 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

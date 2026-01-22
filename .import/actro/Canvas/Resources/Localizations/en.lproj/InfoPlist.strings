@@ -1,0 +1,15 @@
+/* English */
+
+/* Location Permission */
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "We'll use your location to provide accurate navigation and tour guidance";
+"NSLocationWhenInUseUsageDescription" = "We'll use your location to provide accurate navigation and tour guidance";
+
+/* Microphone Permission */
+"NSMicrophoneUsageDescription" = "Enable microphone for voice queries – Get efficient AI services via voice commands";
+
+/* Camera Permission */
+"NSCameraUsageDescription" = "Enable camera to capture photos and videos for enhanced AI interactions";
+
+/* Photo Library Permission */
+"NSPhotoLibraryUsageDescription" = "Allow access to your photo library to select images to upload.";
+"NSPhotoLibraryAddUsageDescription" = "Allow the app to save photos to your photo library when needed (e.g., save or cache uploads).";

@@ -161,6 +161,8 @@ struct CanvasApp: App {
     init() {
         // Suppress common system warnings in development
         UserDefaults.standard.set(false, forKey: "NSConstraintBasedLayoutLogUnsatisfiable")
+        
+        LoginManager.shared.register()
 
         #if DEBUG
         logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")

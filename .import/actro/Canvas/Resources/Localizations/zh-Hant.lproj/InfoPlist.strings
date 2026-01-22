@@ -1,0 +1,14 @@
+/* 繁體中文 (zh-Hant) */
+
+/* 位置權限 */
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "我們會使用你的位置來提供更精准的導航與導覽服務";
+"NSLocationWhenInUseUsageDescription" = "我們會使用你的位置來提供更精准的導航與導覽服務";
+
+/* 麥克風權限 */
+"NSMicrophoneUsageDescription" = "開啟麥克風後，你可以用語音提問，獲取更便捷的Ai服務";
+
+/* 相機權限 */
+"NSCameraUsageDescription" = "開啟相機權限，可以拍攝照片和視頻，獲得更豐富的AI交互體驗";
+/* 相簿權限 */
+"NSPhotoLibraryUsageDescription" = "允許存取相簿以選擇要上傳的圖片。";
+"NSPhotoLibraryAddUsageDescription" = "允許將照片儲存到相簿，以便上傳或保存生成的內容。";
