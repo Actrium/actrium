@@ -9,6 +9,36 @@
 import Foundation
 import AppKit
 
+// MARK: - Service XPC Logging
+
+/// Log path for Service XPC debugging (shared temp directory)
+private let xpcLogPath: String = {
+    let tempDir = NSTemporaryDirectory()
+    return (tempDir as NSString).appendingPathComponent("canvas-xpc-service.log")
+}()
+
+/// Write to the shared Service log file
+private func xpcLog(_ message: String) {
+    NSLog("[ServiceXPC] %@", message)
+    fputs("[ServiceXPC] \(message)\n", stderr)
+    fflush(stderr)
+
+    // Also write to log file
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let logMessage = "[\(timestamp)] [ServiceXPC] \(message)\n"
+    if let data = logMessage.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: xpcLogPath) {
+            if let handle = FileHandle(forWritingAtPath: xpcLogPath) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        } else {
+            try? data.write(to: URL(fileURLWithPath: xpcLogPath))
+        }
+    }
+}
+
 // MARK: - Service XPC Listener
 
 /// XPC listener for the Service side
@@ -63,24 +93,28 @@ public final class ServiceXPCListener: NSObject {
     /// Start the XPC listener
     /// Uses anonymous listener since ViewBridge services can't use NSXPCListener.service()
     public func start() {
+        xpcLog("start() called for service: \(serviceBundleId)")
+
         guard !isListening else {
-            NSLog("[ServiceXPC] Already listening")
+            xpcLog("Already listening, skipping")
             return
         }
 
-        NSLog("[ServiceXPC] Starting XPC listener for service: %@", serviceBundleId)
+        xpcLog("Starting XPC listener...")
 
         // Use anonymous listener (ViewBridge services aren't standard XPC Services)
         listener = NSXPCListener.anonymous()
         listener?.delegate = self
         listener?.resume()
 
+        xpcLog("Anonymous listener created and resumed")
+
         isListening = true
 
         // Export endpoint via notification so Host can connect
         exportEndpoint()
 
-        NSLog("[ServiceXPC] XPC listener started")
+        xpcLog("XPC listener started successfully")
     }
 
     /// Stop the XPC listener
@@ -101,41 +135,44 @@ public final class ServiceXPCListener: NSObject {
 
     // MARK: - Endpoint Export
 
-    /// Export the listener endpoint via DistributedNotification
+    /// Notify Host that this Service's XPC listener is ready
+    /// NOTE: NSXPCListenerEndpoint cannot be serialized for DN transmission.
+    /// Instead, we send a "ready" notification and use DN for message passing.
+    /// Future: Pass endpoint through ViewBridge's XPC connection.
     private func exportEndpoint() {
-        guard let listener = listener else { return }
+        xpcLog("exportEndpoint called for \(serviceBundleId)")
 
-        do {
-            let data = try NSKeyedArchiver.archivedData(
-                withRootObject: listener.endpoint,
-                requiringSecureCoding: true
-            )
-
-            var userInfo: [String: Any] = [
-                "bundleId": serviceBundleId,
-                "endpoint": data.base64EncodedString(),
-                "processId": ProcessInfo.processInfo.processIdentifier
-            ]
-
-            if let hostPid = hostProcessId {
-                userInfo["hostProcessId"] = hostPid
-            }
-
-            // Use host PID for process isolation if known
-            let notificationName = hostProcessId.map { "com.canvas.xpcEndpoint.\($0)" }
-                ?? "com.canvas.xpcEndpoint"
-
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name(notificationName),
-                object: nil,
-                userInfo: userInfo,
-                deliverImmediately: true
-            )
-
-            NSLog("[ServiceXPC] Endpoint exported (notification: %@)", notificationName)
-        } catch {
-            NSLog("[ServiceXPC] Failed to export endpoint: %@", error.localizedDescription)
+        guard listener != nil else {
+            xpcLog("exportEndpoint: listener is nil!")
+            return
         }
+
+        xpcLog("exportEndpoint: sending ready notification (endpoint stays local)")
+
+        // Send a simple "ready" notification without the endpoint
+        // Host will continue using DistributedNotificationCenter for communication
+        var userInfo: [String: Any] = [
+            "bundleId": serviceBundleId,
+            "processId": ProcessInfo.processInfo.processIdentifier,
+            "listenerReady": true
+        ]
+
+        if let hostPid = hostProcessId {
+            userInfo["hostProcessId"] = hostPid
+        }
+
+        // Use host PID for process isolation if known
+        let notificationName = hostProcessId.map { "com.canvas.xpcEndpoint.\($0)" }
+            ?? "com.canvas.xpcEndpoint"
+
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(notificationName),
+            object: nil,
+            userInfo: userInfo,
+            deliverImmediately: true
+        )
+
+        xpcLog("Ready notification sent via DN: \(notificationName)")
     }
 
     /// Set host process ID and re-export endpoint

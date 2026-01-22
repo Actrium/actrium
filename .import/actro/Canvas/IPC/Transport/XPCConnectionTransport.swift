@@ -91,15 +91,28 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
 
     private func handleEndpointNotification(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
-              let bundleId = userInfo["bundleId"] as? String,
-              let endpointBase64 = userInfo["endpoint"] as? String,
-              let endpointData = Data(base64Encoded: endpointBase64) else {
+              let bundleId = userInfo["bundleId"] as? String else {
             return
         }
 
         // Verify this is for our process if hostProcessId is included
         if let notificationHostPid = userInfo["hostProcessId"] as? Int32,
            notificationHostPid != hostProcessId {
+            return
+        }
+
+        // Check if this is a "listenerReady" notification (no endpoint)
+        if userInfo["listenerReady"] as? Bool == true {
+            NSLog("📡 [XPCTransport] Service listener ready: %@ (using serviceName fallback)", bundleId.components(separatedBy: ".").last ?? "")
+            // Mark service as ready for serviceName connection
+            // Connection will use NSXPCConnection(serviceName:) fallback
+            return
+        }
+
+        // Try to decode endpoint if provided
+        guard let endpointBase64 = userInfo["endpoint"] as? String,
+              let endpointData = Data(base64Encoded: endpointBase64) else {
+            NSLog("⚠️ [XPCTransport] No endpoint in notification for %@", bundleId)
             return
         }
 
