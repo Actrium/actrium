@@ -6,7 +6,7 @@
  * - HistoryApp: for chrome://history
  * - BookmarksApp: for chrome://bookmarks
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import type { TabRouterProps } from './actr-host/types';
 
