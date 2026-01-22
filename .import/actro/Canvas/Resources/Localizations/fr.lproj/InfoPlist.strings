@@ -1,0 +1,15 @@
+/* Français (fr) */
+
+/* Autorisation de localisation */
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Nous utiliserons votre position pour une navigation et un guide précis.";
+"NSLocationWhenInUseUsageDescription" = "Nous utiliserons votre position pour une navigation et un guide précis.";
+
+/* Autorisation du microphone */
+"NSMicrophoneUsageDescription" = "Activez le microphone pour poser des questions vocales et accéder aux services IA.";
+
+/* Autorisation de la caméra */
+"NSCameraUsageDescription" = "Activez les autorisations de caméra pour prendre des photos et des vidéos et obtenir une expérience d'interaction IA plus riche.";
+
+/* Autorisation bibliothèque de photos */
+"NSPhotoLibraryUsageDescription" = "Autoriser l'accès à votre bibliothèque de photos pour sélectionner des images à télécharger.";
+"NSPhotoLibraryAddUsageDescription" = "Autoriser l'enregistrement de photos dans votre bibliothèque pour les téléchargements et sauvegardes.";

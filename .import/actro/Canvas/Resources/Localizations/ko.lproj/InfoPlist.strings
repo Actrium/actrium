@@ -1,0 +1,15 @@
+/* 한국어 (ko) */
+
+/* 위치 권한 */
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "당신의 위치정보를 이용하여 더욱 정확한 네비게이션 및 안내 서비스를 제공할 수 있습니다.";
+"NSLocationWhenInUseUsageDescription" = "당신의 위치정보를 이용하여 더욱 정확한 네비게이션 및 안내 서비스를 제공할 수 있습니다.";
+
+/* 마이크 권한 */
+"NSMicrophoneUsageDescription" = "마이크 사용을 허용하면, 음성질문을 할 수 있어 더욱 편리한 Ai 서비스를 받을 수 있습니다.";
+
+/* 카메라 권한 */
+"NSCameraUsageDescription" = "카메라 권한을 활성화하면 사진과 비디오를 촬영하여 더욱 풍부한 AI 상호작용 경험을 얻을 수 있습니다.";
+
+/* 사진 보관함 권한 */
+"NSPhotoLibraryUsageDescription" = "업로드할 사진을 선택하기 위해 사진 보관함에 대한 접근을 허용해주세요.";
+"NSPhotoLibraryAddUsageDescription" = "앱이 사진을 사진 보관함에 저장할 수 있도록 허용해주세요.";
