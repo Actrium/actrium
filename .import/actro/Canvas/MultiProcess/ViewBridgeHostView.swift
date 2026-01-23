@@ -585,7 +585,7 @@ final class ViewBridgeCoordinator {
         ]
 
         // 使用 coordinator 存储的完整 tab 配置
-        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil")")
+        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil"), isOverviewMode=\(isOverviewMode)")
         if let tabConfig = self.tabConfig {
             config["title"] = tabConfig.title
             config["backgroundColor"] = tabConfig.backgroundColor
@@ -1573,20 +1573,22 @@ struct UnifiedReactNativeLayer: View {
         self.bookmarks = bookmarks
         self.recentHistory = recentHistory
 
-        // 🔑 设置 coordinator 的 tabId 和 tabConfig，确保 bootstrap 时有完整配置
+        // 🔑 设置 coordinator 的 tabId、tabConfig 和 isOverviewMode
+        // 确保 bootstrap 时有完整配置
         coordinator.tabId = tab.id
+        coordinator.isOverviewMode = !isFocused  // Focus模式 = 非Overview模式
         coordinator.tabConfig = XPCTabConfig(
             tabId: tab.id,
             title: tab.title,
             backgroundColor: tab.backgroundColor,
-            containerSize: viewportSize,
+            containerSize: isFocused ? viewportSize : cardSize,  // 根据模式选择尺寸
             systemAppType: tab.systemTabType?.rawValue,
             unifiedScript: tab.unifiedScript,
             leftPanelScript: tab.leftPanelScript,
             leftPanelVisible: tab.leftPanelDefaultVisible,
             rightPanelVisible: tab.rightPanelDefaultVisible
         )
-        ipcLog("🏗️ UnifiedReactNativeLayer.init: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil")")
+        ipcLog("🏗️ UnifiedReactNativeLayer.init: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
     }
 
     /// 当前尺寸
