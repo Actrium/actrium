@@ -522,27 +522,80 @@ final class ViewBridgeCoordinator {
                 let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
                 fputs("🔗 [Coordinator] hasConnection=true for tab=\(tabIdShort)\n", stderr)
 
-                // Send pendingTabId now that connection is established
-                // Service is guaranteed to be running and listener is active
-                if let tabIdStr = tabId?.uuidString, let serviceId = hostView?.serviceId {
-                    let notificationName = "com.canvas.pendingTabId.\(serviceId)"
-                    DistributedNotificationCenter.default().postNotificationName(
-                        NSNotification.Name(notificationName),
-                        object: nil,
-                        userInfo: ["tabId": tabIdStr, "hostProcessId": CanvasHostProcessId],
-                        deliverImmediately: true
-                    )
-                    fputs("📤 [Coordinator] Sent pendingTabId: \(tabIdStr.prefix(8)) (connection established)\n", stderr)
-                }
+                // 🔑 连接建立后立即发送 bootstrap tabConfig（不带 PID）
+                // 这个通知让 Service 获取 hostProcessId 并设置带 PID 的监听器
+                // 同时包含 tabId，替代之前的 pendingTabId 机制
+                sendBootstrapTabConfig()
 
                 trySendInitialConfig()
             }
         }
     }
+
+    /// 发送 bootstrap tabConfig（不带 hostProcessId 前缀）
+    /// 用于在 ViewBridge 连接建立后立即通知 Service：
+    /// 1. hostProcessId - 让 Service 能设置带 PID 的监听器
+    /// 2. tabId - 让 Service 绑定 pending entry
+    /// 3. 基本配置 - 让 Service 可以开始渲染
+    private func sendBootstrapTabConfig() {
+        guard let tabId = tabId,
+              let serviceId = hostView?.serviceId else {
+            fputs("⚠️ [Coordinator] sendBootstrapTabConfig: missing tabId or serviceId\n", stderr)
+            return
+        }
+
+        let size = currentViewportSize
+        let tabIdShort = String(tabId.uuidString.prefix(8))
+
+        // 构建 bootstrap config（包含 hostProcessId）
+        var config: [String: Any] = [
+            "tabId": tabId.uuidString,
+            "hostProcessId": CanvasHostProcessId,
+            "containerWidth": size.width,
+            "containerHeight": size.height,
+            "isOverviewMode": isOverviewMode,
+            "isBootstrap": true  // 标记这是 bootstrap config
+        ]
+
+        // 使用 coordinator 存储的完整 tab 配置
+        if let tabConfig = self.tabConfig {
+            config["title"] = tabConfig.title
+            config["backgroundColor"] = tabConfig.backgroundColor
+            if let systemAppType = tabConfig.systemAppType {
+                config["systemAppType"] = systemAppType
+            }
+            if let script = tabConfig.unifiedScript { config["unifiedScript"] = script }
+            if let script = tabConfig.leftPanelScript { config["leftPanelScript"] = script }
+            config["leftPanelVisible"] = tabConfig.leftPanelVisible
+            config["rightPanelVisible"] = tabConfig.rightPanelVisible
+        }
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: config),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            fputs("⚠️ [Coordinator] sendBootstrapTabConfig: JSON serialization failed\n", stderr)
+            return
+        }
+
+        // 🔑 使用不带 PID 的通知名，确保 Service 能立即收到
+        let notificationName = "com.canvas.tabConfig.\(serviceId)"
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(notificationName),
+            object: nil,
+            userInfo: ["config": jsonString],
+            deliverImmediately: true
+        )
+
+        fputs("📤 [Coordinator] Sent bootstrap tabConfig: tab=\(tabIdShort) size=\(Int(size.width))x\(Int(size.height)) notificationName=\(notificationName)\n", stderr)
+        NSLog("📤 [Coordinator] Sent bootstrap tabConfig: tab=%@ notificationName=%@", tabIdShort, notificationName)
+    }
     var xpcReadyObserver: NSObjectProtocol?
     var connectionCreatedObserver: NSObjectProtocol?
     var liveResizeEndedObserver: NSObjectProtocol?
     var tabId: UUID?
+
+    /// Tab 配置数据 - 用于发送 bootstrap tabConfig
+    /// 由 ViewBridgeMultiProcessTabView 初始化时设置
+    var tabConfig: XPCTabConfig?
 
     /// Whether the tab is in Overview mode (for compact view in system apps)
     /// Default to false since BrowserViewModel.init sets canvasMode = .focus
@@ -1885,8 +1938,20 @@ struct ViewBridgeMultiProcessTabView: View {
         self.containerSize = containerSize
         self.coordinator = coordinator
         self.isFocused = isFocused
-        // 设置 coordinator 的 tabId
+
+        // 设置 coordinator 的 tabId 和 tabConfig
         coordinator.tabId = tab.id
+        coordinator.tabConfig = XPCTabConfig(
+            tabId: tab.id,
+            title: tab.title,
+            backgroundColor: tab.backgroundColor,
+            containerSize: containerSize,
+            systemAppType: tab.systemTabType?.rawValue,
+            unifiedScript: tab.unifiedScript,
+            leftPanelScript: tab.leftPanelScript,
+            leftPanelVisible: tab.leftPanelDefaultVisible,
+            rightPanelVisible: tab.rightPanelDefaultVisible
+        )
     }
 
     var body: some View {
