@@ -20,6 +20,32 @@ import ReactAppDependencyProvider
 
 // MARK: - Debug Logging
 
+/// Millisecond timestamp for cross-process log correlation
+private func ts() -> String {
+    let now = Date()
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss.SSS"
+    return formatter.string(from: now)
+}
+
+/// Write to shared debug log file (for cross-process log correlation)
+private func ipcLog(_ message: String) {
+    let timestamp = ts()
+    let line = "[\(timestamp)] [SVC] \(message)\n"
+    NSLog("[\(timestamp)] [SVC] %@", message)
+    // Also write to shared file
+    let logPath = "/tmp/canvas_ipc_debug.log"
+    if let handle = FileHandle(forWritingAtPath: logPath) {
+        handle.seekToEndOfFile()
+        if let data = line.data(using: .utf8) {
+            handle.write(data)
+        }
+        handle.closeFile()
+    } else {
+        FileManager.default.createFile(atPath: logPath, contents: line.data(using: .utf8))
+    }
+}
+
 private let debugLogPath: String = {
     let tempDir = NSTemporaryDirectory()
     return (tempDir as NSString).appendingPathComponent("canvas-xpc-service.log")
@@ -27,7 +53,7 @@ private let debugLogPath: String = {
 
 private func debugLog(_ message: String) {
     NSLog("[CanvasViewService] %@", message)
-    fputs("[CanvasViewService] \(message)\n", stderr)
+    fputs("[\(ts())] [SVC] \(message)\n", stderr)
     fflush(stderr)
 
     let timestamp = ISO8601DateFormatter().string(from: Date())
@@ -354,6 +380,10 @@ private class ServiceReactNativeHost {
     /// Key is the internal ID generated at loadView time
     private var pendingEntries: [String: TabViewControllerEntry] = [:]
 
+    /// Order of pending entry creation (internalIds) - ensures FIFO assignment
+    /// Dictionary doesn't preserve insertion order, so we need this array
+    private var pendingEntryOrder: [String] = []
+
     /// Pending container size changes received before entry was registered
     /// Key is tabId, value is the pending size
     private var pendingSizeChanges: [String: CGSize] = [:]
@@ -459,6 +489,8 @@ private class ServiceReactNativeHost {
 
         // Prefer pending entry that matches the connection internalId
         if let entry = pendingEntries.removeValue(forKey: internalId) {
+            // Also remove from order array
+            pendingEntryOrder.removeAll { $0 == internalId }
             NSLog("[XPC] 🔗 bind: found pending entry for internalId=%@, assigning hostTabId=%@",
                   String(internalId.prefix(8)), String(hostTabId.prefix(8)))
             entry.assignTabId(hostTabId)
@@ -504,6 +536,8 @@ private class ServiceReactNativeHost {
 
         let entry = TabViewControllerEntry(internalId: internalId, containerView: containerView, viewController: viewController)
         pendingEntries[internalId] = entry
+        pendingEntryOrder.append(internalId)  // Track creation order for FIFO
+        ipcLog("📝 registerPendingEntry: internalId=\(String(internalId.prefix(8))), pendingEntries=\(pendingEntries.count), pendingOrder=\(pendingEntryOrder.count)")
         return entry
     }
 
@@ -514,6 +548,8 @@ private class ServiceReactNativeHost {
 
         // Try to find by internalId in pending
         if let entry = pendingEntries.removeValue(forKey: internalId) {
+            // Also remove from order array
+            pendingEntryOrder.removeAll { $0 == internalId }
             // Also remove from tabRegistry if it was assigned
             if let tabId = entry.tabId {
                 tabRegistry.removeValue(forKey: tabId)
@@ -553,25 +589,27 @@ private class ServiceReactNativeHost {
     private func assignPendingEntry(tabId: String) -> TabViewControllerEntry? {
         registryLock.lock()
 
+        let tabIdShort = String(tabId.prefix(8))
         // Log current state for debugging
-        NSLog("[XPC] 🔍 assignPendingEntry: tabId=%@, pendingEntries=%d, tabRegistry=%d",
-              String(tabId.prefix(8)), pendingEntries.count, tabRegistry.count)
+        ipcLog("🔍 assignPendingEntry: tabId=\(tabIdShort), pendingEntries=\(pendingEntries.count), pendingOrder=\(pendingEntryOrder.count), tabRegistry=\(tabRegistry.count)")
 
         // If already registered, return existing
         if let existing = tabRegistry[tabId] {
-            NSLog("[XPC] 🔍 assignPendingEntry: already in tabRegistry")
+            ipcLog("🔍 assignPendingEntry: already in tabRegistry")
             registryLock.unlock()
             return existing
         }
 
-        // Find the oldest pending entry (FIFO)
-        guard let (internalId, entry) = pendingEntries.first else {
-            NSLog("[XPC] ⚠️ assignPendingEntry: pendingEntries is EMPTY!")
+        // Find the oldest pending entry (FIFO) using order array
+        guard let internalId = pendingEntryOrder.first,
+              let entry = pendingEntries[internalId] else {
+            ipcLog("⚠️ assignPendingEntry: pendingEntries is EMPTY!")
             registryLock.unlock()
             return nil
         }
 
-        // Remove from pending
+        // Remove from pending (both dictionary and order array)
+        pendingEntryOrder.removeFirst()
         pendingEntries.removeValue(forKey: internalId)
 
         // Assign real tabId and add to registry
@@ -644,13 +682,13 @@ private class ServiceReactNativeHost {
 
         // Listen for tab config with service-specific notification
         let notificationName = "com.canvas.tabConfig.\(serviceBundleId)"
-        NSLog("[XPC] 🎧 Setting up tabConfig listener: %@", notificationName)
+        ipcLog("🎧 Setting up tabConfig listener: \(notificationName)")
         tabConfigObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(notificationName),
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            NSLog("[XPC] 📬 Received notification on: %@", notificationName)
+            ipcLog("📬 Received notification on: \(notificationName)")
             self?.handleTabConfigNotification(notification)
         }
 
@@ -920,27 +958,27 @@ private class ServiceReactNativeHost {
     }
 
     private func handleTabConfigNotification(_ notification: Notification) {
-        NSLog("[XPC] 📥 handleTabConfigNotification received")
+        ipcLog("📥 handleTabConfigNotification received")
 
         guard let userInfo = notification.userInfo else {
-            NSLog("[XPC] ⚠️ handleTabConfigNotification: userInfo is nil")
+            ipcLog("⚠️ handleTabConfigNotification: userInfo is nil")
             return
         }
 
         guard let configJson = userInfo["config"] as? String else {
             let keysStr = userInfo.keys.map { String(describing: $0) }.joined(separator: ", ")
-            NSLog("[XPC] ⚠️ handleTabConfigNotification: config not found in userInfo, keys: %@", keysStr)
+            ipcLog("⚠️ handleTabConfigNotification: config not found, keys: \(keysStr)")
             return
         }
 
         guard let configData = configJson.data(using: .utf8),
               let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] else {
-            NSLog("[XPC] ⚠️ handleTabConfigNotification: failed to parse JSON")
+            ipcLog("⚠️ handleTabConfigNotification: failed to parse JSON")
             return
         }
 
         guard let tabId = config["tabId"] as? String else {
-            NSLog("[XPC] ⚠️ handleTabConfigNotification: tabId not found in config")
+            ipcLog("⚠️ handleTabConfigNotification: tabId not found")
             return
         }
 
@@ -949,22 +987,22 @@ private class ServiceReactNativeHost {
         if let pid = config["hostProcessId"] as? Int32 {
             if self.hostProcessId == nil {
                 self.hostProcessId = pid
-                NSLog("[XPC] 📌 hostProcessId set to %d (from tabConfig)", pid)
+                ipcLog("📌 hostProcessId set to \(pid) (from tabConfig)")
                 // Set hostProcessId on XPC listener for state reporting
                 ServiceXPCListener.shared.setHostProcessId(pid)
                 // 设置带 PID 的通知监听器
                 self.setupProcessIsolatedListeners()
             } else if self.hostProcessId != pid {
                 // 忽略来自其他主进程的通知
-                NSLog("[XPC] ⚠️ Ignoring tabConfig from different host: %d (current: %d)", pid, self.hostProcessId!)
+                ipcLog("⚠️ Ignoring tabConfig from different host: \(pid) (current: \(self.hostProcessId!))")
                 return
             }
         }
 
         let systemAppType = config["systemAppType"] as? String ?? "nil"
         let isBootstrap = config["isBootstrap"] as? Bool ?? false
-        NSLog("[XPC] 📥 tabConfig for tab=%@ systemAppType=%@ isBootstrap=%@",
-              String(tabId.prefix(8)), systemAppType, isBootstrap ? "true" : "false")
+        let tabIdShort = String(tabId.prefix(8))
+        ipcLog("📥 tabConfig tab=\(tabIdShort) systemAppType=\(systemAppType) isBootstrap=\(isBootstrap)")
 
         // Stop retry timer once we receive first config
         hasReceivedTabConfig = true
@@ -972,15 +1010,15 @@ private class ServiceReactNativeHost {
         // Try to find existing entry, or assign a pending entry
         let entry: TabViewControllerEntry?
         if let existing = getTabEntry(tabId: tabId) {
-            NSLog("[XPC] ✅ Found existing entry for tab=%@", String(tabId.prefix(8)))
+            ipcLog("✅ Found existing entry for tab=\(tabIdShort)")
             entry = existing
         } else {
             // First config for this tabId - assign a pending entry
             entry = assignPendingEntry(tabId: tabId)
             if entry != nil {
-                NSLog("[XPC] ✅ Assigned pending entry for tab=%@", String(tabId.prefix(8)))
+                ipcLog("✅ Assigned pending entry for tab=\(tabIdShort)")
             } else {
-                NSLog("[XPC] ⚠️ No pending entry available for tab=%@ (pendingEntries empty)", String(tabId.prefix(8)))
+                ipcLog("⚠️ No pending entry for tab=\(tabIdShort) (pendingEntries empty)")
             }
         }
 
@@ -988,7 +1026,7 @@ private class ServiceReactNativeHost {
             applyConfigToEntry(entry, config: config)
         } else {
             // Cache config for later - loadView will apply it when entry is created
-            NSLog("[XPC] 📦 Queueing config for tab=%@ (will apply when entry created)", String(tabId.prefix(8)))
+            ipcLog("📦 Queueing config for tab=\(tabIdShort) (will apply when entry created)")
             pendingTabConfigQueueLock.lock()
             pendingTabConfigQueue.append(config)
             pendingTabConfigQueueLock.unlock()
@@ -1026,6 +1064,7 @@ private class ServiceReactNativeHost {
         entry.assignTabId(tabId)
         registryLock.lock()
         pendingEntries.removeValue(forKey: internalId)
+        pendingEntryOrder.removeAll { $0 == internalId }  // Also remove from order array
         tabRegistry[tabId] = entry
         registryLock.unlock()
 
