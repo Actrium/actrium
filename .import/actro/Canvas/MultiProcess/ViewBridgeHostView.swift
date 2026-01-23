@@ -765,6 +765,8 @@ final class ViewBridgeCoordinator {
     var xpcReadyObserver: NSObjectProtocol?
     var connectionCreatedObserver: NSObjectProtocol?
     var liveResizeEndedObserver: NSObjectProtocol?
+    /// Observer for Service's "listener ready" notification (to resolve race condition)
+    var listenerReadyObserver: NSObjectProtocol?
     var tabId: UUID?
 
     /// Tab 配置数据 - 用于发送 bootstrap tabConfig
@@ -1264,6 +1266,10 @@ final class ViewBridgeCoordinator {
         if let observer = connectionCreatedObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
             connectionCreatedObserver = nil
+        }
+        if let observer = listenerReadyObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            listenerReadyObserver = nil
         }
         if let observer = liveResizeStartedObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -2013,6 +2019,38 @@ struct UnifiedReactNativeLayer: View {
             coordinator.xpcServiceReady = true
             sendTabConfigIfReady()
         }
+
+        // 🔑 设置 listenerReady 监听器 - 解决竞态条件
+        // Service 设置好带 PID 的监听器后会发送 listenerReady 通知
+        // Host 收到后重新发送 containerSizeChanged
+        setupListenerReadyListener(serviceId: serviceId)
+    }
+
+    /// 设置 Service "listener ready" 通知监听器
+    /// 解决竞态条件：Service 可能在 Host 发送 containerSizeChanged 之后才设置好监听器
+    private func setupListenerReadyListener(serviceId: String) {
+        guard coordinator.listenerReadyObserver == nil else { return }
+
+        let listenerReadyName = "com.canvas.listenerReady.\(CanvasHostProcessId).\(serviceId)"
+        ipcLog("🎧 Setting up listenerReady listener: \(listenerReadyName)")
+
+        coordinator.listenerReadyObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(listenerReadyName),
+            object: nil,
+            queue: .main
+        ) { [weak coordinator] notification in
+            guard let coordinator = coordinator else { return }
+            guard let userInfo = notification.userInfo,
+                  let notifyingServiceId = userInfo["serviceId"] as? String,
+                  notifyingServiceId == serviceId else { return }
+
+            let tabIdShort = coordinator.tabId?.uuidString.prefix(8) ?? "nil"
+            ipcLog("📥 [HOST] Received listenerReady for tab=\(tabIdShort), re-sending containerSizeChanged")
+
+            // 🔑 重置 lastSentContainerSize 强制重新发送
+            coordinator.resetLastSentContainerSize()
+            coordinator.trySendInitialConfig()
+        }
     }
 
     private func setupConnectionCallback() {
@@ -2394,6 +2432,35 @@ struct ViewBridgeMultiProcessTabView: View {
 
             coordinator.xpcServiceReady = true
             sendTabConfigIfReady()
+        }
+
+        // 🔑 设置 listenerReady 监听器 - 解决竞态条件
+        setupListenerReadyListenerForMultiProcess(serviceId: expectedBundleId)
+    }
+
+    /// 设置 Service "listener ready" 通知监听器 (MultiProcess 版本)
+    private func setupListenerReadyListenerForMultiProcess(serviceId: String) {
+        guard coordinator.listenerReadyObserver == nil else { return }
+
+        let listenerReadyName = "com.canvas.listenerReady.\(CanvasHostProcessId).\(serviceId)"
+        ipcLog("🎧 [MultiProcess] Setting up listenerReady listener: \(listenerReadyName)")
+
+        coordinator.listenerReadyObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(listenerReadyName),
+            object: nil,
+            queue: .main
+        ) { [weak coordinator] notification in
+            guard let coordinator = coordinator else { return }
+            guard let userInfo = notification.userInfo,
+                  let notifyingServiceId = userInfo["serviceId"] as? String,
+                  notifyingServiceId == serviceId else { return }
+
+            let tabIdShort = coordinator.tabId?.uuidString.prefix(8) ?? "nil"
+            ipcLog("📥 [MultiProcess.HOST] Received listenerReady for tab=\(tabIdShort), re-sending containerSizeChanged")
+
+            // 🔑 重置 lastSentContainerSize 强制重新发送
+            coordinator.resetLastSentContainerSize()
+            coordinator.trySendInitialConfig()
         }
     }
 

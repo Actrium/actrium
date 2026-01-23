@@ -627,8 +627,10 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
     }
 
     /// 导航当前 Tab 到指定 URL 或应用 ID
+    /// 统一的导航入口 - 处理所有类型的输入
     /// - 如果输入是 about: URL，导航到对应系统应用
     /// - 如果输入是 http/https URL，作为 Web 内容加载
+    /// - 如果输入是本地文件路径，加载 ACTR 应用
     /// - 否则作为 app id 处理（暂不实现）
     func navigateCurrentTab(to input: String) {
         guard let currentTabId = currentTabId,
@@ -639,7 +641,26 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // 检查是否为 URL
+        // 1. 检查是否为本地文件路径
+        if isLocalFilePath(trimmed) {
+            let fileURL = URL(fileURLWithPath: trimmed).standardizedFileURL
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory) {
+                if isDirectory.boolValue {
+                    logger.notice("📂 [navigateCurrentTab] 加载开发目录: \(fileURL.path)")
+                    loadFromDevDirectory(fileURL)
+                } else {
+                    logger.notice("📦 [navigateCurrentTab] 加载 ACTR 包: \(fileURL.path)")
+                    importACTRPackage(from: fileURL)
+                }
+                return
+            } else {
+                logger.warning("⚠️ [navigateCurrentTab] 文件不存在: \(fileURL.path)")
+                return
+            }
+        }
+
+        // 2. 检查是否为 URL
         if let url = parseURL(trimmed) {
             // Check if it's an about: URL for system apps
             if let systemType = SystemTabType.from(url: url) {
@@ -675,6 +696,27 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             // TODO: 处理 app id（从书签或应用库加载）
             logger.notice("📱 [navigateCurrentTab] 输入不是有效 URL，可能是 app id: \(trimmed)")
         }
+    }
+
+    /// 检查输入是否是本地文件路径
+    private func isLocalFilePath(_ input: String) -> Bool {
+        // 以 / 开头是绝对路径
+        if input.hasPrefix("/") {
+            return true
+        }
+        // 以 ~ 开头是用户目录
+        if input.hasPrefix("~") {
+            return true
+        }
+        // 以 file:// 开头
+        if input.hasPrefix("file://") {
+            return true
+        }
+        // 以 .actr 结尾
+        if input.hasSuffix(".actr") {
+            return true
+        }
+        return false
     }
 
     /// 解析 URL 字符串
