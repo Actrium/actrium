@@ -170,6 +170,29 @@ class NativeLogger: NSObject {
     // Remote log server for development
     private static let logServerURL = "http://localhost:9999/log"
 
+    /// Write to shared IPC debug log file for cross-process log correlation
+    private static func writeToIPCLog(_ message: String) {
+        let timestamp: String = {
+            let now = Date()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm:ss.SSS"
+            return formatter.string(from: now)
+        }()
+        let line = "[\(timestamp)] [JS] \(message)\n"
+
+        // Write to shared IPC log file
+        let logPath = "/tmp/canvas_ipc_debug.log"
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            handle.seekToEndOfFile()
+            if let data = line.data(using: .utf8) {
+                handle.write(data)
+            }
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: logPath, contents: line.data(using: .utf8))
+        }
+    }
+
     private static func sendToHost(level: String, source: String, message: String) {
         // Send log to host process for DevTools Console
         DistributedNotificationCenter.default().postNotificationName(
@@ -193,6 +216,7 @@ class NativeLogger: NSObject {
     @objc
     func log(_ message: String) {
         NSLog("[JS] %@", message)
+        NativeLogger.writeToIPCLog(message)
         NativeLogger.sendToHost(level: "info", source: "JS", message: message)
         NativeLogger.sendToRemote(level: "log", message: message)
     }

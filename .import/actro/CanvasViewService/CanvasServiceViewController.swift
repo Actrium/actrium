@@ -894,7 +894,20 @@ private class ServiceReactNativeHost {
         if let entry = getTabEntry(tabId: tabId) {
             // 检查尺寸或 isOverviewMode 是否真的变化了
             let sizeChanged = entry.containerSize != size
-            let overviewChanged = isOverviewMode != nil && entry.currentProperties["isOverviewMode"] as? Bool != isOverviewMode
+            let currentOverviewMode = entry.currentProperties["isOverviewMode"] as? Bool ?? false
+            let overviewChanged = isOverviewMode != nil && currentOverviewMode != isOverviewMode
+
+            // 🔑 检查是否有显著的尺寸变化（从 Focus 到 Overview 的过渡）
+            // Overview 卡片尺寸通常约为 196x124，而 Focus 模式约为 630x398
+            // 当尺寸变化超过 50% 时，认为是显著变化，需要重新创建 RCTRootView
+            let significantSizeChange: Bool = {
+                let oldSize = entry.containerSize
+                guard oldSize.width > 0 && oldSize.height > 0 else { return false }
+                let widthRatio = min(size.width, oldSize.width) / max(size.width, oldSize.width)
+                let heightRatio = min(size.height, oldSize.height) / max(size.height, oldSize.height)
+                // 如果宽度或高度变化超过 50%，认为是显著变化
+                return widthRatio < 0.5 || heightRatio < 0.5
+            }()
 
             guard sizeChanged || overviewChanged else { return }
 
@@ -903,15 +916,41 @@ private class ServiceReactNativeHost {
             // 可能在回调执行前检查状态，导致错误的 "same size" 判断
             entry.containerSize = size
 
-            // Update isOverviewMode in RN props if provided
+            // Update props
+            var properties = entry.currentProperties
             if let isOverview = isOverviewMode {
-                var properties = entry.currentProperties
                 properties["isOverviewMode"] = isOverview
-                properties["containerWidth"] = size.width
-                properties["containerHeight"] = size.height
-                entry.currentProperties = properties
+            }
+            properties["containerWidth"] = size.width
+            properties["containerHeight"] = size.height
+            entry.currentProperties = properties
+
+            // 🔑 CRITICAL: appProperties setter may not trigger React re-render on macOS
+            // So we need to force a re-render by recreating the RCTRootView when:
+            // 1. isOverviewMode changes
+            // 2. There's a significant size change (Focus ↔ Overview transition)
+            let needsRecreate = overviewChanged || significantSizeChange
+            if needsRecreate, let container = entry.containerView, let oldRootView = entry.rootView {
+                let reason = overviewChanged ? "isOverviewMode changed (\(currentOverviewMode) → \(isOverviewMode ?? false))" : "significant size change"
+                ipcLog("🔄 \(reason), recreating RCTRootView for tab=\(String(tabId.prefix(8)))")
+
+                // Remove old view
+                oldRootView.removeFromSuperview()
+                entry.rootView = nil
+
+                // Create new RCTRootView with updated props
+                if let newRootView = ServiceReactNativeHost.shared.createRootView(for: entry, initialProperties: properties) {
+                    entry.rootView = newRootView
+                    newRootView.frame = CGRect(origin: .zero, size: size)
+                    container.addSubview(newRootView)
+                    ipcLog("✅ Recreated RCTRootView: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverviewMode ?? false) size=\(Int(size.width))x\(Int(size.height))")
+                } else {
+                    ipcLog("⚠️ Failed to recreate RCTRootView for tab=\(String(tabId.prefix(8)))")
+                }
+            } else {
+                // Just update appProperties (may not work reliably, but try anyway)
                 entry.rootView?.appProperties = properties
-                ipcLog("📱 Updated RN props: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverview) size=\(Int(size.width))x\(Int(size.height))")
+                ipcLog("📱 Updated RN props: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverviewMode ?? false) size=\(Int(size.width))x\(Int(size.height))")
             }
 
             // 先更新 viewController 的 preferredContentSize

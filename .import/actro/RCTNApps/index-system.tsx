@@ -94,7 +94,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (props) => {
   const tab = props?.tab;
   const { containerWidth, containerHeight, isOverviewMode } = props;
 
-  nlog(`[SystemAppRouter] render: systemAppType=${tab?.systemAppType}, tabId=${tab?.id?.substring(0, 8)}`);
+  nlog(`[SystemAppRouter] render: systemAppType=${tab?.systemAppType}, tabId=${tab?.id?.substring(0, 8)}, isOverviewMode=${isOverviewMode}, size=${containerWidth}x${containerHeight}`);
 
   if (!tab?.systemAppType) {
     return (
@@ -102,6 +102,11 @@ const SystemAppRouter: React.FC<SystemAppProps> = (props) => {
         <Text style={styles.loadingText}>Waiting for tab config...</Text>
       </View>
     );
+  }
+
+  // 🔑 Log when startPage is about to be rendered
+  if (tab.systemAppType === 'startPage') {
+    nlog(`[SystemAppRouter] Rendering StartPageApp: isOverviewMode=${isOverviewMode}, size=${containerWidth}x${containerHeight}, bookmarks=${tab.bookmarks?.length ?? 0}`);
   }
 
   return (
