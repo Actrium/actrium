@@ -6,8 +6,8 @@
  * - HistoryApp: for chrome://history
  * - BookmarksApp: for chrome://bookmarks
  */
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, DeviceEventEmitter } from 'react-native';
 import type { TabRouterProps } from './actr-host/types';
 
 // Lazy imports to avoid circular dependencies
@@ -23,7 +23,23 @@ let cachedValidProps: TabRouterProps | null = null;
 // Loading fallback - empty view to avoid "Loading..." text flash
 const LoadingFallback = () => <View style={styles.loading} />;
 
-export const TabRouter: React.FC<TabRouterProps> = (props) => {
+export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
+  // 🔑 使用 state 来存储动态更新的 props
+  // appProperties 更新可能不可靠，所以通过 DeviceEventEmitter 接收更新
+  const [dynamicProps, setDynamicProps] = useState<Partial<TabRouterProps>>({});
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('onPropsUpdate', (newProps: Partial<TabRouterProps>) => {
+      console.warn(`[TabRouter] onPropsUpdate received: isOverviewMode=${newProps.isOverviewMode}`);
+      setDynamicProps(prev => ({ ...prev, ...newProps }));
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  // 合并 initial props 和 dynamic props
+  const props = { ...initialProps, ...dynamicProps };
+
   // Debug: Log props received - use NativeModules for visibility
   const { NativeModules } = require('react-native');
   const NativeLogger = NativeModules.NativeLogger;

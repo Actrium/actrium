@@ -934,6 +934,9 @@ private class ServiceReactNativeHost {
             // 🔑 通知 RN 布局系统尺寸变化（发送 didUpdateDimensions 事件）
             ServiceReactNativeHost.shared.updateDimensionsForEntry(entry)
 
+            // 🔑 通过 DeviceEventEmitter 发送 props 更新事件（appProperties 可能不可靠）
+            ServiceReactNativeHost.shared.emitPropsUpdate(for: entry)
+
             // 通知 Host 尺寸更新完成（事件驱动，替代固定延迟）
             postSizeApplied(tabId: tabId, size: size, requestId: requestId)
         } else {
@@ -1262,6 +1265,24 @@ private class ServiceReactNativeHost {
         ]
 
         bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["didUpdateDimensions", dimensions], completion: nil)
+    }
+
+    /// 🔑 通过 DeviceEventEmitter 发送 props 更新事件
+    /// appProperties 更新可能不可靠（已 deprecated），使用事件更可靠
+    func emitPropsUpdate(for entry: TabViewControllerEntry) {
+        guard let bridge = entry.rootView?.bridge else {
+            ipcLog("⚠️ emitPropsUpdate: no bridge available")
+            return
+        }
+
+        let props = entry.currentProperties
+        let tabId = props["tab"].flatMap { ($0 as? [String: Any])?["id"] as? String } ?? "unknown"
+        let isOverviewMode = props["isOverviewMode"] as? Bool ?? false
+
+        ipcLog("📤 emitPropsUpdate: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverviewMode)")
+
+        // 发送自定义事件通知 RN props 变化
+        bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["onPropsUpdate", props], completion: nil)
     }
 }
 
