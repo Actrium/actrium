@@ -239,10 +239,10 @@ private class ResizableContainerView: NSView {
             isApplyingHostSize = false
         }
 
-        // Container 始终放在 Jail 的原点 (0,0)
-        // NSRemoteView 从 Jail 的 (0,0) 开始显示，所以 Container 必须在这个位置
-        // 之前尝试将 Container 放在 Jail "顶部"（originY = jailHeight - containerHeight）
-        // 但这导致 NSRemoteView 看到的大部分区域是空白
+        // Container 必须放在 (0, 0)
+        // NSRemoteView 只显示 jail view 从原点开始的区域
+        // 由于 jail 不是 flipped，原点在左下角
+        // 内容从 jail 左下角开始，通过 Host 端的 flipped ContainerView 映射到左上角显示
         super.setFrameOrigin(NSPoint(x: 0, y: 0))
         super.setFrameSize(newSize)
 
@@ -250,6 +250,11 @@ private class ResizableContainerView: NSView {
         rnView?.frame = bounds
 
         CATransaction.commit()
+
+        // 🔍 详细调试日志
+        if let sv = superview {
+            ipcLog("📐 applyHostSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)), jail.frame=\(NSStringFromRect(sv.frame)), jail.bounds=\(NSStringFromRect(sv.bounds)), container.frame=\(NSStringFromRect(frame)), rnView.frame=\(rnView != nil ? NSStringFromRect(rnView!.frame) : "nil")")
+        }
 
         if newSize.width > 0 && newSize.height > 0 {
             onSizeChanged?(newSize)
@@ -787,6 +792,7 @@ private class ServiceReactNativeHost {
         }
 
         let containerSizeName = "com.canvas.containerSizeChanged.\(pid).\(serviceBundleId)"
+        ipcLog("🎧 Setting up containerSizeChanged listener: \(containerSizeName)")
         containerSizeObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(containerSizeName),
             object: nil,
@@ -811,6 +817,8 @@ private class ServiceReactNativeHost {
     }
 
     private func handleContainerSizeChanged(_ notification: Notification) {
+        ipcLog("📥 handleContainerSizeChanged notification received")
+
         // Parse JSON string format (for cross-process compatibility)
         guard let userInfo = notification.userInfo,
               let jsonString = userInfo["sizeInfo"] as? String,
@@ -819,6 +827,7 @@ private class ServiceReactNativeHost {
               let tabId = sizeInfo["tabId"] as? String,
               let width = sizeInfo["width"] as? Double,
               let height = sizeInfo["height"] as? Double else {
+            ipcLog("⚠️ handleContainerSizeChanged: failed to parse notification")
             return
         }
 

@@ -841,6 +841,8 @@ public final class IPCInteractionManager: ObservableObject {
 
         let notificationName = "com.canvas.containerSizeChanged.\(configuration.hostProcessId).\(serviceId)"
 
+        NSLog("📤 [IPC] sendContainerSizeChanged: notificationName=%@ size=%.0fx%.0f", notificationName, size.width, size.height)
+
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
             object: nil,
