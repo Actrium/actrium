@@ -539,8 +539,8 @@ final class ViewBridgeCoordinator {
     /// 3. 基本配置 - 让 Service 可以开始渲染
     private func sendBootstrapTabConfig() {
         guard let tabId = tabId,
-              let serviceId = hostView?.serviceId else {
-            fputs("⚠️ [Coordinator] sendBootstrapTabConfig: missing tabId or serviceId\n", stderr)
+              let serviceId = allocatedServiceId else {
+            fputs("⚠️ [Coordinator] sendBootstrapTabConfig: missing tabId or allocatedServiceId\n", stderr)
             return
         }
 
