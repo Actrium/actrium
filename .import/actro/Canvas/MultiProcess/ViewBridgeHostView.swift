@@ -230,8 +230,6 @@ public class ViewBridgeHostView: NSView {
         let expectedFrame = NSRect(origin: .zero, size: bounds.size)
         if remoteView.frame != expectedFrame {
             remoteView.frame = expectedFrame
-            NSLog("🔧 [RemoteView] frame updated: %@ -> %@, hostView.bounds=%@",
-                  NSStringFromRect(remoteView.frame), NSStringFromRect(expectedFrame), NSStringFromRect(bounds))
         }
     }
 
@@ -347,7 +345,7 @@ public class ViewBridgeHostView: NSView {
         let targetFrame = NSRect(origin: .zero, size: currentContentSize)
         remoteView.frame = targetFrame
         // Disable autoresizing mask as we manage layout manually
-        remoteView.autoresizingMask = [] 
+        remoteView.autoresizingMask = []
         addSubview(remoteView)
 
         // Configure ViewBridge content size range
@@ -770,6 +768,8 @@ final class ViewBridgeCoordinator {
             ) { [weak self] _ in
                 guard let self = self else { return }
 
+                ipcLog("🔔 windowLiveResizeEnded received, tab=\(self.tabId?.uuidString.prefix(8) ?? "nil")")
+
                 // 标记进入 debounce 状态
                 self.isWaitingForFinalSize = true
 
@@ -896,10 +896,12 @@ final class ViewBridgeCoordinator {
     /// 当定时器触发时（尺寸稳定），发送最终尺寸到 Service
     private func scheduleFinalSizeDebounce() {
         finalSizeDebounceTimer?.invalidate()
+        ipcLog("⏱️ scheduleFinalSizeDebounce: starting 300ms debounce timer")
         finalSizeDebounceTimer = Timer.scheduledTimer(withTimeInterval: Self.finalSizeDebounceInterval, repeats: false) { [weak self] _ in
             guard let self = self else { return }
 
             self.isWaitingForFinalSize = false
+            ipcLog("⏱️ scheduleFinalSizeDebounce: timer fired")
 
             // 优先从 hostView 的实际 bounds 获取尺寸（比 SwiftUI state 更准确）
             // SwiftUI GeometryReader 可能滞后于实际窗口 frame
@@ -921,6 +923,8 @@ final class ViewBridgeCoordinator {
                 }
             }
 
+            ipcLog("⏱️ scheduleFinalSizeDebounce: finalSize=\(Int(finalSize.width))x\(Int(finalSize.height)), hasServiceId=\(self.allocatedServiceId != nil), hasConn=\(self.hasConnection), xpcReady=\(self.xpcServiceReady)")
+
             // 验证并发送
             if finalSize.width > 50 && finalSize.height > 50 {
                 // 同步更新 coordinator 状态
@@ -932,10 +936,14 @@ final class ViewBridgeCoordinator {
                 // 🔑 检查四个条件都满足才能发送通知
                 guard self.allocatedServiceId != nil,
                       self.hasConnection,
-                      self.xpcServiceReady else { return }
+                      self.xpcServiceReady else {
+                    ipcLog("⚠️ scheduleFinalSizeDebounce: conditions not met, skipping notification")
+                    return
+                }
 
                 self.lastSentContainerSize = finalSize
                 self.lastSizeNotificationTime = Date()
+                ipcLog("📤 scheduleFinalSizeDebounce: sending containerSizeNotification size=\(Int(finalSize.width))x\(Int(finalSize.height))")
                 self.sendContainerSizeNotification(size: finalSize)
             }
 
@@ -1073,25 +1081,42 @@ final class ViewBridgeCoordinator {
 
     /// Send a containerSizeChanged notification to the XPC service
     /// 内部方法 - 由 applyViewportSize 调用
-    /// 🔑 使用 IPCBridgeAdapter 发送，状态机会自动校验
+    /// 🔑 直接发送 DistributedNotification（不走 IPCBridgeAdapter，因为 tabStates 未注册）
     private func sendContainerSizeNotification(size: CGSize) {
-        guard let tabId = tabId else {
-            NSLog("⚠️ [Coordinator] Cannot send containerSizeChanged - no tabId")
+        guard let tabId = tabId,
+              let serviceId = allocatedServiceId else {
+            NSLog("⚠️ [Coordinator] Cannot send containerSizeChanged - no tabId or serviceId")
             return
         }
 
         // Generate request ID for log correlation
         let requestId = Int.random(in: 10000...99999)
 
-        NSLog("📐 [HOST→SVC] containerSizeChanged via IPCBridgeAdapter req=%d tab=%@ size=%.0fx%.0f",
-              requestId, String(tabId.uuidString.prefix(8)), size.width, size.height)
+        // 构建 sizeInfo 数据
+        let sizeInfo: [String: Any] = [
+            "tabId": tabId.uuidString,
+            "width": size.width,
+            "height": size.height,
+            "requestId": requestId,
+            "isOverviewMode": isOverviewMode
+        ]
 
-        // 🔑 使用 IPCBridgeAdapter 发送，状态机会在 IPCInteractionManager 内部校验
-        // 如果状态机不是 ready 状态，请求会被自动队列化
-        IPCBridgeAdapter.shared.sendContainerSizeChanged(
-            tabId: tabId,
-            size: size,
-            requestId: requestId
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            NSLog("⚠️ [Coordinator] Failed to serialize sizeInfo")
+            return
+        }
+
+        // 🔑 直接发送 DistributedNotification，格式与 Service 端监听匹配
+        let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
+
+        ipcLog("📐 [HOST→SVC] containerSizeChanged req=\(requestId) tab=\(String(tabId.uuidString.prefix(8))) size=\(Int(size.width))x\(Int(size.height)) name=\(notificationName)")
+
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(notificationName),
+            object: nil,
+            userInfo: ["sizeInfo": jsonString],
+            deliverImmediately: true
         )
     }
 
