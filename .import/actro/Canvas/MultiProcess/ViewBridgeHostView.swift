@@ -1762,6 +1762,7 @@ struct UnifiedReactNativeLayer: View {
     let isFocused: Bool           // 是否处于 Focus 模式
     let isTransitioning: Bool     // 是否正在过渡动画中
     let coordinator: ViewBridgeCoordinator
+    let isOverviewDragging: Bool  // 是否正在 Overview 模式下拖拽（拖拽时降低 z-index）
 
     // System app data (for StartPageApp)
     var bookmarks: [[String: Any]] = []
@@ -1776,6 +1777,7 @@ struct UnifiedReactNativeLayer: View {
         isFocused: Bool,
         isTransitioning: Bool,
         coordinator: ViewBridgeCoordinator,
+        isOverviewDragging: Bool = false,
         bookmarks: [[String: Any]] = [],
         recentHistory: [[String: Any]] = []
     ) {
@@ -1787,6 +1789,7 @@ struct UnifiedReactNativeLayer: View {
         self.isFocused = isFocused
         self.isTransitioning = isTransitioning
         self.coordinator = coordinator
+        self.isOverviewDragging = isOverviewDragging
         self.bookmarks = bookmarks
         self.recentHistory = recentHistory
 
@@ -1928,10 +1931,12 @@ struct UnifiedReactNativeLayer: View {
         .animation(nil, value: isTransitioning)
         // 🔑 过渡期间完全透明，动画结束后才显示
         .opacity(isTransitioning ? 0 : 1)
-        // 🔑 z-index 控制：Overview 模式放在 TabGridView 下面，让拖拽手势穿透
-        // Focus 模式放在上面，让用户与 React Native 内容交互
-        // 注意：不要依赖 isTransitioning，否则过渡期间会导致 Focus 模式下内容被遮挡
-        .zIndex(isFocused ? 100 : -100)
+        // 🔑 z-index 控制：
+        // - Focus 模式: zIndex(100) 在最前，确保交互时在最前
+        // - Overview 模式 (非拖拽): zIndex(50) 在 canvas 前面，内容可见
+        // - Overview 模式 (拖拽中): zIndex(-100) 在 canvas 后面，让拖拽手势正常工作
+        // 注意：拖拽期间 RN 内容被卡片背景遮挡是可接受的，因为拖拽交互更重要
+        .zIndex(isFocused ? 100 : (isOverviewDragging ? -100 : 50))
         // Focus 模式下允许交互
         .allowsHitTesting(isFocused && !isTransitioning)
         .onAppear {
