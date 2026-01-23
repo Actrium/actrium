@@ -925,6 +925,15 @@ private class ServiceReactNativeHost {
                 container.applyHostSize(size)
             }
 
+            // 🔑 关键：更新 RN rootView 的 frame 并通知 RN 尺寸变化
+            if let rootView = entry.rootView {
+                rootView.frame = CGRect(origin: .zero, size: size)
+                ipcLog("📱 Updated RN rootView.frame: tab=\(String(tabId.prefix(8))) size=\(Int(size.width))x\(Int(size.height))")
+            }
+
+            // 🔑 通知 RN 布局系统尺寸变化（发送 didUpdateDimensions 事件）
+            ServiceReactNativeHost.shared.updateDimensionsForEntry(entry)
+
             // 通知 Host 尺寸更新完成（事件驱动，替代固定延迟）
             postSizeApplied(tabId: tabId, size: size, requestId: requestId)
         } else {
@@ -1234,7 +1243,7 @@ private class ServiceReactNativeHost {
         updateDimensionsForEntry(entry)
     }
 
-    private func updateDimensionsForEntry(_ entry: TabViewControllerEntry) {
+    func updateDimensionsForEntry(_ entry: TabViewControllerEntry) {
         guard let bridge = entry.rootView?.bridge else { return }
 
         let size = entry.containerSize
