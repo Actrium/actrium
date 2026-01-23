@@ -517,6 +517,7 @@ public class ViewBridgeHostView: NSView {
     /// 由 coordinator.applyViewportSize 调用，不发送通知（通知由 coordinator 统一处理）
     func applyFrameSize(_ newSize: CGSize) {
         currentContentSize = newSize
+        let oldBounds = bounds.size
 
         // 更新自身 frame 和 remoteView frame（直接同步设置，避免异步积压）
         if bounds.size != newSize {
@@ -533,6 +534,10 @@ public class ViewBridgeHostView: NSView {
                 vc.preferredContentSize = newSize
             }
         }
+
+        // 调试日志
+        let remoteFrame = remoteViewController?.view.frame ?? .zero
+        ipcLog("📐 applyFrameSize: oldBounds=\(Int(oldBounds.width))x\(Int(oldBounds.height)) newSize=\(Int(newSize.width))x\(Int(newSize.height)) bounds=\(Int(bounds.width))x\(Int(bounds.height)) remoteView=\(Int(remoteFrame.width))x\(Int(remoteFrame.height))")
     }
 
     private func handleError(_ message: String) {
@@ -1638,18 +1643,33 @@ struct PersistentViewBridgeView: NSViewRepresentable {
             containerView.allowsHitTesting = allowsHitTesting
         }
 
-        // 🔑 关键：不要用 `size` 参数覆盖 SwiftUI 分配的 frame！
-        // SwiftUI 会自动设置 NSView 的 frame，我们应该使用它分配的尺寸
-        let actualSize = container.bounds.size
-        guard actualSize.width > 50 && actualSize.height > 50 else { return }
+        // 🔑 关键修复：使用传入的 size 参数，而不是 container.bounds.size
+        // SwiftUI 使用 .position() 定位时，可能不会更新 container.bounds
+        // 传入的 size 参数才是正确的目标尺寸（Overview 模式下是 cardSize）
+        let targetSize = size
+        let containerBounds = container.bounds.size
 
-        // 更新 hostView frame 使用 SwiftUI 分配的实际尺寸
+        // 调试日志
+        ipcLog("📐 updateNSView: tab=\(String(tabId.uuidString.prefix(8))), targetSize=\(Int(targetSize.width))x\(Int(targetSize.height)), containerBounds=\(Int(containerBounds.width))x\(Int(containerBounds.height)), allowsHitTesting=\(allowsHitTesting)")
+
+        guard targetSize.width > 10 && targetSize.height > 10 else {
+            ipcLog("⚠️ updateNSView: skipping - targetSize too small")
+            return
+        }
+
+        // 🔑 如果 container bounds 与目标尺寸不同，主动更新 container frame
+        if abs(containerBounds.width - targetSize.width) > 1 || abs(containerBounds.height - targetSize.height) > 1 {
+            container.setFrameSize(targetSize)
+            ipcLog("📐 updateNSView: updated container frame to \(Int(targetSize.width))x\(Int(targetSize.height))")
+        }
+
+        // 更新 hostView frame 使用目标尺寸
         if let hostView = container.subviews.first as? ViewBridgeHostView {
             // Update hit testing state on hostView as well
             hostView.allowsHitTesting = allowsHitTesting
-            hostView.applyFrameSize(actualSize)
+            hostView.applyFrameSize(targetSize)
             // 通知 coordinator 实际尺寸（用于同步到 Service）
-            coordinator.updateViewportSize(actualSize)
+            coordinator.updateViewportSize(targetSize)
         }
     }
 
