@@ -585,7 +585,7 @@ final class ViewBridgeCoordinator {
         ]
 
         // 使用 coordinator 存储的完整 tab 配置
-        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil"), isOverviewMode=\(isOverviewMode)")
+        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil"), isOverviewMode=\(isOverviewMode), bookmarks=\(tabConfig?.bookmarks.count ?? 0), history=\(tabConfig?.recentHistory.count ?? 0)")
 
         // 🔑 如果 tabConfig 还没设置，标记为待发送，等 tabConfig 设置后再发
         guard let tabConfig = self.tabConfig else {
@@ -604,6 +604,9 @@ final class ViewBridgeCoordinator {
             if let script = tabConfig.leftPanelScript { config["leftPanelScript"] = script }
             config["leftPanelVisible"] = tabConfig.leftPanelVisible
             config["rightPanelVisible"] = tabConfig.rightPanelVisible
+            // 🔑 StartPage 需要的数据
+            if !tabConfig.bookmarks.isEmpty { config["bookmarks"] = tabConfig.bookmarks }
+            if !tabConfig.recentHistory.isEmpty { config["recentHistory"] = tabConfig.recentHistory }
         }
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: config),
@@ -1606,7 +1609,9 @@ struct UnifiedReactNativeLayer: View {
             unifiedScript: tab.unifiedScript,
             leftPanelScript: tab.leftPanelScript,
             leftPanelVisible: tab.leftPanelDefaultVisible,
-            rightPanelVisible: tab.rightPanelDefaultVisible
+            rightPanelVisible: tab.rightPanelDefaultVisible,
+            bookmarks: bookmarks,
+            recentHistory: recentHistory
         )
         ipcLog("🏗️ UnifiedReactNativeLayer.init: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
     }
@@ -2039,7 +2044,9 @@ struct ViewBridgeMultiProcessTabView: View {
             unifiedScript: tab.unifiedScript,
             leftPanelScript: tab.leftPanelScript,
             leftPanelVisible: tab.leftPanelDefaultVisible,
-            rightPanelVisible: tab.rightPanelDefaultVisible
+            rightPanelVisible: tab.rightPanelDefaultVisible,
+            bookmarks: [],
+            recentHistory: []
         )
     }
 

@@ -33,6 +33,8 @@ struct XPCTabConfig {
     let leftPanelScript: String?
     let leftPanelVisible: Bool
     let rightPanelVisible: Bool
+    let bookmarks: [[String: Any]]
+    let recentHistory: [[String: Any]]
 
     func toDictionary(isOverviewMode: Bool) -> [String: Any] {
         var dict: [String: Any] = [
@@ -43,7 +45,9 @@ struct XPCTabConfig {
             "containerHeight": containerSize.height,
             "isOverviewMode": isOverviewMode,
             "leftPanelVisible": leftPanelVisible,
-            "rightPanelVisible": rightPanelVisible
+            "rightPanelVisible": rightPanelVisible,
+            "bookmarks": bookmarks,
+            "recentHistory": recentHistory
         ]
         if let systemAppType = systemAppType {
             dict["systemAppType"] = systemAppType
