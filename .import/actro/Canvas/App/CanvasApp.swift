@@ -520,6 +520,9 @@ struct CanvasApp: App {
         // Setup crash handler to log crashes
         CrashHandler.setup()
 
+        // Disable window state restoration to prevent multiple windows on launch
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
+
         // Suppress common system warnings in development
         UserDefaults.standard.set(false, forKey: "NSConstraintBasedLayoutLogUnsatisfiable")
 
