@@ -12,7 +12,7 @@ import {
   NativeModules,
 } from 'react-native';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
-import { CompactSystemAppView } from './CompactSystemAppView';
+import { CompactSystemAppView, COMPACT_MODE_THRESHOLD } from './CompactSystemAppView';
 
 // Native module for history actions
 const HistoryModule = NativeModules.HistoryModule;
@@ -81,8 +81,12 @@ export default function HistoryApp({ items, groups, containerWidth, containerHei
 
   const groupedItems = useMemo(() => groupByDate(filteredItems), [filteredItems]);
 
-  // Compact mode controlled by isOverviewMode prop (when in Tab Overview Card mode)
-  if (isOverviewMode) {
+  // 🔑 Compact mode: use BOTH explicit isOverviewMode prop AND size-based detection
+  // Use AND logic: only small if BOTH dimensions are small (Focus mode is ~630x398, Overview is ~196x124)
+  const isSmallContainer = (containerWidth ?? 999) < COMPACT_MODE_THRESHOLD && (containerHeight ?? 999) < COMPACT_MODE_THRESHOLD;
+  const shouldShowCompact = isOverviewMode || isSmallContainer;
+
+  if (shouldShowCompact) {
     return (
       <CompactSystemAppView
         icon="🕐"
