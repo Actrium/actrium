@@ -1074,6 +1074,9 @@ private class ServiceReactNativeHost {
     }
 
     private func applyConfigToEntry(_ entry: TabViewControllerEntry, config: [String: Any]) {
+        let tabIdShort = String((config["tabId"] as? String ?? entry.internalId).prefix(8))
+        ipcLog("🎨 applyConfigToEntry: tab=\(tabIdShort), hasRootView=\(entry.rootView != nil), hasContainerView=\(entry.containerView != nil)")
+
         // If RCTRootView not ready yet, create it now (event-driven)
         guard entry.rootView != nil else {
             createRootViewWithConfig(for: entry, config: config)
@@ -1495,15 +1498,15 @@ private func setupReactNativeContent(for entry: TabViewControllerEntry) {
 private func createRootViewWithConfig(for entry: TabViewControllerEntry, config: [String: Any]) {
     let logTabId = config["tabId"] as? String ?? entry.internalId
     let logSystemAppType = config["systemAppType"] as? String ?? "nil"
-    NSLog("[XPC] 🔧 createRootViewWithConfig: tab=%@ systemAppType=%@", String(logTabId.prefix(8)), logSystemAppType)
+    ipcLog("🔧 createRootViewWithConfig: tab=\(String(logTabId.prefix(8))) systemAppType=\(logSystemAppType)")
 
     guard entry.rootView == nil else {
-        NSLog("[XPC] ⚠️ createRootViewWithConfig: rootView already exists for tab=%@", String(logTabId.prefix(8)))
+        ipcLog("⚠️ createRootViewWithConfig: rootView already exists for tab=\(String(logTabId.prefix(8)))")
         return
     }
 
     guard let container = entry.containerView else {
-        NSLog("[XPC] ⚠️ createRootViewWithConfig: containerView is nil for tab=%@", String(logTabId.prefix(8)))
+        ipcLog("⚠️ createRootViewWithConfig: containerView is nil for tab=\(String(logTabId.prefix(8)))")
         return
     }
 

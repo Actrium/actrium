@@ -529,6 +529,7 @@ struct CanvasApp: App {
         // 🔥 Prewarm XPC Services for faster tab creation
         // Only prewarm slot 0 (system apps) + slot 1 (app reserve)
         // Metro is no longer auto-started - apps load from local bundles
+        let prewarmStart = Date()
         Task { @MainActor in
             #if DEBUG
             logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
@@ -539,7 +540,8 @@ struct CanvasApp: App {
             // Prewarm initial services and WAIT for slot 0 (system apps) to be ready
             await XPCServicePool.shared.prewarmInitialServicesAsync()
 
-            logger.info("✅ System startup complete - ready to create tabs")
+            let elapsed = Date().timeIntervalSince(prewarmStart) * 1000
+            logger.info("✅ System startup complete - prewarm took \(Int(elapsed))ms")
         }
 
         // Initialize TabProcessManager early
