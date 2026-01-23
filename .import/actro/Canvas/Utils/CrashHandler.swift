@@ -64,46 +64,78 @@ final class CrashHandler {
     }
 
     private static func logSignal(_ signal: Int32) {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let signalName = signalName(for: signal)
+        // IMPORTANT: Signal handlers can only use async-signal-safe functions!
+        // NSLog, malloc, and most standard library functions are NOT safe.
+        // Use write() system call to stderr directly.
 
-        // Get current thread's call stack
-        let callStack = Thread.callStackSymbols.joined(separator: "\n")
-
-        let message = """
-        ========================================
-        💥 CRASH - Signal Received
-        ========================================
-        Time: \(timestamp)
-        Signal: \(signal) (\(signalName))
-
-        Call Stack:
-        \(callStack)
-        ========================================
-        """
-
-        NSLog("%@", message)
-
-        // Also write to a crash log file
-        writeCrashLog(message)
+        // Write minimal crash info using only async-signal-safe functions
+        writeSignalSafe("========================================\n")
+        writeSignalSafe("CRASH - Signal Received: ")
+        writeSignalNumber(signal)
+        writeSignalSafe(" (")
+        writeSignalName(for: signal)
+        writeSignalSafe(")\n")
+        writeSignalSafe("========================================\n")
 
         // Re-raise the signal to let the system handle it
         Darwin.signal(signal, SIG_DFL)
         Darwin.raise(signal)
     }
 
-    private static func signalName(for signal: Int32) -> String {
+    /// Async-signal-safe write to stderr
+    private static func writeSignalSafe(_ message: StaticString) {
+        message.withUTF8Buffer { buffer in
+            _ = write(STDERR_FILENO, buffer.baseAddress, buffer.count)
+        }
+    }
+
+    /// Async-signal-safe write of signal number using stack buffer
+    private static func writeSignalNumber(_ signal: Int32) {
+        // Use fixed-size stack buffer (max 11 digits for Int32 + sign)
+        var buffer: (CChar, CChar, CChar, CChar, CChar, CChar, CChar, CChar, CChar, CChar, CChar, CChar) =
+            (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+        var num = signal
+        var idx = 10  // Start from end of buffer
+
+        if num < 0 {
+            num = -num
+        }
+
+        repeat {
+            withUnsafeMutableBytes(of: &buffer) { ptr in
+                ptr[idx] = UInt8(48 + num % 10)  // '0' = 48
+            }
+            num /= 10
+            idx -= 1
+        } while num > 0
+
+        if signal < 0 {
+            withUnsafeMutableBytes(of: &buffer) { ptr in
+                ptr[idx] = UInt8(45)  // '-' = 45
+            }
+            idx -= 1
+        }
+
+        // Write from idx+1 to end
+        withUnsafeBytes(of: &buffer) { ptr in
+            _ = write(STDERR_FILENO, ptr.baseAddress!.advanced(by: idx + 1), 10 - idx)
+        }
+    }
+
+    /// Write signal name using static string (no allocation)
+    private static func writeSignalName(for signal: Int32) {
         switch signal {
-        case SIGABRT: return "SIGABRT (Abort)"
-        case SIGILL: return "SIGILL (Illegal instruction)"
-        case SIGSEGV: return "SIGSEGV (Segmentation fault)"
-        case SIGFPE: return "SIGFPE (Floating point exception)"
-        case SIGBUS: return "SIGBUS (Bus error)"
-        case SIGPIPE: return "SIGPIPE (Broken pipe)"
-        case SIGTRAP: return "SIGTRAP (Trap)"
-        case SIGTERM: return "SIGTERM (Termination)"
-        case SIGKILL: return "SIGKILL (Kill)"
-        default: return "Unknown signal"
+        case SIGABRT: writeSignalSafe("SIGABRT")
+        case SIGILL: writeSignalSafe("SIGILL")
+        case SIGSEGV: writeSignalSafe("SIGSEGV")
+        case SIGFPE: writeSignalSafe("SIGFPE")
+        case SIGBUS: writeSignalSafe("SIGBUS")
+        case SIGPIPE: writeSignalSafe("SIGPIPE")
+        case SIGTRAP: writeSignalSafe("SIGTRAP")
+        case SIGTERM: writeSignalSafe("SIGTERM")
+        case SIGKILL: writeSignalSafe("SIGKILL")
+        default: writeSignalSafe("UNKNOWN")
         }
     }
 
