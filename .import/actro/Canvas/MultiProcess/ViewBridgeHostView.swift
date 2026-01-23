@@ -259,6 +259,22 @@ public class ViewBridgeHostView: NSView {
 
         NSLog("ViewBridgeHostView: Requesting \(serviceViewControllerClassName) from \(serviceBundleIdentifier)")
 
+        // 🔥 优化：尝试复用预热的 ViewController
+        // ⚠️ 暂时禁用，需要调试为何复用预热的 VC 会导致空白页
+        // if let prewarmedVC = XPCServicePool.shared.consumePrewarmedViewController(bundleIdentifier: serviceBundleIdentifier) {
+        //     NSLog("ViewBridgeHostView: ✨ Using prewarmed ViewController!")
+        //     DispatchQueue.main.async { [weak self] in
+        //         self?.handleConnectionResult(viewController: prewarmedVC, error: nil)
+        //     }
+        //     // 🔑 消费后异步预热下一个
+        //     Task { @MainActor in
+        //         XPCServicePool.shared.ensureOnePrewarmedSlot()
+        //     }
+        //     return
+        // }
+
+        NSLog("ViewBridgeHostView: Requesting remote ViewController...")
+
         // NOTE: pendingTabId is sent AFTER connection is established (in coordinator.hasConnection.didSet)
         // This ensures Service has started and listener is active before we send the notification
 
