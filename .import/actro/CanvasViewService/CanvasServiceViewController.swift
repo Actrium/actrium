@@ -1001,8 +1001,9 @@ private class ServiceReactNativeHost {
 
         let systemAppType = config["systemAppType"] as? String ?? "nil"
         let isBootstrap = config["isBootstrap"] as? Bool ?? false
+        let isOverviewMode = config["isOverviewMode"] as? Bool ?? false
         let tabIdShort = String(tabId.prefix(8))
-        ipcLog("📥 tabConfig tab=\(tabIdShort) systemAppType=\(systemAppType) isBootstrap=\(isBootstrap)")
+        ipcLog("📥 tabConfig tab=\(tabIdShort) systemAppType=\(systemAppType) isBootstrap=\(isBootstrap) isOverviewMode=\(isOverviewMode)")
 
         // Stop retry timer once we receive first config
         hasReceivedTabConfig = true
@@ -1113,6 +1114,7 @@ private class ServiceReactNativeHost {
         }
 
         // Build full properties
+        let isOverviewMode = config["isOverviewMode"] as? Bool ?? false
         let properties: [String: Any] = [
             "singleTabMode": true,
             "tab": tabDict,
@@ -1120,7 +1122,8 @@ private class ServiceReactNativeHost {
             "isLeftPanelVisible": config["leftPanelVisible"] as? Bool ?? true,
             "isRightPanelVisible": config["rightPanelVisible"] as? Bool ?? true,
             "containerWidth": entry.containerSize.width,
-            "containerHeight": entry.containerSize.height
+            "containerHeight": entry.containerSize.height,
+            "isOverviewMode": isOverviewMode
         ]
 
         entry.currentProperties = properties
