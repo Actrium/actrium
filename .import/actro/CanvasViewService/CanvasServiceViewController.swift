@@ -614,33 +614,22 @@ private class ServiceReactNativeHost {
 
     /// Get the next pending tabId from the queue (FIFO)
     /// Waits briefly for pendingTabId notification to arrive if queue is empty
+    /// 尝试从队列中获取 pendingTabId（不再等待）
+    /// 新架构下，tabId 主要通过 bootstrap tabConfig 传递，这个方法只是辅助机制
+    /// 用于处理 pendingTabId 比 loadView 更早到达的情况
     func dequeueNextPendingTabId() -> String? {
-        // First try without waiting
         pendingTabIdLock.lock()
+        defer { pendingTabIdLock.unlock() }
+
         if !pendingTabIdQueue.isEmpty {
             let tabId = pendingTabIdQueue.removeFirst()
-            pendingTabIdLock.unlock()
+            NSLog("[XPC] ✅ dequeueNextPendingTabId: found queued tabId")
             return tabId
         }
-        pendingTabIdLock.unlock()
 
-        // Wait briefly for notification to arrive (DistributedNotificationCenter is async)
-        // This handles the race condition where loadView is called before pendingTabId arrives
-        for _ in 0..<10 {  // Wait up to 100ms total
-            // Yield to let notifications be processed
-            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
-
-            pendingTabIdLock.lock()
-            if !pendingTabIdQueue.isEmpty {
-                let tabId = pendingTabIdQueue.removeFirst()
-                pendingTabIdLock.unlock()
-                NSLog("[XPC] ✅ dequeueNextPendingTabId: found tabId after waiting")
-                return tabId
-            }
-            pendingTabIdLock.unlock()
-        }
-
-        NSLog("[XPC] ⚠️ dequeueNextPendingTabId: no tabId after waiting 100ms")
+        // 不再等待 - tabId 将通过 bootstrap tabConfig 传递
+        // 如果队列为空，返回 nil，entry 将保持 pending 状态
+        // 后续收到 tabConfig 时会通过 assignPendingEntry 绑定
         return nil
     }
 
@@ -650,11 +639,13 @@ private class ServiceReactNativeHost {
 
         // Listen for tab config with service-specific notification
         let notificationName = "com.canvas.tabConfig.\(serviceBundleId)"
+        NSLog("[XPC] 🎧 Setting up tabConfig listener: %@", notificationName)
         tabConfigObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(notificationName),
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            NSLog("[XPC] 📬 Received notification on: %@", notificationName)
             self?.handleTabConfigNotification(notification)
         }
 
@@ -948,8 +939,27 @@ private class ServiceReactNativeHost {
             return
         }
 
+        // 🔑 从 bootstrap tabConfig 中提取 hostProcessId（替代之前的 pendingTabId 机制）
+        // 这样即使 pendingTabId 没有发送，也能从第一个 tabConfig 中获取 hostProcessId
+        if let pid = config["hostProcessId"] as? Int32 {
+            if self.hostProcessId == nil {
+                self.hostProcessId = pid
+                NSLog("[XPC] 📌 hostProcessId set to %d (from tabConfig)", pid)
+                // Set hostProcessId on XPC listener for state reporting
+                ServiceXPCListener.shared.setHostProcessId(pid)
+                // 设置带 PID 的通知监听器
+                self.setupProcessIsolatedListeners()
+            } else if self.hostProcessId != pid {
+                // 忽略来自其他主进程的通知
+                NSLog("[XPC] ⚠️ Ignoring tabConfig from different host: %d (current: %d)", pid, self.hostProcessId!)
+                return
+            }
+        }
+
         let systemAppType = config["systemAppType"] as? String ?? "nil"
-        NSLog("[XPC] 📥 tabConfig for tab=%@ systemAppType=%@", String(tabId.prefix(8)), systemAppType)
+        let isBootstrap = config["isBootstrap"] as? Bool ?? false
+        NSLog("[XPC] 📥 tabConfig for tab=%@ systemAppType=%@ isBootstrap=%@",
+              String(tabId.prefix(8)), systemAppType, isBootstrap ? "true" : "false")
 
         // Stop retry timer once we receive first config
         hasReceivedTabConfig = true
