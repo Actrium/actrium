@@ -61,10 +61,9 @@ struct WorkspaceMainView: View {
     // 模式切换过渡控制器
     @StateObject private var modeTransitionController = ModeTransitionController()
 
-    // Overview 模式下 resize 时的快照遮盖
-    @State private var overviewResizeSnapshot: NSImage?
-    @State private var isOverviewResizing: Bool = false
-    @State private var lastKnownViewportSize: CGSize = .zero
+    // 🔑 拖动状态（从 TabGridView 提升，让 UnifiedReactNativeLayer 也能访问）
+    @State private var draggingTabId: UUID?
+    @State private var dropTargetTabId: UUID?  // 当前 drop target 的 tab ID
 
     // 根据搜索文本过滤 tabs
     private var filteredTabs: [Tab] {
@@ -103,15 +102,6 @@ struct WorkspaceMainView: View {
             width: max(viewportSize.width, 100),
             height: max(viewportSize.height, 100)
         )
-
-        // 更新最后已知的视口尺寸（用于 resize 时截图）
-        let _ = {
-            if safeViewportSize != lastKnownViewportSize {
-                DispatchQueue.main.async {
-                    lastKnownViewportSize = safeViewportSize
-                }
-            }
-        }()
 
         // Toolbar height estimation (for grid layout calculations)
         let toolbarHeight: CGFloat = 52
@@ -187,7 +177,9 @@ struct WorkspaceMainView: View {
                         viewModel.currentTabId = tabId
                         viewModel.navigateCurrentTab(to: url.absoluteString)
                         enterFocus(tabId: tabId)
-                    }
+                    },
+                    draggingTabId: $draggingTabId,
+                    dropTargetTabId: $dropTargetTabId
                 )
                 .frame(width: canvasSize.width, height: canvasSize.height)
                 // 防止 scale 为 0 导致奇异矩阵
@@ -262,6 +254,13 @@ struct WorkspaceMainView: View {
                             return false
                         }()
 
+                        let isOverviewMode = {
+                            if case .overview = viewModel.canvasMode {
+                                return true
+                            }
+                            return false
+                        }()
+
                         // 计算卡片在 canvas 坐标系中的位置和尺寸
                         let slotPosition = filteredTabPositions[tab.id] ?? 0
                         let canvasCardTopLeft = slotPosition < gridResult.positions.count
@@ -290,7 +289,10 @@ struct WorkspaceMainView: View {
                             cardSize: viewportCardSize,
                             cardPosition: viewportCardPosition,
                             isFocused: isFocused,
+                            isOverviewMode: isOverviewMode,
                             isTransitioning: modeTransitionController.phase.isTransitioning,
+                            isDragSource: draggingTabId == tab.id,
+                            isDropTarget: dropTargetTabId == tab.id,
                             coordinator: viewBridgeCoordinatorManager.coordinator(for: tab.id),
                             bookmarks: bookmarksForRN,
                             recentHistory: recentHistoryForRN
@@ -348,18 +350,6 @@ struct WorkspaceMainView: View {
                 .allowsHitTesting(false)
                 // 🔑 确保动画层在所有其他内容之上（包括 Live 层的 NSView）
                 .zIndex(1000)
-
-                // 🔑 Overview 模式下 resize 时的快照遮盖层
-                // 避免拖动窗口大小时出现渲染空白撕裂
-                if isOverviewResizing, let snapshot = overviewResizeSnapshot {
-                    Image(nsImage: snapshot)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: safeViewportSize.width, height: safeViewportSize.height)
-                        .clipped()
-                        .allowsHitTesting(false)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
@@ -512,24 +502,6 @@ struct WorkspaceMainView: View {
         // 🔑 处理原生 toolbar 按钮的模式切换请求（通过 ModeTransitionController）
         .onReceive(NotificationCenter.default.publisher(for: .toggleFocusOverviewRequested)) { _ in
             toggleFocusOverview()
-        }
-        // 🔑 Overview 模式下窗口 resize 时显示快照遮盖
-        .onReceive(NotificationCenter.default.publisher(for: .windowLiveResizeStarted)) { _ in
-            guard case .overview = viewModel.canvasMode else { return }
-            // 截取当前视口快照
-            overviewResizeSnapshot = captureViewportSnapshot(viewportSize: lastKnownViewportSize)
-            isOverviewResizing = true
-            NSLog("📸 Overview resize started - snapshot captured, viewportSize=%.0fx%.0f",
-                  lastKnownViewportSize.width, lastKnownViewportSize.height)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .windowLiveResizeEnded)) { _ in
-            guard isOverviewResizing else { return }
-            // 延迟清除遮盖，等待渲染完成
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                isOverviewResizing = false
-                overviewResizeSnapshot = nil
-                NSLog("📸 Overview resize ended - snapshot cleared")
-            }
         }
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 从 Focus 切换到 Overview 时，先截图当前页面
@@ -1295,10 +1267,11 @@ struct WorkspaceMainView: View {
         let effectiveCards = max(totalCards, 4)
         // 基础间距用于垂直方向和边距计算
         let baseSpacing = max(16, windowWidth / (CGFloat(effectiveCards) * 7))
-        // 水平间距增加到 2.5 倍
-        let hSpacing = max(40, baseSpacing * 2.5)
+        // 水平间距（减小下限让卡片更大）
+        let hSpacing = max(25, baseSpacing * 2.0)
         let vSpacing = baseSpacing + floatingTitleBarHeight  // 纵向间距包含标题栏高度
-        let verticalMargin = baseSpacing * 1.25 + floatingTitleBarHeight  // 顶部边距也要留空间给第一行标题栏
+        // 顶部边距：包含标题栏高度 + 少量额外空间避免与 Search Tabs 重叠
+        let verticalMargin = baseSpacing * 1.25 + floatingTitleBarHeight + 15
         return (hSpacing, vSpacing, verticalMargin)
     }
 
@@ -1416,7 +1389,10 @@ private struct TabGridView: View {
     let onCloseTab: (UUID) -> Void
     var onNavigate: ((UUID, URL) -> Void)?  // tabId, url
 
-    @State private var draggingTabId: UUID?
+    // 🔑 拖动状态绑定（从 WorkspaceMainView 传入，让 UnifiedReactNativeLayer 也能访问）
+    @Binding var draggingTabId: UUID?
+    @Binding var dropTargetTabId: UUID?
+
     @State private var hoveringOverTabId: UUID?
     @State private var swappingTabId: UUID?  // 正在交换过程中的卡片（用于淡入动画）
     @State private var isDraggingActive = false  // 跟踪拖动是否正在进行（用于抑制点击）
@@ -1516,6 +1492,7 @@ private struct TabGridView: View {
                         draggingTabId: $draggingTabId,
                         hoveringOverTabId: $hoveringOverTabId,
                         dropTargetSlotIndexFixed: $dropTargetSlotIndexFixed,
+                        dropTargetTabId: $dropTargetTabId,
                         tabSlotPositions: tabSlotPositions,
                         onSwapPositions: { tabId1, tabId2 in
                             // 标记目标卡片为交换中（触发淡入动画）
@@ -1536,6 +1513,7 @@ private struct TabGridView: View {
                                 swappingTabId = nil
                                 dragSourceSlotIndexFixed = nil
                                 dropTargetSlotIndexFixed = nil
+                                dropTargetTabId = nil
                             }
                         }
                     ))
@@ -1650,6 +1628,7 @@ private struct TabSwapDropDelegate: DropDelegate {
     @Binding var draggingTabId: UUID?
     @Binding var hoveringOverTabId: UUID?
     @Binding var dropTargetSlotIndexFixed: Int?
+    @Binding var dropTargetTabId: UUID?  // 🔑 新增：用于 RN 层显示边框
     let tabSlotPositions: [UUID: Int]
     let onSwapPositions: (UUID?, UUID?) -> Void
 
@@ -1687,6 +1666,8 @@ private struct TabSwapDropDelegate: DropDelegate {
             hoveringOverTabId = targetId
             // 更新目标槽位索引（跟随 hover 目标变化）
             dropTargetSlotIndexFixed = tabSlotPositions[targetId]
+            // 🔑 更新 dropTargetTabId 用于 RN 层边框
+            dropTargetTabId = targetId
         }
     }
 
@@ -1696,6 +1677,8 @@ private struct TabSwapDropDelegate: DropDelegate {
                 hoveringOverTabId = nil
                 // 清除目标槽位标记
                 dropTargetSlotIndexFixed = nil
+                // 🔑 清除 dropTargetTabId
+                dropTargetTabId = nil
             }
         }
     }
@@ -1708,12 +1691,14 @@ private struct TabSwapDropDelegate: DropDelegate {
     func dropSessionDidEnd(_ session: DropSession) {
         // 清理悬停状态（draggingTabId 由 onSwapPositions 回调延迟清除）
         hoveringOverTabId = nil
+        dropTargetTabId = nil
     }
 
     private func clearAllStates() {
         draggingTabId = nil
         hoveringOverTabId = nil
         dropTargetSlotIndexFixed = nil
+        dropTargetTabId = nil
     }
 }
 
@@ -2098,6 +2083,13 @@ private struct TabPanel: View {
         contentView
             .frame(width: panelWidth, height: panelHeight)
             .cornerRadius(isFocused ? 0 : CardStyle.cornerRadius)
+            // 🔑 Overview 模式统一边框样式（与 NewTabPanel、UnifiedReactNativeLayer 一致）
+            .overlay {
+                if !isFocused {
+                    RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                }
+            }
             .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
             // 只有卡片主体响应 onTapGesture（不包括标题栏）
             .contentShape(Rectangle())
@@ -2216,13 +2208,10 @@ private struct TabPanel: View {
             // 🔑 React Native 标签在 Overview 模式使用透明背景
             //    因为 UnifiedReactNativeLayer 在 canvas 外以 zIndex(50) 渲染
             //    需要通过透明背景才能看到 RN 内容
+            //    边框已移到 TabPanel body 外层统一处理
             if case .reactNative = tab.contentType, !isFocused {
-                // Overview 模式：透明背景 + 边框，让 RN 内容显示且保持卡片边界
+                // Overview 模式：透明背景，让 RN 内容显示
                 Color.clear
-                    .overlay(
-                        RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                    )
             } else {
                 Color(hslString: tab.backgroundColor)
             }
