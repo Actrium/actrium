@@ -262,9 +262,16 @@ public class ViewBridgeHostView: NSView {
         Task { @MainActor [weak self] in
             guard let self = self else { return }
 
+            // 🔑 DEBUG 模式下增加超时时间，因为 Xcode 调试器会导致 XPC 启动变慢
+            #if DEBUG
+            let prewarmTimeout: TimeInterval = 5.0  // DEBUG: 5 秒（调试器附加会变慢）
+            #else
+            let prewarmTimeout: TimeInterval = 2.0  // RELEASE: 2 秒
+            #endif
+
             if let prewarmSlot = await XPCServicePool.shared.consumePrewarmedSlotAsync(
                 bundleIdentifier: self.serviceBundleIdentifier,
-                timeout: 2.0  // 最多等待 2 秒
+                timeout: prewarmTimeout
             ) {
                 NSLog("ViewBridgeHostView: ✨ Using prewarmed ViewController! (internalId=%@)",
                       prewarmSlot.internalId?.prefix(8).description ?? "nil")
@@ -301,12 +308,17 @@ public class ViewBridgeHostView: NSView {
         }
     }
 
+    /// 用于捕获新连接的 internalId
+    private var pendingConnectionInternalId: String?
+    private var connectionCreatedObserverForDirect: NSObjectProtocol?
+
     /// 直接请求远程 ViewController（不使用 prewarm）
     private func requestRemoteViewControllerDirect() {
         NSLog("ViewBridgeHostView: Requesting remote ViewController directly... (no prewarm)")
 
-        // NOTE: pendingTabId is sent AFTER connection is established (in coordinator.hasConnection.didSet)
-        // This ensures Service has started and listener is active before we send the notification
+        // 🔑 设置监听器来捕获新连接的 internalId
+        // 这样即使 prewarm 已经创建了 entry，我们也能通过 bindTab 正确绑定
+        setupConnectionCreatedListener()
 
         // Load ViewBridge framework
         let frameworkPath = "/System/Library/PrivateFrameworks/ViewBridge.framework/ViewBridge"
@@ -332,7 +344,7 @@ public class ViewBridgeHostView: NSView {
         // Create connection handler block
         let handler: @convention(block) (NSViewController?, Error?) -> Void = { [weak self] viewController, error in
             DispatchQueue.main.async {
-                self?.handleConnectionResult(viewController: viewController, error: error)
+                self?.handleConnectionResultWithBinding(viewController: viewController, error: error)
             }
         }
 
@@ -348,6 +360,84 @@ public class ViewBridgeHostView: NSView {
             serviceBundleIdentifier,
             handler
         )
+    }
+
+    /// 设置监听器捕获新连接的 internalId
+    private func setupConnectionCreatedListener() {
+        // 移除旧的监听器
+        if let observer = connectionCreatedObserverForDirect {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
+
+        pendingConnectionInternalId = nil
+
+        connectionCreatedObserverForDirect = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.canvas.xpcConnectionCreated"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let userInfo = notification.userInfo,
+                  let bundleId = userInfo["bundleId"] as? String,
+                  let internalId = userInfo["internalId"] as? String else { return }
+
+            // 过滤：只处理本 HostView 对应的 service
+            guard bundleId == self.serviceBundleIdentifier else { return }
+
+            // 过滤：只处理属于本进程的通知
+            if let hostPid = userInfo["hostProcessId"] as? Int32,
+               hostPid != CanvasHostProcessId {
+                return
+            }
+
+            NSLog("ViewBridgeHostView: 🔗 Captured internalId=%@ for direct connection", String(internalId.prefix(8)))
+            self.pendingConnectionInternalId = internalId
+
+            // 移除监听器（只需要捕获一次）
+            if let observer = self.connectionCreatedObserverForDirect {
+                DistributedNotificationCenter.default().removeObserver(observer)
+                self.connectionCreatedObserverForDirect = nil
+            }
+        }
+    }
+
+    /// 处理新连接结果，并发送 bindTab 通知
+    private func handleConnectionResultWithBinding(viewController: NSViewController?, error: Error?) {
+        // 等待一小段时间让 xpcConnectionCreated 通知到达
+        // 使用 RunLoop 确保通知能被处理
+        let startTime = Date()
+        while pendingConnectionInternalId == nil && Date().timeIntervalSince(startTime) < 0.5 {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+
+        // 发送 bindTab 通知（如果有 internalId）
+        if let internalId = pendingConnectionInternalId, let tabId = coordinator?.tabId {
+            let bindName = "com.canvas.bindTab.\(CanvasHostProcessId).\(serviceBundleIdentifier)"
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name(bindName),
+                object: nil,
+                userInfo: [
+                    "tabId": tabId.uuidString,
+                    "internalId": internalId,
+                    "hostProcessId": CanvasHostProcessId
+                ],
+                deliverImmediately: true
+            )
+            NSLog("ViewBridgeHostView: 📤 Sent bindTab (direct): tabId=%@, internalId=%@",
+                  String(tabId.uuidString.prefix(8)), String(internalId.prefix(8)))
+        } else {
+            NSLog("⚠️ ViewBridgeHostView: No internalId captured for direct connection, relying on FIFO")
+        }
+
+        // 清理
+        pendingConnectionInternalId = nil
+        if let observer = connectionCreatedObserverForDirect {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            connectionCreatedObserverForDirect = nil
+        }
+
+        // 继续原来的处理
+        handleConnectionResult(viewController: viewController, error: error)
     }
 
     // MARK: - Connection Handling
