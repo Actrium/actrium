@@ -1406,6 +1406,10 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     }
 
     /// 实际执行 isOverviewMode 更新的核心逻辑
+    /// 🔑 注意：此方法只更新 isOverviewMode 标志和重置 lastSentContainerSize
+    ///    不在此处发送 containerSizeChanged 通知，因为此时 coordinator.currentViewportSize
+    ///    仍然是旧的 Focus 模式尺寸。正确的尺寸通知会在 SwiftUI 重新渲染时通过
+    ///    onChange(of: currentSize) → updateViewportSize → sendContainerSizeNotification 发送
     private func applyOverviewMode(_ isOverview: Bool) {
         // Update global state for newly created coordinators
         currentOverviewMode = isOverview
@@ -1420,36 +1424,11 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
                   coordinator.hasConnection ? "true" : "false",
                   coordinator.allocatedServiceId ?? "nil")
             coordinator.isOverviewMode = isOverview
-            // Reset lastSentContainerSize to force re-send notification
-            // This handles the race condition where size change notification was sent
-            // before isOverviewMode was updated
+            // Reset lastSentContainerSize to force re-send notification when SwiftUI updates the view
+            // with the correct cardSize. This ensures the next updateViewportSize() call sends the notification.
             coordinator.resetLastSentContainerSize()
-            // Send containerSizeChanged notification with updated isOverviewMode
-            if coordinator.hasConnection, let serviceId = coordinator.allocatedServiceId {
-                let requestId = UUID().uuidString.prefix(8)
-                let size = coordinator.currentViewportSize
-                writeToIPCLog("📐 [applyOverviewMode] SENDING notification tab=\(tabId.uuidString.prefix(8)) isOverview=\(isOverview) size=\(Int(size.width))x\(Int(size.height))")
-                let sizeInfo: [String: Any] = [
-                    "tabId": tabId.uuidString,
-                    "width": size.width,
-                    "height": size.height,
-                    "requestId": String(requestId),
-                    "isOverviewMode": isOverview
-                ]
-                if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
-                   let jsonString = String(data: jsonData, encoding: .utf8) {
-                    let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
-                    writeToIPCLog("📐 [HOST→SVC] isOverviewMode changed req=\(requestId) tab=\(tabId.uuidString.prefix(8)) isOverview=\(isOverview)")
-                    NSLog("📐 [HOST→SVC] isOverviewMode changed req=%@ tab=%@ isOverview=%@",
-                          String(requestId), String(tabId.uuidString.prefix(8)), isOverview ? "true" : "false")
-                    DistributedNotificationCenter.default().postNotificationName(
-                        NSNotification.Name(notificationName),
-                        object: nil,
-                        userInfo: ["sizeInfo": jsonString],
-                        deliverImmediately: true
-                    )
-                }
-            }
+            // 🔑 不在此处发送通知！coordinator.currentViewportSize 是旧的 Focus 模式尺寸
+            // SwiftUI 会在重新渲染时通过 onChange(of: currentSize) 发送正确的 cardSize
         }
     }
 }
