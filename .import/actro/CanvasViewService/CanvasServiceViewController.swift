@@ -911,6 +911,7 @@ private class ServiceReactNativeHost {
                 properties["containerHeight"] = size.height
                 entry.currentProperties = properties
                 entry.rootView?.appProperties = properties
+                ipcLog("📱 Updated RN props: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverview) size=\(Int(size.width))x\(Int(size.height))")
             }
 
             // 先更新 viewController 的 preferredContentSize
