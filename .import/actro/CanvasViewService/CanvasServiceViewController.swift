@@ -859,6 +859,9 @@ private class ServiceReactNativeHost {
         // 取整，避免浮点精度问题
         let newSize = CGSize(width: round(width), height: round(height))
 
+        // Log received isOverviewMode for debugging
+        ipcLog("📐 handleContainerSizeChanged: req=\(requestId) tab=\(tabId.prefix(8)) size=\(Int(newSize.width))x\(Int(newSize.height)) isOverviewMode=\(isOverviewMode)")
+
         // 注意：DistributedNotificationCenter 的回调已经在 main queue 上执行
         // 不需要再 DispatchQueue.main.async，这样可以减少一个 run loop 周期的延迟
 

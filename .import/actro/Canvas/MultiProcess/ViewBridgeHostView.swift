@@ -1234,7 +1234,7 @@ final class ViewBridgeCoordinator {
         // 🔑 直接发送 DistributedNotification，格式与 Service 端监听匹配
         let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
 
-        ipcLog("📐 [HOST→SVC] containerSizeChanged req=\(requestId) tab=\(String(tabId.uuidString.prefix(8))) size=\(Int(size.width))x\(Int(size.height)) name=\(notificationName)")
+        ipcLog("📐 [HOST→SVC] containerSizeChanged req=\(requestId) tab=\(String(tabId.uuidString.prefix(8))) size=\(Int(size.width))x\(Int(size.height)) isOverviewMode=\(isOverviewMode) name=\(notificationName)")
 
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
@@ -1321,6 +1321,24 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     /// Singleton for global access
     static let shared = ViewBridgeCoordinatorManager()
 
+    /// Write debug message to IPC log file
+    private func writeToIPCLog(_ message: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let timestamp = formatter.string(from: Date())
+        let line = "[\(timestamp)] [HOST] \(message)\n"
+        let logPath = "/tmp/canvas_ipc_debug.log"
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            handle.seekToEndOfFile()
+            if let data = line.data(using: .utf8) {
+                handle.write(data)
+            }
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: logPath, contents: line.data(using: .utf8))
+        }
+    }
+
     /// 绑定到 BrowserViewModel，订阅 canvasMode 变化
     /// 应该在 app 启动时调用一次
     func bindToViewModel(_ viewModel: any CanvasModePublisher) {
@@ -1330,6 +1348,7 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
         // 立即同步当前状态（Focus 模式 → isOverviewMode = false）
         // 注意：必须调用 updateOverviewMode 来更新已存在的 coordinators
         let isOverview = !viewModel.canvasMode.isInFocusMode
+        writeToIPCLog("📐 [ViewBridgeCoordinatorManager] bindToViewModel: isInFocusMode=\(viewModel.canvasMode.isInFocusMode), isOverview=\(isOverview)")
         NSLog("📐 [ViewBridgeCoordinatorManager] bindToViewModel: canvasMode.isInFocusMode=%@, isOverview=%@, currentOverviewMode=%@",
               viewModel.canvasMode.isInFocusMode ? "true" : "false",
               isOverview ? "true" : "false",
@@ -1341,11 +1360,13 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
         // 订阅 canvasMode 变化
         canvasModeSubscription = viewModel.canvasModePublisher
             .dropFirst() // 跳过初始值（已经在上面同步了）
-            .sink { [weak self] newMode in
+            .sink { [weak self] (newMode: CanvasMode) in
                 let isOverview = !newMode.isInFocusMode
+                self?.writeToIPCLog("📐 [canvasModeSubscription] newMode=\(newMode), isOverview=\(isOverview)")
                 self?.updateOverviewMode(isOverview)
             }
 
+        writeToIPCLog("📐 [ViewBridgeCoordinatorManager] Bound to ViewModel, isOverviewMode=\(isOverview)")
         NSLog("📐 [ViewBridgeCoordinatorManager] Bound to ViewModel, isOverviewMode=%@",
               isOverview ? "true" : "false")
     }
@@ -1383,9 +1404,12 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     private func applyOverviewMode(_ isOverview: Bool) {
         // Update global state for newly created coordinators
         currentOverviewMode = isOverview
+        // Write to IPC log file for debugging
+        writeToIPCLog("📐 [applyOverviewMode] isOverview=\(isOverview) coordinatorCount=\(coordinators.count)")
         NSLog("📐 [applyOverviewMode] isOverview=%@ coordinatorCount=%d", isOverview ? "true" : "false", coordinators.count)
 
         for (tabId, coordinator) in coordinators {
+            writeToIPCLog("📐 [applyOverviewMode] tab=\(tabId.uuidString.prefix(8)) hasConnection=\(coordinator.hasConnection) serviceId=\(coordinator.allocatedServiceId ?? "nil")")
             NSLog("📐 [applyOverviewMode] tab=%@ hasConnection=%@ serviceId=%@",
                   String(tabId.uuidString.prefix(8)),
                   coordinator.hasConnection ? "true" : "false",
@@ -1399,6 +1423,7 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
             if coordinator.hasConnection, let serviceId = coordinator.allocatedServiceId {
                 let requestId = UUID().uuidString.prefix(8)
                 let size = coordinator.currentViewportSize
+                writeToIPCLog("📐 [applyOverviewMode] SENDING notification tab=\(tabId.uuidString.prefix(8)) isOverview=\(isOverview) size=\(Int(size.width))x\(Int(size.height))")
                 let sizeInfo: [String: Any] = [
                     "tabId": tabId.uuidString,
                     "width": size.width,
@@ -1409,6 +1434,7 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
                 if let jsonData = try? JSONSerialization.data(withJSONObject: sizeInfo),
                    let jsonString = String(data: jsonData, encoding: .utf8) {
                     let notificationName = "com.canvas.containerSizeChanged.\(CanvasHostProcessId).\(serviceId)"
+                    writeToIPCLog("📐 [HOST→SVC] isOverviewMode changed req=\(requestId) tab=\(tabId.uuidString.prefix(8)) isOverview=\(isOverview)")
                     NSLog("📐 [HOST→SVC] isOverviewMode changed req=%@ tab=%@ isOverview=%@",
                           String(requestId), String(tabId.uuidString.prefix(8)), isOverview ? "true" : "false")
                     DistributedNotificationCenter.default().postNotificationName(
