@@ -537,6 +537,17 @@ private class ServiceReactNativeHost {
         return tabRegistry[tabId]
     }
 
+    /// Try to bind a tabId to an existing pending entry (for late-arriving pendingTabId)
+    /// Returns true if successfully bound, false if no pending entry available
+    func tryBindPendingEntry(tabId: String) -> Bool {
+        registryLock.lock()
+        let hasPending = !pendingEntries.isEmpty
+        registryLock.unlock()
+
+        guard hasPending else { return false }
+        return assignPendingEntry(tabId: tabId) != nil
+    }
+
     /// Find the oldest pending entry and assign it the given tabId
     /// Returns the entry if successful, nil if no pending entries
     private func assignPendingEntry(tabId: String) -> TabViewControllerEntry? {
@@ -697,9 +708,18 @@ private class ServiceReactNativeHost {
                 }
             }
 
+            // First try to bind to an existing pending entry (handles late arrival)
+            // If loadView already executed but didn't get tabId, this binds it now
+            if self.tryBindPendingEntry(tabId: tabId) {
+                NSLog("[XPC] ✅ pendingTabId %@ bound to existing pending entry", String(tabId.prefix(8)))
+                return
+            }
+
+            // No pending entry yet - add to queue for upcoming loadView to consume
             self.pendingTabIdLock.lock()
             self.pendingTabIdQueue.append(tabId)
             self.pendingTabIdLock.unlock()
+            NSLog("[XPC] 📥 pendingTabId %@ queued for future loadView", String(tabId.prefix(8)))
         }
 
         // Notify Host that this service is ready (with retry until tab config received)
