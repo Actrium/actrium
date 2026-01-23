@@ -612,6 +612,11 @@ private class ServiceReactNativeHost {
     private var pendingTabIdQueue: [String] = []
     private let pendingTabIdLock = NSLock()
 
+    /// Queue of tab configs that arrived before their pending entries were created
+    /// When loadView creates a pending entry, it dequeues the first config and applies it (FIFO)
+    private var pendingTabConfigQueue: [[String: Any]] = []
+    private let pendingTabConfigQueueLock = NSLock()
+
     /// Get the next pending tabId from the queue (FIFO)
     /// Waits briefly for pendingTabId notification to arrive if queue is empty
     /// 尝试从队列中获取 pendingTabId（不再等待）
@@ -982,8 +987,50 @@ private class ServiceReactNativeHost {
         if let entry = entry {
             applyConfigToEntry(entry, config: config)
         } else {
-            NSLog("[XPC] ⚠️ Cannot apply config - no entry for tab=%@", String(tabId.prefix(8)))
+            // Cache config for later - loadView will apply it when entry is created
+            NSLog("[XPC] 📦 Queueing config for tab=%@ (will apply when entry created)", String(tabId.prefix(8)))
+            pendingTabConfigQueueLock.lock()
+            pendingTabConfigQueue.append(config)
+            pendingTabConfigQueueLock.unlock()
         }
+    }
+
+    /// Dequeue the next pending tab config (FIFO)
+    /// Called by loadView after creating a pending entry
+    private func dequeueNextPendingTabConfig() -> [String: Any]? {
+        pendingTabConfigQueueLock.lock()
+        defer { pendingTabConfigQueueLock.unlock() }
+
+        if !pendingTabConfigQueue.isEmpty {
+            let config = pendingTabConfigQueue.removeFirst()
+            if let tabId = config["tabId"] as? String {
+                NSLog("[XPC] 📦 Dequeued pending config for tab=%@", String(tabId.prefix(8)))
+            }
+            return config
+        }
+        return nil
+    }
+
+    /// Try to apply a pending config to a newly created entry
+    /// Called by loadView after creating a pending entry
+    func tryApplyPendingConfig(for entry: TabViewControllerEntry, internalId: String) {
+        guard let cachedConfig = dequeueNextPendingTabConfig(),
+              let tabId = cachedConfig["tabId"] as? String else {
+            return
+        }
+
+        NSLog("[XPC] 📦 Applying cached config for tab=%@ to entry=%@",
+              String(tabId.prefix(8)), String(internalId.prefix(8)))
+
+        // Assign tabId to entry and move to tabRegistry
+        entry.assignTabId(tabId)
+        registryLock.lock()
+        pendingEntries.removeValue(forKey: internalId)
+        tabRegistry[tabId] = entry
+        registryLock.unlock()
+
+        // Apply the cached config
+        applyConfigToEntry(entry, config: cachedConfig)
     }
 
     private func applyConfigToEntry(_ entry: TabViewControllerEntry, config: [String: Any]) {
@@ -1308,6 +1355,11 @@ public func registerCanvasServiceViewController() {
 
         // Setup React Native content for this Tab
         setupReactNativeContent(for: entry)
+
+        // Check for any cached tab config that arrived before this loadView
+        // This handles the race condition where bootstrap tabConfig arrives before ViewBridge
+        // requests the ViewController
+        host.tryApplyPendingConfig(for: entry, internalId: internalId)
     }
     let loadViewImp = imp_implementationWithBlock(loadViewBlock)
     class_addMethod(newClass, #selector(NSViewController.loadView), loadViewImp, "v@:")
