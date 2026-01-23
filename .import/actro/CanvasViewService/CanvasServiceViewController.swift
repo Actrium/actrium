@@ -823,6 +823,17 @@ private class ServiceReactNativeHost {
         }
 
         NSLog("[XPC] 📡 Process-isolated listeners setup for pid=%d", pid)
+
+        // 🔑 通知 Host 监听器已设置好，请求重新发送 containerSizeChanged
+        // 这解决了竞态条件：Host 可能在监听器设置好之前就发送了 containerSizeChanged
+        let listenerReadyName = "com.canvas.listenerReady.\(pid).\(serviceBundleId)"
+        ipcLog("📤 Sending listenerReady notification: \(listenerReadyName)")
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(listenerReadyName),
+            object: nil,
+            userInfo: ["serviceId": serviceBundleId],
+            deliverImmediately: true
+        )
     }
 
     private func handleContainerSizeChanged(_ notification: Notification) {

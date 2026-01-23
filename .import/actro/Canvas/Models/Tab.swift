@@ -175,23 +175,26 @@ struct Tab: Identifiable {
     /// 计算 Tab 的内容类型
     /// 优先级：Web URL > RN 应用 > 空白
     var contentType: TabContentType {
+        let result: TabContentType
+
         // 1. 检查是否为 Web URL (http/https)
         if let url = url, url.scheme == "http" || url.scheme == "https" {
-            return .web(url: url)
+            result = .web(url: url)
         }
-
         // 2. 检查是否为 RN 应用（有脚本内容）
-        if let fingerprint = bundleFingerprint {
-            return .reactNative(bundleFingerprint: fingerprint)
+        else if let fingerprint = bundleFingerprint {
+            result = .reactNative(bundleFingerprint: fingerprint)
         }
-
         // 3. 系统 Tab 也使用 RN 渲染
-        if let systemType = systemTabType {
-            return .reactNative(bundleFingerprint: "system.\(systemType.rawValue)")
+        else if let systemType = systemTabType {
+            result = .reactNative(bundleFingerprint: "system.\(systemType.rawValue)")
+        }
+        // 4. 空白 Tab
+        else {
+            result = .empty
         }
 
-        // 4. 空白 Tab
-        return .empty
+        return result
     }
 
     /// RN 应用的 bundle 指纹

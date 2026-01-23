@@ -256,33 +256,13 @@ struct BrowserWindowView: View {
                 }
             }
             // Handle URL open from Start Page (XPC service)
+            // All URL types are handled by navigateCurrentTab: about:*, http/https, file paths
             .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openURLFromStartPage)) { notification in
                 guard let userInfo = notification.userInfo,
                       let urlString = userInfo["url"] as? String else { return }
 
-                let url: URL
-                if let parsed = URL(string: urlString) {
-                    url = parsed
-                } else {
-                    url = URL(fileURLWithPath: urlString)
-                }
-
-                // Check if it's a web URL (http/https)
-                if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
-                    // Navigate current tab to web URL
-                    viewModel.navigateCurrentTab(to: urlString)
-                    return
-                }
-
-                // Otherwise treat as local file path
-                var isDirectory: ObjCBool = false
-                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
-                    if isDirectory.boolValue {
-                        viewModel.loadFromDevDirectory(url)
-                    } else {
-                        viewModel.importACTRPackage(from: url)
-                    }
-                }
+                // 统一由 navigateCurrentTab 处理所有类型的 URL
+                viewModel.navigateCurrentTab(to: urlString)
             }
     }
 
@@ -832,7 +812,8 @@ struct CanvasApp: App {
     private func openBookmark(_ bookmark: Bookmark) {
         guard let vm = focusedViewModel else { return }
         if let url = bookmark.appURL {
-            vm.importACTRPackage(from: url)
+            // 统一由 navigateCurrentTab 处理
+            vm.navigateCurrentTab(to: url.path)
             bookmarkVM.markAsUsed(bookmark)
             // Also record in history
             if let tab = vm.currentTab {
