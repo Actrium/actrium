@@ -29,16 +29,32 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
   const [dynamicProps, setDynamicProps] = useState<Partial<TabRouterProps>>({});
 
   useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener('onPropsUpdate', (newProps: Partial<TabRouterProps>) => {
-      console.warn(`[TabRouter] onPropsUpdate received: isOverviewMode=${newProps.isOverviewMode}`);
-      setDynamicProps(prev => ({ ...prev, ...newProps }));
+    console.warn('[TabRouter] Setting up DeviceEventEmitter listener for onPropsUpdate');
+
+    const subscription = DeviceEventEmitter.addListener('onPropsUpdate', (newProps: any) => {
+      // Log to native for visibility in IPC logs
+      const { NativeModules } = require('react-native');
+      const msg = `[TabRouter] onPropsUpdate received: isOverviewMode=${newProps?.isOverviewMode}, keys=${Object.keys(newProps || {}).join(',')}`;
+      NativeModules.NativeLogger?.log?.(msg);
+      console.warn(msg);
+
+      if (newProps?.isOverviewMode !== undefined) {
+        setDynamicProps(prev => ({ ...prev, isOverviewMode: newProps.isOverviewMode }));
+      }
     });
 
-    return () => subscription.remove();
+    return () => {
+      console.warn('[TabRouter] Removing DeviceEventEmitter listener');
+      subscription.remove();
+    };
   }, []);
 
   // 合并 initial props 和 dynamic props
   const props = { ...initialProps, ...dynamicProps };
+
+  // Debug: Log merged isOverviewMode
+  const { NativeModules: NM } = require('react-native');
+  NM.NativeLogger?.log?.(`[TabRouter] Merged props: initialProps.isOverviewMode=${initialProps?.isOverviewMode}, dynamicProps.isOverviewMode=${dynamicProps?.isOverviewMode}, final=${props?.isOverviewMode}`);
 
   // Debug: Log props received - use NativeModules for visibility
   const { NativeModules } = require('react-native');

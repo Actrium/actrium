@@ -1773,8 +1773,11 @@ struct UnifiedReactNativeLayer: View {
     let viewportSize: CGSize      // Focus 模式的尺寸（全屏）
     let cardSize: CGSize          // Overview 模式的尺寸（卡片大小）
     let cardPosition: CGPoint     // Overview 模式的位置（卡片左上角）
-    let isFocused: Bool           // 是否处于 Focus 模式
+    let isFocused: Bool           // 当前 tab 是否处于 Focus 状态
+    let isOverviewMode: Bool      // 当前是否处于 Overview 模式（用于边框显示）
     let isTransitioning: Bool     // 是否正在过渡动画中
+    let isDragSource: Bool        // 是否为拖动源（蓝色虚线边框）
+    let isDropTarget: Bool        // 是否为拖放目标（绿色实线边框）
     let coordinator: ViewBridgeCoordinator
 
     // System app data (for StartPageApp)
@@ -1788,7 +1791,10 @@ struct UnifiedReactNativeLayer: View {
         cardSize: CGSize,
         cardPosition: CGPoint,
         isFocused: Bool,
+        isOverviewMode: Bool,
         isTransitioning: Bool,
+        isDragSource: Bool = false,
+        isDropTarget: Bool = false,
         coordinator: ViewBridgeCoordinator,
         bookmarks: [[String: Any]] = [],
         recentHistory: [[String: Any]] = []
@@ -1799,7 +1805,10 @@ struct UnifiedReactNativeLayer: View {
         self.cardSize = cardSize
         self.cardPosition = cardPosition
         self.isFocused = isFocused
+        self.isOverviewMode = isOverviewMode
         self.isTransitioning = isTransitioning
+        self.isDragSource = isDragSource
+        self.isDropTarget = isDropTarget
         self.coordinator = coordinator
         self.bookmarks = bookmarks
         self.recentHistory = recentHistory
@@ -1928,8 +1937,35 @@ struct UnifiedReactNativeLayer: View {
                     .allowsHitTesting(false)
             }
 
+            // 🔑 Overview 模式下的卡片边框（放在 ZStack 内部确保尺寸正确）
+            // 使用 CardStyle.cornerRadius 与 WebTab 卡片对齐
+            // 边框样式与 SlotView 一致：拖动源蓝色虚线，拖放目标绿色实线，默认白色细线
+            if isOverviewMode && !isTransitioning {
+                if isDragSource {
+                    // 拖动源：蓝色虚线（与 SlotView 一致）
+                    RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
+                        .stroke(
+                            Color.blue.opacity(0.6),
+                            style: StrokeStyle(lineWidth: 2, dash: [5, 5])
+                        )
+                        .allowsHitTesting(false)
+                } else if isDropTarget {
+                    // 拖放目标：绿色实线（与 SlotView 一致）
+                    RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
+                        .stroke(Color.green.opacity(0.7), lineWidth: 2)
+                        .allowsHitTesting(false)
+                } else {
+                    // 默认：白色细线边框
+                    RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
+            }
         }
         .frame(width: currentSize.width, height: currentSize.height, alignment: .topLeading)
+        // 🔑 Overview 模式添加圆角和阴影，与 TabPanel/NewTabPanel 统一
+        .cornerRadius(isFocused ? 0 : CardStyle.cornerRadius)
+        .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
         // 🔑 使用 position 定位：Focus=(0,0), Overview=卡片位置
         // position 使用中心点坐标
         .position(
@@ -1947,14 +1983,6 @@ struct UnifiedReactNativeLayer: View {
         // - Overview 模式: zIndex(50) 在 canvas 前面，内容可见
         //   通过 NSView 的 hitTest() 返回 nil 让拖拽手势穿透到 TabGridView
         .zIndex(isFocused ? 100 : 50)
-        // 🔑 Overview 模式下添加边框
-        .overlay {
-            if !isFocused && !isTransitioning {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
-        }
         // Focus 模式下允许交互
         .allowsHitTesting(isFocused && !isTransitioning)
         .onAppear {
