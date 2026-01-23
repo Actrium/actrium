@@ -16,6 +16,32 @@ import Cocoa
 import SwiftUI
 import Combine
 
+/// Millisecond timestamp for cross-process log correlation
+private func ts() -> String {
+    let now = Date()
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss.SSS"
+    return formatter.string(from: now)
+}
+
+/// Write to shared debug log file (for cross-process log correlation)
+private func ipcLog(_ message: String) {
+    let timestamp = ts()
+    let line = "[\(timestamp)] [HOST] \(message)\n"
+    NSLog("[\(timestamp)] [HOST] %@", message)
+    // Also write to shared file
+    let logPath = "/tmp/canvas_ipc_debug.log"
+    if let handle = FileHandle(forWritingAtPath: logPath) {
+        handle.seekToEndOfFile()
+        if let data = line.data(using: .utf8) {
+            handle.write(data)
+        }
+        handle.closeFile()
+    } else {
+        FileManager.default.createFile(atPath: logPath, contents: line.data(using: .utf8))
+    }
+}
+
 // MARK: - ViewBridge Host View
 
 /// A view that hosts content from a ViewBridge XPC service.
@@ -90,6 +116,7 @@ public class ViewBridgeHostView: NSView {
         self.serviceViewControllerClassName = className
         super.init(frame: .zero)
         setupView()
+        ipcLog("🆕 ViewBridgeHostView init: service=\(bundleIdentifier.components(separatedBy: ".").last ?? "?")")
     }
 
     /// Convenience initializer with default Canvas service
@@ -115,8 +142,7 @@ public class ViewBridgeHostView: NSView {
             viewControllerClassName: "CanvasServiceViewController"
         )
         self.currentContentSize = initialContentSize
-        NSLog("ViewBridgeHostView: init with bundleId=%@, contentSize=%.1fx%.1f",
-              serviceBundleIdentifier, initialContentSize.width, initialContentSize.height)
+        ipcLog("📐 ViewBridgeHostView: contentSize=\(Int(initialContentSize.width))x\(Int(initialContentSize.height))")
     }
 
     required init?(coder: NSCoder) {
@@ -166,6 +192,7 @@ public class ViewBridgeHostView: NSView {
         }
 
         NSLog("ViewBridgeHostView: Initialized for service \(serviceBundleIdentifier)")
+        ipcLog("🆕 ViewBridgeHostView init for service=\(serviceBundleIdentifier.components(separatedBy: ".").last ?? "?")")
     }
 
     // MARK: - Size Control
@@ -496,7 +523,7 @@ final class ViewBridgeCoordinator {
             if allocatedServiceId != nil && oldValue == nil {
                 let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
                 let serviceShort = allocatedServiceId?.components(separatedBy: ".").last ?? "nil"
-                fputs("🎯 [Coordinator] allocatedServiceId=\(serviceShort) for tab=\(tabIdShort)\n", stderr)
+                ipcLog("🎯 allocatedServiceId=\(serviceShort) for tab=\(tabIdShort)")
                 trySendInitialConfig()
             }
         }
@@ -508,7 +535,7 @@ final class ViewBridgeCoordinator {
         didSet {
             if xpcServiceReady && !oldValue {
                 let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
-                fputs("📡 [Coordinator] xpcServiceReady=true for tab=\(tabIdShort)\n", stderr)
+                ipcLog("📡 xpcServiceReady=true for tab=\(tabIdShort)")
                 trySendInitialConfig()
             }
         }
@@ -520,7 +547,7 @@ final class ViewBridgeCoordinator {
         didSet {
             if hasConnection && !oldValue {
                 let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
-                fputs("🔗 [Coordinator] hasConnection=true for tab=\(tabIdShort)\n", stderr)
+                ipcLog("🔗 hasConnection=true for tab=\(tabIdShort)")
 
                 // 🔑 连接建立后立即发送 bootstrap tabConfig（不带 PID）
                 // 这个通知让 Service 获取 hostProcessId 并设置带 PID 的监听器
@@ -540,7 +567,7 @@ final class ViewBridgeCoordinator {
     private func sendBootstrapTabConfig() {
         guard let tabId = tabId,
               let serviceId = allocatedServiceId else {
-            fputs("⚠️ [Coordinator] sendBootstrapTabConfig: missing tabId or allocatedServiceId\n", stderr)
+            ipcLog("⚠️ sendBootstrapTabConfig: missing tabId or allocatedServiceId")
             return
         }
 
@@ -558,6 +585,7 @@ final class ViewBridgeCoordinator {
         ]
 
         // 使用 coordinator 存储的完整 tab 配置
+        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil")")
         if let tabConfig = self.tabConfig {
             config["title"] = tabConfig.title
             config["backgroundColor"] = tabConfig.backgroundColor
@@ -572,7 +600,7 @@ final class ViewBridgeCoordinator {
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: config),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
-            fputs("⚠️ [Coordinator] sendBootstrapTabConfig: JSON serialization failed\n", stderr)
+            ipcLog("⚠️ sendBootstrapTabConfig: JSON serialization failed")
             return
         }
 
@@ -585,8 +613,7 @@ final class ViewBridgeCoordinator {
             deliverImmediately: true
         )
 
-        fputs("📤 [Coordinator] Sent bootstrap tabConfig: tab=\(tabIdShort) size=\(Int(size.width))x\(Int(size.height)) notificationName=\(notificationName)\n", stderr)
-        NSLog("📤 [Coordinator] Sent bootstrap tabConfig: tab=%@ notificationName=%@", tabIdShort, notificationName)
+        ipcLog("📤 Sent bootstrap tabConfig: tab=\(tabIdShort) size=\(Int(size.width))x\(Int(size.height)) notificationName=\(notificationName)")
     }
     var xpcReadyObserver: NSObjectProtocol?
     var connectionCreatedObserver: NSObjectProtocol?
@@ -611,7 +638,7 @@ final class ViewBridgeCoordinator {
             let isValid = currentViewportSize.width > 10 && currentViewportSize.height > 10
             if isValid && !wasValid {
                 let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
-                fputs("📐 [Coordinator] viewportSize valid for tab=\(tabIdShort): \(Int(currentViewportSize.width))x\(Int(currentViewportSize.height))\n", stderr)
+                ipcLog("📐 viewportSize valid for tab=\(tabIdShort): \(Int(currentViewportSize.width))x\(Int(currentViewportSize.height))")
                 trySendInitialConfig()
             }
         }
@@ -636,7 +663,7 @@ final class ViewBridgeCoordinator {
         let sizeValid = size.width > 10 && size.height > 10
 
         // 打印当前状态
-        fputs("🔍 [Coordinator] trySendInitialConfig tab=\(tabIdShort): serviceId=\(allocatedServiceId != nil ? "✓" : "✗"), xpcReady=\(xpcServiceReady ? "✓" : "✗"), conn=\(hasConnection ? "✓" : "✗"), size=\(sizeValid ? "✓" : "✗")(\(Int(size.width))x\(Int(size.height)))\n", stderr)
+        ipcLog("🔍 trySendInitialConfig tab=\(tabIdShort): serviceId=\(allocatedServiceId != nil ? "✓" : "✗"), xpcReady=\(xpcServiceReady ? "✓" : "✗"), conn=\(hasConnection ? "✓" : "✗"), size=\(sizeValid ? "✓" : "✗")(\(Int(size.width))x\(Int(size.height)))")
 
         // 检查四个条件
         guard allocatedServiceId != nil else { return }
@@ -646,11 +673,11 @@ final class ViewBridgeCoordinator {
 
         // 防止重复发送
         guard size != lastSentContainerSize else {
-            fputs("ℹ️ [Coordinator] trySendInitialConfig tab=\(tabIdShort): already sent, skipping\n", stderr)
+            ipcLog("ℹ️ trySendInitialConfig tab=\(tabIdShort): already sent, skipping")
             return
         }
 
-        fputs("🚀 [Coordinator] trySendInitialConfig: ALL CONDITIONS MET for tab=\(tabIdShort), size=\(Int(size.width))x\(Int(size.height))\n", stderr)
+        ipcLog("🚀 trySendInitialConfig: ALL CONDITIONS MET for tab=\(tabIdShort), size=\(Int(size.width))x\(Int(size.height))")
         lastSentContainerSize = size
         sendContainerSizeNotification(size: size)
     }
@@ -1072,7 +1099,7 @@ final class ViewBridgeCoordinator {
 
         if let tabId = tabId, allocatedServiceId != nil {
             XPCServicePool.shared.releaseService(for: tabId)
-            fputs("📦 Coordinator cleanup: Tab \(tabId.uuidString.prefix(8)) released service and disconnected\n", stderr)
+            ipcLog("📦 Coordinator cleanup: Tab \(String(tabId.uuidString.prefix(8))) released service and disconnected")
         }
         allocatedServiceId = nil
         xpcServiceReady = false
@@ -1411,7 +1438,7 @@ struct PersistentViewBridgeView: NSViewRepresentable {
     static func dismantleNSView(_ container: NSView, coordinator: ()) {
         // 不移除 hostView - 它由 Manager 持有
         // 下次 makeNSView 时会重用同一个 hostView
-        fputs("⚠️ PersistentViewBridgeView.dismantleNSView called (hostView retained by manager)\n", stderr)
+        ipcLog("⚠️ PersistentViewBridgeView.dismantleNSView called (hostView retained by manager)")
     }
 }
 
@@ -1522,6 +1549,45 @@ struct UnifiedReactNativeLayer: View {
     // System app data (for StartPageApp)
     var bookmarks: [[String: Any]] = []
     var recentHistory: [[String: Any]] = []
+
+    init(
+        tab: Tab,
+        fingerprint: String,
+        viewportSize: CGSize,
+        cardSize: CGSize,
+        cardPosition: CGPoint,
+        isFocused: Bool,
+        isTransitioning: Bool,
+        coordinator: ViewBridgeCoordinator,
+        bookmarks: [[String: Any]] = [],
+        recentHistory: [[String: Any]] = []
+    ) {
+        self.tab = tab
+        self.fingerprint = fingerprint
+        self.viewportSize = viewportSize
+        self.cardSize = cardSize
+        self.cardPosition = cardPosition
+        self.isFocused = isFocused
+        self.isTransitioning = isTransitioning
+        self.coordinator = coordinator
+        self.bookmarks = bookmarks
+        self.recentHistory = recentHistory
+
+        // 🔑 设置 coordinator 的 tabId 和 tabConfig，确保 bootstrap 时有完整配置
+        coordinator.tabId = tab.id
+        coordinator.tabConfig = XPCTabConfig(
+            tabId: tab.id,
+            title: tab.title,
+            backgroundColor: tab.backgroundColor,
+            containerSize: viewportSize,
+            systemAppType: tab.systemTabType?.rawValue,
+            unifiedScript: tab.unifiedScript,
+            leftPanelScript: tab.leftPanelScript,
+            leftPanelVisible: tab.leftPanelDefaultVisible,
+            rightPanelVisible: tab.rightPanelDefaultVisible
+        )
+        ipcLog("🏗️ UnifiedReactNativeLayer.init: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil")")
+    }
 
     /// 当前尺寸
     /// 🔑 过渡期间保持 Focus 尺寸，避免闪烁（因为动画层会遮盖）
@@ -1891,7 +1957,7 @@ struct ViewBridgeTabView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: ViewBridgeHostView, context: Context) {
-        fputs("📐 ViewBridgeTabView.updateNSView: contentSize=\(contentSize)\n", stderr)
+        ipcLog("📐 ViewBridgeTabView.updateNSView: contentSize=\(Int(contentSize.width))x\(Int(contentSize.height))")
         // Ensure coordinator reference is set
         nsView.coordinator = coordinator
         coordinator.hostView = nsView
@@ -1940,6 +2006,7 @@ struct ViewBridgeMultiProcessTabView: View {
         self.isFocused = isFocused
 
         // 设置 coordinator 的 tabId 和 tabConfig
+        ipcLog("🏗️ ViewBridgeMultiProcessTabView.init: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil")")
         coordinator.tabId = tab.id
         coordinator.tabConfig = XPCTabConfig(
             tabId: tab.id,
