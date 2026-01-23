@@ -30,6 +30,9 @@ public class ViewBridgeHostView: NSView {
     /// The service bundle identifier
     private let serviceBundleIdentifier: String
 
+    /// Public accessor for service bundle identifier (used by coordinator for re-sending pendingTabId)
+    var serviceId: String { serviceBundleIdentifier }
+
     /// The view controller class name in the service
     private let serviceViewControllerClassName: String
 
@@ -229,19 +232,8 @@ public class ViewBridgeHostView: NSView {
 
         NSLog("ViewBridgeHostView: Requesting \(serviceViewControllerClassName) from \(serviceBundleIdentifier)")
 
-        // Send tabId to Service BEFORE requesting connection
-        // This allows Service to associate the upcoming connection with the correct tabId
-        // 同时发送 hostProcessId，用于进程隔离
-        if let tabId = coordinator?.tabId?.uuidString {
-            let notificationName = "com.canvas.pendingTabId.\(serviceBundleIdentifier)"
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name(notificationName),
-                object: nil,
-                userInfo: ["tabId": tabId, "hostProcessId": CanvasHostProcessId],
-                deliverImmediately: true
-            )
-            fputs("📤 [HOST] Sent pendingTabId: \(tabId.prefix(8)) to \(serviceBundleIdentifier) (pid=\(CanvasHostProcessId))\n", stderr)
-        }
+        // NOTE: pendingTabId is sent AFTER connection is established (in coordinator.hasConnection.didSet)
+        // This ensures Service has started and listener is active before we send the notification
 
         // Load ViewBridge framework
         let frameworkPath = "/System/Library/PrivateFrameworks/ViewBridge.framework/ViewBridge"
@@ -352,7 +344,7 @@ public class ViewBridgeHostView: NSView {
 
         NSLog("ViewBridgeHostView: Remote view embedded, size=%.0fx%.0f", currentContentSize.width, currentContentSize.height)
 
-        // 通知连接已建立
+        // 通知连接已建立 - coordinator 会处理重发 pendingTabId
         onConnectionEstablished?()
     }
 
@@ -529,6 +521,20 @@ final class ViewBridgeCoordinator {
             if hasConnection && !oldValue {
                 let tabIdShort = tabId?.uuidString.prefix(8) ?? "nil"
                 fputs("🔗 [Coordinator] hasConnection=true for tab=\(tabIdShort)\n", stderr)
+
+                // Send pendingTabId now that connection is established
+                // Service is guaranteed to be running and listener is active
+                if let tabIdStr = tabId?.uuidString, let serviceId = hostView?.serviceId {
+                    let notificationName = "com.canvas.pendingTabId.\(serviceId)"
+                    DistributedNotificationCenter.default().postNotificationName(
+                        NSNotification.Name(notificationName),
+                        object: nil,
+                        userInfo: ["tabId": tabIdStr, "hostProcessId": CanvasHostProcessId],
+                        deliverImmediately: true
+                    )
+                    fputs("📤 [Coordinator] Sent pendingTabId: \(tabIdStr.prefix(8)) (connection established)\n", stderr)
+                }
+
                 trySendInitialConfig()
             }
         }
