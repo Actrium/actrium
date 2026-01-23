@@ -586,7 +586,15 @@ final class ViewBridgeCoordinator {
 
         // 使用 coordinator 存储的完整 tab 配置
         ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil"), isOverviewMode=\(isOverviewMode)")
-        if let tabConfig = self.tabConfig {
+
+        // 🔑 如果 tabConfig 还没设置，标记为待发送，等 tabConfig 设置后再发
+        guard let tabConfig = self.tabConfig else {
+            pendingBootstrap = true
+            ipcLog("⏳ sendBootstrapTabConfig: tabConfig not set, marking pending")
+            return
+        }
+
+        if true {  // keep scope for tabConfig
             config["title"] = tabConfig.title
             config["backgroundColor"] = tabConfig.backgroundColor
             if let systemAppType = tabConfig.systemAppType {
@@ -622,7 +630,19 @@ final class ViewBridgeCoordinator {
 
     /// Tab 配置数据 - 用于发送 bootstrap tabConfig
     /// 由 ViewBridgeMultiProcessTabView 初始化时设置
-    var tabConfig: XPCTabConfig?
+    var tabConfig: XPCTabConfig? {
+        didSet {
+            // 🔑 如果 bootstrap 之前因为缺少 tabConfig 而失败，现在重试
+            if tabConfig != nil && pendingBootstrap && hasConnection {
+                pendingBootstrap = false
+                ipcLog("📤 Retrying bootstrap after tabConfig set")
+                sendBootstrapTabConfig()
+            }
+        }
+    }
+
+    /// 标记是否有待发送的 bootstrap（因为 tabConfig 还没设置而延迟）
+    private var pendingBootstrap = false
 
     /// Whether the tab is in Overview mode (for compact view in system apps)
     /// Default to false since BrowserViewModel.init sets canvasMode = .focus
