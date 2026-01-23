@@ -115,6 +115,12 @@ private class ResizableContainerView: NSView {
 
         guard let superview = superview else { return }
 
+        // 🔧 DEBUG: 暂时禁用 isGeometryFlipped，测试是否导致空白
+        // superview.wantsLayer = true
+        // superview.layer?.isGeometryFlipped = true
+        // ipcLog("🔧 Set jail layer.isGeometryFlipped=true")
+        ipcLog("🔧 jail.isFlipped=\(superview.isFlipped), layer=\(superview.layer != nil)")
+
         // Use autoresizing mask for flexible positioning, but NOT for size
         // Size is controlled by Host's containerSizeChanged notification
         translatesAutoresizingMaskIntoConstraints = true
@@ -454,13 +460,16 @@ private class ServiceReactNativeHost {
 
     /// Create RCTBridge (loads from local bundle file)
     private func ensureBridgeCreated() {
-        guard !bridgeCreated else { return }
+        guard !bridgeCreated else {
+            ipcLog("🔧 ensureBridgeCreated: already created, factory=\(factory != nil ? "OK" : "NIL")")
+            return
+        }
         bridgeCreated = true
 
-        debugLog("Creating RCTBridge (loading from local bundle)")
+        ipcLog("🔧 ensureBridgeCreated: Creating RCTBridge (loading from local bundle)")
         factoryDelegate = ServiceReactNativeFactoryDelegate()
         factory = RCTReactNativeFactory(delegate: factoryDelegate!)
-        debugLog("Shared RCTBridge created")
+        ipcLog("🔧 ensureBridgeCreated: factory created = \(factory != nil)")
     }
 
     /// Track which internalIds have already been bound to prevent duplicate bindings
@@ -1165,6 +1174,7 @@ private class ServiceReactNativeHost {
         ensureBridgeCreated()
 
         guard let factory = factory else {
+            ipcLog("⚠️ createRootView: factory is nil!")
             return nil
         }
 
@@ -1173,6 +1183,7 @@ private class ServiceReactNativeHost {
         properties["containerHeight"] = entry.containerSize.height
         entry.currentProperties = properties
 
+        ipcLog("📦 createRootView: calling rootViewFactory.view with moduleName=ActrApp")
         let view = factory.rootViewFactory.view(
             withModuleName: "ActrApp",
             initialProperties: properties,
@@ -1180,6 +1191,7 @@ private class ServiceReactNativeHost {
         )
 
         guard let rootView = view as? RCTRootView else {
+            ipcLog("⚠️ createRootView: view is not RCTRootView, got \(type(of: view))")
             return nil
         }
 
@@ -1574,11 +1586,11 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         for: entry,
         initialProperties: initialProperties
     ) else {
-        NSLog("[XPC] ⚠️ createRootViewWithConfig: createRootView returned nil for tab=%@", String(logTabId.prefix(8)))
+        ipcLog("⚠️ createRootViewWithConfig: createRootView returned nil for tab=\(String(logTabId.prefix(8)))")
         return
     }
 
-    NSLog("[XPC] ✅ RCTRootView created for tab=%@ size=%.0fx%.0f", String(logTabId.prefix(8)), containerSize.width, containerSize.height)
+    ipcLog("✅ RCTRootView created for tab=\(String(logTabId.prefix(8))) size=\(Int(containerSize.width))x\(Int(containerSize.height))")
 
     // Set RCTRootView frame to fill container
     let targetFrame = CGRect(origin: .zero, size: containerSize)
