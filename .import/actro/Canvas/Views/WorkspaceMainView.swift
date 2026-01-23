@@ -65,7 +65,6 @@ struct WorkspaceMainView: View {
     @State private var overviewResizeSnapshot: NSImage?
     @State private var isOverviewResizing: Bool = false
     @State private var lastKnownViewportSize: CGSize = .zero
-    @State private var isOverviewDragging: Bool = false  // 跟踪 Overview 模式下的拖拽状态
 
     // 根据搜索文本过滤 tabs
     private var filteredTabs: [Tab] {
@@ -188,8 +187,7 @@ struct WorkspaceMainView: View {
                         viewModel.currentTabId = tabId
                         viewModel.navigateCurrentTab(to: url.absoluteString)
                         enterFocus(tabId: tabId)
-                    },
-                    isOverviewDragging: $isOverviewDragging  // 🔑 暴露拖拽状态给 RN 层
+                    }
                 )
                 .frame(width: canvasSize.width, height: canvasSize.height)
                 // 防止 scale 为 0 导致奇异矩阵
@@ -294,7 +292,6 @@ struct WorkspaceMainView: View {
                             isFocused: isFocused,
                             isTransitioning: modeTransitionController.phase.isTransitioning,
                             coordinator: viewBridgeCoordinatorManager.coordinator(for: tab.id),
-                            isOverviewDragging: isOverviewDragging,  // 🔑 拖拽时降低 z-index
                             bookmarks: bookmarksForRN,
                             recentHistory: recentHistoryForRN
                         )
@@ -1423,7 +1420,6 @@ private struct TabGridView: View {
     @State private var hoveringOverTabId: UUID?
     @State private var swappingTabId: UUID?  // 正在交换过程中的卡片（用于淡入动画）
     @State private var isDraggingActive = false  // 跟踪拖动是否正在进行（用于抑制点击）
-    @Binding var isOverviewDragging: Bool  // 暴露给父视图，用于调整 RN 层 z-index
 
     // 固定的槽位索引（拖动开始时记录，不随 tabs 交换而改变）
     @State private var dragSourceSlotIndexFixed: Int?  // 拖动源槽位 a
@@ -1503,7 +1499,6 @@ private struct TabGridView: View {
 
                             // 设置新的拖动状态
                             isDraggingActive = true
-                            isOverviewDragging = true  // 同步到父视图
                             draggingTabId = tab.id
                             dragSourceSlotIndexFixed = tabSlotPositions[tab.id]
                             return NSItemProvider(object: tab.id.uuidString as NSString)
@@ -1537,7 +1532,6 @@ private struct TabGridView: View {
                             // 延迟清除状态
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                 isDraggingActive = false
-                                isOverviewDragging = false  // 同步到父视图
                                 draggingTabId = nil
                                 swappingTabId = nil
                                 dragSourceSlotIndexFixed = nil

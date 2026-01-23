@@ -93,7 +93,14 @@ public class ViewBridgeHostView: NSView {
 
     /// 是否允许 hit testing（Overview 模式下为 false，让手势穿透到下层 Grid）
     /// 从 coordinator.isOverviewMode 获取状态
-    var allowsHitTesting: Bool = true
+    var allowsHitTesting: Bool = true {
+        didSet {
+            // 🔑 在 Overview 模式下禁用拖拽目标，让拖拽事件穿透到下层 Grid
+            if !allowsHitTesting {
+                unregisterDraggedTypes()
+            }
+        }
+    }
 
     /// Override hitTest to allow events to pass through in Overview mode
     /// This enables tab dragging in Overview mode
@@ -1512,7 +1519,14 @@ private class ContainerView: NSView {
 
     /// 是否允许 hit testing（由 SwiftUI 通过 userInteractionEnabled 控制）
     /// Overview 模式下设为 false，让手势穿透到下层的 Grid
-    var allowsHitTesting: Bool = true
+    var allowsHitTesting: Bool = true {
+        didSet {
+            // 🔑 在 Overview 模式下禁用拖拽目标，让拖拽事件穿透到下层 Grid
+            if !allowsHitTesting {
+                unregisterDraggedTypes()
+            }
+        }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1762,7 +1776,6 @@ struct UnifiedReactNativeLayer: View {
     let isFocused: Bool           // 是否处于 Focus 模式
     let isTransitioning: Bool     // 是否正在过渡动画中
     let coordinator: ViewBridgeCoordinator
-    let isOverviewDragging: Bool  // 是否正在 Overview 模式下拖拽（拖拽时降低 z-index）
 
     // System app data (for StartPageApp)
     var bookmarks: [[String: Any]] = []
@@ -1777,7 +1790,6 @@ struct UnifiedReactNativeLayer: View {
         isFocused: Bool,
         isTransitioning: Bool,
         coordinator: ViewBridgeCoordinator,
-        isOverviewDragging: Bool = false,
         bookmarks: [[String: Any]] = [],
         recentHistory: [[String: Any]] = []
     ) {
@@ -1789,7 +1801,6 @@ struct UnifiedReactNativeLayer: View {
         self.isFocused = isFocused
         self.isTransitioning = isTransitioning
         self.coordinator = coordinator
-        self.isOverviewDragging = isOverviewDragging
         self.bookmarks = bookmarks
         self.recentHistory = recentHistory
 
@@ -1933,10 +1944,17 @@ struct UnifiedReactNativeLayer: View {
         .opacity(isTransitioning ? 0 : 1)
         // 🔑 z-index 控制：
         // - Focus 模式: zIndex(100) 在最前，确保交互时在最前
-        // - Overview 模式 (非拖拽): zIndex(50) 在 canvas 前面，内容可见
-        // - Overview 模式 (拖拽中): zIndex(-100) 在 canvas 后面，让拖拽手势正常工作
-        // 注意：拖拽期间 RN 内容被卡片背景遮挡是可接受的，因为拖拽交互更重要
-        .zIndex(isFocused ? 100 : (isOverviewDragging ? -100 : 50))
+        // - Overview 模式: zIndex(50) 在 canvas 前面，内容可见
+        //   通过 NSView 的 hitTest() 返回 nil 让拖拽手势穿透到 TabGridView
+        .zIndex(isFocused ? 100 : 50)
+        // 🔑 Overview 模式下添加边框
+        .overlay {
+            if !isFocused && !isTransitioning {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+        }
         // Focus 模式下允许交互
         .allowsHitTesting(isFocused && !isTransitioning)
         .onAppear {
