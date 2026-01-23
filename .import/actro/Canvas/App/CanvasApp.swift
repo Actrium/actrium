@@ -537,9 +537,10 @@ struct CanvasApp: App {
 
             // Verify service bundles exist
             _ = XPCServicePool.shared.verifyServiceBundles()
-            // 🔧 DEBUG: 暂时禁用预热，测试是否解决灰屏问题
-            // await XPCServicePool.shared.prewarmInitialServicesAsync()
-            logger.info("⚠️ DEBUG: Prewarm DISABLED for testing")
+            // Prewarm XPC services for faster startup
+            // Service 端会发送 xpcConnectionCreated 通知，Host 捕获 internalId
+            // 后续消费 prewarm VC 时通过 bindTab 通知绑定 tabId
+            await XPCServicePool.shared.prewarmInitialServicesAsync()
 
             let elapsed = Date().timeIntervalSince(prewarmStart) * 1000
             logger.info("✅ System startup complete - prewarm took \(Int(elapsed))ms")

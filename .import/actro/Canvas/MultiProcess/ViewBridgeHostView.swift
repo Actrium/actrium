@@ -258,20 +258,52 @@ public class ViewBridgeHostView: NSView {
         NSLog("ViewBridgeHostView: Requesting \(serviceViewControllerClassName) from \(serviceBundleIdentifier)")
 
         // 🔥 优化：尝试复用预热的 ViewController
-        // ⚠️ 暂时禁用，需要调试为何复用预热的 VC 会导致空白页
-        // if let prewarmedVC = XPCServicePool.shared.consumePrewarmedViewController(bundleIdentifier: serviceBundleIdentifier) {
-        //     NSLog("ViewBridgeHostView: ✨ Using prewarmed ViewController!")
-        //     DispatchQueue.main.async { [weak self] in
-        //         self?.handleConnectionResult(viewController: prewarmedVC, error: nil)
-        //     }
-        //     // 🔑 消费后异步预热下一个
-        //     Task { @MainActor in
-        //         XPCServicePool.shared.ensureOnePrewarmedSlot()
-        //     }
-        //     return
-        // }
+        // 使用异步消费，如果 prewarm 正在进行中会等待其完成
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
 
-        NSLog("ViewBridgeHostView: Requesting remote ViewController...")
+            if let prewarmSlot = await XPCServicePool.shared.consumePrewarmedSlotAsync(
+                bundleIdentifier: self.serviceBundleIdentifier,
+                timeout: 2.0  // 最多等待 2 秒
+            ) {
+                NSLog("ViewBridgeHostView: ✨ Using prewarmed ViewController! (internalId=%@)",
+                      prewarmSlot.internalId?.prefix(8).description ?? "nil")
+
+                // 🔑 发送 bindTab 通知，告诉 Service 将 prewarm entry 绑定到我们的 tabId
+                if let tabId = self.coordinator?.tabId, let internalId = prewarmSlot.internalId {
+                    let bindName = "com.canvas.bindTab.\(CanvasHostProcessId).\(self.serviceBundleIdentifier)"
+                    DistributedNotificationCenter.default().postNotificationName(
+                        NSNotification.Name(bindName),
+                        object: nil,
+                        userInfo: [
+                            "tabId": tabId.uuidString,
+                            "internalId": internalId,
+                            "hostProcessId": CanvasHostProcessId
+                        ],
+                        deliverImmediately: true
+                    )
+                    NSLog("ViewBridgeHostView: 📤 Sent bindTab: tabId=%@, internalId=%@",
+                          String(tabId.uuidString.prefix(8)), String(internalId.prefix(8)))
+                } else {
+                    NSLog("⚠️ ViewBridgeHostView: Cannot send bindTab - tabId=%@, internalId=%@",
+                          self.coordinator?.tabId?.uuidString.prefix(8).description ?? "nil",
+                          prewarmSlot.internalId?.prefix(8).description ?? "nil")
+                }
+
+                self.handleConnectionResult(viewController: prewarmSlot.viewController, error: nil)
+                // 🔑 消费后异步预热下一个
+                XPCServicePool.shared.ensureOnePrewarmedSlot()
+                return
+            }
+
+            // Prewarm 不可用，继续创建新连接
+            self.requestRemoteViewControllerDirect()
+        }
+    }
+
+    /// 直接请求远程 ViewController（不使用 prewarm）
+    private func requestRemoteViewControllerDirect() {
+        NSLog("ViewBridgeHostView: Requesting remote ViewController directly... (no prewarm)")
 
         // NOTE: pendingTabId is sent AFTER connection is established (in coordinator.hasConnection.didSet)
         // This ensures Service has started and listener is active before we send the notification
