@@ -237,9 +237,13 @@ public class ViewBridgeHostView: NSView {
         let expectedFrame = NSRect(origin: .zero, size: bounds.size)
         if remoteView.frame != expectedFrame {
             remoteView.frame = expectedFrame
+            // 🔑 更新 layer position 以保持 Y 轴翻转后的正确显示
+            // anchorPoint 是 (0.5, 0.5)，position 需要是视图中心点
+            if let layer = remoteView.layer {
+                layer.position = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
+            }
         }
     }
-
 
     // MARK: - View Lifecycle
 
@@ -475,6 +479,23 @@ public class ViewBridgeHostView: NSView {
         remoteView.frame = targetFrame
         // Disable autoresizing mask as we manage layout manually
         remoteView.autoresizingMask = []
+
+        // 🔑 坐标系修复：Service 端的 jail 是非 flipped 的（原点在左下角）
+        // Container 放在 jail 的 (0,0)，但我们需要把内容显示在视觉顶部
+        // 使用 Y 轴翻转变换来解决坐标系不匹配问题
+        remoteView.wantsLayer = true
+        if let layer = remoteView.layer {
+            // anchorPoint 默认是 (0.5, 0.5)，翻转以视图中心为轴
+            layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            // 设置 position 为视图中心点（因为 anchorPoint 是相对于 bounds 的）
+            layer.position = CGPoint(x: targetFrame.width / 2, y: targetFrame.height / 2)
+            // 应用 Y 轴翻转
+            layer.transform = CATransform3DMakeScale(1, -1, 1)
+            ipcLog("🔄 Applied Y-axis flip transform to remoteView, frame=\(NSStringFromRect(targetFrame))")
+        } else {
+            ipcLog("⚠️ remoteView.layer is nil, cannot apply Y-axis flip transform")
+        }
+
         addSubview(remoteView)
 
         // Configure ViewBridge content size range
