@@ -856,8 +856,8 @@ private class ServiceReactNativeHost {
         // Extract isOverviewMode for compact view in system apps
         let isOverviewMode = sizeInfo["isOverviewMode"] as? Bool ?? false
 
-        // 取整，避免浮点精度问题
-        let newSize = CGSize(width: round(width), height: round(height))
+        // 🔑 使用 floor() 取整，与 Host 端保持一致
+        let newSize = CGSize(width: floor(width), height: floor(height))
 
         // Log received isOverviewMode for debugging
         ipcLog("📐 handleContainerSizeChanged: req=\(requestId) tab=\(tabId.prefix(8)) size=\(Int(newSize.width))x\(Int(newSize.height)) isOverviewMode=\(isOverviewMode)")
