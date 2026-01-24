@@ -170,48 +170,27 @@ private class ResizableContainerView: NSView {
     /// Reference to the ViewController for updating preferredContentSize dynamically
     weak var viewController: AnyObject?
 
-    /// Keep Container aligned to jail's visual top-left
-    /// 🔑 关键：jail 是非 flipped 的（原点在左下角），但我们需要内容从视觉上的左上角开始
-    /// 解决方案：将 Container 定位到 jail 的左上角，即 y = jail.height - container.height
+    /// 🔑 Container 始终固定在 jail 的 (0, 0) 位置
+    /// Host 端使用 Y 轴翻转 transform 来处理坐标系差异
+    /// 这样垂直 resize 时不会产生抖动
     private func syncOriginWithSuperview(_ superview: NSView) {
         guard hasReceivedHostSize else { return }
 
-        // 🔑 非 flipped 坐标系：原点在左下角，Y 轴向上
-        // 要让 Container 的视觉顶部与 jail 顶部对齐，需要：
-        // container.origin.y = jail.height - container.height
-        let targetY = superview.bounds.height - frame.height
-        let targetOrigin = NSPoint(x: 0, y: targetY)
-
-        guard frame.origin != targetOrigin else { return }
+        // Container 固定在 (0, 0)，Host 端翻转处理坐标系
+        guard frame.origin.x != 0 || frame.origin.y != 0 else { return }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        super.setFrameOrigin(targetOrigin)
+        super.setFrameOrigin(.zero)
         CATransaction.commit()
     }
 
     /// Notify ViewBridge of desired content size via preferredContentSize.
-    /// Note: We do NOT resize the jail view - it's meant to be a large buffer.
-    /// Container positioning within jail handles the visual alignment.
+    /// 🔑 禁用：不再设置 preferredContentSize，让 jail 保持初始大尺寸
+    /// 设置 preferredContentSize 会导致 jail 被 resize，破坏坐标系计算
     private func syncJailSize(superview: NSView, desiredSize: NSSize) {
-        // Clamp to a safe upper bound
-        let clamped = NSSize(
-            width: min(desiredSize.width, Self.maxJailSize.width),
-            height: min(desiredSize.height, Self.maxJailSize.height)
-        )
-
-        // 去重：同一尺寸不重复请求（0.5px 容差）
-        guard abs(clamped.width - lastJailResizeRequest.width) > 0.5 ||
-              abs(clamped.height - lastJailResizeRequest.height) > 0.5 else {
-            return
-        }
-        lastJailResizeRequest = clamped
-
-        // 只更新 preferredContentSize，不修改 jail view 尺寸
-        // Jail view 是 ViewBridge 的内部缓冲区，应该保持大尺寸
-        if let vc = viewController {
-            vc.setValue(NSValue(size: clamped), forKey: "preferredContentSize")
-        }
+        // 不再设置 preferredContentSize
+        // jail 保持初始大尺寸（1920x1200），container 定位到 jail 的左上角
     }
 
     private static func computeMaximumJailSize() -> NSSize {
@@ -252,14 +231,8 @@ private class ResizableContainerView: NSView {
             isApplyingHostSize = false
         }
 
-        // 🔑 非 flipped 坐标系：将 Container 定位到 jail 的左上角
-        // container.origin.y = jail.height - container.height
-        if let jail = superview {
-            let targetY = jail.bounds.height - newSize.height
-            super.setFrameOrigin(NSPoint(x: 0, y: targetY))
-        } else {
-            super.setFrameOrigin(NSPoint(x: 0, y: 0))
-        }
+        // Container 放在 (0, 0)，Host 端 isGeometryFlipped 处理翻转
+        super.setFrameOrigin(.zero)
         super.setFrameSize(newSize)
 
         // 触发子视图更新
@@ -267,9 +240,11 @@ private class ResizableContainerView: NSView {
 
         CATransaction.commit()
 
-        // 🔍 调试日志 - 验证左上角对齐
+        // 🔍 详细调试日志 - 检查坐标系
         if let sv = superview {
-            ipcLog("📐 applyHostSize: size=\(Int(newSize.width))x\(Int(newSize.height)), jail=\(Int(sv.bounds.height)), container.y=\(Int(frame.origin.y))")
+            // 🔑 关键：检查 jail.isFlipped 和坐标原点
+            // 如果 jail 是非 flipped 的，垂直 resize 时 container 的 origin.y 需要调整
+            ipcLog("📐 applyHostSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)), jail.isFlipped=\(sv.isFlipped), jail.frame=\(NSStringFromRect(sv.frame)), container.origin=(\(frame.origin.x),\(frame.origin.y))")
         }
 
         if newSize.width > 0 && newSize.height > 0 {
@@ -279,6 +254,17 @@ private class ResizableContainerView: NSView {
 
     func setRNView(_ view: NSView) {
         self.rnView = view
+
+        // 🔑 应用 Y 轴翻转来抵消 Host 端的翻转
+        // Host 端对 remoteView 应用 Y 轴翻转以解决坐标系问题
+        // 为了让内容不上下颠倒，我们需要在 Service 端也翻转一次
+        view.wantsLayer = true
+        if let layer = view.layer {
+            layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            // position 会在 frame 设置后自动调整
+            layer.transform = CATransform3DMakeScale(1, -1, 1)
+            ipcLog("🔄 Applied Y-axis flip transform to rnView")
+        }
     }
 
     override func magnify(with event: NSEvent) {
@@ -990,7 +976,7 @@ private class ServiceReactNativeHost {
             // 🔑 通过 DeviceEventEmitter 发送 props 更新事件（appProperties 可能不可靠）
             ServiceReactNativeHost.shared.emitPropsUpdate(for: entry)
 
-            // 通知 Host 尺寸更新完成（事件驱动，替代固定延迟）
+            // 通知 Host 尺寸更新完成
             postSizeApplied(tabId: tabId, size: size, requestId: requestId)
         } else {
             // Entry not yet registered - cache for later
@@ -1002,7 +988,6 @@ private class ServiceReactNativeHost {
 
     /// 通知 Host 端尺寸更新已完成
     private func postSizeApplied(tabId: String, size: CGSize, requestId: String = "?") {
-        // 使用带 hostProcessId 的通知名称（如果已设置）
         let notificationName: String
         if let pid = hostProcessId {
             notificationName = "com.canvas.sizeApplied.\(pid).\(serviceBundleId)"
