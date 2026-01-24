@@ -257,9 +257,11 @@ private class ResizableContainerView: NSView {
 
         CATransaction.commit()
 
-        // 🔍 详细调试日志
+        // 🔍 详细调试日志 - 检查坐标系
         if let sv = superview {
-            ipcLog("📐 applyHostSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)), jail.frame=\(NSStringFromRect(sv.frame)), jail.bounds=\(NSStringFromRect(sv.bounds)), container.frame=\(NSStringFromRect(frame)), rnView.frame=\(rnView != nil ? NSStringFromRect(rnView!.frame) : "nil")")
+            // 🔑 关键：检查 jail.isFlipped 和坐标原点
+            // 如果 jail 是非 flipped 的，垂直 resize 时 container 的 origin.y 需要调整
+            ipcLog("📐 applyHostSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)), jail.isFlipped=\(sv.isFlipped), jail.frame=\(NSStringFromRect(sv.frame)), container.origin=(\(frame.origin.x),\(frame.origin.y))")
         }
 
         if newSize.width > 0 && newSize.height > 0 {
