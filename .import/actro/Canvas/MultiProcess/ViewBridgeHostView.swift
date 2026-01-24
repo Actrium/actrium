@@ -218,8 +218,11 @@ public class ViewBridgeHostView: NSView {
     /// 接受外部尺寸设置
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        // Manually update layout since autoresizesSubviews is false
-        updateRemoteViewLayout()
+        // 🔑 Live resize 期间跳过 remoteView frame 更新
+        // 减少 Host/Service 尺寸不同步导致的视觉抖动
+        if !WindowResizeState.shared.isLiveResizing {
+            updateRemoteViewLayout()
+        }
     }
 
     /// Update remote view frame to fill bounds
@@ -526,15 +529,21 @@ public class ViewBridgeHostView: NSView {
         currentContentSize = newSize
         let oldBounds = bounds.size
 
-        // 更新自身 frame 和 remoteView frame（直接同步设置，避免异步积压）
+        // 更新自身 frame（直接同步设置，避免异步积压）
         if bounds.size != newSize {
             setFrameSize(newSize)
         }
 
-        // 强制更新 remoteView frame，即使 bounds 相同（确保 resize 结束后 remoteView 正确填满）
-        updateRemoteViewLayout()
+        // 🔑 Live resize 期间跳过 remoteView frame 更新
+        // remoteView 的尺寸由 Service 端通过 preferredContentSize 控制
+        // 这样可以减少 Host/Service 尺寸不同步导致的视觉抖动
+        let isLiveResizing = WindowResizeState.shared.isLiveResizing
+        if !isLiveResizing {
+            // 非 resize 期间：强制更新 remoteView frame，确保填满 hostView
+            updateRemoteViewLayout()
+        }
 
-        // 同步到 NSRemoteViewController
+        // 同步到 NSRemoteViewController（始终更新，让 Service 知道目标尺寸）
         if let vc = remoteViewController {
             let current = vc.preferredContentSize
             if abs(current.width - newSize.width) > 0.5 || abs(current.height - newSize.height) > 0.5 {
@@ -544,7 +553,7 @@ public class ViewBridgeHostView: NSView {
 
         // 调试日志
         let remoteFrame = remoteViewController?.view.frame ?? .zero
-        ipcLog("📐 applyFrameSize: oldBounds=\(Int(oldBounds.width))x\(Int(oldBounds.height)) newSize=\(Int(newSize.width))x\(Int(newSize.height)) bounds=\(Int(bounds.width))x\(Int(bounds.height)) remoteView=\(Int(remoteFrame.width))x\(Int(remoteFrame.height))")
+        ipcLog("📐 applyFrameSize: oldBounds=\(Int(oldBounds.width))x\(Int(oldBounds.height)) newSize=\(Int(newSize.width))x\(Int(newSize.height)) bounds=\(Int(bounds.width))x\(Int(bounds.height)) remoteView=\(Int(remoteFrame.width))x\(Int(remoteFrame.height)) isLiveResizing=\(isLiveResizing)")
     }
 
     private func handleError(_ message: String) {
@@ -1105,10 +1114,11 @@ final class ViewBridgeCoordinator {
             return
         }
 
-        // 取整，避免浮点精度问题导致频繁微小更新
+        // 🔑 使用 floor() 取整，与 WorkspaceMainViewport/WorkspaceView 保持一致
+        // 避免 round() vs floor() 差异导致 1px 抖动
         let roundedSize = CGSize(
-            width: round(newSize.width),
-            height: round(newSize.height)
+            width: floor(newSize.width),
+            height: floor(newSize.height)
         )
 
         // 验证尺寸合法性
@@ -1190,22 +1200,17 @@ final class ViewBridgeCoordinator {
     private func applyViewportSize(_ size: CGSize) {
         lastUpdateTime = Date()
 
-        // 1. 更新 hostView 的本地 frame（始终执行，保证视觉同步）
+        // 1. 更新 hostView 的本地 frame（始终执行）
         hostView?.applyFrameSize(size)
 
-        // 2. 如果正在 live resize，跳过跨进程通知（提升拖动流畅度）
-        //    最终尺寸会在 windowDidEndLiveResize 时发送
-        if WindowResizeState.shared.isLiveResizing {
-            return
-        }
-
-        // 3. 🔑 检查四个条件都满足才能发送通知
+        // 2. 🔑 检查四个条件都满足才能发送通知
         //    否则由 didSet 触发的 trySendInitialConfig 会处理
         guard allocatedServiceId != nil else { return }
         guard hasConnection else { return }
         guard xpcServiceReady else { return }
 
-        // 4. 发送 containerSizeChanged 通知到 Service（防重复）
+        // 3. 发送 containerSizeChanged 通知到 Service（防重复）
+        //    🔑 resize 期间也发送，让 RN 层动态响应尺寸变化
         guard size != lastSentContainerSize else { return }
         lastSentContainerSize = size
         sendContainerSizeNotification(size: size)
@@ -1543,10 +1548,9 @@ private class ContainerView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        // 当 SwiftUI 改变容器尺寸时，更新 hostView
-        if let hostView = subviews.first as? ViewBridgeHostView {
-            hostView.applyFrameSize(newSize)
-        }
+        // 🔑 不再直接调用 hostView.applyFrameSize
+        // 尺寸更新统一由 coordinator.updateViewportSize 处理，避免多源竞争导致 1px 抖动
+        // hostView 有 autoresizingMask = [.width, .height]，会自动跟随 container 调整 frame
     }
 
     /// 重写 hitTest 以支持条件性手势穿透
@@ -1651,17 +1655,18 @@ struct PersistentViewBridgeView: NSViewRepresentable {
         }
 
         // 🔑 如果 container bounds 与目标尺寸不同，主动更新 container frame
-        if abs(containerBounds.width - targetSize.width) > 1 || abs(containerBounds.height - targetSize.height) > 1 {
+        // 使用 >= 1 而非 > 1，确保 1px 差异也触发更新，避免 container 和 hostView 尺寸不一致
+        if abs(containerBounds.width - targetSize.width) >= 1 || abs(containerBounds.height - targetSize.height) >= 1 {
             container.setFrameSize(targetSize)
             ipcLog("📐 updateNSView: updated container frame to \(Int(targetSize.width))x\(Int(targetSize.height))")
         }
 
         // 更新 hostView frame 使用目标尺寸
+        // 🔑 只通过 coordinator 统一更新，避免多源竞争导致尺寸抖动
         if let hostView = container.subviews.first as? ViewBridgeHostView {
             // Update hit testing state on hostView as well
             hostView.allowsHitTesting = allowsHitTesting
-            hostView.applyFrameSize(targetSize)
-            // 通知 coordinator 实际尺寸（用于同步到 Service）
+            // 通知 coordinator 更新尺寸（coordinator 会调用 hostView.applyFrameSize）
             coordinator.updateViewportSize(targetSize)
         }
     }
@@ -1923,7 +1928,8 @@ struct UnifiedReactNativeLayer: View {
                 NineGridDebugOverlay(size: currentSize)
             }
 
-            // 拖动 resize 时的快照遮罩层（仅 Focus 模式）
+            // 🔑 resize 期间不再需要遮罩，因为尺寸变化会实时传递给 RN 层
+            // 只保留 sizeApplied 等待期的遮罩（用于 resize 结束后的短暂过渡）
             if isFocused && !isTransitioning,
                resizeState.isWaitingForSizeApplied,
                resizeState.activeTabId == tab.id,
@@ -1994,11 +2000,8 @@ struct UnifiedReactNativeLayer: View {
                 sendTabConfigIfReady()
             }
         }
-        // 🔑 监听尺寸变化（模式切换时）
-        .onChange(of: currentSize) { _, newSize in
-            guard newSize.width > 50 && newSize.height > 50 else { return }
-            coordinator.updateViewportSize(newSize)
-        }
+        // 🔑 尺寸变化由 PersistentViewBridgeView.updateNSView 统一处理
+        // 不再需要 onChange 监听，避免多源竞争导致尺寸抖动
     }
 
     /// 检查 viewportSize 是否有效（不是初始的 100x100）- 用于直接访问 view 的 viewportSize

@@ -21,8 +21,14 @@ struct WorkspaceMainViewport<Content: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
+            // 🔑 在源头取整，避免下游不同地方取整方式不一致导致 1px 抖动
+            // 使用 floor() 向下取整，确保视口不超过实际可用空间
+            let roundedSize = CGSize(
+                width: floor(geometry.size.width),
+                height: floor(geometry.size.height)
+            )
             content()
-                .environment(\.viewportSize, geometry.size)
+                .environment(\.viewportSize, roundedSize)
         }
     }
 }
@@ -72,7 +78,9 @@ struct DevToolsDivider: View {
                 )
                 .onHover { hovering in
                     if hovering {
-                        NSCursor.resizeUpDown.push()
+                        // 根据分隔条方向选择正确的光标
+                        let cursor = axis == .vertical ? NSCursor.resizeUpDown : NSCursor.resizeLeftRight
+                        cursor.push()
                     } else {
                         NSCursor.pop()
                     }
@@ -120,18 +128,19 @@ struct WorkspaceView<Content: View>: View {
             let isDockedBottom = devTools.dockPosition == .bottom
 
             // Calculate content size (shrink to make room for DevTools)
+            // 🔑 使用 floor() 取整，与 WorkspaceMainViewport 保持一致，避免小数导致布局抖动
             let contentWidth: CGFloat = {
                 if shouldShowDevTools && !isDockedBottom {
-                    return geometry.size.width - devTools.dockedWidth - 8
+                    return floor(geometry.size.width - devTools.dockedWidth - 8)
                 }
-                return geometry.size.width
+                return floor(geometry.size.width)
             }()
 
             let contentHeight: CGFloat = {
                 if shouldShowDevTools && isDockedBottom {
-                    return geometry.size.height - devTools.dockedHeight - 8
+                    return floor(geometry.size.height - devTools.dockedHeight - 8)
                 }
-                return geometry.size.height
+                return floor(geometry.size.height)
             }()
 
             let _ = NSLog("📐 [WorkspaceView] geometry=%.1fx%.1f, shouldShowDevTools=%d, displayMode=%@, contentSize=%.1fx%.1f",
