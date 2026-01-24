@@ -27,6 +27,19 @@ struct WorkspaceMainViewport<Content: View>: View {
                 width: floor(geometry.size.width),
                 height: floor(geometry.size.height)
             )
+
+            // 🔍 调试日志：检查 geometry 是否有小数
+            let _ = {
+                let wDiff = geometry.size.width - roundedSize.width
+                let hDiff = geometry.size.height - roundedSize.height
+                if wDiff > 0.01 || hDiff > 0.01 {
+                    NSLog("📐 [Viewport] geometry=%.2fx%.2f → rounded=%.0fx%.0f (diff=%.2f,%.2f)",
+                          geometry.size.width, geometry.size.height,
+                          roundedSize.width, roundedSize.height,
+                          wDiff, hDiff)
+                }
+            }()
+
             content()
                 .environment(\.viewportSize, roundedSize)
         }
