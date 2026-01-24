@@ -172,19 +172,21 @@ private class ResizableContainerView: NSView {
 
     /// Keep Container aligned to jail's visual top-left
     /// 🔑 关键：jail 是非 flipped 的（原点在左下角），但我们需要内容从视觉上的左上角开始
-    /// NSRemoteView 显示 jail 从 (0,0) 开始的区域，即左下角
-    /// 但 Host 端的 ContainerView 是 flipped 的，所以需要坐标转换
+    /// 解决方案：将 Container 定位到 jail 的左上角，即 y = jail.height - container.height
     private func syncOriginWithSuperview(_ superview: NSView) {
         guard hasReceivedHostSize else { return }
 
-        // 🔑 Container 必须放在 (0, 0)，因为 NSRemoteView 显示从原点开始的内容
-        // 由于 jail 是非 flipped 的，(0,0) 是左下角
-        // Host 端会通过 flipped ContainerView 把这个内容映射到左上角显示
-        guard frame.origin.x != 0 || frame.origin.y != 0 else { return }
+        // 🔑 非 flipped 坐标系：原点在左下角，Y 轴向上
+        // 要让 Container 的视觉顶部与 jail 顶部对齐，需要：
+        // container.origin.y = jail.height - container.height
+        let targetY = superview.bounds.height - frame.height
+        let targetOrigin = NSPoint(x: 0, y: targetY)
+
+        guard frame.origin != targetOrigin else { return }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        super.setFrameOrigin(NSPoint(x: 0, y: 0))
+        super.setFrameOrigin(targetOrigin)
         CATransaction.commit()
     }
 
@@ -250,11 +252,14 @@ private class ResizableContainerView: NSView {
             isApplyingHostSize = false
         }
 
-        // Container 必须放在 (0, 0)
-        // NSRemoteView 只显示 jail view 从原点开始的区域
-        // 由于 jail 不是 flipped，原点在左下角
-        // 内容从 jail 左下角开始，通过 Host 端的 flipped ContainerView 映射到左上角显示
-        super.setFrameOrigin(NSPoint(x: 0, y: 0))
+        // 🔑 非 flipped 坐标系：将 Container 定位到 jail 的左上角
+        // container.origin.y = jail.height - container.height
+        if let jail = superview {
+            let targetY = jail.bounds.height - newSize.height
+            super.setFrameOrigin(NSPoint(x: 0, y: targetY))
+        } else {
+            super.setFrameOrigin(NSPoint(x: 0, y: 0))
+        }
         super.setFrameSize(newSize)
 
         // 触发子视图更新
@@ -262,11 +267,9 @@ private class ResizableContainerView: NSView {
 
         CATransaction.commit()
 
-        // 🔍 详细调试日志 - 检查坐标系
+        // 🔍 调试日志 - 验证左上角对齐
         if let sv = superview {
-            // 🔑 关键：检查 jail.isFlipped 和坐标原点
-            // 如果 jail 是非 flipped 的，垂直 resize 时 container 的 origin.y 需要调整
-            ipcLog("📐 applyHostSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)), jail.isFlipped=\(sv.isFlipped), jail.frame=\(NSStringFromRect(sv.frame)), container.origin=(\(frame.origin.x),\(frame.origin.y))")
+            ipcLog("📐 applyHostSize: size=\(Int(newSize.width))x\(Int(newSize.height)), jail=\(Int(sv.bounds.height)), container.y=\(Int(frame.origin.y))")
         }
 
         if newSize.width > 0 && newSize.height > 0 {
