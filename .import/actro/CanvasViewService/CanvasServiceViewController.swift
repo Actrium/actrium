@@ -408,12 +408,11 @@ private class ServiceReactNativeHost {
 
     private let registryLock = NSLock()
 
-    /// 去抖动：待处理的尺寸更新
-    private var pendingSizeUpdate: (tabId: String, size: CGSize)?
-    /// 去抖动：定时器
-    private var sizeDebounceTimer: Timer?
-    /// 去抖动间隔 - 等待尺寸稳定后再应用
-    private static let sizeDebounceInterval: TimeInterval = 0.025  // 25ms
+    /// 🔑 跳帧机制：每个 tabId 的最新 size 请求序列号
+    /// 当收到新的 size 通知时，只处理最新的，跳过中间的旧通知
+    private var latestSizeSeq: [String: Int] = [:]
+    /// 全局序列号计数器
+    private var sizeSeqCounter: Int = 0
 
     /// This service's bundle identifier for notification routing
     let serviceBundleId: String
@@ -844,8 +843,6 @@ private class ServiceReactNativeHost {
     }
 
     private func handleContainerSizeChanged(_ notification: Notification) {
-        ipcLog("📥 handleContainerSizeChanged notification received")
-
         // Parse JSON string format (for cross-process compatibility)
         guard let userInfo = notification.userInfo,
               let jsonString = userInfo["sizeInfo"] as? String,
@@ -866,34 +863,41 @@ private class ServiceReactNativeHost {
         // 🔑 使用 floor() 取整，与 Host 端保持一致
         let newSize = CGSize(width: floor(width), height: floor(height))
 
-        // Log received isOverviewMode for debugging
-        ipcLog("📐 handleContainerSizeChanged: req=\(requestId) tab=\(tabId.prefix(8)) size=\(Int(newSize.width))x\(Int(newSize.height)) isOverviewMode=\(isOverviewMode)")
+        // 🔑 跳帧机制：记录最新的 size 请求序列号
+        // 这样即使多个通知快速到达，我们也只处理最新的
+        sizeSeqCounter += 1
+        let mySeq = sizeSeqCounter
+        latestSizeSeq[tabId] = mySeq
 
-        // 注意：DistributedNotificationCenter 的回调已经在 main queue 上执行
-        // 不需要再 DispatchQueue.main.async，这样可以减少一个 run loop 周期的延迟
+        ipcLog("📥 containerSizeChanged: seq=\(mySeq) req=\(requestId) tab=\(tabId.prefix(8)) size=\(Int(newSize.width))x\(Int(newSize.height))")
 
-        // 去重：相同尺寸且 isOverviewMode 未变化时不重复处理
-        if let entry = self.getTabEntry(tabId: tabId) {
-            let currentOverviewMode = entry.currentProperties["isOverviewMode"] as? Bool ?? false
-            let sizeUnchanged = entry.containerSize == newSize
-            let overviewUnchanged = currentOverviewMode == isOverviewMode
+        // 🔑 延迟一个 run loop 周期，让后续通知有机会到达
+        // 这样如果有更新的通知，当前这个就会被跳过
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
 
-            if sizeUnchanged && overviewUnchanged {
-                NSLog("📐 [SVC] containerSizeChanged SKIPPED (same size & mode): req=%@ tab=%@ size=%.0fx%.0f isOverview=%@",
-                      requestId, String(tabId.prefix(8)), newSize.width, newSize.height, isOverviewMode ? "true" : "false")
+            // 🔑 检查是否仍然是最新的请求
+            // 如果有更新的请求到达，跳过当前处理（跳帧）
+            if let latestSeq = self.latestSizeSeq[tabId], latestSeq != mySeq {
+                ipcLog("⏭️ SKIP FRAME: seq=\(mySeq) (latest=\(latestSeq)) tab=\(tabId.prefix(8)) size=\(Int(newSize.width))x\(Int(newSize.height))")
                 return
             }
-            NSLog("📐 [SVC] containerSizeChanged APPLYING: req=%@ tab=%@ oldSize=%.0fx%.0f newSize=%.0fx%.0f isOverview=%@ (sizeChanged=%@ modeChanged=%@)",
-                  requestId, String(tabId.prefix(8)), entry.containerSize.width, entry.containerSize.height,
-                  newSize.width, newSize.height, isOverviewMode ? "true" : "false",
-                  sizeUnchanged ? "NO" : "YES", overviewUnchanged ? "NO" : "YES")
-        } else {
-            NSLog("📐 [SVC] containerSizeChanged NO ENTRY: req=%@ tab=%@ size=%.0fx%.0f (caching)",
-                  requestId, String(tabId.prefix(8)), newSize.width, newSize.height)
-        }
 
-        // 直接应用尺寸（同步），不再去抖动（Host 端已经节流 25ms，无需双重延迟）
-        self.applySizeUpdate(tabId: tabId, size: newSize, requestId: requestId, isOverviewMode: isOverviewMode)
+            // 去重：相同尺寸且 isOverviewMode 未变化时不重复处理
+            if let entry = self.getTabEntry(tabId: tabId) {
+                let currentOverviewMode = entry.currentProperties["isOverviewMode"] as? Bool ?? false
+                let sizeUnchanged = entry.containerSize == newSize
+                let overviewUnchanged = currentOverviewMode == isOverviewMode
+
+                if sizeUnchanged && overviewUnchanged {
+                    ipcLog("📐 SKIP (same): seq=\(mySeq) tab=\(tabId.prefix(8)) size=\(Int(newSize.width))x\(Int(newSize.height))")
+                    return
+                }
+            }
+
+            ipcLog("📐 APPLY: seq=\(mySeq) req=\(requestId) tab=\(tabId.prefix(8)) size=\(Int(newSize.width))x\(Int(newSize.height))")
+            self.applySizeUpdate(tabId: tabId, size: newSize, requestId: requestId, isOverviewMode: isOverviewMode)
+        }
     }
 
     /// 应用尺寸更新（同步，无延迟）
