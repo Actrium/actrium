@@ -1181,12 +1181,14 @@ class DevToolsManager: ObservableObject {
 
         let height = UserDefaults.standard.double(forKey: "devtools.dockedHeight")
         if height > 0 {
-            dockedHeight = max(Self.minDockedHeight, min(Self.maxDockedHeight, height))
+            // 🔑 取整，避免小数导致布局抖动
+            dockedHeight = round(max(Self.minDockedHeight, min(Self.maxDockedHeight, height)))
         }
 
         let width = UserDefaults.standard.double(forKey: "devtools.dockedWidth")
         if width > 0 {
-            dockedWidth = max(Self.minDockedWidth, min(Self.maxDockedWidth, width))
+            // 🔑 取整，避免小数导致布局抖动
+            dockedWidth = round(max(Self.minDockedWidth, min(Self.maxDockedWidth, width)))
         }
 
         if let tabRaw = UserDefaults.standard.string(forKey: "devtools.activeTab"),

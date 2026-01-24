@@ -80,7 +80,9 @@ struct DevToolsDivider: View {
                         .onChanged { value in
                             isDragging = true
                             let delta = axis == .vertical ? -value.translation.height : -value.translation.width
-                            let newSize = size + delta
+                            // 🔑 使用 round() 取整，避免 dockedWidth/dockedHeight 产生小数
+                            // 小数的 docked 尺寸会导致 contentWidth/contentHeight 计算出现精度问题
+                            let newSize = round(size + delta)
                             size = max(minSize, min(maxSize, newSize))
                         }
                         .onEnded { _ in
