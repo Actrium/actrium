@@ -170,11 +170,16 @@ private class ResizableContainerView: NSView {
     /// Reference to the ViewController for updating preferredContentSize dynamically
     weak var viewController: AnyObject?
 
-    /// Keep Container at jail origin (0,0) - NSRemoteView displays from this position
+    /// Keep Container aligned to jail's visual top-left
+    /// 🔑 关键：jail 是非 flipped 的（原点在左下角），但我们需要内容从视觉上的左上角开始
+    /// NSRemoteView 显示 jail 从 (0,0) 开始的区域，即左下角
+    /// 但 Host 端的 ContainerView 是 flipped 的，所以需要坐标转换
     private func syncOriginWithSuperview(_ superview: NSView) {
         guard hasReceivedHostSize else { return }
 
-        // Container must stay at (0,0) because NSRemoteView displays jail content from origin
+        // 🔑 Container 必须放在 (0, 0)，因为 NSRemoteView 显示从原点开始的内容
+        // 由于 jail 是非 flipped 的，(0,0) 是左下角
+        // Host 端会通过 flipped ContainerView 把这个内容映射到左上角显示
         guard frame.origin.x != 0 || frame.origin.y != 0 else { return }
 
         CATransaction.begin()

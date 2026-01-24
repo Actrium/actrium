@@ -218,11 +218,8 @@ public class ViewBridgeHostView: NSView {
     /// 接受外部尺寸设置
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        // 🔑 Live resize 期间跳过 remoteView frame 更新
-        // 减少 Host/Service 尺寸不同步导致的视觉抖动
-        if !WindowResizeState.shared.isLiveResizing {
-            updateRemoteViewLayout()
-        }
+        // 🔑 始终更新 remoteView frame，确保与 bounds 同步
+        updateRemoteViewLayout()
     }
 
     /// Update remote view frame to fill bounds
@@ -534,14 +531,11 @@ public class ViewBridgeHostView: NSView {
             setFrameSize(newSize)
         }
 
-        // 🔑 Live resize 期间跳过 remoteView frame 更新
-        // remoteView 的尺寸由 Service 端通过 preferredContentSize 控制
-        // 这样可以减少 Host/Service 尺寸不同步导致的视觉抖动
+        // 🔑 始终更新 remoteView frame，确保与 bounds 同步
+        // 之前错误地在 Live resize 期间跳过此调用，导致 remoteView 滞后 10-20px
+        updateRemoteViewLayout()
+
         let isLiveResizing = WindowResizeState.shared.isLiveResizing
-        if !isLiveResizing {
-            // 非 resize 期间：强制更新 remoteView frame，确保填满 hostView
-            updateRemoteViewLayout()
-        }
 
         // 同步到 NSRemoteViewController（始终更新，让 Service 知道目标尺寸）
         if let vc = remoteViewController {
