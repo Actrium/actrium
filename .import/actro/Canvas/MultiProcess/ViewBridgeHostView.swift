@@ -2016,6 +2016,8 @@ struct UnifiedReactNativeLayer: View {
             guard coordinator.hasConnection && coordinator.xpcServiceReady else { return }
             NSLog("🔄 [UnifiedRN] systemTabType changed to %@, resending config",
                   newValue?.rawValue ?? "nil")
+            // 🔑 重置 lastSentConfigSize 强制重新发送（因为尺寸可能没变但内容变了）
+            coordinator.lastSentConfigSize = nil
             sendTabConfigIfReady()
         }
         // 🔑 尺寸变化由 PersistentViewBridgeView.updateNSView 统一处理
