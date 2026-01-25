@@ -42,7 +42,7 @@ struct DevToolsPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Toolbar
+            // Toolbar at top (WebKit Inspector style)
             DevToolsToolbar(
                 devTools: devTools,
                 viewModel: viewModel,
@@ -50,7 +50,9 @@ struct DevToolsPanel: View {
             )
 
             Divider()
+                .background(Color(white: 0.25))
 
+            // Content area below toolbar
             if !isActive {
                 // Overview mode - but global tabs (Metro, Monitor) are still available
                 if isGlobalTab {
@@ -80,7 +82,7 @@ struct DevToolsPanel: View {
                 }
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(red: 0.11, green: 0.11, blue: 0.11))
     }
 
     /// Content view for global tabs (Metro, Monitor)
@@ -103,16 +105,16 @@ private struct DevToolsInactivePlaceholder: View {
         VStack(spacing: 12) {
             Image(systemName: "square.grid.2x2")
                 .font(.system(size: 32))
-                .foregroundColor(.secondary.opacity(0.5))
+                .foregroundColor(Color(white: 0.4))
             Text("DevTools unavailable in Overview mode")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(white: 0.5))
             Text("Switch to a tab to use DevTools")
                 .font(.system(size: 11))
-                .foregroundColor(.secondary.opacity(0.7))
+                .foregroundColor(Color(white: 0.4))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(red: 0.11, green: 0.11, blue: 0.11))
     }
 }
 
@@ -122,16 +124,16 @@ private struct DevToolsWebPlaceholder: View {
         VStack(spacing: 16) {
             Image(systemName: "globe")
                 .font(.system(size: 36))
-                .foregroundColor(.secondary.opacity(0.5))
+                .foregroundColor(Color(white: 0.4))
 
             VStack(spacing: 6) {
                 Text("DevTools unavailable for Web content")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color(white: 0.5))
 
                 Text("Use WebKit Inspector for web page debugging")
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary.opacity(0.8))
+                    .foregroundColor(Color(white: 0.45))
             }
 
             // Keyboard shortcut hint
@@ -145,12 +147,12 @@ private struct DevToolsWebPlaceholder: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(Color(white: 0.2))
             .cornerRadius(6)
-            .foregroundColor(.secondary)
+            .foregroundColor(Color(white: 0.6))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(red: 0.11, green: 0.11, blue: 0.11))
     }
 }
 
@@ -160,20 +162,20 @@ private struct DevToolsUnavailablePlaceholder: View {
         VStack(spacing: 12) {
             Image(systemName: "wrench.and.screwdriver")
                 .font(.system(size: 32))
-                .foregroundColor(.secondary.opacity(0.5))
+                .foregroundColor(Color(white: 0.4))
             Text("DevTools not available")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(white: 0.5))
             Text("Switch to an Actr app to use DevTools")
                 .font(.system(size: 11))
-                .foregroundColor(.secondary.opacity(0.7))
+                .foregroundColor(Color(white: 0.4))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(red: 0.11, green: 0.11, blue: 0.11))
     }
 }
 
-/// DevTools toolbar with tab buttons and controls
+/// DevTools toolbar - WebKit Inspector pixel-perfect clone
 struct DevToolsToolbar: View {
     @ObservedObject var devTools: DevToolsManager
     @ObservedObject var viewModel: BrowserViewModel
@@ -182,167 +184,185 @@ struct DevToolsToolbar: View {
     @Environment(\.openWindow) private var openWindow
     @State private var draggingTab: DevToolsTab?
 
+    // WebKit Inspector exact colors
+    private let toolbarBg = Color(red: 0.145, green: 0.145, blue: 0.145)  // #252525
+    private let selectedTabBg = Color(red: 0.22, green: 0.22, blue: 0.22)  // Selected tab fill
+    private let iconColor = Color(white: 0.55)
+    private let iconActiveColor = Color(white: 0.90)
+    private let textColor = Color(white: 0.65)
+    private let textSelectedColor = Color.white
+    private let separatorColor = Color(white: 0.30)
+
     var body: some View {
         HStack(spacing: 0) {
-            // Tab buttons (using custom order for drag-and-drop reordering)
-            HStack(spacing: 2) {
+            // === Dock icons (WebKit: no X button shown, dock icons first) ===
+            HStack(spacing: 0) {
+                // Icon 1: Dock right (two vertical split)
+                Button(action: {
+                    if !isDetached {
+                        devTools.dockPosition = .right
+                        devTools.saveSettings()
+                    }
+                }) {
+                    Image(systemName: "rectangle.lefthalf.inset.filled.arrow.left")
+                        .font(.system(size: 15))
+                        .foregroundColor(!isDetached && devTools.dockPosition == .right ? iconActiveColor : iconColor)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 28, height: 36)
+
+                // Icon 2: Dock bottom (two horizontal split)
+                Button(action: {
+                    if !isDetached {
+                        devTools.dockPosition = .bottom
+                        devTools.saveSettings()
+                    }
+                }) {
+                    Image(systemName: "rectangle.bottomhalf.inset.filled.arrow.down")
+                        .font(.system(size: 15))
+                        .foregroundColor(!isDetached && devTools.dockPosition == .bottom ? iconActiveColor : iconColor)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 28, height: 36)
+
+                // Icon 3: Detach (pip-style window)
+                Button(action: {
+                    if isDetached { devTools.dock() }
+                    else {
+                        devTools.detach()
+                        openWindow(id: "devtools")
+                    }
+                }) {
+                    Image(systemName: "pip.exit")
+                        .font(.system(size: 15))
+                        .foregroundColor(isDetached ? iconActiveColor : iconColor)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 28, height: 36)
+
+                // Icon 4: Element selector (crosshair)
+                Button(action: {}) {
+                    Image(systemName: "scope")
+                        .font(.system(size: 15))
+                        .foregroundColor(iconColor)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 28, height: 36)
+
+                // Icon 5: Responsive/device
+                Button(action: {}) {
+                    Image(systemName: "display")
+                        .font(.system(size: 14))
+                        .foregroundColor(iconColor)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 28, height: 36)
+            }
+            .padding(.leading, 4)
+
+            // === TABS: WebKit-style - NO border, just icon+text, selected has fill ===
+            HStack(spacing: 0) {
                 ForEach(devTools.tabOrder) { tab in
-                    // Metro tab turns green when running
+                    let isSelected = devTools.activeTab == tab
                     let statusColor: Color? = (tab == .metro && metro.state.isRunning) ? .green : nil
 
-                    DevToolsTabButton(
-                        tab: tab,
-                        isSelected: devTools.activeTab == tab,
-                        isDragging: draggingTab == tab,
-                        statusColor: statusColor
-                    ) {
-                        devTools.activeTab = tab
+                    Button(action: { devTools.activeTab = tab }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 12))
+                            Text(tab.rawValue)
+                                .font(.system(size: 12, weight: .regular))
+                        }
+                        .foregroundColor(statusColor ?? (isSelected ? textSelectedColor : textColor))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(
+                            // WebKit: selected tab = dark fill, no border
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(isSelected ? selectedTabBg : Color.clear)
+                        )
                     }
+                    .buttonStyle(.plain)
+                    .opacity(draggingTab == tab ? 0.5 : 1.0)
                     .onDrag {
                         draggingTab = tab
                         return NSItemProvider(object: tab.rawValue as NSString)
                     }
                     .onDrop(of: [.text], delegate: DevToolsTabDropDelegate(
-                        tab: tab,
-                        devTools: devTools,
-                        draggingTab: $draggingTab
+                        tab: tab, devTools: devTools, draggingTab: $draggingTab
                     ))
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.leading, 4)
 
             Spacer()
 
-            // Pause button and current inspected tab indicator - only for Actr Apps
-            // (RN apps with actual guest script, not system pages like StartPage/History)
+            // === RIGHT: Pause indicator (for RN apps) ===
             if let currentTab = viewModel.currentTab,
                case .reactNative = currentTab.contentType,
                currentTab.systemTabType == nil {
-                HStack(spacing: 6) {
-                    // Pause/Resume button with 3-state indicator:
-                    // - Gray: not connected (no engine snapshot)
-                    // - Green: running
-                    // - Yellow: paused
-                    let isConnected = devTools.engineMonitorSnapshot?.rows.contains { $0.tabId == currentTab.id.uuidString } ?? false
-                    let indicatorColor: Color = {
-                        if !isConnected { return .gray }
-                        return devTools.isEnginePaused ? .yellow : .green
-                    }()
+                let isConnected = devTools.engineMonitorSnapshot?.rows.contains { $0.tabId == currentTab.id.uuidString } ?? false
+                let indicatorColor: Color = !isConnected ? .gray : (devTools.isEnginePaused ? .yellow : .green)
 
-                    Button(action: {
-                        devTools.togglePause()
-                    }) {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(indicatorColor)
-                                .frame(width: 8, height: 8)
-                            Image(systemName: devTools.isEnginePaused ? "play.fill" : "pause.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(devTools.isEnginePaused ? .yellow : .secondary)
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(!isConnected)
-                    .help(devTools.isEnginePaused ? "Resume Engine" : "Pause Engine")
-
-                    // Display app name (contractName or systemTabType) instead of tab title
-                    let appName: String = {
-                        if let contractName = currentTab.contractName {
-                            return contractName
-                        }
-                        if let systemType = currentTab.systemTabType {
-                            return systemType.title
-                        }
-                        return currentTab.title
-                    }()
-                    Text(appName)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+                Button(action: { devTools.togglePause() }) {
+                    Circle().fill(indicatorColor).frame(width: 8, height: 8)
                 }
-                .padding(.horizontal, 8)
+                .buttonStyle(.plain)
+                .disabled(!isConnected)
+                .padding(.trailing, 8)
             }
 
-            Spacer()
-
-            // Action buttons
-            HStack(spacing: 4) {
-                // Dock position toggle (only when docked)
-                if !isDetached {
-                    Button(action: {
-                        devTools.toggleDockPosition()
-                    }) {
-                        Image(systemName: devTools.dockPosition == .bottom ? "rectangle.righthalf.inset.filled" : "rectangle.bottomhalf.inset.filled")
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.borderless)
-                    .help(devTools.dockPosition == .bottom ? "Dock to Right" : "Dock to Bottom")
-                }
-
-                // Detach/Dock button
-                Button(action: {
-                    if isDetached {
-                        devTools.dock()
-                    } else {
-                        devTools.detach()
-                        openWindow(id: "devtools")
-                    }
-                }) {
-                    Image(systemName: isDetached ? "rectangle.inset.bottomright.filled" : "rectangle.on.rectangle")
-                        .font(.system(size: 12))
-                }
-                .buttonStyle(.borderless)
-                .help(isDetached ? "Dock to Main Window" : "Open in Separate Window")
-
-                // Close button
-                Button(action: {
-                    devTools.hide()
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .buttonStyle(.borderless)
-                .help("Close DevTools")
+            // === Search button ===
+            Rectangle().fill(separatorColor).frame(width: 1, height: 20)
+            Button(action: {}) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13))
+                    .foregroundColor(iconColor)
             }
-            .padding(.horizontal, 8)
+            .buttonStyle(.plain)
+            .frame(width: 32, height: 36)
+
+            // === Settings button ===
+            Rectangle().fill(separatorColor).frame(width: 1, height: 20)
+            Button(action: {}) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14))
+                    .foregroundColor(iconColor)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 32, height: 36)
         }
-        .frame(height: 32)
-        .background(Color(nsColor: .controlBackgroundColor))
-        // Prevent window toolbar context menu from showing up on right click
+        .frame(height: 36)
+        .background(toolbarBg)
         .contextMenu { }
     }
 }
 
-/// Individual tab button in the toolbar
+/// Individual tab button in the toolbar - WebKit Inspector cell style
 struct DevToolsTabButton: View {
     let tab: DevToolsTab
     let isSelected: Bool
     var isDragging: Bool = false
-    var statusColor: Color? = nil  // Optional status color for icon and text
+    var statusColor: Color? = nil
     let action: () -> Void
 
     var body: some View {
-        // Determine colors: statusColor overrides default when not selected
-        let effectiveColor: Color = {
-            if isSelected { return .accentColor }
+        // WebKit style: selected tab has subtle background highlight
+        let textColor: Color = {
             if let status = statusColor { return status }
-            return .secondary
+            return isSelected ? Color.white : Color(white: 0.6)
         }()
 
         Button(action: action) {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: tab.icon)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                 Text(tab.rawValue)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 12, weight: .regular))
             }
-            .foregroundColor(effectiveColor)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-            )
+            .foregroundColor(textColor)
+            .frame(minWidth: 80, maxWidth: 120, minHeight: 28)
+            .background(isSelected ? Color(white: 0.22) : Color.clear)
             .opacity(isDragging ? 0.5 : 1.0)
         }
         .buttonStyle(.plain)

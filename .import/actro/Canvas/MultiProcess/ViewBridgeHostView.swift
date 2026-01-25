@@ -237,11 +237,6 @@ public class ViewBridgeHostView: NSView {
         let expectedFrame = NSRect(origin: .zero, size: bounds.size)
         if remoteView.frame != expectedFrame {
             remoteView.frame = expectedFrame
-            // 🔑 更新 layer position 以保持 Y 轴翻转后的正确显示
-            // anchorPoint 是 (0.5, 0.5)，position 需要是视图中心点
-            if let layer = remoteView.layer {
-                layer.position = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
-            }
         }
     }
 
@@ -479,23 +474,6 @@ public class ViewBridgeHostView: NSView {
         remoteView.frame = targetFrame
         // Disable autoresizing mask as we manage layout manually
         remoteView.autoresizingMask = []
-
-        // 🔑 坐标系修复：Service 端的 jail 是非 flipped 的（原点在左下角）
-        // Container 放在 jail 的 (0,0)，但我们需要把内容显示在视觉顶部
-        // 使用 Y 轴翻转变换来解决坐标系不匹配问题
-        remoteView.wantsLayer = true
-        if let layer = remoteView.layer {
-            // anchorPoint 默认是 (0.5, 0.5)，翻转以视图中心为轴
-            layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            // 设置 position 为视图中心点（因为 anchorPoint 是相对于 bounds 的）
-            layer.position = CGPoint(x: targetFrame.width / 2, y: targetFrame.height / 2)
-            // 应用 Y 轴翻转
-            layer.transform = CATransform3DMakeScale(1, -1, 1)
-            ipcLog("🔄 Applied Y-axis flip transform to remoteView, frame=\(NSStringFromRect(targetFrame))")
-        } else {
-            ipcLog("⚠️ remoteView.layer is nil, cannot apply Y-axis flip transform")
-        }
-
         addSubview(remoteView)
 
         // Configure ViewBridge content size range
@@ -547,10 +525,11 @@ public class ViewBridgeHostView: NSView {
         currentContentSize = newSize
         let oldBounds = bounds.size
 
-        // 更新自身 frame（直接同步设置，避免异步积压）
-        if bounds.size != newSize {
-            setFrameSize(newSize)
-        }
+        // 🔑 重要：不要在这里强行 setFrameSize
+        // ViewBridgeHostView 的尺寸由上层 SwiftUI/ContainerView 驱动（autoresizingMask / layout）
+        // 如果在 resize 过程中反向 setFrameSize，会与 SwiftUI/.position 的布局反馈相互“拉扯”，
+        // 造成 Y 向抖动（尤其是当 SwiftUI 给出 0.5pt 的几何尺寸时）。
+        invalidateIntrinsicContentSize()
 
         // 🔑 始终更新 remoteView frame，确保与 bounds 同步
         // 之前错误地在 Live resize 期间跳过此调用，导致 remoteView 滞后 10-20px
@@ -1660,6 +1639,7 @@ struct PersistentViewBridgeView: NSViewRepresentable {
         // 传入的 size 参数才是正确的目标尺寸（Overview 模式下是 cardSize）
         let targetSize = size
         let containerBounds = container.bounds.size
+        let isLiveResizing = WindowResizeState.shared.isLiveResizing
 
         // 调试日志
         ipcLog("📐 updateNSView: tab=\(String(tabId.uuidString.prefix(8))), targetSize=\(Int(targetSize.width))x\(Int(targetSize.height)), containerBounds=\(Int(containerBounds.width))x\(Int(containerBounds.height)), allowsHitTesting=\(allowsHitTesting)")
@@ -1669,11 +1649,27 @@ struct PersistentViewBridgeView: NSViewRepresentable {
             return
         }
 
-        // 🔑 如果 container bounds 与目标尺寸不同，主动更新 container frame
-        // 使用 >= 1 而非 > 1，确保 1px 差异也触发更新，避免 container 和 hostView 尺寸不一致
-        if abs(containerBounds.width - targetSize.width) >= 1 || abs(containerBounds.height - targetSize.height) >= 1 {
-            container.setFrameSize(targetSize)
-            ipcLog("📐 updateNSView: updated container frame to \(Int(targetSize.width))x\(Int(targetSize.height))")
+        // 🔑 不要在 updateNSView 里强行 setFrameSize(container)
+        // 这会与 SwiftUI 的 .frame/.position 布局打架，导致拖动窗口（尤其是 Y 向）内容明显抖动。
+        // 改为：
+        // - live resize 期间：优先使用 AppKit 实际 bounds（更贴近屏幕上的真实尺寸）
+        // - 非 live resize：优先使用 SwiftUI 传入的 targetSize（解决 .position 下 bounds 不更新的场景）
+        // - 如果两者差异较大：异步在下一轮 RunLoop 再读一次 bounds，避免“旧 bounds”导致 Service 频繁来回改尺寸
+        let effectiveSize: CGSize
+        let boundsLooksValid = containerBounds.width > 10 && containerBounds.height > 10
+        let boundsCloseToTarget = abs(containerBounds.width - targetSize.width) < 1 && abs(containerBounds.height - targetSize.height) < 1
+
+        if isLiveResizing, boundsLooksValid {
+            effectiveSize = containerBounds
+        } else {
+            effectiveSize = targetSize
+            if boundsLooksValid, !boundsCloseToTarget {
+                DispatchQueue.main.async {
+                    let updated = container.bounds.size
+                    guard updated.width > 10 && updated.height > 10 else { return }
+                    coordinator.updateViewportSize(updated)
+                }
+            }
         }
 
         // 更新 hostView frame 使用目标尺寸
@@ -1682,7 +1678,7 @@ struct PersistentViewBridgeView: NSViewRepresentable {
             // Update hit testing state on hostView as well
             hostView.allowsHitTesting = allowsHitTesting
             // 通知 coordinator 更新尺寸（coordinator 会调用 hostView.applyFrameSize）
-            coordinator.updateViewportSize(targetSize)
+            coordinator.updateViewportSize(effectiveSize)
         }
     }
 
@@ -2014,6 +2010,13 @@ struct UnifiedReactNativeLayer: View {
             if coordinator.hasConnection && coordinator.xpcServiceReady && isCoordinatorViewportSizeValid {
                 sendTabConfigIfReady()
             }
+        }
+        .onChange(of: tab.systemTabType) { _, newValue in
+            // 🔑 系统 Tab 类型变化时（如从 startPage 切换到 history），重新发送 config
+            guard coordinator.hasConnection && coordinator.xpcServiceReady else { return }
+            NSLog("🔄 [UnifiedRN] systemTabType changed to %@, resending config",
+                  newValue?.rawValue ?? "nil")
+            sendTabConfigIfReady()
         }
         // 🔑 尺寸变化由 PersistentViewBridgeView.updateNSView 统一处理
         // 不再需要 onChange 监听，避免多源竞争导致尺寸抖动
@@ -2382,6 +2385,12 @@ struct ViewBridgeMultiProcessTabView: View {
                     }
                 }
                 .onChange(of: tab.unifiedScript) { _, _ in
+                    sendTabConfigToService()
+                }
+                .onChange(of: tab.systemTabType) { _, newValue in
+                    // 🔑 系统 Tab 类型变化时（如从 startPage 切换到 history），重新发送 config
+                    NSLog("🔄 [MultiProcess] systemTabType changed to %@, resending config",
+                          newValue?.rawValue ?? "nil")
                     sendTabConfigToService()
                 }
                 .onChange(of: isFocused) { _, newValue in
