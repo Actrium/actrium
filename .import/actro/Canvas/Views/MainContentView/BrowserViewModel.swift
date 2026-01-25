@@ -629,9 +629,10 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
     /// 导航当前 Tab 到指定 URL 或应用 ID
     /// 统一的导航入口 - 处理所有类型的输入
     /// - 如果输入是 about: URL，导航到对应系统应用
+    /// - 如果输入是 askw:// 或 askaway:// URL，加载 AskAway 应用
     /// - 如果输入是 http/https URL，作为 Web 内容加载
     /// - 如果输入是本地文件路径，加载 ACTR 应用
-    /// - 否则作为 app id 处理（暂不实现）
+    /// - 否则作为 app id 处理
     func navigateCurrentTab(to input: String) {
         guard let currentTabId = currentTabId,
               let index = tabs.firstIndex(where: { $0.id == currentTabId }) else {
@@ -680,6 +681,39 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 return
             }
 
+            // Check if it's an askw:// or askaway:// URL for AskAway apps
+            // Two formats supported:
+            // - askw://bundleId - lookup by bundleId in database
+            // - askw:///absolute/path - local file path (three slashes)
+            if url.scheme == "askw" || url.scheme == "askaway" {
+                var sourcePath: String?
+
+                // Check if it's a local path (askw:///path/to/app)
+                // URL parsing: askw:///path -> host is nil/empty, path is /path
+                if let host = url.host, !host.isEmpty {
+                    // bundleId mode: askw://com.example.app - lookup in database
+                    logger.notice("📱 [navigateCurrentTab] 导航到 AskAway 应用 (bundleId): \(host)")
+                    let appRepo = AppRepository()
+                    if let app = appRepo.getByBundleId(host) {
+                        sourcePath = app.sourcePath
+                        appRepo.updateLastUsed(bundleId: host)
+                    } else {
+                        logger.warning("⚠️ [navigateCurrentTab] 未找到应用: \(host)")
+                        return
+                    }
+                } else {
+                    // local path mode: askw:///Users/example-dev-2/path/to/app
+                    sourcePath = url.path
+                    logger.notice("📂 [navigateCurrentTab] 导航到本地 AskAway 应用: \(sourcePath ?? "")")
+                }
+
+                // Load ACTR app into current tab
+                if let path = sourcePath {
+                    loadACTRAppIntoCurrentTab(from: URL(fileURLWithPath: path), tabIndex: index)
+                }
+                return
+            }
+
             logger.notice("🌐 [navigateCurrentTab] 导航到 URL: \(url.absoluteString)")
             // 更新 Tab 为 Web 内容
             tabs[index].url = url
@@ -693,8 +727,120 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             tabs[index].contractName = nil
             objectWillChange.send()
         } else {
-            // TODO: 处理 app id（从书签或应用库加载）
-            logger.notice("📱 [navigateCurrentTab] 输入不是有效 URL，可能是 app id: \(trimmed)")
+            // Try to load as app bundle ID directly
+            logger.notice("📱 [navigateCurrentTab] 尝试作为 bundle ID 加载: \(trimmed)")
+            let appRepo = AppRepository()
+            if let app = appRepo.getByBundleId(trimmed) {
+                appRepo.updateLastUsed(bundleId: trimmed)
+                loadACTRAppIntoCurrentTab(from: URL(fileURLWithPath: app.sourcePath), tabIndex: index)
+            } else {
+                logger.warning("⚠️ [navigateCurrentTab] 未找到应用: \(trimmed)")
+            }
+        }
+    }
+
+    /// Load ACTR app into the current tab (in-place update, not creating new tab)
+    /// Used by askw:// URL navigation to update current tab content
+    private func loadACTRAppIntoCurrentTab(from fileURL: URL, tabIndex: Int) {
+        let resolvedURL = fileURL.standardizedFileURL
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory) else {
+            logger.error("❌ [loadACTRAppIntoCurrentTab] 路径不存在: \(resolvedURL.path)")
+            return
+        }
+
+        let rootDir: URL
+        if isDirectory.boolValue {
+            rootDir = resolvedURL
+        } else {
+            // Archive mode - extract to temp
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                try unzipACTR(archive: resolvedURL, to: tempDir)
+            } catch {
+                logger.error("❌ [loadACTRAppIntoCurrentTab] 解压失败: \(error.localizedDescription)")
+                return
+            }
+            rootDir = tempDir
+        }
+
+        do {
+            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+            let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
+
+            // Register app if bundleId provided
+            if let bundleId = manifestInfo.bundleId {
+                let sourceType: AppSourceType = isDirectory.boolValue ? .localDev : .downloaded
+                registerApp(
+                    name: tabTitle,
+                    bundleId: bundleId,
+                    version: manifestInfo.version,
+                    description: manifestInfo.description,
+                    sourceType: sourceType,
+                    sourcePath: resolvedURL.path,
+                    icon: manifestInfo.icon
+                )
+            }
+
+            // Read scripts
+            var unifiedScript: String? = nil
+            if let unifiedFileName = manifestInfo.unifiedScript {
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
+            }
+
+            var leftPanelScript: String? = nil
+            var rightPanelScript: String? = nil
+            if let leftFileName = manifestInfo.leftPanelScript {
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
+            }
+            if let rightFileName = manifestInfo.rightPanelScript {
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
+            }
+
+            let guestScript = readGuestScript(fromRoot: rootDir)
+
+            // Update current tab in-place (like about: URL handling)
+            logger.notice("📱 [loadACTRAppIntoCurrentTab] 更新当前 Tab: \(tabTitle)")
+
+            tabs[tabIndex].title = tabTitle
+            tabs[tabIndex].url = resolvedURL
+            tabs[tabIndex].systemTabType = nil
+            tabs[tabIndex].htmlContent = nil
+
+            // Set scripts based on available content
+            if let unified = unifiedScript {
+                tabs[tabIndex].unifiedScript = unified
+                tabs[tabIndex].leftPanelScript = nil
+                tabs[tabIndex].rightPanelScript = nil
+                tabs[tabIndex].guestScript = nil
+            } else if leftPanelScript != nil || rightPanelScript != nil {
+                tabs[tabIndex].unifiedScript = nil
+                tabs[tabIndex].leftPanelScript = leftPanelScript
+                tabs[tabIndex].rightPanelScript = rightPanelScript
+                tabs[tabIndex].guestScript = nil
+            } else if let script = guestScript {
+                tabs[tabIndex].unifiedScript = nil
+                tabs[tabIndex].leftPanelScript = nil
+                tabs[tabIndex].rightPanelScript = nil
+                tabs[tabIndex].guestScript = script
+            }
+
+            tabs[tabIndex].contractName = manifestInfo.contractName
+            tabs[tabIndex].contractVersion = manifestInfo.contractVersion
+            tabs[tabIndex].permissions = manifestInfo.permissions
+            tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
+            tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
+
+            // Update panel visibility
+            leftPanelVisibility[tabs[tabIndex].id] = manifestInfo.leftPanelDefaultVisible
+
+            objectWillChange.send()
+
+        } catch {
+            logger.error("❌ [loadACTRAppIntoCurrentTab] 加载失败: \(error.localizedDescription)")
         }
     }
 
@@ -720,11 +866,13 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
     }
 
     /// 解析 URL 字符串
-    /// - 如果是 about:/http/https，直接解析
-    /// - 如果看起来像域名（包含 .），添加 https:// 前缀
+    /// - 如果是 about:/http/https/askw/askaway，直接解析
+    /// - 如果看起来像域名（包含 . 且不包含空格），添加 https:// 前缀
     private func parseURL(_ input: String) -> URL? {
-        // 已经是完整 URL (http/https/about)
-        if input.hasPrefix("http://") || input.hasPrefix("https://") || input.hasPrefix("about:") {
+        // 已经是完整 URL (http/https/about/askw/askaway)
+        if input.hasPrefix("http://") || input.hasPrefix("https://") ||
+           input.hasPrefix("about:") ||
+           input.hasPrefix("askw://") || input.hasPrefix("askaway://") {
             return URL(string: input)
         }
 
@@ -937,6 +1085,19 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         do {
             let manifestInfo = try readManifestJSON(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
+
+            // Register as downloaded app if bundleId is provided
+            if let bundleId = manifestInfo.bundleId {
+                registerApp(
+                    name: tabTitle,
+                    bundleId: bundleId,
+                    version: manifestInfo.version,
+                    description: manifestInfo.description,
+                    sourceType: .downloaded,
+                    sourcePath: resolvedURL.path,
+                    icon: manifestInfo.icon
+                )
+            }
 
             // 读取 guest 脚本
             let guestScript = readGuestScript(fromRoot: rootDir)
@@ -1154,6 +1315,19 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             let tabTitle = manifestInfo.name ?? directoryURL.lastPathComponent
             logger.debug("📂 [loadFromDevDirectory] 加载开发目录: \(tabTitle)")
 
+            // Register as local dev app if bundleId is provided
+            if let bundleId = manifestInfo.bundleId {
+                registerApp(
+                    name: tabTitle,
+                    bundleId: bundleId,
+                    version: manifestInfo.version,
+                    description: manifestInfo.description,
+                    sourceType: .localDev,
+                    sourcePath: directoryURL.path,
+                    icon: manifestInfo.icon
+                )
+            }
+
             let guestScript = readGuestScript(fromRoot: directoryURL)
 
             var unifiedScript: String? = nil
@@ -1222,6 +1396,45 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             }
         } catch {
             logger.error(" 开发目录加载失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// Register an AskAway app in the database
+    /// This allows the app to be opened via askw://bundleId URL
+    private func registerApp(
+        name: String,
+        bundleId: String,
+        version: String?,
+        description: String?,
+        sourceType: AppSourceType,
+        sourcePath: String,
+        icon: String?
+    ) {
+        let appRepo = AppRepository()
+
+        // Check if already registered
+        if let existing = appRepo.getByBundleId(bundleId) {
+            // Update existing entry
+            var updated = existing
+            updated.sourcePath = sourcePath
+            if let v = version { updated.version = v }
+            if let d = description { updated.description = d }
+            if let i = icon { updated.icon = i }
+            appRepo.update(updated)
+            logger.notice("📱 [registerApp] 更新应用: \(bundleId)")
+        } else {
+            // Create new entry
+            let app = AskAwayApp(
+                name: name,
+                bundleId: bundleId,
+                version: version,
+                description: description,
+                sourceType: sourceType,
+                sourcePath: sourcePath,
+                icon: icon
+            )
+            appRepo.add(app)
+            logger.notice("📱 [registerApp] 注册新应用: \(bundleId) -> \(sourcePath)")
         }
     }
 
@@ -1316,7 +1529,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         }
     }
 
-    private func readManifestJSON(fromRoot root: URL) throws -> (name: String?, version: String?, description: String?, contractName: String?, contractVersion: Int?, permissions: [String], leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, leftPanelScript: String?, rightPanelScript: String?, unifiedScript: String?, systemAppType: SystemTabType?) {
+    private func readManifestJSON(fromRoot root: URL) throws -> (name: String?, version: String?, description: String?, bundleId: String?, icon: String?, contractName: String?, contractVersion: Int?, permissions: [String], leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, leftPanelScript: String?, rightPanelScript: String?, unifiedScript: String?, systemAppType: SystemTabType?) {
         guard let manifestURL = findManifestJSON(in: root) else {
             throw NSError(
                 domain: "ACTRPackage",
@@ -1330,6 +1543,9 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         let name = json?["name"] as? String
         let version = json?["version"] as? String
         let description = json?["description"] as? String
+        // bundleId can be specified as "id" or "bundleId" in manifest
+        let bundleId = (json?["id"] as? String) ?? (json?["bundleId"] as? String)
+        let icon = json?["icon"] as? String
 
         // MARK: - Contracts / Permissions (Phase 1: gating + logging)
         let supportedContractName = "ask"
@@ -1394,7 +1610,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             systemAppType = SystemTabType(rawValue: typeStr)
         }
 
-        return (name, version, description, contractNameValue, contractVersionValue, permissionsValue, leftPanelDefaultVisible, rightPanelDefaultVisible, leftPanelScript, rightPanelScript, unifiedScript, systemAppType)
+        return (name, version, description, bundleId, icon, contractNameValue, contractVersionValue, permissionsValue, leftPanelDefaultVisible, rightPanelDefaultVisible, leftPanelScript, rightPanelScript, unifiedScript, systemAppType)
     }
 
     private func findManifestJSON(in root: URL) -> URL? {

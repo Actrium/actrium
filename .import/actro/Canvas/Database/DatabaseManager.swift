@@ -99,6 +99,25 @@ final class DatabaseManager {
             )
         """)
         execute("CREATE INDEX IF NOT EXISTS idx_bookmark_tags_tag ON bookmark_tags(tag_id)")
+
+        // Apps table - stores AskAway apps (downloaded packages and local dev packages)
+        execute("""
+            CREATE TABLE IF NOT EXISTS apps (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                bundle_id TEXT NOT NULL UNIQUE,
+                version TEXT,
+                description TEXT,
+                source_type TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                icon TEXT,
+                installed_at INTEGER NOT NULL,
+                last_used_at INTEGER,
+                is_pinned INTEGER DEFAULT 0
+            )
+        """)
+        execute("CREATE INDEX IF NOT EXISTS idx_apps_bundle_id ON apps(bundle_id)")
+        execute("CREATE INDEX IF NOT EXISTS idx_apps_source_type ON apps(source_type)")
     }
 
     private func insertDefaultTags() {
