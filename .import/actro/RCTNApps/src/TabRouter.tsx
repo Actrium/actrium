@@ -80,7 +80,7 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
     // System app tab
     if (tab.systemAppType) {
       return (
-        <View style={styles.container} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
+        <View style={styles.container} key={`${tab.id}-${tab.systemAppType}-${tab.reloadKey ?? 0}`}>
           <React.Suspense fallback={<LoadingFallback />}>
             {tab.systemAppType === 'loading' && (
               <View style={styles.xpcLoading}>
@@ -196,7 +196,7 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
         const isActive = tab.id === activeTabId;
         return (
           <View
-            key={`${tab.id}-${tab.reloadKey ?? 0}`}
+            key={`${tab.id}-${tab.systemAppType}-${tab.reloadKey ?? 0}`}
             style={[
               StyleSheet.absoluteFill,
               { display: isActive ? 'flex' : 'none' }
