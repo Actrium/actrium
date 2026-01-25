@@ -736,7 +736,8 @@ final class ViewBridgeCoordinator {
         ]
 
         // 使用 coordinator 存储的完整 tab 配置
-        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil"), isOverviewMode=\(isOverviewMode), bookmarks=\(tabConfig?.bookmarks.count ?? 0), history=\(tabConfig?.recentHistory.count ?? 0)")
+        let unifiedScriptPreview = tabConfig?.unifiedScript.map { String($0.prefix(50)) + "..." } ?? "nil"
+        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil"), unifiedScript=\(unifiedScriptPreview), isOverviewMode=\(isOverviewMode), bookmarks=\(tabConfig?.bookmarks.count ?? 0), history=\(tabConfig?.recentHistory.count ?? 0)")
 
         // 🔑 如果 tabConfig 还没设置，标记为待发送，等 tabConfig 设置后再发
         guard let tabConfig = self.tabConfig else {
@@ -2020,9 +2021,15 @@ struct UnifiedReactNativeLayer: View {
             coordinator.lastSentConfigSize = nil
             sendTabConfigIfReady()
         }
-        .onChange(of: tab.unifiedScript) { _, _ in
+        .onChange(of: tab.unifiedScript) { oldValue, newValue in
             // 🔑 unifiedScript 变化时（如从 startPage 切换到 ACTR app），重新发送 config
-            guard coordinator.hasConnection && coordinator.xpcServiceReady else { return }
+            let oldPreview = oldValue.map { String($0.prefix(30)) + "..." } ?? "nil"
+            let newPreview = newValue.map { String($0.prefix(30)) + "..." } ?? "nil"
+            NSLog("🔄 [UnifiedRN] onChange(unifiedScript): old=\(oldPreview), new=\(newPreview), hasConn=\(coordinator.hasConnection), xpcReady=\(coordinator.xpcServiceReady)")
+            guard coordinator.hasConnection && coordinator.xpcServiceReady else {
+                NSLog("⚠️ [UnifiedRN] unifiedScript changed but connection not ready, skipping")
+                return
+            }
             NSLog("🔄 [UnifiedRN] unifiedScript changed, resending config")
             coordinator.lastSentConfigSize = nil
             sendTabConfigIfReady()
