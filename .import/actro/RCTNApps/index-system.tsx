@@ -32,6 +32,9 @@ const BookmarksApp = React.lazy(() => import('./src/system-apps/BookmarksApp'));
 const DebugApp = React.lazy(() => import('./src/system-apps/DebugApp').then(m => ({ default: m.DebugApp })));
 const StartPageApp = React.lazy(() => import('./src/system-apps/StartPageApp'));
 
+// Lazy import for ACTR apps (with unifiedScript)
+const ActrApp = React.lazy(() => import('./src/actr-host/ActrApp').then(m => ({ default: m.ActrApp })));
+
 const NativeLogger = NativeModules.NativeLogger;
 const nlog = (msg: string) => { try { NativeLogger?.log?.(msg); } catch {} };
 const nerror = (msg: string) => { try { NativeLogger?.error?.(msg); } catch {} };
@@ -78,6 +81,10 @@ interface SystemAppProps {
     id: string;
     title?: string;
     systemAppType?: string;
+    unifiedScript?: string;  // ACTR app script
+    leftPanelScript?: string;
+    rightPanelScript?: string;
+    guestScript?: string;
     backgroundColor?: string;
     bookmarks?: any[];
     recentHistory?: any[];
@@ -88,14 +95,39 @@ interface SystemAppProps {
   containerWidth?: number;
   containerHeight?: number;
   isOverviewMode?: boolean;
+  isLeftPanelVisible?: boolean;
+  isRightPanelVisible?: boolean;
 }
 
 const SystemAppRouter: React.FC<SystemAppProps> = (props) => {
   const tab = props?.tab;
-  const { containerWidth, containerHeight, isOverviewMode } = props;
+  const { containerWidth, containerHeight, isOverviewMode, isLeftPanelVisible, isRightPanelVisible } = props;
 
-  nlog(`[SystemAppRouter] render: systemAppType=${tab?.systemAppType}, tabId=${tab?.id?.substring(0, 8)}, isOverviewMode=${isOverviewMode}, size=${containerWidth}x${containerHeight}`);
+  const hasActrScript = !!(tab?.unifiedScript || tab?.leftPanelScript || tab?.rightPanelScript || tab?.guestScript);
+  nlog(`[SystemAppRouter] render: systemAppType=${tab?.systemAppType}, hasActrScript=${hasActrScript}, tabId=${tab?.id?.substring(0, 8)}, isOverviewMode=${isOverviewMode}, size=${containerWidth}x${containerHeight}`);
 
+  // 🔑 ACTR app: has script but no systemAppType
+  if (!tab?.systemAppType && hasActrScript && tab) {
+    nlog(`[SystemAppRouter] Rendering ActrApp for tab=${tab.id?.substring(0, 8)}`);
+    return (
+      <View style={styles.container}>
+        <ErrorBoundary>
+          <React.Suspense fallback={<LoadingFallback />}>
+            <ActrApp
+              tabs={[tab]}
+              currentTabId={tab.id}
+              isLeftPanelVisible={isLeftPanelVisible}
+              isRightPanelVisible={isRightPanelVisible}
+              containerWidth={containerWidth}
+              containerHeight={containerHeight}
+            />
+          </React.Suspense>
+        </ErrorBoundary>
+      </View>
+    );
+  }
+
+  // No systemAppType and no script - waiting for config
   if (!tab?.systemAppType) {
     return (
       <View style={styles.loading}>
