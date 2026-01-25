@@ -2020,6 +2020,13 @@ struct UnifiedReactNativeLayer: View {
             coordinator.lastSentConfigSize = nil
             sendTabConfigIfReady()
         }
+        .onChange(of: tab.unifiedScript) { _, _ in
+            // 🔑 unifiedScript 变化时（如从 startPage 切换到 ACTR app），重新发送 config
+            guard coordinator.hasConnection && coordinator.xpcServiceReady else { return }
+            NSLog("🔄 [UnifiedRN] unifiedScript changed, resending config")
+            coordinator.lastSentConfigSize = nil
+            sendTabConfigIfReady()
+        }
         // 🔑 尺寸变化由 PersistentViewBridgeView.updateNSView 统一处理
         // 不再需要 onChange 监听，避免多源竞争导致尺寸抖动
     }
