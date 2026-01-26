@@ -34,13 +34,18 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
     const subscription = DeviceEventEmitter.addListener('onPropsUpdate', (newProps: any) => {
       // Log to native for visibility in IPC logs
       const { NativeModules } = require('react-native');
-      const msg = `[TabRouter] onPropsUpdate received: isOverviewMode=${newProps?.isOverviewMode}, keys=${Object.keys(newProps || {}).join(',')}`;
+      const msg = `[TabRouter] onPropsUpdate received: size=${newProps?.containerWidth}x${newProps?.containerHeight}, isOverviewMode=${newProps?.isOverviewMode}`;
       NativeModules.NativeLogger?.log?.(msg);
       console.warn(msg);
 
-      if (newProps?.isOverviewMode !== undefined) {
-        setDynamicProps(prev => ({ ...prev, isOverviewMode: newProps.isOverviewMode }));
-      }
+      setDynamicProps(prev => ({
+        ...prev,
+        ...(newProps?.containerWidth !== undefined && { containerWidth: newProps.containerWidth }),
+        ...(newProps?.containerHeight !== undefined && { containerHeight: newProps.containerHeight }),
+        ...(newProps?.isOverviewMode !== undefined && { isOverviewMode: newProps.isOverviewMode }),
+        ...(newProps?.isLeftPanelVisible !== undefined && { isLeftPanelVisible: newProps.isLeftPanelVisible }),
+        ...(newProps?.isRightPanelVisible !== undefined && { isRightPanelVisible: newProps.isRightPanelVisible }),
+      }));
     });
 
     return () => {
