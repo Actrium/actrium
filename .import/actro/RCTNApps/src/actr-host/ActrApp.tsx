@@ -1257,16 +1257,10 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     };
   }, [activeTabId, getEngine, monitorTabs]);
 
-  // 使用显式尺寸替代 absoluteFill，确保容器尺寸正确
-  const hasExplicitSize = containerWidth && containerWidth > 0 && containerHeight && containerHeight > 0;
-
-  // 当有显式尺寸时，完全不使用 flex，避免布局冲突
-  const tabHostStyle = React.useMemo(() => {
-    if (hasExplicitSize) {
-      return { width: containerWidth, height: containerHeight, position: 'relative' as const };
-    }
-    return styles.tabHost;
-  }, [hasExplicitSize, containerWidth, containerHeight]);
+  // 🔑 Always use flex:1 layout — RCTRootView frame is updated by native on resize,
+  // flex children automatically fill the available space without needing explicit dimensions.
+  // (containerWidth/containerHeight are still passed to Engine config for initial setup)
+  const tabHostStyle = styles.tabHost;
 
   // Ref to the main content view for Inspector API
   const inspectedViewRef = useRef<View>(null);
@@ -1506,11 +1500,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       >
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
-          // 重要：显式尺寸模式下不使用 flex:1，完全依赖父容器的宽高
           const displayStyle = { display: isActive ? 'flex' as const : 'none' as const };
-          const tabContainerStyle = hasExplicitSize
-            ? { width: containerWidth, height: containerHeight, ...displayStyle }
-            : [StyleSheet.absoluteFill, displayStyle];
+          const tabContainerStyle = [StyleSheet.absoluteFill, displayStyle];
           return (
             <View
               key={`${tab.id}-${tab.reloadKey ?? 0}`}

@@ -146,6 +146,19 @@ private class ResizableContainerView: NSView {
         super.setFrameSize(newSize)
         rnView?.frame = bounds
         CATransaction.commit()
+
+        // 🔑 macOS XPC: directly call layoutSubviews (window is nil, so layout() won't)
+        if let rnView = rnView {
+            let sel = NSSelectorFromString("layoutSubviews")
+            if rnView.responds(to: sel) {
+                rnView.perform(sel)
+            }
+            for subview in rnView.subviews {
+                if subview.responds(to: sel) {
+                    subview.perform(sel)
+                }
+            }
+        }
     }
 
     /// Reference to the ViewController for updating preferredContentSize dynamically
@@ -229,6 +242,24 @@ private class ResizableContainerView: NSView {
         rnView?.frame = bounds
 
         CATransaction.commit()
+
+        // 🔑 macOS XPC: In XPC service, views have no NSWindow, so layout() skips layoutSubviews
+        // (RCTUIKit.m: layout() { if (self.window != nil) { [self layoutSubviews]; } })
+        // We must directly call layoutSubviews to trigger the Yoga recalculation chain:
+        //   RCTRootView.layoutSubviews → _contentView.frame = self.bounds
+        //   RCTRootContentView.layoutSubviews → updateAvailableSize → Yoga recalculation
+        if let rnView = rnView {
+            let sel = NSSelectorFromString("layoutSubviews")
+            if rnView.responds(to: sel) {
+                rnView.perform(sel)
+            }
+            for subview in rnView.subviews {
+                subview.frame = rnView.bounds
+                if subview.responds(to: sel) {
+                    subview.perform(sel)
+                }
+            }
+        }
 
         // 详细日志：检查 jail 和 Container 的尺寸/位置是否一致
         let jailSize = superview?.bounds.size ?? .zero
@@ -919,6 +950,17 @@ private class ServiceReactNativeHost {
                     entry.rootView = newRootView
                     newRootView.frame = CGRect(origin: .zero, size: size)
                     container.addSubview(newRootView)
+                    container.setRNView(newRootView)
+                    // Force layoutSubviews directly (XPC has no window, layout() won't cascade)
+                    let sel = NSSelectorFromString("layoutSubviews")
+                    if newRootView.responds(to: sel) {
+                        newRootView.perform(sel)
+                    }
+                    for subview in newRootView.subviews {
+                        if subview.responds(to: sel) {
+                            subview.perform(sel)
+                        }
+                    }
                     ipcLog("✅ Recreated RCTRootView: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverviewMode ?? false) size=\(Int(size.width))x\(Int(size.height))")
                 } else {
                     ipcLog("⚠️ Failed to recreate RCTRootView for tab=\(String(tabId.prefix(8)))")
@@ -940,10 +982,25 @@ private class ServiceReactNativeHost {
                 container.applyHostSize(size)
             }
 
-            // 🔑 关键：更新 RN rootView 的 frame 并通知 RN 尺寸变化
+            // 🔑 关键：更新 RN rootView 的 frame 并强制 Yoga 重新布局
+            // applyHostSize 已经设置了 rnView.frame 并直接调用 layoutSubviews，
+            // 但作为安全措施，确保 rootView 也被正确更新
             if let rootView = entry.rootView {
+                let oldFrame = rootView.frame
                 rootView.frame = CGRect(origin: .zero, size: size)
-                ipcLog("📱 Updated RN rootView.frame: tab=\(String(tabId.prefix(8))) size=\(Int(size.width))x\(Int(size.height))")
+                // 如果 frame 确实变了，直接调用 layoutSubviews（XPC 中 window 为 nil，layout() 不会调用 layoutSubviews）
+                if oldFrame.size != size {
+                    let sel = NSSelectorFromString("layoutSubviews")
+                    if rootView.responds(to: sel) {
+                        rootView.perform(sel)
+                    }
+                    for subview in rootView.subviews {
+                        if subview.responds(to: sel) {
+                            subview.perform(sel)
+                        }
+                    }
+                }
+                ipcLog("📱 Updated RN rootView.frame + layoutSubviews: tab=\(String(tabId.prefix(8))) size=\(Int(size.width))x\(Int(size.height))")
             }
 
             // 🔑 通知 RN 布局系统尺寸变化（发送 didUpdateDimensions 事件）
@@ -1662,8 +1719,17 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     container.applyHostSize(containerSize)
 
     // Force layout to ensure RN content is visible immediately
-    container.needsLayout = true
-    container.layoutSubtreeIfNeeded()
+    // 🔑 XPC service has no NSWindow, so layout() won't call layoutSubviews.
+    // Directly call layoutSubviews on RCTRootView and RCTRootContentView.
+    let sel = NSSelectorFromString("layoutSubviews")
+    if rnView.responds(to: sel) {
+        rnView.perform(sel)
+    }
+    for subview in rnView.subviews {
+        if subview.responds(to: sel) {
+            subview.perform(sel)
+        }
+    }
 
     // Size change callback
     container.onSizeChanged = { [weak entry] newSize in

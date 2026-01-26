@@ -23,8 +23,8 @@ try {
   }
 } catch {}
 
-import React from 'react';
-import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
 
 // Lazy imports for system apps
 const HistoryApp = React.lazy(() => import('./src/system-apps/HistoryApp'));
@@ -99,9 +99,48 @@ interface SystemAppProps {
   isRightPanelVisible?: boolean;
 }
 
-const SystemAppRouter: React.FC<SystemAppProps> = (props) => {
+const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
+  // 🔑 Use onLayout for live container size — most reliable on macOS
+  // (appProperties, DeviceEventEmitter, useWindowDimensions all unreliable on macOS XPC)
+  const [layoutSize, setLayoutSize] = useState<{ width: number; height: number } | null>(null);
+
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0 && height > 0) {
+      setLayoutSize(prev => {
+        if (prev && Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) {
+          return prev; // avoid re-render for sub-pixel changes
+        }
+        nlog(`[SystemAppRouter] onLayout: ${Math.round(width)}x${Math.round(height)}`);
+        return { width, height };
+      });
+    }
+  }, []);
+
+  // 🔑 Dynamic props via DeviceEventEmitter (for non-size props like isOverviewMode)
+  const [dynamicProps, setDynamicProps] = useState<Partial<SystemAppProps>>({});
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('onPropsUpdate', (newProps: any) => {
+      nlog(`[SystemAppRouter] onPropsUpdate: isOverviewMode=${newProps?.isOverviewMode}, leftPanel=${newProps?.isLeftPanelVisible}, rightPanel=${newProps?.isRightPanelVisible}`);
+      setDynamicProps(prev => ({
+        ...prev,
+        isOverviewMode: newProps?.isOverviewMode ?? prev.isOverviewMode,
+        isLeftPanelVisible: newProps?.isLeftPanelVisible ?? prev.isLeftPanelVisible,
+        isRightPanelVisible: newProps?.isRightPanelVisible ?? prev.isRightPanelVisible,
+      }));
+    });
+    return () => subscription.remove();
+  }, []);
+
+  // 🔑 Container size: prefer onLayout (live) > initial props
+  const containerWidth = layoutSize?.width ?? initialProps?.containerWidth;
+  const containerHeight = layoutSize?.height ?? initialProps?.containerHeight;
+
+  // Merge initial props with dynamic updates (except size which comes from onLayout)
+  const props = { ...initialProps, ...dynamicProps };
   const tab = props?.tab;
-  const { containerWidth, containerHeight, isOverviewMode, isLeftPanelVisible, isRightPanelVisible } = props;
+  const { isOverviewMode, isLeftPanelVisible, isRightPanelVisible } = props;
 
   const hasActrScript = !!(tab?.unifiedScript || tab?.leftPanelScript || tab?.rightPanelScript || tab?.guestScript);
   nlog(`[SystemAppRouter] render: systemAppType=${tab?.systemAppType}, hasActrScript=${hasActrScript}, tabId=${tab?.id?.substring(0, 8)}, isOverviewMode=${isOverviewMode}, size=${containerWidth}x${containerHeight}`);
@@ -110,7 +149,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (props) => {
   if (!tab?.systemAppType && hasActrScript && tab) {
     nlog(`[SystemAppRouter] Rendering ActrApp for tab=${tab.id?.substring(0, 8)}`);
     return (
-      <View style={styles.container}>
+      <View style={styles.container} onLayout={handleLayout}>
         <ErrorBoundary>
           <React.Suspense fallback={<LoadingFallback />}>
             <ActrApp
@@ -130,7 +169,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (props) => {
   // No systemAppType and no script - waiting for config
   if (!tab?.systemAppType) {
     return (
-      <View style={styles.loading}>
+      <View style={styles.loading} onLayout={handleLayout}>
         <Text style={styles.loadingText}>Waiting for tab config...</Text>
       </View>
     );
@@ -142,7 +181,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (props) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={handleLayout}>
       <ErrorBoundary>
         <React.Suspense fallback={<LoadingFallback />}>
           {tab.systemAppType === 'loading' && (
