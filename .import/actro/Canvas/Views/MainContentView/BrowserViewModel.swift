@@ -56,7 +56,10 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
     /// Toolbar 实际高度（从视图测量得到）
     @Published var toolbarHeight: CGFloat = 52 // 默认值，会在视图中更新
-    
+
+    /// History view model reference for recording ACTR app visits
+    weak var historyVM: HistoryViewModel?
+
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }
         return tabs.first(where: { $0.id == currentTabId })
@@ -802,11 +805,21 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
             let guestScript = readGuestScript(fromRoot: rootDir)
 
+            // Construct askw:// URL for History and address bar
+            let askwURL: URL
+            if let bundleId = manifestInfo.bundleId,
+               let url = URL(string: "askw://\(bundleId)") {
+                askwURL = url
+            } else {
+                // Local dev path: askw:///absolute/path
+                askwURL = URL(string: "askw://\(resolvedURL.path)") ?? resolvedURL
+            }
+
             // Update current tab in-place (like about: URL handling)
-            logger.notice("📱 [loadACTRAppIntoCurrentTab] 更新当前 Tab: \(tabTitle)")
+            logger.notice("📱 [loadACTRAppIntoCurrentTab] 更新当前 Tab: \(tabTitle), url=\(askwURL.absoluteString)")
 
             tabs[tabIndex].title = tabTitle
-            tabs[tabIndex].url = resolvedURL
+            tabs[tabIndex].url = askwURL
             tabs[tabIndex].systemTabType = nil
             tabs[tabIndex].htmlContent = nil
 
@@ -838,6 +851,9 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             leftPanelVisibility[tabs[tabIndex].id] = manifestInfo.leftPanelDefaultVisible
 
             objectWillChange.send()
+
+            // Record History visit for ACTR app
+            historyVM?.recordVisit(tab: tabs[tabIndex])
 
         } catch {
             logger.error("❌ [loadACTRAppIntoCurrentTab] 加载失败: \(error.localizedDescription)")
@@ -1471,9 +1487,11 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false
     ) {
+        // Use askw:// URL for History and address bar
+        let askwURL = URL(string: "askw://\(sourceURL.path)") ?? sourceURL
         let newTab = Tab(
             title: title,
-            url: sourceURL,
+            url: askwURL,
             htmlContent: htmlContent,
             guestScript: guestScript,
             leftPanelScript: leftPanelScript,
@@ -1503,6 +1521,9 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 logger.debug("  └─ 右侧面板默认\(rightPanelDefaultVisible ? "显示" : "隐藏")")
             }
         }
+
+        // Record History visit for ACTR app
+        historyVM?.recordVisit(tab: newTab)
     }
 
     private func unzipACTR(archive: URL, to destination: URL) throws {
