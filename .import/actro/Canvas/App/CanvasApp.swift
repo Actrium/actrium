@@ -159,6 +159,8 @@ struct BrowserWindowView: View {
         ContentView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
             .focusedSceneValue(\.browserViewModel, viewModel)
             .onAppear {
+                // Inject historyVM for ACTR app history recording
+                viewModel.historyVM = historyVM
                 // Register with DevTools for detached window support
                 DevToolsManager.shared.activeBrowserViewModel = viewModel
                 // Check for pending group transfer
@@ -173,23 +175,8 @@ struct BrowserWindowView: View {
                 guard let userInfo = notification.userInfo,
                       let urlString = userInfo["url"] as? String else { return }
 
-                // Parse URL from string (XPC passes strings, not URL objects)
-                let url: URL
-                if let parsed = URL(string: urlString) {
-                    url = parsed
-                } else {
-                    url = URL(fileURLWithPath: urlString)
-                }
-
-                // Check if it's a directory or .actr file
-                var isDirectory: ObjCBool = false
-                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
-                    if isDirectory.boolValue {
-                        viewModel.loadFromDevDirectory(url)
-                    } else {
-                        viewModel.importACTRPackage(from: url)
-                    }
-                }
+                // Use navigateCurrentTab which handles all URL schemes (askw://, http://, about:, file paths)
+                viewModel.navigateCurrentTab(to: urlString)
 
                 // Mark bookmark as used if we can find it
                 if let bookmarkId = userInfo["bookmarkId"] as? String,
@@ -203,21 +190,8 @@ struct BrowserWindowView: View {
                 guard let userInfo = notification.userInfo,
                       let urlString = userInfo["url"] as? String else { return }
 
-                let url: URL
-                if let parsed = URL(string: urlString) {
-                    url = parsed
-                } else {
-                    url = URL(fileURLWithPath: urlString)
-                }
-
-                var isDirectory: ObjCBool = false
-                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
-                    if isDirectory.boolValue {
-                        viewModel.loadFromDevDirectory(url)
-                    } else {
-                        viewModel.importACTRPackage(from: url)
-                    }
-                }
+                // Use navigateCurrentTab which handles all URL schemes (askw://, http://, about:, file paths)
+                viewModel.navigateCurrentTab(to: urlString)
             }
             // Handle bookmark delete from XPC service
             .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteBookmark)) { notification in
@@ -804,7 +778,8 @@ struct CanvasApp: App {
     private func openHistoryItem(_ item: HistoryItem) {
         guard let vm = focusedViewModel else { return }
         if let url = item.appURL {
-            vm.importACTRPackage(from: url)
+            // Use navigateCurrentTab which handles all URL schemes (askw://, http://, about:, etc.)
+            vm.navigateCurrentTab(to: url.absoluteString)
             historyVM.recordVisit(item: item)
         }
     }
