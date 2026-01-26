@@ -49,6 +49,7 @@ private:
 
   void *jsiToJSValue(jsi::Runtime &rt, const jsi::Value &value);
   jsi::Value jsValueToJSI(jsi::Runtime &rt, void *jsValue);
+  jsi::Value jsValueToJSI(jsi::Runtime &rt, void *jsValue, int depth);
   void *wrapFunctionForSandbox(jsi::Runtime &rt, jsi::Function &&func);
 };
 

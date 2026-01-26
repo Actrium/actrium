@@ -4,6 +4,24 @@
 
 namespace jsc_sandbox {
 
+// Safe extraction of error message from a JSValue without triggering
+// toString recursion. [JSValue toString] executes JS code which can throw,
+// re-entering the exception handler and causing stack overflow (SIGBUS).
+static NSString *safeExceptionMessage(JSValue *exception) {
+  if (!exception) return @"(null exception)";
+  if ([exception isString]) {
+    return [exception toString];
+  }
+  // For Error objects, .message is typically a plain string
+  JSValue *msg = exception[@"message"];
+  if (msg && [msg isString]) {
+    JSValue *name = exception[@"name"];
+    NSString *nameStr = (name && [name isString]) ? [name toString] : @"Error";
+    return [NSString stringWithFormat:@"%@: %@", nameStr, [msg toString]];
+  }
+  return @"(exception: cannot safely stringify)";
+}
+
 // MARK: - JSCSandboxContext Implementation
 
 JSCSandboxContext::JSCSandboxContext(jsi::Runtime &hostRuntime, double timeout)
@@ -16,54 +34,29 @@ JSCSandboxContext::JSCSandboxContext(jsi::Runtime &hostRuntime, double timeout)
       throw jsi::JSError(hostRuntime, "Failed to create JSContext");
     }
 
-    // Set up exception handler - must store exception for later checking
-    // NOTE: JSValue's default description can be empty for some thrown values.
-    // Log name/message/stack when available to make sandbox crashes debuggable.
+    // Set up exception handler - must store exception for later checking.
+    // CRITICAL: Use recursion guard to prevent infinite toString recursion.
+    // [JSValue toString] executes JS code which can throw, re-entering this
+    // handler and causing stack overflow (EXC_BAD_ACCESS / SIGBUS).
+    __block BOOL inExceptionHandler = NO;
     ctx.exceptionHandler = ^(JSContext *context, JSValue *exception) {
-      @autoreleasepool {
-        NSString *exceptionStr = nil;
-        @try {
-          exceptionStr = [exception toString];
-        } @catch (NSException *e) {
-          exceptionStr = [NSString stringWithFormat:@"(toString failed: %@)", e.reason];
-        }
-        if (!exceptionStr) {
-          exceptionStr = @"(null)";
-        }
-
-        NSString *name = nil;
-        NSString *message = nil;
-        NSString *stack = nil;
-        @try {
-          JSValue *nameVal = exception[@"name"];
-          if (nameVal && !nameVal.isUndefined) name = [nameVal toString];
-          JSValue *msgVal = exception[@"message"];
-          if (msgVal && !msgVal.isUndefined) message = [msgVal toString];
-          JSValue *stackVal = exception[@"stack"];
-          if (stackVal && !stackVal.isUndefined) stack = [stackVal toString];
-        } @catch (NSException *e) {
-          // ignore
-          (void)e;
-        }
-
-        if (name || message || stack) {
-          NSLog(@"[JSCSandbox] Exception: %@ | name=%@ | message=%@\n%@",
-                exceptionStr,
-                name ? name : @"(null)",
-                message ? message : @"(null)",
-                stack ? stack : @"");
-        } else {
-          NSLog(@"[JSCSandbox] Exception: %@", exceptionStr);
-        }
-
-        context.exception = exception; // Preserve for checking after eval
-      }
+      context.exception = exception; // Preserve for checking after eval
+      if (inExceptionHandler) return; // Break recursion cycle
+      inExceptionHandler = YES;
+      NSLog(@"[JSCSandbox] Exception: %@", safeExceptionMessage(exception));
+      inExceptionHandler = NO;
     };
 
     // Inject console shim
+    // message is always a string from JS-side .join(' '), safe to toString.
+    // Guard against non-string values to avoid toString recursion.
     JSValue *consoleLog = [JSValue
         valueWithObject:^(JSValue *message) {
-          NSLog(@"[JSCSandbox] %@", message);
+          if ([message isString]) {
+            NSLog(@"[JSCSandbox] %@", [message toString]);
+          } else {
+            NSLog(@"[JSCSandbox] [non-string value]");
+          }
         }
               inContext:ctx];
     ctx[@"__jsc_console_log"] = consoleLog;
@@ -213,7 +206,7 @@ jsi::Value JSCSandboxContext::eval(jsi::Runtime &rt, const std::string &code) {
 
     // Check for exceptions
     if (ctx.exception) {
-      NSString *errorMsg = [ctx.exception toString];
+      NSString *errorMsg = safeExceptionMessage(ctx.exception);
       ctx.exception = nil;
       throw jsi::JSError(rt, [errorMsg UTF8String]);
     }
@@ -527,8 +520,16 @@ void *JSCSandboxContext::jsiToJSValue(jsi::Runtime &rt,
   return (__bridge void *)[JSValue valueWithUndefinedInContext:ctx];
 }
 
-// Convert JSValue* to jsi::Value
+// Convert JSValue* to jsi::Value (entry point, delegates to depth-limited version)
 jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue) {
+  return jsValueToJSI(rt, jsValue, 0);
+}
+
+// Depth-limited conversion to prevent stack overflow from circular references
+static constexpr int kMaxConversionDepth = 32;
+
+jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue,
+                                            int depth) {
   JSValue *value = (__bridge JSValue *)jsValue;
 
   if (!value || [value isUndefined]) {
@@ -547,13 +548,23 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue) {
     NSString *str = [value toString];
     return jsi::String::createFromUtf8(rt, [str UTF8String]);
   }
+
+  // Depth guard for recursive structures (arrays, objects)
+  if (depth >= kMaxConversionDepth) {
+    NSLog(@"[JSCSandbox] jsValueToJSI: max depth %d reached, returning "
+          @"undefined",
+          kMaxConversionDepth);
+    return jsi::Value::undefined();
+  }
+
   if ([value isArray]) {
     NSArray *arr = [value toArray];
     jsi::Array jsiArr = jsi::Array(rt, arr.count);
     for (NSUInteger i = 0; i < arr.count; i++) {
       id elem = arr[i];
       if ([elem isKindOfClass:[JSValue class]]) {
-        jsiArr.setValueAtIndex(rt, i, jsValueToJSI(rt, (__bridge void *)elem));
+        jsiArr.setValueAtIndex(
+            rt, i, jsValueToJSI(rt, (__bridge void *)elem, depth + 1));
       } else if ([elem isKindOfClass:[NSNumber class]]) {
         jsiArr.setValueAtIndex(rt, i, jsi::Value([elem doubleValue]));
       } else if ([elem isKindOfClass:[NSString class]]) {
@@ -562,11 +573,11 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue) {
       } else if ([elem isKindOfClass:[NSNull class]]) {
         jsiArr.setValueAtIndex(rt, i, jsi::Value::null());
       } else if ([elem isKindOfClass:[NSDictionary class]]) {
-        // Recursively convert nested objects
         JSContext *ctx = (__bridge JSContext *)jsContext_;
         JSValue *nestedValue = [JSValue valueWithObject:elem inContext:ctx];
-        jsiArr.setValueAtIndex(rt, i,
-                               jsValueToJSI(rt, (__bridge void *)nestedValue));
+        jsiArr.setValueAtIndex(
+            rt, i,
+            jsValueToJSI(rt, (__bridge void *)nestedValue, depth + 1));
       }
     }
     return std::move(jsiArr);
@@ -632,7 +643,7 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue) {
 
               // Check for exceptions
               if (ctx.exception) {
-                NSString *errorMsg = [ctx.exception toString];
+                NSString *errorMsg = safeExceptionMessage(ctx.exception);
                 ctx.exception = nil;
                 throw jsi::JSError(rt, [errorMsg UTF8String]);
               }
@@ -643,10 +654,6 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue) {
     }
 
     // Not a function, convert as regular object
-    // IMPORTANT: Use Object.keys() instead of toDictionary to preserve all
-    // properties toDictionary loses Symbol properties and may not handle nested
-    // objects correctly
-
     jsi::Object jsiObj = jsi::Object(rt);
 
     // Get all own property names using JavaScript
@@ -665,8 +672,9 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue) {
         if (!propVal || [propVal isUndefined])
           continue;
 
-        // Recursively convert each property
-        jsi::Value jsiPropVal = jsValueToJSI(rt, (__bridge void *)propVal);
+        // Recursively convert each property with depth tracking
+        jsi::Value jsiPropVal =
+            jsValueToJSI(rt, (__bridge void *)propVal, depth + 1);
         jsiObj.setProperty(rt, [key UTF8String], std::move(jsiPropVal));
       }
     }
