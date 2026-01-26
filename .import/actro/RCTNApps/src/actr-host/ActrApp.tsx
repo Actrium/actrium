@@ -93,6 +93,7 @@ function extractPanelsByPanelId(
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
+const nlog = (msg: string) => { try { NativeModules.NativeLogger?.log?.(msg); } catch {} };
 
 // DevTools message logging helper
 const DevToolsBridge = NativeModules.DevToolsBridge as {
@@ -315,6 +316,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   onContractViolation,
   onEngineChange,
 }) => {
+  nlog(`[ActrTabView] render: tabId=${tab.id?.substring(0,8)}, isActive=${isActive}, isLeftPanelVisible=${isLeftPanelVisible}, script=${tab.unifiedScript ? `${tab.unifiedScript.length}chars` : 'nil'}`);
   const gate = evaluateTabGate(tab);
 
   // 右侧面板可见性（按 tab 维度保存）
@@ -348,14 +350,16 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   // 更新回调：提取面板
   const handleUpdate = useCallback(() => {
+    nlog(`[ActrTabView] handleUpdate called: isActive=${isActiveRef.current}, hasEngine=${!!engineRef.current}`);
     if (!isActiveRef.current) {
       pendingUpdateRef.current = true;
+      nlog(`[ActrTabView] handleUpdate: not active, queued`);
       return;
     }
     const eng = engineRef.current;
-    if (!eng) return;
+    if (!eng) { nlog(`[ActrTabView] handleUpdate: no engine`); return; }
     const receiver = eng.getReceiver();
-    if (!receiver) return;
+    if (!receiver) { nlog(`[ActrTabView] handleUpdate: no receiver`); return; }
 
     const receiverStats = receiver.getStats?.();
     if (!receiverStats || receiverStats.nodeCount === 0) return;
@@ -367,6 +371,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     const fullTree = receiver.render();
     const panels = extractPanelsByPanelId(fullTree);
+    nlog(`[ActrTabView] handleUpdate: leftPanel=${!!panels.left}, rightPanel=${!!panels.right}, fullTree=${fullTree ? 'exists' : 'null'}`);
     setLeftPanel(panels.left);
     setRightPanel(panels.right);
 
@@ -405,6 +410,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   // 仅在首次进入该 tab（active）时初始化 Engine
   React.useEffect(() => {
+    nlog(`[ActrTabView] Engine init effect: isActive=${isActive}, gate=${gate.status}, hasEngine=${!!engineRef.current}, tabId=${tab.id?.substring(0,8)}`);
     if (!isActive) return;
     if (gate.status === 'blocked') return;
     if (engineRef.current) return;
@@ -415,6 +421,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     async function init() {
       try {
+        nlog(`[ActrTabView] Engine init starting...`);
         setIsLoading(true);
         setLoadError(null);
 
@@ -513,6 +520,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         adapterRef.current = currentAdapter;
         setEngine(currentEngine);
         onEngineChange?.(tab.id, currentEngine);
+        nlog(`[ActrTabView] Engine created successfully, tabId=${tab.id?.substring(0,8)}`);
         setIsLoading(false);
       } catch (e: any) {
         if (cancelled) return;
@@ -553,7 +561,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     const eng = engine;
 
     const unifiedScript = tab.unifiedScript;
-    if (!unifiedScript) return;
+    nlog(`[ActrTabView] Bundle load effect: hasEngine=${!!engine}, isActive=${isActive}, hasScript=${!!unifiedScript}, scriptLen=${unifiedScript?.length ?? 0}, tabId=${tab.id?.substring(0,8)}`);
+    if (!unifiedScript) { nlog(`[ActrTabView] No unifiedScript, skipping bundle load`); return; }
 
     const script = unifiedScript;
 
@@ -577,6 +586,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     async function loadUnifiedBundle() {
       try {
+        nlog(`[ActrTabView] loadUnifiedBundle starting, scriptLen=${script.length}`);
         loadedUnifiedScriptRef.current = script;
         eng.createReceiver(handleUpdate);
         // Pass tab config to Engine so Guest can access via __getConfig()
@@ -589,9 +599,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         });
 
         // 确保面板提取
+        nlog(`[ActrTabView] Bundle loaded, calling handleUpdate`);
         handleUpdate();
         setTimeout(handleUpdate, 0);
         setTimeout(handleUpdate, 50);
+        setTimeout(handleUpdate, 200);
 
         // 通知 Native 内容已加载完成
         try {
