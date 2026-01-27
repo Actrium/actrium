@@ -1,0 +1,308 @@
+/* 英语 (en) */
+
+/* 1. Menu Page */
+"welcome" = "Welcome";
+"welcomeTip" = "I'm Mu Ai, your all-knowing guide!";
+"language" = "Language";
+"about" = "About";
+"aboutDescription" = "Hi, I’m Mu AI! I’ll plan your trip, answer any questions, and be your guide along the way.";
+"clearChat" = "Clear onversation history";
+"clearChatTip" = "This cannot be undone. Are you sure to continue?";
+"teasing" = "feedback";
+"confirm" = "Confirm";
+"disagree" = "Cancel";
+"teasingTopic" = "#feedback about Mu Ai#";
+
+/* 2. Input Text */
+"messageOrHoldToTalk" = "Message or talk";
+"sendMessage" = "Send message";
+"holdToTalk" = "Hold to speak";
+"releaseToSendSwipeToCancel" = "Release to send, swipe up to cancel";
+"releaseToCancel" = "Release to cancel";
+
+/* 3. Location */
+"currentLocation" = "Current location";
+"addCurrentLocation" = "Add current location";
+"enableCompanionMode" = "Enable tour guide mode";
+"unenableCompanionMode" = "Exit Travel Companion Mode";
+"companionTip" = "After enabling, automatically match and push attraction information";
+"companionMode" = "Companion Tour Mode";
+"companyStart" = "Start";
+"companyNoStart" = "Not Now";
+"companyTitle" = "Welcome to the AI Companion Tour Mode";
+"companyWelcome" = "Enable AI tour mode to explore nearby. Allow location and don’t lock screen";
+
+/* 4. Toolbar */
+/* Questions */
+"edit" = "Edit";
+"copy" = "Copy";
+"delete" = "Delete";
+"cancel" = "Cancel";
+"send" = "Send";
+"goSetting" = "Settings";
+"more" = "More";
+
+/* Answers */
+"commonQuestions" = "FAQs";
+"references" = "References";
+"onlyReferences" = "The answer is for reference only.";
+"voiceReading" = "Audio playback";
+"stop" = "Stop";
+"copy" = "Copy";
+"like" = "Likes";
+"dislike" = "Dislikes";
+
+/* 5. Feedback Dialog */
+"tellUsHowToImprove" = "Tell me how to improve!";
+"inaccurate" = "Inaccurate";
+"tooShort" = "Too short";
+"other" = "Other";
+"submit" = "Submit";
+"submitSuccess" = "Submitted successfully";
+"feedbackAndReport" = "Feedback & Report";
+"feedbackPromt" = "Include more messages? Helps check issue. No past conversations.";
+"harmfulReport" = "Harmful/Unsafe";
+"sexualReport" = "Sexual/Explicit";
+"privacyReport" = "Privacy-related";
+"abuseReport" = "Abuse/Harassment";
+"illegalReport" = "Illegal/Criminal";
+"falseInfoReport" = "Misinformation";
+"copyrightReport" = "Copyright/Defamation";
+"placeholder" = "Additional details (optional)";
+
+/* 6. Others */
+"disconnected" = "Not connected";
+"greatwall" = "the Mutianyu Great Wall";
+
+/* 7. Toast Notifications */
+"toastSuccess" = "Success";
+"toastError" = "Error";
+"toastWarning" = "Warning";
+"toastInfo" = "Information";
+"copySuccess" = "Copied";
+"operationSuccess" = "Operation successful";
+"operationFailed" = "Operation failed";
+"networkError" = "Network error, please try again later";
+"dataLoadFailed" = "Failed to load data";
+"generatingVoice" = "Generating voice reading";
+"liked" = "Liked";
+"thanksFeedback" = "Thank you for your feedback";
+"noTextDetected" = "No text detected";
+"appUnExist" = "The app doesn't exist";
+"invalidQRCode" = "Invalid QR code";
+"unavailable" = "This feature is temporarily unavailable";
+"noNetwork" = "Network unavailable";
+"deleteMessageTitle" = "Delete selected items?";
+"deleteMessageTip" = "This action cannot be undone.";
+
+/* 8. Weather */
+/* Weather conditions */
+"weather_level" = "grade";
+"weather_clear" = "Clear";
+"weather_partly_cloudy" = "Partly cloudy";
+"weather_mostly_clear" = "Mostly clear";
+"weather_cloudy" = "Cloudy";
+"weather_overcast" = "Overcast";
+
+/* Wind conditions */
+"weather_windy" = "Windy";
+"weather_calm" = "Calm";
+"weather_light_breeze" = "Light breeze";
+"weather_moderate_breeze" = "Moderate breeze";
+"weather_fresh_breeze" = "Fresh breeze";
+"weather_strong_wind" = "Strong wind";
+"weather_high_wind" = "High wind";
+"weather_gale" = "Gale";
+"weather_strong_gale" = "Strong gale";
+"weather_storm" = "Storm";
+"weather_violent_storm" = "Violent storm";
+"weather_hurricane" = "Hurricane";
+"weather_tropical_storm" = "Tropical storm";
+
+/* Air quality */
+"weather_haze" = "Haze";
+"weather_moderate_haze" = "Moderate haze";
+"weather_severe_haze" = "Severe haze";
+"weather_extreme_haze" = "Extreme haze";
+
+/* Precipitation */
+"weather_shower" = "Shower";
+"weather_thundershower" = "Thundershower";
+"weather_thundershower_with_hail" = "Thundershower with hail";
+"weather_light_rain" = "Light rain";
+"weather_moderate_rain" = "Moderate rain";
+"weather_heavy_rain" = "Heavy rain";
+"weather_torrential_rain" = "Torrential rain";
+"weather_downpour" = "Downpour";
+"weather_extreme_downpour" = "Extreme downpour";
+"weather_heavy_shower" = "Heavy shower";
+"weather_heavy_thundershower" = "Heavy thundershower";
+"weather_extreme_rainfall" = "Extreme rainfall";
+"weather_drizzle" = "Drizzle";
+"weather_rain" = "Rain";
+"weather_light_to_moderate_rain" = "Light to moderate rain";
+"weather_moderate_to_heavy_rain" = "Moderate to heavy rain";
+"weather_heavy_to_torrential_rain" = "Heavy to torrential rain";
+"weather_torrential_rain_to_downpour" = "Torrential rain to downpour";
+"weather_downpour_to_extreme_downpour" = "Downpour to extreme downpour";
+
+/* Snow and mixed weather */
+"weather_rain_and_snow" = "Rain and snow";
+"weather_sleet" = "Sleet";
+"weather_snow_rain_shower" = "Snow/rain shower";
+"weather_freezing_rain" = "Freezing rain";
+"weather_snow" = "Snow";
+"weather_snow_shower" = "Snow shower";
+"weather_light_snow" = "Light snow";
+"weather_moderate_snow" = "Moderate snow";
+"weather_heavy_snow" = "Heavy snow";
+"weather_snowstorm" = "Snowstorm";
+"weather_light_to_moderate_snow" = "Light to moderate snow";
+"weather_moderate_to_heavy_snow" = "Moderate to heavy snow";
+"weather_heavy_snow_to_snowstorm" = "Heavy snow to snowstorm";
+
+/* Dust and special weather */
+"weather_dust" = "Dust";
+"weather_blowing_dust" = "Blowing dust";
+"weather_dust_storm" = "Dust storm";
+"weather_strong_dust_storm" = "Strong dust storm";
+"weather_tornado" = "Tornado";
+
+/* Fog */
+"weather_fog" = "Fog";
+"weather_dense_fog" = "Dense fog";
+"weather_thick_fog" = "Thick fog";
+"weather_mist" = "Mist";
+"weather_heavy_fog" = "Heavy fog";
+"weather_extreme_dense_fog" = "Extreme dense fog";
+
+/* Temperature feeling */
+"weather_hot" = "Hot";
+"weather_cold" = "Cold";
+
+/* Others */
+"weather_unknown" = "Unknown";
+
+/* 9. Date Related */
+"today" = "Today";
+"monday" = "Mon.";
+"tuesday" = "Tue.";
+"wednesday" = "Wed.";
+"thursday" = "Thu.";
+"friday" = "Fri.";
+"saturday" = "Sat.";
+"sunday" = "Sun.";
+
+/* 10. Navigation */
+"startNavigation" = "Start Navigation";
+"selelctNavigation" = "Please choose map";
+"tencentMap" = "Tencent Map";
+"baiduMap" = "Baidu Map";
+"amap" = "Amap";
+"maps" = "Apple Maps";
+"details" = "Details";
+
+/* 11. Permission Dialogs */
+"accuracyTitle" = "Permission Reminder";
+"accuracyMessage" = "Currently using approximate location only. This may limit some features. Go to Settings to enable Precise Location permission?";
+"locationTitle" = "Location permission disabled";
+"locationMessage" = "Enable Location Services in Settings to access all features.";
+"recordTitle" = "Permission Reminder";
+"recordMessage" = "Go to Settings to enable Microphone permission for voice features.";
+"cameraTitle" = "Allow Camera Access";
+"cameraMessage" = "Please grant camera permission to use the Scan feature.";
+"photoTitle" = "Allow Photo Library Access";
+"photoMessage" = "Please grant photo library permission to select images to upload.";
+
+
+/* 12. Service Unavailable Page */
+"scanToEnter" = "Scan QR code to enter";
+"alignCenter" = "Align with code center";
+
+/* 13. 应用列表 */
+"appList" = "Applications";
+"appActive" = "active";
+"appUnavailable" = "Unavailable";
+"appRecently" = "Recently Used";
+
+/* 14. 隐私弹窗 */
+"privateTitle" = "Welcome to AskAway";
+"privateMessage" = "Before using this application, please carefully read and fully understand the [**User Agreement**](https://www.actrium.example/corp/en/user.html) and [**Privacy Policy**](https://www.actrium.example/corp/en/privacy.html).<br>
+To provide intelligent Q&A and related services, we may collect and use necessary information.\n
+Please note:
+* Do not share your personal sensitive information in conversations.
+* Your chat content may be used for security review and service optimization.
+* This application is a technical platform. Content is provided and managed by the Application Provider. The platform does not guarantee the accuracy, completeness, or legality of the content.\n
+We will strictly protect your personal information and only use it within the scope permitted by law and required for providing services.<br>
+By clicking “Agree”, you confirm that you have read and agreed to the above agreements.<br>
+If you do not agree, you will not be able to use the features of this application.";
+"privateDisagree" = "Disagree";
+"privateAgree" = "Agree";
+
+/* 15. 关于我们 */
+"aboutUs" = "About";
+"aboutApp" = "About AskAway";
+"icpInfo" = "ICP Filing";
+"aiAndLargeModels" = "About AI and Large Models";
+"feedback" = "Feedback";
+"privacyPolicy" = "Privacy Policy";
+"userAgreement" = "User Agreement";
+
+/* 16. 登录 */
+"loginAlertTitle" = "User Agreement And Privacy Policy";
+"loginAlertMessage" = "agree to the [Terms of Service](https://www.actrium.example/corp/en/user.html) and [Privacy Policy](https://www.actrium.example/corp/en/privacy.html)";
+"loginTip" = "You can log in using the options below";
+"loginByWechat" = "Sign in with WeChat";
+"loginByApple" = "Sign in with Apple";
+"authorized" = "Authorization successful!";
+"authorTip" = "Would like to access your information to provide a personalized experience:";
+"authorExplain" = "User ID, nickname, avatar, and email address (if supported by the chosen login method, such as Apple or Google).";
+"declineAuthor" = "Decline";
+"agreeAuthor" = "Sign in with AskAway";
+"agreeAuthorTip" = "and allow access";
+"wechatIdentity" = "WeChat Identity: ";
+"allowAuthor" = "Allow";
+"login" = "Login";
+"loginOut" = "Log Out";
+"deleteAccount" = "Delete Account";
+"loginOutTitle" = "Confirm Log Out?";
+"loginOutConfirm" = "Log Out";
+"loginOutCancel" = "Cancel";
+"deleteAccountTitle" = "Confirm Account Deletion?";
+"deleteAccountMessage" = "Deleting your account will permanently remove it and cannot be undone. Please confirm that you wish to proceed.";
+"deleteAccountConfirm" = "Delete Account";
+"deleteAccountCancel" = "Cancel";
+"nickname" = "Nickname";
+"email" = "Email";
+"camera" = "Camera";
+"photo" = "Photo Library";
+"file" = "File";
+
+/* 17. 起始页 */
+"activity" = "Activity";
+"preferences" = "Preferences";
+"bookmarks" = "Bookmarks";
+"allTag" = "All";
+"addTagTitle" = "Tags";
+"addTagPlaceholder" = "Add new tag…";
+"collected" = "Saved";
+"canAddTag" = "You can edit the tag";
+"renameTag" = "Rename";
+"deleteTag" = "Delete";
+"search" = "Search";
+"deleteTagTitle" = "Are you sure you want to delete this tag?";
+"deleteTagMessage" = "Deleting this tag will not remove its items.";
+"gotIt" = "Got it";
+"sendKey" = "Send Key";
+"sendKeyDescription" = "Send → Enter";
+"onlineSearch" = "Online Search";
+"onlineSearchDescription" = "Use online search";
+"fileCoveredTitle" = "Content is already attached. Continuing will replace it.";
+"agreeCover" = "Confirm Overwrite";
+"fileTooLarge" = "File is too large. Each file must not exceed 10 MB";
+"filelimit" = "You can upload up to 6 files";
+"fileTypeUnsupported" = "Unsupported file type";
+"addChannel" = "Add Application";
+"imagelimit" = "Up to 6 images";
+"location" = "Location";
+"locationDescription" = "Add Location";
