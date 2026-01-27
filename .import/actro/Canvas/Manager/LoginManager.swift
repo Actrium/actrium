@@ -132,13 +132,6 @@ class LoginManager: ObservableObject {
             
             // 自动授权：将全局用户信息保存到 UserInfoManager（本地存储）
             self.saveUserToLocalStorage(userInfo)
-            
-            // 发送登录成功通知，用于解析 UserInfoModule 中等待的请求
-            NotificationCenter.default.post(
-                name: NSNotification.Name("LoginSuccessNotification"),
-                object: nil,
-                userInfo: ["user": userInfo]
-            )
         }
     }
     
@@ -345,7 +338,15 @@ class LoginManager: ObservableObject {
             } else {
                 logger.error("[LoginManager] ❌ 保存用户信息到本地存储失败")
             }
+            NotificationCenter.default.post(
+                name: NSNotification.Name("LoginSuccessNotification"),
+                object: nil
+            )
         } catch {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("LoginSuccessNotification"),
+                object: nil
+            )
             logger.error("[LoginManager] ❌ 序列化用户信息失败: \(error.localizedDescription)")
         }
     }
