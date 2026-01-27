@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var selectedDetent: PresentationDetent = .medium
     @State private var selectedDetail: ASSettingDetailType = .unknown
     @State private var showDetail = false
+    @State private var showLogoutAlert = false
     
     var divider: some View {
         return Color(hex: "#404042")
@@ -62,7 +63,10 @@ struct SettingsView: View {
                         iconName: "rectangle.portrait.and.arrow.right.fill",
                         title: "退出登录",
                         showChevron: false,
-                        foregroundColor: Color(hex: "#FF453A")
+                        foregroundColor: Color(hex: "#FF453A"),
+                        action: {
+                            showLogoutAlert = true
+                        }
                     )
                     .background(Color(hex: "#2C2C2D"))
                     .cornerRadius(26)
@@ -77,27 +81,33 @@ struct SettingsView: View {
             .navigationDestination(isPresented: $showUserDetail, destination: {
                 ASUserDetailView()
             })
-//            .sheet(isPresented: $loginManager.showLoginSheet) {
-//                HStack {
-//                    switch loginManager.currentLoginSheetType {
-//                    case .login:
-//                        LoginSheet()
-//                            .presentationDetents([.height(341)])
-//                            .interactiveDismissDisabled()
-//                    case .loginAuth:
-//                        LoginAuthorSheet()
-//                            .presentationDetents([.height(367)])
-//                            .interactiveDismissDisabled()
-//                    case .loginView:
-//                        LoginView(detent: $selectedDetent)
-//                            .presentationDetents([.large], selection: $selectedDetent)
-//                            .interactiveDismissDisabled()
-//                            .ignoresSafeArea()
-//                    case .none:
-//                        EmptyView()
-//                    }
-//                }
-//            }
+            .sheet(isPresented: $loginManager.showLoginSheet) {
+                HStack {
+                    switch loginManager.currentLoginSheetType {
+                    case .login:
+                        LoginSheet()
+                            .presentationDetents([.height(341)])
+                            .interactiveDismissDisabled()
+                    case .loginAuth:
+                        LoginAuthorSheet()
+                            .presentationDetents([.height(367)])
+                            .interactiveDismissDisabled()
+                    case .loginView:
+                        LoginView(detent: $selectedDetent)
+                            .presentationDetents([.large], selection: $selectedDetent)
+                            .interactiveDismissDisabled()
+                            .ignoresSafeArea()
+                    case .none:
+                        EmptyView()
+                    }
+                }
+            }
+            .alert(TM.login.loginOutTitle(), isPresented: $showLogoutAlert) {
+                Button(TM.login.loginOutCancel(), role: .cancel) {}
+                Button(TM.login.loginOutConfirm(), role: .destructive) {
+                    loginManager.logout()
+                }
+            }
         }
     }
 }
