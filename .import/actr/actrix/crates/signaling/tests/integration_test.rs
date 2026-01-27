@@ -65,7 +65,7 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
                 let err_msg = e.to_string();
                 if !err_msg.contains("already initialized") && !err_msg.contains("Database already")
                 {
-                    panic!("Failed to initialize test database: {}", e);
+                    panic!("Failed to initialize test database: {e}");
                 }
             }
         }
@@ -73,7 +73,7 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
     .await;
 
     // 确保测试所需的 realm 存在（realm_id = 1001）——避免因为 realm 不存在导致 403 错误
-    if RealmEntity::exists_by_realm_id(1001).await == false {
+    if !(RealmEntity::exists_by_realm_id(1001).await) {
         let mut realm = RealmEntity::new(1001, "test_realm".to_string());
         // 保存到数据库（忽略重复错误）
         let _ = realm.save().await;
@@ -87,7 +87,7 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
     // 绑定到随机端口
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let ws_url = format!("ws://{}/ws", addr);
+    let ws_url = format!("ws://{addr}/ws");
 
     // 启动服务器（添加 ConnectInfo 支持）
     let handle = tokio::spawn(async move {
@@ -236,7 +236,7 @@ async fn test_websocket_connection() {
                 println!("✅ WebSocket connection test passed: received expected 401 error");
             }
             other => {
-                panic!("Expected Error response, got: {:?}", other);
+                panic!("Expected Error response, got: {other:?}");
             }
         }
     }
@@ -274,11 +274,10 @@ async fn test_credential_validation() {
                     signaling_msg.payload,
                     Some(signaling_to_actr::Payload::Error(_))
                 ),
-                "Expected Error for ping {} due to invalid credential",
-                i
+                "Expected Error for ping {i} due to invalid credential"
             );
         } else {
-            panic!("Expected ServerToActr flow for ping {}", i);
+            panic!("Expected ServerToActr flow for ping {i}");
         }
     }
 
@@ -310,7 +309,7 @@ async fn test_invalid_message_handling() {
         Ok(Some(Ok(TungsteniteMessage::Binary(data)))) => {
             // 尝试解析错误响应
             if let Ok(envelope) = SignalingEnvelope::decode(&data[..]) {
-                println!("✅ Server sent error response: {:?}", envelope);
+                println!("✅ Server sent error response: {envelope:?}");
             }
         }
         Ok(None) => {

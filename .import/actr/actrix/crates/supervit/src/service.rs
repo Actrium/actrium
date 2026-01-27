@@ -111,7 +111,7 @@ impl Supervisord {
             .map_err(|e| Status::internal(format!("Failed to load realm: {e}")))?;
 
         let realm =
-            realm.ok_or_else(|| Status::not_found(format!("Realm not found: {}", realm_id)))?;
+            realm.ok_or_else(|| Status::not_found(format!("Realm not found: {realm_id}")))?;
 
         let rowid = realm.rowid.ok_or_else(|| {
             Status::internal(format!(
@@ -250,7 +250,7 @@ impl SupervisedService for Supervisord {
         if let Err(err) = save_result {
             let resp = CreateRealmResponse {
                 success: false,
-                error_message: Some(format!("Failed to create realm: {}", err)),
+                error_message: Some(format!("Failed to create realm: {err}")),
                 realm: None,
             };
             return Ok(Response::new(resp));
@@ -282,7 +282,7 @@ impl SupervisedService for Supervisord {
 
             let response = CreateRealmResponse {
                 success: false,
-                error_message: Some(format!("Failed to persist realm metadata: {}", err_msg)),
+                error_message: Some(format!("Failed to persist realm metadata: {err_msg}")),
                 realm: None,
             };
             return Ok(Response::new(response));
@@ -361,7 +361,7 @@ impl SupervisedService for Supervisord {
         if let Err(err) = save_result {
             let response = UpdateRealmResponse {
                 success: false,
-                error_message: Some(format!("Failed to update realm: {}", err)),
+                error_message: Some(format!("Failed to update realm: {err}")),
                 realm: None,
             };
             return Ok(Response::new(response));
@@ -391,7 +391,7 @@ impl SupervisedService for Supervisord {
 
             let response = UpdateRealmResponse {
                 success: false,
-                error_message: Some(format!("Failed to persist realm metadata: {}", err_msg)),
+                error_message: Some(format!("Failed to persist realm metadata: {err_msg}")),
                 realm: None,
             };
             return Ok(Response::new(response));
@@ -445,7 +445,7 @@ impl SupervisedService for Supervisord {
             Err(err) => {
                 let response = DeleteRealmResponse {
                     success: false,
-                    error_message: Some(format!("Failed to delete realm: {}", err)),
+                    error_message: Some(format!("Failed to delete realm: {err}")),
                 };
                 Ok(Response::new(response))
             }
@@ -465,7 +465,7 @@ impl SupervisedService for Supervisord {
 
         let realms = Realm::get_all()
             .await
-            .map_err(|e| Status::internal(format!("Failed to load realm list: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to load realm list: {e}")))?;
 
         let mut realms_info = Vec::with_capacity(realms.len());
         for realm in realms {
@@ -524,7 +524,7 @@ impl SupervisedService for Supervisord {
             if let Err(e) = handler(req.graceful, req.timeout_secs, req.reason.clone()).await {
                 let response = ShutdownResponse {
                     accepted: false,
-                    error_message: Some(format!("Shutdown handler failed: {}", e)),
+                    error_message: Some(format!("Shutdown handler failed: {e}")),
                     estimated_shutdown_time: None,
                 };
                 return Ok(Response::new(response));

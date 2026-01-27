@@ -38,7 +38,7 @@ pub mod utils {
                     if !err_msg.contains("already initialized")
                         && !err_msg.contains("Database already")
                     {
-                        panic!("Failed to initialize test database: {}", e);
+                        panic!("Failed to initialize test database: {e}");
                     }
                 }
             }

@@ -306,6 +306,12 @@ async fn handle_websocket(
         }
     }
 
+    // 提取 webrtc_role 参数（如果存在）
+    let webrtc_role = params.get("webrtc_role").cloned();
+    if let Some(ref role) = webrtc_role {
+        info!("🎭 WebRTC 角色: {}", role);
+    }
+
     // 增加连接计数
     if let Some(ref limiter) = state.server.connection_rate_limiter {
         limiter.increment_connection(client_ip).await;
@@ -324,9 +330,14 @@ async fn handle_websocket(
     };
 
     // 调用 SignalingServer 的 WebSocket 处理函数
-    if let Err(e) =
-        crate::handle_websocket_connection(socket, server_handle, Some(client_ip), url_identity)
-            .await
+    if let Err(e) = crate::handle_websocket_connection(
+        socket,
+        server_handle,
+        Some(client_ip),
+        url_identity,
+        webrtc_role,
+    )
+    .await
     {
         error!("WebSocket connection error: {}", e);
     }

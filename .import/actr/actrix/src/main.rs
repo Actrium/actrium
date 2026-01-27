@@ -271,8 +271,7 @@ impl ApplicationLauncher {
 
             let bind_addr: SocketAddr = bind_addr_str.parse().map_err(|e| {
                 Error::service_startup(format!(
-                    "Failed to parse supervisord bind address {}: {}",
-                    bind_addr_str, e
+                    "Failed to parse supervisord bind address {bind_addr_str}: {e}"
                 ))
             })?;
 
