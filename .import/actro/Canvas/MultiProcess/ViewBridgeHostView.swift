@@ -1256,6 +1256,38 @@ final class ViewBridgeCoordinator {
         )
     }
 
+    /// Send left panel visibility change to XPC service via DistributedNotification
+    /// Called when user toggles the left panel via address bar menu icon
+    func sendLeftPanelVisibilityChanged(_ visible: Bool) {
+        guard let tabId = tabId,
+              let serviceId = allocatedServiceId else {
+            ipcLog("⚠️ sendLeftPanelVisibilityChanged: missing tabId or allocatedServiceId")
+            return
+        }
+
+        let payload: [String: Any] = [
+            "tabId": tabId.uuidString,
+            "isLeftPanelVisible": visible
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            ipcLog("⚠️ sendLeftPanelVisibilityChanged: failed to serialize payload")
+            return
+        }
+
+        let notificationName = "com.canvas.uiStateChanged.\(CanvasHostProcessId).\(serviceId)"
+
+        ipcLog("📤 [HOST→SVC] leftPanelVisibility tab=\(String(tabId.uuidString.prefix(8))) visible=\(visible) name=\(notificationName)")
+
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(notificationName),
+            object: nil,
+            userInfo: ["payload": jsonString],
+            deliverImmediately: true
+        )
+    }
+
     /// 清理 XPC 资源
     func cleanup() {
         // 清理节流定时器

@@ -449,6 +449,18 @@ struct WorkspaceMainView: View {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     viewModel.toggleLeftPanelForCurrentTab()
                                 }
+                                // Send visibility change to XPC service
+                                let tabId: UUID? = {
+                                    if case .focus(let focusTabId) = viewModel.canvasMode {
+                                        return focusTabId
+                                    }
+                                    return viewModel.currentTabId
+                                }()
+                                if let tabId = tabId {
+                                    let newVisible = viewModel.isLeftPanelVisible(for: tabId)
+                                    let coordinator = viewBridgeCoordinatorManager.coordinator(for: tabId)
+                                    coordinator.sendLeftPanelVisibilityChanged(newVisible)
+                                }
                             },
                             showingBookmarkPopover: $showingBookmarkSheet,
                             shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
