@@ -432,6 +432,7 @@ class LoginManager: ObservableObject {
         A1SDK.shared.auth.logout()
         let key = globalUserInfoKey
         UserDefaults.standard.removeObject(forKey: key)
+        UserInfoManager.shared.deleteUser()
         logger.debug("已清除全局用户信息，环境: \(self.currentEnvironment), key: \(key)")
     }
     
