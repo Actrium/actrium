@@ -50,18 +50,19 @@ import type { ActrProps, TabConfig } from './types';
 
 /**
  * Extract panels from React element tree by __panelId attribute
- * Searches for nodes with __panelId="left" and __panelId="right"
+ * Searches for nodes with __panelId="left", __panelId="right", and __panelId="main"
  */
 function extractPanelsByPanelId(
   element: React.ReactNode
-): { left: React.ReactElement | null; right: React.ReactElement | null } {
+): { left: React.ReactElement | null; right: React.ReactElement | null; main: React.ReactElement | null } {
   if (!element || !React.isValidElement(element)) {
-    return { left: null, right: null };
+    return { left: null, right: null, main: null };
   }
 
-  const result: { left: React.ReactElement | null; right: React.ReactElement | null } = {
+  const result: { left: React.ReactElement | null; right: React.ReactElement | null; main: React.ReactElement | null } = {
     left: null,
     right: null,
+    main: null,
   };
 
   function traverse(node: React.ReactNode): void {
@@ -76,6 +77,10 @@ function extractPanelsByPanelId(
     }
     if (panelId === 'right') {
       result.right = props.children as React.ReactElement;
+      return;
+    }
+    if (panelId === 'main') {
+      result.main = props.children as React.ReactElement;
       return;
     }
 
@@ -328,6 +333,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [leftPanel, setLeftPanel] = useState<React.ReactElement | null>(null);
   const [rightPanel, setRightPanel] = useState<React.ReactElement | null>(null);
+  const [mainPanel, setMainPanel] = useState<React.ReactElement | null>(null);
 
   const engineRef = useRef<Engine | null>(null);
   const adapterRef = useRef<{ dispose: () => void } | null>(null);
@@ -371,9 +377,10 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     const fullTree = receiver.render();
     const panels = extractPanelsByPanelId(fullTree);
-    nlog(`[ActrTabView] handleUpdate: leftPanel=${!!panels.left}, rightPanel=${!!panels.right}, fullTree=${fullTree ? 'exists' : 'null'}`);
+    nlog(`[ActrTabView] handleUpdate: leftPanel=${!!panels.left}, rightPanel=${!!panels.right}, mainPanel=${!!panels.main}, fullTree=${fullTree ? 'exists' : 'null'}`);
     setLeftPanel(panels.left);
     setRightPanel(panels.right);
+    setMainPanel(panels.main);
 
     // Update DevTools component tree
     updateDevToolsComponentTree(eng, tab.id);
@@ -443,6 +450,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         const unsubscribeMessage = currentEngine.on('message', async (msg: { event: string; payload?: unknown }) => {
           // Log all Guest → Host messages to DevTools
           logDevToolsMessage('guestToHost', msg.event, msg.payload, tab.id);
+
+          // Handle TOGGLE_RIGHT_PANEL from guest
+          if (msg.event === 'TOGGLE_RIGHT_PANEL') {
+            setIsRightPanelVisible(prev => !prev);
+            return;
+          }
 
           // Handle APP_FETCH_REQUEST
           if (msg.event !== 'APP_FETCH_REQUEST') return;
@@ -724,8 +737,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       )}
 
       {/* 中间对话窗口 - flex 自适应 */}
-      <View style={[styles.centerColumn, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: '#FF9800', fontSize: 24, fontWeight: 'bold' }}>main panel</Text>
+      <View style={[styles.centerColumn]}>
+        {mainPanel || (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <Text style={{ color: '#FF9800', fontSize: 24, fontWeight: 'bold' }}>main panel</Text>
+          </View>
+        )}
       </View>
 
       {/* 右侧扩展面板 - 基准宽度，窗口变小时允许收缩 */}
