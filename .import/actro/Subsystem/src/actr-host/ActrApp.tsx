@@ -35,7 +35,7 @@ const getInspectorDataForViewAtPoint =
       hierarchy: Array<{
         name: string;
         getInspectorData: (
-          findNodeHandle: (component: unknown) => number | null
+          findNodeHandle: (component: unknown) => number | null,
         ) => {
           measure: (
             callback: (
@@ -44,8 +44,8 @@ const getInspectorDataForViewAtPoint =
               width: number,
               height: number,
               left: number,
-              top: number
-            ) => void
+              top: number,
+            ) => void,
           ) => void;
           props: Record<string, unknown>;
         };
@@ -56,7 +56,7 @@ const getInspectorDataForViewAtPoint =
       pointerY: number;
       touchedViewTag: number;
       closestInstance: unknown;
-    }) => boolean
+    }) => boolean,
   ) => void;
 import { logger } from '../logger';
 import { installConsoleInterceptor } from '../devtools-console';
@@ -71,6 +71,16 @@ import { DevToolsBridge } from './libs/devTools';
 import ActrTabView from './ActrTabView';
 import { LAYOUT } from './constants';
 import { evaluateTabGate, extractBoxModelFromStyle } from './utils';
+import {
+  subscribeToUserInfoChanges,
+  subscribeToLoginStatusChanges,
+  subscribeToUserLogout,
+  removeAllUserInfoListeners,
+  UserInfoModule,
+} from '../native-modules/UserInfoModule';
+import { useUserStore } from './store/useUserStore';
+import { useAppStore } from './store/useAppStore';
+import { useTabIdMapStore } from './store/useTabIdMapStore';
 
 // 模块级别的 props 缓存
 let cachedValidProps: ActrProps | null = null;
@@ -108,7 +118,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         const gate = evaluateTabGate(t);
         return { ...t, status: gate.status, blockedReason: gate.blockedReason };
       }),
-    [tabs]
+    [tabs],
   );
 
   const engineMapRef = useRef<Map<string, Engine>>(new Map());
@@ -125,7 +135,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       }
       collector.record(violation);
     },
-    []
+    [],
   );
 
   const handleEngineChange = useCallback(
@@ -137,7 +147,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         contractCollectorsRef.current.delete(tabId);
       }
     },
-    []
+    [],
   );
 
   // Inspect mode state
@@ -166,7 +176,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   const measureAllNodeFrames = useCallback((engine: Engine | null) => {
     console.log(
       '[DevTools] measureAllNodeFrames called, engine:',
-      engine ? 'exists' : 'null'
+      engine ? 'exists' : 'null',
     );
     if (!engine) {
       console.log('[DevTools] No engine for measureAllNodeFrames');
@@ -183,7 +193,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     const allRefs = receiver.getAllNodeRefs?.();
     console.log(
       '[DevTools] getAllNodeRefs available:',
-      !!receiver.getAllNodeRefs
+      !!receiver.getAllNodeRefs,
     );
     if (!allRefs) {
       console.log('[DevTools] No refs from getAllNodeRefs');
@@ -193,7 +203,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     console.log(
       '[DevTools] Building viewTag mapping for',
       allRefs.size,
-      'nodes'
+      'nodes',
     );
     const frames = new Map<
       string,
@@ -228,8 +238,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             width: number,
             height: number,
             pageX: number,
-            pageY: number
-          ) => void
+            pageY: number,
+          ) => void,
         ) => void;
       };
       if (typeof component.measure === 'function') {
@@ -245,7 +255,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       '[DevTools] Refs with .current:',
       refCount,
       'ViewTags found:',
-      viewTagCount
+      viewTagCount,
     );
 
     // Update mappings
@@ -254,7 +264,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     console.log(
       '[DevTools] Built viewTag mapping:',
       viewTagToNodeId.size,
-      'entries'
+      'entries',
     );
 
     // Update frames after a short delay to let measurements complete
@@ -274,11 +284,11 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         y: number;
         width: number;
         height: number;
-      }) => void
+      }) => void,
     ) => {
       console.log(
         '[DevTools] measureAndHighlightNode called with nodeId:',
-        nodeId
+        nodeId,
       );
       if (!engine) {
         console.log('[DevTools] No engine available');
@@ -298,7 +308,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         'ref:',
         ref,
         'current:',
-        ref?.current
+        ref?.current,
       );
       if (!ref?.current) {
         console.log('[DevTools] No ref.current, clearing highlight');
@@ -312,7 +322,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         width: number,
         height: number,
         pageX: number,
-        pageY: number
+        pageY: number,
       ) => {
         if (width > 0 && height > 0) {
           const frame = { x: pageX, y: pageY, width, height };
@@ -338,8 +348,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             width: number,
             height: number,
             pageX: number,
-            pageY: number
-          ) => void
+            pageY: number,
+          ) => void,
         ) => void;
       };
       if (typeof component.measure === 'function') {
@@ -380,7 +390,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         handleMeasureResult(x, y, width, height, pageX, pageY);
       });
     },
-    []
+    [],
   );
 
   // Find deepest node at given position
@@ -426,7 +436,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
               '[DevTools] Node',
               node.id,
               'contains point, area:',
-              area
+              area,
             );
             // Prefer smaller (deeper) nodes
             if (area < smallestArea) {
@@ -442,7 +452,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             child as {
               id: string;
               children: Array<{ id: string; children: unknown[] }>;
-            }
+            },
           );
         }
       }
@@ -451,12 +461,12 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         tree as {
           id: string;
           children: Array<{ id: string; children: unknown[] }>;
-        }
+        },
       );
       console.log('[DevTools] findNodeAtPosition result:', deepestNode);
       return deepestNode;
     },
-    []
+    [],
   );
 
   // DevTools pause handler - toggle pause for active engine
@@ -495,11 +505,11 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             '[DevTools] Inspect mode toggled to:',
             next,
             'activeTabId:',
-            activeTabId
+            activeTabId,
           );
           console.log(
             '[DevTools] engineMapRef keys:',
-            Array.from(engineMapRef.current.keys())
+            Array.from(engineMapRef.current.keys()),
           );
 
           if (next) {
@@ -507,7 +517,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             const activeEngine = engineMapRef.current.get(activeTabId);
             console.log(
               '[DevTools] Active engine for inspect:',
-              activeEngine ? 'exists' : 'null'
+              activeEngine ? 'exists' : 'null',
             );
             measureAllNodeFrames(activeEngine ?? null);
           } else {
@@ -518,7 +528,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
           return next;
         });
-      }
+      },
     );
 
     // Set up event listener for node selection from DevTools tree
@@ -532,7 +542,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
           '[DevTools] Active engine:',
           activeEngine ? 'exists' : 'null',
           'tabId:',
-          activeTabId
+          activeTabId,
         );
 
         // Get node props first (for style extraction)
@@ -555,7 +565,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                     id: string;
                     props?: Record<string, unknown>;
                     children: unknown[];
-                  }
+                  },
                 );
                 if (found !== null) return found;
               }
@@ -566,7 +576,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                 id: string;
                 props?: Record<string, unknown>;
                 children: unknown[];
-              }
+              },
             );
           }
         }
@@ -583,7 +593,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
           });
           DevToolsBridge?.updateBoxModel?.(boxModelData);
         });
-      }
+      },
     );
 
     // Set up event listener to toggle RN's built-in Element Inspector
@@ -592,7 +602,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       () => {
         // Emit the event that RN's AppContainer listens to
         DeviceEventEmitter.emit('toggleElementInspector');
-      }
+      },
     );
 
     // Track RN Inspector state (listen to our own toggle events for state sync)
@@ -602,7 +612,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       () => {
         rnInspectorActive = !rnInspectorActive;
         DevToolsBridge?.setRNInspectorActive?.(rnInspectorActive);
-      }
+      },
     );
 
     return () => {
@@ -613,6 +623,22 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       rnInspectorStateSubscription.remove();
     };
   }, [activeTabId, measureAndHighlightNode, measureAllNodeFrames]);
+
+  // User Info Sync logic
+  const setUserInfo = useUserStore((s) => s.setUserInfo);
+  const clearUser = useUserStore((s) => s.clearUser);
+  const currentUserInfo = useUserStore((s) => s.userInfoNative);
+
+  useEffect(() => {
+    console.error('>>>> 注册')
+    const subStatus = subscribeToLoginStatusChanges((status) => {
+      console.error('[ActrApp] Login status changed:', status);
+    });
+
+    return () => {
+      subStatus.remove();
+    };
+  }, [setUserInfo, clearUser, activeTabId, tabs]);
 
   const getEngine = useCallback((tabId: string) => {
     const engine = engineMapRef.current.get(tabId);
@@ -699,7 +725,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             timestamp: Date.now(),
             activeTabId,
             rows: [row],
-          })
+          }),
         );
       } catch {
         // Ignore DevTools monitor update errors
@@ -755,7 +781,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
               // Try to find Rill node ID - first direct match
               let nodeId = viewTagToNodeIdRef.current.get(
-                viewData.touchedViewTag
+                viewData.touchedViewTag,
               );
 
               // If no direct match, find via frame matching
@@ -804,7 +830,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
             // Silently ignore hover errors to prevent noise
           }
           return false;
-        }
+        },
       );
     } catch {
       // Silently ignore hover errors
@@ -858,7 +884,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                       y: frame.top,
                       width: frame.width,
                       height: frame.height,
-                    }
+                    },
                   );
                 }
 
@@ -866,26 +892,26 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                 // First try direct match
                 console.log(
                   '[DevTools] viewTagToNodeId map size:',
-                  viewTagToNodeIdRef.current.size
+                  viewTagToNodeIdRef.current.size,
                 );
                 console.log(
                   '[DevTools] nodeFrames map size:',
-                  nodeFramesRef.current.size
+                  nodeFramesRef.current.size,
                 );
                 let nodeId = viewTagToNodeIdRef.current.get(
-                  viewData.touchedViewTag
+                  viewData.touchedViewTag,
                 );
                 console.log(
                   '[DevTools] Direct viewTag lookup:',
                   viewData.touchedViewTag,
                   '->',
-                  nodeId
+                  nodeId,
                 );
 
                 // If no direct match, walk up the hierarchy to find a Rill node
                 if (!nodeId && viewData.hierarchy) {
                   console.log(
-                    '[DevTools] Walking hierarchy to find Rill node...'
+                    '[DevTools] Walking hierarchy to find Rill node...',
                   );
                   for (
                     let i = viewData.selectedIndex;
@@ -897,7 +923,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
                     try {
                       const inspectorData = item.getInspectorData(
-                        findNodeHandle as (component: unknown) => number | null
+                        findNodeHandle as (component: unknown) => number | null,
                       );
                       if (
                         inspectorData &&
@@ -908,7 +934,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                           (mx, my, mw, mh, pageX, pageY) => {
                             // Check if this hierarchy item's view tag is in our mapping
                             // We can't easily get the view tag here, but we can check by component name
-                          }
+                          },
                         );
                       }
                     } catch {
@@ -968,7 +994,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                       (viewData.hierarchy?.[
                         viewData.selectedIndex
                       ]?.getInspectorData(
-                        findNodeHandle as (component: unknown) => number | null
+                        findNodeHandle as (component: unknown) => number | null,
                       )?.props?.style as Record<string, unknown>);
                     const boxModelData = extractBoxModelFromStyle(style, frame);
                     DevToolsBridge?.updateBoxModel?.(boxModelData);
@@ -976,20 +1002,20 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                 } else {
                   console.log(
                     '[DevTools] No Rill node found for viewTag:',
-                    viewData.touchedViewTag
+                    viewData.touchedViewTag,
                   );
                 }
               }
             } catch (callbackError) {
               console.log(
                 '[DevTools] Inspector callback error:',
-                callbackError
+                callbackError,
               );
             }
             // Note: Don't exit inspect mode - let user manually exit
 
             return false; // Don't continue traversing
-          }
+          },
         );
       } catch (error) {
         console.log('[DevTools] Inspector API error:', error);
@@ -1008,7 +1034,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
         // Don't exit inspect mode on error - let user manually exit
       }
     },
-    [activeTabId, findNodeAtPosition, measureAndHighlightNode]
+    [activeTabId, findNodeAtPosition, measureAndHighlightNode],
   );
 
   // Handle touch for inspect mode (like RN's InspectorOverlay)
@@ -1017,7 +1043,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       const { locationX, locationY } = e.nativeEvent;
       handleInspectHover(locationX, locationY);
     },
-    [handleInspectHover]
+    [handleInspectHover],
   );
 
   const handleStartShouldSetResponder = useCallback(
@@ -1025,7 +1051,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       findViewForTouchEvent(e);
       return true;
     },
-    [findViewForTouchEvent]
+    [findViewForTouchEvent],
   );
 
   const handleResponderRelease = useCallback(
@@ -1033,7 +1059,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       const { locationX, locationY } = e.nativeEvent;
       handleInspectClick(locationX, locationY);
     },
-    [handleInspectClick]
+    [handleInspectClick],
   );
 
   return (
