@@ -69,9 +69,9 @@ else
     exit 1
 fi
 
-# 2b. actr.jsbundle
+# 2b. All jsbundles (system + actr — both share Engine.ts)
 info "Building actr.jsbundle..."
-ACTR_OUT=$(cd "$CANVAS_DIR" && ./scripts/bundle-rctnapp.sh --target actr 2>&1)
+ACTR_OUT=$(cd "$CANVAS_DIR" && ./scripts/bundle-rctnapp.sh --target all 2>&1)
 if echo "$ACTR_OUT" | grep -q 'Done!'; then
     ACTR_SIZE=$(echo "$ACTR_OUT" | grep -oE 'Size: [0-9A-Za-z.]+' | head -1)
     ok "actr.jsbundle built ($ACTR_SIZE)"
@@ -197,14 +197,12 @@ header "Step 5: Generating report"
     # Section B: XPC Service (Native) logs from syslog
     # -----------------------------------------------------------------
     echo "============================================================"
-    echo "  B. XPC SERVICE NATIVE LOGS"
+    echo "  B. XPC SERVICE NATIVE LOGS (actr-only)"
     echo "============================================================"
     if [ -f "$SYSLOG_RAW" ] && [ -s "$SYSLOG_RAW" ]; then
-        # Filter only CanvasViewService lines, remove OS-level noise
+        # Whitelist: only keep lines with actr/Canvas app-specific keywords
         grep -E 'CanvasViewService|RCTViewService' "$SYSLOG_RAW" 2>/dev/null \
-            | grep -v 'libnetwork\|nw_\|TCP\|kqueue\|CFNetwork\|mDNS\|Lookup\|TIC\|ATS' \
-            | grep -v 'User Defaults\|CFPrefs\|CFBundle\|CoreAnalytics\|launchservices\|pasteboard\|CarbonCore\|libsystem_info\|Foundation.*<private>' \
-            | grep -v 'ViewBridgeBoolShouldLog\|NSViewShouldSwizzle\|NSShow\|NSSpin\|NSLifeguard\|NSForce\|NSApplication' \
+            | grep -iE 'Rill|actr|tabConfig|ViewBridge|RCTRoot|NativeLog|ensureBridge|createRoot|registerPending|applyConfig|bootstrap|pendingTab|ServiceXPC|hostProcess|containerSize|listenerReady|serviceReady|serviceState|serviceDidBecome|handleTab|pendingEntry|ipcLog|\[SVC\]|\[HOST\]|\[JS\]' \
             | head -60 || echo "  (none)"
     else
         echo "  (No syslog captured)"
@@ -215,12 +213,12 @@ header "Step 5: Generating report"
     # Section C: Host-side Canvas logs from syslog
     # -----------------------------------------------------------------
     echo "============================================================"
-    echo "  C. HOST-SIDE CANVAS LOGS"
+    echo "  C. HOST-SIDE CANVAS LOGS (actr-only)"
     echo "============================================================"
     if [ -f "$SYSLOG_RAW" ] && [ -s "$SYSLOG_RAW" ]; then
-        grep -E 'Canvas ' "$SYSLOG_RAW" 2>/dev/null \
-            | grep -iE 'IPC|ViewBridge|tabConfig|XPC|Service|ready|error|warn|size|panel' \
-            | grep -v 'libnetwork\|nw_\|TCP\|kqueue\|CFNetwork\|mDNS\|Lookup\|TIC\|ATS\|Metal\|GPU\|CAMetalLayer' \
+        # Whitelist: only keep Canvas host process lines with app-specific keywords
+        grep -E 'Canvas\[' "$SYSLOG_RAW" 2>/dev/null \
+            | grep -iE 'Rill|actr|tabConfig|ViewBridge|RCTRoot|IPC|XPC|Service|ensureBridge|bootstrap|listenerReady|serviceReady|serviceState|UnifiedRN|coordinator|containerSize|hostProcess|allocateService|prewarm|pendingTab|\[HOST\]|\[JS\]' \
             | head -100 || echo "  (none)"
     else
         echo "  (No syslog captured)"
@@ -237,7 +235,9 @@ header "Step 5: Generating report"
         grep -iE 'mouse|click|onPress|touchStart|touchEnd|gestureRecognizer' "$IPC_LOG" 2>/dev/null | head -30 || echo "  (none)"
     fi
     if [ -f "$SYSLOG_RAW" ]; then
-        grep -iE 'mouseDown|mouseUp|touchHandler' "$SYSLOG_RAW" 2>/dev/null | head -20 || echo "  (none from syslog)"
+        grep -E 'Canvas\[|CanvasViewService' "$SYSLOG_RAW" 2>/dev/null \
+            | grep -iE 'mouseDown|mouseUp|touchHandler|hitTest|onPress|gestureRecognizer' \
+            | head -20 || echo "  (none from syslog)"
     fi
     echo ""
 
