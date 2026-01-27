@@ -4,7 +4,8 @@
 @interface RCT_EXTERN_MODULE(UserInfoModule, RCTEventEmitter)
 
 // 暴露给 RN 的方法（可选）
-RCT_EXTERN_METHOD(getCurrentUserInfo:(RCTPromiseResolveBlock)resolve
+RCT_EXTERN_METHOD(getCurrentUserInfo:(NSDictionary *)params
+                  resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 @end
