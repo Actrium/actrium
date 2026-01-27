@@ -271,7 +271,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        println!("Before insert: {}", before_insert);
+        println!("Before insert: {before_insert}");
 
         // 添加即将过期的 nonce（1 秒TTL）
         storage
@@ -292,13 +292,13 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        println!("After sleep: {}", after_sleep);
+        println!("After sleep: {after_sleep}");
         println!("Time elapsed: {} seconds", after_sleep - before_insert);
 
         // 通过 NonceStorage trait 调用（会检查过期）
         use nonce_auth::storage::NonceStorage;
         let expired_entry = NonceStorage::get(&storage, "expired", None).await.unwrap();
-        println!("Expired entry after trait call: {:?}", expired_entry);
+        println!("Expired entry after trait call: {expired_entry:?}");
 
         // 验证：过期的应该查不到（trait方法内部会检查过期）
         assert!(

@@ -21,11 +21,11 @@ impl Realm {
     pub async fn validate_realm(realm_id: u32) -> Result<Realm, String> {
         let realm = Self::get_by_realm_id(realm_id)
             .await
-            .map_err(|e| format!("Failed to query realm: {}", e))?
-            .ok_or_else(|| format!("Realm {} not found", realm_id))?;
+            .map_err(|e| format!("Failed to query realm: {e}"))?
+            .ok_or_else(|| format!("Realm {realm_id} not found"))?;
 
         if realm.is_expired() {
-            return Err(format!("Realm {} has expired", realm_id));
+            return Err(format!("Realm {realm_id} has expired"));
         }
 
         if realm.status() != RealmStatus::Normal {

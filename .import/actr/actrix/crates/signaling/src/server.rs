@@ -88,6 +88,8 @@ pub struct ClientConnection {
     pub credential: Option<AIdCredential>,
     pub direct_sender: tokio::sync::mpsc::UnboundedSender<WsMessage>,
     pub client_ip: Option<std::net::IpAddr>,
+    /// WebRTC 角色：\"answer\" 或 None (默认为 offer)
+    pub webrtc_role: Option<String>,
 }
 
 /// 信令服务器句柄 - 用于在异步任务中操作服务器
@@ -168,6 +170,7 @@ pub async fn handle_websocket_connection(
     server: SignalingServerHandle,
     client_ip: Option<std::net::IpAddr>,
     url_identity: Option<(ActrId, AIdCredential)>,
+    webrtc_role: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4().to_string();
     info!(
@@ -211,6 +214,7 @@ pub async fn handle_websocket_connection(
                 credential: cred_for_entry,
                 direct_sender: direct_tx,
                 client_ip,
+                webrtc_role: webrtc_role.clone(),
             },
         );
     }
@@ -385,7 +389,7 @@ async fn handle_peer_to_server(
                 send_register_error(
                     client_id,
                     403,
-                    &format!("Realm validation failed: {}", e),
+                    &format!("Realm validation failed: {e}"),
                     server,
                     request_envelope_id,
                 )
@@ -1113,7 +1117,12 @@ async fn handle_actr_relay(
     if let Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation { from, to, .. })) =
         relay.payload.clone()
     {
-        let is_offerer = actor_order_key(&from) > actor_order_key(&to);
+        let clients_guard = server.clients.read().await;
+
+        // 使用 determine_webrtc_role 函数确定角色
+        let is_offerer = determine_webrtc_role(&from, &to, &clients_guard);
+
+        drop(clients_guard);
 
         let new_relay = ActrRelay {
             // source: peer actor (对端)，target: 该 assignment 的接收方
@@ -1196,6 +1205,53 @@ fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
         id.r#type.manufacturer.clone(),
         id.r#type.name.clone(),
     )
+}
+
+/// 根据双方的角色偏好和 ActorId 确定发起方是否为 offerer
+///
+/// # 角色判定规则:
+/// 1. 如果一方明确要求当 "answer" 而另一方没有要求，则满足该要求
+/// 2. 如果双方都有相同偏好（都想当 "answer" 或都没要求），则回退到 ActrId 静态排序逻辑
+///
+/// # Arguments
+/// * `from` - 发起方的 ActorId
+/// * `to` - 接收方的 ActorId
+/// * `clients` - 客户端连接映射表,用于查找角色偏好
+///
+/// # Returns
+/// * `true` - 发起方应该是 offerer
+/// * `false` - 发起方应该是 answerer
+fn determine_webrtc_role(
+    from: &ActrId,
+    to: &ActrId,
+    clients: &HashMap<String, ClientConnection>,
+) -> bool {
+    // 从客户端连接中查找双方的角色偏好
+    let from_role = clients
+        .values()
+        .find(|c| c.actor_id.as_ref() == Some(from))
+        .and_then(|c| c.webrtc_role.as_deref());
+
+    let to_role = clients
+        .values()
+        .find(|c| c.actor_id.as_ref() == Some(to))
+        .and_then(|c| c.webrtc_role.as_deref());
+
+    let is_offerer = if from_role == Some("answer") && to_role != Some("answer") {
+        false
+    } else if to_role == Some("answer") && from_role != Some("answer") {
+        true
+    } else {
+        // 其他情况(双方都偏好 answer 或都无偏好)，使用 ActorId 排序
+        actor_order_key(from) < actor_order_key(to)
+    };
+
+    info!(
+        "⚖️ 角色协商完成: {} (role={:?}) -> {} (role={:?}), is_offerer={}",
+        from.serial_number, from_role, to.serial_number, to_role, is_offerer
+    );
+
+    is_offerer
 }
 
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all))]
@@ -2077,7 +2133,7 @@ async fn handle_get_service_spec_request(
         .unwrap_or_else(|| {
             actr_protocol::get_service_spec_response::Result::Error(ErrorResponse {
                 code: 404,
-                message: format!("Service specification not found for name={}", service_name),
+                message: format!("Service specification not found for name={service_name}"),
             })
         });
 
@@ -2208,3 +2264,105 @@ async fn send_error_response(
 }
 
 // Main function removed - SignalingServer can now be instantiated and started from other modules
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actr_protocol::{ActrType, Realm};
+    use std::collections::HashMap;
+
+    /// 创建测试用的 ActrId
+    fn create_test_actr_id(serial: u64) -> ActrId {
+        ActrId {
+            serial_number: serial,
+            realm: Realm { realm_id: 1001 },
+            r#type: ActrType {
+                manufacturer: "test".to_string(),
+                name: "device".to_string(),
+            },
+        }
+    }
+
+    /// 创建测试用的 ClientConnection
+    fn create_test_client(actor_id: ActrId, webrtc_role: Option<String>) -> ClientConnection {
+        ClientConnection {
+            id: uuid::Uuid::new_v4().to_string(),
+            actor_id: Some(actor_id),
+            credential: None,
+            direct_sender: tokio::sync::mpsc::unbounded_channel().0,
+            client_ip: None,
+            webrtc_role,
+        }
+    }
+
+    #[test]
+    fn test_determine_webrtc_role() {
+        // 测试数据: (from_serial, to_serial, from_role, to_role, expected_is_offerer, description)
+        let test_cases = vec![
+            (2, 1, None, None, false, "双方都没有偏好,使用 ActorId 排序"),
+            (
+                2,
+                1,
+                None,
+                Some("answer"),
+                true,
+                "接收方偏好 answer,发起方应该是 offerer",
+            ),
+            (
+                2,
+                1,
+                Some("answer"),
+                None,
+                false,
+                "发起方偏好 answer,发起方应该是 answerer",
+            ),
+            (
+                2,
+                1,
+                Some("answer"),
+                Some("answer"),
+                false,
+                "双方都偏好 answer,回退到排序逻辑",
+            ),
+            (
+                1,
+                2,
+                None,
+                None,
+                true,
+                "serial 1 < serial 2,发起方应该是 offerer",
+            ),
+            (
+                1,
+                2,
+                Some("answer"),
+                Some("answer"),
+                true,
+                "双方都偏好 answer,serial 1 应该是 offerer",
+            ),
+        ];
+
+        for (from_serial, to_serial, from_role, to_role, expected, desc) in test_cases {
+            let from = create_test_actr_id(from_serial);
+            let to = create_test_actr_id(to_serial);
+
+            // 创建 clients map
+            let mut clients = HashMap::new();
+            clients.insert(
+                format!("client_{from_serial}"),
+                create_test_client(from.clone(), from_role.map(|s| s.to_string())),
+            );
+            clients.insert(
+                format!("client_{to_serial}"),
+                create_test_client(to.clone(), to_role.map(|s| s.to_string())),
+            );
+
+            let is_offerer = determine_webrtc_role(&from, &to, &clients);
+
+            assert_eq!(
+                is_offerer, expected,
+                "测试失败: {desc} (from={from_serial}, to={to_serial}, from_role={from_role:?}, to_role={to_role:?})"
+            );
+        }
+    }
+}

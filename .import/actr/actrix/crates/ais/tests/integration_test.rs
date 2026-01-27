@@ -83,7 +83,7 @@ async fn test_end_to_end_token_issuance_and_validation() {
     let register_ok = match response.result.unwrap() {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => {
-            panic!("Expected success but got error: {:?}", err);
+            panic!("Expected success but got error: {err:?}");
         }
     };
 
@@ -187,7 +187,7 @@ async fn test_token_validation_with_wrong_realm_fails() {
     let register_ok = match response.result.unwrap() {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => {
-            panic!("Expected success but got error: {:?}", err);
+            panic!("Expected success but got error: {err:?}");
         }
     };
 
@@ -239,8 +239,8 @@ async fn test_multiple_key_rotations() {
     for i in 0..5 {
         let request = RegisterRequest {
             actr_type: ActrType {
-                manufacturer: format!("test-manufacturer-{}", i),
-                name: format!("test-device-{}", i),
+                manufacturer: format!("test-manufacturer-{i}"),
+                name: format!("test-device-{i}"),
             },
             realm: Realm { realm_id: 1001 },
             service_spec: None,
@@ -255,7 +255,7 @@ async fn test_multiple_key_rotations() {
         let register_ok = match response.result.unwrap() {
             register_response::Result::Success(ok) => ok,
             register_response::Result::Error(err) => {
-                panic!("Expected success but got error: {:?}", err);
+                panic!("Expected success but got error: {err:?}");
             }
         };
 
@@ -266,13 +266,9 @@ async fn test_multiple_key_rotations() {
     for (i, credential) in credentials.iter().enumerate() {
         let (claims, _) = AIdCredentialValidator::check(credential, 1001)
             .await
-            .unwrap_or_else(|e| panic!("Token {} validation failed: {}", i, e));
+            .unwrap_or_else(|e| panic!("Token {i} validation failed: {e}"));
 
-        assert_eq!(
-            claims.realm_id, 1001,
-            "Realm ID should match for token {}",
-            i
-        );
+        assert_eq!(claims.realm_id, 1001, "Realm ID should match for token {i}");
     }
 
     println!("✅ Multiple key rotations test passed!");
@@ -307,7 +303,7 @@ async fn test_issuer_health_checks() {
             }
             Err(e) => {
                 // 如果 KS 不可用，应该得到明确的错误信息
-                println!("⚠️  Issuer creation failed (KS unavailable): {}", e);
+                println!("⚠️  Issuer creation failed (KS unavailable): {e}");
                 assert!(
                     e.to_string().contains("KS"),
                     "Error should mention KS service"
@@ -315,7 +311,7 @@ async fn test_issuer_health_checks() {
             }
         },
         Err(e) => {
-            println!("⚠️  KS gRPC client creation failed: {}", e);
+            println!("⚠️  KS gRPC client creation failed: {e}");
             assert!(
                 e.to_string().contains("KS") || e.to_string().contains("gRPC"),
                 "Error should mention KS or gRPC"

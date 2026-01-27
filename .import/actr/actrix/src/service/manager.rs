@@ -370,8 +370,7 @@ impl ServiceManager {
             _ => {
                 error!("Invalid service type for ICE service: {}", service_name);
                 Err(anyhow::anyhow!(
-                    "Invalid service type for ICE service: {}",
-                    service_name
+                    "Invalid service type for ICE service: {service_name}"
                 ))
             }
         }

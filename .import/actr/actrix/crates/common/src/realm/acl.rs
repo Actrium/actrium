@@ -60,7 +60,21 @@ impl ActorAcl {
         let db = get_database();
         let pool = db.get_pool();
 
-        if self.rowid.is_none() {
+        if let Some(rowid) = self.rowid {
+            // 更新现有记录
+            sqlx::query(
+                "UPDATE actoracl SET realm_id = ?, from_type = ?, to_type = ?, access = ? WHERE rowid = ?"
+            )
+            .bind(self.realm_id)
+            .bind(&self.from_type)
+            .bind(&self.to_type)
+            .bind(if self.access { 1 } else { 0 })
+            .bind(rowid)
+            .execute(pool)
+            .await?;
+
+            Ok(rowid)
+        } else {
             // 插入新记录
             let result = sqlx::query(
                 "INSERT INTO actoracl (realm_id, from_type, to_type, access) VALUES (?, ?, ?, ?)",
@@ -75,20 +89,6 @@ impl ActorAcl {
             let new_rowid = result.last_insert_rowid();
             self.rowid = Some(new_rowid);
             Ok(new_rowid)
-        } else {
-            // 更新现有记录
-            sqlx::query(
-                "UPDATE actoracl SET realm_id = ?, from_type = ?, to_type = ?, access = ? WHERE rowid = ?"
-            )
-            .bind(self.realm_id)
-            .bind(&self.from_type)
-            .bind(&self.to_type)
-            .bind(if self.access { 1 } else { 0 })
-            .bind(self.rowid)
-            .execute(pool)
-            .await?;
-
-            Ok(self.rowid.unwrap())
         }
     }
 

@@ -303,13 +303,11 @@ mod tests {
         assert!(
             output.contains("actrix_websocket_connections")
                 || output.contains("websocket_connections"),
-            "Output should contain websocket_connections metric. Output: {}",
-            output
+            "Output should contain websocket_connections metric. Output: {output}"
         );
         assert!(
             output.contains("42"),
-            "Output should contain value 42. Output: {}",
-            output
+            "Output should contain value 42. Output: {output}"
         );
     }
 }
