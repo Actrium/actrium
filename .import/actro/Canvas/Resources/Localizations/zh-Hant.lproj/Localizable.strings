@@ -1,0 +1,306 @@
+/* 繁体中文 (zh-Hant) */
+
+/* 1. 選單頁面 */
+"welcome" = "歡迎";
+"welcomeTip" = "我是Mu Ai，知無不答～";
+"language" = "語言";
+"about" = "關於";
+"aboutDescription" = "我是 Mu Ai，知無不答！依託前沿人工智慧，融合個性化服務，為您定制特色行程，高效解答問題，全程相伴暢玩景區。";
+"clearChat" = "清除對話記錄";
+"clearChatTip" = "清除對話記錄將無法恢復，是否繼續？";
+"teasing" = "吐個槽";
+"confirm" = "確認";
+"disagree" = "取消";
+"teasingTopic" = "#吐個槽 关于 Mu Ai#";
+
+/* 2. 輸入框文案 */
+"messageOrHoldToTalk" = "發訊息或按住說話";
+"sendMessage" = "發訊息";
+"holdToTalk" = "按住說話";
+"releaseToSendSwipeToCancel" = "鬆手發送，上移取消";
+"releaseToCancel" = "鬆手取消";
+
+/* 3. 位置 */
+"currentLocation" = "當前位置";
+"addCurrentLocation" = "添加當前位置";
+"enableCompanionMode" = "開啟伴遊模式";
+"unenableCompanionMode" = "退出伴遊模式";
+"companionMode" = "伴遊模式";
+"companionTip" = "開啟後，自動匹配推送景點資訊";
+"companyStart" = "開始";
+"companyNoStart" = "暫不開啟";
+"companyTitle" = "歡迎使用AI伴遊模式";
+"companyWelcome" = "開啟AI伴遊模式，根據您的位置自動推送景點介紹。請開啟位置權限，並請勿鎖屏。";
+
+/* 4. 工具列 */
+/* 提問 */
+"edit" = "編輯";
+"copy" = "複製";
+"delete" = "刪除";
+"cancel" = "取消";
+"send" = "發送";
+"goSetting" = "前往設定";
+"more" = "更多";
+
+/* 答案 */
+"commonQuestions" = "常見問題";
+"references" = "參考資料";
+"onlyReferences" = "答案僅供參考";
+"voiceReading" = "播放朗讀";
+"stop" = "停止";
+"copy" = "複製";
+"like" = "喜歡";
+"dislike" = "不喜歡";
+
+/* 5. 反饋彈窗 */
+"tellUsHowToImprove" = "告訴我哪裡需要改進吧！";
+"inaccurate" = "不準確";
+"tooShort" = "太短暫";
+"other" = "其他";
+"submit" = "提交";
+"submitSuccess" = "提交成功";
+"feedbackAndReport" = "反馈与举报";
+"feedbackPromt" = "附上本次对话更多内容？有助于排查问题。不含历史。";
+"harmfulReport" = "有害/不安全";
+"sexualReport" = "色情/低俗";
+"privacyReport" = "隐私相关";
+"abuseReport" = "谩骂/攻击";
+"illegalReport" = "违法/犯罪";
+"falseInfoReport" = "虚假信息";
+"copyrightReport" = "侵犯著作权/名誉权";
+"placeholder" = "补充（选填）";
+
+/* 6. 其它 */
+"disconnected" = "未連接";
+"greatwall" = "慕田峪長城";
+
+/* 7. 提示通知 */
+"toastSuccess" = "成功";
+"toastError" = "錯誤";
+"toastWarning" = "警告";
+"toastInfo" = "信息";
+"copySuccess" = "已複製";
+"operationSuccess" = "操作成功";
+"operationFailed" = "操作失敗";
+"networkError" = "網絡錯誤，請稍後再試";
+"dataLoadFailed" = "數據加載失敗";
+"generatingVoice" = "正在生成語音朗讀";
+"liked" = "已喜歡";
+"thanksFeedback" = "感謝你的反饋";
+"noTextDetected" = "未識別到文字";
+"appUnExist" = "應用程式不存在";
+"invalidQRCode" = "無效二維碼";
+"unavailable" = "該功能暫不可用";
+"noNetwork" = "當前網絡不可用";
+"deleteMessageTitle" = "是否删除已选？";
+"deleteMessageTip" = "删除后，无法恢复。";
+
+/* 8. 天氣 */
+/* 天氣狀態 */
+"weather_level" = "級";
+"weather_clear" = "晴";
+"weather_partly_cloudy" = "少雲";
+"weather_mostly_clear" = "晴間多雲";
+"weather_cloudy" = "多雲";
+"weather_overcast" = "陰";
+
+/* 風力情況 */
+"weather_windy" = "有風";
+"weather_calm" = "平靜";
+"weather_light_breeze" = "微風";
+"weather_moderate_breeze" = "和風";
+"weather_fresh_breeze" = "清風";
+"weather_strong_wind" = "強風";
+"weather_high_wind" = "疾風";
+"weather_gale" = "大風";
+"weather_strong_gale" = "烈風";
+"weather_storm" = "風暴";
+"weather_violent_storm" = "狂爆風";
+"weather_hurricane" = "颶風";
+"weather_tropical_storm" = "熱帶風暴";
+
+/* 空氣質量 */
+"weather_haze" = "霾";
+"weather_moderate_haze" = "中度霾";
+"weather_severe_haze" = "重度霾";
+"weather_extreme_haze" = "嚴重霾";
+
+/* 降水情況 */
+"weather_shower" = "陣雨";
+"weather_thundershower" = "雷陣雨";
+"weather_thundershower_with_hail" = "雷陣雨並伴有冰雹";
+"weather_light_rain" = "小雨";
+"weather_moderate_rain" = "中雨";
+"weather_heavy_rain" = "大雨";
+"weather_torrential_rain" = "暴雨";
+"weather_downpour" = "大暴雨";
+"weather_extreme_downpour" = "特大暴雨";
+"weather_heavy_shower" = "強陣雨";
+"weather_heavy_thundershower" = "強雷陣雨";
+"weather_extreme_rainfall" = "極端降雨";
+"weather_drizzle" = "毛毛雨";
+"weather_rain" = "雨";
+"weather_light_to_moderate_rain" = "小雨-中雨";
+"weather_moderate_to_heavy_rain" = "中雨-大雨";
+"weather_heavy_to_torrential_rain" = "大雨-暴雨";
+"weather_torrential_rain_to_downpour" = "暴雨-大暴雨";
+"weather_downpour_to_extreme_downpour" = "大暴雨-特大暴雨";
+
+/* 雪與混合天氣 */
+"weather_rain_and_snow" = "雨雪天氣";
+"weather_sleet" = "雨夾雪";
+"weather_snow_rain_shower" = "陣雨夾雪";
+"weather_freezing_rain" = "凍雨";
+"weather_snow" = "雪";
+"weather_snow_shower" = "陣雪";
+"weather_light_snow" = "小雪";
+"weather_moderate_snow" = "中雪";
+"weather_heavy_snow" = "大雪";
+"weather_snowstorm" = "暴雪";
+"weather_light_to_moderate_snow" = "小雪-中雪";
+"weather_moderate_to_heavy_snow" = "中雪-大雪";
+"weather_heavy_snow_to_snowstorm" = "大雪-暴雪";
+
+/* 沙塵與特殊天氣 */
+"weather_dust" = "浮塵";
+"weather_blowing_dust" = "揚沙";
+"weather_dust_storm" = "沙塵暴";
+"weather_strong_dust_storm" = "強沙塵暴";
+"weather_tornado" = "龍捲風";
+
+/* 霧 */
+"weather_fog" = "霧";
+"weather_dense_fog" = "濃霧";
+"weather_thick_fog" = "強濃霧";
+"weather_mist" = "輕霧";
+"weather_heavy_fog" = "大霧";
+"weather_extreme_dense_fog" = "特強濃霧";
+
+/* 溫度感受 */
+"weather_hot" = "熱";
+"weather_cold" = "冷";
+
+/* 其他 */
+"weather_unknown" = "未知";
+
+/* 9. 日期相关 */
+"today" = "今天";
+"monday" = "週一";
+"tuesday" = "週二";
+"wednesday" = "週三";
+"thursday" = "週四";
+"friday" = "週五";
+"saturday" = "週六";
+"sunday" = "週日";
+
+/* 10. 導航 */
+"startNavigation" = "開始導航";
+"selelctNavigation" = "請選擇導航";
+"tencentMap" = "騰訊地圖";
+"baiduMap" = "百度地圖";
+"amap" = "高德地圖";
+"maps" = "Apple地圖";
+"details" = "詳情";
+
+/* 11. 權限彈窗 */
+"accuracyTitle" = "需要授權";
+"accuracyMessage" = "當前僅使用粗略定位，這可能會影響部分功能。 是否前往設定啟用精確位置許可權？";
+"locationTitle" = "定位許可權未開啟";
+"locationMessage" = "請在“設定”中開啟定位許可權，以正常使用此功能";
+"recordTitle" = "需要授權";
+"recordMessage" = "請前往“設定”開啟麥克風許可權，以便正常使用語音功能。";
+"cameraTitle" = "允許訪問相機";
+"cameraMessage" = "請授權相機權限，以便使用掃一掃功能";
+
+/* 12. 兜底頁 */
+"scanToEnter" = "掃描二維碼進入應用";
+"alignCenter" = "對準二維碼中心";
+
+/* 13. 应用列表 */
+"appList" = "應用";
+"appActive" = "使用中";
+"appUnavailable" = "不可用";
+"appRecently" = "最近使用";
+
+/* 14. 隐私弹窗 */
+"privateTitle" = "欢迎使用 AskAway";
+"privateMessage" = "在您使用本应用前，请仔细阅读并充分理解[《用户协议》](https://www.askaway.chat/corp/zh-Hans/user.html)和[《隐私政策》](https://www.askaway.chat/corp/zh-Hans/privacy.html)。<br>
+为向您提供智能问答与相关服务，我们可能会收集和使用必要的信息。\n
+请注意：
+* 请勿在对话中共享您的个人敏感信息；
+* 您的聊天内容可能会被用于安全审查及服务优化；
+* 本应用为技术平台，内容由应用方提供与负责，平台不对内容的准确性、完整性或合法性承担责任。\n
+我们将严格保护您的个人信息，并仅在法律允许和服务所需范围内使用。<br>
+点击“同意”，即表示您已阅读并同意上述协议。<br>
+如您不同意，将无法继续使用本应用的功能。";
+"privateDisagree" = "不同意";
+"privateAgree" = "同意";
+
+/* 15. 关于我们 */
+"aboutUs" = "关于我们";
+"aboutApp" = "关于 AskAway";
+"icpInfo" = "ICP备案";
+"aiAndLargeModels" = "AI 与大模型";
+"feedback" = "吐个槽";
+"privacyPolicy" = "隐私政策";
+"userAgreement" = "用户协议";
+
+/* 16. 登录 */
+"loginAlertTitle" = "用户协议及隐私政策";
+"loginAlertMessage" = "已阅读并同意[《用户协议》](https://www.askaway.chat/corp/zh-Hans/user.html)和[《隐私政策》](https://www.askaway.chat/corp/zh-Hans/privacy.html)";
+"loginTip" = "您可以通过以下方式登录";
+"loginByWechat" = "使用微信登录";
+"loginByApple" = "使用Apple登录";
+"authorized" = "授权成功！";
+"authorTip" = "希望访问你的信息，用于提供个性化服务：";
+"authorExplain" = "用户标识、昵称、头像、邮箱。若所选登录方式支持邮箱（如 Apple、Google），也将获取邮箱地址。";
+"declineAuthor" = "拒绝";
+"agreeAuthor" = "用 AskAway 登录";
+"agreeAuthorTip" = "并允许此应用访问你的信息";
+"wechatIdentity" = "微信身份：";
+"appleIdentity" = "苹果身份: ";
+"allowAuthor" = "允许";
+"login" = "登录";
+"loginOut" = "退出登录";
+"deleteAccount" = "删除账号";
+"loginOutTitle" = "确认退出登录？";
+"loginOutConfirm" = "退出";
+"loginOutCancel" = "取消";
+"deleteAccountTitle" = "确认删除账号？";
+"deleteAccountMessage" = "删除后，账号将被永久删除且无法恢复。请确认你希望继续操作。";
+"deleteAccountConfirm" = "删除账号";
+"deleteAccountCancel" = "取消";
+"nickname" = "昵称";
+"email" = "邮箱";
+"camera" = "相机";
+"photo" = "相册";
+"file" = "文件";
+
+/* 17. 起始页 */
+"activity" = "活躍";
+"preferences" = "偏好設定";
+"bookmarks" = "書籤";
+"allTag" = "全部";
+"addTagTitle" = "标签";
+"addTagPlaceholder" = "添加新标签...";
+"collected" = "已收藏";
+"canAddTag" = "可修改标签";
+"renameTag" = "重命名";
+"deleteTag" = "删除";
+"search" = "搜索";
+"deleteTagTitle" = "确认要删除该标签吗？";
+"deleteTagMessage" = "删除标签后，其中的收藏会保留在‘全部’中";
+"gotIt" = "知道了";
+"sendKey" = "发送键设置";
+"sendKeyDescription" = "发送键变回车";
+"onlineSearch" = "联网搜索";
+"onlineSearchDescription" = "使用在线搜索";
+"fileCoveredTitle" = "已添加内容，继续将覆盖当前内容。";
+"agreeCover" = "确定覆盖";
+"fileTooLarge" = "文件过大，单个文件不超过 10 MB";
+"filelimit" = "最多可上传 6 个文件";
+"fileTypeUnsupported" = "不支持的文件类型";
+"addChannel" = "新增應用";
+"imagelimit" = "最多 6 张图片";
+"location" = "位置";
+"locationDescription" = "添加位置";
