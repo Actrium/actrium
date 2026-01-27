@@ -1,5 +1,6 @@
 import Foundation
 import React
+import A1SDK
 
 private let logger = AppLogger.reactNative
 
@@ -120,28 +121,85 @@ class UserInfoModule: RCTEventEmitter {
         logger.debug("[UserInfoModule] RN requested current user info")
         logger.debug("[UserInfoModule] Params: \(params)")
         
-        // 先尝试直接获取用户信息
-        if let user = UserInfoManager.shared.getUser() {
-            logger.debug("[UserInfoModule] Found local user info, returning immediately")
+        let appUrl = params["appUrl"] as? String ?? ""
+        
+        // 检查本地用户信息
+        if UserInfoManager.shared.getUser() != nil {
+            // 有本地用户信息，验证环境是否一致
+            if !appUrl.isEmpty {
+                let appEnvironment = mapUrlToEnvironment(appUrl)
+                let currentEnvironment = LoginManager.shared.currentEnvironment
+                
+                if appEnvironment != currentEnvironment {
+                    logger.warning("[UserInfoModule] Environment mismatch: app=\(appEnvironment), current=\(currentEnvironment)")
+                    logger.info("[UserInfoModule] Triggering re-login due to environment change")
+                    
+                    // 构建授权上下文
+                    let authContext: [String: String] = [
+                        "clientId": params["clientId"] as? String ?? "",
+                        "appId": params["appId"] as? String ?? "",
+                        "tabId": params["tabId"] as? String ?? "",
+                        "appUrl": appUrl
+                    ]
+                    
+                    // 环境不一致，触发重新登录
+                    pendingRequests.append((params: params, resolve: resolve, reject: reject))
+                    DispatchQueue.main.async {
+                        LoginManager.shared.setupConfig(appUrl)
+                        LoginManager.shared.setAuthContext(authContext)
+                        LoginManager.shared.showLogin(.login)
+                    }
+                    return
+                }
+            }
+            
+            // 环境一致，直接返回用户信息
+            logger.debug("[UserInfoModule] Found local user info with matching environment, returning immediately")
             processUserInfoRequest(params: params, resolve: resolve, reject: reject)
             return
         }
         
-        // 检查是否已登录（LoginManager 中的全局用户）
-        if LoginManager.shared.isLoggedIn, let currentUser = LoginManager.shared.currentUser {
-            logger.debug("[UserInfoModule] User is logged in globally, saving to local storage")
-            // 将全局用户信息保存到当前 appId 的本地存储
-            // TODO: 需要实现将 currentUser 转换并保存到 UserInfoManager
-            // 暂时先返回错误，触发登录授权流程
-        }
-        
-        // 用户信息为空，添加到等待队列并触发登录
-        logger.info("[UserInfoModule] No user info found, triggering login authorization")
+        // 无本地用户信息，说明未登录，触发登录流程
+        // 登录成功后会自动授权并保存到本地，不弹授权提示框
+        logger.info("[UserInfoModule] No local user info, user not logged in, triggering login flow")
         pendingRequests.append((params: params, resolve: resolve, reject: reject))
         
-        // 在主线程显示登录弹窗
+        // 构建授权上下文
+        let authContext: [String: String] = [
+            "clientId": params["clientId"] as? String ?? "",
+            "appId": params["appId"] as? String ?? "",
+            "tabId": params["tabId"] as? String ?? "",
+            "appUrl": appUrl
+        ]
+        
+        // 设置环境、授权上下文并显示登录弹窗
         DispatchQueue.main.async {
-            LoginManager.shared.showLogin(.loginAuth)
+            if !appUrl.isEmpty {
+                LoginManager.shared.setupConfig(appUrl)
+            }
+            // 设置授权上下文，登录成功后会自动进行授权
+            LoginManager.shared.setAuthContext(authContext)
+            LoginManager.shared.showLogin(.login)
+        }
+    }
+    
+    /// 将 URL 映射到环境枚举
+    private func mapUrlToEnvironment(_ urlString: String) -> A1Environment {
+        guard let url = URL(string: urlString),
+              let host = url.host else {
+            logger.error("[UserInfoModule] Failed to parse URL: \(urlString)")
+            return .prod
+        }
+        
+        if host.hasSuffix(".develenv.com") {
+            return .dev
+        } else if host.hasSuffix(".betaenv.com") {
+            return .beta
+        } else if host.hasSuffix(".askaway.chat") {
+            return .prod
+        } else {
+            logger.warning("[UserInfoModule] Unknown domain: \(host), defaulting to prod")
+            return .prod
         }
     }
     
