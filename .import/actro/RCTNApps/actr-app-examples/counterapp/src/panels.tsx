@@ -4,7 +4,7 @@
  * 与 counterapp 保持一致
  */
 import React, {useState, useCallback, useMemo, useEffect, useRef} from 'react';
-import {View, Text, TouchableOpacity, ScrollView, ActivityIndicator, useSendToHost, useHostEvent} from 'rill/let';
+import {View, Text, TouchableOpacity, ScrollView, ActivityIndicator, useSendToHost, useHostEvent} from 'rill/sdk';
 
 // ============ Weather Types ============
 interface WeatherData {
@@ -180,6 +180,7 @@ function Counter({
       {/* 红色按钮 */}
       <TouchableOpacity
         onPress={() => {
+          console.log('[CLICK_TEST] Red button pressed, count=' + (redCount + 1));
           setRedCount(c => c + 1);
           onChange?.('红色按钮', '🔴', '#ff4444');
         }}
@@ -201,6 +202,7 @@ function Counter({
       {/* 蓝色按钮 */}
       <TouchableOpacity
         onPress={() => {
+          console.log('[CLICK_TEST] Blue button pressed, count=' + (blueCount + 1));
           setBlueCount(c => c + 1);
           onChange?.('蓝色按钮', '🔵', '#4444ff');
         }}
@@ -222,6 +224,7 @@ function Counter({
       {/* 绿色按钮 */}
       <TouchableOpacity
         onPress={() => {
+          console.log('[CLICK_TEST] Green button pressed, count=' + (greenCount + 1));
           setGreenCount(c => c + 1);
           onChange?.('绿色按钮', '🟢', '#44ff44');
         }}

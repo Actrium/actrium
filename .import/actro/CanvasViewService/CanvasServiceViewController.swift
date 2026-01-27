@@ -93,11 +93,32 @@ private class ResizableContainerView: NSView {
     /// The tabId this container belongs to (for 1:1:1 mapping)
     var tabId: String?
 
-    /// Track whether we've received a valid size from Host (via containerSizeChanged or tabConfig)
-    /// Before this, the container uses a placeholder size and should NOT propagate it to children
-    var hasReceivedHostSize: Bool = false
-
     override var acceptsFirstResponder: Bool { true }
+
+    // MARK: - Prevent NSView tracking loop from swallowing mouse events
+
+    /// Default NSView.mouseDown enters a modal tracking loop that dequeues
+    /// mouseUp from the event queue, preventing RCTTouchHandler (gesture
+    /// recognizer on RCTRootContentView) from ever receiving mouseUp.
+    /// This causes touchEnd to never be dispatched, breaking all onPress handlers.
+    ///
+    /// Fix: override mouseDown/mouseUp to do nothing. The gesture recognizer
+    /// already receives mouse events independently through NSWindow's
+    /// sendEvent: → gesture recognizer dispatch (which runs before the view
+    /// hierarchy dispatch).
+    override func mouseDown(with event: NSEvent) {
+        // Do NOT call super — default NSView.mouseDown enters a tracking loop.
+        let gr = rnView?.subviews.first?.gestureRecognizers.first
+        let nativeTouches = gr?.value(forKey: "_nativeTouches") as? NSOrderedSet
+        ipcLog("🖱️ mouseDown: tab=\(tabId ?? "?") gr=\(gr != nil) grState=\(gr?.state.rawValue ?? -1) nativeTouches=\(nativeTouches?.count ?? -1) loc=\(Int(event.locationInWindow.x)),\(Int(event.locationInWindow.y))")
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        // Match mouseDown override — do NOT call super.
+        let gr = rnView?.subviews.first?.gestureRecognizers.first
+        let nativeTouches = gr?.value(forKey: "_nativeTouches") as? NSOrderedSet
+        ipcLog("🖱️ mouseUp: tab=\(tabId ?? "?") gr=\(gr != nil) nativeTouches=\(nativeTouches?.count ?? -1)")
+    }
 
     /// Setup view when added to hierarchy
     /// Container 固定在 (0,0)，不计算位置
@@ -121,22 +142,10 @@ private class ResizableContainerView: NSView {
         ipcLog("🔧 Container at (0,0), no position calculation")
     }
 
-    /// The authorized size from Host (via containerSizeChanged notification)
-    /// We only apply sizes that match this, to filter out ViewBridge's scaled sizes
-    var authorizedSize: NSSize?
-
     override func setFrameSize(_ newSize: NSSize) {
-        // 基础过滤：避免异常尺寸把视图系统拖死
+        // Basic sanity: reject zero/negative or absurdly large sizes
         guard newSize.width > 0 && newSize.height > 0 else { return }
         guard newSize.width <= 16384 && newSize.height <= 16384 else { return }
-
-        // 一旦收到 Host 的权威尺寸，只允许该尺寸（避免 ViewBridge/jail 的非预期 setFrame 形成抖动/闭环）
-        if hasReceivedHostSize, let authorizedSize {
-            guard abs(newSize.width - authorizedSize.width) < 0.5,
-                  abs(newSize.height - authorizedSize.height) < 0.5 else {
-                return
-            }
-        }
 
         // Skip if size unchanged
         guard frame.size != newSize else { return }
@@ -147,7 +156,7 @@ private class ResizableContainerView: NSView {
         rnView?.frame = bounds
         CATransaction.commit()
 
-        // 🔑 macOS XPC: directly call layoutSubviews (window is nil, so layout() won't)
+        // macOS XPC: directly call layoutSubviews (window may be nil, so layout() won't)
         if let rnView = rnView {
             let sel = NSSelectorFromString("layoutSubviews")
             if rnView.responds(to: sel) {
@@ -225,8 +234,6 @@ private class ResizableContainerView: NSView {
     /// Called when Host sends a valid size (via containerSizeChanged or tabConfig)
     /// This marks the container as ready to propagate sizes to children
     func applyHostSize(_ newSize: NSSize) {
-        hasReceivedHostSize = true
-        authorizedSize = newSize
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)

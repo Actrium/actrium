@@ -421,14 +421,18 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     async function init() {
       try {
-        nlog(`[ActrTabView] Engine init starting...`);
+        const t0 = Date.now();
+        nlog(`[ActrTabView] Engine init starting... t=${t0}`);
         setIsLoading(true);
         setLoadError(null);
 
         currentEngine = new Engine({
           debug: false,
           logger: {
-            log: () => {},
+            log: (...args: unknown[]) => {
+              const msg = args.map(a => String(a)).join(' ');
+              if (msg.includes('[DIAG]')) nlog(msg);
+            },
             warn: (...args: unknown[]) => log.warning(args.map(a => String(a)).join(' ')),
             error: (...args: unknown[]) => nerror(args.map(a => String(a)).join(' ')),
           },
@@ -520,7 +524,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         adapterRef.current = currentAdapter;
         setEngine(currentEngine);
         onEngineChange?.(tab.id, currentEngine);
-        nlog(`[ActrTabView] Engine created successfully, tabId=${tab.id?.substring(0,8)}`);
+        nlog(`[ActrTabView] Engine created successfully, tabId=${tab.id?.substring(0,8)}, elapsed=${Date.now() - t0}ms`);
         setIsLoading(false);
       } catch (e: any) {
         if (cancelled) return;
@@ -586,10 +590,13 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
     async function loadUnifiedBundle() {
       try {
-        nlog(`[ActrTabView] loadUnifiedBundle starting, scriptLen=${script.length}`);
+        const tBundleStart = Date.now();
+        nlog(`[ActrTabView] loadUnifiedBundle starting, scriptLen=${script.length}, t=${tBundleStart}`);
         loadedUnifiedScriptRef.current = script;
         eng.createReceiver(handleUpdate);
+        nlog(`[TIMING] createReceiver done, elapsed=${Date.now() - tBundleStart}ms`);
         // Pass tab config to Engine so Guest can access via __getConfig()
+        nlog(`[TIMING] loadBundle START t=${Date.now()}`);
         await eng.loadBundle(script, {
           tabId: tab.id,
           title: tab.title,
@@ -597,13 +604,14 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           containerWidth: propsContainerWidth ?? 1400,
           containerHeight: propsContainerHeight ?? 977,
         });
+        nlog(`[TIMING] loadBundle END elapsed=${Date.now() - tBundleStart}ms`);
+        const receiverAfterLoad = eng.getReceiver();
+        const statsAfterLoad = receiverAfterLoad?.getStats?.();
+        nlog(`[TIMING] After loadBundle: nodeCount=${statsAfterLoad?.nodeCount ?? 'N/A'}, totalBatches=${statsAfterLoad?.totalBatches ?? 'N/A'}, totalOps=${statsAfterLoad?.totalOps ?? 'N/A'}`);
 
         // 确保面板提取
         nlog(`[ActrTabView] Bundle loaded, calling handleUpdate`);
         handleUpdate();
-        setTimeout(handleUpdate, 0);
-        setTimeout(handleUpdate, 50);
-        setTimeout(handleUpdate, 200);
 
         // 通知 Native 内容已加载完成
         try {
@@ -702,7 +710,10 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
           {/* 右侧面板控制按钮 */}
           <TouchableOpacity
-            onPress={() => setIsRightPanelVisible(!isRightPanelVisible)}
+            onPress={() => {
+              console.log('[CLICK_TEST] Toggle right panel button pressed, current=' + isRightPanelVisible);
+              setIsRightPanelVisible(!isRightPanelVisible);
+            }}
             style={{
               padding: 12,
               backgroundColor: isRightPanelVisible ? '#ff6b6b' : '#4CAF50',
