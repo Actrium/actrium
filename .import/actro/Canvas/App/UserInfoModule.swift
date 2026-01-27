@@ -153,9 +153,52 @@ class UserInfoModule: RCTEventEmitter {
                 }
             }
             
-            // 环境一致，直接返回用户信息
-            logger.debug("[UserInfoModule] Found local user info with matching environment, returning immediately")
-            processUserInfoRequest(params: params, resolve: resolve, reject: reject)
+            // 环境一致，验证用户是否已授权
+            logger.debug("[UserInfoModule] Found local user info with matching environment, checking authorization")
+            
+            let appId = params["appId"] as? String ?? ""
+            let clientId = params["clientId"] as? String ?? ""
+            
+            // 从本地用户信息中获取 userId
+            guard let user = UserInfoManager.shared.getUser() else {
+                logger.error("[UserInfoModule] Failed to get user info for authorization check")
+                processUserInfoRequest(params: params, resolve: resolve, reject: reject)
+                return
+            }
+            
+            // 解析 userIdentity 获取 userId（假设 userIdentity 就是 user.cn）
+            let userId = user.userIdentity
+            
+            // 验证用户授权
+            LoginManager.shared.checkUserAuthorization(appId: appId, userId: userId, appUrl: appUrl) { [weak self] isAuthorized in
+                guard let self = self else { return }
+                
+                if isAuthorized {
+                    // 已授权，直接返回用户信息
+                    logger.debug("[UserInfoModule] User is authorized, returning user info")
+                    self.processUserInfoRequest(params: params, resolve: resolve, reject: reject)
+                } else {
+                    // 未授权，触发授权流程
+                    logger.info("[UserInfoModule] User not authorized, triggering authorization flow")
+                    
+                    // 构建授权上下文
+                    let authContext: [String: String] = [
+                        "clientId": clientId,
+                        "appId": appId,
+                        "tabId": params["tabId"] as? String ?? "",
+                        "appUrl": appUrl
+                    ]
+                    
+                    // 将请求加入等待队列
+                    self.pendingRequests.append((params: params, resolve: resolve, reject: reject))
+                    
+                    // 触发授权弹窗
+                    DispatchQueue.main.async {
+                        LoginManager.shared.setAuthContext(authContext)
+                        LoginManager.shared.showLogin(.loginAuth)
+                    }
+                }
+            }
             return
         }
         
