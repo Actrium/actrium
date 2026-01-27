@@ -1829,25 +1829,8 @@ struct UnifiedReactNativeLayer: View {
         self.coordinator = coordinator
         self.bookmarks = bookmarks
         self.recentHistory = recentHistory
-
-        // 🔑 设置 coordinator 的 tabId、tabConfig 和 isOverviewMode
-        // 确保 bootstrap 时有完整配置
-        coordinator.tabId = tab.id
-        coordinator.isOverviewMode = !isFocused  // Focus模式 = 非Overview模式
-        coordinator.tabConfig = XPCTabConfig(
-            tabId: tab.id,
-            title: tab.title,
-            backgroundColor: tab.backgroundColor,
-            containerSize: isFocused ? viewportSize : cardSize,  // 根据模式选择尺寸
-            systemAppType: tab.systemTabType?.rawValue,
-            unifiedScript: tab.unifiedScript,
-            leftPanelScript: tab.leftPanelScript,
-            leftPanelVisible: tab.leftPanelDefaultVisible,
-            rightPanelVisible: tab.rightPanelDefaultVisible,
-            bookmarks: bookmarks,
-            recentHistory: recentHistory
-        )
-        ipcLog("🏗️ UnifiedReactNativeLayer.init: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
+        // Note: coordinator setup moved to onAppear to avoid redundant side effects
+        // during SwiftUI body re-evaluation (init called multiple times per tab)
     }
 
     /// 当前尺寸
@@ -2004,8 +1987,24 @@ struct UnifiedReactNativeLayer: View {
         // Focus 模式下允许交互
         .allowsHitTesting(isFocused && !isTransitioning)
         .onAppear {
+            // Coordinator setup (moved from init to avoid redundant calls during SwiftUI body re-evaluation)
             coordinator.tabId = tab.id
+            coordinator.isOverviewMode = !isFocused
+            coordinator.tabConfig = XPCTabConfig(
+                tabId: tab.id,
+                title: tab.title,
+                backgroundColor: tab.backgroundColor,
+                containerSize: isFocused ? viewportSize : cardSize,
+                systemAppType: tab.systemTabType?.rawValue,
+                unifiedScript: tab.unifiedScript,
+                leftPanelScript: tab.leftPanelScript,
+                leftPanelVisible: tab.leftPanelDefaultVisible,
+                rightPanelVisible: tab.rightPanelDefaultVisible,
+                bookmarks: bookmarks,
+                recentHistory: recentHistory
+            )
             coordinator.currentViewportSize = currentSize
+            ipcLog("📱 UnifiedReactNativeLayer.onAppear: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
             setupConnectionCallback()
             allocateServiceIfNeeded()
             if coordinator.hasConnection && coordinator.xpcServiceReady && isCoordinatorViewportSizeValid {
