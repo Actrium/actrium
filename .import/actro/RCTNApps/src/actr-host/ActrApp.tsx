@@ -320,7 +320,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const gate = evaluateTabGate(tab);
 
   // 右侧面板可见性（按 tab 维度保存）
-  const [isRightPanelVisible, setIsRightPanelVisible] = useState(tab.rightPanelDefaultVisible ?? false);
+  const [isRightPanelVisible, setIsRightPanelVisible] = useState(tab.rightPanelDefaultVisible ?? true);
 
   // Engine 状态（按 tab 维度隔离）
   const [engine, setEngine] = useState<Engine | null>(null);
@@ -597,6 +597,20 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         nlog(`[TIMING] createReceiver done, elapsed=${Date.now() - tBundleStart}ms`);
         // Pass tab config to Engine so Guest can access via __getConfig()
         nlog(`[TIMING] loadBundle START t=${Date.now()}`);
+        // DIAG: Schedule a timer BEFORE loadBundle to guarantee bridge flush.
+        // If loadBundle blocks the JS thread, this fires after it unblocks.
+        // The native timer callback (native→JS) forces bridge to flush all pending messages.
+        const diagTimerStart = Date.now();
+        setTimeout(() => {
+          const elapsed = Date.now() - diagTimerStart;
+          const diag = (globalThis as any).__rill_drain_diag as string[] | undefined;
+          const recv = eng.getReceiver();
+          const stats = recv?.getStats?.();
+          console.error(`[DIAG-TIMER] fired after ${elapsed}ms, __rill_drain_diag=${diag ? diag.length : 'null'} entries, receiver: nodeCount=${stats?.nodeCount ?? 'N/A'}, totalBatches=${stats?.totalBatches ?? 'N/A'}, totalOps=${stats?.totalOps ?? 'N/A'}`);
+          if (diag && diag.length > 0) {
+            console.error(`[DIAG-TIMER] entries:\n${diag.join('\n')}`);
+          }
+        }, 5000);
         await eng.loadBundle(script, {
           tabId: tab.id,
           title: tab.title,
@@ -605,6 +619,19 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           containerHeight: propsContainerHeight ?? 977,
         });
         nlog(`[TIMING] loadBundle END elapsed=${Date.now() - tBundleStart}ms`);
+
+        // DIAG: Read drain accumulator from globalThis (bypasses RN bridge batching)
+        try {
+          const drainDiag = (globalThis as any).__rill_drain_diag as string[] | undefined;
+          if (drainDiag && drainDiag.length > 0) {
+            nerror(`[DIAG] __rill_drain_diag (${drainDiag.length} entries):\n${drainDiag.join('\n')}`);
+          } else {
+            nerror(`[DIAG] __rill_drain_diag is empty or undefined`);
+          }
+        } catch (diagErr: any) {
+          nerror(`[DIAG] Failed to read __rill_drain_diag: ${diagErr?.message}`);
+        }
+
         const receiverAfterLoad = eng.getReceiver();
         const statsAfterLoad = receiverAfterLoad?.getStats?.();
         nlog(`[TIMING] After loadBundle: nodeCount=${statsAfterLoad?.nodeCount ?? 'N/A'}, totalBatches=${statsAfterLoad?.totalBatches ?? 'N/A'}, totalOps=${statsAfterLoad?.totalOps ?? 'N/A'}`);
@@ -697,98 +724,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       )}
 
       {/* 中间对话窗口 - flex 自适应 */}
-      <View style={styles.centerColumn}>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 20 }}
-          showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={{ color: '#fff', fontSize: 24, marginBottom: 20, fontWeight: 'bold' }}>
-            Canvas ActrApp v8
-          </Text>
-
-          {/* 右侧面板控制按钮 */}
-          <TouchableOpacity
-            onPress={() => {
-              console.log('[CLICK_TEST] Toggle right panel button pressed, current=' + isRightPanelVisible);
-              setIsRightPanelVisible(!isRightPanelVisible);
-            }}
-            style={{
-              padding: 12,
-              backgroundColor: isRightPanelVisible ? '#ff6b6b' : '#4CAF50',
-              borderRadius: 6,
-              marginBottom: 20,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ color: '#fff', fontSize: 14, fontWeight: 'bold' }}>
-              {isRightPanelVisible ? '◀ 隐藏右侧面板' : '▶ 显示右侧面板'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Tab 信息 */}
-          <View style={{ marginBottom: 16, padding: 12, backgroundColor: '#1a1a1a', borderRadius: 8 }}>
-            <Text style={{ color: '#00ff00', fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
-              ✅ 当前 Tab
-            </Text>
-            <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
-              标题: {tab.title || '未命名'}
-            </Text>
-            <Text style={{ color: '#fff', fontSize: 14 }}>
-              ID: {tab.id || 'N/A'}
-            </Text>
-          </View>
-
-          {/* Contracts / Permissions（Phase 1：提示） */}
-          <View style={{ marginBottom: 16, padding: 12, backgroundColor: '#101827', borderRadius: 8 }}>
-            <Text style={{ color: '#93c5fd', fontSize: 14, fontWeight: 'bold', marginBottom: 8 }}>
-              📜 Contracts / 🔐 Permissions
-            </Text>
-            <Text style={{ color: '#e5e7eb', fontSize: 12, marginBottom: 4 }}>
-              contract: {tab.contract ? `${tab.contract.name}@v${tab.contract.version}` : '（未声明/兼容模式）'}
-            </Text>
-            <Text style={{ color: '#e5e7eb', fontSize: 12 }}>
-              permissions: {(tab.permissions && tab.permissions.length > 0) ? tab.permissions.join(', ') : '（无）'}
-            </Text>
-            {gate.status === 'compat' && (
-              <Text style={{ color: '#fbbf24', fontSize: 11, marginTop: 8 }}>
-                ⚠️ 未声明 contract：将以兼容模式运行；建议补齐 `manifest.contract` 以便宿主做版本协商与诊断。
-              </Text>
-            )}
-            {tab.permissions && tab.permissions.length > 0 && (
-              <Text style={{ color: '#fbbf24', fontSize: 11, marginTop: 8 }}>
-                ⚠️ 该 Guest 声明了权限；宿主可按策略 warn/deny（当前：{PERMISSION_MODE}）。
-              </Text>
-            )}
-          </View>
-
-          {/* v8 架构说明 */}
-          <View style={{
-            marginTop: 20,
-            padding: 12,
-            backgroundColor: '#1a2a2a',
-            borderRadius: 8,
-            borderLeftWidth: 4,
-            borderLeftColor: '#00aaff'
-          }}>
-            <Text style={{ color: '#88ddff', fontSize: 12, fontWeight: 'bold', marginBottom: 8 }}>
-              🚀 v8 Single Engine + usePanels Hook 架构
-            </Text>
-            <Text style={{ color: '#cccccc', fontSize: 11, marginBottom: 4 }}>
-              ✅ 单 Engine 加载统一 bundle
-            </Text>
-            <Text style={{ color: '#cccccc', fontSize: 11, marginBottom: 4 }}>
-              ✅ Guest 导出 usePanels hook
-            </Text>
-            <Text style={{ color: '#cccccc', fontSize: 11, marginBottom: 4 }}>
-              ✅ __panelId 属性识别面板
-            </Text>
-            <Text style={{ color: '#cccccc', fontSize: 11 }}>
-              ✅ 与 CounterMacOS 模式一致
-            </Text>
-          </View>
-        </ScrollView>
+      <View style={[styles.centerColumn, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#FF9800', fontSize: 24, fontWeight: 'bold' }}>main panel</Text>
       </View>
 
       {/* 右侧扩展面板 - 基准宽度，窗口变小时允许收缩 */}
