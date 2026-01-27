@@ -217,6 +217,28 @@ class LoginManager: ObservableObject {
     }
     
     // MARK: - 频道授权方法
+    
+    /// 执行授权（公共方法，供 UI 层调用）
+    /// 使用当前已登录的用户和保存的授权上下文执行授权流程
+    func performAuthorization() {
+        guard let user = currentUser else {
+            logger.error("[LoginManager] 执行授权失败：当前没有登录用户")
+            return
+        }
+        
+        guard let context = authContext,
+              let clientId = context["clientId"],
+              let appId = context["appId"],
+              let appUrl = context["appUrl"],
+              !clientId.isEmpty else {
+            logger.error("[LoginManager] 执行授权失败：授权上下文不完整")
+            return
+        }
+        
+        logger.info("[LoginManager] 开始执行授权流程")
+        authorizeWith(clientId: clientId, appId: appId, appUrl: appUrl, user: user)
+    }
+    
     /// 为指定 app 进行授权，获取 sessionToken
     /// - Parameters:
     ///   - clientId: 客户端 ID
@@ -253,6 +275,68 @@ class LoginManager: ObservableObject {
                 self.saveUserWithoutAuth(user: user)
             }
         }
+    }
+
+    /// 验证用户是否已授权
+    /// - Parameters:
+    ///   - appId: 应用 ID
+    ///   - userId: 用户 ID (通常是 user.cn)
+    ///   - appUrl: 应用 URL
+    ///   - completion: 完成回调，返回是否已授权
+    func checkUserAuthorization(appId: String, userId: String, appUrl: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: appUrl),
+              let host = url.host,
+              let scheme = url.scheme else {
+            logger.error("[LoginManager] checkUserAuthorization: 无法解析 appUrl: \(appUrl)")
+            completion(false)
+            return
+        }
+        
+        let base = "\(scheme)://\(host)"
+        let path = "/api/access_control/\(appId)/\(userId)"
+        let fullUrl = "\(base)\(path)"
+        
+        logger.info("[LoginManager] 验证用户授权: \(fullUrl)")
+        
+        guard let requestUrl = URL(string: fullUrl) else {
+            logger.error("[LoginManager] 无效的 URL: \(fullUrl)")
+            completion(false)
+            return
+        }
+        
+        var request = URLRequest(url: requestUrl)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                logger.error("[LoginManager] ❌ 验证授权失败: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            
+            guard let data = data else {
+                logger.error("[LoginManager] ❌ 验证授权响应数据为空")
+                completion(false)
+                return
+            }
+            
+            do {
+                // 解析响应 JSON
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let code = json["code"] as? Int {
+                    let isAuthorized = (code == 0)
+                    logger.info("[LoginManager] \(isAuthorized ? "✅" : "❌") 用户授权状态: code=\(code), \(isAuthorized ? "已授权" : "未授权")")
+                    completion(isAuthorized)
+                } else {
+                    logger.error("[LoginManager] ❌ 无法解析授权响应")
+                    completion(false)
+                }
+            } catch {
+                logger.error("[LoginManager] ❌ 解析授权响应失败: \(error.localizedDescription)")
+                completion(false)
+            }
+        }.resume()
     }
     
     /// 上传授权码到服务器，获取 sessionToken
