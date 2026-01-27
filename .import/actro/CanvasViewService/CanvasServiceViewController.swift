@@ -270,7 +270,9 @@ private class ResizableContainerView: NSView {
 
         // 详细日志：检查 jail 和 Container 的尺寸/位置是否一致
         let jailSize = superview?.bounds.size ?? .zero
-        ipcLog("📐 applyHostSize: container=\(Int(newSize.width))x\(Int(newSize.height)) jail=\(Int(jailSize.width))x\(Int(jailSize.height)) origin=\(frame.origin)")
+        let rnFrame = rnView?.frame ?? .zero
+        let rnBounds = rnView?.bounds ?? .zero
+        ipcLog("📐 applyHostSize: container=\(Int(newSize.width))x\(Int(newSize.height)) jail=\(Int(jailSize.width))x\(Int(jailSize.height)) origin=\(frame.origin) rnFrame=\(Int(rnFrame.width))x\(Int(rnFrame.height)) rnBounds=\(Int(rnBounds.width))x\(Int(rnBounds.height))")
 
         if newSize.width > 0 && newSize.height > 0 {
             onSizeChanged?(newSize)
@@ -660,6 +662,7 @@ private class ServiceReactNativeHost {
 
     private var containerSizeObserver: NSObjectProtocol?
     private var bindTabObserver: NSObjectProtocol?
+    private var uiStateChangedObserver: NSObjectProtocol?
     private var pendingTabIdObserver: NSObjectProtocol?
     private var readyNotificationTimer: Timer?
     private var hasReceivedTabConfig = false
@@ -798,6 +801,9 @@ private class ServiceReactNativeHost {
         if let observer = bindTabObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
         }
+        if let observer = uiStateChangedObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
 
         // 使用带 PID 的通知名称重新设置监听器
         let tabConfigName = "com.canvas.tabConfig.\(pid).\(serviceBundleId)"
@@ -829,6 +835,16 @@ private class ServiceReactNativeHost {
                   let tabId = info["tabId"] as? String,
                   let internalId = info["internalId"] as? String else { return }
             self?.bind(hostTabId: tabId, toInternalId: internalId)
+        }
+
+        // Listen for UI state changes (e.g. left panel visibility toggle)
+        let uiStateName = "com.canvas.uiStateChanged.\(pid).\(serviceBundleId)"
+        uiStateChangedObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(uiStateName),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleUIStateChanged(notification)
         }
 
         NSLog("[XPC] 📡 Process-isolated listeners setup for pid=%d", pid)
@@ -901,6 +917,46 @@ private class ServiceReactNativeHost {
             ipcLog("📐 APPLY: seq=\(mySeq) req=\(requestId) tab=\(tabId.prefix(8)) size=\(Int(newSize.width))x\(Int(newSize.height))")
             self.applySizeUpdate(tabId: tabId, size: newSize, requestId: requestId, isOverviewMode: isOverviewMode)
         }
+    }
+
+    /// Handle UI state changes from Host (e.g. left panel visibility toggle)
+    private func handleUIStateChanged(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let jsonString = userInfo["payload"] as? String,
+              let jsonData = jsonString.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let tabId = payload["tabId"] as? String else {
+            ipcLog("⚠️ handleUIStateChanged: failed to parse notification")
+            return
+        }
+
+        ipcLog("📥 uiStateChanged: tab=\(tabId.prefix(8)) payload=\(payload)")
+
+        guard let entry = getTabEntry(tabId: tabId) else {
+            ipcLog("⚠️ handleUIStateChanged: no entry for tab=\(tabId.prefix(8))")
+            return
+        }
+
+        // Update entry properties with changed values
+        var properties = entry.currentProperties
+        var changed = false
+
+        if let isLeftPanelVisible = payload["isLeftPanelVisible"] as? Bool {
+            let current = properties["isLeftPanelVisible"] as? Bool ?? true
+            if current != isLeftPanelVisible {
+                properties["isLeftPanelVisible"] = isLeftPanelVisible
+                changed = true
+                ipcLog("📤 uiStateChanged: tab=\(tabId.prefix(8)) isLeftPanelVisible \(current) → \(isLeftPanelVisible)")
+            }
+        }
+
+        guard changed else { return }
+
+        entry.currentProperties = properties
+        entry.rootView?.appProperties = properties
+
+        // Emit props update event to RN (more reliable than appProperties)
+        emitPropsUpdate(for: entry)
     }
 
     /// 应用尺寸更新（同步，无延迟）
