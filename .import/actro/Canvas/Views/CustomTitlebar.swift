@@ -540,6 +540,22 @@ private struct LiquidGlassToolbar: View {
                 // Has mode icon (globe for web, custom/default app icon for actr)
                 Button(action: {
                     NSLog("🔘 [Toolbar] Left button tapped (mode: \(mode))")
+                    // Toggle left panel visibility
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        viewModel.toggleLeftPanelForCurrentTab()
+                    }
+                    // Send visibility change to XPC service
+                    let tabId: UUID? = {
+                        if case .focus(let focusTabId) = viewModel.canvasMode {
+                            return focusTabId
+                        }
+                        return viewModel.currentTabId
+                    }()
+                    if let tabId = tabId {
+                        let newVisible = viewModel.isLeftPanelVisible(for: tabId)
+                        let coordinator = ViewBridgeCoordinatorManager.shared.coordinator(for: tabId)
+                        coordinator.sendLeftPanelVisibilityChanged(newVisible)
+                    }
                 }) {
                     Image(systemName: icon)
                         .font(.system(size: 14, weight: .light))
