@@ -136,283 +136,7 @@ module.exports = __toCommonJS(exports_unified_app);
 
 // src/panels.tsx
 var import_react = React;
-
-// ../../../../rill/src/guest/let/sdk.ts
-function getReactHooks() {
-  const g = globalThis;
-  if (g.React && typeof g.React.useEffect === "function") {
-    return g.React;
-  }
-  try {
-    const React = React;
-    if (React && typeof React.useEffect === "function") {
-      return React;
-    }
-  } catch {}
-  const throwUnavailable = (hook) => () => {
-    throw new Error(`[rill/sdk] ${hook} not available. Ensure running in rill sandbox.`);
-  };
-  return {
-    useEffect: throwUnavailable("useEffect"),
-    useRef: throwUnavailable("useRef"),
-    useState: throwUnavailable("useState"),
-    useMemo: throwUnavailable("useMemo"),
-    useCallback: throwUnavailable("useCallback")
-  };
-}
-function isInSandbox() {
-  return globalThis.__RILL_GUEST_ENV__ === true;
-}
-var COMPONENT_NAMES = [
-  "View",
-  "Text",
-  "Image",
-  "ImageBackground",
-  "ScrollView",
-  "FlatList",
-  "SectionList",
-  "VirtualizedList",
-  "RefreshControl",
-  "TextInput",
-  "Button",
-  "Switch",
-  "Pressable",
-  "TouchableOpacity",
-  "TouchableHighlight",
-  "TouchableWithoutFeedback",
-  "ActivityIndicator",
-  "Modal",
-  "StatusBar",
-  "SafeAreaView",
-  "KeyboardAvoidingView"
-];
-function getComponents() {
-  if (isInSandbox()) {
-    const result = {};
-    for (const name of COMPONENT_NAMES) {
-      result[name] = name;
-    }
-    return result;
-  }
-  try {
-    const RN = ReactNative;
-    const result = {};
-    for (const name of COMPONENT_NAMES) {
-      result[name] = RN[name];
-    }
-    return result;
-  } catch {
-    const result = {};
-    for (const name of COMPONENT_NAMES) {
-      result[name] = name;
-    }
-    return result;
-  }
-}
-function getAPIs() {
-  const stubs = {
-    StyleSheet: { create: (styles) => styles, flatten: (s) => s },
-    Easing: {
-      linear: (t) => t,
-      ease: (t) => t,
-      quad: (t) => t * t,
-      cubic: (t) => t * t * t,
-      bezier: () => (t) => t,
-      in: (e) => e,
-      out: (e) => e,
-      inOut: (e) => e
-    },
-    Platform: {
-      OS: "unknown",
-      Version: 0,
-      select: (spec) => spec.default
-    },
-    Dimensions: {
-      get: () => ({ width: 0, height: 0, scale: 1, fontScale: 1 }),
-      addEventListener: () => ({ remove: () => {} })
-    },
-    PixelRatio: {
-      get: () => 1,
-      getFontScale: () => 1,
-      getPixelSizeForLayoutSize: (size) => size,
-      roundToNearestPixel: (size) => size
-    },
-    Appearance: {
-      getColorScheme: () => "light",
-      addChangeListener: () => ({ remove: () => {} })
-    },
-    I18nManager: { isRTL: false, allowRTL: () => {}, forceRTL: () => {} },
-    AppState: {
-      currentState: "active",
-      addEventListener: () => ({ remove: () => {} })
-    },
-    Keyboard: {
-      dismiss: () => {},
-      addListener: () => ({ remove: () => {} })
-    },
-    Alert: { alert: () => {}, prompt: () => {} },
-    Linking: {
-      openURL: async () => {},
-      canOpenURL: async () => false,
-      getInitialURL: async () => null,
-      addEventListener: () => ({ remove: () => {} })
-    },
-    Share: { share: async () => ({ action: "dismissedAction" }) },
-    Vibration: { vibrate: () => {}, cancel: () => {} },
-    Animated: {}
-  };
-  if (isInSandbox()) {
-    return stubs;
-  }
-  try {
-    const RN = ReactNative;
-    return {
-      StyleSheet: RN.StyleSheet ?? stubs.StyleSheet,
-      Easing: RN.Easing ?? stubs.Easing,
-      Platform: RN.Platform ?? stubs.Platform,
-      Dimensions: RN.Dimensions ?? stubs.Dimensions,
-      PixelRatio: RN.PixelRatio ?? stubs.PixelRatio,
-      Appearance: RN.Appearance ?? stubs.Appearance,
-      I18nManager: RN.I18nManager ?? stubs.I18nManager,
-      AppState: RN.AppState ?? stubs.AppState,
-      Keyboard: RN.Keyboard ?? stubs.Keyboard,
-      Alert: RN.Alert ?? stubs.Alert,
-      Linking: RN.Linking ?? stubs.Linking,
-      Share: RN.Share ?? stubs.Share,
-      Vibration: RN.Vibration ?? stubs.Vibration,
-      Animated: RN.Animated ?? stubs.Animated
-    };
-  } catch {
-    return stubs;
-  }
-}
-function getRNHooks() {
-  const stubs = {
-    useColorScheme: () => "light",
-    useWindowDimensions: () => ({ width: 0, height: 0, scale: 1, fontScale: 1 })
-  };
-  if (isInSandbox()) {
-    return stubs;
-  }
-  try {
-    const RN = ReactNative;
-    return {
-      useColorScheme: RN.useColorScheme ?? stubs.useColorScheme,
-      useWindowDimensions: RN.useWindowDimensions ?? stubs.useWindowDimensions
-    };
-  } catch {
-    return stubs;
-  }
-}
-var _components = getComponents();
-var _apis = getAPIs();
-var _rnHooks = getRNHooks();
-var View = _components.View;
-var Text = _components.Text;
-var Image = _components.Image;
-var ImageBackground = _components.ImageBackground;
-var ScrollView = _components.ScrollView;
-var FlatList = _components.FlatList;
-var SectionList = _components.SectionList;
-var VirtualizedList = _components.VirtualizedList;
-var RefreshControl = _components.RefreshControl;
-var TextInput = _components.TextInput;
-var Button = _components.Button;
-var Switch = _components.Switch;
-var Pressable = _components.Pressable;
-var TouchableOpacity = _components.TouchableOpacity;
-var TouchableHighlight = _components.TouchableHighlight;
-var TouchableWithoutFeedback = _components.TouchableWithoutFeedback;
-var ActivityIndicator = _components.ActivityIndicator;
-var Modal = _components.Modal;
-var StatusBar = _components.StatusBar;
-var SafeAreaView = _components.SafeAreaView;
-var KeyboardAvoidingView = _components.KeyboardAvoidingView;
-var StyleSheet = _apis.StyleSheet;
-var Easing = _apis.Easing;
-var Platform = _apis.Platform;
-var Dimensions = _apis.Dimensions;
-var PixelRatio = _apis.PixelRatio;
-var Appearance = _apis.Appearance;
-var I18nManager = _apis.I18nManager;
-var AppState = _apis.AppState;
-var Keyboard = _apis.Keyboard;
-var Alert = _apis.Alert;
-var Linking = _apis.Linking;
-var Share = _apis.Share;
-var Vibration = _apis.Vibration;
-var Animated = _apis.Animated;
-var useColorScheme = _rnHooks.useColorScheme;
-var useWindowDimensions = _rnHooks.useWindowDimensions;
-function useHostEvent(eventName, callback) {
-  const { useEffect, useRef } = getReactHooks();
-  const callbackRef = useRef(callback);
-  useEffect(() => {
-    callbackRef.current = callback;
-    return;
-  });
-  useEffect(() => {
-    const g = globalThis;
-    if ("__useHostEvent" in globalThis) {
-      const stableCallback = (payload) => callbackRef.current(payload);
-      const unsubscribe = g.__useHostEvent(eventName, stableCallback);
-      return unsubscribe;
-    }
-    return;
-  }, [eventName]);
-}
-function useSendToHost() {
-  const g = globalThis;
-  if ("__sendEventToHost" in globalThis) {
-    return g.__sendEventToHost;
-  }
-  return () => {
-    console.warn("[rill] sendToHost is not available outside sandbox");
-  };
-}
-var React = globalThis.React && typeof globalThis.React.Component === "function" ? globalThis.React : { Component: class {
-} };
-
-class RillErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
-  }
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error, errorInfo) {
-    const info = { componentStack: errorInfo.componentStack };
-    this.setState({ errorInfo: info });
-    if (this.props.onError) {
-      this.props.onError(error, info);
-    }
-    const g = globalThis;
-    if ("__sendEventToHost" in g) {
-      const sendToHost = g.__sendEventToHost;
-      sendToHost("RENDER_ERROR", {
-        message: error.message,
-        stack: error.stack,
-        componentStack: info.componentStack
-      });
-    }
-  }
-  render() {
-    if (this.state.hasError) {
-      const { fallback } = this.props;
-      const { error, errorInfo } = this.state;
-      if (typeof fallback === "function" && error && errorInfo) {
-        return fallback(error, errorInfo);
-      }
-      if (fallback && typeof fallback !== "function") {
-        return fallback;
-      }
-      return null;
-    }
-    return this.props.children;
-  }
-}
-// src/panels.tsx
+var import_sdk = RillSDK;
 var jsx_runtime = ReactJSXRuntime;
 function Counter({
   onChange
@@ -427,7 +151,7 @@ function Counter({
   const [weatherData, setWeatherData] = import_react.useState(null);
   const [weatherLoading, setWeatherLoading] = import_react.useState(false);
   const [weatherExpanded, setWeatherExpanded] = import_react.useState(false);
-  const sendToHost = useSendToHost();
+  const sendToHost = import_sdk.useSendToHost();
   const pendingRequestRef = import_react.useRef(null);
   import_react.useEffect(() => {
     const updateTime = () => {
@@ -437,7 +161,7 @@ function Counter({
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
-  useHostEvent("APP_FETCH_RESPONSE", (response) => {
+  import_sdk.useHostEvent("APP_FETCH_RESPONSE", (response) => {
     if (response.requestId !== pendingRequestRef.current)
       return;
     pendingRequestRef.current = null;
@@ -498,11 +222,11 @@ function Counter({
     }, 1e4);
   }, [weatherLoading, sendToHost]);
   const totalCount = redCount + blueCount + greenCount;
-  return /* @__PURE__ */ jsx_runtime.jsxs(ScrollView, {
+  return /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.ScrollView, {
     style: { flex: 1, backgroundColor: "#1a1a2e" },
     contentContainerStyle: { padding: 16, paddingBottom: 80 },
     children: [
-      /* @__PURE__ */ jsx_runtime.jsx(Text, {
+      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
         style: {
           color: "#ffffff",
           fontSize: 20,
@@ -511,7 +235,7 @@ function Counter({
         },
         children: "\uD83C\uDFAE 计数器测试"
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(View, {
+      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
         style: {
           backgroundColor: "#2a2a4e",
           padding: 16,
@@ -520,21 +244,22 @@ function Counter({
           alignItems: "center"
         },
         children: [
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#888888", fontSize: 12, marginBottom: 4 },
             children: "总点击次数"
           }),
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#ffaa00", fontSize: 36, fontWeight: "bold" },
             children: totalCount
           })
         ]
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(TouchableOpacity, {
+      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.TouchableOpacity, {
         onPress: Object.assign(() => {
+          console.log("[CLICK_TEST] Red button pressed, count=" + (redCount + 1));
           setRedCount((c) => c + 1);
           onChange?.("红色按钮", "\uD83D\uDD34", "#ff4444");
-        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 182 }),
+        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 182 }),
         style: {
           backgroundColor: "#ff4444",
           padding: 20,
@@ -543,11 +268,11 @@ function Counter({
           alignItems: "center"
         },
         children: [
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#ffffff", fontSize: 18, fontWeight: "bold" },
             children: "\uD83D\uDD34 红色 +1"
           }),
-          /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
             style: { color: "#ffcccc", fontSize: 14, marginTop: 4 },
             children: [
               "点击: ",
@@ -556,11 +281,12 @@ function Counter({
           })
         ]
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(TouchableOpacity, {
+      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.TouchableOpacity, {
         onPress: Object.assign(() => {
+          console.log("[CLICK_TEST] Blue button pressed, count=" + (blueCount + 1));
           setBlueCount((c) => c + 1);
           onChange?.("蓝色按钮", "\uD83D\uDD35", "#4444ff");
-        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 203 }),
+        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 204 }),
         style: {
           backgroundColor: "#4444ff",
           padding: 20,
@@ -569,11 +295,11 @@ function Counter({
           alignItems: "center"
         },
         children: [
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#ffffff", fontSize: 18, fontWeight: "bold" },
             children: "\uD83D\uDD35 蓝色 +1"
           }),
-          /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
             style: { color: "#ccccff", fontSize: 14, marginTop: 4 },
             children: [
               "点击: ",
@@ -582,11 +308,12 @@ function Counter({
           })
         ]
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(TouchableOpacity, {
+      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.TouchableOpacity, {
         onPress: Object.assign(() => {
+          console.log("[CLICK_TEST] Green button pressed, count=" + (greenCount + 1));
           setGreenCount((c) => c + 1);
           onChange?.("绿色按钮", "\uD83D\uDFE2", "#44ff44");
-        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 224 }),
+        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 226 }),
         style: {
           backgroundColor: "#44ff44",
           padding: 20,
@@ -595,11 +322,11 @@ function Counter({
           alignItems: "center"
         },
         children: [
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#000000", fontSize: 18, fontWeight: "bold" },
             children: "\uD83D\uDFE2 绿色 +1"
           }),
-          /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
             style: { color: "#006600", fontSize: 14, marginTop: 4 },
             children: [
               "点击: ",
@@ -608,12 +335,12 @@ function Counter({
           })
         ]
       }),
-      /* @__PURE__ */ jsx_runtime.jsx(TouchableOpacity, {
+      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
         onPress: Object.assign(() => {
           setRedCount(0);
           setBlueCount(0);
           setGreenCount(0);
-        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 245 }),
+        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 248 }),
         style: {
           backgroundColor: "#666666",
           padding: 16,
@@ -623,12 +350,12 @@ function Counter({
           borderWidth: 1,
           borderColor: "#888888"
         },
-        children: /* @__PURE__ */ jsx_runtime.jsx(Text, {
+        children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
           style: { color: "#ffffff", fontSize: 16, fontWeight: "bold" },
           children: "\uD83D\uDD04 重置所有计数"
         })
       }),
-      /* @__PURE__ */ jsx_runtime.jsx(View, {
+      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.View, {
         style: {
           marginTop: 30,
           padding: 12,
@@ -637,7 +364,7 @@ function Counter({
           borderLeftWidth: 4,
           borderLeftColor: "#ffaa00"
         },
-        children: /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+        children: /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
           style: { color: "#cccccc", fontSize: 11, lineHeight: 16 },
           children: [
             "\uD83D\uDCA1 点击彩色按钮增加对应计数",
@@ -653,7 +380,7 @@ function Counter({
           ]
         })
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(View, {
+      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
         style: {
           marginTop: 20,
           padding: 12,
@@ -664,11 +391,11 @@ function Counter({
           justifyContent: "space-between"
         },
         children: [
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#888888", fontSize: 14, fontVariant: ["tabular-nums"] },
             children: currentTime
           }),
-          /* @__PURE__ */ jsx_runtime.jsx(TouchableOpacity, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
             onPress: fetchWeather,
             disabled: weatherLoading,
             style: {
@@ -678,17 +405,17 @@ function Counter({
               flexDirection: "row",
               alignItems: "center"
             },
-            children: weatherLoading ? /* @__PURE__ */ jsx_runtime.jsx(ActivityIndicator, {
+            children: weatherLoading ? /* @__PURE__ */ jsx_runtime.jsx(import_sdk.ActivityIndicator, {
               size: "small",
               color: "#88b8e8"
-            }) : /* @__PURE__ */ jsx_runtime.jsx(Text, {
+            }) : /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
               style: { color: "#88b8e8", fontSize: 14 },
               children: weatherData ? `${weatherData.temperature}°C` : "\uD83C\uDF24️"
             })
           })
         ]
       }),
-      weatherExpanded && weatherData && /* @__PURE__ */ jsx_runtime.jsxs(View, {
+      weatherExpanded && weatherData && /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
         style: {
           marginTop: 12,
           padding: 16,
@@ -698,7 +425,7 @@ function Counter({
           borderColor: "#2d4a77"
         },
         children: [
-          /* @__PURE__ */ jsx_runtime.jsxs(View, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
             style: {
               flexDirection: "row",
               justifyContent: "space-between",
@@ -706,43 +433,43 @@ function Counter({
               marginBottom: 12
             },
             children: [
-              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                 style: { color: "#ffffff", fontSize: 16, fontWeight: "bold" },
                 children: weatherData.city
               }),
-              /* @__PURE__ */ jsx_runtime.jsx(TouchableOpacity, {
-                onPress: Object.assign(() => setWeatherExpanded(false), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 341 }),
-                children: /* @__PURE__ */ jsx_runtime.jsx(Text, {
+              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
+                onPress: Object.assign(() => setWeatherExpanded(false), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 344 }),
+                children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                   style: { color: "#88b8e8", fontSize: 12 },
                   children: "收起 ▲"
                 })
               })
             ]
           }),
-          /* @__PURE__ */ jsx_runtime.jsxs(View, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
             style: {
               flexDirection: "row",
               alignItems: "baseline",
               marginBottom: 12
             },
             children: [
-              /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+              /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
                 style: { color: "#ffffff", fontSize: 36, fontWeight: "300", marginRight: 12 },
                 children: [
                   weatherData.temperature,
                   "°C"
                 ]
               }),
-              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                 style: { color: "#a0c4e8", fontSize: 16 },
                 children: weatherData.description
               })
             ]
           }),
-          /* @__PURE__ */ jsx_runtime.jsxs(View, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
             style: { flexDirection: "row", flexWrap: "wrap", marginBottom: 8 },
             children: [
-              /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+              /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
                 style: { color: "#c0d8f0", fontSize: 12, marginRight: 16 },
                 children: [
                   "体感 ",
@@ -750,7 +477,7 @@ function Counter({
                   "°C"
                 ]
               }),
-              /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+              /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
                 style: { color: "#c0d8f0", fontSize: 12, marginRight: 16 },
                 children: [
                   "湿度 ",
@@ -758,7 +485,7 @@ function Counter({
                   "%"
                 ]
               }),
-              /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+              /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
                 style: { color: "#c0d8f0", fontSize: 12 },
                 children: [
                   "风速 ",
@@ -768,7 +495,7 @@ function Counter({
               })
             ]
           }),
-          /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
             style: { color: "#88b8e8", fontSize: 11, fontStyle: "italic" },
             children: [
               "更新于 ",
@@ -786,11 +513,11 @@ function Stats({
   onAddRecord,
   onClear
 }) {
-  return /* @__PURE__ */ jsx_runtime.jsxs(ScrollView, {
+  return /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.ScrollView, {
     style: { flex: 1, backgroundColor: "#1a1a2e" },
     contentContainerStyle: { padding: 16 },
     children: [
-      /* @__PURE__ */ jsx_runtime.jsx(Text, {
+      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
         style: {
           color: "#ffffff",
           fontSize: 20,
@@ -799,7 +526,7 @@ function Stats({
         },
         children: "\uD83D\uDCCA 交互统计"
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(View, {
+      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
         style: {
           backgroundColor: "#2a2a4e",
           padding: 16,
@@ -807,15 +534,15 @@ function Stats({
           marginBottom: 20
         },
         children: [
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#888888", fontSize: 12, marginBottom: 8 },
             children: "本次会话点击"
           }),
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#00ff88", fontSize: 32, fontWeight: "bold" },
             children: sessionClicks
           }),
-          /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
             style: { color: "#666666", fontSize: 10, marginTop: 4 },
             children: [
               "历史记录: ",
@@ -825,15 +552,15 @@ function Stats({
           })
         ]
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(View, {
+      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
         style: { marginBottom: 20 },
         children: [
-          /* @__PURE__ */ jsx_runtime.jsx(Text, {
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
             style: { color: "#888888", fontSize: 12, marginBottom: 8 },
             children: "快速测试"
           }),
-          /* @__PURE__ */ jsx_runtime.jsx(TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("快速点击", "⚡", "#ffaa00"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 447 }),
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
+            onPress: Object.assign(() => onAddRecord("快速点击", "⚡", "#ffaa00"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 450 }),
             style: {
               backgroundColor: "#ffaa00",
               padding: 12,
@@ -841,13 +568,13 @@ function Stats({
               marginBottom: 8,
               alignItems: "center"
             },
-            children: /* @__PURE__ */ jsx_runtime.jsx(Text, {
+            children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
               style: { color: "#000000", fontSize: 14, fontWeight: "bold" },
               children: "⚡ 快速测试"
             })
           }),
-          /* @__PURE__ */ jsx_runtime.jsx(TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("星标动作", "⭐", "#ff88ff"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 461 }),
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
+            onPress: Object.assign(() => onAddRecord("星标动作", "⭐", "#ff88ff"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 464 }),
             style: {
               backgroundColor: "#ff88ff",
               padding: 12,
@@ -855,29 +582,29 @@ function Stats({
               marginBottom: 8,
               alignItems: "center"
             },
-            children: /* @__PURE__ */ jsx_runtime.jsx(Text, {
+            children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
               style: { color: "#000000", fontSize: 14, fontWeight: "bold" },
               children: "⭐ 星标测试"
             })
           }),
-          /* @__PURE__ */ jsx_runtime.jsx(TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("火箭发射", "\uD83D\uDE80", "#00aaff"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/Subsystem/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 475 }),
+          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
+            onPress: Object.assign(() => onAddRecord("火箭发射", "\uD83D\uDE80", "#00aaff"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 478 }),
             style: {
               backgroundColor: "#00aaff",
               padding: 12,
               borderRadius: 6,
               alignItems: "center"
             },
-            children: /* @__PURE__ */ jsx_runtime.jsx(Text, {
+            children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
               style: { color: "#ffffff", fontSize: 14, fontWeight: "bold" },
               children: "\uD83D\uDE80 火箭测试"
             })
           })
         ]
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(View, {
+      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
         children: [
-          /* @__PURE__ */ jsx_runtime.jsxs(View, {
+          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
             style: {
               flexDirection: "row",
               justifyContent: "space-between",
@@ -885,21 +612,21 @@ function Stats({
               marginBottom: 12
             },
             children: [
-              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                 style: { color: "#888888", fontSize: 12 },
                 children: "点击历史"
               }),
-              records.length > 0 && /* @__PURE__ */ jsx_runtime.jsx(TouchableOpacity, {
+              records.length > 0 && /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
                 onPress: onClear,
                 style: { padding: 4 },
-                children: /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                   style: { color: "#ff6666", fontSize: 11 },
                   children: "清空"
                 })
               })
             ]
           }),
-          records.length === 0 ? /* @__PURE__ */ jsx_runtime.jsxs(View, {
+          records.length === 0 ? /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
             style: {
               backgroundColor: "#2a2a3a",
               padding: 20,
@@ -907,16 +634,16 @@ function Stats({
               alignItems: "center"
             },
             children: [
-              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                 style: { color: "#666666", fontSize: 13 },
                 children: "暂无记录"
               }),
-              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                 style: { color: "#555555", fontSize: 11, marginTop: 4 },
                 children: "点击上方按钮开始测试"
               })
             ]
-          }) : records.map((record) => /* @__PURE__ */ jsx_runtime.jsx(View, {
+          }) : records.map((record) => /* @__PURE__ */ jsx_runtime.jsx(import_sdk.View, {
             style: {
               backgroundColor: "#2a2a3a",
               padding: 12,
@@ -925,27 +652,27 @@ function Stats({
               borderLeftWidth: 3,
               borderLeftColor: record.color
             },
-            children: /* @__PURE__ */ jsx_runtime.jsxs(View, {
+            children: /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
               style: {
                 flexDirection: "row",
                 justifyContent: "space-between",
                 alignItems: "center"
               },
               children: [
-                /* @__PURE__ */ jsx_runtime.jsxs(View, {
+                /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
                   style: { flexDirection: "row", alignItems: "center" },
                   children: [
-                    /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                    /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                       style: { fontSize: 16, marginRight: 8 },
                       children: record.emoji
                     }),
-                    /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                    /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                       style: { color: "#ffffff", fontSize: 13 },
                       children: record.action
                     })
                   ]
                 }),
-                /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                   style: { color: "#666666", fontSize: 11 },
                   children: record.time
                 })
@@ -954,7 +681,7 @@ function Stats({
           }, record.id))
         ]
       }),
-      /* @__PURE__ */ jsx_runtime.jsx(View, {
+      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.View, {
         style: {
           marginTop: 20,
           padding: 12,
@@ -963,7 +690,7 @@ function Stats({
           borderLeftWidth: 4,
           borderLeftColor: "#00ff88"
         },
-        children: /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+        children: /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
           style: { color: "#cccccc", fontSize: 11, lineHeight: 16 },
           children: [
             "\uD83D\uDCCA 实时统计点击次数",
