@@ -28,8 +28,8 @@ struct SettingsView: View {
                 
                 VStack(spacing: 18) {
                     ASUserInfoSection(
-                        isLoggedIn: false,
-                        currentUser: nil,
+                        isLoggedIn: loginManager.isLoggedIn,
+                        currentUser: loginManager.currentUser,
                         onTap: {
                             if loginManager.isLoggedIn {
                                 showUserDetail = true
