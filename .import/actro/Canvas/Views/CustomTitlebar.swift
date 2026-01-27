@@ -680,7 +680,7 @@ private struct LiquidGlassToolbar: View {
         var leftIcon: String? {
             switch self {
             case .web: return "globe"  // Web: globe icon
-            case .app: return "app.badge.checkmark"
+            case .app: return "list.bullet"
             case .empty: return nil
             }
         }
