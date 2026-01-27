@@ -119,6 +119,13 @@ class LoginManager: ObservableObject {
             self.isLoggedIn = true
             self.currentUser = userInfo
             self.saveGlobalUserInfo(userInfo)
+            
+            // 发送登录成功通知，用于解析 UserInfoModule 中等待的请求
+            NotificationCenter.default.post(
+                name: NSNotification.Name("LoginSuccessNotification"),
+                object: nil,
+                userInfo: ["user": userInfo]
+            )
         }
     }
     

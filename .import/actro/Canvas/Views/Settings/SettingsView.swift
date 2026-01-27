@@ -77,27 +77,27 @@ struct SettingsView: View {
             .navigationDestination(isPresented: $showUserDetail, destination: {
                 ASUserDetailView()
             })
-            .sheet(isPresented: $loginManager.showLoginSheet) {
-                HStack {
-                    switch loginManager.currentLoginSheetType {
-                    case .login:
-                        LoginSheet()
-                            .presentationDetents([.height(341)])
-                            .interactiveDismissDisabled()
-                    case .loginAuth:
-                        LoginAuthorSheet()
-                            .presentationDetents([.height(367)])
-                            .interactiveDismissDisabled()
-                    case .loginView:
-                        LoginView(detent: $selectedDetent)
-                            .presentationDetents([.large], selection: $selectedDetent)
-                            .interactiveDismissDisabled()
-                            .ignoresSafeArea()
-                    case .none:
-                        EmptyView()
-                    }
-                }
-            }
+//            .sheet(isPresented: $loginManager.showLoginSheet) {
+//                HStack {
+//                    switch loginManager.currentLoginSheetType {
+//                    case .login:
+//                        LoginSheet()
+//                            .presentationDetents([.height(341)])
+//                            .interactiveDismissDisabled()
+//                    case .loginAuth:
+//                        LoginAuthorSheet()
+//                            .presentationDetents([.height(367)])
+//                            .interactiveDismissDisabled()
+//                    case .loginView:
+//                        LoginView(detent: $selectedDetent)
+//                            .presentationDetents([.large], selection: $selectedDetent)
+//                            .interactiveDismissDisabled()
+//                            .ignoresSafeArea()
+//                    case .none:
+//                        EmptyView()
+//                    }
+//                }
+//            }
         }
     }
 }

@@ -9,6 +9,8 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isACTRDropTarget: Bool = false
     @State private var showAllTabs: Bool = false
+    
+    @StateObject private var loginManager = LoginManager.shared
 
     var body: some View {
         ZStack {
@@ -53,6 +55,27 @@ struct ContentView: View {
                 return false
             } isTargeted: { isTargeted in
                 isACTRDropTarget = isTargeted
+            }
+        }
+        .sheet(isPresented: $loginManager.showLoginSheet) {
+            HStack {
+                switch loginManager.currentLoginSheetType {
+                case .login:
+                    LoginSheet()
+                        .presentationDetents([.height(341)])
+                        .interactiveDismissDisabled()
+                case .loginAuth:
+                    LoginAuthorSheet()
+                        .presentationDetents([.height(367)])
+                        .interactiveDismissDisabled()
+                case .loginView:
+                    LoginView(detent: .constant(.large))
+                        .presentationDetents([.large])
+                        .interactiveDismissDisabled()
+                        .ignoresSafeArea()
+                case .none:
+                    EmptyView()
+                }
             }
         }
     }
