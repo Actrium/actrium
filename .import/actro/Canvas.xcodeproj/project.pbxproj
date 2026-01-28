@@ -14,6 +14,7 @@
 		E57012CD2F20D8BD0033B7CE /* A1SDK in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CC2F20D8BD0033B7CE /* A1SDK */; };
 		E57012D02F20D8DD0033B7CE /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CF2F20D8DD0033B7CE /* Kingfisher */; };
 		E572DEE52F221B84001D2A56 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E572DEE42F221B84001D2A56 /* MarkdownUI */; };
+		E5881D752F29B1F700882E9D /* Actr in Frameworks */ = {isa = PBXBuildFile; productRef = E5881D742F29B1F700882E9D /* Actr */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +57,7 @@
 				E572DEE52F221B84001D2A56 /* MarkdownUI in Frameworks */,
 				442EB4E3928B6CB9A596ED32 /* libPods-Canvas.a in Frameworks */,
 				E57012D02F20D8DD0033B7CE /* Kingfisher in Frameworks */,
+				E5881D752F29B1F700882E9D /* Actr in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +127,7 @@
 				E57012CC2F20D8BD0033B7CE /* A1SDK */,
 				E57012CF2F20D8DD0033B7CE /* Kingfisher */,
 				E572DEE42F221B84001D2A56 /* MarkdownUI */,
+				E5881D742F29B1F700882E9D /* Actr */,
 			);
 			productName = Canvas;
 			productReference = E55901A52F163A5B00514034 /* Canvas.app */;
@@ -167,6 +170,7 @@
 				E57012CB2F20D8BD0033B7CE /* XCRemoteSwiftPackageReference "a1-sdk-swift" */,
 				E57012CE2F20D8DD0033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */,
 				E572DEE32F221B83001D2A56 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				E5881D732F29B1F700882E9D /* XCRemoteSwiftPackageReference "actr-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E55901A62F163A5B00514034 /* Products */;
@@ -749,6 +753,14 @@
 				minimumVersion = 2.4.1;
 			};
 		};
+		E5881D732F29B1F700882E9D /* XCRemoteSwiftPackageReference "actr-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/actor-rtc/actr-swift.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.1.17;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -776,6 +788,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E572DEE32F221B83001D2A56 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
+		};
+		E5881D742F29B1F700882E9D /* Actr */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E5881D732F29B1F700882E9D /* XCRemoteSwiftPackageReference "actr-swift" */;
+			productName = Actr;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
