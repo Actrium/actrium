@@ -627,18 +627,19 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   // User Info Sync logic
   const setUserInfo = useUserStore((s) => s.setUserInfo);
   const clearUser = useUserStore((s) => s.clearUser);
-  const currentUserInfo = useUserStore((s) => s.userInfoNative);
 
   useEffect(() => {
-    console.error('>>>> 注册')
     const subStatus = subscribeToLoginStatusChanges((status) => {
       console.error('[ActrApp] Login status changed:', status);
+      if (!status.isLoggedIn) {
+        clearUser();
+      }
     });
 
     return () => {
       subStatus.remove();
     };
-  }, [setUserInfo, clearUser, activeTabId, tabs]);
+  }, [setUserInfo, clearUser]);
 
   const getEngine = useCallback((tabId: string) => {
     const engine = engineMapRef.current.get(tabId);
