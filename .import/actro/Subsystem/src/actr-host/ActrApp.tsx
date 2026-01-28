@@ -71,16 +71,6 @@ import { DevToolsBridge } from './libs/devTools';
 import ActrTabView from './ActrTabView';
 import { LAYOUT } from './constants';
 import { evaluateTabGate, extractBoxModelFromStyle } from './utils';
-import {
-  subscribeToUserInfoChanges,
-  subscribeToLoginStatusChanges,
-  subscribeToUserLogout,
-  removeAllUserInfoListeners,
-  UserInfoModule,
-} from '../native-modules/UserInfoModule';
-import { useUserStore } from './store/useUserStore';
-import { useAppStore } from './store/useAppStore';
-import { useTabIdMapStore } from './store/useTabIdMapStore';
 
 // 模块级别的 props 缓存
 let cachedValidProps: ActrProps | null = null;
@@ -623,23 +613,6 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
       rnInspectorStateSubscription.remove();
     };
   }, [activeTabId, measureAndHighlightNode, measureAllNodeFrames]);
-
-  // User Info Sync logic
-  const setUserInfo = useUserStore((s) => s.setUserInfo);
-  const clearUser = useUserStore((s) => s.clearUser);
-
-  useEffect(() => {
-    const subStatus = subscribeToLoginStatusChanges((status) => {
-      console.error('[ActrApp] Login status changed:', status);
-      if (!status.isLoggedIn) {
-        clearUser();
-      }
-    });
-
-    return () => {
-      subStatus.remove();
-    };
-  }, [setUserInfo, clearUser]);
 
   const getEngine = useCallback((tabId: string) => {
     const engine = engineMapRef.current.get(tabId);

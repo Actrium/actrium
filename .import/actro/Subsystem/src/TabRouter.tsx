@@ -9,11 +9,13 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import type { TabRouterProps } from './actr-host/types';
+import { TabProvider } from './actr-host/contexts/TabContext';
 
 // Lazy imports to avoid circular dependencies
 const ActrApp = React.lazy(() => import('./actr-host/ActrApp').then(m => ({ default: m.ActrApp })));
 const HistoryApp = React.lazy(() => import('./system-apps/HistoryApp'));
 const BookmarksApp = React.lazy(() => import('./system-apps/BookmarksApp'));
+const LoginApp = React.lazy(() => import('./system-apps/LoginApp'));
 
 // Props cache for bridge stability
 let cachedValidProps: TabRouterProps | null = null;
@@ -36,15 +38,20 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
       return (
         <View style={styles.container} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
           <React.Suspense fallback={<LoadingFallback />}>
-            {tab.systemAppType === 'history' && (
-              <HistoryApp
-                items={tab.historyItems ?? []}
-                groups={tab.historyGroups ?? []}
-              />
-            )}
-            {tab.systemAppType === 'bookmarks' && (
-              <BookmarksApp />
-            )}
+            <TabProvider tab={tab}>
+              {tab.systemAppType === 'history' && (
+                <HistoryApp
+                  items={tab.historyItems ?? []}
+                  groups={tab.historyGroups ?? []}
+                />
+              )}
+              {tab.systemAppType === 'bookmarks' && (
+                <BookmarksApp />
+              )}
+              {tab.systemAppType === 'login' && (
+                <LoginApp />
+              )}
+            </TabProvider>
           </React.Suspense>
         </View>
       );
@@ -125,15 +132,20 @@ export const TabRouter: React.FC<TabRouterProps> = (props) => {
             ]}
           >
             <React.Suspense fallback={<LoadingFallback />}>
-              {tab.systemAppType === 'history' && (
-                <HistoryApp
-                  items={tab.historyItems ?? []}
-                  groups={tab.historyGroups ?? []}
-                />
-              )}
-              {tab.systemAppType === 'bookmarks' && (
-                <BookmarksApp />
-              )}
+              <TabProvider tab={tab}>
+                {tab.systemAppType === 'history' && (
+                  <HistoryApp
+                    items={tab.historyItems ?? []}
+                    groups={tab.historyGroups ?? []}
+                  />
+                )}
+                {tab.systemAppType === 'bookmarks' && (
+                  <BookmarksApp />
+                )}
+                {tab.systemAppType === 'login' && (
+                  <LoginApp />
+                )}
+              </TabProvider>
             </React.Suspense>
           </View>
         );

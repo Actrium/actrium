@@ -18,38 +18,10 @@ class UserInfoModule: RCTEventEmitter {
         super.init()
         UserInfoModule.shared = self
         logger.notice("[UserInfoModule] Initialized")
-        
-        // 监听登录成功事件
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleLoginSuccess),
-            name: NSNotification.Name("LoginSuccessNotification"),
-            object: nil
-        )
     }
     
     deinit {
-        NotificationCenter.default.removeObserver(self)
         logger.notice("[UserInfoModule] Deinitialized")
-    }
-    
-    /// 处理登录成功通知，解析所有等待的请求
-    @objc private func handleLoginSuccess() {
-        logger.info("[UserInfoModule] Login success, processing \(self.pendingRequests.count) pending requests")
-        
-        guard !pendingRequests.isEmpty else { return }
-        
-        // 处理所有等待的请求
-        let requests = pendingRequests
-        pendingRequests.removeAll()
-        
-        for request in requests {
-            processUserInfoRequest(
-                params: request.params,
-                resolve: request.resolve,
-                reject: request.reject
-            )
-        }
     }
     
     // MARK: - RCTEventEmitter
@@ -59,8 +31,18 @@ class UserInfoModule: RCTEventEmitter {
         return [
             "onUserInfoChanged",
             "onLoginStatusChanged",
-            "onUserLogout"
+            "onUserLogout",
+            "onLoginResult"
         ]
+    }
+    
+    /// 触发登录
+    @objc
+    func loginWithType(_ type: String) {
+        let loginType: LoginType = type == "wechat" ? .wechat : .apple
+        DispatchQueue.main.async {
+            LoginManager.shared.loginWithType(loginType)
+        }
     }
     
     /// 确保在主队列初始化
@@ -105,6 +87,18 @@ class UserInfoModule: RCTEventEmitter {
         
         logger.info("[UserInfoModule] Sending onUserLogout event")
         shared.sendEvent(withName: "onUserLogout", body: nil)
+    }
+
+    /// 发送登录结果事件 (wechat code / apple idToken)
+    @objc
+    static func notifyLoginResult(_ result: [String: Any]) {
+        guard let shared = shared else {
+            logger.warning("[UserInfoModule] Module not initialized, cannot send event")
+            return
+        }
+        
+        logger.info("[UserInfoModule] Sending onLoginResult event")
+        shared.sendEvent(withName: "onLoginResult", body: result)
     }
     
     // MARK: - Optional: Expose methods to RN (if needed)

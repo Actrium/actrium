@@ -45,8 +45,8 @@ class BrowserViewModel: ObservableObject {
 
     init() {
         // 🔴 开发调试：优先加载 counterapp 开发目录作为启动 tab (Focus 模式)
+        // let counterAppDevPath = "/Users/toupitutuetoudada/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"
         let counterAppDevPath = "/Users/wangyanbo/work/askaway-ipad/Subsystem/actr-app-examples/counterapp"
-        // let counterAppDevPath = "/Users/wangyanbo/work/askaway-ipad/Subsystem/actr-app-examples/counterapp"
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
             logger.debug("🔄 [BrowserViewModel] 启动时直接加载 counterapp 开发目录 (Focus 模式)")
@@ -118,7 +118,7 @@ class BrowserViewModel: ObservableObject {
     /// Open or switch to a system tab (History, Bookmarks)
     /// Returns the existing tab if already open, otherwise creates a new one
     @discardableResult
-    func openSystemTab(_ type: SystemTabType) -> Tab {
+    func openSystemTab(_ type: SystemTabType, id: UUID? = nil) -> Tab {
         // Check if a system tab of this type is already open
         if let existingTab = tabs.first(where: { $0.systemTabType == type }) {
             // Switch to existing tab
@@ -130,6 +130,7 @@ class BrowserViewModel: ObservableObject {
 
         // Create new system tab
         let newTab = Tab(
+            id: id ?? UUID(),
             title: type.title,
             systemTabType: type,
             backgroundColor: "#1e1e1e"  // Dark background for system tabs

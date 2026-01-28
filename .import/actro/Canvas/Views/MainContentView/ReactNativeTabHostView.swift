@@ -184,6 +184,10 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
                             return bookmarkDict
                         }
                     }
+                case .login:
+                    // Login tab currently doesn't need extra data from native,
+                    // context info (clientId) is handled via JS store using tabId.
+                    break
                 }
                 return dict
             }

@@ -87,6 +87,37 @@ struct BrowserWindowView: View {
             .onReceive(NotificationCenter.default.publisher(for: .clearHistoryFromRN)) { _ in
                 historyVM.clearHistory()
             }
+            // Handle open system tab from RN
+            .onReceive(NotificationCenter.default.publisher(for: .openTabFromRN)) { notification in
+                guard let userInfo = notification.userInfo,
+                      let tabId = userInfo["tabId"] as? UUID,
+                      let systemAppTypeStr = userInfo["systemAppType"] as? String,
+                      let systemTabType = SystemTabType(rawValue: systemAppTypeStr) else { return }
+                
+                withAnimation {
+                    viewModel.openSystemTab(systemTabType, id: tabId)
+                }
+            }
+            // Handle select tab from RN
+            .onReceive(NotificationCenter.default.publisher(for: .selectTabFromRN)) { notification in
+                guard let userInfo = notification.userInfo,
+                      let tabIdStr = userInfo["tabId"] as? String,
+                      let tabId = UUID(uuidString: tabIdStr) else { return }
+                
+                withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+                    viewModel.switchToTab(id: tabId)
+                }
+            }
+            // Handle close tab from RN
+            .onReceive(NotificationCenter.default.publisher(for: .closeTabFromRN)) { notification in
+                guard let userInfo = notification.userInfo,
+                      let tabIdStr = userInfo["tabId"] as? String,
+                      let tabId = UUID(uuidString: tabIdStr) else { return }
+                
+                withAnimation {
+                    viewModel.closeTab(id: tabId)
+                }
+            }
     }
 
     private func checkPendingGroupTransfer() {

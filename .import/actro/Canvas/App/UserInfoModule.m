@@ -8,4 +8,6 @@ RCT_EXTERN_METHOD(getCurrentUserInfo:(NSDictionary *)params
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(loginWithType:(NSString *)type)
+
 @end
