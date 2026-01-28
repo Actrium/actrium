@@ -6,11 +6,13 @@ private let logger = AppLogger.app
 enum SystemTabType: String, Codable {
     case history
     case bookmarks
+    case login
 
     var title: String {
         switch self {
         case .history: return "History"
         case .bookmarks: return "Bookmarks"
+        case .login: return "Login"
         }
     }
 
@@ -18,12 +20,13 @@ enum SystemTabType: String, Codable {
         switch self {
         case .history: return "clock.arrow.circlepath"
         case .bookmarks: return "bookmark"
+        case .login: return "lock"
         }
     }
 }
 
 struct Tab: Identifiable {
-    let id = UUID()
+    let id: UUID
     var title: String
     var url: URL?
     var htmlContent: String?
@@ -66,6 +69,7 @@ struct Tab: Identifiable {
     var backgroundColor: String
 
     init(
+        id: UUID = UUID(),
         title: String,
         url: URL? = nil,
         htmlContent: String? = nil,
@@ -83,6 +87,7 @@ struct Tab: Identifiable {
         rightPanelDefaultVisible: Bool = false,
         backgroundColor: String? = nil
     ) {
+        self.id = id
         self.title = title
         self.url = url
         self.htmlContent = htmlContent

@@ -19,8 +19,20 @@ class WeChatManager: NSObject, WXApiDelegate {
         return WXApi.handleOpen(url, delegate: self)
     }
     
+    private let logger = AppLogger.app
+
     // 微信登录
     func sendLoginRequest() {
+        if !WXApi.isWXAppInstalled() {
+            logger.error("[WeChatManager] 微信未安装，无法进行登录跳转")
+            let result: [String: Any] = [
+                "success": false,
+                "errorMsg": "未安装微信"
+            ]
+            NotificationCenter.default.post(name: .wechatLoginResult, object: result)
+            return
+        }
+        
         let req = SendAuthReq()
         req.scope = "snsapi_userinfo"
         req.state = "123"

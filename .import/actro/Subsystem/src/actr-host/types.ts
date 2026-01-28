@@ -1,5 +1,5 @@
 // System app types (built-in apps like chrome:// pages)
-export type SystemAppType = 'history' | 'bookmarks';
+export type SystemAppType = 'history' | 'bookmarks' | 'login';
 
 // History item passed from native
 export type HistoryItemData = {

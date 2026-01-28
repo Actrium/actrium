@@ -117,67 +117,6 @@ class LoginManager: ObservableObject {
         }
     }
     
-    /// 通用登录成功处理
-    func login(userInfo: UserDetailData) {
-        if let env = userEnvironment?.rawValue {
-            clearGlobalUserInfoWithEnv(env)
-        }
-        userEnvironment = currentEnvironment
-        
-        DispatchQueue.main.async {
-            self.hideAllLoginViews()
-            self.isLoggedIn = true
-            self.currentUser = userInfo
-            self.saveGlobalUserInfo(userInfo)
-            
-            // 自动授权：将全局用户信息保存到 UserInfoManager（本地存储）
-            self.saveUserToLocalStorage(userInfo)
-        }
-    }
-    
-    /// 将 UserDetailData 保存到 UserInfoManager（自动授权）
-    private func saveUserToLocalStorage(_ user: UserDetailData) {
-        // 如果有授权上下文，先进行授权获取 sessionToken
-        if let context = authContext,
-           let clientId = context["clientId"],
-           let appId = context["appId"],
-           let appUrl = context["appUrl"],
-           !clientId.isEmpty {
-            logger.info("[LoginManager] 开始授权流程，clientId: \(clientId), appId: \(appId)")
-            authorizeWith(clientId: clientId, appId: appId, appUrl: appUrl, user: user)
-        } else {
-            // 没有授权上下文，直接保存（不需要 sessionToken）
-            logger.info("[LoginManager] 无授权上下文，直接保存用户信息")
-            saveUserWithoutAuth(user: user)
-        }
-    }
-    
-    /// 保存用户信息（不进行授权）
-    private func saveUserWithoutAuth(user: UserDetailData) {
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let userData = try encoder.encode(user)
-            let userJsonString = String(data: userData, encoding: .utf8) ?? ""
-            
-            let storageInfo = UserStorageInfo(
-                loginApiUrl: currentEnvironment.rawValue,
-                userInfo: userJsonString,
-                userIdentity: user.user.cn,
-                sessionToken: "" // 无 sessionToken
-            )
-            
-            let success = UserInfoManager.shared.addOrUpdateUser(storageInfo)
-            if success {
-                logger.debug("✅ 用户信息已保存到本地存储")
-            } else {
-                logger.error("❌ 保存用户信息到本地存储失败")
-            }
-        } catch {
-            logger.error("❌ 序列化用户信息失败: \(error.localizedDescription)")
-        }
-    }
-    
     /// 登出
     func logout() {
         DispatchQueue.main.async {
@@ -191,14 +130,7 @@ class LoginManager: ObservableObject {
     /// 注销账户
     func deleteAccount() {
         logout()
-        A1SDK.shared.auth.deleteAccount { result in
-            switch result {
-            case .success(let msg):
-                logger.debug("账户已删除: \(msg)")
-            case .failure(let err):
-                logger.error("删除账户失败: \(err.localizedDescription)")
-            }
-        }
+        // A1SDK.shared.auth.deleteAccount { ... } // 移除 A1SDK 调用
     }
     
     func handleOpenURL(_ url: URL, type: LoginType = .wechat) -> Bool {
@@ -218,65 +150,6 @@ class LoginManager: ObservableObject {
     
     // MARK: - 频道授权方法
     
-    /// 执行授权（公共方法，供 UI 层调用）
-    /// 使用当前已登录的用户和保存的授权上下文执行授权流程
-    func performAuthorization() {
-        guard let user = currentUser else {
-            logger.error("[LoginManager] 执行授权失败：当前没有登录用户")
-            return
-        }
-        
-        guard let context = authContext,
-              let clientId = context["clientId"],
-              let appId = context["appId"],
-              let appUrl = context["appUrl"],
-              !clientId.isEmpty else {
-            logger.error("[LoginManager] 执行授权失败：授权上下文不完整")
-            return
-        }
-        
-        logger.info("[LoginManager] 开始执行授权流程")
-        authorizeWith(clientId: clientId, appId: appId, appUrl: appUrl, user: user)
-    }
-    
-    /// 为指定 app 进行授权，获取 sessionToken
-    /// - Parameters:
-    ///   - clientId: 客户端 ID
-    ///   - appId: 应用 ID
-    ///   - appUrl: 应用 URL
-    ///   - user: 用户信息
-    private func authorizeWith(clientId: String, appId: String, appUrl: String, user: UserDetailData) {
-        guard let identity = user.profiles.first else {
-            logger.error("[LoginManager] 授权失败：用户身份信息获取不到")
-            saveUserWithoutAuth(user: user)
-            return
-        }
-        
-        let loginHint = "\(identity.id)@\(identity.domain)"
-        logger.info("[LoginManager] 调用授权接口，clientId: \(clientId), loginHint: \(loginHint)")
-        
-        A1SDK.shared.auth.authorize(
-            clientId: clientId,
-            loginHint: loginHint
-        ) { [weak self] result in
-            guard let self = self else { return }
-            
-            switch result {
-            case .success(let data):
-                logger.info("[LoginManager] ✅ 授权成功，获得临时授权码")
-                logger.debug("[LoginManager] 授权码: \(data.code), 重定向URI: \(data.redirectUri)")
-                
-                // 上传 code 到服务器
-                self.uploadCode(code: data.code, appId: appId, appUrl: appUrl, user: user)
-                
-            case .failure(let error):
-                logger.error("[LoginManager] ❌ 授权失败: \(error.localizedDescription)")
-                // 授权失败，仍然保存用户信息（无 sessionToken）
-                self.saveUserWithoutAuth(user: user)
-            }
-        }
-    }
-
     /// 验证用户是否已授权
     /// - Parameters:
     ///   - appId: 应用 ID
@@ -339,102 +212,6 @@ class LoginManager: ObservableObject {
         }.resume()
     }
     
-    /// 上传授权码到服务器，获取 sessionToken
-    /// - Parameters:
-    ///   - code: 授权码
-    ///   - appId: 应用 ID
-    ///   - appUrl: 应用 URL
-    ///   - user: 用户信息
-    private func uploadCode(code: String, appId: String, appUrl: String, user: UserDetailData) {
-        guard let url = URL(string: appUrl),
-              let host = url.host,
-              let scheme = url.scheme else {
-            logger.error("[LoginManager] uploadCode: 无法解析 appUrl: \(appUrl)")
-            saveUserWithoutAuth(user: user)
-            return
-        }
-        
-        let base = "\(scheme)://\(host)"
-        let path = "/api/client/app/\(appId)"
-        let fullUrl = "\(base)\(path)"
-        
-        logger.info("[LoginManager] 上传授权码到: \(fullUrl)")
-        
-        // 使用 URLSession 上传授权码
-        guard let requestUrl = URL(string: fullUrl) else {
-            logger.error("[LoginManager] 无效的 URL: \(fullUrl)")
-            saveUserWithoutAuth(user: user)
-            return
-        }
-        
-        var request = URLRequest(url: requestUrl)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let body = ["code": code]
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        } catch {
-            logger.error("[LoginManager] 序列化请求体失败: \(error.localizedDescription)")
-            saveUserWithoutAuth(user: user)
-            return
-        }
-        
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else { return }
-            
-            if let error = error {
-                logger.error("[LoginManager] ❌ 上传授权码失败: \(error.localizedDescription)")
-                self.saveUserWithoutAuth(user: user)
-                return
-            }
-            
-            logger.info("[LoginManager] ✅ 授权码上传成功")
-            
-            // 从 A1SDK 获取 sessionToken
-            let sessionToken = A1SDK.shared.getSessionToken() ?? ""
-            logger.debug("[LoginManager] 获取到 sessionToken: \(sessionToken.isEmpty ? "(空)" : "(已获取)")")
-            
-            // 保存用户信息（包含 sessionToken）
-            self.saveUserWithSessionToken(user: user, sessionToken: sessionToken)
-            
-        }.resume()
-    }
-    
-    /// 保存用户信息（包含 sessionToken）
-    private func saveUserWithSessionToken(user: UserDetailData, sessionToken: String) {
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let userData = try encoder.encode(user)
-            let userJsonString = String(data: userData, encoding: .utf8) ?? ""
-            
-            let storageInfo = UserStorageInfo(
-                loginApiUrl: currentEnvironment.rawValue,
-                userInfo: userJsonString,
-                userIdentity: user.user.cn,
-                sessionToken: sessionToken
-            )
-            
-            let success = UserInfoManager.shared.addOrUpdateUser(storageInfo)
-            if success {
-                logger.debug("[LoginManager] ✅ 用户信息已授权并保存到本地存储（含 sessionToken）")
-            } else {
-                logger.error("[LoginManager] ❌ 保存用户信息到本地存储失败")
-            }
-            NotificationCenter.default.post(
-                name: NSNotification.Name("LoginSuccessNotification"),
-                object: nil
-            )
-        } catch {
-            NotificationCenter.default.post(
-                name: NSNotification.Name("LoginSuccessNotification"),
-                object: nil
-            )
-            logger.error("[LoginManager] ❌ 序列化用户信息失败: \(error.localizedDescription)")
-        }
-    }
-        
     // MARK: - UI 控制方法
     func showLogin(_ type: LoginSheetType) {
         currentLoginSheetType = type
@@ -514,7 +291,7 @@ class LoginManager: ObservableObject {
     
     /// 删除当前环境的全局用户信息
     private func clearGlobalUserInfo() {
-        A1SDK.shared.auth.logout()
+        // A1SDK.shared.auth.logout() // 移除 A1SDK 调用
         let key = globalUserInfoKey
         UserDefaults.standard.removeObject(forKey: key)
         UserInfoManager.shared.deleteUser()
@@ -530,7 +307,7 @@ class LoginManager: ObservableObject {
     
     /// 删除所有环境的全局用户信息
     func clearAllEnvironmentsUserInfo() {
-        A1SDK.shared.auth.logout()
+        // A1SDK.shared.auth.logout() // 移除 A1SDK 调用
         
         // 删除所有环境的用户信息
         let environments: [A1Environment] = [.dev, .beta, .prod]
@@ -642,9 +419,10 @@ class LoginManager: ObservableObject {
         
         if let success = result["success"] as? Bool, success {
             // 苹果登录成功
-            logger.debug("Apple 登录成功，result：\(result)")
+            logger.debug("Apple 登录成功，通知 RN")
             if let identityToken = result["identityToken"] as? String {
-                fetchAppleUserInfo(identityToken)
+                // 通知 RN
+                UserInfoModule.notifyLoginResult(["type": "apple", "id_token": identityToken])
             }
         } else {
             let errorMsg = result["errorMsg"] as? String ?? "未知错误"
@@ -654,42 +432,22 @@ class LoginManager: ObservableObject {
     
     @objc private func handleWeChatLoginResult(_ notification: Notification) {
         guard let result = notification.object as? [String: Any] else { return }
-        let code = result["code"] as? String ?? ""
-        let errorCode = result["errorCode"]
         
-        if !code.isEmpty {
-            logger.debug("微信登录成功，code：\(code)")
-            // 这里用 code 向你的服务器换取 access_token 和用户信息
-            fetchWeChatUserInfo(code: code)
+        if let code = result["code"] as? String, !code.isEmpty {
+            logger.debug("微信登录成功，通知 RN, code：\(code)")
+            UserInfoModule.notifyLoginResult(["type": "wechat", "code": code])
         } else {
-            logger.debug("微信登录失败，错误码：\(String(describing: errorCode))")
+            let errorMsg = result["errorMsg"] as? String ?? "未知错误"
+            let errorCode = result["errorCode"]
+            logger.debug("微信登录失败：\(errorMsg), 错误码：\(String(describing: errorCode))")
+            
+            // 通知 RN 登录失败，方便清除 loading 状态或报错
+            UserInfoModule.notifyLoginResult([
+                "type": "wechat",
+                "error": true,
+                "message": errorMsg
+            ])
         }
     }
     
-    /// 使用微信授权码获取用户信息
-    private func fetchWeChatUserInfo(code: String) {
-        A1SDK.shared.auth.loginWithWeChatAndGetUserInfo(code: code) { result in
-            logger.debug("========= WeChat Login 获取用户信息：\(result)")
-            switch result {
-            case .success(let userDetail):
-                logger.debug("✅ 微信登录成功")
-                self.login(userInfo: userDetail)
-            case .failure(let error):
-                logger.debug("❌ 微信登录失败: \(error.localizedDescription)")
-            }
-        }
-    }
-    
-    private func fetchAppleUserInfo(_ identityToken: String) {
-        A1SDK.shared.auth.loginWithAppleAndGetUserInfo(identityToken: identityToken) { result in
-            logger.debug("========= Apple Login 获取用户信息：\(result)")
-            switch result {
-            case .success(let userDetail):
-                logger.debug("✅ 苹果登录成功")
-                self.login(userInfo: userDetail)
-            case .failure(let error):
-                logger.debug("❌ 苹果登录失败: \(error.localizedDescription)")
-            }
-        }
-    }
 }

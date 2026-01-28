@@ -3,3 +3,4 @@
  */
 export { default as HistoryApp } from './HistoryApp';
 export { default as BookmarksApp } from './BookmarksApp';
+export { default as LoginApp } from './LoginApp';
