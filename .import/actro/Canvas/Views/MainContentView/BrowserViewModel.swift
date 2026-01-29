@@ -45,8 +45,8 @@ class BrowserViewModel: ObservableObject {
 
     init() {
         // 🔴 开发调试：优先加载 counterapp 开发目录作为启动 tab (Focus 模式)
-        // let counterAppDevPath = "/Users/toupitutuetoudada/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"
-        let counterAppDevPath = "/Users/wangyanbo/work/askaway-ipad/Subsystem/actr-app-examples/counterapp"
+        let counterAppDevPath = "/Users/toupitutuetoudada/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"
+        // let counterAppDevPath = "/Users/wangyanbo/work/askaway-ipad/Subsystem/actr-app-examples/counterapp"
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
             logger.debug("🔄 [BrowserViewModel] 启动时直接加载 counterapp 开发目录 (Focus 模式)")

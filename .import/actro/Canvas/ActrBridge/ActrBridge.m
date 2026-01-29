@@ -77,4 +77,23 @@ RCT_EXTERN_METHOD(removeNode:(NSString *)nodeId
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+// MARK: - ActrService Methods
+
+/// Initialize ActrService
+RCT_EXTERN_METHOD(initializeService:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+/// Shutdown ActrService
+RCT_EXTERN_METHOD(shutdownService:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+/// Send echo message through ActrService
+RCT_EXTERN_METHOD(sendEcho:(NSString *)message
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+/// Get ActrService connection status
+RCT_EXTERN_METHOD(getServiceStatus:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
 @end
