@@ -404,13 +404,14 @@ extension ActrBridge {
     /// Initialize ActrService
     @objc
     public func initializeService(
-        _ resolve: @escaping RCTPromiseResolveBlock,
+        path: String,
+        resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
             do {
                 let service = ActrService()
-                try await service.initialize()
+                try await service.initialize(path: path)
                 
                 queue.sync {
                     self.actrService = service
