@@ -8,44 +8,21 @@ import ActrBindings
 /// exposing the high-level API (ActrSystem, ActrNode, ActrRef) to JavaScript.
 @objc(ActrBridge)
 @preconcurrency
-public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
-    
-    // MARK: - Singleton
-    
-    /// Static reference to the bridge instance for sending events
-    private static weak var shared: ActrBridge?
-    
-    override init() {
-        super.init()
-        ActrBridge.shared = self
-    }
+public class ActrBridge: NSObject, @unchecked Sendable {
     
     // MARK: - Storage
     
-    /// Stores ActrSystemWrapper instances by ID
-    private var systems: [String: ActrSystemWrapper] = [:]
+    /// Stores ActrSystem instances by ID
+    private var systems: [String: ActrSystem] = [:]
     
-    /// Stores ActrNodeWrapper instances by ID
-    private var nodes: [String: ActrNodeWrapper] = [:]
+    /// Stores ActrNode instances by ID
+    private var nodes: [String: ActrNode] = [:]
     
-    /// Stores ActrRefWrapper instances by ID
-    private var refs: [String: ActrRefWrapper] = [:]
+    /// Stores ActrRef instances by ID
+    private var refs: [String: ActrRef] = [:]
     
     /// Serial queue for thread-safe access to storage
     private let queue = DispatchQueue(label: "com.actr.bridge.queue")
-    
-    // MARK: - RCTEventEmitter
-    
-    /// Declare supported events
-    override public func supportedEvents() -> [String]! {
-        return ["onActrMessage"]
-    }
-    
-    /// Ensure initialization on main queue
-    @objc
-    override public static func requiresMainQueueSetup() -> Bool {
-        return true
-    }
     
     // MARK: - ActrSystem Methods
     
@@ -61,7 +38,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     ) {
         Task {
             do {
-                let system = try await ActrSystemWrapper.newFromFile(configPath: configPath)
+                let system = try await ActrSystem.from(tomlConfig: configPath)
                 let systemId = UUID().uuidString
                 
                 queue.sync {
@@ -93,8 +70,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
                     reject("INVALID_URL", "Invalid URL: \(configUrl)", nil)
                     return
                 }
-                // ActrSystemWrapper expects a file path
-                let system = try await ActrSystemWrapper.newFromFile(configPath: url.path)
+                let system = try await ActrSystem.from(tomlConfig: url)
                 let systemId = UUID().uuidString
                 
                 queue.sync {
@@ -134,7 +110,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
             }
             
             do {
-                let node = try system.attach(callback: workload)
+                let node = try system.spawn(workload: workload)
                 let nodeId = UUID().uuidString
                 
                 self.queue.sync {
@@ -335,8 +311,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
             }
             
             Task {
-                actrRef.shutdown()
-                await actrRef.waitForShutdown()
+                await actrRef.stop()
                 
                 let _ = self.queue.sync {
                     self.refs.removeValue(forKey: refId)
@@ -378,28 +353,12 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     // MARK: - Helper Methods
     
     private nonisolated func formatActrError(_ error: ActrError) -> String {
-        switch error {
-        case .ConfigError(let msg): return "ConfigError: \(msg)"
-        case .ConnectionError(let msg): return "ConnectionError: \(msg)"
-        case .RpcError(let msg): return "RpcError: \(msg)"
-        case .StateError(let msg): return "StateError: \(msg)"
-        case .InternalError(let msg): return "InternalError: \(msg)"
-        case .TimeoutError(let msg): return "TimeoutError: \(msg)"
-        case .WorkloadError(let msg): return "WorkloadError: \(msg)"
-        }
+        return error.errorDescription ?? ""
     }
     
     private nonisolated func serializeRealm(_ realm: Realm) -> [String: Any] {
         // Realm serialization - adjust based on actual Realm structure
         return ["id": "\(realm)"]
-    }
-    
-    // MARK: - Event Notification
-    
-    /// Notify JavaScript of an incoming message/event
-    public static func notifyMessageReceived(_ body: [String: Any]) {
-        guard let shared = shared else { return }
-        shared.sendEvent(withName: "onActrMessage", body: body)
     }
 }
 
