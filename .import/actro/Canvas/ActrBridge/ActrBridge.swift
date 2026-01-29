@@ -204,50 +204,44 @@ public class ActrBridge: NSObject, @unchecked Sendable {
     /// @param timeoutMs: Timeout in milliseconds
     /// @param resolve: Promise resolve callback with response data as base64 string
     /// @param reject: Promise reject callback
-//    @objc
-//    public func call(
-//        _ refId: String,
-//        routeKey: String,
-//        requestData: String,
-//        payloadType: Int32,
-//        timeoutMs: Int64,
-//        resolve: @escaping RCTPromiseResolveBlock,
-//        reject: @escaping RCTPromiseRejectBlock
-//    ) {
-//        queue.async {
-//            guard let actrRef = self.refs[refId] else {
-//                reject("REF_NOT_FOUND", "ActrRef with ID \(refId) not found", nil)
-//                return
-//            }
-//            
-//            guard let requestBytes = Data(base64Encoded: requestData) else {
-//                reject("INVALID_DATA", "Invalid base64 encoded request data", nil)
-//                return
-//            }
-//            
-//            guard let payloadTypeEnum = PayloadType(rawValue: payloadType) else {
-//                reject("INVALID_PAYLOAD_TYPE", "Invalid payload type: \(payloadType)", nil)
-//                return
-//            }
-//            
-//            Task {
-//                do {
-//                    let responseData = try await actrRef.rawCall(
-//                        routeKey: routeKey,
-//                        payloadType: payloadTypeEnum,
-//                        requestPayload: requestBytes,
-//                        timeoutMs: timeoutMs
-//                    )
-//                    let responseBase64 = responseData.base64EncodedString()
-//                    resolve(responseBase64)
-//                } catch let error as ActrError {
-//                    reject("ACTR_ERROR", self.formatActrError(error), error)
-//                } catch {
-//                    reject("UNKNOWN_ERROR", error.localizedDescription, error)
-//                }
-//            }
-//        }
-//    }
+    @objc
+    public func call(
+        _ refId: String,
+        routeKey: String,
+        requestData: String,
+        payloadType: Int32,
+        timeoutMs: Int64,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        queue.async {
+            guard let actrRef = self.refs[refId] else {
+                reject("REF_NOT_FOUND", "ActrRef with ID \(refId) not found", nil)
+                return
+            }
+            
+            guard let requestBytes = Data(base64Encoded: requestData) else {
+                reject("INVALID_DATA", "Invalid base64 encoded request data", nil)
+                return
+            }
+            
+            Task {
+                do {
+                    let responseData = try await actrRef.rawCall(
+                        routeKey: routeKey,
+                        requestPayload: requestBytes,
+                        timeoutMs: timeoutMs
+                    )
+                    let responseBase64 = responseData.base64EncodedString()
+                    resolve(responseBase64)
+                } catch let error as ActrError {
+                    reject("ACTR_ERROR", self.formatActrError(error), error)
+                } catch {
+                    reject("UNKNOWN_ERROR", error.localizedDescription, error)
+                }
+            }
+        }
+    }
     
     /// Discover actors of a specific type
     /// @param refId: The ID of the ActrRef
