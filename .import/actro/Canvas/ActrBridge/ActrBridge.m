@@ -7,8 +7,9 @@
 //
 
 #import <React/RCTBridgeModule.h>
+#import <React/RCTEventEmitter.h>
 
-@interface RCT_EXTERN_MODULE(ActrBridge, NSObject)
+@interface RCT_EXTERN_MODULE(ActrBridge, RCTEventEmitter)
 
 // MARK: - ActrSystem Methods
 
@@ -43,13 +44,13 @@ RCT_EXTERN_METHOD(getActorId:(NSString *)refId
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// Perform an RPC call
- RCT_EXTERN_METHOD(call:(NSString *)refId
-                   routeKey:(NSString *)routeKey
-                   requestData:(NSString *)requestData
-                   payloadType:(int32_t)payloadType
-                   timeoutMs:(int64_t)timeoutMs
-                   resolve:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(call:(NSString *)refId
+                  routeKey:(NSString *)routeKey
+                  requestData:(NSString *)requestData
+                  payloadType:(int32_t)payloadType
+                  timeoutMs:(int64_t)timeoutMs
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 
 /// Discover actors of a specific type
 RCT_EXTERN_METHOD(discover:(NSString *)refId
