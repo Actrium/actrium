@@ -24,6 +24,8 @@ public class ActrBridge: NSObject, @unchecked Sendable {
     /// Serial queue for thread-safe access to storage
     private let queue = DispatchQueue(label: "com.actr.bridge.queue")
     
+    private var actrService: ActrService?
+    
     // MARK: - ActrSystem Methods
     
     /// Create an ActrSystem from a TOML config file path
@@ -392,6 +394,101 @@ public class WorkloadRegistry {
     public func removeWorkload(_ id: String) {
         let _ = queue.sync {
             workloads.removeValue(forKey: id)
+        }
+    }
+}
+
+// MARK: - ActrService Methods
+
+extension ActrBridge {
+    /// Initialize ActrService
+    @objc
+    public func initializeService(
+        _ resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            do {
+                let service = ActrService()
+                try await service.initialize()
+                
+                queue.sync {
+                    self.actrService = service
+                }
+                
+                resolve(["status": "connected"])
+            } catch let error as ActrError {
+                reject("ACTR_ERROR", self.formatActrError(error), error)
+            } catch {
+                reject("UNKNOWN_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
+    
+    /// Shutdown ActrService
+    @objc
+    public func shutdownService(
+        _ resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            guard let service = queue.sync(execute: { self.actrService }) else {
+                reject("SERVICE_NOT_FOUND", "ActrService not initialized", nil)
+                return
+            }
+            
+            await service.shutdown()
+            
+            queue.sync {
+                self.actrService = nil
+            }
+            
+            resolve(["status": "disconnected"])
+        }
+    }
+    
+    /// Send echo message through ActrService
+    @objc
+    public func sendEcho(
+        _ message: String,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            guard let service = queue.sync(execute: { self.actrService }) else {
+                reject("SERVICE_NOT_FOUND", "ActrService not initialized", nil)
+                return
+            }
+            
+            do {
+                let reply = try await service.sendEcho(message)
+                resolve(["reply": reply])
+            } catch let error as ActrError {
+                reject("ACTR_ERROR", self.formatActrError(error), error)
+            } catch {
+                reject("UNKNOWN_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
+    
+    /// Get ActrService connection status
+    @objc
+    public func getServiceStatus(
+        _ resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            guard let service = queue.sync(execute: { self.actrService }) else {
+                resolve(["status": "disconnected"])
+                return
+            }
+            
+            let status = service.connectionStatus.description
+            let result: [String: Any] = [
+                "status": status,
+                "errorMessage": service.errorMessage ?? NSNull()
+            ]
+            resolve(result)
         }
     }
 }
