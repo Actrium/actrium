@@ -80,7 +80,8 @@ RCT_EXTERN_METHOD(removeNode:(NSString *)nodeId
 // MARK: - ActrService Methods
 
 /// Initialize ActrService
-RCT_EXTERN_METHOD(initializeService:(RCTPromiseResolveBlock)resolve
+RCT_EXTERN_METHOD(initializeService:(NSString *)path
+                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// Shutdown ActrService
