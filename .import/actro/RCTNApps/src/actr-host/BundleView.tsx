@@ -7,7 +7,7 @@ import {
 import { logger } from '../logger';
 
 // 导入 rill Engine 和 preset 组件 - 内置 JSC sandbox 自动检测
-import { Engine } from 'rill';
+import { Engine } from 'rill/host';
 // 使用 rill preset 组件 - 这些组件已正确处理事件序列化
 import {
   ActivityIndicator,
@@ -114,9 +114,9 @@ const LocalEngineView: React.FC<{
 // EngineView 使用本地版本
 const EngineView = LocalEngineView;
 
-import type { ComponentMap } from 'rill';
+import type { ComponentMap } from 'rill/host';
 import { ThemeView, StepList, UserAvatar, ChatBubble, PanelMarker } from 'askit';
-import { createEngineAdapter } from 'askit/core';
+import { createEngineAdapter } from 'askit/host';
 
 const log = logger.child('BundleView');
 const nerror = (msg: string) => log.error(msg);

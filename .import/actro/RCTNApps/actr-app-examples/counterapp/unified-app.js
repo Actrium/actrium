@@ -136,7 +136,7 @@ module.exports = __toCommonJS(exports_unified_app);
 
 // src/panels.tsx
 var import_react = React;
-var import_sdk = RillSDK;
+var import_sdk = RillGuest;
 var jsx_runtime = ReactJSXRuntime;
 function Counter({
   onChange
@@ -735,7 +735,7 @@ function usePanels() {
 try {
   var __rillModuleExports = (typeof module !== 'undefined' && module && module.exports) ? module.exports : (typeof exports !== 'undefined' ? exports : undefined);
   if (__rillModuleExports) {
-    globalThis.__RillGuest = __rillModuleExports.default || __rillModuleExports;
+    globalThis.__rill.guest = __rillModuleExports.default || __rillModuleExports;
   }
 } catch {}
 
@@ -747,7 +747,7 @@ try {
  */
 /* Auto-render (actr mode) */
 (function() {
-  if (typeof __sendToHost === 'function' && typeof globalThis.__RillGuest !== 'undefined') {
+  if (typeof __rill_sendBatch === 'function' && typeof globalThis.__rill.guest !== 'undefined') {
     try {
       var React = globalThis.React;
       if (!React) {
@@ -761,7 +761,7 @@ try {
         return;
       }
 
-      var GuestExport = globalThis.__RillGuest;
+      var GuestExport = globalThis.__rill.guest;
       var element;
 
       // Check for usePanels hook export (actr panel mode)
@@ -791,7 +791,7 @@ try {
       }
 
       console.log('[actr] Auto-rendering guest');
-      RillReconciler.render(element, __sendToHost);
+      RillReconciler.render(element, __rill_sendBatch);
     } catch (error) {
       console.error('[actr] Auto-render failed:', error);
     }
