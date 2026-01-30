@@ -47,6 +47,12 @@ post_install do |installer|
   # 抑制所有 Pods 项目的警告
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
+      # Ensure REACT_NATIVE_PATH is available in shell script phases.
+      # hermes-engine's "[Hermes] Replace Hermes" script references this var
+      # but project-level build settings may not propagate to shell environments.
+      config.build_settings['REACT_NATIVE_PATH'] ||=
+        "${PODS_ROOT}/../#{react_native_macos_path}"
+
       # 抑制所有警告
       config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
       # 抑制特定的常见警告
