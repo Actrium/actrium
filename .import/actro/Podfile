@@ -33,6 +33,7 @@ target 'Canvas' do
   pod 'NitroModules', :path => 'Subsystem/node_modules/react-native-nitro-modules'
   pod 'RNCClipboard', :path => 'Subsystem/node_modules/@react-native-clipboard/clipboard'
   pod 'RNFS', :path => 'Subsystem/node_modules/react-native-fs'
+  pod 'RNZipArchive', :path => 'Subsystem/node_modules/react-native-zip-archive'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 微信 SDK
