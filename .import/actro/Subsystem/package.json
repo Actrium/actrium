@@ -36,6 +36,7 @@
     "react-native-nitro-sound": "^0.2.10",
     "react-native-sqlite-storage": "^6.0.1",
     "react-native-vision-camera": "^4.7.3",
+    "react-native-zip-archive": "^7.0.2",
     "react-reconciler": "0.31.0",
     "rill": "file:../../rill",
     "zustand": "^5.0.10"
