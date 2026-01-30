@@ -55,9 +55,8 @@ const customConfig = {
         return resolve(context, 'react-native-macos', platform);
       }
 
-      // Workaround: rill root package.json exports points to source, but we want to be explicit
-      // Pin to the actual host entry to keep Metro + TS consistent.
-      if (moduleName === 'rill') {
+      // Resolve rill/host to the host entry point
+      if (moduleName === 'rill/host') {
         return {
           type: 'sourceFile',
           filePath: path.resolve(goAskAwayRoot, 'rill', 'src', 'host', 'index.ts'),
@@ -71,7 +70,7 @@ const customConfig = {
           filePath: path.resolve(goAskAwayRoot, 'askit', 'src', 'index.host.ts'),
         };
       }
-      if (moduleName === 'askit/core') {
+      if (moduleName === 'askit/host') {
         return {
           type: 'sourceFile',
           filePath: path.resolve(goAskAwayRoot, 'askit', 'src', 'core', 'index.ts'),

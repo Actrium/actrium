@@ -38,14 +38,14 @@ const getInspectorDataForViewAtPoint = require('react-native/src/private/inspect
 ) => void;
 import { logger } from '../logger';
 import { installConsoleInterceptor } from '../devtools-console';
-import { Engine } from 'rill';
+import { Engine } from 'rill/host';
 
 // Install console interceptor to forward logs to DevTools Console panel
 installConsoleInterceptor();
 import { hostComponents } from './BundleView';
 import type { ContractViolation } from 'askit/contracts';
 import { createContractViolationCollector, createHostToGuestSender } from 'askit/contracts';
-import { createEngineAdapter } from 'askit/core';
+import { createEngineAdapter } from 'askit/host';
 import type { ActrProps, TabConfig } from './types';
 
 /**
@@ -437,8 +437,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           debug: false,
           logger: {
             log: (...args: unknown[]) => {
-              const msg = args.map(a => String(a)).join(' ');
-              if (msg.includes('[DIAG]')) nlog(msg);
+              // Engine log messages (only emitted when debug=true or unconditionally)
             },
             warn: (...args: unknown[]) => log.warning(args.map(a => String(a)).join(' ')),
             error: (...args: unknown[]) => nerror(args.map(a => String(a)).join(' ')),
@@ -449,10 +448,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         // Generic message handler with DevTools logging
         const unsubscribeMessage = currentEngine.on('message', async (msg: { event: string; payload?: unknown }) => {
           // Log all Guest → Host messages to DevTools
+          nlog(`[ActrTabView] 📩 Guest message: event=${msg.event} payload=${JSON.stringify(msg.payload)}`);
           logDevToolsMessage('guestToHost', msg.event, msg.payload, tab.id);
 
           // Handle TOGGLE_RIGHT_PANEL from guest
           if (msg.event === 'TOGGLE_RIGHT_PANEL') {
+            nlog(`[ActrTabView] 🔄 TOGGLE_RIGHT_PANEL received, toggling right panel`);
             setIsRightPanelVisible(prev => !prev);
             return;
           }
@@ -607,23 +608,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         nlog(`[ActrTabView] loadUnifiedBundle starting, scriptLen=${script.length}, t=${tBundleStart}`);
         loadedUnifiedScriptRef.current = script;
         eng.createReceiver(handleUpdate);
-        nlog(`[TIMING] createReceiver done, elapsed=${Date.now() - tBundleStart}ms`);
-        // Pass tab config to Engine so Guest can access via __getConfig()
-        nlog(`[TIMING] loadBundle START t=${Date.now()}`);
-        // DIAG: Schedule a timer BEFORE loadBundle to guarantee bridge flush.
-        // If loadBundle blocks the JS thread, this fires after it unblocks.
-        // The native timer callback (native→JS) forces bridge to flush all pending messages.
-        const diagTimerStart = Date.now();
-        setTimeout(() => {
-          const elapsed = Date.now() - diagTimerStart;
-          const diag = (globalThis as any).__rill_drain_diag as string[] | undefined;
-          const recv = eng.getReceiver();
-          const stats = recv?.getStats?.();
-          console.error(`[DIAG-TIMER] fired after ${elapsed}ms, __rill_drain_diag=${diag ? diag.length : 'null'} entries, receiver: nodeCount=${stats?.nodeCount ?? 'N/A'}, totalBatches=${stats?.totalBatches ?? 'N/A'}, totalOps=${stats?.totalOps ?? 'N/A'}`);
-          if (diag && diag.length > 0) {
-            console.error(`[DIAG-TIMER] entries:\n${diag.join('\n')}`);
-          }
-        }, 5000);
+        nlog(`[ActrTabView] createReceiver done, elapsed=${Date.now() - tBundleStart}ms`);
         await eng.loadBundle(script, {
           tabId: tab.id,
           title: tab.title,
@@ -631,23 +616,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           containerWidth: propsContainerWidth ?? 1400,
           containerHeight: propsContainerHeight ?? 977,
         });
-        nlog(`[TIMING] loadBundle END elapsed=${Date.now() - tBundleStart}ms`);
-
-        // DIAG: Read drain accumulator from globalThis (bypasses RN bridge batching)
-        try {
-          const drainDiag = (globalThis as any).__rill_drain_diag as string[] | undefined;
-          if (drainDiag && drainDiag.length > 0) {
-            nerror(`[DIAG] __rill_drain_diag (${drainDiag.length} entries):\n${drainDiag.join('\n')}`);
-          } else {
-            nerror(`[DIAG] __rill_drain_diag is empty or undefined`);
-          }
-        } catch (diagErr: any) {
-          nerror(`[DIAG] Failed to read __rill_drain_diag: ${diagErr?.message}`);
-        }
-
-        const receiverAfterLoad = eng.getReceiver();
-        const statsAfterLoad = receiverAfterLoad?.getStats?.();
-        nlog(`[TIMING] After loadBundle: nodeCount=${statsAfterLoad?.nodeCount ?? 'N/A'}, totalBatches=${statsAfterLoad?.totalBatches ?? 'N/A'}, totalOps=${statsAfterLoad?.totalOps ?? 'N/A'}`);
+        nlog(`[ActrTabView] loadBundle done, elapsed=${Date.now() - tBundleStart}ms`);
 
         // 确保面板提取
         nlog(`[ActrTabView] Bundle loaded, calling handleUpdate`);

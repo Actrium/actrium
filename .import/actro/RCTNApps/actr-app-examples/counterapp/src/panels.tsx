@@ -4,7 +4,7 @@
  * 与 counterapp 保持一致
  */
 import React, {useState, useCallback, useMemo, useEffect, useRef} from 'react';
-import {View, Text, TouchableOpacity, ScrollView, ActivityIndicator, useSendToHost, useHostEvent} from 'rill/sdk';
+import {View, Text, TouchableOpacity, ScrollView, ActivityIndicator, useSendToHost, useHostEvent} from 'rill/guest';
 
 // ============ Weather Types ============
 interface WeatherData {

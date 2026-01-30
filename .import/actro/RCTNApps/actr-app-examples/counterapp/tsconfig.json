@@ -12,7 +12,7 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "rill/sdk": ["../../../../rill/src/sdk/index.ts"],
+      "rill/guest": ["../../../../rill/src/sdk/index.ts"],
       "askit": ["../../../../askit/src/index.guest.ts"]
     }
   },
