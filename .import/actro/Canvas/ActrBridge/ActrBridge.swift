@@ -103,6 +103,10 @@ extension ActrBridge {
             actrNode = node
             self.actr = actr
             self.workload = workload
+            
+            // Wait a bit for the signaling client to establish connection
+            logger.info("Waiting for signaling client to connect...")
+            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
 
             connectionStatus = .connected
             logger.info("ActrBridge initialized successfully")
@@ -301,6 +305,10 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
         let message = "stream_id=\(streamId), seq=\(chunk.sequence), bytes=\(chunk.payload.count), sender=\(senderRepr), text=\"\(payloadText)\""
         await logger.info("📥 DataStream chunk: \(message)")
         onMessage?(message)
+        // --- 新增: 通过事件推送到RN ---
+        if let bridge = ActrBridge.shared {
+            bridge.sendStreamEventToRN(message: message)
+        }
     }
 }
 
@@ -393,3 +401,25 @@ private let logger = Logger(subsystem: "io.actr.App", category: "ActrBridge")
 /// Type alias for React Native promise callbacks
 public typealias RCTPromiseResolveBlock = (Any?) -> Void
 public typealias RCTPromiseRejectBlock = (String?, String?, Error?) -> Void
+
+// --- ActrBridge 单例与事件推送 ---
+extension ActrBridge {
+    @objc static let shared = ActrBridge()
+    
+    @objc func sendStreamEventToRN(message: String) {
+        DispatchQueue.main.async {
+            if let bridge = self.value(forKey: "bridge") as? RCTBridge {
+                let eventEmitter = bridge.module(forName: "RCTDeviceEventEmitter") as? RCTEventEmitter
+                eventEmitter?.sendEvent(withName: "ActrStreamMessage", body: message)
+            }
+        }
+    }
+    
+    @objc public static func requiresMainQueueSetup() -> Bool {
+        return true
+    }
+    
+    @objc public func supportedEvents() -> [String] {
+        return ["ActrStreamMessage"]
+    }
+}
