@@ -37,6 +37,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UIView {
+        logger.notice("🔴 [RECREATING] RootView for Tab: \(tab.title)")
         #if canImport(React)
         logger.notice("[SingleTabRootView] Creating RootView for Tab: \(tab.title) (\(tab.id.uuidString.prefix(8)))")
 
