@@ -3,13 +3,15 @@ import Actr
 import SwiftProtobuf
 import ActrBindings
 import OSLog
+import React
 
 /// React Native bridge for Actr High Level API
 /// This class provides a bridge between React Native and the Actr Swift SDK,
 /// exposing the high-level API (ActrSystem, ActrNode, ActrRef) to JavaScript.
+
 @objc(ActrBridge)
 @preconcurrency
-public class ActrBridge: NSObject, @unchecked Sendable {
+public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     // MARK: - Properties
     
     private var connectionStatus: ConnectionStatus = .disconnected
@@ -306,9 +308,7 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
         await logger.info("📥 DataStream chunk: \(message)")
         onMessage?(message)
         // --- 新增: 通过事件推送到RN ---
-        if let bridge = ActrBridge.shared {
-            bridge.sendStreamEventToRN(message: message)
-        }
+        await ActrBridge.shared.sendStreamEventToRN(message: message)
     }
 }
 
@@ -415,11 +415,11 @@ extension ActrBridge {
         }
     }
     
-    @objc public static func requiresMainQueueSetup() -> Bool {
+    @objc public override static func requiresMainQueueSetup() -> Bool {
         return true
     }
     
-    @objc public func supportedEvents() -> [String] {
+    @objc public override func supportedEvents() -> [String] {
         return ["ActrStreamMessage"]
     }
 }
