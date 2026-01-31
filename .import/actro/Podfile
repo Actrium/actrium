@@ -34,6 +34,7 @@ target 'Canvas' do
   pod 'RNCClipboard', :path => 'Subsystem/node_modules/@react-native-clipboard/clipboard'
   pod 'RNFS', :path => 'Subsystem/node_modules/react-native-fs'
   pod 'RNZipArchive', :path => 'Subsystem/node_modules/react-native-zip-archive'
+  pod 'RNLiveAudioStream', :path => 'Subsystem/node_modules/react-native-live-audio-stream'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 微信 SDK
