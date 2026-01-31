@@ -12,7 +12,7 @@
 @interface RCT_EXTERN_MODULE(ActrBridge, RCTEventEmitter)
 /// Send voice stream through ActrService
 RCT_EXTERN_METHOD(sendVoiceStream:(NSInteger)expectedCount
-                  audioData:(NSArray<NSData *> *)audioData
+                  audioData:(NSArray<NSString *> *)audioData
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 

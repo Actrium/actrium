@@ -244,31 +244,32 @@ extension ActrBridge {
     @objc
     public func sendVoiceStream(
         _ expectedCount: Int,
-        audioData: [NSData],
+        audioData: [String],
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
+        NSLog("🔥 sendVoiceStream called")
+
         Task { @MainActor in
             guard connectionStatus == .connected else {
                 reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
                 return
             }
-            if audioData.count > 0 && expectedCount > 0 && audioData.count <= expectedCount {
-                do {
-                    let response = try await self.prepareClientStream(expectedCount: Int32(expectedCount))
-                    // TODO: 发送audioData分片到服务端（可扩展为逐片发送）
-                    // 当前仅返回准备结果
-                    resolve([
-                        "ready": response.ready,
-                        "message": response.message
-                    ])
-                } catch let error as ActrError {
-                    reject("ACTR_ERROR", self.formatActrError(error), error)
-                } catch {
-                    reject("UNKNOWN_ERROR", error.localizedDescription, error)
-                }
-            } else {
-                reject("INVALID_INPUT", "语音数据或分片数量无效", nil)
+
+            // let datas = audioData.compactMap { Data(base64Encoded: $0) }
+            // guard datas.count > 0 else {
+            //     reject("INVALID_INPUT", "audioData empty", nil)
+            //     return
+            // }
+
+            do {
+                let response = try await self.prepareClientStream(expectedCount: Int32(expectedCount))
+                resolve([
+                    "ready": response.ready,
+                    "message": response.message
+                ])
+            } catch {
+                reject("ACTR_ERROR", error.localizedDescription, error)
             }
         }
     }

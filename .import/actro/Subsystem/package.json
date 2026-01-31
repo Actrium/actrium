@@ -30,6 +30,7 @@
     "react-native-geolocation-service": "^5.3.1",
     "react-native-image-picker": "^8.2.1",
     "react-native-linear-gradient": "^2.8.3",
+    "react-native-live-audio-stream": "^1.1.1",
     "react-native-localize": "^3.6.1",
     "react-native-maps": "1.20.1",
     "react-native-nitro-modules": "^0.33.2",
