@@ -607,7 +607,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         const tBundleStart = Date.now();
         nlog(`[ActrTabView] loadUnifiedBundle starting, scriptLen=${script.length}, t=${tBundleStart}`);
         loadedUnifiedScriptRef.current = script;
-        eng.createReceiver(handleUpdate);
+        eng.createReceiver();
+        eng.on('update', handleUpdate);
         nlog(`[ActrTabView] createReceiver done, elapsed=${Date.now() - tBundleStart}ms`);
         await eng.loadBundle(script, {
           tabId: tab.id,
