@@ -326,6 +326,11 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
         fatalError("init(coder:) has not been implemented")
     }
 
+    // MARK: - Bridgeless + TurboModule (no Fabric on macOS)
+
+    override func bridgelessEnabled() -> Bool { return true }
+    override func turboModuleEnabled() -> Bool { return true }
+
     override func bundleURL() -> URL? {
         // Always load from local bundle file (no Metro dev server dependency)
         return Bundle.main.url(forResource: "main.rctnapp", withExtension: "jsbundle")
