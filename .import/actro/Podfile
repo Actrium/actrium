@@ -8,6 +8,19 @@ require File.join(rctnapps_path, 'node_modules', 'react-native-macos', 'scripts'
 
 prepare_react_native_project!
 
+# Patch react-native-macos 0.81.1: HermesExecutorFactory.cpp missing <thread> include
+# (macOS SDK 26.2 C++ headers no longer transitively include <thread>)
+hermes_executor = File.join(__dir__, react_native_macos_path,
+  'ReactCommon/hermes/executor/HermesExecutorFactory.cpp')
+if File.exist?(hermes_executor)
+  content = File.read(hermes_executor)
+  unless content.include?('#include <thread>')
+    content = content.sub('#include "HermesExecutorFactory.h"',
+      "#include \"HermesExecutorFactory.h\"\n\n#include <thread>")
+    File.write(hermes_executor, content)
+  end
+end
+
 # rill sandbox engine: JSC for guest sandbox (Hermes is main runtime)
 ENV['RILL_SANDBOX_ENGINE'] = 'jsc'
 
