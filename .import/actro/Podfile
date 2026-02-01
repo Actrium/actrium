@@ -26,7 +26,7 @@ def use_canvas_react_native
   )
 
   # rill native sandbox (JSI) - Guest uses JSC engine
-  pod 'RillSandboxNative', :path => 'RCTNApps/node_modules/rill/native'
+  pod 'RillSandboxNative', :path => 'RCTNApps/node_modules/rill'
 end
 
 target 'Canvas' do
