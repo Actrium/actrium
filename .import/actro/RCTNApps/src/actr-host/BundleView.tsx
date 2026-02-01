@@ -68,7 +68,8 @@ const LocalEngineView: React.FC<{
 
       try {
         // 创建 Receiver
-        engine.createReceiver(handleUpdate);
+        engine.createReceiver();
+        engine.on('update', handleUpdate);
 
         // loadBundle 内部会自动初始化运行时
         await engine.loadBundle(bundleUrl, { containerHeight, containerWidth });
