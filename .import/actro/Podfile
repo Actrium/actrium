@@ -13,15 +13,9 @@ ENV['RILL_SANDBOX_ENGINE'] = 'jsc'
 
 # Shared React Native configuration
 def use_canvas_react_native
-  # 根据环境变量决定是否启用新架构 / Fabric
-  flags = get_default_flags()
-
   use_react_native!(
     path: 'RCTNApps/node_modules/react-native-macos',
-    # Hermes as main runtime
     hermes_enabled: true,
-    fabric_enabled: ENV['RCT_NEW_ARCH_ENABLED'] == '1',
-    # React Native JS 工程所在目录（包含 package.json）
     app_path: File.join(__dir__, 'RCTNApps')
   )
 
