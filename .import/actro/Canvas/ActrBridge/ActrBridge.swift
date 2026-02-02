@@ -241,22 +241,18 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard connectionStatus == .connected else {
+            guard connectionStatus == .connected, let actr = self.actr else {
                 reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
                 return
             }
             
             do {
-                guard let data = json.data(using: .utf8),
-                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let satrt = dict["start"] as? Int else {
-                    reject("INVALID_INPUT", "Invalid JSON or missing expectedCount", nil)
-                    return
-                }
+                var request = DataStreamApp_StartVoiceMessage()
+                // 此处可解析 json 填充 request 字段
                 
-                let streamID = try await self.prepareClientStream()
+                let response = try await actr.call(request)
                 resolve([
-                    "streamId": streamID
+                    "streamId": response.streamID
                 ])
             } catch {
                 reject("ACTR_ERROR", error.localizedDescription, error)
@@ -339,6 +335,51 @@ extension ActrBridge {
             }
         }
     }
+
+    /// Upload attachment
+    /// - Parameters:
+    ///   - json: JSON string containing 'id', 'filename', 'type'
+    ///   - fileData: Base64 encoded file data
+    @objc
+    public func uploadAttachment(
+        _ json: String,
+        fileData: String,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            guard connectionStatus == .connected, let actr = self.actr else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+                return
+            }
+
+            do {
+                guard let data = json.data(using: .utf8),
+                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let binaryData = Data(base64Encoded: fileData) else {
+                    reject("INVALID_INPUT", "Invalid JSON or fileData", nil)
+                    return
+                }
+
+                var request = StreamServer_AttachRequest()
+                request.id = dict["id"] as? String ?? UUID().uuidString
+                request.filename = dict["filename"] as? String ?? "file"
+                
+                let typeInt = dict["type"] as? Int ?? 0
+                request.type = StreamServer_AttachmentType(rawValue: typeInt) ?? .unknown
+                request.data = binaryData
+
+                let response = try await actr.call(request)
+                resolve([
+                    "id": response.id,
+                    "statusCode": response.statusCode,
+                    "errorMessage": response.errorMessage
+                ])
+            } catch {
+                reject("ACTR_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
     
     /// Get ActrService connection status
     @objc
@@ -394,6 +435,26 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         logger.info("Received SendText request")
         return DataStreamApp_TextMessageResponse()
     }
+    
+    /// RPC method: StartSendVoice
+    public func startSendVoice(
+        req: DataStreamApp_StartVoiceMessage,
+        ctx: Context
+    ) async throws -> DataStreamApp_StartVoiceMessageResponse {
+        logger.info("[AskLocalServiceHandlerImpl] Received StartSendVoice request")
+        
+        // 注册数据流并关联回调
+        let streamId = try await ctx.registerDataStream(
+            callback: StreamPrintCallback(streamId: "voice-stream-\(UUID().uuidString)", onMessage: nil)
+        )
+        logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(streamId)")
+
+        var resp = DataStreamApp_StartVoiceMessageResponse()
+        // 注意：这里需要确保 DataStreamApp_StartVoiceMessageResponse 有 streamID 字段
+        // 如果没有，可能需要根据实际定义的字段名修改
+        resp.streamID = streamId
+        return resp
+    }
 
     /// RPC method: SendVoiceChunk
     public func sendVoiceChunk(
@@ -401,6 +462,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         ctx: Context
     ) async throws -> DataStreamApp_VoiceChunkMessageResponse {
         logger.info("Received SendVoiceChunk request: chunk=\(req.chunkID)")
+        
         return DataStreamApp_VoiceChunkMessageResponse()
     }
 
@@ -411,6 +473,12 @@ extension AskLocalServiceWorkload: Workload where T == AskLocalServiceHandlerImp
     public func onStop(ctx _: Context) async throws {}
 
     public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
+        // Handle StartSendVoice if not handled by __dispatch
+        if envelope.routeKey == "data_stream_app.AskLocalService.StartSendVoice" {
+            let req = try DataStreamApp_StartVoiceMessage(serializedBytes: envelope.payload)
+            let resp = try await handler.startSendVoice(req: req, ctx: ctx)
+            return try resp.serializedData()
+        }
         return try await __dispatch(ctx: ctx, envelope: envelope)
     }
 }

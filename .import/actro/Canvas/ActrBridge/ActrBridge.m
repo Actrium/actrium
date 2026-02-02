@@ -26,7 +26,11 @@ RCT_EXTERN_METHOD(sendVoiceChunk:(NSString *)json
 RCT_EXTERN_METHOD(endVoice:(NSString *)json
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
-
+/// Upload attachment
+RCT_EXTERN_METHOD(uploadAttachment:(NSString *)json
+                  fileData:(NSString *)fileData
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 // MARK: - ActrService Methods
 
 /// Initialize ActrService
