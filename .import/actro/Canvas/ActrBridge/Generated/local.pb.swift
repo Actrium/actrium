@@ -45,6 +45,8 @@ public struct DataStreamApp_TextMessage: Sendable {
   /// Optional: Attachment IDs
   public var attachmentIds: [String] = []
 
+  public var streamID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -77,6 +79,12 @@ public struct DataStreamApp_TextMessageResponse: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  public var streamID: String = String()
+
+  public var status: Int32 = 0
+
+  public var message: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -86,6 +94,44 @@ public struct DataStreamApp_VoiceChunkMessageResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
+
+  public var streamID: String = String()
+
+  public var status: Int32 = 0
+
+  public var message: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct DataStreamApp_StartVoiceMessage: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var sessionID: String = String()
+
+  public var messageID: String = String()
+
+  public var streamID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct DataStreamApp_StartVoiceMessageResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var streamID: String = String()
+
+  public var status: Int32 = 0
+
+  public var message: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -104,6 +150,7 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
     3: .standard(proto: "message_id"),
     4: .same(proto: "location"),
     5: .standard(proto: "attachment_ids"),
+    6: .standard(proto: "stream_id"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -117,6 +164,7 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
       case 3: try { try decoder.decodeSingularStringField(value: &self.messageID) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._location) }()
       case 5: try { try decoder.decodeRepeatedStringField(value: &self.attachmentIds) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
       default: break
       }
     }
@@ -142,6 +190,9 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
     if !self.attachmentIds.isEmpty {
       try visitor.visitRepeatedStringField(value: self.attachmentIds, fieldNumber: 5)
     }
+    if !self.streamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -151,6 +202,7 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
     if lhs.messageID != rhs.messageID {return false}
     if lhs._location != rhs._location {return false}
     if lhs.attachmentIds != rhs.attachmentIds {return false}
+    if lhs.streamID != rhs.streamID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -214,18 +266,43 @@ extension DataStreamApp_VoiceChunkMessage: @preconcurrency SwiftProtobuf._Messag
 
 extension DataStreamApp_TextMessageResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TextMessageResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "stream_id"),
+    2: .same(proto: "status"),
+    3: .same(proto: "message"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.status) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.streamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 1)
+    }
+    if self.status != 0 {
+      try visitor.visitSingularInt32Field(value: self.status, fieldNumber: 2)
+    }
+    if !self.message.isEmpty {
+      try visitor.visitSingularStringField(value: self.message, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: DataStreamApp_TextMessageResponse, rhs: DataStreamApp_TextMessageResponse) -> Bool {
+    if lhs.streamID != rhs.streamID {return false}
+    if lhs.status != rhs.status {return false}
+    if lhs.message != rhs.message {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -233,18 +310,131 @@ extension DataStreamApp_TextMessageResponse: @preconcurrency SwiftProtobuf._Mess
 
 extension DataStreamApp_VoiceChunkMessageResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".VoiceChunkMessageResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "stream_id"),
+    2: .same(proto: "status"),
+    3: .same(proto: "message"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.status) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.streamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 1)
+    }
+    if self.status != 0 {
+      try visitor.visitSingularInt32Field(value: self.status, fieldNumber: 2)
+    }
+    if !self.message.isEmpty {
+      try visitor.visitSingularStringField(value: self.message, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: DataStreamApp_VoiceChunkMessageResponse, rhs: DataStreamApp_VoiceChunkMessageResponse) -> Bool {
+    if lhs.streamID != rhs.streamID {return false}
+    if lhs.status != rhs.status {return false}
+    if lhs.message != rhs.message {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension DataStreamApp_StartVoiceMessage: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".StartVoiceMessage"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "session_id"),
+    2: .standard(proto: "message_id"),
+    3: .standard(proto: "stream_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.sessionID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.messageID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.sessionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.sessionID, fieldNumber: 1)
+    }
+    if !self.messageID.isEmpty {
+      try visitor.visitSingularStringField(value: self.messageID, fieldNumber: 2)
+    }
+    if !self.streamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DataStreamApp_StartVoiceMessage, rhs: DataStreamApp_StartVoiceMessage) -> Bool {
+    if lhs.sessionID != rhs.sessionID {return false}
+    if lhs.messageID != rhs.messageID {return false}
+    if lhs.streamID != rhs.streamID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension DataStreamApp_StartVoiceMessageResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".StartVoiceMessageResponse"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "stream_id"),
+    2: .same(proto: "status"),
+    3: .same(proto: "message"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.status) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.streamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 1)
+    }
+    if self.status != 0 {
+      try visitor.visitSingularInt32Field(value: self.status, fieldNumber: 2)
+    }
+    if !self.message.isEmpty {
+      try visitor.visitSingularStringField(value: self.message, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DataStreamApp_StartVoiceMessageResponse, rhs: DataStreamApp_StartVoiceMessageResponse) -> Bool {
+    if lhs.streamID != rhs.streamID {return false}
+    if lhs.status != rhs.status {return false}
+    if lhs.message != rhs.message {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
