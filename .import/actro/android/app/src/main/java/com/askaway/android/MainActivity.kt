@@ -1,16 +1,19 @@
 package com.askaway.android
 
 import android.os.Bundle
+import android.view.ViewGroup
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.askaway.android.databinding.ActivityMainBinding
 import com.google.android.material.tabs.TabLayout
-import com.facebook.react.ReactInstanceManager
+import com.facebook.react.ReactRootView
+import com.facebook.react.interfaces.fabric.ReactSurface
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
+    private var reactSurface: ReactSurface? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -18,9 +21,27 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         val tabLayout = binding.tabLayout
+        val reactHost = (application as MainApplication).reactHost
         binding.ivAdd.setOnClickListener {
-            // 可在此处通过 viewModel 操作数据
-
+            binding.flContent.removeAllViews()
+            // 停止上一个 surface
+            reactSurface?.stop()
+            val bundle = Bundle()
+            val tabModel = viewModel.genReactNativeTabModel()
+            bundle.putBundle("tab", tabModel.toBundle())
+            bundle.putBoolean("singleTabMode", true)
+            // 创建并启动新的 ReactSurface
+            reactSurface = reactHost.createSurface(
+                this,
+                "canvas-kotlin",
+                bundle
+            )
+            reactSurface?.start()
+            // 添加 ReactSurface 的 view
+            reactSurface?.view?.let { view ->
+                binding.flContent.addView(view)
+            }
+            reactHost.onHostResume(this)
         }
 
         // 观察 tabIndex 变化
@@ -64,5 +85,10 @@ class MainActivity : AppCompatActivity() {
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragmentContainer, fragment)
             .commit()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        reactSurface?.stop()
     }
 }

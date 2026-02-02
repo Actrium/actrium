@@ -3,6 +3,8 @@ package com.askaway.android
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
+import com.askaway.android.model.ReactNativeTabModel
+import java.util.UUID
 
 class MainViewModel : ViewModel() {
     private val _tabIndex = MutableLiveData(0)
@@ -12,7 +14,7 @@ class MainViewModel : ViewModel() {
         _tabIndex.value = index
     }
 
-    fun genTab(){
-
+    fun genReactNativeTabModel(): ReactNativeTabModel.Tab {
+        return ReactNativeTabModel.Tab(id = UUID.randomUUID().toString())
     }
 }
