@@ -47,7 +47,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     /// Prepare client-side stream handling
     /// - Parameter expectedCount: Number of messages expected from the server
     /// - Returns: PrepareStreamResponse containing the result and the generated streamID
-    func prepareClientStream() async throws -> (DataStreamApp_PrepareStreamResponse, String) {
+    func prepareClientStream() async throws -> (String) {
         guard connectionStatus == .connected else {
             throw ActrError.StateError(msg: "Not connected to server")
         }
@@ -56,16 +56,15 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
             throw ActrError.StateError(msg: "Actor reference not available")
         }
         
-        var request = DataStreamApp_PrepareClientStreamRequest()
+        var request = DataStreamApp_VoiceChunkMessage()
         let streamID = "stream-\(UUID().uuidString)"
         request.streamID = streamID
         
-        logger.info("Preparing client stream: stream_id=\(request.streamID), expected_count=\(request.expectedCount)")
+        logger.info("Preparing client stream: stream_id=\(request.streamID)")
         
         do {
-            let response = try await actr.call(request)
-            logger.info("Prepare client stream completed: ready=\(response.ready)")
-            return (response, streamID)
+            let _ = try await actr.call(request)
+            return (streamID)
         } catch let actrError as ActrError {
             logger.error("Prepare client stream error: \(actrError.localizedDescription)")
             throw actrError
@@ -151,11 +150,10 @@ extension ActrBridge {
         }
 
         do {
-            var request = DataStreamApp_PrepareClientStreamRequest()
-            request.streamID = "text-\(UUID().uuidString)"
-            let response = try await actr.call(request)
-
-            return response.message
+            var request = DataStreamApp_TextMessage()
+            request.sessionID = "text-\(UUID().uuidString)"
+            let _ = try await actr.call(request)
+            return request.sessionID
         } catch let actrError as ActrError {
             throw actrError
         } catch {
@@ -256,10 +254,8 @@ extension ActrBridge {
                     return
                 }
                 
-                let (response, streamID) = try await self.prepareClientStream()
+                let streamID = try await self.prepareClientStream()
                 resolve([
-                    "ready": response.ready,
-                    "message": response.message,
                     "streamId": streamID
                 ])
             } catch {
@@ -294,7 +290,7 @@ extension ActrBridge {
                 }
                 
                 var request = DataStreamApp_VoiceChunkMessage()
-                request.streamId = streamID
+                request.streamID = streamID
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.chunkID = dict["chunkId"] as? String ?? ""
