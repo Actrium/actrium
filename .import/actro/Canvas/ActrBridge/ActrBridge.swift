@@ -442,17 +442,14 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         ctx: Context
     ) async throws -> DataStreamApp_StartVoiceMessageResponse {
         logger.info("[AskLocalServiceHandlerImpl] Received StartSendVoice request")
-        
-        // 注册数据流并关联回调
-        let streamId = try await ctx.registerDataStream(
-            callback: StreamPrintCallback(streamId: "voice-stream-\(UUID().uuidString)", onMessage: nil)
-        )
-        logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(streamId)")
 
         var resp = DataStreamApp_StartVoiceMessageResponse()
-        // 注意：这里需要确保 DataStreamApp_StartVoiceMessageResponse 有 streamID 字段
-        // 如果没有，可能需要根据实际定义的字段名修改
-        resp.streamID = streamId
+        // 注册数据流并关联回调
+        let _ = try await ctx.registerStream(
+            streamId: resp.streamID,
+            callback: StreamPrintCallback(streamId: resp.streamID, onMessage: nil)
+        )
+        logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(resp.streamID)")
         return resp
     }
 
