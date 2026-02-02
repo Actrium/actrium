@@ -10,9 +10,20 @@
 #import <React/RCTEventEmitter.h>
 
 @interface RCT_EXTERN_MODULE(ActrBridge, RCTEventEmitter)
-/// Send voice stream through ActrService
-RCT_EXTERN_METHOD(sendVoiceStream:(NSInteger)expectedCount
-                  audioData:(NSArray<NSString *> *)audioData
+
+/// Start voice stream (was sendVoiceStream)
+RCT_EXTERN_METHOD(startVoice:(NSString *)json
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+/// Send voice chunk
+RCT_EXTERN_METHOD(sendVoiceChunk:(NSString *)json
+                  audioData:(NSString *)audioData
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+/// End voice stream
+RCT_EXTERN_METHOD(endVoice:(NSString *)json
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
