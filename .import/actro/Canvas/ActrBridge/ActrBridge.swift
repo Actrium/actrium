@@ -22,7 +22,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     private var actrSystem: ActrSystem?
     private var actrNode: ActrNode?
     private var actr: ActrRef?
-    private var workload: LocalFileServiceWorkload<LocalFileServiceHandlerImpl>?
+    private var workload: AskLocalServiceWorkload<AskLocalServiceHandlerImpl>?
     
     private let queue = DispatchQueue(label: "com.actr.bridge.queue")
     
@@ -46,8 +46,8 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     
     /// Prepare client-side stream handling
     /// - Parameter expectedCount: Number of messages expected from the server
-    /// - Returns: PrepareStreamResponse containing the result
-    func prepareClientStream(expectedCount: Int32) async throws -> DataStreamApp_PrepareStreamResponse {
+    /// - Returns: PrepareStreamResponse containing the result and the generated streamID
+    func prepareClientStream() async throws -> (DataStreamApp_PrepareStreamResponse, String) {
         guard connectionStatus == .connected else {
             throw ActrError.StateError(msg: "Not connected to server")
         }
@@ -57,15 +57,15 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
         }
         
         var request = DataStreamApp_PrepareClientStreamRequest()
-        request.streamID = "stream-\(UUID().uuidString)"
-        request.expectedCount = UInt32(clamping: expectedCount)
+        let streamID = "stream-\(UUID().uuidString)"
+        request.streamID = streamID
         
         logger.info("Preparing client stream: stream_id=\(request.streamID), expected_count=\(request.expectedCount)")
         
         do {
             let response = try await actr.call(request)
             logger.info("Prepare client stream completed: ready=\(response.ready)")
-            return response
+            return (response, streamID)
         } catch let actrError as ActrError {
             logger.error("Prepare client stream error: \(actrError.localizedDescription)")
             throw actrError
@@ -87,14 +87,10 @@ extension ActrBridge {
 
         do {
             let result = try await Task.detached(priority: .userInitiated) { () throws
-                -> (ActrSystem, ActrNode, ActrRef, LocalFileServiceWorkload<LocalFileServiceHandlerImpl>) in
+                -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>) in
                 let system = try await ActrSystem.from(tomlConfig: path)
-                let handler = await LocalFileServiceHandlerImpl { [weak self] message in
-                    Task { @MainActor in
-                        self?.streamMessages.append(message)
-                    }
-                }
-                let workload = LocalFileServiceWorkload(handler: handler)
+                let handler = await AskLocalServiceHandlerImpl()
+                let workload = AskLocalServiceWorkload(handler: handler)
                 let node = try system.spawn(workload: workload)
                 let actr = try await node.start()
                 return (system, node, actr, workload)
@@ -238,34 +234,108 @@ extension ActrBridge {
         }
     }
     
-    /// Send voice stream to ActrService (max 60s)
-    /// - expectedCount: 语音分片数量（建议根据采样率和分片时长计算）
-    /// - audioData: 语音PCM数据（或分片数组）
+    /// Start voice stream (was sendVoiceStream)
+    /// - Parameter json: JSON string containing 'expectedCount'
     @objc
-    public func sendVoiceStream(
-        _ expectedCount: Int,
-        audioData: [String],
+    public func startVoice(
+        _ json: String,
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
-        NSLog("🔥 sendVoiceStream called")
-
         Task { @MainActor in
             guard connectionStatus == .connected else {
                 reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
                 return
             }
-
-            // let datas = audioData.compactMap { Data(base64Encoded: $0) }
-            // guard datas.count > 0 else {
-            //     reject("INVALID_INPUT", "audioData empty", nil)
-            //     return
-            // }
-
+            
             do {
-                let response = try await self.prepareClientStream(expectedCount: Int32(expectedCount))
+                guard let data = json.data(using: .utf8),
+                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let satrt = dict["start"] as? Int else {
+                    reject("INVALID_INPUT", "Invalid JSON or missing expectedCount", nil)
+                    return
+                }
+                
+                let (response, streamID) = try await self.prepareClientStream()
                 resolve([
                     "ready": response.ready,
+                    "message": response.message,
+                    "streamId": streamID
+                ])
+            } catch {
+                reject("ACTR_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
+    
+    /// Send voice chunk message
+    /// - Parameters:
+    ///   - json: JSON string containing 'sessionId', 'messageId', 'chunkId'
+    ///   - audioData: Base64 encoded audio chunk data
+    @objc
+    public func sendVoiceChunk(
+        _ json: String,
+        audioData: String,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            guard connectionStatus == .connected, let actr = self.actr else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+                return
+            }
+            
+            do {
+                guard let data = json.data(using: .utf8),
+                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let streamID = dict["streamId"] as? String else {
+                    reject("INVALID_INPUT", "Invalid JSON or streamId", nil)
+                    return
+                }
+                
+                var request = DataStreamApp_VoiceChunkMessage()
+                request.streamId = streamID
+                request.sessionID = dict["sessionId"] as? String ?? ""
+                request.messageID = dict["messageId"] as? String ?? ""
+                request.chunkID = dict["chunkId"] as? String ?? ""
+                request.chunkData = dict["chunkData"] as? Data ?? Data()
+                
+                let _ = try await actr.call(request)
+                resolve(["status": "sent"])
+            } catch {
+                reject("ACTR_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
+    
+    /// End voice stream (UnregisterDataStream)
+    /// - Parameter json: JSON string containing 'streamId'
+    @objc
+    public func endVoice(
+        _ json: String,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            guard connectionStatus == .connected, let actr = self.actr else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+                return
+            }
+            
+            do {
+                guard let data = json.data(using: .utf8),
+                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let streamID = dict["streamId"] as? String else {
+                    reject("INVALID_INPUT", "Invalid JSON or missing streamId", nil)
+                    return
+                }
+                
+                var request = StreamServer_UnregisterRequest()
+                request.streamID = streamID
+                
+                let response = try await actr.call(request)
+                resolve([
+                    "success": response.success,
                     "message": response.message
                 ])
             } catch {
@@ -315,81 +385,36 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
 
 // MARK: - Implementation of LocalFileServiceHandler
 
-public actor LocalFileServiceHandlerImpl: LocalFileServiceHandler {
-    private var streamCallbacks: [String: Actr.DataStreamCallback] = [:]
-    private let onMessage: (@Sendable (String) -> Void)?
-    
-    public init(onMessage: (@Sendable (String) -> Void)? = nil) {
-        self.onMessage = onMessage
+/// Implementation of AskLocalServiceHandler
+/// TODO: Implement the business logic for each RPC method
+public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
+    public init() {}
+
+    /// RPC method: SendText
+    public func sendText(
+        req: DataStreamApp_TextMessage,
+        ctx: Context
+    ) async throws -> DataStreamApp_TextMessageResponse {
+        logger.info("Received SendText request")
+        return DataStreamApp_TextMessageResponse()
     }
-    
-    /// RPC method: PrepareClientStream
-    public func prepareClientStream(
-        req: DataStreamApp_PrepareClientStreamRequest,
-        ctx: Actr.Context
-    ) async throws -> DataStreamApp_PrepareStreamResponse {
-        await logger.info("📡 Received PrepareClientStream request: stream_id=\(req.streamID), expected_count=\(req.expectedCount)")
-        
-        do {
-            try await ensureStreamHandler(streamId: req.streamID, ctx: ctx)
-            let registerResponse = try await registerRemoteStream(
-                streamId: req.streamID,
-                messageCount: Int32(clamping: req.expectedCount),
-                ctx: ctx
-            )
-            
-            var response = await DataStreamApp_PrepareStreamResponse()
-            response.ready = registerResponse.success
-            response.message = registerResponse.message
-            return response
-        } catch {
-            await logger.error("❌ PrepareClientStream failed: \(error.localizedDescription)")
-            var response = await DataStreamApp_PrepareStreamResponse()
-            response.ready = false
-            response.message = "Prepare client stream failed: \(error.localizedDescription)"
-            return response
-        }
+
+    /// RPC method: SendVoiceChunk
+    public func sendVoiceChunk(
+        req: DataStreamApp_VoiceChunkMessage,
+        ctx: Context
+    ) async throws -> DataStreamApp_VoiceChunkMessageResponse {
+        logger.info("Received SendVoiceChunk request: chunk=\(req.chunkID)")
+        return DataStreamApp_VoiceChunkMessageResponse()
     }
-    
-    private func ensureStreamHandler(streamId: String, ctx: Actr.Context) async throws {
-        if streamCallbacks[streamId] != nil {
-            return
-        }
-        
-        let callback = StreamPrintCallback(streamId: streamId, onMessage: onMessage)
-        streamCallbacks[streamId] = callback
-        try await ctx.registerStream(streamId: streamId, callback: callback)
-    }
-    
-    private func registerRemoteStream(
-        streamId: String,
-        messageCount: Int32,
-        ctx: Actr.Context
-    ) async throws -> StreamServer_RegisterStreamResponse {
-        let targetType = try ActrType.fromStringRepr("acme+StreamEchoServer")
-        let targetId = try await ctx.discover(targetType: targetType)
-        
-        var request = await StreamServer_RegisterStreamRequest()
-        request.streamID = streamId
-        request.messageCount = messageCount
-        
-        let payload = try request.serializedData()
-        let responseData = try await ctx.call(
-            target: targetId,
-            routeKey: "stream_server.StreamServer.RegisterStream",
-            payload: payload
-        )
-        return try StreamServer_RegisterStreamResponse(serializedBytes: responseData)
-    }
+
 }
 
-// MARK: - LocalFileServiceWorkload Extension
+extension AskLocalServiceWorkload: Workload where T == AskLocalServiceHandlerImpl {
+    public func onStart(ctx _: Context) async throws {}
+    public func onStop(ctx _: Context) async throws {}
 
-extension LocalFileServiceWorkload: Workload where T == LocalFileServiceHandlerImpl {
-    public func onStart(ctx _: Actr.Context) async throws {}
-    public func onStop(ctx _: Actr.Context) async throws {}
-
-    public func dispatch(ctx: Actr.Context, envelope: Actr.RpcEnvelope) async throws -> Data {
+    public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
         return try await __dispatch(ctx: ctx, envelope: envelope)
     }
 }
