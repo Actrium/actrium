@@ -249,6 +249,7 @@ extension ActrBridge {
             do {
                 var request = DataStreamApp_StartVoiceMessage()
                 // 此处可解析 json 填充 request 字段
+                request.streamID = "stream-\(UUID().uuidString)"
                 
                 let response = try await actr.call(request)
                 resolve([
@@ -444,6 +445,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         logger.info("[AskLocalServiceHandlerImpl] Received StartSendVoice request")
 
         var resp = DataStreamApp_StartVoiceMessageResponse()
+        resp.streamID = req.streamID
         // 注册数据流并关联回调
         let _ = try await ctx.registerStream(
             streamId: resp.streamID,
