@@ -252,6 +252,7 @@ extension ActrBridge {
                 request.streamID = "stream-\(UUID().uuidString)"
                 
                 let response = try await actr.call(request)
+                appLogger.error("response======= \(response)")
                 resolve([
                     "streamId": response.streamID
                 ])
@@ -445,13 +446,22 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         logger.info("[AskLocalServiceHandlerImpl] Received StartSendVoice request")
 
         var resp = DataStreamApp_StartVoiceMessageResponse()
-        resp.streamID = req.streamID
-        // 注册数据流并关联回调
-        let _ = try await ctx.registerStream(
-            streamId: resp.streamID,
-            callback: StreamPrintCallback(streamId: resp.streamID, onMessage: nil)
+//        resp.streamID = req.streamID
+//        // 注册数据流并关联回调
+//        let _ = try await ctx.registerStream(
+//            streamId: resp.streamID,
+//            callback: StreamPrintCallback(streamId: resp.streamID, onMessage: nil)
+//        )
+//        logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(resp.streamID)")
+        let targetType = try ActrType.fromStringRepr("acme+AskService")
+        let targetId = try await ctx.discover(targetType: targetType)
+        var request = StreamServer_UsrPromptRequest()
+        request.voiceStreamID = req.streamID
+        try await ctx.call(
+            target: targetId,
+            routeKey: StreamServer_UsrPromptRequest.routeKey,
+            payload: request.serializedData()
         )
-        logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(resp.streamID)")
         return resp
     }
 
@@ -473,11 +483,6 @@ extension AskLocalServiceWorkload: Workload where T == AskLocalServiceHandlerImp
 
     public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
         // Handle StartSendVoice if not handled by __dispatch
-        if envelope.routeKey == "data_stream_app.AskLocalService.StartSendVoice" {
-            let req = try DataStreamApp_StartVoiceMessage(serializedBytes: envelope.payload)
-            let resp = try await handler.startSendVoice(req: req, ctx: ctx)
-            return try resp.serializedData()
-        }
         return try await __dispatch(ctx: ctx, envelope: envelope)
     }
 }
