@@ -254,9 +254,14 @@ extension ActrBridge {
                 request.sessionID = "session-\(UUID().uuidString)"
                 
                 let response = try await actr.call(request)
-                appLogger.error("response======= \(response)")
+                appLogger.info("startVoice response======= \(response)")
                 resolve([
-                    "streamId": response.streamID
+                    "streamId": request.streamID,
+                    "messageId": request.messageID,
+                    "sessionId": request.sessionID,
+                    "responseStreamId": response.streamID,
+                    "status": response.status,
+                    "message": response.message
                 ])
             } catch {
                 reject("ACTR_ERROR", error.localizedDescription, error)
