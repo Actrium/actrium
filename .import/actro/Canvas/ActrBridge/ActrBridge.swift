@@ -254,6 +254,7 @@ extension ActrBridge {
                 request.sessionID = "session-\(UUID().uuidString)"
                 
                 let response = try await actr.call(request)
+                appLogger.error("response======= \(response)")
                 resolve([
                     "streamId": response.streamID
                 ])
