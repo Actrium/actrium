@@ -43,7 +43,7 @@ RCT_EXTERN_METHOD(shutdownService:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// Send echo message through ActrService
-RCT_EXTERN_METHOD(sendEcho:(NSString *)message
+RCT_EXTERN_METHOD(sendTextMessage:(NSString *)message
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
