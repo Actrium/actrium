@@ -377,7 +377,7 @@ extension ActrBridge {
             }
 
             do {
-                guard let binaryData = Data(base64Encoded: fileData) else {
+                guard let tmpData = dict["fileData"] as? String, let binaryData = Data(base64Encoded: tmpData) else {
                     reject("INVALID_INPUT", "Invalid fileData (Base64 decode failed)", nil)
                     return
                 }
