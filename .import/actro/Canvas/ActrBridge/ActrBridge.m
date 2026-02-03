@@ -12,22 +12,22 @@
 @interface RCT_EXTERN_MODULE(ActrBridge, RCTEventEmitter)
 
 /// Start voice stream (was sendVoiceStream)
-RCT_EXTERN_METHOD(startVoice:(NSString *)json
+RCT_EXTERN_METHOD(startVoice:(NSDictionary *)params
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// Send voice chunk
-RCT_EXTERN_METHOD(sendVoiceChunk:(NSString *)json
+RCT_EXTERN_METHOD(sendVoiceChunk:(NSDictionary *)params
                   audioData:(NSString *)audioData
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// End voice stream
-RCT_EXTERN_METHOD(endVoice:(NSString *)json
+RCT_EXTERN_METHOD(endVoice:(NSDictionary *)params
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 /// Upload attachment
-RCT_EXTERN_METHOD(uploadAttachment:(NSString *)json
+RCT_EXTERN_METHOD(uploadAttachment:(NSDictionary *)params
                   fileData:(NSString *)fileData
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
@@ -43,7 +43,7 @@ RCT_EXTERN_METHOD(shutdownService:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// Send echo message through ActrService
-RCT_EXTERN_METHOD(sendTextMessage:(NSString *)message
+RCT_EXTERN_METHOD(sendTextMessage:(NSDictionary *)params
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
