@@ -303,12 +303,14 @@ extension ActrBridge {
                 request.streamID = streamID
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
-                request.chunkID = dict["chunkId"] as? String ?? ""
-                
-                // 将 base64 字符串转换为 Data
-                if let audioBinary = Data(base64Encoded: audioData) {
-                    request.chunkData = audioBinary
+                request.chunkID = dict["chunkId"] as? String ?? ""// 客户端创建
+
+
+                guard let audioBinary = Data(base64Encoded: audioData) else {
+                    reject("INVALID_INPUT", "Invalid audioData base64", nil)
+                    return
                 }
+                request.chunkData = audioBinary
                 
                 let response = try await actr.call(request)
                 resolve([
@@ -428,19 +430,19 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
     }
     
     func onStream(chunk: Actr.DataStream, sender: ActrId) async throws {
-        let payloadText = String(data: chunk.payload, encoding: .utf8) ?? ""
-        
-        // 推送到 RN
-        guard let bridge = await ActrBridge.shared() else {
-            let errorMsg = "Failed to get ActrBridge instance to send event"
-            throw ActrError.StateError(msg: errorMsg)
-        }
-        
-        let body: [String: Any] = [
-            "streamID": self.streamId,
-            "status": 0,
-            "message": payloadText
-        ]
+        let base64Payload = chunk.payload.base64EncodedString()
+                
+                // 推送到 RN
+                guard let bridge = await ActrBridge.shared() else {
+                    let errorMsg = "Failed to get ActrBridge instance to send event"
+                    throw ActrError.StateError(msg: errorMsg)
+                }
+                
+                let body: [String: Any] = [
+                    "streamID": self.streamId,
+                    "status": 0,
+                    "message": base64Payload
+                ]
         
         await bridge.sendStreamEventToRN(body: body)
     }
