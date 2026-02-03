@@ -91,7 +91,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   const {
     tabs = [],
     currentTabId,
-    isLeftPanelVisible = true,
+    isLeftPanelVisible = false,
     containerWidth,
     containerHeight,
   } = effectiveProps || {};
