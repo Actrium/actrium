@@ -198,7 +198,7 @@ extension ActrBridge {
     /// Send text message through ActrService
     @objc
     public func sendTextMessage(
-        _ json: String,
+        _ dict: [String: Any],
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
@@ -209,12 +209,6 @@ extension ActrBridge {
             }
             
             do {
-                guard let data = json.data(using: .utf8),
-                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    reject("INVALID_INPUT", "Invalid JSON", nil)
-                    return
-                }
-
                 var request = DataStreamApp_TextMessage()
                 request.questionID = dict["text"] as? String ?? ""
                 request.sessionID = dict["sessionId"] as? String ?? ""
@@ -242,10 +236,10 @@ extension ActrBridge {
     }
     
     /// Start voice stream (was sendVoiceStream)
-    /// - Parameter json: JSON string containing 'expectedCount'
+    /// - Parameter dict: Dictionary containing IDs
     @objc
     public func startVoice(
-        _ json: String,
+        _ dict: [String: Any],
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
@@ -256,12 +250,6 @@ extension ActrBridge {
             }
             
             do {
-                guard let data = json.data(using: .utf8),
-                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    reject("INVALID_INPUT", "Invalid JSON", nil)
-                    return
-                }
-
                 var request = DataStreamApp_StartVoiceMessage()
                 request.streamID = dict["streamId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
@@ -290,11 +278,11 @@ extension ActrBridge {
     
     /// Send voice chunk message
     /// - Parameters:
-    ///   - json: JSON string containing 'sessionId', 'messageId', 'chunkId'
+    ///   - dict: Dictionary containing 'sessionId', 'messageId', 'chunkId'
     ///   - audioData: Base64 encoded audio chunk data
     @objc
     public func sendVoiceChunk(
-        _ json: String,
+        _ dict: [String: Any],
         audioData: String,
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
@@ -306,10 +294,8 @@ extension ActrBridge {
             }
             
             do {
-                guard let data = json.data(using: .utf8),
-                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let streamID = dict["streamId"] as? String else {
-                    reject("INVALID_INPUT", "Invalid JSON or streamId", nil)
+                guard let streamID = dict["streamId"] as? String else {
+                    reject("INVALID_INPUT", "Missing streamId", nil)
                     return
                 }
                 
@@ -317,8 +303,12 @@ extension ActrBridge {
                 request.streamID = streamID
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
-                request.chunkID = dict["chunkId"] as? String ?? ""// 客户端创建
-                request.chunkData = dict["chunkData"] as? Data ?? Data()
+                request.chunkID = dict["chunkId"] as? String ?? ""
+                
+                // 将 base64 字符串转换为 Data
+                if let audioBinary = Data(base64Encoded: audioData) {
+                    request.chunkData = audioBinary
+                }
                 
                 let response = try await actr.call(request)
                 resolve([
@@ -333,10 +323,10 @@ extension ActrBridge {
     }
     
     /// End voice stream (UnregisterDataStream)
-    /// - Parameter json: JSON string containing 'streamId'
+    /// - Parameter dict: Dictionary containing 'streamId'
     @objc
     public func endVoice(
-        _ json: String,
+        _ dict: [String: Any],
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
@@ -347,10 +337,8 @@ extension ActrBridge {
             }
             
             do {
-                guard let data = json.data(using: .utf8),
-                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let streamID = dict["streamId"] as? String else {
-                    reject("INVALID_INPUT", "Invalid JSON or missing streamId", nil)
+                guard let streamID = dict["streamId"] as? String else {
+                    reject("INVALID_INPUT", "Missing streamId", nil)
                     return
                 }
                 
@@ -370,11 +358,11 @@ extension ActrBridge {
 
     /// Upload attachment
     /// - Parameters:
-    ///   - json: JSON string containing 'id', 'filename', 'type'
+    ///   - dict: Dictionary containing 'id', 'filename', 'type'
     ///   - fileData: Base64 encoded file data
     @objc
     public func uploadAttachment(
-        _ json: String,
+        _ dict: [String: Any],
         fileData: String,
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
@@ -386,10 +374,8 @@ extension ActrBridge {
             }
 
             do {
-                guard let data = json.data(using: .utf8),
-                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let binaryData = Data(base64Encoded: fileData) else {
-                    reject("INVALID_INPUT", "Invalid JSON or fileData", nil)
+                guard let binaryData = Data(base64Encoded: fileData) else {
+                    reject("INVALID_INPUT", "Invalid fileData (Base64 decode failed)", nil)
                     return
                 }
 
