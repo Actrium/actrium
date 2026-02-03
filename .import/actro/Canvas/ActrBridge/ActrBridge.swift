@@ -147,30 +147,6 @@ extension ActrBridge {
         connectionStatus = .disconnected
         errorMessage = nil
     }
-    
-    /// Send an echo RPC request
-    private func sendEchoMessage(_ message: String) async throws -> String {
-        guard connectionStatus == .connected else {
-            let error = ActrError.StateError(msg: "Not connected to server")
-            return "Error: \(error.localizedDescription)"
-        }
-
-        guard let actr = actr else {
-            let error = ActrError.StateError(msg: "Actor reference not available")
-            return "Error: \(error.localizedDescription)"
-        }
-
-        do {
-            var request = DataStreamApp_TextMessage()
-            request.sessionID = "text-\(UUID().uuidString)"
-            let _ = try await actr.call(request)
-            return request.sessionID
-        } catch let actrError as ActrError {
-            throw actrError
-        } catch {
-            throw error
-        }
-    }
 }
 
 // MARK: - React Native Bridge Methods
@@ -219,22 +195,44 @@ extension ActrBridge {
         }
     }
     
-    /// Send echo message through ActrService
+    /// Send text message through ActrService
     @objc
-    public func sendEcho(
-        _ message: String,
+    public func sendTextMessage(
+        _ json: String,
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard connectionStatus == .connected else {
+            guard connectionStatus == .connected, let actr = self.actr else {
                 reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
                 return
             }
             
             do {
-                let reply = try await self.sendEchoMessage(message)
-                resolve(["reply": reply])
+                guard let data = json.data(using: .utf8),
+                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    reject("INVALID_INPUT", "Invalid JSON", nil)
+                    return
+                }
+
+                var request = DataStreamApp_TextMessage()
+                request.questionID = dict["text"] as? String ?? ""
+                request.sessionID = dict["sessionId"] as? String ?? ""
+                request.messageID = dict["messageId"] as? String ?? ""
+                request.streamID = dict["streamId"] as? String ?? ""
+                
+                if request.questionID.isEmpty || request.sessionID.isEmpty || request.messageID.isEmpty {
+                    reject("INVALID_INPUT", "Missing required fields (text, sessionId, messageId)", nil)
+                    return
+                }
+
+                let response = try await actr.call(request)
+                resolve([
+                    "streamId": request.streamID,
+                    "responseStreamId": response.streamID,
+                    "status": response.status,
+                    "message": response.message
+                ])
             } catch let error as ActrError {
                 reject("ACTR_ERROR", self.formatActrError(error), error)
             } catch {
@@ -482,8 +480,41 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         req: DataStreamApp_TextMessage,
         ctx: Context
     ) async throws -> DataStreamApp_TextMessageResponse {
-        logger.info("Received SendText request")
-        return DataStreamApp_TextMessageResponse()
+        logger.info("[AskLocalServiceHandlerImpl] Received SendText request")
+
+        var userMessage = StreamServer_UsrPromptRequest()
+        userMessage.text = req.questionID
+        userMessage.sessionID = req.sessionID
+        userMessage.questionID = req.messageID
+        
+        let targetId = try await discoverTarget(ctx: ctx)
+        let responseData = try await ctx.call(
+            target: targetId,
+            routeKey: StreamServer_UsrPromptRequest.routeKey,
+            payload: try userMessage.serializedData()
+        )
+        
+        // 反序列化为 StreamServer_AssistantReply
+        let reply = try StreamServer_AssistantReply(serializedBytes: responseData)
+        
+        // 创建并保存回调实例，确保生命周期
+        let callback = StreamPrintCallback(streamId: reply.streamID, onMessage: nil)
+        self.callbacks[reply.streamID] = callback
+        
+        // 注册回调以便处理后续的流式响应
+        let _ = try await ctx.registerStream(
+            streamId: reply.streamID,
+            callback: callback
+        )
+        
+        logger.info("[AskLocalServiceHandlerImpl] Text response stream registered: \(reply.streamID)")
+        
+        var resp = DataStreamApp_TextMessageResponse()
+        resp.streamID = reply.streamID
+        resp.status = reply.statusCode
+        resp.message = reply.errorMessage
+        
+        return resp
     }
     
     /// RPC method: StartSendVoice
