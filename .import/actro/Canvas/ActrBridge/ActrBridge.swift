@@ -322,8 +322,12 @@ extension ActrBridge {
                 request.chunkID = dict["chunkId"] as? String ?? ""// 客户端创建
                 request.chunkData = dict["chunkData"] as? Data ?? Data()
                 
-                let _ = try await actr.call(request)
-                resolve(["status": "sent"])
+                let response = try await actr.call(request)
+                resolve([
+                    "streamID": response.streamID,
+                    "status": response.status,
+                    "message": response.message
+                ])
             } catch {
                 reject("ACTR_ERROR", error.localizedDescription, error)
             }
@@ -440,19 +444,21 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
     }
     
     func onStream(chunk: Actr.DataStream, sender: ActrId) async throws {
-        let senderRepr = "\(sender.type.toStringRepr())#\(sender.serialNumber)"
-        let payloadText = String(data: chunk.payload, encoding: .utf8) ?? "<non-utf8 data>"
-        let message = "stream_id=\(streamId), seq=\(chunk.sequence), bytes=\(chunk.payload.count), sender=\(senderRepr), text=\"\(payloadText)\""
-        logger.info("📥 [StreamPrintCallback] onStream: \(message)")
-        onMessage?(message)
+        let payloadText = String(data: chunk.payload, encoding: .utf8) ?? ""
         
         // 推送到 RN
-        if let bridge = ActrBridge.shared() {
-            logger.info("📤 [StreamPrintCallback] Sending event to RN: ActrStreamMessage")
-            bridge.sendStreamEventToRN(message: message)
-        } else {
-            logger.error("❌ [StreamPrintCallback] Failed to get ActrBridge instance to send event")
+        guard let bridge = await ActrBridge.shared() else {
+            let errorMsg = "Failed to get ActrBridge instance to send event"
+            throw ActrError.StateError(msg: errorMsg)
         }
+        
+        let body: [String: Any] = [
+            "streamID": self.streamId,
+            "status": 0,
+            "message": payloadText
+        ]
+        
+        await bridge.sendStreamEventToRN(body: body)
     }
 }
 
@@ -572,8 +578,8 @@ public typealias RCTPromiseRejectBlock = (String?, String?, Error?) -> Void
 
 // --- ActrBridge 事件推送 ---
 extension ActrBridge {
-    @objc func sendStreamEventToRN(message: String) {
-        self.sendEvent(withName: "ActrStreamMessage", body: message)
+    @objc func sendStreamEventToRN(body: Any) {
+        self.sendEvent(withName: "ActrStreamMessage", body: body)
     }
     
     @objc public override static func requiresMainQueueSetup() -> Bool {
