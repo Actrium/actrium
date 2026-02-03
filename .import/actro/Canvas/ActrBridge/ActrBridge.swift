@@ -247,11 +247,21 @@ extension ActrBridge {
             }
             
             do {
+                guard let data = json.data(using: .utf8),
+                      let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    reject("INVALID_INPUT", "Invalid JSON", nil)
+                    return
+                }
+
                 var request = DataStreamApp_StartVoiceMessage()
-                // 此处可解析 json 填充 request 字段
-                request.streamID = "stream-\(UUID().uuidString)"
-                request.messageID = "message-\(UUID().uuidString)"
-                request.sessionID = "session-\(UUID().uuidString)"
+                request.streamID = dict["streamId"] as? String ?? ""
+                request.messageID = dict["messageId"] as? String ?? ""
+                request.sessionID = dict["sessionId"] as? String ?? ""
+                
+                if request.streamID.isEmpty || request.messageID.isEmpty || request.sessionID.isEmpty {
+                    reject("INVALID_INPUT", "Missing required IDs (streamId, messageId, sessionId)", nil)
+                    return
+                }
                 
                 let response = try await actr.call(request)
                 appLogger.info("startVoice response======= \(response)")
@@ -298,7 +308,7 @@ extension ActrBridge {
                 request.streamID = streamID
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
-                request.chunkID = dict["chunkId"] as? String ?? ""
+                request.chunkID = dict["chunkId"] as? String ?? ""// 客户端创建
                 request.chunkData = dict["chunkData"] as? Data ?? Data()
                 
                 let _ = try await actr.call(request)
@@ -434,7 +444,14 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
 /// Implementation of AskLocalServiceHandler
 /// TODO: Implement the business logic for each RPC method
 public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
+    private let remoteServiceTypeRepr = "acme+AskService"
+    
     public init() {}
+
+    private func discoverTarget(ctx: Context) async throws -> ActrId {
+        let targetType = try ActrType.fromStringRepr(remoteServiceTypeRepr)
+        return try await ctx.discover(targetType: targetType)
+    }
 
     /// RPC method: SendText
     public func sendText(
@@ -457,8 +474,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         userMessage.sessionID = req.sessionID
         userMessage.questionID = req.messageID
         
-        let targetType = try ActrType.fromStringRepr("acme+AskService")
-        let targetId = try await ctx.discover(targetType: targetType)
+        let targetId = try await discoverTarget(ctx: ctx)
         let responseData = try await ctx.call(
             target: targetId,
             routeKey: StreamServer_UsrPromptRequest.routeKey,
@@ -489,9 +505,27 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         req: DataStreamApp_VoiceChunkMessage,
         ctx: Context
     ) async throws -> DataStreamApp_VoiceChunkMessageResponse {
-        logger.info("Received SendVoiceChunk request: chunk=\(req.chunkID)")
+        logger.info("[AskLocalServiceHandlerImpl] Received sendVoiceChunk: streamId=\(req.streamID), chunkId=\(req.chunkID)")
         
-        return DataStreamApp_VoiceChunkMessageResponse()
+        let targetId = try await discoverTarget(ctx: ctx)
+        
+        let seq = UInt64(req.chunkID) ?? 0
+        
+        let chunk = DataStream(
+            streamId: req.streamID,
+            sequence: seq,
+            payload: req.chunkData,
+            metadata: [],
+            timestampMs: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        
+        try await ctx.sendDataStream(target: targetId, chunk: chunk)
+        
+        var resp = DataStreamApp_VoiceChunkMessageResponse()
+        resp.streamID = req.streamID
+        resp.status = 0
+        
+        return resp
     }
 
 }
