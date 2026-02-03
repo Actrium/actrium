@@ -250,6 +250,8 @@ extension ActrBridge {
                 var request = DataStreamApp_StartVoiceMessage()
                 // 此处可解析 json 填充 request 字段
                 request.streamID = "stream-\(UUID().uuidString)"
+                request.messageID = "message-\(UUID().uuidString)"
+                request.sessionID = "session-\(UUID().uuidString)"
                 
                 let response = try await actr.call(request)
                 resolve([
@@ -444,14 +446,35 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     ) async throws -> DataStreamApp_StartVoiceMessageResponse {
         logger.info("[AskLocalServiceHandlerImpl] Received StartSendVoice request")
 
-        var resp = DataStreamApp_StartVoiceMessageResponse()
-        resp.streamID = req.streamID
-        // 注册数据流并关联回调
-        let _ = try await ctx.registerStream(
-            streamId: resp.streamID,
-            callback: StreamPrintCallback(streamId: resp.streamID, onMessage: nil)
+        var userMessage = StreamServer_UsrPromptRequest()
+        userMessage.voiceStreamID = req.streamID
+        userMessage.sessionID = req.sessionID
+        userMessage.questionID = req.messageID
+        
+        let targetType = try ActrType.fromStringRepr("acme+AskService")
+        let targetId = try await ctx.discover(targetType: targetType)
+        let responseData = try await ctx.call(
+            target: targetId,
+            routeKey: StreamServer_UsrPromptRequest.routeKey,
+            payload: try userMessage.serializedData()
         )
-        logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(resp.streamID)")
+        
+        // 反序列化为 StreamServer_AssistantReply
+        let reply = try StreamServer_AssistantReply(serializedBytes: responseData)
+        
+        // 使用 StreamServer_AssistantReply 的 streamID 注册回调
+        let _ = try await ctx.registerStream(
+            streamId: reply.streamID,
+            callback: StreamPrintCallback(streamId: reply.streamID, onMessage: nil)
+        )
+        
+        logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(reply.streamID)")
+        
+        var resp = DataStreamApp_StartVoiceMessageResponse()
+        resp.streamID = reply.streamID
+        resp.status = reply.statusCode
+        resp.message = reply.errorMessage
+        
         return resp
     }
 
@@ -472,12 +495,6 @@ extension AskLocalServiceWorkload: Workload where T == AskLocalServiceHandlerImp
     public func onStop(ctx _: Context) async throws {}
 
     public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
-        // Handle StartSendVoice if not handled by __dispatch
-        if envelope.routeKey == "data_stream_app.AskLocalService.StartSendVoice" {
-            let req = try DataStreamApp_StartVoiceMessage(serializedBytes: envelope.payload)
-            let resp = try await handler.startSendVoice(req: req, ctx: ctx)
-            return try resp.serializedData()
-        }
         return try await __dispatch(ctx: ctx, envelope: envelope)
     }
 }
