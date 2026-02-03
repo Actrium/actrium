@@ -214,6 +214,7 @@ extension ActrBridge {
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.streamID = dict["streamId"] as? String ?? ""
+                request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
                 
                 if request.questionID.isEmpty || request.sessionID.isEmpty || request.messageID.isEmpty {
                     reject("INVALID_INPUT", "Missing required fields (text, sessionId, messageId)", nil)
@@ -474,6 +475,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         userMessage.text = req.questionID
         userMessage.sessionID = req.sessionID
         userMessage.questionID = req.messageID
+        userMessage.attachmentIds = req.attachmentIds
         
         let targetId = try await discoverTarget(ctx: ctx)
         let responseData = try await ctx.call(
