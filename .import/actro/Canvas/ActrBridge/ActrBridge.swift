@@ -14,6 +14,17 @@ import React
 public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     // MARK: - Properties
     
+    private static weak var activeInstance: ActrBridge?
+    
+    public override init() {
+        super.init()
+        Self.activeInstance = self
+    }
+
+    @objc public static func shared() -> ActrBridge? {
+        return activeInstance
+    }
+    
     private var connectionStatus: ConnectionStatus = .disconnected
     private var errorMessage: String?
     var streamMessages: [String] = []
@@ -432,10 +443,16 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
         let senderRepr = "\(sender.type.toStringRepr())#\(sender.serialNumber)"
         let payloadText = String(data: chunk.payload, encoding: .utf8) ?? "<non-utf8 data>"
         let message = "stream_id=\(streamId), seq=\(chunk.sequence), bytes=\(chunk.payload.count), sender=\(senderRepr), text=\"\(payloadText)\""
-        await logger.info("📥 DataStream chunk: \(message)")
+        logger.info("📥 [StreamPrintCallback] onStream: \(message)")
         onMessage?(message)
-        // --- 新增: 通过事件推送到RN ---
-        await ActrBridge.shared.sendStreamEventToRN(message: message)
+        
+        // 推送到 RN
+        if let bridge = ActrBridge.shared() {
+            logger.info("📤 [StreamPrintCallback] Sending event to RN: ActrStreamMessage")
+            bridge.sendStreamEventToRN(message: message)
+        } else {
+            logger.error("❌ [StreamPrintCallback] Failed to get ActrBridge instance to send event")
+        }
     }
 }
 
@@ -445,6 +462,7 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
 /// TODO: Implement the business logic for each RPC method
 public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     private let remoteServiceTypeRepr = "acme+AskService"
+    private var callbacks: [String: StreamPrintCallback] = [:]
     
     public init() {}
 
@@ -484,10 +502,14 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         // 反序列化为 StreamServer_AssistantReply
         let reply = try StreamServer_AssistantReply(serializedBytes: responseData)
         
+        // 创建并保存回调实例，确保生命周期
+        let callback = StreamPrintCallback(streamId: reply.streamID, onMessage: nil)
+        self.callbacks[reply.streamID] = callback
+        
         // 使用 StreamServer_AssistantReply 的 streamID 注册回调
         let _ = try await ctx.registerStream(
             streamId: reply.streamID,
-            callback: StreamPrintCallback(streamId: reply.streamID, onMessage: nil)
+            callback: callback
         )
         
         logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(reply.streamID)")
@@ -548,17 +570,10 @@ private let logger = Logger(subsystem: "io.actr.App", category: "ActrBridge")
 public typealias RCTPromiseResolveBlock = (Any?) -> Void
 public typealias RCTPromiseRejectBlock = (String?, String?, Error?) -> Void
 
-// --- ActrBridge 单例与事件推送 ---
+// --- ActrBridge 事件推送 ---
 extension ActrBridge {
-    @objc static let shared = ActrBridge()
-    
     @objc func sendStreamEventToRN(message: String) {
-        DispatchQueue.main.async {
-            if let bridge = self.value(forKey: "bridge") as? RCTBridge {
-                let eventEmitter = bridge.module(forName: "RCTDeviceEventEmitter") as? RCTEventEmitter
-                eventEmitter?.sendEvent(withName: "ActrStreamMessage", body: message)
-            }
-        }
+        self.sendEvent(withName: "ActrStreamMessage", body: message)
     }
     
     @objc public override static func requiresMainQueueSetup() -> Bool {
