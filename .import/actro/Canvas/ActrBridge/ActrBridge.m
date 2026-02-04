@@ -47,4 +47,9 @@ RCT_EXTERN_METHOD(sendTextMessage:(NSDictionary *)params
 RCT_EXTERN_METHOD(getServiceStatus:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+/// Unregister a stream callback
+RCT_EXTERN_METHOD(unregisterStream:(NSString *)streamId
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
 @end
