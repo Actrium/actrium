@@ -327,6 +327,17 @@ extension ActrBridge {
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.chunkID = dict["chunkId"] as? String ?? ""// 客户端创建
                 
+                // Parse metadata if present
+                if let metadataArray = dict["metadata"] as? [[String: String]] {
+                    var metadataDict: [String: String] = [:]
+                    for entry in metadataArray {
+                        if let key = entry["key"], let value = entry["value"] {
+                            metadataDict[key] = value
+                        }
+                    }
+                    request.metadata = metadataDict
+                }
+                
                 guard let audioBinary = Data(base64Encoded: audioData) else {
                     reject("INVALID_INPUT", "Invalid audioData base64", nil)
                     return
@@ -449,18 +460,29 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
             message = String(data: chunk.payload, encoding: .utf8) ?? ""
         }
         
+        // Convert metadata to dictionary array
+        let metadataArray = chunk.metadata.map { entry in
+            return ["key": entry.key, "value": entry.value]
+        }
+        
         // 推送到 RN
         guard let bridge = await ActrBridge.shared() else {
             let errorMsg = "[StreamPrintCallback] Failed to get ActrBridge instance to send event"
             throw ActrError.StateError(msg: errorMsg)
         }
         
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "streamID": self.streamId,
             "type": self.streamType.rawValue,
             "status": 0,
-            "message": message
+            "message": message,
+            "metadata": metadataArray,
+            "sequence": chunk.sequence
         ]
+        
+        if let timestampMs = chunk.timestampMs {
+            body["timestampMs"] = timestampMs
+        }
         
         await bridge.sendStreamEventToRN(body: body)
     }
@@ -617,11 +639,14 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         
         let seq = UInt64(req.chunkID) ?? 0
         
+        // Convert metadata dictionary to MetadataEntry array
+        let metadataEntries = req.metadata.map { MetadataEntry(key: $0.key, value: $0.value) }
+        
         let chunk = DataStream(
             streamId: req.streamID,
             sequence: seq,
             payload: req.chunkData,
-            metadata: [],
+            metadata: metadataEntries,
             timestampMs: Int64(Date().timeIntervalSince1970 * 1000)
         )
         

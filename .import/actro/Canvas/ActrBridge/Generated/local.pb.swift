@@ -157,6 +157,8 @@ public struct DataStreamApp_VoiceChunkMessage: @unchecked Sendable {
 
   public var streamID: String = String()
 
+  public var metadata: Dictionary<String,String> = [:]
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -452,6 +454,7 @@ extension DataStreamApp_VoiceChunkMessage: @preconcurrency SwiftProtobuf._Messag
     3: .standard(proto: "chunk_id"),
     4: .standard(proto: "chunk_data"),
     5: .standard(proto: "stream_id"),
+    6: .same(proto: "metadata"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -465,6 +468,7 @@ extension DataStreamApp_VoiceChunkMessage: @preconcurrency SwiftProtobuf._Messag
       case 3: try { try decoder.decodeSingularStringField(value: &self.chunkID) }()
       case 4: try { try decoder.decodeSingularBytesField(value: &self.chunkData) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
+      case 6: try { try decoder.decodeMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufString,SwiftProtobuf.ProtobufString>.self, value: &self.metadata) }()
       default: break
       }
     }
@@ -486,6 +490,9 @@ extension DataStreamApp_VoiceChunkMessage: @preconcurrency SwiftProtobuf._Messag
     if !self.streamID.isEmpty {
       try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 5)
     }
+    if !self.metadata.isEmpty {
+      try visitor.visitMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufString,SwiftProtobuf.ProtobufString>.self, value: self.metadata, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -495,6 +502,7 @@ extension DataStreamApp_VoiceChunkMessage: @preconcurrency SwiftProtobuf._Messag
     if lhs.chunkID != rhs.chunkID {return false}
     if lhs.chunkData != rhs.chunkData {return false}
     if lhs.streamID != rhs.streamID {return false}
+    if lhs.metadata != rhs.metadata {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
