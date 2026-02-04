@@ -403,6 +403,24 @@ extension ActrBridge {
             resolve(result)
         }
     }
+    
+    /// Unregister a stream callback
+    @objc
+    public func unregisterStream(
+        _ streamId: String,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            guard let workload = self.workload else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+                return
+            }
+            
+            workload.handler.removeCallback(streamId: streamId)
+            resolve(true)
+        }
+    }
 }
 
 // MARK: - Simple stream handler that logs incoming chunks.
@@ -454,9 +472,14 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
 /// TODO: Implement the business logic for each RPC method
 public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     private let remoteServiceTypeRepr = "acme+AskService"
-    private var callbacks: [String: StreamPrintCallback] = [:]
+    fileprivate var callbacks: [String: StreamPrintCallback] = [:]
     
     public init() {}
+    
+    public func removeCallback(streamId: String) {
+        self.callbacks.removeValue(forKey: streamId)
+        logger.info("[AskLocalServiceHandlerImpl] Stream callback unregistered: \(streamId)")
+    }
     
     private func discoverTarget(ctx: Context) async throws -> ActrId {
         let targetType = try ActrType.fromStringRepr(remoteServiceTypeRepr)
