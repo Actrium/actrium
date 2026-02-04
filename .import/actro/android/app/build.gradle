@@ -3,6 +3,9 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "kotlin-parcelize"
 
+// Match build config to gradle.properties newArchEnabled.
+def isNewArchEnabled = project.hasProperty("newArchEnabled") && project.newArchEnabled == "true"
+
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
@@ -85,6 +88,17 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
+        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
+
+//        externalNativeBuild {
+//            cmake {
+//                cppFlags '-std=c++17 -fexceptions -frtti'
+//                arguments '-DANDROID_STL=c++_shared'
+//            }
+//        }
+        ndk {
+            abiFilters (*reactNativeArchitectures.split(','))
+        }
     }
     signingConfigs {
         debug {
@@ -108,6 +122,16 @@ android {
     }
     viewBinding {
         enabled = true
+    }
+    // Commenting out custom externalNativeBuild to allow React Native new-arch libs to be packaged
+    // TODO: Build rillsandbox as a separate Gradle module or use prefab to consume it
+//     externalNativeBuild {
+//         cmake {
+//             path '/Users/qibao_an/Documents/Project/huanqiu/GoAskAway/rill/native/platform/android/CMakeLists.txt'
+//         }
+//     }
+    buildFeatures {
+        prefab true
     }
 }
 
