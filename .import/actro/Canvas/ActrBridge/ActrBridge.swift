@@ -152,8 +152,6 @@ extension ActrBridge {
 // MARK: - React Native Bridge Methods
 
 extension ActrBridge {
-
-// MARK: - Helper Methods
     
     private nonisolated func formatActrError(_ error: ActrError) -> String {
         return error.errorDescription ?? ""
@@ -210,13 +208,22 @@ extension ActrBridge {
             
             do {
                 var request = DataStreamApp_TextMessage()
-                request.questionID = dict["text"] as? String ?? ""
+                request.text = dict["text"] as? String ?? ""
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.streamID = dict["streamId"] as? String ?? ""
                 request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
                 
-                if request.questionID.isEmpty || request.sessionID.isEmpty || request.messageID.isEmpty {
+                if let locationDict = dict["location"] as? [String: Any] {
+                    var location = StreamServer_Location()
+                    location.latitude = locationDict["latitude"] as? Double ?? 0
+                    location.longitude = locationDict["longitude"] as? Double ?? 0
+                    location.address = locationDict["address"] as? String ?? ""
+                    location.placeName = locationDict["placeName"] as? String ?? ""
+                    request.location = location
+                }
+                
+                if request.text.isEmpty || request.sessionID.isEmpty || request.messageID.isEmpty {
                     reject("INVALID_INPUT", "Missing required fields (text, sessionId, messageId)", nil)
                     return
                 }
@@ -255,6 +262,16 @@ extension ActrBridge {
                 request.streamID = dict["streamId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.sessionID = dict["sessionId"] as? String ?? ""
+                request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
+
+                if let locationDict = dict["location"] as? [String: Any] {
+                    var location = StreamServer_Location()
+                    location.latitude = locationDict["latitude"] as? Double ?? 0
+                    location.longitude = locationDict["longitude"] as? Double ?? 0
+                    location.address = locationDict["address"] as? String ?? ""
+                    location.placeName = locationDict["placeName"] as? String ?? ""
+                    request.location = location
+                }
                 
                 if request.streamID.isEmpty || request.messageID.isEmpty || request.sessionID.isEmpty {
                     reject("INVALID_INPUT", "Missing required IDs (streamId, messageId, sessionId)", nil)
@@ -305,7 +322,16 @@ extension ActrBridge {
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.chunkID = dict["chunkId"] as? String ?? ""// 客户端创建
+                request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
 
+                if let locationDict = dict["location"] as? [String: Any] {
+                    var location = StreamServer_Location()
+                    location.latitude = locationDict["latitude"] as? Double ?? 0
+                    location.longitude = locationDict["longitude"] as? Double ?? 0
+                    location.address = locationDict["address"] as? String ?? ""
+                    location.placeName = locationDict["placeName"] as? String ?? ""
+                    request.location = location
+                }
 
                 guard let audioBinary = Data(base64Encoded: audioData) else {
                     reject("INVALID_INPUT", "Invalid audioData base64", nil)
@@ -472,10 +498,13 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         logger.info("[AskLocalServiceHandlerImpl] Received SendText request")
 
         var userMessage = StreamServer_UsrPromptRequest()
-        userMessage.text = req.questionID
+        userMessage.text = req.text
         userMessage.sessionID = req.sessionID
         userMessage.questionID = req.messageID
         userMessage.attachmentIds = req.attachmentIds
+        if req.hasLocation {
+            userMessage.location = req.location
+        }
         
         let targetId = try await discoverTarget(ctx: ctx)
         let responseData = try await ctx.call(
@@ -518,7 +547,11 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         userMessage.voiceStreamID = req.streamID
         userMessage.sessionID = req.sessionID
         userMessage.questionID = req.messageID
-        
+        userMessage.attachmentIds = req.attachmentIds
+        if req.hasLocation {
+            userMessage.location = req.location
+        }
+
         let targetId = try await discoverTarget(ctx: ctx)
         let responseData = try await ctx.call(
             target: targetId,
