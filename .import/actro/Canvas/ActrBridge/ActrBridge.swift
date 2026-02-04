@@ -215,7 +215,7 @@ extension ActrBridge {
                 request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
                 
                 if let locationDict = dict["location"] as? [String: Any] {
-                    var location = StreamServer_Location()
+                    var location = Ask_Location()
                     location.latitude = locationDict["latitude"] as? Double ?? 0
                     location.longitude = locationDict["longitude"] as? Double ?? 0
                     location.address = locationDict["address"] as? String ?? ""
@@ -265,7 +265,7 @@ extension ActrBridge {
                 request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
 
                 if let locationDict = dict["location"] as? [String: Any] {
-                    var location = StreamServer_Location()
+                    var location = Ask_Location()
                     location.latitude = locationDict["latitude"] as? Double ?? 0
                     location.longitude = locationDict["longitude"] as? Double ?? 0
                     location.address = locationDict["address"] as? String ?? ""
@@ -361,14 +361,14 @@ extension ActrBridge {
                     return
                 }
                 
-                var request = StreamServer_UnregisterRequest()
-                request.streamID = streamID
-                
-                let response = try await actr.call(request)
-                resolve([
-                    "success": response.success,
-                    "message": response.message
-                ])
+//                var request = Ask_UnregisterRequest()
+//                request.streamID = streamID
+//                
+//                let response = try await actr.call(request)
+//                resolve([
+//                    "success": response.success,
+//                    "message": response.message
+//                ])
             } catch {
                 reject("ACTR_ERROR", error.localizedDescription, error)
             }
@@ -398,12 +398,12 @@ extension ActrBridge {
                     return
                 }
 
-                var request = StreamServer_AttachRequest()
+                var request = Ask_AttachRequest()
                 request.id = dict["id"] as? String ?? UUID().uuidString
                 request.filename = dict["filename"] as? String ?? "file"
                 
                 let typeInt = dict["type"] as? Int ?? 0
-                request.type = StreamServer_AttachmentType(rawValue: typeInt) ?? .unknown
+                request.type = Ask_AttachmentType(rawValue: typeInt) ?? .unknown
                 request.data = binaryData
 
                 let response = try await actr.call(request)
@@ -487,7 +487,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     ) async throws -> DataStreamApp_TextMessageResponse {
         logger.info("[AskLocalServiceHandlerImpl] Received SendText request")
 
-        var userMessage = StreamServer_UsrPromptRequest()
+        var userMessage = Ask_UsrPromptRequest()
         userMessage.text = req.text
         userMessage.sessionID = req.sessionID
         userMessage.questionID = req.messageID
@@ -499,12 +499,12 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         let targetId = try await discoverTarget(ctx: ctx)
         let responseData = try await ctx.call(
             target: targetId,
-            routeKey: StreamServer_UsrPromptRequest.routeKey,
+            routeKey: Ask_UsrPromptRequest.routeKey,
             payload: try userMessage.serializedData()
         )
         
-        // 反序列化为 StreamServer_AssistantReply
-        let reply = try StreamServer_AssistantReply(serializedBytes: responseData)
+        // 反序列化为 Ask_AssistantReply
+        let reply = try Ask_AssistantReply(serializedBytes: responseData)
         
         // 创建并保存回调实例，确保生命周期
         let callback = StreamPrintCallback(streamId: reply.streamID, onMessage: nil)
@@ -533,7 +533,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     ) async throws -> DataStreamApp_StartVoiceMessageResponse {
         logger.info("[AskLocalServiceHandlerImpl] Received StartSendVoice request")
 
-        var userMessage = StreamServer_UsrPromptRequest()
+        var userMessage = Ask_UsrPromptRequest()
         userMessage.voiceStreamID = req.streamID
         userMessage.sessionID = req.sessionID
         userMessage.questionID = req.messageID
@@ -545,18 +545,18 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         let targetId = try await discoverTarget(ctx: ctx)
         let responseData = try await ctx.call(
             target: targetId,
-            routeKey: StreamServer_UsrPromptRequest.routeKey,
+            routeKey: Ask_UsrPromptRequest.routeKey,
             payload: try userMessage.serializedData()
         )
         
-        // 反序列化为 StreamServer_AssistantReply
-        let reply = try StreamServer_AssistantReply(serializedBytes: responseData)
+        // 反序列化为 Ask_AssistantReply
+        let reply = try Ask_AssistantReply(serializedBytes: responseData)
         
         // 创建并保存回调实例，确保生命周期
         let callback = StreamPrintCallback(streamId: reply.streamID, onMessage: nil)
         self.callbacks[reply.streamID] = callback
         
-        // 使用 StreamServer_AssistantReply 的 streamID 注册回调
+        // 使用 Ask_AssistantReply 的 streamID 注册回调
         let _ = try await ctx.registerStream(
             streamId: reply.streamID,
             callback: callback
