@@ -47,6 +47,12 @@ public struct DataStreamApp_TextMessage: Sendable {
 
   public var streamID: String = String()
 
+  /// Text response stream ID (if applicable)
+  public var textResponseStreamID: String = String()
+
+  /// Voice response stream ID (if applicable)
+  public var voiceResponseStreamID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -59,11 +65,18 @@ public struct DataStreamApp_TextMessageResponse: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var streamID: String = String()
+  /// ID for the answer stream
+  public var questionID: String = String()
 
-  public var status: Int32 = 0
+  /// Session ID for tracking
+  public var sessionID: String = String()
 
-  public var message: String = String()
+  /// Text answer (if applicable)
+  public var text: String = String()
+
+  public var statusCode: Int32 = 0
+
+  public var errorMessage: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -93,6 +106,12 @@ public struct DataStreamApp_StartVoiceMessage: Sendable {
   /// Optional: Attachment IDs
   public var attachmentIds: [String] = []
 
+  /// Text response stream ID (if applicable)
+  public var textResponseStreamID: String = String()
+
+  /// Voice response stream ID (if applicable)
+  public var voiceResponseStreamID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -105,11 +124,18 @@ public struct DataStreamApp_StartVoiceMessageResponse: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var streamID: String = String()
+  /// ID for the answer stream
+  public var questionID: String = String()
 
-  public var status: Int32 = 0
+  /// Session ID for tracking
+  public var sessionID: String = String()
 
-  public var message: String = String()
+  /// Text answer (if applicable)
+  public var text: String = String()
+
+  public var statusCode: Int32 = 0
+
+  public var errorMessage: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -165,6 +191,8 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
     4: .same(proto: "location"),
     5: .standard(proto: "attachment_ids"),
     6: .standard(proto: "stream_id"),
+    7: .standard(proto: "text_response_stream_id"),
+    8: .standard(proto: "voice_response_stream_id"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -179,6 +207,8 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
       case 4: try { try decoder.decodeSingularMessageField(value: &self._location) }()
       case 5: try { try decoder.decodeRepeatedStringField(value: &self.attachmentIds) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.textResponseStreamID) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.voiceResponseStreamID) }()
       default: break
       }
     }
@@ -207,6 +237,12 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
     if !self.streamID.isEmpty {
       try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 6)
     }
+    if !self.textResponseStreamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.textResponseStreamID, fieldNumber: 7)
+    }
+    if !self.voiceResponseStreamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.voiceResponseStreamID, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -217,6 +253,8 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
     if lhs._location != rhs._location {return false}
     if lhs.attachmentIds != rhs.attachmentIds {return false}
     if lhs.streamID != rhs.streamID {return false}
+    if lhs.textResponseStreamID != rhs.textResponseStreamID {return false}
+    if lhs.voiceResponseStreamID != rhs.voiceResponseStreamID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -225,9 +263,11 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
 extension DataStreamApp_TextMessageResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TextMessageResponse"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "stream_id"),
-    2: .same(proto: "status"),
-    3: .same(proto: "message"),
+    1: .standard(proto: "question_id"),
+    2: .standard(proto: "session_id"),
+    3: .same(proto: "text"),
+    4: .standard(proto: "status_code"),
+    5: .standard(proto: "error_message"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -236,31 +276,41 @@ extension DataStreamApp_TextMessageResponse: @preconcurrency SwiftProtobuf._Mess
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
-      case 2: try { try decoder.decodeSingularInt32Field(value: &self.status) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      case 1: try { try decoder.decodeSingularStringField(value: &self.questionID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.sessionID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.statusCode) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.errorMessage) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.streamID.isEmpty {
-      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 1)
+    if !self.questionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.questionID, fieldNumber: 1)
     }
-    if self.status != 0 {
-      try visitor.visitSingularInt32Field(value: self.status, fieldNumber: 2)
+    if !self.sessionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.sessionID, fieldNumber: 2)
     }
-    if !self.message.isEmpty {
-      try visitor.visitSingularStringField(value: self.message, fieldNumber: 3)
+    if !self.text.isEmpty {
+      try visitor.visitSingularStringField(value: self.text, fieldNumber: 3)
+    }
+    if self.statusCode != 0 {
+      try visitor.visitSingularInt32Field(value: self.statusCode, fieldNumber: 4)
+    }
+    if !self.errorMessage.isEmpty {
+      try visitor.visitSingularStringField(value: self.errorMessage, fieldNumber: 5)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: DataStreamApp_TextMessageResponse, rhs: DataStreamApp_TextMessageResponse) -> Bool {
-    if lhs.streamID != rhs.streamID {return false}
-    if lhs.status != rhs.status {return false}
-    if lhs.message != rhs.message {return false}
+    if lhs.questionID != rhs.questionID {return false}
+    if lhs.sessionID != rhs.sessionID {return false}
+    if lhs.text != rhs.text {return false}
+    if lhs.statusCode != rhs.statusCode {return false}
+    if lhs.errorMessage != rhs.errorMessage {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -274,6 +324,8 @@ extension DataStreamApp_StartVoiceMessage: @preconcurrency SwiftProtobuf._Messag
     3: .standard(proto: "stream_id"),
     4: .same(proto: "location"),
     5: .standard(proto: "attachment_ids"),
+    7: .standard(proto: "text_response_stream_id"),
+    8: .standard(proto: "voice_response_stream_id"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -287,6 +339,8 @@ extension DataStreamApp_StartVoiceMessage: @preconcurrency SwiftProtobuf._Messag
       case 3: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._location) }()
       case 5: try { try decoder.decodeRepeatedStringField(value: &self.attachmentIds) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.textResponseStreamID) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.voiceResponseStreamID) }()
       default: break
       }
     }
@@ -312,6 +366,12 @@ extension DataStreamApp_StartVoiceMessage: @preconcurrency SwiftProtobuf._Messag
     if !self.attachmentIds.isEmpty {
       try visitor.visitRepeatedStringField(value: self.attachmentIds, fieldNumber: 5)
     }
+    if !self.textResponseStreamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.textResponseStreamID, fieldNumber: 7)
+    }
+    if !self.voiceResponseStreamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.voiceResponseStreamID, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -321,6 +381,8 @@ extension DataStreamApp_StartVoiceMessage: @preconcurrency SwiftProtobuf._Messag
     if lhs.streamID != rhs.streamID {return false}
     if lhs._location != rhs._location {return false}
     if lhs.attachmentIds != rhs.attachmentIds {return false}
+    if lhs.textResponseStreamID != rhs.textResponseStreamID {return false}
+    if lhs.voiceResponseStreamID != rhs.voiceResponseStreamID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -329,9 +391,11 @@ extension DataStreamApp_StartVoiceMessage: @preconcurrency SwiftProtobuf._Messag
 extension DataStreamApp_StartVoiceMessageResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".StartVoiceMessageResponse"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "stream_id"),
-    2: .same(proto: "status"),
-    3: .same(proto: "message"),
+    1: .standard(proto: "question_id"),
+    2: .standard(proto: "session_id"),
+    3: .same(proto: "text"),
+    4: .standard(proto: "status_code"),
+    5: .standard(proto: "error_message"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -340,31 +404,41 @@ extension DataStreamApp_StartVoiceMessageResponse: @preconcurrency SwiftProtobuf
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
-      case 2: try { try decoder.decodeSingularInt32Field(value: &self.status) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      case 1: try { try decoder.decodeSingularStringField(value: &self.questionID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.sessionID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.statusCode) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.errorMessage) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.streamID.isEmpty {
-      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 1)
+    if !self.questionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.questionID, fieldNumber: 1)
     }
-    if self.status != 0 {
-      try visitor.visitSingularInt32Field(value: self.status, fieldNumber: 2)
+    if !self.sessionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.sessionID, fieldNumber: 2)
     }
-    if !self.message.isEmpty {
-      try visitor.visitSingularStringField(value: self.message, fieldNumber: 3)
+    if !self.text.isEmpty {
+      try visitor.visitSingularStringField(value: self.text, fieldNumber: 3)
+    }
+    if self.statusCode != 0 {
+      try visitor.visitSingularInt32Field(value: self.statusCode, fieldNumber: 4)
+    }
+    if !self.errorMessage.isEmpty {
+      try visitor.visitSingularStringField(value: self.errorMessage, fieldNumber: 5)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: DataStreamApp_StartVoiceMessageResponse, rhs: DataStreamApp_StartVoiceMessageResponse) -> Bool {
-    if lhs.streamID != rhs.streamID {return false}
-    if lhs.status != rhs.status {return false}
-    if lhs.message != rhs.message {return false}
+    if lhs.questionID != rhs.questionID {return false}
+    if lhs.sessionID != rhs.sessionID {return false}
+    if lhs.text != rhs.text {return false}
+    if lhs.statusCode != rhs.statusCode {return false}
+    if lhs.errorMessage != rhs.errorMessage {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -20,7 +20,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
         super.init()
         Self.activeInstance = self
     }
-
+    
     @objc public static func shared() -> ActrBridge? {
         return activeInstance
     }
@@ -44,7 +44,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
         case initializing
         case connected
         case error
-
+        
         var description: String {
             switch self {
             case .disconnected: return "Disconnected"
@@ -94,7 +94,7 @@ extension ActrBridge {
         connectionStatus = .initializing
         errorMessage = nil
         logger.info("Initializing ActrBridge...")
-
+        
         do {
             let result = try await Task.detached(priority: .userInitiated) { () throws
                 -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>) in
@@ -105,7 +105,7 @@ extension ActrBridge {
                 let actr = try await node.start()
                 return (system, node, actr, workload)
             }.value
-
+            
             let (system, node, actr, workload) = result
             actrSystem = system
             actrNode = node
@@ -115,7 +115,7 @@ extension ActrBridge {
             // Wait a bit for the signaling client to establish connection
             logger.info("Waiting for signaling client to connect...")
             try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-
+            
             connectionStatus = .connected
             logger.info("ActrBridge initialized successfully")
         } catch let actrError as ActrError {
@@ -130,20 +130,20 @@ extension ActrBridge {
             throw error
         }
     }
-
+    
     /// Shutdown the service and cleanup resources
     private func shutdown() async {
         logger.info("Shutting down ActrBridge...")
-
+        
         if let actr {
             await actr.stop()
         }
-
+        
         actr = nil
         actrNode = nil
         actrSystem = nil
         workload = nil
-
+        
         connectionStatus = .disconnected
         errorMessage = nil
     }
@@ -161,7 +161,7 @@ extension ActrBridge {
         // Realm serialization - adjust based on actual Realm structure
         return ["id": "\(realm)"]
     }
-
+    
     /// Initialize ActrService
     @objc
     public func initializeService(
@@ -213,6 +213,8 @@ extension ActrBridge {
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.streamID = dict["streamId"] as? String ?? ""
                 request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
+                request.textResponseStreamID = dict["textResponseStreamId"] as? String ?? ""
+                request.voiceResponseStreamID = dict["voiceResponseStreamId"] as? String ?? ""
                 
                 if let locationDict = dict["location"] as? [String: Any] {
                     var location = Ask_Location()
@@ -223,17 +225,18 @@ extension ActrBridge {
                     request.location = location
                 }
                 
-                if request.text.isEmpty || request.sessionID.isEmpty || request.messageID.isEmpty {
-                    reject("INVALID_INPUT", "Missing required fields (text, sessionId, messageId)", nil)
+                if request.streamID.isEmpty {
+                    reject("INVALID_INPUT", "Missing required field (streamId)", nil)
                     return
                 }
-
+                
                 let response = try await actr.call(request)
                 resolve([
-                    "streamId": request.streamID,
-                    "responseStreamId": response.streamID,
-                    "status": response.status,
-                    "message": response.message
+                    "questionId": response.questionID,
+                    "sessionId": response.sessionID,
+                    "text": response.text,
+                    "statusCode": response.statusCode,
+                    "errorMessage": response.errorMessage
                 ])
             } catch let error as ActrError {
                 reject("ACTR_ERROR", self.formatActrError(error), error)
@@ -263,7 +266,9 @@ extension ActrBridge {
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
-
+                request.textResponseStreamID = dict["textResponseStreamId"] as? String ?? ""
+                request.voiceResponseStreamID = dict["voiceResponseStreamId"] as? String ?? ""
+                
                 if let locationDict = dict["location"] as? [String: Any] {
                     var location = Ask_Location()
                     location.latitude = locationDict["latitude"] as? Double ?? 0
@@ -273,20 +278,19 @@ extension ActrBridge {
                     request.location = location
                 }
                 
-                if request.streamID.isEmpty || request.messageID.isEmpty || request.sessionID.isEmpty {
-                    reject("INVALID_INPUT", "Missing required IDs (streamId, messageId, sessionId)", nil)
+                if request.streamID.isEmpty {
+                    reject("INVALID_INPUT", "Missing required field (streamId)", nil)
                     return
                 }
                 
                 let response = try await actr.call(request)
                 appLogger.info("startVoice response======= \(response)")
                 resolve([
-                    "streamId": request.streamID,
-                    "messageId": request.messageID,
-                    "sessionId": request.sessionID,
-                    "responseStreamId": response.streamID,
-                    "status": response.status,
-                    "message": response.message
+                    "sessionId": response.sessionID,
+                    "questionId": response.questionID,
+                    "text": response.text,
+                    "statusCode": response.statusCode,
+                    "errorMessage": response.errorMessage
                 ])
             } catch {
                 reject("ACTR_ERROR", error.localizedDescription, error)
@@ -322,7 +326,7 @@ extension ActrBridge {
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.chunkID = dict["chunkId"] as? String ?? ""// 客户端创建
-
+                
                 guard let audioBinary = Data(base64Encoded: audioData) else {
                     reject("INVALID_INPUT", "Invalid audioData base64", nil)
                     return
@@ -341,40 +345,6 @@ extension ActrBridge {
         }
     }
     
-    /// End voice stream (UnregisterDataStream)
-    /// - Parameter dict: Dictionary containing 'streamId'
-    @objc
-    public func endVoice(
-        _ dict: [String: Any],
-        resolve: @escaping RCTPromiseResolveBlock,
-        reject: @escaping RCTPromiseRejectBlock
-    ) {
-        Task { @MainActor in
-            guard connectionStatus == .connected, let actr = self.actr else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
-                return
-            }
-            
-            do {
-                guard let streamID = dict["streamId"] as? String else {
-                    reject("INVALID_INPUT", "Missing streamId", nil)
-                    return
-                }
-                
-//                var request = Ask_UnregisterRequest()
-//                request.streamID = streamID
-//                
-//                let response = try await actr.call(request)
-//                resolve([
-//                    "success": response.success,
-//                    "message": response.message
-//                ])
-            } catch {
-                reject("ACTR_ERROR", error.localizedDescription, error)
-            }
-        }
-    }
-
     /// Upload attachment
     /// - Parameters:
     ///   - dict: Dictionary containing 'id', 'filename', 'type'
@@ -391,13 +361,13 @@ extension ActrBridge {
                 reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
                 return
             }
-
+            
             do {
                 guard let tmpData = dict["fileData"] as? String, let binaryData = Data(base64Encoded: tmpData) else {
                     reject("INVALID_INPUT", "Invalid fileData (Base64 decode failed)", nil)
                     return
                 }
-
+                
                 var request = Ask_AttachRequest()
                 request.id = dict["id"] as? String ?? UUID().uuidString
                 request.filename = dict["filename"] as? String ?? "file"
@@ -405,7 +375,7 @@ extension ActrBridge {
                 let typeInt = dict["type"] as? Int ?? 0
                 request.type = Ask_AttachmentType(rawValue: typeInt) ?? .unknown
                 request.data = binaryData
-
+                
                 let response = try await actr.call(request)
                 resolve([
                     "id": response.id,
@@ -437,29 +407,42 @@ extension ActrBridge {
 
 // MARK: - Simple stream handler that logs incoming chunks.
 
+enum StreamType: String {
+    case text
+    case voice
+}
+
 private actor StreamPrintCallback: Actr.DataStreamCallback {
     private let streamId: String
+    private let streamType: StreamType
     private let onMessage: (@Sendable (String) -> Void)?
     
-    init(streamId: String, onMessage: (@Sendable (String) -> Void)?) {
+    init(streamId: String, type: StreamType, onMessage: (@Sendable (String) -> Void)?) {
         self.streamId = streamId
+        self.streamType = type
         self.onMessage = onMessage
     }
     
     func onStream(chunk: Actr.DataStream, sender: ActrId) async throws {
-        let base64Payload = chunk.payload.base64EncodedString()
-                
-                // 推送到 RN
-                guard let bridge = await ActrBridge.shared() else {
-                    let errorMsg = "Failed to get ActrBridge instance to send event"
-                    throw ActrError.StateError(msg: errorMsg)
-                }
-                
-                let body: [String: Any] = [
-                    "streamID": self.streamId,
-                    "status": 0,
-                    "message": base64Payload
-                ]
+        let message: String
+        if streamType == .voice {
+            message = chunk.payload.base64EncodedString()
+        } else {
+            message = String(data: chunk.payload, encoding: .utf8) ?? ""
+        }
+        
+        // 推送到 RN
+        guard let bridge = await ActrBridge.shared() else {
+            let errorMsg = "[StreamPrintCallback] Failed to get ActrBridge instance to send event"
+            throw ActrError.StateError(msg: errorMsg)
+        }
+        
+        let body: [String: Any] = [
+            "streamID": self.streamId,
+            "type": self.streamType.rawValue,
+            "status": 0,
+            "message": message
+        ]
         
         await bridge.sendStreamEventToRN(body: body)
     }
@@ -474,24 +457,26 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     private var callbacks: [String: StreamPrintCallback] = [:]
     
     public init() {}
-
+    
     private func discoverTarget(ctx: Context) async throws -> ActrId {
         let targetType = try ActrType.fromStringRepr(remoteServiceTypeRepr)
         return try await ctx.discover(targetType: targetType)
     }
-
+    
     /// RPC method: SendText
     public func sendText(
         req: DataStreamApp_TextMessage,
         ctx: Context
     ) async throws -> DataStreamApp_TextMessageResponse {
         logger.info("[AskLocalServiceHandlerImpl] Received SendText request")
-
+        
         var userMessage = Ask_UsrPromptRequest()
         userMessage.text = req.text
         userMessage.sessionID = req.sessionID
         userMessage.questionID = req.messageID
         userMessage.attachmentIds = req.attachmentIds
+        userMessage.textResponseStreamID = req.textResponseStreamID
+        userMessage.voiceResponseStreamID = req.voiceResponseStreamID
         if req.hasLocation {
             userMessage.location = req.location
         }
@@ -506,22 +491,34 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         // 反序列化为 Ask_AssistantReply
         let reply = try Ask_AssistantReply(serializedBytes: responseData)
         
-        // 创建并保存回调实例，确保生命周期
-        let callback = StreamPrintCallback(streamId: reply.streamID, onMessage: nil)
-        self.callbacks[reply.streamID] = callback
+        // 注册文本响应流
+        if !req.textResponseStreamID.isEmpty {
+            let callback = StreamPrintCallback(streamId: req.textResponseStreamID, type: .text, onMessage: nil)
+            self.callbacks[req.textResponseStreamID] = callback
+            let _ = try await ctx.registerStream(
+                streamId: req.textResponseStreamID,
+                callback: callback
+            )
+            logger.info("[AskLocalServiceHandlerImpl] Text response stream registered: \(req.textResponseStreamID)")
+        }
         
-        // 注册回调以便处理后续的流式响应
-        let _ = try await ctx.registerStream(
-            streamId: reply.streamID,
-            callback: callback
-        )
-        
-        logger.info("[AskLocalServiceHandlerImpl] Text response stream registered: \(reply.streamID)")
+        // 注册语音响应流
+        if !req.voiceResponseStreamID.isEmpty {
+            let callback = StreamPrintCallback(streamId: req.voiceResponseStreamID, type: .voice, onMessage: nil)
+            self.callbacks[req.voiceResponseStreamID] = callback
+            let _ = try await ctx.registerStream(
+                streamId: req.voiceResponseStreamID,
+                callback: callback
+            )
+            logger.info("[AskLocalServiceHandlerImpl] Voice response stream registered: \(req.voiceResponseStreamID)")
+        }
         
         var resp = DataStreamApp_TextMessageResponse()
-        resp.streamID = reply.streamID
-        resp.status = reply.statusCode
-        resp.message = reply.errorMessage
+        resp.questionID = reply.questionID
+        resp.sessionID = reply.sessionID
+        resp.text = reply.text
+        resp.statusCode = reply.statusCode
+        resp.errorMessage = reply.errorMessage
         
         return resp
     }
@@ -532,16 +529,18 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         ctx: Context
     ) async throws -> DataStreamApp_StartVoiceMessageResponse {
         logger.info("[AskLocalServiceHandlerImpl] Received StartSendVoice request")
-
+        
         var userMessage = Ask_UsrPromptRequest()
         userMessage.voiceStreamID = req.streamID
         userMessage.sessionID = req.sessionID
         userMessage.questionID = req.messageID
         userMessage.attachmentIds = req.attachmentIds
+        userMessage.textResponseStreamID = req.textResponseStreamID
+        userMessage.voiceResponseStreamID = req.voiceResponseStreamID
         if req.hasLocation {
             userMessage.location = req.location
         }
-
+        
         let targetId = try await discoverTarget(ctx: ctx)
         let responseData = try await ctx.call(
             target: targetId,
@@ -552,26 +551,38 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         // 反序列化为 Ask_AssistantReply
         let reply = try Ask_AssistantReply(serializedBytes: responseData)
         
-        // 创建并保存回调实例，确保生命周期
-        let callback = StreamPrintCallback(streamId: reply.streamID, onMessage: nil)
-        self.callbacks[reply.streamID] = callback
+        // 注册文本响应流
+        if !req.textResponseStreamID.isEmpty {
+            let callback = StreamPrintCallback(streamId: req.textResponseStreamID, type: .text, onMessage: nil)
+            self.callbacks[req.textResponseStreamID] = callback
+            let _ = try await ctx.registerStream(
+                streamId: req.textResponseStreamID,
+                callback: callback
+            )
+            logger.info("[AskLocalServiceHandlerImpl] Text response stream registered: \(req.textResponseStreamID)")
+        }
         
-        // 使用 Ask_AssistantReply 的 streamID 注册回调
-        let _ = try await ctx.registerStream(
-            streamId: reply.streamID,
-            callback: callback
-        )
-        
-        logger.info("[AskLocalServiceHandlerImpl] DataStream registered with ID: \(reply.streamID)")
+        // 注册语音响应流
+        if !req.voiceResponseStreamID.isEmpty {
+            let callback = StreamPrintCallback(streamId: req.voiceResponseStreamID, type: .voice, onMessage: nil)
+            self.callbacks[req.voiceResponseStreamID] = callback
+            let _ = try await ctx.registerStream(
+                streamId: req.voiceResponseStreamID,
+                callback: callback
+            )
+            logger.info("[AskLocalServiceHandlerImpl] Voice response stream registered: \(req.voiceResponseStreamID)")
+        }
         
         var resp = DataStreamApp_StartVoiceMessageResponse()
-        resp.streamID = reply.streamID
-        resp.status = reply.statusCode
-        resp.message = reply.errorMessage
+        resp.questionID = reply.questionID
+        resp.sessionID = reply.sessionID
+        resp.text = reply.text
+        resp.statusCode = reply.statusCode
+        resp.errorMessage = reply.errorMessage
         
         return resp
     }
-
+    
     /// RPC method: SendVoiceChunk
     public func sendVoiceChunk(
         req: DataStreamApp_VoiceChunkMessage,
@@ -599,13 +610,13 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         
         return resp
     }
-
+    
 }
 
 extension AskLocalServiceWorkload: Workload where T == AskLocalServiceHandlerImpl {
     public func onStart(ctx _: Context) async throws {}
     public func onStop(ctx _: Context) async throws {}
-
+    
     public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
         return try await __dispatch(ctx: ctx, envelope: envelope)
     }
