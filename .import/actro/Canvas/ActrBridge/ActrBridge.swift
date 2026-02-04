@@ -322,16 +322,6 @@ extension ActrBridge {
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.chunkID = dict["chunkId"] as? String ?? ""// 客户端创建
-                request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
-
-                if let locationDict = dict["location"] as? [String: Any] {
-                    var location = StreamServer_Location()
-                    location.latitude = locationDict["latitude"] as? Double ?? 0
-                    location.longitude = locationDict["longitude"] as? Double ?? 0
-                    location.address = locationDict["address"] as? String ?? ""
-                    location.placeName = locationDict["placeName"] as? String ?? ""
-                    request.location = location
-                }
 
                 guard let audioBinary = Data(base64Encoded: audioData) else {
                     reject("INVALID_INPUT", "Invalid audioData base64", nil)
