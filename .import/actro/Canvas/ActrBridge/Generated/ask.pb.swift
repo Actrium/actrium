@@ -130,9 +130,6 @@ public struct Ask_AssistantReply: Sendable {
   /// Text answer (if applicable)
   public var text: String = String()
 
-  /// Stream ID for the answer
-  public var streamID: String = String()
-
   public var statusCode: Int32 = 0
 
   public var errorMessage: String = String()
@@ -307,9 +304,8 @@ extension Ask_AssistantReply: @preconcurrency SwiftProtobuf._MessageImplementati
     1: .standard(proto: "question_id"),
     2: .standard(proto: "session_id"),
     3: .same(proto: "text"),
-    4: .standard(proto: "stream_id"),
-    5: .standard(proto: "status_code"),
-    6: .standard(proto: "error_message"),
+    4: .standard(proto: "status_code"),
+    5: .standard(proto: "error_message"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -321,9 +317,8 @@ extension Ask_AssistantReply: @preconcurrency SwiftProtobuf._MessageImplementati
       case 1: try { try decoder.decodeSingularStringField(value: &self.questionID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.sessionID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.text) }()
-      case 4: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
-      case 5: try { try decoder.decodeSingularInt32Field(value: &self.statusCode) }()
-      case 6: try { try decoder.decodeSingularStringField(value: &self.errorMessage) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.statusCode) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.errorMessage) }()
       default: break
       }
     }
@@ -339,14 +334,11 @@ extension Ask_AssistantReply: @preconcurrency SwiftProtobuf._MessageImplementati
     if !self.text.isEmpty {
       try visitor.visitSingularStringField(value: self.text, fieldNumber: 3)
     }
-    if !self.streamID.isEmpty {
-      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 4)
-    }
     if self.statusCode != 0 {
-      try visitor.visitSingularInt32Field(value: self.statusCode, fieldNumber: 5)
+      try visitor.visitSingularInt32Field(value: self.statusCode, fieldNumber: 4)
     }
     if !self.errorMessage.isEmpty {
-      try visitor.visitSingularStringField(value: self.errorMessage, fieldNumber: 6)
+      try visitor.visitSingularStringField(value: self.errorMessage, fieldNumber: 5)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -355,7 +347,6 @@ extension Ask_AssistantReply: @preconcurrency SwiftProtobuf._MessageImplementati
     if lhs.questionID != rhs.questionID {return false}
     if lhs.sessionID != rhs.sessionID {return false}
     if lhs.text != rhs.text {return false}
-    if lhs.streamID != rhs.streamID {return false}
     if lhs.statusCode != rhs.statusCode {return false}
     if lhs.errorMessage != rhs.errorMessage {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}

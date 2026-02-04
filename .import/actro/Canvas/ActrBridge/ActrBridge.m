@@ -22,10 +22,6 @@ RCT_EXTERN_METHOD(sendVoiceChunk:(NSDictionary *)params
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
-/// End voice stream
-RCT_EXTERN_METHOD(endVoice:(NSDictionary *)params
-                  resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject)
 /// Upload attachment
 RCT_EXTERN_METHOD(uploadAttachment:(NSDictionary *)params
                   fileData:(NSString *)fileData
