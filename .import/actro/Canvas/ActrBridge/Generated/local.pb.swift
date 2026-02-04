@@ -33,8 +33,8 @@ public struct DataStreamApp_TextMessage: Sendable {
 
   public var messageID: String = String()
 
-  public var location: StreamServer_Location {
-    get {return _location ?? StreamServer_Location()}
+  public var location: Ask_Location {
+    get {return _location ?? Ask_Location()}
     set {_location = newValue}
   }
   /// Returns true if `location` has been explicitly set.
@@ -51,7 +51,7 @@ public struct DataStreamApp_TextMessage: Sendable {
 
   public init() {}
 
-  fileprivate var _location: StreamServer_Location? = nil
+  fileprivate var _location: Ask_Location? = nil
 }
 
 public struct DataStreamApp_TextMessageResponse: Sendable {
@@ -81,8 +81,8 @@ public struct DataStreamApp_StartVoiceMessage: Sendable {
 
   public var streamID: String = String()
 
-  public var location: StreamServer_Location {
-    get {return _location ?? StreamServer_Location()}
+  public var location: Ask_Location {
+    get {return _location ?? Ask_Location()}
     set {_location = newValue}
   }
   /// Returns true if `location` has been explicitly set.
@@ -97,7 +97,7 @@ public struct DataStreamApp_StartVoiceMessage: Sendable {
 
   public init() {}
 
-  fileprivate var _location: StreamServer_Location? = nil
+  fileprivate var _location: Ask_Location? = nil
 }
 
 public struct DataStreamApp_StartVoiceMessageResponse: Sendable {
