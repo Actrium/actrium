@@ -428,7 +428,7 @@ extension ActrBridge {
                 return
             }
             
-            workload.handler.removeCallback(streamId: streamId)
+            await workload.handler.removeCallback(streamId: streamId)
             resolve(true)
         }
     }
@@ -494,13 +494,22 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
 /// TODO: Implement the business logic for each RPC method
 public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     private let remoteServiceTypeRepr = "acme+AskService"
-    fileprivate var callbacks: [String: StreamPrintCallback] = [:]
+    
+    fileprivate struct StreamInfo {
+        let callback: StreamPrintCallback
+        let ctx: Context
+    }
+    
+    fileprivate var activeStreams: [String: StreamInfo] = [:]
     
     public init() {}
     
-    public func removeCallback(streamId: String) {
-        self.callbacks.removeValue(forKey: streamId)
-        logger.info("[AskLocalServiceHandlerImpl] Stream callback unregistered: \(streamId)")
+    public func removeCallback(streamId: String) async {
+        if let info = self.activeStreams.removeValue(forKey: streamId) {
+            try? await info.ctx.unregisterStream(streamId: streamId)
+            logger.info("[AskLocalServiceHandlerImpl] Stream unregistered from context: \(streamId)")
+        }
+        logger.info("[AskLocalServiceHandlerImpl] Stream callback info removed: \(streamId)")
     }
     
     private func discoverTarget(ctx: Context) async throws -> ActrId {
@@ -539,7 +548,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         // 注册文本响应流
         if !req.textResponseStreamID.isEmpty {
             let callback = StreamPrintCallback(streamId: req.textResponseStreamID, type: .text, onMessage: nil)
-            self.callbacks[req.textResponseStreamID] = callback
+            self.activeStreams[req.textResponseStreamID] = StreamInfo(callback: callback, ctx: ctx)
             let _ = try await ctx.registerStream(
                 streamId: req.textResponseStreamID,
                 callback: callback
@@ -550,7 +559,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         // 注册语音响应流
         if !req.voiceResponseStreamID.isEmpty {
             let callback = StreamPrintCallback(streamId: req.voiceResponseStreamID, type: .voice, onMessage: nil)
-            self.callbacks[req.voiceResponseStreamID] = callback
+            self.activeStreams[req.voiceResponseStreamID] = StreamInfo(callback: callback, ctx: ctx)
             let _ = try await ctx.registerStream(
                 streamId: req.voiceResponseStreamID,
                 callback: callback
@@ -599,7 +608,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         // 注册文本响应流
         if !req.textResponseStreamID.isEmpty {
             let callback = StreamPrintCallback(streamId: req.textResponseStreamID, type: .text, onMessage: nil)
-            self.callbacks[req.textResponseStreamID] = callback
+            self.activeStreams[req.textResponseStreamID] = StreamInfo(callback: callback, ctx: ctx)
             let _ = try await ctx.registerStream(
                 streamId: req.textResponseStreamID,
                 callback: callback
@@ -610,7 +619,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         // 注册语音响应流
         if !req.voiceResponseStreamID.isEmpty {
             let callback = StreamPrintCallback(streamId: req.voiceResponseStreamID, type: .voice, onMessage: nil)
-            self.callbacks[req.voiceResponseStreamID] = callback
+            self.activeStreams[req.voiceResponseStreamID] = StreamInfo(callback: callback, ctx: ctx)
             let _ = try await ctx.registerStream(
                 streamId: req.voiceResponseStreamID,
                 callback: callback
