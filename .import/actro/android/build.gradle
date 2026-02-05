@@ -1,22 +1,21 @@
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:7.4.2'
-    }
-}
-
 apply plugin: 'com.android.library'
+
+def safeExtGet(prop, fallback) {
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
 
 android {
     namespace 'com.rill.sandbox'
-    compileSdkVersion 33
+    compileSdk safeExtGet('compileSdkVersion', 35)
+    ndkVersion safeExtGet('ndkVersion', '27.1.12297006')
+
+    buildFeatures {
+        prefab true
+    }
 
     defaultConfig {
-        minSdkVersion 21
-        targetSdkVersion 33
+        minSdk safeExtGet('minSdkVersion', 24)
+        targetSdk safeExtGet('targetSdkVersion', 35)
 
         externalNativeBuild {
             cmake {
@@ -29,12 +28,14 @@ android {
     externalNativeBuild {
         cmake {
             path 'CMakeLists.txt'
+            version '3.31.6'
         }
     }
 
     sourceSets {
         main {
             manifest.srcFile 'src/main/AndroidManifest.xml'
+            java.srcDirs = ['src/main/java']
         }
     }
 }
@@ -45,5 +46,6 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.facebook.react:react-native:+'
+    implementation 'com.facebook.react:react-android:+'
+    implementation 'com.facebook.react:hermes-android:+'
 }
