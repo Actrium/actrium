@@ -1,14 +1,10 @@
 package com.askaway.android
 
 import android.os.Bundle
-import android.view.ViewGroup
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.fragment.app.Fragment
 import com.askaway.android.databinding.ActivityMainBinding
-import com.google.android.material.tabs.TabLayout
 import com.facebook.react.ReactRootView
-import com.facebook.react.ReactInstanceManager
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
@@ -21,39 +17,52 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        val tabLayout = binding.tabLayout
-        val reactInstanceManager = (application as MainApplication).reactNativeHost.reactInstanceManager
-
         binding.ivAdd.setOnClickListener {
-            binding.flContent.removeAllViews()
-
-            // 停止上一个 ReactRootView
+            // 移除旧的 ReactRootView
             reactRootView?.unmountReactApplication()
+            binding.flContent.removeAllViews()
 
             val bundle = Bundle()
             val tabModel = viewModel.genReactNativeTabModel()
             bundle.putBundle("tab", tabModel.toBundle())
             bundle.putBoolean("singleTabMode", true)
 
-            // 创建新的 ReactRootView
-            reactRootView = ReactRootView(this)
-            reactRootView?.startReactApplication(
-                reactInstanceManager,
-                "canvas-kotlin",
-                bundle
-            )
+            // 直接创建 ReactRootView 作为普通 View 使用
+            reactRootView = createReactRootView("canvas-kotlin", bundle)
 
-            // 添加 ReactRootView 到容器
-            reactRootView?.let { view ->
-                binding.flContent.addView(view)
-            }
+            // 添加到容器中
+            binding.flContent.addView(reactRootView)
         }
-
-        // ...existing code...
     }
 
-    private fun showFragment(fragment: Fragment) {
-        // ...existing code...
+    /**
+     * 创建支持新架构的 ReactRootView
+     */
+    private fun createReactRootView(componentName: String, launchOptions: Bundle?): ReactRootView {
+        val application = application as MainApplication
+        val reactInstanceManager = application.reactNativeHost.reactInstanceManager
+
+        return ReactRootView(this).apply {
+            // 为新架构启用 Fabric
+            if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
+                setIsFabric(true)
+            }
+
+            // 启动 React 应用
+            startReactApplication(reactInstanceManager, componentName, launchOptions)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        val application = application as MainApplication
+        application.reactNativeHost.reactInstanceManager.onHostPause(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val application = application as MainApplication
+        application.reactNativeHost.reactInstanceManager.onHostResume(this, this)
     }
 
     override fun onDestroy() {
@@ -61,30 +70,18 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         reactRootView?.unmountReactApplication()
     }
 
-    override fun onPause() {
-        super.onPause()
-        val reactInstanceManager = (application as MainApplication).reactNativeHost.reactInstanceManager
-        reactInstanceManager.onHostPause(this)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        val reactInstanceManager = (application as MainApplication).reactNativeHost.reactInstanceManager
-        reactInstanceManager.onHostResume(this, this)
-    }
-
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        val reactInstanceManager = (application as MainApplication).reactNativeHost.reactInstanceManager
-        if (reactInstanceManager != null && reactInstanceManager.hasStartedCreatingInitialContext()) {
+        val application = application as MainApplication
+        val reactInstanceManager = application.reactNativeHost.reactInstanceManager
+        if (reactInstanceManager.hasStartedCreatingInitialContext()) {
             reactInstanceManager.onBackPressed()
-            return
+        } else {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
         }
-        @Suppress("DEPRECATION")
-        super.onBackPressed()
     }
 
-    // 实现 DefaultHardwareBackBtnHandler 接口
     override fun invokeDefaultOnBackPressed() {
         @Suppress("DEPRECATION")
         super.onBackPressed()
