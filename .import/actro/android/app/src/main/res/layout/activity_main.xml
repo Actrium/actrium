@@ -47,23 +47,4 @@
         android:id="@+id/flContent"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
-
-    <com.google.android.material.tabs.TabLayout
-        android:id="@+id/tabLayout"
-        android:visibility="gone"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="?attr/colorPrimary"
-        app:tabIndicatorColor="@android:color/black"
-        app:tabSelectedTextColor="@android:color/black"
-        app:tabTextColor="@android:color/black" />
-
-    <!-- Fragment容器 -->
-    <FrameLayout
-        android:id="@+id/fragmentContainer"
-        android:layout_width="match_parent"
-        android:visibility="gone"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
 </LinearLayout>

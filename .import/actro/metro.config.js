@@ -20,6 +20,10 @@ const subsystemPath = path.resolve(__dirname, 'Subsystem');
 const config = {
   watchFolders: [subsystemPath],
   resolver: {
+    nodeModulesPaths: [
+      path.resolve(__dirname, 'Subsystem/node_modules'),
+      path.resolve(__dirname, 'node_modules'),
+    ],
     // 确保 react 和 react-native 使用主项目的版本，避免冲突
     extraNodeModules: {
       'react': path.resolve(__dirname, 'node_modules/react'),
