@@ -374,7 +374,6 @@ extension ActrBridge {
     @objc
     public func uploadAttachment(
         _ dict: [String: Any],
-        fileData: String,
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
@@ -502,7 +501,7 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
     }
 }
 
-// MARK: - Implementation of LocalFileServiceHandler 
+// MARK: - Implementation of LocalFileServiceHandler
 
 /// Implementation of AskLocalServiceHandler
 /// TODO: Implement the business logic for each RPC method
