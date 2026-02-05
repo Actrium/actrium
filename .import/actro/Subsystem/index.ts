@@ -27,6 +27,8 @@ log.debug('console.assert type (after guard): ' + typeof console.assert);
 import { initDatabase } from './src/libs/Sqlite.init';
 initDatabase();
 
+import 'react-native-get-random-values';
+
 import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';
 

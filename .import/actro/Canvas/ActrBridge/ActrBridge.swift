@@ -493,7 +493,7 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
 /// Implementation of AskLocalServiceHandler
 /// TODO: Implement the business logic for each RPC method
 public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
-    private let remoteServiceTypeRepr = "acme+AskService"
+    private let remoteServiceTypeRepr = "acmeopenclaw+AskService"
     
     fileprivate struct StreamInfo {
         let callback: StreamPrintCallback
