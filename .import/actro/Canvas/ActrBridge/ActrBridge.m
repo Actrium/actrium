@@ -30,12 +30,13 @@ RCT_EXTERN_METHOD(uploadAttachment:(NSDictionary *)params
 // MARK: - ActrService Methods
 
 /// Initialize ActrService
-RCT_EXTERN_METHOD(initializeService:(NSString *)path
+RCT_EXTERN_METHOD(initializeService:(NSDictionary *)config
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// Shutdown ActrService
-RCT_EXTERN_METHOD(shutdownService:(RCTPromiseResolveBlock)resolve
+RCT_EXTERN_METHOD(shutdownService:(NSDictionary *)params
+                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// Send echo message through ActrService
@@ -48,7 +49,7 @@ RCT_EXTERN_METHOD(getServiceStatus:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 /// Unregister a stream callback
-RCT_EXTERN_METHOD(unregisterStream:(NSString *)streamId
+RCT_EXTERN_METHOD(unregisterStream:(NSDictionary *)params
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 

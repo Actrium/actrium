@@ -30,10 +30,14 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     var streamMessages: [String] = []
     var textMessages: [String] = []
     
-    private var actrSystem: ActrSystem?
-    private var actrNode: ActrNode?
-    private var actr: ActrRef?
-    private var workload: AskLocalServiceWorkload<AskLocalServiceHandlerImpl>?
+    private struct ActorInstance {
+        let system: ActrSystem
+        let node: ActrNode
+        let actr: ActrRef
+        let workload: AskLocalServiceWorkload<AskLocalServiceHandlerImpl>
+    }
+    
+    private var actorInstances: [String: ActorInstance] = [:]
     
     private let queue = DispatchQueue(label: "com.actr.bridge.queue")
     
@@ -56,31 +60,27 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     }
     
     /// Prepare client-side stream handling
-    /// - Parameter expectedCount: Number of messages expected from the server
-    /// - Returns: PrepareStreamResponse containing the result and the generated streamID
-    func prepareClientStream() async throws -> (String) {
-        guard connectionStatus == .connected else {
-            throw ActrError.StateError(msg: "Not connected to server")
-        }
-        
-        guard let actr = actr else {
-            throw ActrError.StateError(msg: "Actor reference not available")
+    /// - Parameter actorType: The actor type to use
+    /// - Returns: The generated streamID
+    func prepareClientStream(actorType: String) async throws -> (String) {
+        guard let instance = actorInstances[actorType] else {
+            throw ActrError.StateError(msg: "ActrBridge not initialized for \(actorType)")
         }
         
         var request = DataStreamApp_VoiceChunkMessage()
         let streamID = "stream-\(UUID().uuidString)"
         request.streamID = streamID
         
-        logger.info("Preparing client stream: stream_id=\(request.streamID)")
+        logger.info("[ActrBridge] Preparing client stream: stream_id=\(request.streamID)")
         
         do {
-            let _ = try await actr.call(request)
+            let _ = try await instance.actr.call(request)
             return (streamID)
         } catch let actrError as ActrError {
-            logger.error("Prepare client stream error: \(actrError.localizedDescription)")
+            logger.error("[ActrBridge] Prepare client stream error: \(actrError.localizedDescription)")
             throw actrError
         } catch {
-            logger.error("Prepare client stream error: \(error.localizedDescription)")
+            logger.error("[ActrBridge] Prepare client stream error: \(error.localizedDescription)")
             throw error
         }
     }
@@ -90,16 +90,16 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
 
 extension ActrBridge {
     /// Initialize the Actr system and its underlying actors
-    private func initialize(path: String) async throws {
+    private func initialize(actorType: String, configPath: String) async throws {
         connectionStatus = .initializing
         errorMessage = nil
-        logger.info("Initializing ActrBridge...")
+        logger.info("[ActrBridge] Initializing ActrBridge for \(actorType)...")
         
         do {
             let result = try await Task.detached(priority: .userInitiated) { () throws
                 -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>) in
-                let system = try await ActrSystem.from(tomlConfig: path)
-                let handler = await AskLocalServiceHandlerImpl()
+                let system = try await ActrSystem.from(tomlConfig: configPath)
+                let handler = await AskLocalServiceHandlerImpl(remoteServiceTypeRepr: actorType)
                 let workload = AskLocalServiceWorkload(handler: handler)
                 let node = try system.spawn(workload: workload)
                 let actr = try await node.start()
@@ -107,44 +107,45 @@ extension ActrBridge {
             }.value
             
             let (system, node, actr, workload) = result
-            actrSystem = system
-            actrNode = node
-            self.actr = actr
-            self.workload = workload
+            let instance = ActorInstance(system: system, node: node, actr: actr, workload: workload)
+            actorInstances[actorType] = instance
             
             // Wait a bit for the signaling client to establish connection
-            logger.info("Waiting for signaling client to connect...")
+            logger.info("[ActrBridge] Waiting for signaling client to connect...")
             try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             
             connectionStatus = .connected
-            logger.info("ActrBridge initialized successfully")
+            logger.info("[ActrBridge] ActrBridge initialized successfully for \(actorType)")
         } catch let actrError as ActrError {
             errorMessage = "Actr Error: \(actrError.localizedDescription)"
             connectionStatus = .error
-            logger.error("Failed to initialize: \(actrError.localizedDescription)")
+            logger.error("[ActrBridge] Failed to initialize \(actorType): \(actrError.localizedDescription)")
             throw actrError
         } catch {
             errorMessage = "Initialization Error: \(error.localizedDescription)"
             connectionStatus = .error
-            logger.error("Failed to initialize: \(error.localizedDescription)")
+            logger.error("[ActrBridge] Failed to initialize \(actorType): \(error.localizedDescription)")
             throw error
         }
     }
     
     /// Shutdown the service and cleanup resources
-    private func shutdown() async {
-        logger.info("Shutting down ActrBridge...")
-        
-        if let actr {
-            await actr.stop()
+    private func shutdown(actorType: String?) async {
+        if let actorType = actorType {
+            logger.info("[ActrBridge] Shutting down ActrBridge for \(actorType)...")
+            if let instance = actorInstances.removeValue(forKey: actorType) {
+                await instance.actr.stop()
+            }
+        } else {
+            logger.info("[ActrBridge] Shutting down all ActrBridge instances...")
+            for (type, instance) in actorInstances {
+                logger.info("[ActrBridge] Shutting down \(type)...")
+                await instance.actr.stop()
+            }
+            actorInstances.removeAll()
+            connectionStatus = .disconnected
         }
         
-        actr = nil
-        actrNode = nil
-        actrSystem = nil
-        workload = nil
-        
-        connectionStatus = .disconnected
         errorMessage = nil
     }
 }
@@ -165,13 +166,18 @@ extension ActrBridge {
     /// Initialize ActrService
     @objc
     public func initializeService(
-        _ path: String,
+        _ dict: [String: Any],
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
+            guard let actorType = dict["actorType"] as? String,
+                  let path = dict["path"] as? String else {
+                reject("INVALID_INPUT", "Missing actorType or path in JSON config", nil)
+                return
+            }
             do {
-                try await self.initialize(path: path)
+                try await self.initialize(actorType: actorType, configPath: path)
                 resolve(["status": "connected"])
             } catch let error as ActrError {
                 reject("ACTR_ERROR", self.formatActrError(error), error)
@@ -184,11 +190,13 @@ extension ActrBridge {
     /// Shutdown ActrService
     @objc
     public func shutdownService(
-        _ resolve: @escaping RCTPromiseResolveBlock,
+        _ dict: [String: Any],
+        resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            await self.shutdown()
+            let actorType = dict["actorType"] as? String
+            await self.shutdown(actorType: actorType)
             resolve(["status": "disconnected"])
         }
     }
@@ -201,8 +209,9 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard connectionStatus == .connected, let actr = self.actr else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+            guard let actorType = dict["actorType"] as? String,
+                  let instance = actorInstances[actorType] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
                 return
             }
             
@@ -230,7 +239,7 @@ extension ActrBridge {
                     return
                 }
                 
-                let response = try await actr.call(request)
+                let response = try await instance.actr.call(request)
                 resolve([
                     "questionId": response.questionID,
                     "sessionId": response.sessionID,
@@ -255,8 +264,9 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard connectionStatus == .connected, let actr = self.actr else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+            guard let actorType = dict["actorType"] as? String,
+                  let instance = actorInstances[actorType] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
                 return
             }
             
@@ -283,7 +293,7 @@ extension ActrBridge {
                     return
                 }
                 
-                let response = try await actr.call(request)
+                let response = try await instance.actr.call(request)
                 appLogger.info("startVoice response======= \(response)")
                 resolve([
                     "sessionId": response.sessionID,
@@ -310,8 +320,9 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard connectionStatus == .connected, let actr = self.actr else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+            guard let actorType = dict["actorType"] as? String,
+                  let instance = actorInstances[actorType] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
                 return
             }
             
@@ -344,7 +355,7 @@ extension ActrBridge {
                 }
                 request.chunkData = audioBinary
                 
-                let response = try await actr.call(request)
+                let response = try await instance.actr.call(request)
                 resolve([
                     "streamID": response.streamID,
                     "status": response.status,
@@ -368,8 +379,9 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard connectionStatus == .connected, let actr = self.actr else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+            guard let actorType = dict["actorType"] as? String,
+                  let instance = actorInstances[actorType] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
                 return
             }
             
@@ -387,7 +399,7 @@ extension ActrBridge {
                 request.type = Ask_AttachmentType(rawValue: typeInt) ?? .unknown
                 request.data = binaryData
                 
-                let response = try await actr.call(request)
+                let response = try await instance.actr.call(request)
                 resolve([
                     "id": response.id,
                     "statusCode": response.statusCode,
@@ -418,17 +430,19 @@ extension ActrBridge {
     /// Unregister a stream callback
     @objc
     public func unregisterStream(
-        _ streamId: String,
+        _ dict: [String: Any],
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let workload = self.workload else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized", nil)
+            guard let actorType = dict["actorType"] as? String,
+                  let streamId = dict["streamId"] as? String,
+                  let instance = actorInstances[actorType] else {
+                reject("INVALID_INPUT", "Missing actorType, streamId or instance not found", nil)
                 return
             }
             
-            await workload.handler.removeCallback(streamId: streamId)
+            await instance.workload.handler.removeCallback(streamId: streamId)
             resolve(true)
         }
     }
@@ -488,12 +502,12 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
     }
 }
 
-// MARK: - Implementation of LocalFileServiceHandler
+// MARK: - Implementation of LocalFileServiceHandler 
 
 /// Implementation of AskLocalServiceHandler
 /// TODO: Implement the business logic for each RPC method
 public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
-    private let remoteServiceTypeRepr = "acmeopenclaw+AskService"
+    private let remoteServiceTypeRepr: String
     
     fileprivate struct StreamInfo {
         let callback: StreamPrintCallback
@@ -502,7 +516,9 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     
     fileprivate var activeStreams: [String: StreamInfo] = [:]
     
-    public init() {}
+    public init(remoteServiceTypeRepr: String) {
+        self.remoteServiceTypeRepr = remoteServiceTypeRepr
+    }
     
     public func removeCallback(streamId: String) async {
         if let info = self.activeStreams.removeValue(forKey: streamId) {
