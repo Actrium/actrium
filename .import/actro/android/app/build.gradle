@@ -4,7 +4,6 @@ apply plugin: "com.facebook.react"
 apply plugin: "kotlin-parcelize"
 
 // Match build config to gradle.properties newArchEnabled.
-def isNewArchEnabled = project.hasProperty("newArchEnabled") && project.newArchEnabled == "true"
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -88,7 +87,6 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
-        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
 
 //        externalNativeBuild {
 //            cmake {
@@ -96,9 +94,6 @@ android {
 //                arguments '-DANDROID_STL=c++_shared'
 //            }
 //        }
-        ndk {
-            abiFilters (*reactNativeArchitectures.split(','))
-        }
     }
     signingConfigs {
         debug {
@@ -130,9 +125,6 @@ android {
 //             path '/Users/example/Documents/Project/example-app/rill/native/platform/android/CMakeLists.txt'
 //         }
 //     }
-    buildFeatures {
-        prefab true
-    }
 }
 
 dependencies {
