@@ -1,5 +1,6 @@
 package com.askaway.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -16,7 +17,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
+        binding.ivExpand.setOnClickListener {
+            startActivity(Intent(this, HomeActivity::class.java))
+        }
         binding.ivAdd.setOnClickListener {
             // 移除旧的 ReactRootView
             reactRootView?.unmountReactApplication()
@@ -33,6 +36,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             // 添加到容器中
             binding.flContent.addView(reactRootView)
         }
+
     }
 
     /**
