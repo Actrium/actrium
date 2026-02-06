@@ -96,7 +96,11 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             guard let rootView = rootView else { return }
 
             // 通知 Yoga 新尺寸（关键：解决缩小时不更新的问题）
-            rootView.bridge.uiManager.setSize(throttledSize, for: rootView)
+            // 虽然 bridge 在定义上可能非可选，但在 Release 模式下运行时可能为 nil，
+            // 我们通过可选类型转换来安全访问 uiManager。
+            if let uiManager = (rootView.bridge as RCTBridge?)?.uiManager {
+                uiManager.setSize(throttledSize, for: rootView)
+            }
 
             // 强制布局更新
             rootView.setNeedsLayout()

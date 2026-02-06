@@ -44,13 +44,13 @@ class BrowserViewModel: ObservableObject {
     }
 
     init() {
+        #if DEBUG
         // 🔴 开发调试：优先加载 counterapp 开发目录作为启动 tab (Focus 模式)
-        let counterAppDevPath = "/Users/toupitutuetoudada/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"
-        // let counterAppDevPath = "/Users/wangyanbo/work/askaway-ipad/Subsystem/actr-app-examples/counterapp"
+//        let counterAppDevPath = "/Users/toupitutuetoudada/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"
+        let counterAppDevPath = "/Users/wangyanbo/work/askaway-ipad/Subsystem/actr-app-examples/counterapp"
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: counterAppDevPath, isDirectory: &isDirectory), isDirectory.boolValue {
             logger.debug("🔄 [BrowserViewModel] 启动时直接加载 counterapp 开发目录 (Focus 模式)")
-            // Initialize slot positions
             initializeSlotPositions()
 
             // 延迟加载开发目录，避免在 SwiftUI 初始化期间阻塞主线程
@@ -60,6 +60,17 @@ class BrowserViewModel: ObservableObject {
             }
             return
         }
+        #else
+        // 🟢 正式构建：自动搜索并加载 Bundle 内的所有 .actr 包
+        if let actrURLs = Bundle.main.urls(forResourcesWithExtension: "actr", subdirectory: nil), !actrURLs.isEmpty {
+            logger.notice("📦 [BrowserViewModel] 检测到 \(actrURLs.count) 个内置应用包，开始加载...")
+            initializeSlotPositions()
+            for url in actrURLs {
+                importACTRPackage(from: url)
+            }
+            return
+        }
+        #endif
 
         let defaultTab = Tab(
             title: "human in loop - coding for ever",
