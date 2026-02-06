@@ -74,7 +74,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
         logger.info("[ActrBridge] Preparing client stream: stream_id=\(request.streamID)")
         
         do {
-            let _ = try await instance.actr.call(request)
+            let _ = try await instance.actr.call(request, timeoutMs: 90000)
             return (streamID)
         } catch let actrError as ActrError {
             logger.error("[ActrBridge] Prepare client stream error: \(actrError.localizedDescription)")
@@ -238,8 +238,7 @@ extension ActrBridge {
                     reject("INVALID_INPUT", "Missing required field (streamId)", nil)
                     return
                 }
-                
-                let response = try await instance.actr.call(request)
+                let response = try await instance.actr.call(request, timeoutMs: 90000)
                 resolve([
                     "questionId": response.questionID,
                     "sessionId": response.sessionID,
@@ -293,7 +292,7 @@ extension ActrBridge {
                     return
                 }
                 
-                let response = try await instance.actr.call(request)
+                let response = try await instance.actr.call(request, timeoutMs: 90000)
                 appLogger.info("startVoice response======= \(response)")
                 resolve([
                     "sessionId": response.sessionID,
@@ -355,7 +354,7 @@ extension ActrBridge {
                 }
                 request.chunkData = audioBinary
                 
-                let response = try await instance.actr.call(request)
+                let response = try await instance.actr.call(request, timeoutMs: 90000)
                 resolve([
                     "streamID": response.streamID,
                     "status": response.status,
@@ -398,7 +397,7 @@ extension ActrBridge {
                 request.type = Ask_AttachmentType(rawValue: typeInt) ?? .unknown
                 request.data = binaryData
                 
-                let response = try await instance.actr.call(request)
+                let response = try await instance.actr.call(request, timeoutMs: 90000)
                 resolve([
                     "id": response.id,
                     "statusCode": response.statusCode,
