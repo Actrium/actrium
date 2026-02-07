@@ -1091,7 +1091,7 @@ class BrowserViewModel: ObservableObject {
         contractName: String? = nil,
         contractVersion: Int? = nil,
         permissions: [String] = [],
-        leftPanelDefaultVisible: Bool = true,
+        leftPanelDefaultVisible: Bool = false,
         rightPanelDefaultVisible: Bool = false
     ) {
         let newTab = Tab(

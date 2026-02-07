@@ -83,7 +83,7 @@ struct Tab: Identifiable {
         contractVersion: Int? = nil,
         permissions: [String] = [],
         reloadNonce: Int = 0,
-        leftPanelDefaultVisible: Bool = true,
+        leftPanelDefaultVisible: Bool = false,
         rightPanelDefaultVisible: Bool = false,
         backgroundColor: String? = nil
     ) {
