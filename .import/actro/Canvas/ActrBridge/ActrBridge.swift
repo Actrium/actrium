@@ -195,7 +195,11 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            let actorType = dict["actorType"] as? String
+            guard let actorType = dict["actorType"] as? String,
+                  let path = dict["path"] as? String else {
+                reject("INVALID_INPUT", "Missing actorType or path in JSON config", nil)
+                return
+            }
             await self.shutdown(actorType: actorType)
             resolve(["status": "disconnected"])
         }
@@ -216,6 +220,7 @@ extension ActrBridge {
             }
             
             do {
+                logger.info("[ActrBridge] Sending text message: \(dict)")
                 var request = DataStreamApp_TextMessage()
                 request.text = dict["text"] as? String ?? ""
                 request.sessionID = dict["sessionId"] as? String ?? ""
@@ -548,6 +553,8 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         if req.hasLocation {
             userMessage.location = req.location
         }
+
+        logger.info("[AskLocalServiceHandlerImpl] User message prepared: \(userMessage.debugDescription)")
         
         let targetId = try await discoverTarget(ctx: ctx)
         let responseData = try await ctx.call(
