@@ -213,6 +213,7 @@ extension ActrBridge {
     ) {
         Task { @MainActor in
             guard let actorType = dict["actorType"] as? String,
+                  let textResponseStreamID = dict["textResponseStreamId"] as? String,
                   let instance = actorInstances[actorType] else {
                 reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
                 return
@@ -221,12 +222,19 @@ extension ActrBridge {
             do {
                 logger.info("[ActrBridge] Sending text message: \(dict)")
                 var request = DataStreamApp_TextMessage()
-                request.text = dict["text"] as? String ?? ""
+                if let base64Text = dict["text"] as? String, !base64Text.isEmpty {
+                    if let data = Data(base64Encoded: base64Text),
+                       let decodedString = String(data: data, encoding: .utf8) {
+                        request.text = decodedString
+                    } else {
+                        request.text = base64Text
+                    }
+                }
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
                 request.streamID = dict["streamId"] as? String ?? ""
                 request.attachmentIds = dict["attachmentIds"] as? [String] ?? []
-                request.textResponseStreamID = dict["textResponseStreamId"] as? String ?? ""
+                request.textResponseStreamID = textResponseStreamID
                 request.voiceResponseStreamID = dict["voiceResponseStreamId"] as? String ?? ""
                 
                 if let locationDict = dict["location"] as? [String: Any] {
