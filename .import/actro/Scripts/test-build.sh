@@ -33,6 +33,28 @@ else
 fi
 cd "$PROJECT_ROOT"
 
+# 打包 React Native Bundle 和资源
+echo "📦 打包 React Native Bundle..."
+cd Subsystem
+npx react-native bundle \
+    --platform ios \
+    --dev false \
+    --entry-file index.ts \
+    --bundle-output "$PROJECT_ROOT/Canvas/actr.jsbundle" \
+    --assets-dest "$PROJECT_ROOT/Canvas"
+cd "$PROJECT_ROOT"
+
+# 打包示例 App (counterapp.actr)
+echo "📦 打包示例 App (counterapp.actr)..."
+COUNTER_APP_DIR="$PROJECT_ROOT/Subsystem/actr-app-examples/counterapp"
+OUTPUT_ASSET_DIR="$PROJECT_ROOT/Canvas/Resources"
+if [ -d "$COUNTER_APP_DIR" ]; then
+    cd "$COUNTER_APP_DIR"
+    zip -j "$OUTPUT_ASSET_DIR/counterapp.actr" manifest.json unified-app.js
+    echo "✅ counterapp.actr 已更新至 $OUTPUT_ASSET_DIR"
+fi
+cd "$PROJECT_ROOT"
+
 echo "📦 安装 CocoaPods 依赖..."
 pod install
 
