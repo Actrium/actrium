@@ -195,8 +195,7 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let actorType = dict["actorType"] as? String,
-                  let path = dict["path"] as? String else {
+            guard let actorType = dict["actorType"] as? String else {
                 reject("INVALID_INPUT", "Missing actorType or path in JSON config", nil)
                 return
             }
