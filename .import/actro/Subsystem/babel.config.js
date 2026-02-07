@@ -1,7 +1,7 @@
 module.exports = {
   presets: ['@react-native/babel-preset'],
   plugins: [
-    // Inject source location into function expressions for DevTools navigation
-    './babel-plugin-function-source-location.js',
-  ],
+    // 仅在非生产环境下注入源码位置
+    !isProd && './babel-plugin-function-source-location.js',
+  ].filter(Boolean),
 };
