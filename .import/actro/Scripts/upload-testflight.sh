@@ -178,6 +178,48 @@ cd "$PROJECT_ROOT"
 log_success "React Native 依赖安装完成"
 
 # ==============================================================================
+# 打包 React Native Bundle 和资源
+# ==============================================================================
+
+log_step "打包 React Native Bundle"
+
+cd "$PROJECT_ROOT/Subsystem"
+
+# 运行打包命令
+# --bundle-output 输出到 Canvas 根目录，符合 CanvasReactNativeFactoryDelegate.bundleURL 引用逻辑
+# --assets-dest 输出到 Canvas 根目录，会生成 assets/ 文件夹层级
+npx react-native bundle \
+    --platform ios \
+    --dev false \
+    --entry-file index.ts \
+    --bundle-output "$PROJECT_ROOT/Canvas/actr.jsbundle" \
+    --assets-dest "$PROJECT_ROOT/Canvas"
+
+cd "$PROJECT_ROOT"
+
+log_success "React Native Bundle 及资源打包完成"
+
+# ==============================================================================
+# 打包示例 .actr 应用
+# ==============================================================================
+
+log_step "打包示例 App (counterapp.actr)"
+
+COUNTER_APP_DIR="$PROJECT_ROOT/Subsystem/actr-app-examples/counterapp"
+OUTPUT_ASSET_DIR="$PROJECT_ROOT/Canvas/Resources"
+
+if [ -d "$COUNTER_APP_DIR" ]; then
+    cd "$COUNTER_APP_DIR"
+    # 将 manifest.json 和 unified-app.js 压缩，重命名为 .actr 并输出到 Resources
+    zip -j "$OUTPUT_ASSET_DIR/counterapp.actr" manifest.json unified-app.js
+    log_success "counterapp.actr 已更新至 $OUTPUT_ASSET_DIR"
+else
+    log_warning "未找到 counterapp 目录，跳过 .actr 打包"
+fi
+
+cd "$PROJECT_ROOT"
+
+# ==============================================================================
 # 安装 CocoaPods 依赖
 # ==============================================================================
 

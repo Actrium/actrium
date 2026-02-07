@@ -73,6 +73,14 @@ main() {
     update_xcode_env "$@"
     ;;
 
+  'tf') # 打包并上传到 TestFlight
+    ./Scripts/upload-testflight.sh
+    ;;
+
+  'test') # 本地测试构建
+    ./Scripts/test-build.sh
+    ;;
+
   *) show_error "无效命令: $*" ;;
   esac
 }
