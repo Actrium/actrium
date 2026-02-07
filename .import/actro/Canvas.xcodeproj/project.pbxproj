@@ -15,6 +15,7 @@
 		E57012D02F20D8DD0033B7CE /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CF2F20D8DD0033B7CE /* Kingfisher */; };
 		E572DEE52F221B84001D2A56 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E572DEE42F221B84001D2A56 /* MarkdownUI */; };
 		E5881D752F29B1F700882E9D /* Actr in Frameworks */ = {isa = PBXBuildFile; productRef = E5881D742F29B1F700882E9D /* Actr */; };
+		E5B0D7B72F36C3B000299691 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = E5B0D7B62F36C3B000299691 /* assets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,13 +23,35 @@
 		54BE6183EA33DF557E1EAE93 /* libPods-Canvas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Canvas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9E8F106EEB5ACFC4B33B67C7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		BDECA8F1C7AE7D67A02606DC /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
-		E55901A52F163A5B00514034 /* Canvas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Canvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E55901A52F163A5B00514034 /* AskAway.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AskAway.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E5B0D7B62F36C3B000299691 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = assets; path = Canvas/assets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		E572DEB22F21FCBC001D2A56 /* Exceptions for "Canvas" folder in "Canvas" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				assets/src/assets/icons/audio.png,
+				assets/src/assets/icons/camera.png,
+				assets/src/assets/icons/close.png,
+				assets/src/assets/icons/copy.png,
+				assets/src/assets/icons/delete.png,
+				assets/src/assets/icons/edit.png,
+				assets/src/assets/icons/enter.png,
+				assets/src/assets/icons/file.png,
+				assets/src/assets/icons/link.png,
+				assets/src/assets/icons/load_link.png,
+				assets/src/assets/icons/menu_more.png,
+				assets/src/assets/icons/more.png,
+				assets/src/assets/icons/network.png,
+				assets/src/assets/icons/photo.png,
+				assets/src/assets/icons/send.png,
+				assets/src/assets/icons/share_position.png,
+				assets/src/assets/icons/voice.png,
+				assets/src/assets/login/apple_logo.png,
+				assets/src/assets/login/login_bg.png,
+				assets/src/assets/login/login_logo.png,
+				assets/src/assets/login/wechat_logo.png,
 				Info.plist,
 			);
 			target = E55901A42F163A5B00514034 /* Canvas */;
@@ -84,6 +107,7 @@
 		E559019C2F163A5B00514034 = {
 			isa = PBXGroup;
 			children = (
+				E5B0D7B62F36C3B000299691 /* assets */,
 				E55901A72F163A5B00514034 /* Canvas */,
 				E55901A62F163A5B00514034 /* Products */,
 				9E8F106EEB5ACFC4B33B67C7 /* PrivacyInfo.xcprivacy */,
@@ -95,7 +119,7 @@
 		E55901A62F163A5B00514034 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				E55901A52F163A5B00514034 /* Canvas.app */,
+				E55901A52F163A5B00514034 /* AskAway.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -130,7 +154,7 @@
 				E5881D742F29B1F700882E9D /* Actr */,
 			);
 			productName = Canvas;
-			productReference = E55901A52F163A5B00514034 /* Canvas.app */;
+			productReference = E55901A52F163A5B00514034 /* AskAway.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -187,6 +211,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E5B0D7B72F36C3B000299691 /* assets in Resources */,
 				45693714731FFE1094AABA6D /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -376,12 +401,13 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = BDECA8F1C7AE7D67A02606DC /* Pods-Canvas.debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "askaway-logo";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Canvas/Canvas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 92;
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_DEBUG_DYLIB = YES;
@@ -470,6 +496,8 @@
 					"$(SRCROOT)/Canvas/Native/RillSandbox",
 				);
 				INFOPLIST_FILE = Canvas/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AskAway;
+				INFOPLIST_KEY_CFBundleName = AskAway;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置以支持发送位置附件";
@@ -489,7 +517,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.28.0;
 				OTHER_CFLAGS = (
 					"$(inherited)",
 					"-fmodule-map-file=\"${PODS_ROOT}/Headers/Public/DoubleConversion/DoubleConversion.modulemap\"",
@@ -526,7 +554,7 @@
 					"-fmodule-map-file=\"${PODS_ROOT}/Headers/Public/yoga/Yoga.modulemap\"",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ios;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = AskAway;
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
 				RUNTIME_EXCEPTION_ALLOW_JIT = YES;
@@ -553,12 +581,13 @@
 			baseConfigurationReference = 06927ECF5C93151FF890669A /* Pods-Canvas.release.xcconfig */;
 			buildSettings = {
 				ALLOW_TARGET_PLATFORM_SPECIALIZATION = YES;
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "askaway-logo";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Canvas/Canvas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 92;
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_DEBUG_DYLIB = YES;
@@ -647,6 +676,8 @@
 					"$(SRCROOT)/Canvas/Native/RillSandbox",
 				);
 				INFOPLIST_FILE = Canvas/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AskAway;
+				INFOPLIST_KEY_CFBundleName = AskAway;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera for QR scan";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置以支持发送位置附件";
@@ -666,9 +697,9 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.28.0;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ios;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = AskAway;
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
 				RUNTIME_EXCEPTION_ALLOW_JIT = YES;

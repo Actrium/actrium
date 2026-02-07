@@ -8,6 +8,8 @@
  */
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { I18nextProvider, useTranslation } from 'react-i18next';
+import './i18n'; // Ensure i18n is initialized
 import type { TabRouterProps } from './actr-host/types';
 import { TabProvider } from './actr-host/contexts/TabContext';
 
@@ -21,13 +23,24 @@ const LoginApp = React.lazy(() => import('./system-apps/LoginApp'));
 let cachedValidProps: TabRouterProps | null = null;
 
 // Loading fallback
-const LoadingFallback = () => (
-  <View style={styles.loading}>
-    <Text style={styles.loadingText}>Loading...</Text>
-  </View>
-);
+const LoadingFallback = () => {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.loading}>
+      <Text style={styles.loadingText}>{t('common.loading')}</Text>
+    </View>
+  );
+};
 
 export const TabRouter: React.FC<TabRouterProps> = (props) => {
+  return (
+    <I18nextProvider i18n={require('./i18n').default}>
+      <TabRouterInner {...props} />
+    </I18nextProvider>
+  );
+};
+
+const TabRouterInner: React.FC<TabRouterProps> = (props) => {
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
