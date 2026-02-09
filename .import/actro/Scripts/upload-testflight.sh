@@ -21,7 +21,7 @@ set -o pipefail  # 管道命令失败时退出
 # 项目配置
 PROJECT_NAME="Canvas"
 WORKSPACE_PATH="Canvas.xcworkspace"
-SCHEME="Canvas"
+SCHEME="AskAway"
 CONFIGURATION="Release"
 
 # 路径配置
@@ -29,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build"
 ARCHIVE_PATH="$BUILD_DIR/Canvas.xcarchive"
-EXPORT_PATH="$BUILD_DIR/Canvas-IPA"
+EXPORT_PATH="$BUILD_DIR/AskAway-IPA"
 EXPORT_OPTIONS_PATH="$SCRIPT_DIR/ExportOptions.plist"
 
 # 加载本地配置
