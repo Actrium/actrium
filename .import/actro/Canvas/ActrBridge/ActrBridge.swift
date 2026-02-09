@@ -223,12 +223,7 @@ extension ActrBridge {
                 logger.info("[ActrBridge] Sending text message: \(dict)")
                 var request = DataStreamApp_TextMessage()
                 if let base64Text = dict["text"] as? String, !base64Text.isEmpty {
-                    if let data = Data(base64Encoded: base64Text),
-                       let decodedString = String(data: data, encoding: .utf8) {
-                        request.text = decodedString
-                    } else {
-                        request.text = base64Text
-                    }
+                    request.text = base64Text
                 }
                 request.sessionID = dict["sessionId"] as? String ?? ""
                 request.messageID = dict["messageId"] as? String ?? ""
