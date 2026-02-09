@@ -741,7 +741,7 @@ class BrowserViewModel: ObservableObject {
 
     func isLeftPanelVisible(for tabId: UUID?) -> Bool {
         guard let id = tabId else { return true }
-        let visible = leftPanelVisibility[id] ?? true
+        let visible = leftPanelVisibility[id] ?? false
         logger.debug("🔍 [isLeftPanelVisible] Tab \(id.uuidString.prefix(8)): \(visible)")
         return visible
     }
