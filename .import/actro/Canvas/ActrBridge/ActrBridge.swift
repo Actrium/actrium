@@ -564,10 +564,12 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         logger.info("[AskLocalServiceHandlerImpl] User message prepared: \(userMessage.debugDescription)")
         
         let targetId = try await discoverTarget(ctx: ctx)
-        let responseData = try await ctx.call(
+        let responseData = try await ctx.callRaw(
             target: targetId,
             routeKey: Ask_UsrPromptRequest.routeKey,
-            payload: try userMessage.serializedData()
+            payloadType: .rpcReliable,
+            payload: try userMessage.serializedData(),
+            timeoutMs: 300000
         )
         
         // 反序列化为 Ask_AssistantReply
@@ -624,10 +626,12 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         }
         
         let targetId = try await discoverTarget(ctx: ctx)
-        let responseData = try await ctx.call(
+        let responseData = try await ctx.callRaw(
             target: targetId,
             routeKey: Ask_UsrPromptRequest.routeKey,
-            payload: try userMessage.serializedData()
+            payloadType: .rpcReliable,
+            payload: try userMessage.serializedData(),
+            timeoutMs: 300000
         )
         
         // 反序列化为 Ask_AssistantReply
