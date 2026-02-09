@@ -20,10 +20,10 @@ use tracing::{debug, error, info, warn};
 use crate::service_registry_storage::ServiceRegistryStorage;
 
 /// 服务过期阈值（秒）- 超过此时间未收到心跳则认为服务过期
-pub const SERVICE_EXPIRY_THRESHOLD_SECS: u64 = 5;
+pub const SERVICE_EXPIRY_THRESHOLD_SECS: u64 = 5 * 60;
 
 /// 清理任务执行间隔（秒）
-pub const CLEANUP_INTERVAL_SECS: u64 = 1;
+pub const CLEANUP_INTERVAL_SECS: u64 = 30;
 
 /// 服务能力描述
 #[derive(Debug, Clone, Serialize, Deserialize)]
