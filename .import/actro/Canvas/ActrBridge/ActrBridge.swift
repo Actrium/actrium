@@ -35,6 +35,7 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
         let node: ActrNode
         let actr: ActrRef
         let workload: AskLocalServiceWorkload<AskLocalServiceHandlerImpl>
+        let serverActId: ActrId
     }
     
     private var actorInstances: [String: ActorInstance] = [:]
@@ -60,11 +61,11 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
     }
     
     /// Prepare client-side stream handling
-    /// - Parameter actorType: The actor type to use
+    /// - Parameter tabId: The tab ID to use
     /// - Returns: The generated streamID
-    func prepareClientStream(actorType: String) async throws -> (String) {
-        guard let instance = actorInstances[actorType] else {
-            throw ActrError.StateError(msg: "ActrBridge not initialized for \(actorType)")
+    func prepareClientStream(tabId: String) async throws -> (String) {
+        guard let instance = actorInstances[tabId] else {
+            throw ActrError.StateError(msg: "ActrBridge not initialized for \(tabId)")
         }
         
         var request = DataStreamApp_VoiceChunkMessage()
@@ -90,32 +91,46 @@ public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
 
 extension ActrBridge {
     /// Initialize the Actr system and its underlying actors
-    private func initialize(actorType: String, configPath: String) async throws {
+    private func initialize(tabId: String, actorType: String, configPath: String) async throws {
         connectionStatus = .initializing
         errorMessage = nil
-        logger.info("[ActrBridge] Initializing ActrBridge for \(actorType)...")
+        logger.info("[ActrBridge] Initializing ActrBridge for \(actorType) (tabId: \(tabId))...")
         
         do {
             let result = try await Task.detached(priority: .userInitiated) { () throws
-                -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>) in
+                -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>, ActrId) in
                 let system = try await ActrSystem.from(tomlConfig: configPath)
                 let handler = await AskLocalServiceHandlerImpl(remoteServiceTypeRepr: actorType)
                 let workload = AskLocalServiceWorkload(handler: handler)
                 let node = try system.spawn(workload: workload)
                 let actr = try await node.start()
-                return (system, node, actr, workload)
+                
+                let parts = actorType.split(separator: "+")
+                guard parts.count == 2 else {
+                    throw ActrError.StateError(msg: "Invalid actorType format: \(actorType)")
+                }
+                let manufacturer = String(parts[0])
+                let name = String(parts[1])
+                let targetType = ActrType(manufacturer: manufacturer, name: name)
+                
+                let discovered = try await actr.discover(targetType: targetType, count: 1)
+                guard let serverActId = discovered.first else {
+                    throw ActrError.StateError(msg: "No actor found for target type: \(actorType)")
+                }
+                
+                return (system, node, actr, workload, serverActId)
             }.value
             
-            let (system, node, actr, workload) = result
-            let instance = ActorInstance(system: system, node: node, actr: actr, workload: workload)
-            actorInstances[actorType] = instance
+            let (system, node, actr, workload, serverActId) = result
+            let instance = ActorInstance(system: system, node: node, actr: actr, workload: workload, serverActId: serverActId)
+            actorInstances[tabId] = instance
             
             // Wait a bit for the signaling client to establish connection
             logger.info("[ActrBridge] Waiting for signaling client to connect...")
             try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             
             connectionStatus = .connected
-            logger.info("[ActrBridge] ActrBridge initialized successfully for \(actorType)")
+            logger.info("[ActrBridge] ActrBridge initialized successfully for \(actorType) (tabId: \(tabId))")
         } catch let actrError as ActrError {
             errorMessage = "Actr Error: \(actrError.localizedDescription)"
             connectionStatus = .error
@@ -130,16 +145,16 @@ extension ActrBridge {
     }
     
     /// Shutdown the service and cleanup resources
-    private func shutdown(actorType: String?) async {
-        if let actorType = actorType {
-            logger.info("[ActrBridge] Shutting down ActrBridge for \(actorType)...")
-            if let instance = actorInstances.removeValue(forKey: actorType) {
+    private func shutdown(tabId: String?) async {
+        if let tabId = tabId {
+            logger.info("[ActrBridge] Shutting down ActrBridge for tabId: \(tabId)...")
+            if let instance = actorInstances.removeValue(forKey: tabId) {
                 await instance.actr.stop()
             }
         } else {
             logger.info("[ActrBridge] Shutting down all ActrBridge instances...")
-            for (type, instance) in actorInstances {
-                logger.info("[ActrBridge] Shutting down \(type)...")
+            for (tid, instance) in actorInstances {
+                logger.info("[ActrBridge] Shutting down instance for tabId: \(tid)...")
                 await instance.actr.stop()
             }
             actorInstances.removeAll()
@@ -171,13 +186,14 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let actorType = dict["actorType"] as? String,
+            guard let tabId = dict["tabId"] as? String,
+                  let actorType = dict["actorType"] as? String,
                   let path = dict["path"] as? String else {
-                reject("INVALID_INPUT", "Missing actorType or path in JSON config", nil)
+                reject("INVALID_INPUT", "Missing tabId, actorType or path in JSON config", nil)
                 return
             }
             do {
-                try await self.initialize(actorType: actorType, configPath: path)
+                try await self.initialize(tabId: tabId, actorType: actorType, configPath: path)
                 resolve(["status": "connected"])
             } catch let error as ActrError {
                 reject("ACTR_ERROR", self.formatActrError(error), error)
@@ -195,11 +211,11 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let actorType = dict["actorType"] as? String else {
-                reject("INVALID_INPUT", "Missing actorType or path in JSON config", nil)
+            guard let tabId = dict["tabId"] as? String else {
+                reject("INVALID_INPUT", "Missing tabId in input", nil)
                 return
             }
-            await self.shutdown(actorType: actorType)
+            await self.shutdown(tabId: tabId)
             resolve(["status": "disconnected"])
         }
     }
@@ -212,10 +228,10 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let actorType = dict["actorType"] as? String,
+            guard let tabId = dict["tabId"] as? String,
                   let textResponseStreamID = dict["textResponseStreamId"] as? String,
-                  let instance = actorInstances[actorType] else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
+                  let instance = actorInstances[tabId] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for tabId", nil)
                 return
             }
             
@@ -270,9 +286,9 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let actorType = dict["actorType"] as? String,
-                  let instance = actorInstances[actorType] else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
+            guard let tabId = dict["tabId"] as? String,
+                  let instance = actorInstances[tabId] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for tabId", nil)
                 return
             }
             
@@ -326,9 +342,9 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let actorType = dict["actorType"] as? String,
-                  let instance = actorInstances[actorType] else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
+            guard let tabId = dict["tabId"] as? String,
+                  let instance = actorInstances[tabId] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for tabId", nil)
                 return
             }
             
@@ -384,9 +400,9 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let actorType = dict["actorType"] as? String,
-                  let instance = actorInstances[actorType] else {
-                reject("NOT_CONNECTED", "ActrBridge not initialized for actorType", nil)
+            guard let tabId = dict["tabId"] as? String,
+                  let instance = actorInstances[tabId] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for tabId", nil)
                 return
             }
             
@@ -440,10 +456,10 @@ extension ActrBridge {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         Task { @MainActor in
-            guard let actorType = dict["actorType"] as? String,
+            guard let tabId = dict["tabId"] as? String,
                   let streamId = dict["streamId"] as? String,
-                  let instance = actorInstances[actorType] else {
-                reject("INVALID_INPUT", "Missing actorType, streamId or instance not found", nil)
+                  let instance = actorInstances[tabId] else {
+                reject("INVALID_INPUT", "Missing tabId, streamId or instance not found", nil)
                 return
             }
             
