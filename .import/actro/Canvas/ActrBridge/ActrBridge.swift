@@ -100,11 +100,12 @@ extension ActrBridge {
             let result = try await Task.detached(priority: .userInitiated) { () throws
                 -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>, ActrId) in
                 let system = try await ActrSystem.from(tomlConfig: configPath)
-                let handler = await AskLocalServiceHandlerImpl(remoteServiceTypeRepr: actorType)
+                let handler = await AskLocalServiceHandlerImpl()
                 let workload = AskLocalServiceWorkload(handler: handler)
                 let node = try system.spawn(workload: workload)
                 let actr = try await node.start()
                 
+                // 解析 actorType 并进行 discover
                 let parts = actorType.split(separator: "+")
                 guard parts.count == 2 else {
                     throw ActrError.StateError(msg: "Invalid actorType format: \(actorType)")
@@ -117,6 +118,9 @@ extension ActrBridge {
                 guard let serverActId = discovered.first else {
                     throw ActrError.StateError(msg: "No actor found for target type: \(actorType)")
                 }
+                
+                // 将 serverActId 设置到 handler 中
+                await handler.setServerActId(serverActId)
                 
                 return (system, node, actr, workload, serverActId)
             }.value
@@ -528,7 +532,7 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
 /// Implementation of AskLocalServiceHandler
 /// TODO: Implement the business logic for each RPC method
 public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
-    private let remoteServiceTypeRepr: String
+    private var serverActId: ActrId? = nil
     
     fileprivate struct StreamInfo {
         let callback: StreamPrintCallback
@@ -537,8 +541,11 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     
     fileprivate var activeStreams: [String: StreamInfo] = [:]
     
-    public init(remoteServiceTypeRepr: String) {
-        self.remoteServiceTypeRepr = remoteServiceTypeRepr
+    public init() {}
+    
+    public func setServerActId(_ actId: ActrId) async {
+        self.serverActId = actId
+        logger.info("[AskLocalServiceHandlerImpl] Server ActId set: \(actId.realm.realmId)")
     }
     
     public func removeCallback(streamId: String) async {
@@ -547,11 +554,6 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
             logger.info("[AskLocalServiceHandlerImpl] Stream unregistered from context: \(streamId)")
         }
         logger.info("[AskLocalServiceHandlerImpl] Stream callback info removed: \(streamId)")
-    }
-    
-    private func discoverTarget(ctx: Context) async throws -> ActrId {
-        let targetType = try ActrType.fromStringRepr(remoteServiceTypeRepr)
-        return try await ctx.discover(targetType: targetType)
     }
     
     /// RPC method: SendText
@@ -574,7 +576,9 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
 
         logger.info("[AskLocalServiceHandlerImpl] User message prepared: \(userMessage.debugDescription)")
         
-        let targetId = try await discoverTarget(ctx: ctx)
+        guard let targetId = self.serverActId else {
+            throw ActrError.StateError(msg: "Server ActId not initialized")
+        }
         let responseData = try await ctx.callRaw(
             target: targetId,
             routeKey: Ask_UsrPromptRequest.routeKey,
@@ -636,7 +640,9 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
             userMessage.location = req.location
         }
         
-        let targetId = try await discoverTarget(ctx: ctx)
+        guard let targetId = self.serverActId else {
+            throw ActrError.StateError(msg: "Server ActId not initialized")
+        }
         let responseData = try await ctx.callRaw(
             target: targetId,
             routeKey: Ask_UsrPromptRequest.routeKey,
@@ -687,7 +693,9 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     ) async throws -> DataStreamApp_VoiceChunkMessageResponse {
         logger.info("[AskLocalServiceHandlerImpl] Received sendVoiceChunk: streamId=\(req.streamID), chunkId=\(req.chunkID)")
         
-        let targetId = try await discoverTarget(ctx: ctx)
+        guard let targetId = self.serverActId else {
+            throw ActrError.StateError(msg: "Server ActId not initialized")
+        }
         
         let seq = UInt64(req.chunkID) ?? 0
         
