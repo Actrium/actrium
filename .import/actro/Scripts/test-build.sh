@@ -113,7 +113,7 @@ if [ -d "build/Canvas.xcarchive" ]; then
 
     # 导出 IPA 到桌面
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-    IPA_NAME="${TIMESTAMP}-${BUILD_VERSION}-${BUILD_NUMBER}.ipa"
+    IPA_NAME="${SCHEME}-${TIMESTAMP}-${BUILD_VERSION}-${BUILD_NUMBER}.ipa"
     DESKTOP_PATH="$HOME/Desktop"
     
     echo "📦 正在导出 IPA 并重命名..."
