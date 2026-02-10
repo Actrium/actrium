@@ -81,6 +81,39 @@ cd "$PROJECT_ROOT"
 echo "📦 安装 CocoaPods 依赖..."
 pod install
 
+# 生成 ExportOptions.plist（从环境变量获取 Team ID）
+echo "📝 生成 ExportOptions.plist..."
+if [ -z "$APPLE_TEAM_ID" ]; then
+    echo "❌ 错误: 未设置环境变量 APPLE_TEAM_ID"
+    echo "请在 ~/.zshrc 或 ~/.bash_profile 中设置: export APPLE_TEAM_ID=\"your-team-id\""
+    exit 1
+fi
+TEAM_ID="$APPLE_TEAM_ID"
+echo "🔑 使用 Team ID: $TEAM_ID"
+
+cat > "$SCRIPT_DIR/ExportOptions.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>debugging</string>
+    <key>compileBitcode</key>
+    <false/>
+    <key>uploadBitcode</key>
+    <true/>
+    <key>thinning</key>
+    <string>&lt;none&gt;</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>teamID</key>
+    <string>$TEAM_ID</string>
+    <key>destination</key>
+    <string>export</string>
+</dict>
+</plist>
+EOF
+
 # 清理
 echo "🧹 清理旧构建..."
 xcodebuild clean \

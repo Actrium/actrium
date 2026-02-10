@@ -48,3 +48,4 @@ Scripts/*.cer
 Scripts/*.p12
 Scripts/*.mobileprovision
 build/*.log
+Scripts/ExportOptions.plist
