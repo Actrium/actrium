@@ -164,6 +164,9 @@ class BrowserViewModel: ObservableObject {
     }
     
     func closeTab(id: UUID) {
+        // 清理缓存的 View
+        CanvasReactNativeHost.shared.removeViewForTab(tabId: id)
+        
         // Get the slot position of the tab being closed
         guard let closedPosition = tabSlotPositions[id] else {
             logger.warning(" Cannot find tab slot position")
