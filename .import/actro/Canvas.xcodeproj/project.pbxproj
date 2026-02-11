@@ -407,7 +407,7 @@
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Canvas/Canvas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 95;
+				CURRENT_PROJECT_VERSION = 98;
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_DEBUG_DYLIB = YES;
@@ -587,7 +587,7 @@
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Canvas/Canvas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 95;
+				CURRENT_PROJECT_VERSION = 98;
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_DEBUG_DYLIB = YES;
@@ -791,7 +791,7 @@
 			repositoryURL = "https://github.com/actor-rtc/actr-swift.git";
 			requirement = {
 				kind = exactVersion;
-				version = 0.1.28;
+				version = 0.1.29;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
