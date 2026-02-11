@@ -22,6 +22,7 @@ struct SingleTabRootView: View {
             bookmarkVM: bookmarkVM,
             containerSize: containerSize
         )
+        .id(tab.id)
     }
 }
 
@@ -37,12 +38,11 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UIView {
-        logger.notice("🔴 [RECREATING] RootView for Tab: \(tab.title)")
         #if canImport(React)
-        logger.notice("[SingleTabRootView] Creating RootView for Tab: \(tab.title) (\(tab.id.uuidString.prefix(8)))")
+        logger.notice("[SingleTabRootView] Getting RootView for Tab: \(tab.title) (\(tab.id.uuidString.prefix(8)))")
 
         let properties = makeProperties()
-        let rootView = CanvasReactNativeHost.shared.createRootView(initialProperties: properties)
+        let rootView = CanvasReactNativeHost.shared.viewForTab(tabId: tab.id, initialProperties: properties)
 
         if let rctRootView = rootView as? RCTRootView {
             context.coordinator.rootView = rctRootView
@@ -65,6 +65,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIView, context: Context) {
         #if canImport(React)
+        logger.notice("[SingleTabRootView] Getting RootView for Tab: \(tab.title) (\(tab.id.uuidString.prefix(8)))")
         guard let rootView = uiView as? RCTRootView else { return }
         guard containerSize.width > 0 && containerSize.height > 0 else { return }
 
@@ -73,10 +74,14 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
 
         // 检查 isLeftPanelVisible 是否变化（立即更新，不等待 debounce）
         let currentIsLeftPanelVisible = viewModel.isLeftPanelVisible(for: tab.id)
-        if coordinator.lastLeftPanelVisible != currentIsLeftPanelVisible {
+        let isResizing = coordinator.lastUpdatedSize != containerSize
+        let reloadKeyChanged = coordinator.lastReloadKey != tab.reloadNonce
+
+        if coordinator.lastLeftPanelVisible != currentIsLeftPanelVisible || reloadKeyChanged {
             coordinator.lastLeftPanelVisible = currentIsLeftPanelVisible
+            coordinator.lastReloadKey = tab.reloadNonce
             rootView.appProperties = self.makeProperties()
-            logger.debug("[SingleTabRootView] isLeftPanelVisible 变化，立即更新 props: \(currentIsLeftPanelVisible)")
+            logger.debug("[SingleTabRootView] 关键属性变化，立即更新 props (tab: \(tab.title))")
         }
 
         // 首次设置：确保 layer 和约束正确配置
@@ -107,10 +112,18 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             rootView.layoutIfNeeded()
         }
 
-        // 拖动结束：延迟 150ms 后更新 React props（减少 re-render 次数）
-        coordinator.scheduleDragEndUpdate { [weak rootView] in
-            guard let rootView = rootView else { return }
-            rootView.appProperties = self.makeProperties()
+        // 拖动结束：尺寸变化超过阈值且停止拖动后，延迟同步到 React props
+        if isResizing {
+            coordinator.scheduleDragEndUpdate { [weak rootView, weak coordinator] in
+                guard let rootView = rootView, let coordinator = coordinator else { return }
+                
+                // 检查尺寸是否真的变了（相对于上次同步给 props 的尺寸）
+                if coordinator.lastPropsSize != containerSize {
+                    coordinator.lastPropsSize = containerSize
+                    rootView.appProperties = self.makeProperties()
+                    logger.debug("[SingleTabRootView] 拖动结束，同步新尺寸到 props: \(containerSize) (tab: \(tab.title))")
+                }
+            }
         }
         #endif
     }
@@ -262,6 +275,8 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
         var lastUpdateTime: CFAbsoluteTime = 0
         var lastUpdatedSize: CGSize = .zero
         var lastLeftPanelVisible: Bool? = nil  // 跟踪左侧面板可见性变化
+        var lastReloadKey: Int = 0             // 跟踪重载状态
+        var lastPropsSize: CGSize = .zero      // 跟踪最后一次同步到 props 的尺寸
         var pendingSize: CGSize?
         var throttleWorkItem: DispatchWorkItem?
         var dragEndWorkItem: DispatchWorkItem?

@@ -85,6 +85,7 @@ final class CanvasReactNativeHost {
     private let factoryDelegate: CanvasReactNativeFactoryDelegate
     private let factory: RCTReactNativeFactory
     private var bridge: RCTBridge?
+    private var viewCache: [UUID: RCTRootView] = [:]
 
     private init() {
         nnotice("🏗️ [Native] CanvasReactNativeHost 初始化")
@@ -99,6 +100,27 @@ final class CanvasReactNativeHost {
         factoryDelegate = CanvasReactNativeFactoryDelegate()
         factory = RCTReactNativeFactory(delegate: factoryDelegate)
         nnotice("✅ [Native] Factory 创建完成")
+    }
+
+    func viewForTab(tabId: UUID, initialProperties: [String: Any]) -> UIView {
+        if let cachedView = viewCache[tabId] {
+            nlog("♻️ [Native] 使用缓存的 RootView: \(tabId)")
+            return cachedView
+        }
+
+        nnotice("📱 [Native] 为 Tab \(tabId) 创建新 RootView")
+        let rootView = createRootView(initialProperties: initialProperties)
+        if let rctRootView = rootView as? RCTRootView {
+            viewCache[tabId] = rctRootView
+        }
+        return rootView
+    }
+
+    func removeViewForTab(tabId: UUID) {
+        if let view = viewCache.removeValue(forKey: tabId) {
+            nlog("🗑️ [Native] 移除 Tab 缓存视图: \(tabId)")
+            // 可以在这里进行额外的清理
+        }
     }
 
     func createRootView(initialProperties: [String: Any]) -> UIView {
