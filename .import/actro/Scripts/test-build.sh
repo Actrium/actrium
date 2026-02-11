@@ -7,6 +7,14 @@
 
 set -e
 
+# 获取构建方式 (pkg: debugging, pkg-prd: app-store-connect)
+BUILD_TYPE="${1:-pkg-prd}"
+if [ "$BUILD_TYPE" = "pkg" ]; then
+    EXPORT_METHOD="debugging"
+else
+    EXPORT_METHOD="app-store-connect"
+fi
+
 # 记录开始时间
 START_TIME=$(date +%s)
 
@@ -97,7 +105,7 @@ cat > "$SCRIPT_DIR/ExportOptions.plist" <<EOF
 <plist version="1.0">
 <dict>
     <key>method</key>
-    <string>debugging</string>
+    <string>$EXPORT_METHOD</string>
     <key>compileBitcode</key>
     <false/>
     <key>uploadBitcode</key>
