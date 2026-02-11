@@ -791,7 +791,7 @@
 			repositoryURL = "https://github.com/actor-rtc/actr-swift.git";
 			requirement = {
 				kind = exactVersion;
-				version = 0.1.27;
+				version = 0.1.28;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

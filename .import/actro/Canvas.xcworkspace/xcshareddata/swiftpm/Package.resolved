@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/actor-rtc/actr-swift.git",
       "state" : {
-        "revision" : "8b4f0f0a5f6195f1b50d1cf91bb0f77d8d65db1a",
-        "version" : "0.1.27"
+        "revision" : "7b9789b9bfbba73bb3506cb6f929697f8466baf6",
+        "version" : "0.1.28"
       }
     },
     {
