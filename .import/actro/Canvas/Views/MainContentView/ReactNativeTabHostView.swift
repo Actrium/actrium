@@ -248,6 +248,7 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
         return properties
     }
 
+    @MainActor
     class Coordinator: NSObject {
         @ObservedObject var viewModel: BrowserViewModel
         #if canImport(React)

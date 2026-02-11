@@ -4,6 +4,7 @@ private let logger = AppLogger.ui
 import WebKit
 import UIKit
 
+@MainActor
 struct MainContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
@@ -254,7 +255,6 @@ struct TabContentView: View {
 // MARK: - Tab Overview
 
 // TabOverviewView 已移至独立文件 TabOverviewView.swift
-
 private struct FocusableTextField: UIViewRepresentable {
     @Binding var text: String
     var placeholder: String
@@ -300,6 +300,7 @@ private struct FocusableTextField: UIViewRepresentable {
         }
     }
     
+    @MainActor
     final class Coordinator: NSObject, UITextFieldDelegate {
         var parent: FocusableTextField
         
@@ -388,6 +389,7 @@ private struct ResizableHandleView: UIViewRepresentable {
         Coordinator(self)
     }
     
+    @MainActor
     class Coordinator: NSObject {
         var parent: ResizableHandleView
         

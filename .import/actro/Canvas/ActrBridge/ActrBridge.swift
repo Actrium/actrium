@@ -10,8 +10,7 @@ import React
 /// exposing the high-level API (ActrSystem, ActrNode, ActrRef) to JavaScript.
 
 @objc(ActrBridge)
-@preconcurrency
-public class ActrBridge: RCTEventEmitter, @unchecked Sendable {
+public class ActrBridge: RCTEventEmitter {
     // MARK: - Properties
     
     private static weak var activeInstance: ActrBridge?
@@ -100,7 +99,7 @@ extension ActrBridge {
             let result = try await Task.detached(priority: .userInitiated) { () throws
                 -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>, ActrId) in
                 let system = try await ActrSystem.from(tomlConfig: configPath)
-                let handler = await AskLocalServiceHandlerImpl()
+                let handler = AskLocalServiceHandlerImpl()
                 let workload = AskLocalServiceWorkload(handler: handler)
                 let node = try system.spawn(workload: workload)
                 let actr = try await node.start()
@@ -505,7 +504,7 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
         }
         
         // 推送到 RN
-        guard let bridge = await ActrBridge.shared() else {
+        guard let bridge = ActrBridge.shared() else {
             let errorMsg = "[StreamPrintCallback] Failed to get ActrBridge instance to send event"
             throw ActrError.StateError(msg: errorMsg)
         }
@@ -523,7 +522,7 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
             body["timestampMs"] = timestampMs
         }
         
-        await bridge.sendStreamEventToRN(body: body)
+        bridge.sendStreamEventToRN(body: body)
     }
 }
 

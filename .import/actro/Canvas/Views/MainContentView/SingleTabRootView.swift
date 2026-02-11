@@ -250,6 +250,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
         ]
     }
 
+    @MainActor
     class Coordinator: NSObject {
         let tab: Tab
         @ObservedObject var viewModel: BrowserViewModel

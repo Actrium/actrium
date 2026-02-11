@@ -142,7 +142,7 @@ public struct DataStreamApp_StartVoiceMessageResponse: Sendable {
   public init() {}
 }
 
-public struct DataStreamApp_VoiceChunkMessage: @unchecked Sendable {
+public struct DataStreamApp_VoiceChunkMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -184,7 +184,7 @@ public struct DataStreamApp_VoiceChunkMessageResponse: Sendable {
 
 fileprivate let _protobuf_package = "data_stream_app"
 
-extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension DataStreamApp_TextMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TextMessage"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "text"),
@@ -262,7 +262,7 @@ extension DataStreamApp_TextMessage: @preconcurrency SwiftProtobuf._MessageImple
   }
 }
 
-extension DataStreamApp_TextMessageResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension DataStreamApp_TextMessageResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TextMessageResponse"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "question_id"),
@@ -318,7 +318,7 @@ extension DataStreamApp_TextMessageResponse: @preconcurrency SwiftProtobuf._Mess
   }
 }
 
-extension DataStreamApp_StartVoiceMessage: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension DataStreamApp_StartVoiceMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".StartVoiceMessage"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "session_id"),
@@ -390,7 +390,7 @@ extension DataStreamApp_StartVoiceMessage: @preconcurrency SwiftProtobuf._Messag
   }
 }
 
-extension DataStreamApp_StartVoiceMessageResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension DataStreamApp_StartVoiceMessageResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".StartVoiceMessageResponse"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "question_id"),
@@ -446,7 +446,7 @@ extension DataStreamApp_StartVoiceMessageResponse: @preconcurrency SwiftProtobuf
   }
 }
 
-extension DataStreamApp_VoiceChunkMessage: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension DataStreamApp_VoiceChunkMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".VoiceChunkMessage"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "session_id"),
@@ -508,7 +508,7 @@ extension DataStreamApp_VoiceChunkMessage: @preconcurrency SwiftProtobuf._Messag
   }
 }
 
-extension DataStreamApp_VoiceChunkMessageResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension DataStreamApp_VoiceChunkMessageResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".VoiceChunkMessageResponse"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "stream_id"),
