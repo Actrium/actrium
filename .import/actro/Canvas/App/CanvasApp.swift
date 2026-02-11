@@ -95,7 +95,7 @@ struct BrowserWindowView: View {
                       let systemTabType = SystemTabType(rawValue: systemAppTypeStr) else { return }
                 
                 withAnimation {
-                    viewModel.openSystemTab(systemTabType, id: tabId)
+                    let _ = viewModel.openSystemTab(systemTabType, id: tabId)
                 }
             }
             // Handle select tab from RN

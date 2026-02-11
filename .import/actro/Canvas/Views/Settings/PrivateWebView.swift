@@ -127,6 +127,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         Coordinator(self)
     }
     
+    @MainActor
     class Coordinator: NSObject, WKNavigationDelegate {
         let parent: WebViewRepresentable
         

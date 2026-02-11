@@ -220,7 +220,7 @@ extension Ask_AttachmentType: SwiftProtobuf._ProtoNameProviding {
   ]
 }
 
-extension Ask_UsrPromptRequest: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension Ask_UsrPromptRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".UsrPromptRequest"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "question_id"),
@@ -298,7 +298,7 @@ extension Ask_UsrPromptRequest: @preconcurrency SwiftProtobuf._MessageImplementa
   }
 }
 
-extension Ask_AssistantReply: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension Ask_AssistantReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AssistantReply"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "question_id"),
@@ -354,7 +354,7 @@ extension Ask_AssistantReply: @preconcurrency SwiftProtobuf._MessageImplementati
   }
 }
 
-extension Ask_AttachRequest: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension Ask_AttachRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AttachRequest"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "id"),
@@ -404,7 +404,7 @@ extension Ask_AttachRequest: @preconcurrency SwiftProtobuf._MessageImplementatio
   }
 }
 
-extension Ask_AttachResponse: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension Ask_AttachResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AttachResponse"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "id"),
@@ -448,7 +448,7 @@ extension Ask_AttachResponse: @preconcurrency SwiftProtobuf._MessageImplementati
   }
 }
 
-extension Ask_Location: @preconcurrency SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+extension Ask_Location: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Location"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "latitude"),
