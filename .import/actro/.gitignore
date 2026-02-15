@@ -1,0 +1,88 @@
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# Logs
+*.log
+/tmp/
+*.tmp
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Testing
+/test-results/
+/coverage/
+
+# Environment
+.env
+.env.local
+
+# Temporary files
+*.bak
+*.backup
+*.swp
+*.tmp
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+
+# vcpkg
+vcpkg_installed/
+.vcpkg/
+
+# Generated files
+generated/
+*.generated.*
+
+# Local configuration
+*.local
+.cargo/config.toml.local
+
+# Flamegraph
+flamegraph.svg
+perf.data
+perf.data.old
+
+# Documentation build
+book/
+_book/
+
+# RustDesk specific
+*.2fa
+*.log
+/id/
+/flutter/build/
+/flutter/.dart_tool/
+/flutter/.flutter-plugins
+/flutter/.flutter-plugins-dependencies
+
+# ACTR specific
+*.pcap
+*.trace
+
+# Compiled protobuf
+*.pb.go
+*_pb2.py
