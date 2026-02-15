@@ -283,27 +283,21 @@ kill -9 <PID>
 
 ## 📊 Current Status
 
-### ✅ Completed
+### ✅ Core Features (Fully Implemented)
 
-- [x] ACTR integration (client + host)
-- [x] Virtual display creation (CGVirtualDisplay)
-- [x] No recursive capture (verified)
-- [x] Workspace organization
-- [x] Build warnings cleanup (57 warnings, 6 project-level, 51 external)
-- [x] Comprehensive testing infrastructure
+- [x] **ACTR Integration** - WebRTC transport for client/host communication
+- [x] **Video Streaming** - VP9/VP8 encoding with fragmentation and reassembly
+- [x] **Audio Streaming** - Opus codec with cpal integration
+- [x] **Input Control** - Full mouse and keyboard via enigo
+- [x] **Clipboard Sync** - Text, images, HTML, and file paths
+- [x] **File Transfer** - Chunked async transfer with progress tracking
+- [x] **Virtual Display** - macOS CGVirtualDisplay API (no recursive capture)
+- [x] **Privacy Mode** - Screen blackout + local input blocking (macOS)
+- [x] **Native UI** - macOS Cocoa window with BGRA rendering
 
-### 🔄 In Progress
+### 📅 Future Plans
 
-- [ ] Full mouse and keyboard control
-- [ ] Clipboard synchronization
-- [ ] File transfer
-- [ ] Performance optimization
-
-### 📅 Planned
-
-- [ ] Audio transmission
 - [ ] Multi-display support
-- [ ] Encryption and security features
 - [ ] Cross-platform support (Linux, Windows)
 
 ## 🤝 Contributing
