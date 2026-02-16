@@ -2,10 +2,18 @@
 members = [
     "client",
     "host",
-    "libs/hbb_common",
+    "libs/ardcore",
     "libs/scrap",
     "libs/enigo",
     "libs/clipboard",
+    # New cross-platform libraries
+    "libs/ardcapture",
+    "libs/ardinput",
+    "libs/ardvirtdisplay",
+    "libs/ardprivacy",
+    "libs/ardaudio",
+    "libs/ardclipboard",
+    "libs/ardui",
 ]
 resolver = "2"
 
@@ -27,11 +35,20 @@ license = "GPL-3.0"
 repository = "https://github.com/kookyleo/rustdesk-actr"
 
 [workspace.dependencies]
-# Local libraries
-hbb_common = { path = "libs/hbb_common" }
+# Local libraries - Legacy
+ardcore = { path = "libs/ardcore" }
 scrap = { path = "libs/scrap" }
 enigo = { path = "libs/enigo", features = ["with_serde"] }
 clipboard = { path = "libs/clipboard" }
+
+# Local libraries - New cross-platform
+ardcapture = { path = "libs/ardcapture" }
+ardinput = { path = "libs/ardinput" }
+ardvirtdisplay = { path = "libs/ardvirtdisplay" }
+ardprivacy = { path = "libs/ardprivacy" }
+ardaudio = { path = "libs/ardaudio" }
+ardclipboard = { path = "libs/ardclipboard" }
+ardui = { path = "libs/ardui" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
