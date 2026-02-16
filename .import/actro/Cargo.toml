@@ -9,6 +9,16 @@ members = [
 ]
 resolver = "2"
 
+[workspace.lints.clippy]
+# Allow certain clippy lints for legacy code compatibility
+empty_line_after_doc_comments = "allow"
+ptr_arg = "allow"
+too_many_arguments = "allow"
+suspicious_open_options = "allow"
+missing_safety_doc = "allow"
+result_unit_err = "allow"
+needless_range_loop = "allow"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
