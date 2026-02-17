@@ -881,3 +881,118 @@ async fn signaling_actr_relay_role_assignment() {
     let _ = svc_w.send(WsMessage::Close(None)).await;
     graceful_shutdown(child);
 }
+
+#[tokio::test]
+#[serial]
+async fn service_registry_persists_across_restart() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = tmp.path().join("data");
+    let port = choose_port();
+    let config_path = write_fullstack_config(&tmp.path().to_path_buf(), port, DEFAULT_TOKEN_TTL);
+    let log_path = tmp.path().join("actrix_persist.log");
+    ensure_realm(&data_dir, 1001).await;
+
+    // first run: register a service
+    let mut child = spawn_actrix(&config_path, &log_path);
+    let base = format!("http://127.0.0.1:{port}");
+    wait_for_health(&format!("{base}/ks/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
+    ensure_realm(&data_dir, 1001).await;
+
+    let acl = Acl {
+        rules: vec![AclRule {
+            principals: vec![Principal {
+                realm: Some(Realm { realm_id: 1001 }),
+                actr_type: Some(ActrType {
+                    manufacturer: "persist".into(),
+                    name: "client".into(),
+                }),
+            }],
+            permission: Permission::Allow as i32,
+        }],
+    };
+    let (_svc_w, _svc_r, svc_ok) = ws_register(port, "persist", "svc", Some(acl)).await;
+    sleep(Duration::from_millis(100)).await;
+
+    // Verify discovery before restart
+    let (mut cli_w1, mut cli_r1, cli_ok1) = ws_register(port, "persist", "client", None).await;
+    let discover1 = actr_protocol::ActrToSignaling {
+        source: cli_ok1.actr_id.clone(),
+        credential: cli_ok1.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
+            actr_protocol::DiscoveryRequest {
+                manufacturer: Some("persist".into()),
+                limit: Some(10),
+            },
+        )),
+    };
+    send_envelope(
+        &mut cli_w1,
+        make_envelope(signaling_envelope::Flow::ActrToServer(discover1)),
+    )
+    .await;
+    let resp1 = recv_envelope(&mut cli_r1).await;
+    let mut has_before = false;
+    if let Some(signaling_envelope::Flow::ServerToActr(server_msg)) = resp1.flow {
+        if let Some(signaling_to_actr::Payload::DiscoveryResponse(rsp)) = server_msg.payload {
+            if let Some(actr_protocol::discovery_response::Result::Success(ok)) = rsp.result {
+                has_before = ok
+                    .entries
+                    .iter()
+                    .any(|e| e.actr_type == svc_ok.actr_id.r#type);
+            }
+        }
+    }
+    assert!(has_before, "service should be discoverable before restart");
+    graceful_shutdown(child);
+
+    // second run: same data_dir, discovery should restore service from cache
+    let log_path2 = tmp.path().join("actrix_persist2.log");
+    let mut child2 = spawn_actrix(&config_path, &log_path2);
+    wait_for_health(&format!("{base}/ks/health"), &mut child2, &log_path2).await;
+    wait_for_health(&format!("{base}/ais/health"), &mut child2, &log_path2).await;
+    wait_for_health(&format!("{base}/signaling/health"), &mut child2, &log_path2).await;
+    ensure_realm(&data_dir, 1001).await;
+    sleep(Duration::from_millis(200)).await;
+
+    // register client
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "persist", "client", None).await;
+
+    let discover = actr_protocol::ActrToSignaling {
+        source: cli_ok.actr_id.clone(),
+        credential: cli_ok.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
+            actr_protocol::DiscoveryRequest {
+                manufacturer: Some("persist".into()),
+                limit: Some(10),
+            },
+        )),
+    };
+    send_envelope(
+        &mut cli_w,
+        make_envelope(signaling_envelope::Flow::ActrToServer(discover)),
+    )
+    .await;
+    let resp = recv_envelope(&mut cli_r).await;
+    match resp.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => {
+            match server_msg.payload {
+                Some(signaling_to_actr::Payload::DiscoveryResponse(rsp)) => match rsp.result {
+                    Some(actr_protocol::discovery_response::Result::Success(ok)) => {
+                        assert!(
+                            ok.entries.iter().any(|e| e.actr_type.name == "svc"
+                                && e.actr_type.manufacturer == "persist"),
+                            "expected restored service entry"
+                        );
+                    }
+                    other => panic!("unexpected discovery result {other:?}"),
+                },
+                other => panic!("unexpected payload {other:?}"),
+            }
+        }
+        other => panic!("unexpected flow {other:?}"),
+    }
+
+    graceful_shutdown(child2);
+}
