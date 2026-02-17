@@ -1,5 +1,8 @@
 use actr_protocol::{ActrType, Realm, RegisterRequest, register_response};
 use actrix_common::aid::credential::validator::AIdCredentialValidator;
+use actrix_common::realm::Realm as DbRealm;
+use actrix_common::storage::db;
+use futures::{SinkExt, StreamExt};
 use prost::Message;
 use serde_json::Value;
 use std::{
@@ -10,6 +13,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
+use uuid::Uuid;
 
 const START_TIMEOUT: Duration = Duration::from_secs(20);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -103,6 +108,19 @@ fn spawn_actrix(config: &PathBuf, log_path: &PathBuf) -> Child {
         .expect("spawn actrix")
 }
 
+async fn ensure_realm(sqlite_dir: &PathBuf, realm_id: u32) {
+    if !db::is_database_initialized() {
+        db::set_db_path(sqlite_dir).await.expect("init db path");
+    }
+    if !DbRealm::exists_by_realm_id(realm_id).await {
+        let mut realm = DbRealm::new(realm_id, "test-realm".to_string());
+        realm
+            .save()
+            .await
+            .expect("create realm for signaling validation");
+    }
+}
+
 async fn wait_for_health(url: &str, child: &mut Child, log_path: &PathBuf) {
     let client = reqwest::Client::new();
     let start = Instant::now();
@@ -153,6 +171,7 @@ async fn actrix_end_to_end_register_and_health() {
     let port = choose_port();
     let config_path = write_fullstack_config(&tmp.path().to_path_buf(), port);
     let log_path = tmp.path().join("actrix_fullstack.log");
+    ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -240,6 +259,61 @@ async fn actrix_end_to_end_register_and_health() {
         .await
         .expect("validate credential");
     assert_eq!(claims.realm_id, 1001);
+
+    // WebSocket signaling ping/pong with valid credential
+    let ws_url = format!("ws://127.0.0.1:{}/signaling/ws", port);
+    let (ws_stream, _) = connect_async(&ws_url).await.expect("ws connect");
+    let (mut write, mut read) = ws_stream.split();
+
+    let ping_msg = actr_protocol::ActrToSignaling {
+        source: ok.actr_id.clone(),
+        credential: ok.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::Ping(
+            actr_protocol::Ping {
+                availability: 100,
+                mailbox_backlog: 0.0,
+                power_reserve: 80.0,
+                ..Default::default()
+            },
+        )),
+    };
+    let envelope = actr_protocol::SignalingEnvelope {
+        envelope_version: 1,
+        envelope_id: Uuid::new_v4().to_string(),
+        timestamp: prost_types::Timestamp {
+            seconds: chrono::Utc::now().timestamp(),
+            nanos: 0,
+        },
+        reply_for: None,
+        traceparent: None,
+        tracestate: None,
+        flow: Some(actr_protocol::signaling_envelope::Flow::ActrToServer(
+            ping_msg,
+        )),
+    };
+    let mut buf = Vec::new();
+    envelope.encode(&mut buf).expect("encode envelope");
+    write
+        .send(WsMessage::Binary(buf.into()))
+        .await
+        .expect("send ping");
+
+    let resp = read.next().await.expect("ws response").expect("ws msg");
+    let pong_env = match resp {
+        WsMessage::Binary(data) => {
+            actr_protocol::SignalingEnvelope::decode(&data[..]).expect("decode signaling resp")
+        }
+        other => panic!("expected binary ws message, got {other:?}"),
+    };
+    match pong_env.flow {
+        Some(actr_protocol::signaling_envelope::Flow::ServerToActr(server_msg)) => {
+            match server_msg.payload {
+                Some(actr_protocol::signaling_to_actr::Payload::Pong(_)) => {}
+                other => panic!("expected Pong, got {other:?}"),
+            }
+        }
+        other => panic!("unexpected flow: {other:?}"),
+    }
 
     graceful_shutdown(child);
 }
