@@ -220,6 +220,21 @@ async fn ws_register(
     ws_register_with_spec(port, manufacturer, name, acl, None).await
 }
 
+fn make_service_spec(fingerprint: &str, package: &str, content: &str) -> actr_protocol::ServiceSpec {
+    actr_protocol::ServiceSpec {
+        name: package.to_string(),
+        description: Some("integration spec".into()),
+        fingerprint: fingerprint.into(),
+        protobufs: vec![actr_protocol::service_spec::Protobuf {
+            package: package.into(),
+            content: content.into(),
+            fingerprint: format!("proto-fp::{fingerprint}"),
+        }],
+        published_at: None,
+        tags: vec!["stable".into()],
+    }
+}
+
 async fn wait_for_health(url: &str, child: &mut Child, log_path: &PathBuf) {
     let client = reqwest::Client::new();
     let start = Instant::now();
@@ -1056,6 +1071,240 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
         },
         other => panic!("unexpected flow {other:?}"),
     }
+
+    let _ = cli_w.send(WsMessage::Close(None)).await;
+    graceful_shutdown(child);
+}
+
+#[tokio::test]
+#[serial]
+async fn signaling_get_service_spec_returns_spec() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let port = choose_port();
+    let config_path = write_fullstack_config(&tmp.path().to_path_buf(), port, DEFAULT_TOKEN_TTL);
+    let log_path = tmp.path().join("actrix_fullstack.log");
+    ensure_realm(&tmp.path().join("data"), 1001).await;
+    let mut child = spawn_actrix(&config_path, &log_path);
+
+    let base = format!("http://127.0.0.1:{port}");
+    wait_for_health(&format!("{base}/ks/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
+    ensure_realm(&tmp.path().join("data"), 1001).await;
+
+    let spec = make_service_spec(
+        "fp-spec",
+        "echo.v1",
+        r#"syntax = "proto3";
+            package echo.v1;
+            message Ping { string msg = 1; }
+            message Pong { string msg = 1; }
+            service Echo { rpc Say(Ping) returns (Pong); }"#,
+    );
+
+    let (_svc_w, _svc_r, _svc_ok) = ws_register_with_spec(
+        port,
+        "mfg",
+        "svc-spec",
+        None,
+        Some(spec.clone()),
+    )
+    .await;
+    sleep(Duration::from_millis(200)).await;
+
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-spec", None).await;
+
+    let get_spec = actr_protocol::ActrToSignaling {
+        source: cli_ok.actr_id.clone(),
+        credential: cli_ok.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::GetServiceSpecRequest(
+            actr_protocol::GetServiceSpecRequest {
+                name: spec.name.clone(),
+            },
+        )),
+    };
+    send_envelope(
+        &mut cli_w,
+        make_envelope(signaling_envelope::Flow::ActrToServer(get_spec)),
+    )
+    .await;
+    let resp = recv_envelope(&mut cli_r).await;
+    match resp.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::GetServiceSpecResponse(rsp)) => match rsp.result {
+                Some(actr_protocol::get_service_spec_response::Result::Success(returned)) => {
+                    assert_eq!(returned.fingerprint, spec.fingerprint);
+                }
+                other => panic!("unexpected get spec result {other:?}"),
+            },
+            other => panic!("unexpected payload {other:?}"),
+        },
+        other => panic!("unexpected flow {other:?}"),
+    }
+
+    graceful_shutdown(child);
+}
+
+#[tokio::test]
+#[serial]
+async fn signaling_route_candidates_compatibility_cache_hit() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let port = choose_port();
+    let config_path = write_fullstack_config(&tmp.path().to_path_buf(), port, DEFAULT_TOKEN_TTL);
+    let log_path = tmp.path().join("actrix_fullstack.log");
+    ensure_realm(&tmp.path().join("data"), 1001).await;
+    let mut child = spawn_actrix(&config_path, &log_path);
+
+    let base = format!("http://127.0.0.1:{port}");
+    wait_for_health(&format!("{base}/ks/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
+    ensure_realm(&tmp.path().join("data"), 1001).await;
+
+    let acl = Acl {
+        rules: vec![AclRule {
+            principals: vec![Principal {
+                realm: Some(Realm { realm_id: 1001 }),
+                actr_type: Some(ActrType {
+                    manufacturer: "mfg".into(),
+                    name: "client-fp-cache".into(),
+                }),
+            }],
+            permission: Permission::Allow as i32,
+        }],
+    };
+
+    let spec_base = make_service_spec(
+        "fp-base",
+        "compat.v1",
+        r#"syntax = "proto3";
+            package compat.v1;
+            message Req { string data = 1; }
+            message Resp { string data = 1; }
+            service Compat { rpc Call(Req) returns (Resp); }"#,
+    );
+    // content identical but fingerprint changed to exercise compatibility cache path without breaking changes
+    let spec_new = make_service_spec(
+        "fp-new",
+        "compat.v1",
+        r#"syntax = "proto3";
+            package compat.v1;
+            message Req { string data = 1; }
+            message Resp { string data = 1; }
+            service Compat { rpc Call(Req) returns (Resp); }"#,
+    );
+
+    // Register base spec instance (provides client fingerprint spec in storage)
+    let (_svc_base_w, _svc_base_r, _svc_base_ok) = ws_register_with_spec(
+        port,
+        "mfg",
+        "svc-compat",
+        Some(acl.clone()),
+        Some(spec_base.clone()),
+    )
+    .await;
+    // Register upgraded instance with different fingerprint
+    let (_svc_w, _svc_r, _svc_ok) = ws_register_with_spec(
+        port,
+        "mfg",
+        "svc-compat",
+        Some(acl.clone()),
+        Some(spec_new.clone()),
+    )
+    .await;
+    sleep(Duration::from_millis(200)).await;
+
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-fp-cache", None).await;
+
+    // First request triggers compatibility analysis and populates cache
+    let route_req = actr_protocol::ActrToSignaling {
+        source: cli_ok.actr_id.clone(),
+        credential: cli_ok.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
+            actr_protocol::RouteCandidatesRequest {
+                target_type: ActrType {
+                    manufacturer: "mfg".into(),
+                    name: "svc-compat".into(),
+                },
+                client_fingerprint: spec_base.fingerprint.clone(),
+                criteria: Some(
+                    actr_protocol::route_candidates_request::NodeSelectionCriteria {
+                        candidate_count: 3,
+                        ranking_factors: vec![actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor::BestCompatibility as i32],
+                        minimal_dependency_requirement: None,
+                        minimal_health_requirement: None,
+                    },
+                ),
+                client_location: None,
+            },
+        )),
+    };
+    send_envelope(
+        &mut cli_w,
+        make_envelope(signaling_envelope::Flow::ActrToServer(route_req)),
+    )
+    .await;
+    let resp1 = recv_envelope(&mut cli_r).await;
+    let (candidates1, info1) = match resp1.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::RouteCandidatesResponse(rsp)) => match rsp.result {
+                Some(route_candidates_response::Result::Success(ok)) => (ok.candidates, ok.compatibility_info),
+                other => panic!("unexpected route result {other:?}"),
+            },
+            other => panic!("unexpected payload {other:?}"),
+        },
+        other => panic!("unexpected flow {other:?}"),
+    };
+    assert!(
+        !candidates1.is_empty(),
+        "should return at least one candidate"
+    );
+    assert!(!info1.is_empty(), "compatibility analysis info should be returned");
+
+    // Second request should reuse cache and still succeed
+    let route_req2 = actr_protocol::ActrToSignaling {
+        source: cli_ok.actr_id.clone(),
+        credential: cli_ok.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
+            actr_protocol::RouteCandidatesRequest {
+                target_type: ActrType {
+                    manufacturer: "mfg".into(),
+                    name: "svc-compat".into(),
+                },
+                client_fingerprint: spec_base.fingerprint.clone(),
+                criteria: Some(
+                    actr_protocol::route_candidates_request::NodeSelectionCriteria {
+                        candidate_count: 3,
+                        ranking_factors: vec![actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor::BestCompatibility as i32],
+                        minimal_dependency_requirement: None,
+                        minimal_health_requirement: None,
+                    },
+                ),
+                client_location: None,
+            },
+        )),
+    };
+    send_envelope(
+        &mut cli_w,
+        make_envelope(signaling_envelope::Flow::ActrToServer(route_req2)),
+    )
+    .await;
+    let resp2 = recv_envelope(&mut cli_r).await;
+    let (candidates2, info2) = match resp2.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::RouteCandidatesResponse(rsp)) => match rsp.result {
+                Some(route_candidates_response::Result::Success(ok)) => (ok.candidates, ok.compatibility_info),
+                other => panic!("unexpected route result {other:?}"),
+            },
+            other => panic!("unexpected payload {other:?}"),
+        },
+        other => panic!("unexpected flow {other:?}"),
+    };
+    assert!(
+        !candidates2.is_empty(),
+        "cache hit should keep returning candidates"
+    );
+    assert!(!info2.is_empty(), "compatibility info should still be present on cache hit");
 
     let _ = cli_w.send(WsMessage::Close(None)).await;
     graceful_shutdown(child);
