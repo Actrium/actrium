@@ -1,3 +1,4 @@
+use actrix_common::storage::db::Database;
 use serde_json::Value;
 use std::{
     fs,
@@ -234,6 +235,63 @@ async fn actrix_exits_when_database_path_is_unavailable() {
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
             panic!("actrix should fail fast when database path is unavailable");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn actrix_exits_on_incompatible_existing_schema() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let port = choose_port();
+    let data_dir = tmp.path().join("data");
+    fs::create_dir_all(&data_dir).expect("create data dir");
+
+    // Pre-create a deliberately incompatible schema:
+    // `realm` exists but misses required `realm_id`, so index creation must fail on startup.
+    let db = Database::new(&data_dir)
+        .await
+        .expect("precreate db with default schema");
+    db.execute("DROP TABLE IF EXISTS realm")
+        .await
+        .expect("drop realm table");
+    db.execute(
+        "CREATE TABLE realm (
+            rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL
+        )",
+    )
+    .await
+    .expect("create incompatible realm table");
+
+    let config_path =
+        write_config_with_sqlite_path(&tmp.path().to_path_buf(), port, &data_dir.display().to_string());
+    let log_path = tmp.path().join("actrix-incompatible-schema.log");
+    let mut child = spawn_actrix(&config_path, &log_path);
+
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("check child status") {
+            assert!(
+                !status.success(),
+                "process should exit with non-zero status for incompatible schema"
+            );
+            let log = fs::read_to_string(&log_path).unwrap_or_default();
+            let log_lower = log.to_lowercase();
+            assert!(
+                log_lower.contains("realm_id")
+                    || log_lower.contains("idx_realm_realm_id")
+                    || log_lower.contains("database")
+                    || log.contains("数据库"),
+                "expected schema/index failure hint in logs, got: {log}"
+            );
+            return;
+        }
+
+        if start.elapsed() > START_TIMEOUT {
+            graceful_shutdown(child);
+            panic!("actrix should fail fast for incompatible existing schema");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
