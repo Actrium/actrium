@@ -54,6 +54,23 @@ fn sign_request(psk: &str, payload: &str) -> NonceCredential {
         .expect("Failed to sign nonce credential")
 }
 
+async fn generate_key_via_http(
+    client: &reqwest::Client,
+    base_url: &str,
+    psk: &str,
+) -> GenerateKeyResponse {
+    let credential = sign_request(psk, "generate_key");
+    let req = GenerateKeyRequest { credential };
+    let resp = client
+        .post(format!("{base_url}/generate"))
+        .json(&req)
+        .send()
+        .await
+        .expect("generate request failed");
+    assert_eq!(resp.status(), StatusCode::OK);
+    resp.json().await.expect("generate response should parse")
+}
+
 #[tokio::test]
 async fn test_http_health_and_key_lifecycle() {
     let psk = "test-ks-psk";
@@ -179,4 +196,91 @@ async fn test_http_generate_timestamp_out_of_window() {
     let url = format!("{}/generate", server.base_url);
     let resp = client.post(&url).json(&req_body).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_http_get_secret_accepts_flattened_and_bracket_credentials() {
+    let psk = "test-ks-psk";
+    let server = start_test_server(psk).await;
+    let client = reqwest::Client::new();
+
+    let generated = generate_key_via_http(&client, &server.base_url, psk).await;
+    let payload = format!("get_secret_key:{}", generated.key_id);
+
+    let flat_credential = sign_request(psk, &payload);
+    let flat_query = [
+        ("key_id", generated.key_id.to_string()),
+        (
+            "credential.timestamp",
+            flat_credential.timestamp.to_string(),
+        ),
+        ("credential.nonce", flat_credential.nonce),
+        ("credential.signature", flat_credential.signature),
+    ];
+    let flat_resp = client
+        .get(format!("{}/secret/{}", server.base_url, generated.key_id))
+        .query(&flat_query)
+        .send()
+        .await
+        .expect("flat query request failed");
+    assert_eq!(flat_resp.status(), StatusCode::OK);
+    let flat_secret: GetSecretKeyResponse = flat_resp
+        .json()
+        .await
+        .expect("flat query response should parse");
+    assert_eq!(flat_secret.key_id, generated.key_id);
+
+    let bracket_credential = sign_request(psk, &payload);
+    let bracket_query = [
+        ("key_id", generated.key_id.to_string()),
+        (
+            "credential[timestamp]",
+            bracket_credential.timestamp.to_string(),
+        ),
+        ("credential[nonce]", bracket_credential.nonce),
+        ("credential[signature]", bracket_credential.signature),
+    ];
+    let bracket_resp = client
+        .get(format!("{}/secret/{}", server.base_url, generated.key_id))
+        .query(&bracket_query)
+        .send()
+        .await
+        .expect("bracket query request failed");
+    assert_eq!(bracket_resp.status(), StatusCode::OK);
+    let bracket_secret: GetSecretKeyResponse = bracket_resp
+        .json()
+        .await
+        .expect("bracket query response should parse");
+    assert_eq!(bracket_secret.key_id, generated.key_id);
+}
+
+#[tokio::test]
+async fn test_http_get_secret_rejects_path_and_query_key_mismatch() {
+    let psk = "test-ks-psk";
+    let server = start_test_server(psk).await;
+    let client = reqwest::Client::new();
+
+    let generated = generate_key_via_http(&client, &server.base_url, psk).await;
+    let secret_payload = format!("get_secret_key:{}", generated.key_id);
+    let credential = sign_request(psk, &secret_payload);
+    let query = [
+        ("key_id", generated.key_id.to_string()),
+        (
+            "credential",
+            serde_json::to_string(&credential).expect("credential should serialize"),
+        ),
+    ];
+
+    let mismatched_path = generated.key_id.saturating_add(1);
+    let resp = client
+        .get(format!("{}/secret/{}", server.base_url, mismatched_path))
+        .query(&query)
+        .send()
+        .await
+        .expect("mismatch request should complete");
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body: Value = resp.json().await.expect("error body should parse");
+    assert_eq!(body["code"], 400);
+    assert_eq!(body["error"], "Invalid request parameters");
 }

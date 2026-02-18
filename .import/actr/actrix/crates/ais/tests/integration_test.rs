@@ -13,17 +13,35 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tonic::transport::Server;
 
 struct TestEnv {
     issuer_temp_dir: TempDir,
     validator_temp_dir: TempDir,
     _ks_temp_dir: TempDir,
+    ks_handle: Option<JoinHandle<()>>,
+    ks_shutdown_tx: Option<oneshot::Sender<()>>,
     ks_config: KsClientConfig,
     shared_key: String,
 }
 
-async fn start_embedded_ks(psk: &str, sqlite_path: &Path) -> String {
+impl TestEnv {
+    async fn shutdown_ks(&mut self) {
+        if let Some(tx) = self.ks_shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        if let Some(handle) = self.ks_handle.take() {
+            let _ = handle.await;
+        }
+    }
+}
+
+async fn start_embedded_ks(
+    psk: &str,
+    sqlite_path: &Path,
+) -> (String, JoinHandle<()>, oneshot::Sender<()>) {
     let service_config = KsServiceConfig::default();
     let storage = KeyStorage::from_config(
         &service_config.storage,
@@ -44,8 +62,16 @@ async fn start_embedded_ks(psk: &str, sqlite_path: &Path) -> String {
         service_config.tolerance_seconds,
     );
 
-    tokio::spawn(async move {
-        if let Err(err) = Server::builder().add_service(service).serve(addr).await {
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    let handle = tokio::spawn(async move {
+        if let Err(err) = Server::builder()
+            .add_service(service)
+            .serve_with_shutdown(addr, async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+        {
             panic!("Embedded KS server failed: {err}");
         }
     });
@@ -68,7 +94,7 @@ async fn start_embedded_ks(psk: &str, sqlite_path: &Path) -> String {
 
         match GrpcClient::new(&cfg).await {
             Ok(mut client) => match client.health_check().await {
-                Ok(status) if status == "healthy" => return endpoint,
+                Ok(status) if status == "healthy" => return (endpoint, handle, shutdown_tx),
                 Ok(status) => last_error = format!("unexpected KS health status: {status}"),
                 Err(err) => last_error = err.to_string(),
             },
@@ -86,7 +112,8 @@ async fn setup_test_environment() -> TestEnv {
     let validator_temp_dir = TempDir::new().expect("Failed to create validator temp dir");
     let ks_temp_dir = TempDir::new().expect("Failed to create ks temp dir");
     let shared_key = "test-psk-key".to_string();
-    let endpoint = start_embedded_ks(&shared_key, ks_temp_dir.path()).await;
+    let (endpoint, ks_handle, ks_shutdown_tx) =
+        start_embedded_ks(&shared_key, ks_temp_dir.path()).await;
 
     let ks_config = KsClientConfig {
         endpoint,
@@ -102,6 +129,8 @@ async fn setup_test_environment() -> TestEnv {
         issuer_temp_dir,
         validator_temp_dir,
         _ks_temp_dir: ks_temp_dir,
+        ks_handle: Some(ks_handle),
+        ks_shutdown_tx: Some(ks_shutdown_tx),
         ks_config,
         shared_key,
     }
@@ -240,4 +269,128 @@ async fn test_issuer_health_checks() {
         .check_key_cache_health()
         .await
         .expect("Key cache health check should pass");
+}
+
+#[tokio::test]
+async fn test_issuer_rotate_key_updates_current_key() {
+    let env = setup_test_environment().await;
+
+    let ks_client = create_ks_client(&env.ks_config, &env.shared_key)
+        .await
+        .expect("Failed to create KS gRPC client");
+    let issuer = AIdIssuer::new(ks_client, default_issuer_config(&env.issuer_temp_dir))
+        .await
+        .expect("Failed to create issuer");
+
+    let key_before = issuer
+        .get_current_key_id()
+        .await
+        .expect("current key before rotate");
+    let rotated = issuer.rotate_key().await.expect("rotate key");
+    let key_after = issuer
+        .get_current_key_id()
+        .await
+        .expect("current key after rotate");
+
+    assert_ne!(key_before, rotated, "rotate_key should change key id");
+    assert_eq!(key_after, rotated, "current key should match rotated key");
+
+    issuer
+        .check_ks_health()
+        .await
+        .expect("KS health should still pass after rotation");
+    let cache = issuer
+        .check_key_cache_health()
+        .await
+        .expect("key cache should remain healthy");
+    assert_eq!(cache.key_id, rotated);
+}
+
+#[tokio::test]
+async fn test_issuer_creation_fails_with_wrong_shared_key() {
+    let env = setup_test_environment().await;
+
+    let ks_client = create_ks_client(&env.ks_config, "wrong-shared-key")
+        .await
+        .expect("gRPC channel creation should succeed even with wrong secret");
+
+    let err = match AIdIssuer::new(ks_client, default_issuer_config(&env.issuer_temp_dir)).await {
+        Ok(_) => panic!("issuer initialization should fail when KS authentication fails"),
+        Err(err) => err,
+    };
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Failed to fetch new key from KS")
+            || msg.contains("Authentication")
+            || msg.contains("Invalid signature"),
+        "unexpected issuer initialization error: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_issuer_check_ks_health_fails_after_ks_shutdown() {
+    let mut env = setup_test_environment().await;
+
+    let ks_client = create_ks_client(&env.ks_config, &env.shared_key)
+        .await
+        .expect("Failed to create KS gRPC client");
+    let issuer = AIdIssuer::new(ks_client, default_issuer_config(&env.issuer_temp_dir))
+        .await
+        .expect("Failed to create issuer");
+
+    env.shutdown_ks().await;
+
+    for _ in 0..40 {
+        match issuer.check_ks_health().await {
+            Ok(()) => tokio::time::sleep(Duration::from_millis(50)).await,
+            Err(err) => {
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("KS service unhealthy")
+                        || msg.contains("Failed")
+                        || msg.contains("transport")
+                        || msg.contains("unavailable")
+                        || msg.contains("connection"),
+                    "unexpected KS health error after shutdown: {msg}"
+                );
+                return;
+            }
+        }
+    }
+
+    panic!("issuer KS health should fail after embedded KS shutdown");
+}
+
+#[tokio::test]
+async fn test_issuer_rotate_key_fails_when_ks_is_unavailable() {
+    let mut env = setup_test_environment().await;
+
+    let ks_client = create_ks_client(&env.ks_config, &env.shared_key)
+        .await
+        .expect("Failed to create KS gRPC client");
+    let issuer = AIdIssuer::new(ks_client, default_issuer_config(&env.issuer_temp_dir))
+        .await
+        .expect("Failed to create issuer");
+
+    env.shutdown_ks().await;
+
+    for _ in 0..40 {
+        match issuer.rotate_key().await {
+            Ok(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+            Err(err) => {
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("KS unavailable")
+                        || msg.contains("Failed")
+                        || msg.contains("transport")
+                        || msg.contains("connection"),
+                    "unexpected rotate_key error after KS shutdown: {msg}"
+                );
+                return;
+            }
+        }
+    }
+
+    panic!("rotate_key should fail after embedded KS shutdown");
 }
