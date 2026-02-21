@@ -14,6 +14,7 @@ members = [
     "libs/ardaudio",
     "libs/ardclipboard",
     "libs/ardui",
+    "libs/evdi-sys",
 ]
 resolver = "2"
 
@@ -49,6 +50,7 @@ ardprivacy = { path = "libs/ardprivacy" }
 ardaudio = { path = "libs/ardaudio" }
 ardclipboard = { path = "libs/ardclipboard" }
 ardui = { path = "libs/ardui" }
+evdi-sys = { path = "libs/evdi-sys" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
