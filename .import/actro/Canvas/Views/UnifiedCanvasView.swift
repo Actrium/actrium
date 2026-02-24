@@ -126,10 +126,8 @@ struct UnifiedCanvasView: View {
                 // 背景
                 #if os(macOS)
                 Color(nsColor: NSColor(white: 0.1, alpha: 0.95))
-                    .ignoresSafeArea()
                 #elseif os(iOS)
                 Color(uiColor: UIColor(white: 0.1, alpha: 0.95))
-                    .ignoresSafeArea()
                 #endif
 
                 // 统一渲染 Canvas（Overview 和 Focus 共用同一个视图，通过 transform 动画切换）
@@ -250,6 +248,7 @@ struct UnifiedCanvasView: View {
                 // 注意：RN 内容层已移至每个 TabCardView 内部
                 // 每个 Tab 都有独立的 RCTRootView，实现真正的缩放
             }
+            .ignoresSafeArea() // 核心修改：允许内容堆格忽略安全区
             .toolbar {
                 ToolbarItemGroup(placement: .principal) {
                     let totalWidth = geometry.size.width
@@ -321,6 +320,7 @@ struct UnifiedCanvasView: View {
                 }
             }
         }
+        .ignoresSafeArea() // 确保获取全屏物理尺寸
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             // 进入 Overview 模式时自动聚焦搜索框
             if case .overview = newValue {
