@@ -66,9 +66,7 @@ struct TabNavigationBar: View {
             }
         } else {
             // 从 Focus 切换到 Overview
-            withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                viewModel.canvasMode = .overview
-            }
+            viewModel.canvasMode = .overview
         }
     }
 }

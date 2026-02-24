@@ -409,11 +409,9 @@ struct UnifiedCanvasView: View {
     private func switchToFocus(tabId: UUID) {
         guard viewModel.canvasMode != .focus(tabId: tabId) else { return }
 
-        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-            // 确保切换到 Focus 模式时，同时更新当前选中的 tab
-            viewModel.currentTabId = tabId
-            viewModel.canvasMode = .focus(tabId: tabId)
-        }
+        // 确保切换到 Focus 模式时，同时更新当前选中的 tab
+        viewModel.currentTabId = tabId
+        viewModel.canvasMode = .focus(tabId: tabId)
     }
 
     // MARK: - Transform Calculations
