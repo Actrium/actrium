@@ -15,62 +15,65 @@ struct PhoneTabListView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 20) {
-                        ForEach(viewModel.tabs) { tab in
-                            PhoneTabCardView(
-                                tab: tab,
-                                viewModel: viewModel,
-                                historyVM: historyVM,
-                                bookmarkVM: bookmarkVM,
-                                screenSize: geometry.size,
-                                isSelected: viewModel.currentTabId == tab.id,
-                                onSelect: {
-                                    // 立即切换 ID，确保 UI 响应（蓝色边框）
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        viewModel.currentTabId = tab.id
+                ZStack(alignment: .top) {
+                    Color.black.ignoresSafeArea()
+                    
+                    ScrollView {
+                        // 顶部间距：适应自定义导航栏
+                        Color.clear.frame(height: 140)
+                        
+                        LazyVGrid(columns: columns, spacing: 20) {
+                            ForEach(viewModel.tabs) { tab in
+                                PhoneTabCardView(
+                                    tab: tab,
+                                    viewModel: viewModel,
+                                    historyVM: historyVM,
+                                    bookmarkVM: bookmarkVM,
+                                    screenSize: geometry.size,
+                                    isSelected: viewModel.currentTabId == tab.id,
+                                    onSelect: {
+                                        // 立即切换 ID，确保 UI 响应（蓝色边框）
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            viewModel.currentTabId = tab.id
+                                        }
+                                        // 延迟一小会儿后进入全屏，让用户看到选中效果
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                            onSelect(tab)
+                                        }
+                                    },
+                                    onClose: {
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                            viewModel.closeTab(id: tab.id)
+                                        }
                                     }
-                                    // 延迟一小会儿后进入全屏，让用户看到选中效果
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        onSelect(tab)
-                                    }
-                                },
-                                onClose: {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                        viewModel.closeTab(id: tab.id)
-                                    }
+                                )
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .ignoresSafeArea()
+                    
+                    PhoneNavigationBar(title: "AskAway", showLargeTitle: true, rightItems: {
+                        ZStack {
+                            Circle().fill(Color.accent)
+                            Image(systemName: "plus")
+                                .renderingMode(.template)
+                                .font(.system(size: 19))
+                                .frame(width: 44, height: 44)
+                                .foregroundColor(.white)
+                                .onTapGesture {
+                                    let newTab = viewModel.addNewTab()
+                                    onSelect(newTab)
                                 }
-                            )
                         }
-                    }
-                    .padding(16)
+                        .asGlassClearEffect(.accent)
+                        .asCornerRadius(22)
+                    })
+                    .ignoresSafeArea(edges: .top)
+                    .zIndex(10)
                 }
             }
-            .navigationTitle("标签页")
-            .navigationBarTitleDisplayMode(.inline)
-            .background(Color(.systemBackground)) // Safari 风格通常是深色或纯色背景
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        let newTab = viewModel.addNewTab()
-                        onSelect(newTab)
-                    }) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 18, weight: .semibold))
-                    }
-                }
-                
-                // 左侧完成按钮（类似 Safari）
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("完成") {
-                        if let currentTab = viewModel.tabs.first(where: { $0.id == viewModel.currentTabId }) {
-                            onSelect(currentTab)
-                        } else if let firstTab = viewModel.tabs.first {
-                            onSelect(firstTab)
-                        }
-                    }
-                }
-            }
+            .navigationBarHidden(true)
         }
     }
 }
@@ -164,11 +167,11 @@ struct PhoneTabCardView: View {
                 .clipped()
                 .allowsHitTesting(false)
         }
-        .background(Color(.systemBackground))
+        .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(isSelected ? Color.blue : Color.primary.opacity(0.1), lineWidth: isSelected ? 3 : 0.5)
+                .stroke(isSelected ? Color.blue : Color.white.opacity(0.15), lineWidth: isSelected ? 3 : 0.5)
         )
         .scaleEffect(isSelected ? 0.98 : 1.0) // 选中时轻微缩小，增加点击感
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isSelected)
