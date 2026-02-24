@@ -6,6 +6,7 @@ import android.util.Log
 import android.view.View
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.forEach
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -42,36 +43,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     viewModel.currentReactNativeStatus.collect {
-//                        reactRootView?.unmountReactApplication()
+                        reactRootView?.unmountReactApplication()
 //                        binding.flContent.removeAllViews()
-//                        val currentAppId = Params.appList.value.lastOrNull()?.id ?: return@collect
-//                        var targetView = appViews[currentAppId]
-//                     直接创建 ReactRootView 作为普通 View 使用
-//                        val reactRootView2 = createReactRootView("canvas-kotlin", it)
-//                        appViews[Params.appList.value.last().id] = reactRootView2
-//                        binding.flContent.addView(reactRootView2)
-
-//                        if (targetView == null) {
-//                            // A. 不存在：创建新的，并添加到容器
-//                            targetView = createReactRootView("canvas-kotlin", it)
-//                            appViews[currentAppId] = targetView
-//                            binding.flContent.addView(targetView)
-//                        } else {
-//                            // B. 存在：更新属性 (可选，如果 props 变了的话)
-//                            targetView.appProperties = it
-//                        }
-//                        appViews.forEach { (id, view) ->
-//                            if (id == currentAppId) {
-//                                view.visibility = View.VISIBLE
-//                                // 仅仅是显示时，一般不需要重新 startReactApplication，因为 View 还在内存里
-//                            } else {
-//                                view.visibility = View.GONE
-//                            }
-//                        }
-                        val targetView1 = createReactRootView("canvas-kotlin", it)
-                        val targetView2 = createReactRootView("canvas-kotlin", it)
-                        binding.flContent.addView(targetView1)
-                        binding.flContent2.addView(targetView2)
+                        val targetView = createReactRootView("canvas-kotlin", it)
+                        Log.e("MainActivity", "Received new React Native status: ${it.getString("currentTabId")}")
+                        targetView.tag = it.getString("currentTabId")
+                        binding.flContent.addView(targetView)
                     }
                 }
                 launch {
@@ -80,6 +57,16 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                         binding.llTabs.removeAllViews()
                         it.forEach {
                             val tabView = HeadTabView(this@MainActivity)
+                            tabView.setOnClickListener { tabView ->
+                                val tabId = it.id
+                                binding.flContent.forEach { child ->
+                                    if(child.tag == tabId) {
+                                        binding.flContent.removeView(child)
+                                        binding.flContent.addView(child)
+                                        return@setOnClickListener
+                                    }
+                                }
+                            }
                             tabView.setAppName("123")
                             binding.llTabs.addView(tabView)
                         }
