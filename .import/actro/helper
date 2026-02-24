@@ -77,8 +77,12 @@ main() {
     ./Scripts/upload-testflight.sh
     ;;
 
-  'test') # 本地测试构建
-    ./Scripts/test-build.sh
+  'pkg') # 调试构建
+    ./Scripts/test-build.sh pkg
+    ;;
+
+  'pkg-prd') # 正式构建
+    ./Scripts/test-build.sh pkg-prd
     ;;
 
   *) show_error "无效命令: $*" ;;
