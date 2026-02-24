@@ -23,7 +23,8 @@ class MainViewModel : ViewModel() {
     }
 
     fun addApp() {
-        val tabModel = AppModel(id = UUID.randomUUID().toString())
+//        val tabModel = AppModel(id = UUID.randomUUID().toString())
+        val tabModel = AppModel(id = "e6c6fefa-51c1-4ac0-baea-4f4ad00fff72")
         Params.appList.value += tabModel
         _currentReactNativeStatus.tryEmit(
             tabModel.genReactNativeBundle(

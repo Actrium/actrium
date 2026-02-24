@@ -4,3 +4,6 @@ extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autoli
 rootProject.name = 'kotlin-canvas'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
+
+include ':actr-kotlin'
+project(':actr-kotlin').projectDir =file('../../actr-kotlin/actr-kotlin')
