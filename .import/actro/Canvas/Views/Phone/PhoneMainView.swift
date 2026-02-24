@@ -43,7 +43,13 @@ struct PhoneMainView: View {
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
         }
         .onChange(of: viewModel.currentTabId) { newValue in
-            if let newValue = newValue, fullscreenTab == nil {
+            guard let newValue = newValue else {
+                fullscreenTab = nil
+                return
+            }
+            
+            // 确保全屏视图显示的标签页与 currentTabId 保持同步
+            if fullscreenTab?.id != newValue {
                 if let tab = viewModel.tabs.first(where: { $0.id == newValue }) {
                     fullscreenTab = tab
                 }
