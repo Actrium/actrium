@@ -18,6 +18,8 @@ enum CanvasMode: Equatable {
 
 @MainActor
 class BrowserViewModel: ObservableObject {
+    static weak var active: BrowserViewModel?
+
     @Published var tabs: [Tab] = []
     @Published var currentTabId: UUID?
     // 默认所有标签页左侧面板可见；仅在用户切换时记录覆盖值
@@ -47,6 +49,7 @@ class BrowserViewModel: ObservableObject {
     }
 
     init() {
+        BrowserViewModel.active = self
         #if DEBUG
         // 🔴 开发调试：优先加载 counterapp 开发目录作为启动 tab (Focus 模式)
         let counterAppDevPath = "/Users/toupitutuetoudada/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"

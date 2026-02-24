@@ -470,6 +470,34 @@ extension ActrBridge {
             resolve(true)
         }
     }
+    
+    /// Close current tab and return to list (iPhone only)
+    @objc
+    public func closeCurrentTab(
+        _ resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom != .phone {
+            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
+            return
+        }
+        #else
+        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
+        return
+        #endif
+
+        Task { @MainActor in
+            guard let viewModel = BrowserViewModel.active,
+                  let currentTabId = viewModel.currentTabId else {
+                reject("NO_ACTIVE_TAB", "No active tab to close", nil)
+                return
+            }
+
+            viewModel.closeTab(id: currentTabId)
+            resolve(true)
+        }
+    }
 }
 
 // MARK: - Simple stream handler that logs incoming chunks.
