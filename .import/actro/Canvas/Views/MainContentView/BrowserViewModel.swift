@@ -35,6 +35,9 @@ class BrowserViewModel: ObservableObject {
     /// Tab ID → grid slot index mapping
     @Published var tabSlotPositions: [UUID: Int] = [:]
 
+    /// Tab snapshots for overview mode
+    @Published var tabSnapshots: [UUID: UIImage] = [:]
+
     /// Toolbar 实际高度（从视图测量得到）
     @Published var toolbarHeight: CGFloat = 52 // 默认值，会在视图中更新
     
@@ -166,6 +169,9 @@ class BrowserViewModel: ObservableObject {
     func closeTab(id: UUID) {
         // 清理缓存的 View
         CanvasReactNativeHost.shared.removeViewForTab(tabId: id)
+        
+        // 清理快照
+        tabSnapshots.removeValue(forKey: id)
         
         // Get the slot position of the tab being closed
         guard let closedPosition = tabSlotPositions[id] else {
