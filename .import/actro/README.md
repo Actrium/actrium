@@ -2,6 +2,7 @@
 
 #### 开发
 
+0. 拉取需要 `git submodule update --init --recursive`
 1. 拉取 askit，rill 库
 2. 执行命令
 
