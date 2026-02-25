@@ -229,7 +229,7 @@ struct PhoneBrowserView: View {
                     }
                 }
             }
-            .ignoresSafeArea(.keyboard)
+            .ignoresSafeArea(.container)
         }
     }
     
