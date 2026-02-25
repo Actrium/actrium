@@ -97,17 +97,24 @@ struct PhoneTabCardView: View {
         VStack(spacing: 0) {
             // 顶部标题栏：白色背景，包含标题和图标，以及关闭按钮
             HStack(spacing: 6) {
-                // 小图标
-                Circle()
-                    .fill(Color(hslString: tab.backgroundColor))
-                    .frame(width: 10, height: 10)
-                
-                Text(tab.title.isEmpty ? "新标签页" : tab.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundColor(.primary)
-                
-                Spacer()
+                // 点击标题区域触发选中
+                HStack(spacing: 6) {
+                    // 小图标
+                    Circle()
+                        .fill(Color(hslString: tab.backgroundColor))
+                        .frame(width: 10, height: 10)
+                    
+                    Text(tab.title.isEmpty ? "新标签页" : tab.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onSelect()
+                }
                 
                 Button(action: onClose) {
                     Image(systemName: "xmark")
@@ -167,6 +174,10 @@ struct PhoneTabCardView: View {
                 }
                 .clipped()
                 .allowsHitTesting(false)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onSelect()
+                }
         }
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -177,10 +188,6 @@ struct PhoneTabCardView: View {
         .scaleEffect(isSelected ? 0.98 : 1.0) // 选中时轻微缩小，增加点击感
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isSelected)
         .shadow(color: Color.black.opacity(isSelected ? 0.25 : 0.1), radius: isSelected ? 12 : 4, x: 0, y: isSelected ? 4 : 2)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onSelect()
-        }
     }
 }
 
