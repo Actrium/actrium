@@ -1,4 +1,5 @@
 import SwiftUI
+import Kingfisher
 
 struct PhoneTabListView: View {
     @ObservedObject var viewModel: BrowserViewModel
@@ -17,6 +18,25 @@ struct PhoneTabListView: View {
             GeometryReader { geometry in
                 ZStack(alignment: .top) {
                     Color.black.ignoresSafeArea()
+                    
+                    PhoneNavigationBar(title: "AskAway", showLargeTitle: true, rightItems: {
+                        ZStack {
+                            Circle().fill(Color.accent)
+                            Image(systemName: "plus")
+                                .renderingMode(.template)
+                                .font(.system(size: 19))
+                                .frame(width: 44, height: 44)
+                                .foregroundColor(.white)
+                                .onTapGesture {
+                                    let newTab = viewModel.addNewTab()
+                                    onSelect(newTab)
+                                }
+                        }
+                        .asGlassClearEffect(.accent)
+                        .asCornerRadius(22)
+                    })
+                    .ignoresSafeArea(edges: .top)
+                    .zIndex(10)
                     
                     ScrollView {
                         // 顶部间距：适应自定义导航栏
@@ -52,25 +72,6 @@ struct PhoneTabListView: View {
                         .padding(16)
                     }
                     .ignoresSafeArea()
-                    
-                    PhoneNavigationBar(title: "AskAway", showLargeTitle: true, rightItems: {
-                        ZStack {
-                            Circle().fill(Color.accent)
-                            Image(systemName: "plus")
-                                .renderingMode(.template)
-                                .font(.system(size: 19))
-                                .frame(width: 44, height: 44)
-                                .foregroundColor(.white)
-                                .onTapGesture {
-                                    let newTab = viewModel.addNewTab()
-                                    onSelect(newTab)
-                                }
-                        }
-                        .asGlassClearEffect(.accent)
-                        .asCornerRadius(22)
-                    })
-                    .ignoresSafeArea(edges: .top)
-                    .zIndex(10)
                 }
             }
             .navigationBarHidden(true)
@@ -192,58 +193,36 @@ struct PhoneBrowserView: View {
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                // Top Bar
-                HStack {
+        NavigationStack {
+            GeometryReader { geometry in
+                SingleTabRootView(
+                    tab: tab,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    containerSize: geometry.size
+                )
+                .id(tab.id)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(tab.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
                     Button(action: {
-                        // 在关闭前尝试对当前内容进行快照
-                        takeSnapshotAndDismiss()
-                    }) {
-                        Image(systemName: "square.grid.2x2")
-                            .font(.system(size: 18))
-                    }
-                    .padding(.leading)
-                    
-                    Spacer()
-                    
-                    Text(tab.title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .lineLimit(1)
-                    
-                    Spacer()
-                    
-                    Button(action: {
+                        UIApplication.shared.hideKeyboard()
                         viewModel.toggleLeftPanelForCurrentTab()
                     }) {
-                        Image(systemName: "sidebar.left")
-                            .font(.system(size: 18))
+                        Image(systemName: "line.3.horizontal")
                     }
-                    .padding(.trailing)
                 }
-                .frame(height: 44)
-                .background(Color(.systemBackground))
-                
-                Divider()
-                
-                // Content
-                GeometryReader { contentGeo in
-                    SingleTabRootView(
-                        tab: tab,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
-                        containerSize: contentGeo.size
-                    )
-                    .id(tab.id)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel", systemImage: "xmark") {
+                        takeSnapshotAndDismiss()
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }
-        .ignoresSafeArea(.keyboard)
-        .onDisappear {
-            // 确保在离开时也保存一份快照（例如通过其他方式关闭）
-            // 注意：此时视图可能已经不在层级中，快照可能失效，主要依赖主动触发的快照
+            .ignoresSafeArea(.keyboard)
         }
     }
     
