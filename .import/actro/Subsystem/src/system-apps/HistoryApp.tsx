@@ -1,7 +1,7 @@
 /**
  * History System App - Built-in app similar to chrome://history
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   NativeModules,
   useWindowDimensions,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
 
 // Native module for history actions
@@ -22,48 +23,51 @@ interface HistoryAppProps {
   groups: HistoryGroupData[];
 }
 
-// Group items by date
-function groupByDate(items: HistoryItemData[]): { date: string; items: HistoryItemData[] }[] {
-  const grouped: Record<string, HistoryItemData[]> = {};
-
-  items.forEach(item => {
-    const date = new Date(item.visitTime);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    let dateKey: string;
-    if (date.toDateString() === today.toDateString()) {
-      dateKey = 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      dateKey = 'Yesterday';
-    } else {
-      dateKey = date.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    }
-
-    if (!grouped[dateKey]) {
-      grouped[dateKey] = [];
-    }
-    grouped[dateKey].push(item);
-  });
-
-  return Object.entries(grouped).map(([date, items]) => ({ date, items }));
-}
-
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-}
-
 export default function HistoryApp({ items, groups }: HistoryAppProps) {
+  const { t, i18n } = useTranslation();
+  
+  // Group items by date
+  const groupByDate = useCallback((items: HistoryItemData[]): { date: string; items: HistoryItemData[] }[] => {
+    const grouped: Record<string, HistoryItemData[]> = {};
+
+    items.forEach(item => {
+      const date = new Date(item.visitTime);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      let dateKey: string;
+      if (date.toDateString() === today.toDateString()) {
+        dateKey = t('actr.history.today');
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        dateKey = t('actr.history.yesterday');
+      } else {
+        dateKey = date.toLocaleDateString(i18n.language === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+      }
+
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(item);
+    });
+
+    return Object.entries(grouped).map(([date, items]) => ({ date, items }));
+  }, [t, i18n.language]);
+
+  const formatTime = useCallback((timestamp: number): string => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString(i18n.language === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: i18n.language !== 'zh-Hans'
+    });
+  }, [i18n.language]);
+
   const { width } = useWindowDimensions();
   const isPhone = width < 768;
   const [searchQuery, setSearchQuery] = useState('');
@@ -100,12 +104,12 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>History</Text>
+        <Text style={styles.title}>{t('actr.history.title')}</Text>
         <View style={[styles.searchContainer, isPhone && styles.searchContainerPhone]}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search history..."
+            placeholder={t('actr.history.searchPlaceholder')}
             placeholderTextColor="#888"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -120,12 +124,12 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
         {/* Closed Groups Section */}
         {groups.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recently Closed Groups</Text>
+            <Text style={styles.sectionTitle}>{t('actr.history.recentlyClosed')}</Text>
             {groups.map(group => (
               <TouchableOpacity
                 key={group.id}
                 style={styles.groupRow}
-                onPress={() => handleRestoreGroup(group)}
+                onPress={() => handleRestoreGroup(group as any)}
               >
                 <View style={[styles.groupIcon, { backgroundColor: group.color + '33' }]}>
                   <Text style={styles.groupIconText}>📁</Text>
@@ -133,19 +137,19 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
                 <View style={styles.groupInfo}>
                   <View style={styles.groupNameRow}>
                     <Text style={styles.groupName}>
-                      {group.name || 'Unnamed Group'}
+                      {group.name || t('actr.history.unnamedGroup')}
                     </Text>
                     <View style={[styles.colorDot, { backgroundColor: group.color }]} />
                   </View>
                   <Text style={styles.groupTabs}>
-                    {group.tabs.length} tab{group.tabs.length !== 1 ? 's' : ''}
+                    {t('actr.history.tabsCount', { count: group.tabs.length })}
                   </Text>
                 </View>
                 <TouchableOpacity
                   style={styles.restoreButton}
-                  onPress={() => handleRestoreGroup(group)}
+                  onPress={() => handleRestoreGroup(group as any)}
                 >
-                  <Text style={styles.restoreButtonText}>Restore</Text>
+                  <Text style={styles.restoreButtonText}>{t('actr.history.restore')}</Text>
                 </TouchableOpacity>
               </TouchableOpacity>
             ))}
@@ -156,22 +160,22 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
         {groupedItems.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🕐</Text>
-            <Text style={styles.emptyTitle}>No History</Text>
+            <Text style={styles.emptyTitle}>{t('actr.history.noHistory')}</Text>
             <Text style={styles.emptySubtitle}>
               {searchQuery
-                ? `No results for "${searchQuery}"`
-                : 'Apps you visit will appear here'}
+                ? t('actr.history.noResult', { defaultValue: `No results for "${searchQuery}"`, query: searchQuery }) as string
+                : t('actr.history.visitEmptyTip')}
             </Text>
           </View>
         ) : (
-          groupedItems.map(group => (
+          groupedItems.map((group: any) => (
             <View key={group.date} style={styles.section}>
               <Text style={styles.sectionTitle}>{group.date}</Text>
-              {group.items.map(item => (
+              {group.items.map((item: any) => (
                 <TouchableOpacity
                   key={item.id}
                   style={styles.itemRow}
-                  onPress={() => handleOpenItem(item)}
+                  onPress={() => handleOpenItem(item as any)}
                 >
                   <Text style={styles.itemIcon}>📄</Text>
                   <View style={styles.itemInfo}>
@@ -196,14 +200,14 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
 
       {/* Footer */}
       <View style={styles.footer}>
-        <Text style={styles.footerText}>{items.length} items</Text>
+        <Text style={styles.footerText}>{t('actr.history.itemsCount', { count: items.length })}</Text>
         <TouchableOpacity
           style={[styles.clearButton, items.length === 0 && styles.clearButtonDisabled]}
           onPress={handleClearHistory}
           disabled={items.length === 0}
         >
           <Text style={[styles.clearButtonText, items.length === 0 && styles.clearButtonTextDisabled]}>
-            Clear History...
+            {t('actr.history.clearHistory')}
           </Text>
         </TouchableOpacity>
       </View>
