@@ -292,6 +292,7 @@ const styles = StyleSheet.create({
   phoneInputDock: {
     width: '100%',
     marginTop: 24,
+    paddingBottom: 12,
   },
   phoneInputSafeArea: {
     width: '100%',
