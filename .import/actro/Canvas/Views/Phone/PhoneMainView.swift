@@ -39,7 +39,7 @@ struct PhoneMainView: View {
                 .tag(PhoneTab.settings)
         }
         .accentColor(.blue)
-        .fullScreenCover(item: $fullscreenTab) { tab in
+        .sheet(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
         }
         .onAppear {
@@ -49,7 +49,7 @@ struct PhoneMainView: View {
                 fullscreenTab = tab
             }
         }
-        .onChange(of: viewModel.currentTabId) { newValue in
+        .onChange(of: viewModel.currentTabId) { oldValue, newValue in
             guard let newValue = newValue else {
                 fullscreenTab = nil
                 return
