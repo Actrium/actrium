@@ -192,7 +192,7 @@ struct PhoneBrowserView: View {
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
-        GeometryReader { geometry in
+        GeometryReader { _ in
             VStack(spacing: 0) {
                 // Top Bar
                 HStack {
@@ -239,8 +239,9 @@ struct PhoneBrowserView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .background(Color(.systemBackground))
         }
-        .ignoresSafeArea(.keyboard)
+        .ignoresSafeArea(.container, edges: .bottom)
         .onDisappear {
             // 确保在离开时也保存一份快照（例如通过其他方式关闭）
             // 注意：此时视图可能已经不在层级中，快照可能失效，主要依赖主动触发的快照
