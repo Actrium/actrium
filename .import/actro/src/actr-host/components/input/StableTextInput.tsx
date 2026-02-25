@@ -1,0 +1,144 @@
+import React, { useCallback, useRef, useState } from 'react';
+import {
+  NativeSyntheticEvent,
+  StyleProp,
+  TextInput,
+  TextInputContentSizeChangeEventData,
+  TextStyle,
+} from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { useInputStore } from '../../store/useInputStore';
+
+interface StableTextInputProps {
+  appId: string;
+  hasAttachments: boolean;
+  isSendOnEnter: boolean;
+  handleSendRef: React.MutableRefObject<() => void>;
+  mobileMode?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  inputRefExternal?: React.MutableRefObject<TextInput | null>;
+  desktopInputStyle: StyleProp<TextStyle>;
+  mobileInputStyle: StyleProp<TextStyle>;
+  editable?: boolean;
+}
+
+export const StableTextInput = React.memo(function StableTextInput({
+  appId,
+  hasAttachments,
+  isSendOnEnter,
+  handleSendRef,
+  mobileMode = false,
+  onFocus,
+  onBlur,
+  inputRefExternal,
+  desktopInputStyle,
+  mobileInputStyle,
+  editable = true,
+}: StableTextInputProps) {
+  const { t } = useTranslation();
+  const MOBILE_LINE_HEIGHT = 22;
+  const MOBILE_MAX_LINES = 5;
+  const MOBILE_MIN_HEIGHT = MOBILE_LINE_HEIGHT;
+  const MOBILE_MAX_HEIGHT = MOBILE_LINE_HEIGHT * MOBILE_MAX_LINES;
+  const inputRef = useRef<TextInput>(null);
+  const localTextRef = useRef('');
+  const [mobileInputHeight, setMobileInputHeight] = useState(MOBILE_MIN_HEIGHT);
+
+  const setInputText = useInputStore((state) => state.setInputText);
+  const [initialText] = useState(
+    () => useInputStore.getState().inputs[appId]?.text ?? '',
+  );
+
+  // 不订阅组件重渲染：仅同步 ref，避免输入中被父级 render 打断。
+  React.useEffect(() => {
+    localTextRef.current = useInputStore.getState().inputs[appId]?.text ?? '';
+  }, [appId]);
+
+  React.useEffect(() => {
+    const unsubscribe = useInputStore.subscribe((state) => {
+      const text = state.inputs[appId]?.text ?? '';
+      if (text !== localTextRef.current) {
+        // 外部清空/回填时，直接改原生文本，不触发输入组件重建。
+        localTextRef.current = text;
+        inputRef.current?.setNativeProps({ text });
+      }
+    });
+    return unsubscribe;
+  }, [appId]);
+
+  React.useEffect(() => {
+    if (!inputRefExternal) return;
+    inputRefExternal.current = inputRef.current;
+    return () => {
+      if (inputRefExternal.current === inputRef.current) {
+        inputRefExternal.current = null;
+      }
+    };
+  }, [inputRefExternal]);
+
+  const handleChangeText = useCallback(
+    (text: string) => {
+      localTextRef.current = text;
+      setInputText(appId, text);
+    },
+    [appId, setInputText],
+  );
+
+  const inputStyle = React.useMemo(
+    () => [
+      mobileMode ? mobileInputStyle : desktopInputStyle,
+      mobileMode
+        ? {
+            height: mobileInputHeight,
+            maxHeight: MOBILE_MAX_HEIGHT,
+          }
+        : null,
+    ],
+    [
+      desktopInputStyle,
+      hasAttachments,
+      mobileInputHeight,
+      mobileInputStyle,
+      mobileMode,
+    ],
+  );
+
+  const handleContentSizeChange = useCallback(
+    (e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
+      if (!mobileMode) return;
+      // mobile 文本框高度限制在 1~5 行，超过后由 TextInput 内部滚动承载。
+      const nextHeight = Math.max(
+        MOBILE_MIN_HEIGHT,
+        Math.min(e.nativeEvent.contentSize.height, MOBILE_MAX_HEIGHT),
+      );
+      if (Math.abs(nextHeight - mobileInputHeight) > 1) {
+        setMobileInputHeight(nextHeight);
+      }
+    },
+    [mobileInputHeight, mobileMode],
+  );
+
+  return (
+    <TextInput
+      ref={inputRef}
+      style={inputStyle}
+      editable={editable}
+      placeholder={t('actr.input.placeholder')}
+      placeholderTextColor='#999'
+      multiline={true}
+      scrollEnabled={mobileMode && mobileInputHeight >= MOBILE_MAX_HEIGHT}
+      defaultValue={initialText}
+      onChangeText={handleChangeText}
+      onContentSizeChange={handleContentSizeChange}
+      blurOnSubmit={isSendOnEnter}
+      onSubmitEditing={() => {
+        if (isSendOnEnter) {
+          handleSendRef.current();
+        }
+      }}
+      onFocus={onFocus}
+      onBlur={onBlur}
+    />
+  );
+});
