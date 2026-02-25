@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   NativeModules,
+  useWindowDimensions,
 } from 'react-native';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
 
@@ -63,6 +64,8 @@ function formatTime(timestamp: number): string {
 }
 
 export default function HistoryApp({ items, groups }: HistoryAppProps) {
+  const { width } = useWindowDimensions();
+  const isPhone = width < 768;
   const [searchQuery, setSearchQuery] = useState('');
 
   // Filter items based on search
@@ -98,7 +101,7 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>History</Text>
-        <View style={styles.searchContainer}>
+        <View style={[styles.searchContainer, isPhone && styles.searchContainerPhone]}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
@@ -218,6 +221,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
+    gap: 12,
   },
   title: {
     fontSize: 20,
@@ -231,16 +235,23 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    flex: 1,
+    maxWidth: 420,
+    minWidth: 0,
+  },
+  searchContainerPhone: {
+    maxWidth: '100%',
   },
   searchIcon: {
     fontSize: 14,
     marginRight: 6,
   },
   searchInput: {
-    width: 200,
+    flex: 1,
     fontSize: 14,
     color: '#fff',
     padding: 0,
+    minWidth: 0,
   },
   divider: {
     height: 1,
