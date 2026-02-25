@@ -42,6 +42,13 @@ struct PhoneMainView: View {
         .fullScreenCover(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
         }
+        .onAppear {
+            // 初始进入时，如果有选中的 tab，直接进入全屏模式
+            if let currentId = viewModel.currentTabId,
+               let tab = viewModel.tabs.first(where: { $0.id == currentId }) {
+                fullscreenTab = tab
+            }
+        }
         .onChange(of: viewModel.currentTabId) { newValue in
             guard let newValue = newValue else {
                 fullscreenTab = nil
