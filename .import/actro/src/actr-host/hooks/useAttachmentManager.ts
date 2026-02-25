@@ -1,0 +1,187 @@
+import { Alert } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { IAttachmentItem } from '../types/attachment';
+import { AttachmentService } from '../../services/AttachmentService';
+import { useInputStore, EMPTY_ATTACHMENTS } from '../store/useInputStore';
+import RNFS from 'react-native-fs';
+import { Utils } from '../../utils/utils';
+
+export const useAttachmentManager = (appId: string) => {
+  const { t } = useTranslation();
+  const attachments = useInputStore(
+    (state) => state.inputs[appId]?.attachments || EMPTY_ATTACHMENTS,
+  );
+  const setStoreAttachments = useInputStore((state) => state.setAttachments);
+
+  const removeAttachment = (id: string) => {
+    const next = attachments.filter((item) => item.id !== id);
+    setStoreAttachments(appId, next);
+  };
+
+  const clearAttachments = () => {
+    setStoreAttachments(appId, []);
+  };
+
+  const copyAssetToTemp = async (
+    uri: string,
+    filename: string,
+    id: string,
+  ): Promise<string> => {
+    try {
+      const tempDir = `${RNFS.TemporaryDirectoryPath}/attachments`;
+      const exists = await RNFS.exists(tempDir);
+      if (!exists) {
+        await RNFS.mkdir(tempDir);
+      }
+
+      const cleanUri = uri.startsWith('file://')
+        ? uri.replace('file://', '')
+        : uri;
+      // 使用传入的 ID 作为文件名的一部分，不再使用时间戳
+      const destPath = `${tempDir}/${id}-${filename}`;
+
+      await RNFS.copyFile(cleanUri, destPath);
+      return `file://${destPath}`;
+    } catch (error) {
+      console.error('[useAttachmentManager] copyAssetToTemp failed:', error);
+      return uri; // 失败则降级使用原始 URI
+    }
+  };
+
+  const handleAddAttachment = async (
+    type: 'image' | 'file',
+    getAssets: () => Promise<any[]>,
+  ) => {
+    const hasConflict =
+      attachments.length > 0 && attachments[0].attachment_type !== type;
+
+    if (hasConflict) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(t('common.tip'), t('actr.attachment.overwriteConfirm'), [
+          { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+          {
+            text: t('common.confirm'),
+            onPress: () => resolve(true),
+          },
+        ]);
+      });
+      if (!confirmed) return;
+    } else if (attachments.length >= 6) {
+      Alert.alert(t('common.tip'), t('actr.attachment.limitReached'));
+      return;
+    }
+
+    const results = await getAssets();
+    if (results && results.length > 0) {
+      // 检查文件大小是否超过 10MB
+      const maxSize = 10 * 1024 * 1024;
+      const validResults = results.filter((res) => {
+        const size = res.fileSize || res.size || 0;
+        return size <= maxSize;
+      });
+
+      if (validResults.length < results.length) {
+        Alert.alert(t('actr.attachment.fileTooLarge'), t('actr.attachment.fileSizeLimit'));
+      }
+
+      // Check for unsupported file types (e.g., no type found)
+      const supportedResults = validResults.filter((res) => {
+        // Simple check: if it's a file but has no type/extension that we filters for
+        // DocumentPicker usually returns types like 'application/pdf', etc.
+        return !!res.type || !!res.mimeType || type === 'image';
+      });
+
+      if (supportedResults.length < validResults.length) {
+        Alert.alert(t('common.tip'), t('actr.attachment.unsupportedType'));
+      }
+
+      if (supportedResults.length === 0) return;
+
+      const isDifferentType =
+        attachments.length > 0 && attachments[0].attachment_type !== type;
+      const currentList = isDifferentType ? [] : attachments;
+      const remainingSlots = 6 - currentList.length;
+
+      if (remainingSlots <= 0) return;
+
+      const newItemsToAdd: IAttachmentItem[] = await Promise.all(
+        supportedResults.slice(0, remainingSlots).map(async (res) => {
+          const id = Utils.generateId();
+          const fileName =
+            res.fileName ||
+            res.name ||
+            (type === 'image' ? `img-${Date.now()}.jpg` : `file-${Date.now()}`);
+
+          // 复制到临时目录
+          const localUrl = await copyAssetToTemp(res.uri, fileName, id);
+
+          return {
+            id,
+            attachment_type: type,
+            local_url: localUrl,
+            cdn_url: '',
+            type: res.type,
+            name: fileName,
+            aspect_ratio: res.width && res.height ? res.width / res.height : 1,
+          };
+        }),
+      );
+
+      if (supportedResults.length > remainingSlots) {
+        Alert.alert(
+          t('common.tip'),
+          t('actr.attachment.limitPartial', { count: remainingSlots }),
+        );
+      }
+
+      setStoreAttachments(appId, [...currentList, ...newItemsToAdd]);
+    }
+  };
+
+  const handleConfirmLocation = async (data: {
+    latitude: number;
+    longitude: number;
+    snapshot: string;
+  }) => {
+    const hasConflict =
+      attachments.length > 0 && attachments[0].attachment_type !== 'location';
+    if (hasConflict) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(t('common.tip'), t('actr.attachment.overwriteConfirm'), [
+          { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+          { text: t('common.confirm'), onPress: () => resolve(true) },
+        ]);
+      });
+      if (!confirmed) return;
+    }
+
+    const snapshotFileName = `map-${Date.now()}.png`;
+    const id = Utils.generateId();
+    const localUrl = await copyAssetToTemp(data.snapshot, snapshotFileName, id);
+
+    const locationItem: IAttachmentItem = {
+      id: id,
+      attachment_type: 'location',
+      local_url: localUrl,
+      cdn_url: '',
+      latitude: data.latitude,
+      longitude: data.longitude,
+      place_name: t('actr.chat.locationInfo'),
+      aspect_ratio: 1,
+    };
+
+    setStoreAttachments(appId, [locationItem]);
+  };
+
+  return {
+    attachments,
+    removeAttachment,
+    clearAttachments,
+    handleAddAttachment,
+    handleConfirmLocation,
+    takePhoto: () => handleAddAttachment('image', AttachmentService.takePhoto),
+    pickImage: () => handleAddAttachment('image', AttachmentService.pickImage),
+    pickDocument: () =>
+      handleAddAttachment('file', AttachmentService.pickDocument),
+  };
+};

@@ -1,0 +1,12 @@
+export const LAYOUT = {
+  LEFT_PANEL_WIDTH: 240,
+  RIGHT_PANEL_WIDTH: 400,
+  LEFT_PANEL_MIN_WIDTH: 140,
+  RIGHT_PANEL_MIN_WIDTH: 180,
+  CENTER_MIN_WIDTH: 200,
+  BORDER_COLOR: '#333',
+} as const;
+
+export const SUPPORTED_CONTRACT = { name: 'ask', version: 1 } as const;
+
+export const PERMISSION_MODE: 'allow' | 'warn' | 'deny' = 'warn';
