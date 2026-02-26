@@ -2,6 +2,7 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "kotlin-parcelize"
+apply plugin: "com.google.protobuf"
 
 // Match build config to gradle.properties newArchEnabled.
 
@@ -127,6 +128,13 @@ android {
 //     }
 }
 
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:3.25.1" }
+    generateProtoTasks {
+        all().forEach { task -> task.builtins { create("java") { option("lite") } } }
+    }
+}
+
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
@@ -143,4 +151,5 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.6.2")
     implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0"
     implementation "androidx.lifecycle:lifecycle-livedata-ktx:2.7.0"
+    implementation("com.google.protobuf:protobuf-javalite:3.25.1")
 }
