@@ -24,6 +24,9 @@ class BrowserViewModel: ObservableObject {
     @Published var currentTabId: UUID?
     // 默认所有标签页左侧面板可见；仅在用户切换时记录覆盖值
     @Published private var leftPanelVisibility: [UUID: Bool] = [:]
+    
+    // MARK: - System Tabs (单独管理，不混入 tabs 数组)
+    @Published var systemTabs: [SystemTabType: Tab] = [:]
 
     // MARK: - Tab Groups
     @Published var tabGroups: [TabGroup] = []
@@ -131,32 +134,26 @@ class BrowserViewModel: ObservableObject {
         return newTab
     }
 
-    /// Open or switch to a system tab (History, Bookmarks)
-    /// Returns the existing tab if already open, otherwise creates a new one
+    /// Open or get a system tab (History, Bookmarks, Settings)
+    /// System tabs are managed separately from regular tabs
+    /// Returns the system tab (creates if doesn't exist)
     @discardableResult
-    func openSystemTab(_ type: SystemTabType, id: UUID? = nil) -> Tab {
-        // Check if a system tab of this type is already open
-        if let existingTab = tabs.first(where: { $0.systemTabType == type }) {
-            // Switch to existing tab
-            currentTabId = existingTab.id
-            canvasMode = .focus(tabId: existingTab.id)
-            logger.debug("🔄 切换到已有系统标签: \(type.title)")
+    func openSystemTab(_ type: SystemTabType) -> Tab {
+        // Check if system tab already exists
+        if let existingTab = systemTabs[type] {
+            logger.debug("🔄 返回已有系统标签: \(type.title)")
             return existingTab
         }
 
         // Create new system tab
         let newTab = Tab(
-            id: id ?? UUID(),
+            id: UUID(),
             title: type.title,
             systemTabType: type,
             backgroundColor: "#1e1e1e"  // Dark background for system tabs
         )
-        tabs.append(newTab)
-        currentTabId = newTab.id
-        tabSlotPositions[newTab.id] = tabs.count - 1
-        canvasMode = .focus(tabId: newTab.id)
-
-        logger.notice(" 已创建系统标签: \(type.title), 位置: \(self.tabs.count - 1)")
+        systemTabs[type] = newTab
+        logger.notice(" 已创建系统标签: \(type.title)")
         return newTab
     }
 

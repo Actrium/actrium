@@ -16,27 +16,43 @@ struct PhoneMainView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            PhoneBookmarkListView(viewModel: viewModel, bookmarkVM: bookmarkVM, onSelect: { tab in
-                fullscreenTab = tab
-            })
-                .tabItem {
-                    Label("书签", systemImage: "bookmark.fill")
+            // 书签页：使用 RN 渲染
+            PhoneSystemAppView(
+                systemType: .bookmarks,
+                viewModel: viewModel,
+                historyVM: historyVM,
+                bookmarkVM: bookmarkVM,
+                onSelect: { tab in
+                    fullscreenTab = tab
                 }
-                .tag(PhoneTab.bookmarks)
+            )
+            .tabItem {
+                Label("书签", systemImage: "bookmark.fill")
+            }
+            .tag(PhoneTab.bookmarks)
             
             PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, onSelect: { tab in
                 fullscreenTab = tab
             })
-                .tabItem {
-                    Label("页签", systemImage: "square.grid.2x2.fill")
-                }
-                .tag(PhoneTab.tabs)
+            .tabItem {
+                Label("页签", systemImage: "square.grid.2x2.fill")
+            }
+            .tag(PhoneTab.tabs)
             
-            SettingsView()
-                .tabItem {
-                    Label("偏好设置", systemImage: "gearshape.fill")
+            // 设置页：使用 RN 渲染
+            PhoneSystemAppView(
+                systemType: .settings,
+                viewModel: viewModel,
+                historyVM: historyVM,
+                bookmarkVM: bookmarkVM,
+                onSelect: { tab in
+                    fullscreenTab = tab
                 }
-                .tag(PhoneTab.settings)
+            )
+            .tabItem {
+                Label("偏好设置", systemImage: "gearshape.fill")
+            }
+            .tag(PhoneTab.settings)
         }
         .accentColor(.blue)
         .sheet(item: $fullscreenTab) { tab in

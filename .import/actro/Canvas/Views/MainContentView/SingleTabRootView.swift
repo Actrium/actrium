@@ -211,6 +211,9 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             case .login:
                 // Login tab currently doesn't need extra data from native
                 break
+            case .settings:
+                // Settings tab currently doesn't need extra data from native
+                break
             }
         } else {
             // Regular ACTR tabs
