@@ -521,10 +521,30 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
           </View>
 
+          {/* tab_preview 按钮 - 未聚焦时显示 */}
           {!isInputFocused && (
             <View style={styles.mobileReservedButton}>
               <Icon type='tab_preview' size={20} color='#666' />
             </View>
+          )}
+
+          {/* send 按钮 - 聚焦 + isSendOnEnter 时显示 */}
+          {isInputFocused && isSendOnEnter && (
+            <TouchableOpacity
+              style={styles.mobileReservedButton}
+              onPress={() => {
+                if (hasInputText) {
+                  handleSendRef.current();
+                }
+              }}
+              disabled={!hasInputText}
+            >
+              <Icon
+                type='send'
+                size={20}
+                color={hasInputText ? '#000000' : '#666'}
+              />
+            </TouchableOpacity>
           )}
         </View>
       </View>
