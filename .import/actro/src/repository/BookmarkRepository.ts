@@ -3,7 +3,7 @@ import { db } from '../libs/Sqlite';
 // 1. 书签项类型：对应 bookmark_items 表 + apps 表的关联字段
 export type TBookmarkItem = {
   id: number;
-  category_id: number;
+  category_id: number | null;
   app_id: string;
   created_at: number;
   sort_order: number;
@@ -25,6 +25,7 @@ export type TBookmarkGroup = {
 export class BookmarkRepository {
   /**
    * 获取所有书签层级 (分类 + 书签项)
+   * 包含未分类的书签（category_id 为 null）
    */
   static async getBookmarksHierarchy(): Promise<TBookmarkGroup[]> {
     try {
@@ -39,9 +40,9 @@ export class BookmarkRepository {
 
       // 2. 获取所有书签项 (严格匹配 TBookmarkItem 字段)
       const items = await db.selectAll<TBookmarkItem>(
-        `SELECT 
-          bi.id, 
-          bi.category_id, 
+        `SELECT
+          bi.id,
+          bi.category_id,
           bi.app_id,
           bi.created_at,
           bi.sort_order,
@@ -55,10 +56,23 @@ export class BookmarkRepository {
       );
 
       // 3. 组装嵌套结构
-      return categories.map((cat) => ({
+      const result = categories.map((cat) => ({
         ...cat,
         items: items.filter((item) => item.category_id === cat.id),
       }));
+
+      // 4. 添加未分类的书签作为一个特殊分组（如果有）
+      const uncategorizedItems = items.filter((item) => item.category_id === null);
+      if (uncategorizedItems.length > 0) {
+        result.push({
+          id: -1, // 特殊 ID 表示未分类
+          title: '未分类',
+          sort_order: 999999,
+          items: uncategorizedItems,
+        });
+      }
+
+      return result;
     } catch (error) {
       console.error(
         '[BookmarkRepository] Failed to fetch bookmarks hierarchy',
@@ -103,19 +117,20 @@ export class BookmarkRepository {
 
   /**
    * 添加一个书签
+   * category_id 可选，为空时表示未分类
    */
   static async addBookmark({
-    category_id,
     app_id,
+    category_id,
     sort_order = 0,
   }: {
-    category_id: number;
     app_id: string;
+    category_id?: number | null;
     sort_order?: number;
   }) {
     return await db.executeSql(
       'INSERT INTO bookmark_items (category_id, app_id, sort_order) VALUES (?, ?, ?)',
-      [category_id, app_id, sort_order]
+      [category_id ?? null, app_id, sort_order]
     );
   }
 
