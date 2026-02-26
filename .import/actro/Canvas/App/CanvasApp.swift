@@ -90,12 +90,11 @@ struct BrowserWindowView: View {
             // Handle open system tab from RN
             .onReceive(NotificationCenter.default.publisher(for: .openTabFromRN)) { notification in
                 guard let userInfo = notification.userInfo,
-                      let tabId = userInfo["tabId"] as? UUID,
                       let systemAppTypeStr = userInfo["systemAppType"] as? String,
                       let systemTabType = SystemTabType(rawValue: systemAppTypeStr) else { return }
                 
                 withAnimation {
-                    let _ = viewModel.openSystemTab(systemTabType, id: tabId)
+                    let _ = viewModel.openSystemTab(systemTabType)
                 }
             }
             // Handle select tab from RN

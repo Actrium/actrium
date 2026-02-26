@@ -188,6 +188,9 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
                     // Login tab currently doesn't need extra data from native,
                     // context info (clientId) is handled via JS store using tabId.
                     break
+                case .settings:
+                    // Settings tab currently doesn't need extra data from native
+                    break
                 }
                 return dict
             }
