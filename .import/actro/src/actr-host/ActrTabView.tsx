@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   NativeModules,
   StyleSheet,
+  Animated,
 } from 'react-native';
 
 import { logger } from '../logger';
@@ -39,6 +40,7 @@ import Main from './views/index';
 import { TabProvider } from './contexts/TabContext';
 import { useAppStore } from './store/useAppStore';
 import { useTabIdMapStore } from './store/useTabIdMapStore';
+import ExtensionPanel from './components/ExtensionPanel';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -89,16 +91,17 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const pendingUpdateRef = useRef(false);
   const lastBatchesRef = useRef<number>(0);
 
+  // 中间窗口的动画值（由 ExtensionPanel 控制）
+  const centerAnimValue = useRef(new Animated.Value(0)).current;
+
   React.useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
 
   // 优化：使用固定宽度 + flexShrink，让 Yoga 自动处理收缩
   // 不再依赖 propsContainerWidth 计算，避免 re-render
-  const rightWidth = useMemo(
-    () => (isLeftPanelVisible ? LAYOUT.RIGHT_PANEL_WIDTH : 0),
-    [isLeftPanelVisible],
-  );
+  // 注意：rightWidth 应该始终是固定值，不要根据 isLeftPanelVisible 变化
+  const rightWidth = LAYOUT.RIGHT_PANEL_WIDTH;
 
   useEffect(() => {
     if (guestLoadingStatus) return;
@@ -453,22 +456,25 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           </View>
         )} */}
 
-        {/* 中间对话窗口 - flex 自适应 */}
-        <View style={styles.centerColumn}>{main}</View>
+        {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
+        <Animated.View
+          style={[
+            styles.centerColumn,
+            {
+              transform: [{ translateX: centerAnimValue }],
+            },
+          ]}
+        >
+          {main}
+        </Animated.View>
 
-        {/* 右侧扩展面板 - 基准宽度，窗口变小时允许收缩 */}
-        {isLeftPanelVisible && rightPanel && (
-          <View
-            style={[
-              styles.rightPanel,
-              {
-                width: rightWidth,
-              },
-            ]}
-          >
-            {rightPanel}
-          </View>
-        )}
+        {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入 */}
+        <ExtensionPanel
+          visible={isLeftPanelVisible}
+          content={rightPanel}
+          width={rightWidth}
+          centerAnimValue={centerAnimValue}
+        />
       </View>
     </TabProvider>
   );
@@ -482,6 +488,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#0a0a0a',
     minWidth: 0, // 允许内部列在窗口缩小时收缩
+    overflow: 'hidden', // 防止横向滚动条
   },
   leftPanel: {
     borderRightWidth: 1,
@@ -494,14 +501,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff', // White background like the source
     minWidth: LAYOUT.CENTER_MIN_WIDTH,
     justifyContent: 'space-between',
-  },
-
-  rightPanel: {
-    flexShrink: 1,
-    minWidth: LAYOUT.RIGHT_PANEL_MIN_WIDTH, // 最小宽度，允许 Yoga 自动收缩
-    position: 'absolute',
-    right: 0,
-    height: '100%',
   },
   container: {
     flex: 1,
