@@ -16,6 +16,7 @@ import type { ActrInputStyles } from './ActrInput.shared';
 import type { PanResponderInstance } from 'react-native';
 import { StableTextInput } from './StableTextInput';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { BookmarkRepository } from '../../../repository/BookmarkRepository';
 
 type ActrInputMobileSharedStyles = Pick<ActrInputStyles, 'input' | 'mobileInputText'>;
 
@@ -46,6 +47,7 @@ interface ActrInputMobileViewProps {
   inputText: string;
   onClearInput: () => void;
   handleSendRef: React.MutableRefObject<() => void>;
+  onAddBookmark?: () => void;
 }
 
 export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
@@ -77,6 +79,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     inputText,
     onClearInput,
     handleSendRef,
+    onAddBookmark,
   } = props;
   const [mobileInputMode, setMobileInputMode] = React.useState<'text' | 'voice_hold'>(
     'text',
@@ -115,6 +118,21 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
       mobileTextInputRef.current?.focus();
     }, 0);
   }, []);
+
+  const handleAddBookmark = React.useCallback(async () => {
+    try {
+      // 直接添加书签，不指定分类（category_id 为 null）
+      await BookmarkRepository.addBookmark({
+        app_id: appId,
+        sort_order: 0,
+      });
+
+      // 调用外部回调（如果有）
+      onAddBookmark?.();
+    } catch (error) {
+      console.error('[ActrInputMobileView] Failed to add bookmark', error);
+    }
+  }, [appId, onAddBookmark]);
 
   React.useEffect(() => {
     if (inputText.length > 0 && mobileInputMode !== 'text') {
@@ -521,11 +539,14 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
           </View>
 
-          {/* tab_preview 按钮 - 未聚焦时显示 */}
+          {/* 收藏按钮 - 未聚焦时显示 */}
           {!isInputFocused && (
-            <View style={styles.mobileReservedButton}>
+            <TouchableOpacity
+              style={styles.mobileReservedButton}
+              onPress={handleAddBookmark}
+            >
               <Icon type='tab_preview' size={20} color='#666' />
-            </View>
+            </TouchableOpacity>
           )}
 
           {/* send 按钮 - 聚焦 + isSendOnEnter 时显示 */}

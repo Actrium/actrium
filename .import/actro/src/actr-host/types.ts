@@ -1,5 +1,10 @@
 // System app types (built-in apps like chrome:// pages)
-export type SystemAppType = 'history' | 'bookmarks' | 'login' | 'settings';
+export type SystemAppType =
+  | 'history'
+  | 'bookmarks'
+  | 'login'
+  | 'settings'
+  | 'bookmarkTags';
 
 // History item passed from native
 export type HistoryItemData = {
@@ -68,7 +73,7 @@ export type ActrProps = {
 export type TabRouterProps = ActrProps & {
   // Single tab mode - each RootView renders one tab
   singleTabMode?: boolean;
-  tab?: TabConfig;  // Single tab when singleTabMode is true
+  tab?: TabConfig; // Single tab when singleTabMode is true
   // Native 传递的容器尺寸（确保窗口缩小时 RN 能感知）
   containerWidth?: number;
   containerHeight?: number;

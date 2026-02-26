@@ -38,8 +38,8 @@ export const initDatabase = async () => {
     await db.executeSql(`
       CREATE TABLE IF NOT EXISTS bookmark_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        category_id INTEGER NOT NULL,      -- 指向书签分类表
-        app_id TEXT NOT NULL,           -- 指向应用信息表
+        category_id INTEGER,                -- 指向书签分类表（可为空，表示未分类）
+        app_id TEXT NOT NULL,               -- 指向应用信息表
         created_at INTEGER DEFAULT (strftime('%s','now')), -- 创建时间
         sort_order INTEGER DEFAULT 0,
         FOREIGN KEY (category_id) REFERENCES bookmark_categories (id) ON DELETE CASCADE,

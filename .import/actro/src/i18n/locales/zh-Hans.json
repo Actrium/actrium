@@ -166,6 +166,19 @@
       "unsupportedType": "不支持的文件类型",
       "limitPartial": "已达到 6 个上限，仅添加了前 {{count}} 个附件",
       "locationTag": "位置"
+    },
+    "bookmark": {
+      "all": "全部",
+      "defaultCategory": "默认分类"
+    },
+    "settings": {
+      "title": "设置",
+      "feedback": "吐个槽",
+      "logout": "退出登录",
+      "nickname": "昵称",
+      "email": "邮箱",
+      "deleteAccount": "删除账号",
+      "logoutAccount": "退出账号"
     }
   }
 }

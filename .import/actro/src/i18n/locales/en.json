@@ -166,6 +166,10 @@
       "unsupportedType": "Unsupported file type",
       "limitPartial": "Reached 6 attachment limit, only added the first {{count}}",
       "locationTag": "Location"
+    },
+    "bookmark": {
+      "all": "All",
+      "defaultCategory": "Default"
     }
   }
 }
