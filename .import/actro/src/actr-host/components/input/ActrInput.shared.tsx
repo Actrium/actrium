@@ -21,7 +21,7 @@ import { IAttachmentItem } from '../../types/attachment';
 import {
   TActrMessageResponse,
   TLocation,
-} from '../../../native-bridge/ActrConnection.type';
+} from '../../../native-bridge/actr/ActrConnection.type';
 import useAuth from '../../../hooks/useAuth';
 import { Utils } from '../../../utils/utils';
 import { getHostLayoutTokens } from '../../../utils/layout';
@@ -29,6 +29,7 @@ import ActrInputMobileView from './ActrInputMobileView';
 import ActrInputPadView from './ActrInputPadView';
 import { StableTextInput } from './StableTextInput';
 import { useActrVoiceController } from './hooks/useActrVoiceController';
+import { LoginModal } from '../../../system-apps/auth';
 
 const { NativeLogger } = NativeModules;
 
@@ -44,6 +45,10 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   const layoutTokens = React.useMemo(() => getHostLayoutTokens(width), [width]);
   const isMobileVariant =
     variant != null ? variant === 'mobile' : !layoutTokens.isTablet;
+
+  // 登录弹窗状态
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [authParams, setAuthParams] = useState<{ clientId: string; appId: string } | null>(null);
 
   const inputText = useInputStore((state) => state.inputs[appId]?.text || '');
   const editingMessageId = useInputStore(
@@ -86,7 +91,17 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   const addMessage = useMessageStore((state) => state.addMessage);
   const updateMessage = useMessageStore((state) => state.updateMessage);
   const appInfo = useAppStore((state) => state.apps[appId]);
-  const { hasAuth } = useAuth(appId);
+
+  // Mobile 模式使用弹窗，Pad 模式使用 Tab
+  const handleNeedAuth = useCallback((params: { clientId: string; appId: string }) => {
+    setAuthParams(params);
+    setShowLoginModal(true);
+  }, []);
+
+  const { hasAuth } = useAuth(appId, {
+    useModal: isMobileVariant,
+    onNeedAuth: handleNeedAuth,
+  });
 
   // 文本消息接收回调
   const onReceiveMessage = useCallback(
@@ -372,6 +387,20 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
           setShowMapModal(false);
         }}
       />
+
+      {/* Mobile 登录弹窗 */}
+      {isMobileVariant && authParams && (
+        <LoginModal
+          visible={showLoginModal}
+          onClose={() => setShowLoginModal(false)}
+          clientId={authParams.clientId}
+          appId={authParams.appId}
+          onSuccess={() => {
+            // 授权成功后重新发送消息
+            processMessageSend(inputText);
+          }}
+        />
+      )}
     </View>
   );
 }

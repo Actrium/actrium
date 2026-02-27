@@ -41,6 +41,8 @@ import { TabProvider } from './contexts/TabContext';
 import { useAppStore } from './store/useAppStore';
 import { useTabIdMapStore } from './store/useTabIdMapStore';
 import ExtensionPanel from './components/ExtensionPanel';
+import { ChatHeader } from './components/ChatHeader';
+import { exitFullscreen } from '../native-bridge/tab/TabModule';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -76,6 +78,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const guestLoadingStatus = useAppStore((state) =>
     appId ? state.guestLoadingStatus[appId] : undefined,
   );
+  const appName = useAppStore((state) =>
+    appId ? state.apps[appId]?.app_name : undefined,
+  );
 
   // Engine 状态（按 tab 维度隔离）
   const [engine, setEngine] = useState<Engine | null>(null);
@@ -83,6 +88,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [leftPanel, setLeftPanel] = useState<React.ReactElement | null>(null);
   const [rightPanel, setRightPanel] = useState<React.ReactElement | null>(null);
+  const [localLeftPanelVisible, setLocalLeftPanelVisible] = useState(false);
 
   const engineRef = useRef<Engine | null>(null);
   const adapterRef = useRef<{ dispose: () => void } | null>(null);
@@ -456,6 +462,15 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           </View>
         )} */}
 
+        {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
+        <ChatHeader
+          onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
+          onRightPress={() => exitFullscreen()}
+          leftDisabled={!appId}
+          leftActive={localLeftPanelVisible}
+          appName={appName}
+        />
+
         {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
         <Animated.View
           style={[
@@ -470,7 +485,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
         {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入 */}
         <ExtensionPanel
-          visible={isLeftPanelVisible}
+          visible={localLeftPanelVisible}
           content={rightPanel}
           width={rightWidth}
           centerAnimValue={centerAnimValue}
