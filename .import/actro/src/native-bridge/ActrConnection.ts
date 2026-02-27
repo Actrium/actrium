@@ -6,6 +6,7 @@ import {
 } from './ActrConnection.type';
 import { Utils } from '../utils/utils';
 import { Buffer } from 'buffer';
+import { useUnreadStore } from '../actr-host/store/useUnreadStore';
 
 const { ActrBridge } = NativeModules;
 
@@ -153,6 +154,9 @@ export class ActrStreamRouter {
         this.sendCloseStream(data.streamID, actorType, tabId);
         // 注销已完成的 stream
         this.unregisterStream(data.streamID);
+
+        // 新消息到达，增加未读数
+        useUnreadStore.getState().incrementUnread(reg.connectionId);
       }
 
       switch (reg.type) {

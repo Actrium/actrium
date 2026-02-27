@@ -22,6 +22,7 @@ import {
   UIManager,
   DeviceEventEmitter,
 } from 'react-native';
+import { useUnreadStore } from './store/useUnreadStore';
 
 // Import RN's Inspector API for accurate view hit testing
 // This uses React's internal renderer to find views at a point
@@ -127,6 +128,11 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     },
     [],
   );
+
+  // 应用启动时从数据库同步未读消息数量
+  useEffect(() => {
+    useUnreadStore.getState().syncFromDatabase();
+  }, []);
 
   const handleEngineChange = useCallback(
     (tabId: string, next: Engine | null) => {
