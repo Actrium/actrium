@@ -220,7 +220,7 @@ class TabEventEmitter: RCTEventEmitter {
     // MARK: - Public Methods
     
     /// Exit fullscreen mode and return to tab list (iPhone only)
-    @objc
+    @objc(exitFullscreen:reject:)
     public func exitFullscreen(
         _ resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
@@ -247,7 +247,7 @@ class TabEventEmitter: RCTEventEmitter {
     
     /// Open a specific tab by ID (Phone: enter fullscreen, Pad: switch tab)
     /// If tabId is empty or not found, creates a new tab
-    @objc
+    @objc(openTab:resolve:reject:)
     public func openTab(
         _ dict: [String: Any],
         resolve: @escaping RCTPromiseResolveBlock,
