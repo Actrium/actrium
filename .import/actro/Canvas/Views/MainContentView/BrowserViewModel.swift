@@ -131,6 +131,17 @@ class BrowserViewModel: ObservableObject {
         }
 
         logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
+        
+        // 发送通知到 RN
+        NotificationCenter.default.post(
+            name: .tabOpenedFromNative,
+            object: nil,
+            userInfo: [
+                "tabId": newTab.id.uuidString,
+                "title": newTab.title
+            ]
+        )
+        
         return newTab
     }
 
@@ -154,16 +165,41 @@ class BrowserViewModel: ObservableObject {
         )
         systemTabs[type] = newTab
         logger.notice(" 已创建系统标签: \(type.title)")
+        
+        // 发送通知到 RN
+        NotificationCenter.default.post(
+            name: .tabOpenedFromNative,
+            object: nil,
+            userInfo: [
+                "tabId": newTab.id.uuidString,
+                "title": newTab.title,
+                "systemTabType": type.rawValue
+            ]
+        )
+        
         return newTab
     }
 
     func switchToTab(id: UUID) {
+        let previousTabId = currentTabId
+        
         if let tab = tabs.first(where: { $0.id == id }) {
             logger.debug("🔄 切换到标签页: \(tab.title)")
         }
         currentTabId = id
         // Ensure canvas is in focus mode when switching tabs
         canvasMode = .focus(tabId: id)
+        
+        // 发送通知到 RN
+        var userInfo: [String: Any] = ["tabId": id.uuidString]
+        if let prevId = previousTabId {
+            userInfo["previousTabId"] = prevId.uuidString
+        }
+        NotificationCenter.default.post(
+            name: .tabSwitchedFromNative,
+            object: nil,
+            userInfo: userInfo
+        )
     }
     
     func closeTab(id: UUID) {
@@ -220,6 +256,13 @@ class BrowserViewModel: ObservableObject {
         }
 
         logger.debug("🗑️ 关闭标签页，位置 \(closedPosition)，剩余 \(self.tabs.count) 个标签页")
+        
+        // 发送通知到 RN
+        NotificationCenter.default.post(
+            name: .tabClosedFromNative,
+            object: nil,
+            userInfo: ["tabId": id.uuidString]
+        )
     }
 
     func reorderTab(fromIndex source: Int, toIndex destination: Int) {
@@ -232,6 +275,14 @@ class BrowserViewModel: ObservableObject {
         tabs.insert(movedTab, at: insertIndex)
 
         logger.debug("🔄 标签页重排: 从索引 \(source) 移动到 \(insertIndex)")
+        
+        // 发送通知到 RN
+        let orderedTabIds = tabs.map { $0.id.uuidString }
+        NotificationCenter.default.post(
+            name: .tabsReorderedFromNative,
+            object: nil,
+            userInfo: ["tabIds": orderedTabIds]
+        )
     }
 
     // MARK: - Tab Group Management
@@ -639,6 +690,16 @@ class BrowserViewModel: ObservableObject {
         guard let currentTabId = currentTabId,
               let index = tabs.firstIndex(where: { $0.id == currentTabId }) else { return }
         tabs[index].title = title
+        
+        // 发送通知到 RN
+        NotificationCenter.default.post(
+            name: .tabUpdatedFromNative,
+            object: nil,
+            userInfo: [
+                "tabId": currentTabId.uuidString,
+                "title": title
+            ]
+        )
     }
 
     func closeCurrentTab() {
@@ -1137,6 +1198,16 @@ class BrowserViewModel: ObservableObject {
                 logger.debug("  └─ 右侧面板默认\(rightPanelDefaultVisible ? "显示" : "隐藏")")
             }
         }
+        
+        // 发送通知到 RN
+        NotificationCenter.default.post(
+            name: .tabOpenedFromNative,
+            object: nil,
+            userInfo: [
+                "tabId": newTab.id.uuidString,
+                "title": title
+            ]
+        )
     }
 
     private func unzipACTR(archive: URL, to destination: URL) throws {
