@@ -9,6 +9,7 @@ struct PhoneMainView: View {
     @State private var fullscreenTab: Tab?
     
     enum PhoneTab {
+        case search
         case bookmarks
         case tabs
         case settings
@@ -53,6 +54,21 @@ struct PhoneMainView: View {
                 Label("偏好设置", systemImage: "gearshape.fill")
             }
             .tag(PhoneTab.settings)
+
+            // 搜索页：使用 RN 渲染
+            PhoneSystemAppView(
+                systemType: .globalSearch,
+                viewModel: viewModel,
+                historyVM: historyVM,
+                bookmarkVM: bookmarkVM,
+                onSelect: { tab in
+                    fullscreenTab = tab
+                }
+            )
+            .tabItem {
+                Label("搜索", systemImage: "magnifyingglass")
+            }
+            .tag(PhoneTab.search)
         }
         .accentColor(.blue)
         .sheet(item: $fullscreenTab) { tab in
@@ -63,7 +79,7 @@ struct PhoneMainView: View {
             // RN 请求退出全屏
             fullscreenTab = nil
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openTabFromRN)) { notification in
+        .onReceive(NotificationCenter.default.publisher(for: .openTabFullscreenFromRN)) { notification in
             // RN 请求打开指定 tab
             if let tabIdString = notification.userInfo?["tabId"] as? String,
                let tabId = UUID(uuidString: tabIdString),

@@ -191,6 +191,9 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
                 case .settings:
                     // Settings tab currently doesn't need extra data from native
                     break
+                case .globalSearch:
+                    // Global search tab currently doesn't need extra data from native
+                    break
                 }
                 return dict
             }
