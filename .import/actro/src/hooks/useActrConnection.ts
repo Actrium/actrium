@@ -1,17 +1,17 @@
 import { useEffect, useMemo } from 'react';
 import RNFS from 'react-native-fs';
-import { ConnectionManager } from '../native-bridge/ActrConnection';
+import { ConnectionManager } from '../native-bridge/actr/ActrConnection';
 import { AppInfo } from '../api/types';
 import {
   generateActrToml,
   generateActrLockToml,
-} from '../native-bridge/ActrConfigUtils';
+} from '../native-bridge/actr/ActrConfigUtils';
 import { IAttachmentItem } from '../actr-host/types/attachment';
 import {
   AttachmentType,
   TActrMessageResponse,
   TLocation,
-} from '../native-bridge/ActrConnection.type';
+} from '../native-bridge/actr/ActrConnection.type';
 import { Utils } from '../utils/utils';
 import { useAppStore } from '../actr-host/store/useAppStore';
 import { Alert } from 'react-native';

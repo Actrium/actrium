@@ -89,6 +89,7 @@ const styles = StyleSheet.create({
     left: 0,
     height: '100%',
     flexShrink: 1,
+    // paddingTop: 64,
   },
   borderRight: {
     position: 'absolute',

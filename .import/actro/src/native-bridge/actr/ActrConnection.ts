@@ -4,9 +4,9 @@ import {
   TActrMessageResponse,
   TActrVoiceRequest,
 } from './ActrConnection.type';
-import { Utils } from '../utils/utils';
+import { Utils } from '../../utils/utils';
 import { Buffer } from 'buffer';
-import { useUnreadStore } from '../actr-host/store/useUnreadStore';
+import { useUnreadStore } from '../../actr-host/store/useUnreadStore';
 
 const { ActrBridge } = NativeModules;
 
