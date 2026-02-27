@@ -29,6 +29,7 @@ export const initDatabase = async () => {
         full_description TEXT,          -- 完整描述
         full_title TEXT,                -- 完整标题
         logo TEXT,                      -- 应用图标 (URL 或 Base64)
+        url TEXT,                       -- 应用加载来源地址
         details TEXT,                   -- 应用详细信息 (JSON)
         last_opened INTEGER            -- 最近打开时间 (Timestamp)
       );
@@ -40,6 +41,7 @@ export const initDatabase = async () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category_id INTEGER,                -- 指向书签分类表（可为空，表示未分类）
         app_id TEXT NOT NULL,               -- 指向应用信息表
+        tab_id TEXT,                        -- 对应的 tab ID（用于识别是否已打开）
         created_at INTEGER DEFAULT (strftime('%s','now')), -- 创建时间
         sort_order INTEGER DEFAULT 0,
         FOREIGN KEY (category_id) REFERENCES bookmark_categories (id) ON DELETE CASCADE,

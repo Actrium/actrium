@@ -43,6 +43,9 @@ import { useTabIdMapStore } from './store/useTabIdMapStore';
 import ExtensionPanel from './components/ExtensionPanel';
 import { ChatHeader } from './components/ChatHeader';
 import { exitFullscreen } from '../native-bridge/tab/TabModule';
+import { TabEvents } from '../native-bridge/tab/TabEvents';
+import { useUnreadStore } from './store/useUnreadStore';
+import { MessageRepository } from '../repository/MessageRepository';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -155,6 +158,25 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       setEngine(null);
     };
   }, []);
+
+  // 监听 tab 进入全屏事件，标记消息已读
+  React.useEffect(() => {
+    const unsubscribe = TabEvents.onTabEnteredFullscreen(async (event) => {
+      if (event.tabId !== tab.id) return;
+
+      const currentAppId = useTabIdMapStore.getState().tabIdMap[tab.id];
+      if (!currentAppId) return;
+
+      console.log('进入 Tab，执行消息更新操作')
+
+      // 更新数据库
+      await MessageRepository.markAllAsReadByAppId(currentAppId);
+      // 更新内存状态
+      useUnreadStore.getState().clearUnread(currentAppId);
+    });
+
+    return () => unsubscribe();
+  }, [tab.id]);
 
   // Host -> Guest：可见性事件（用于 Guest 软睡眠/恢复）
   React.useEffect(() => {

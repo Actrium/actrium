@@ -5,11 +5,13 @@ export type TBookmarkItem = {
   id: number;
   category_id: number | null;
   app_id: string;
+  tab_id: string | null;
   created_at: number;
   sort_order: number;
   // 以下是 JOIN apps 表后得到的字段
   app_name: string | null; // 对应 apps.app_name
   logo: string | null; // 对应 apps.logo
+  url: string | null;  // 对应 apps.url
   last_question: string | null; // 最近一条消息的提问
   last_answer: string | null; // 最近一条消息的回答
 };
@@ -44,10 +46,12 @@ export class BookmarkRepository {
           bi.id,
           bi.category_id,
           bi.app_id,
+          bi.tab_id,
           bi.created_at,
           bi.sort_order,
           a.app_name,
           a.logo,
+          a.url,
           (SELECT question_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_question,
           (SELECT answer_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_answer
          FROM bookmark_items bi
@@ -118,19 +122,22 @@ export class BookmarkRepository {
   /**
    * 添加一个书签
    * category_id 可选，为空时表示未分类
+   * tab_id 可选，用于识别对应的 tab
    */
   static async addBookmark({
     app_id,
+    tab_id,
     category_id,
     sort_order = 0,
   }: {
     app_id: string;
+    tab_id?: string | null;
     category_id?: number | null;
     sort_order?: number;
   }) {
     return await db.executeSql(
-      'INSERT INTO bookmark_items (category_id, app_id, sort_order) VALUES (?, ?, ?)',
-      [category_id ?? null, app_id, sort_order]
+      'INSERT INTO bookmark_items (category_id, app_id, tab_id, sort_order) VALUES (?, ?, ?, ?)',
+      [category_id ?? null, app_id, tab_id ?? null, sort_order]
     );
   }
 

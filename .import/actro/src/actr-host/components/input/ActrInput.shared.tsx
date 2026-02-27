@@ -30,6 +30,7 @@ import ActrInputPadView from './ActrInputPadView';
 import { StableTextInput } from './StableTextInput';
 import { useActrVoiceController } from './hooks/useActrVoiceController';
 import { LoginModal } from '../../../system-apps/auth';
+import { useUnreadStore } from '../../store/useUnreadStore';
 
 const { NativeLogger } = NativeModules;
 
@@ -130,6 +131,12 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
 
       // 2. 更新 Store，如果是结束状态则触发持久化
       updateMessage(appId, currentMsg.message_id, updates, isFinished);
+
+      // 3. 当消息接收完成时，增加未读数
+      if (data.isEnd) {
+        console.warn('更新未读消息数量')
+        useUnreadStore.getState().incrementUnread(appId);
+      }
     },
     [appId, updateMessage],
   );
