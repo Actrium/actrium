@@ -470,32 +470,6 @@ extension ActrBridge {
             resolve(true)
         }
     }
-    
-    /// Exit fullscreen mode and return to tab list (iPhone only)
-    @objc
-    public func exitFullscreen(
-        _ resolve: @escaping RCTPromiseResolveBlock,
-        reject: @escaping RCTPromiseRejectBlock
-    ) {
-        #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom != .phone {
-            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
-            return
-        }
-        #else
-        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
-        return
-        #endif
-
-        Task { @MainActor in
-            // 发送通知，让 PhoneMainView 退出全屏
-            NotificationCenter.default.post(
-                name: .exitFullscreenFromRN,
-                object: nil
-            )
-            resolve(true)
-        }
-    }
 }
 
 // MARK: - Simple stream handler that logs incoming chunks.
