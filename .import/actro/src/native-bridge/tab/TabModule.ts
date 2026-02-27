@@ -1,16 +1,17 @@
 import { NativeModules } from 'react-native';
 
-const { TabModule, ActrBridge } = NativeModules;
+const { TabModule } = NativeModules;
 
 // 关闭 tab
 export const closeCurrentTab = async (tabId: string): Promise<boolean> => {
   return TabModule.closeTab(tabId);
 };
 
-export const openTab = async (options: {
-  systemAppType: string;
+export const openTab = async (data: {
+  tabId: string;
+  openUrl: string;
 }): Promise<string> => {
-  return TabModule.openTab(options);
+  return TabModule.openTab(data);
 };
 
 export const selectTab = async (tabId: string): Promise<boolean> => {
@@ -19,5 +20,11 @@ export const selectTab = async (tabId: string): Promise<boolean> => {
 
 // 退出 tab
 export const exitFullscreen = async (): Promise<boolean> => {
-  return ActrBridge.exitFullscreen();
+  try {
+
+    return TabModule.exitFullscreen();
+  } catch(e) {
+    console.error(e)
+  }
+  return false
 };
