@@ -32,9 +32,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             viewModel.containerWidth = binding.flContent.width.pxToDp().toInt()
             viewModel.containerHeight = binding.flContent.height.pxToDp().toInt()
         }
-        binding.ivExpand.setOnClickListener {
-            startActivity(Intent(this, HomeActivity::class.java))
-        }
+
         binding.ivAdd.setOnClickListener {
             // 移除旧的 ReactRootView
             viewModel.addApp()
@@ -54,22 +52,22 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                 launch {
                     Params.appList.collect {
                         Log.e("MainActivity", "appList changed: ${it.size}")
-                        binding.llTabs.removeAllViews()
-                        it.forEach {
-                            val tabView = HeadTabView(this@MainActivity)
-                            tabView.setOnClickListener { tabView ->
-                                val tabId = it.id
-                                binding.flContent.forEach { child ->
-                                    if(child.tag == tabId) {
-                                        binding.flContent.removeView(child)
-                                        binding.flContent.addView(child)
-                                        return@setOnClickListener
-                                    }
-                                }
-                            }
-                            tabView.setAppName("123")
-                            binding.llTabs.addView(tabView)
-                        }
+//                        binding.llTabs.removeAllViews()
+//                        it.forEach {
+//                            val tabView = HeadTabView(this@MainActivity)
+//                            tabView.setOnClickListener { tabView ->
+//                                val tabId = it.id
+//                                binding.flContent.forEach { child ->
+//                                    if(child.tag == tabId) {
+//                                        binding.flContent.removeView(child)
+//                                        binding.flContent.addView(child)
+//                                        return@setOnClickListener
+//                                    }
+//                                }
+//                            }
+//                            tabView.setAppName("123")
+//                            binding.llTabs.addView(tabView)
+//                        }
                     }
                 }
             }
