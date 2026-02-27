@@ -30,6 +30,7 @@ import { Checkbox } from '../components/Checkbox';
 import { AppSessionService } from '../../services/AppSessionService';
 import { getHostLayoutTokens } from '../../utils/layout';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
+import { useUnreadStore } from '../store/useUnreadStore';
 
 const PAGE_SIZE = 20;
 
@@ -119,6 +120,13 @@ export default function Chat() {
     // 🌟 无条件执行：确保每次挂载都能同步最新第一页数据，覆盖旧缓存导致的错乱
     loadInitialMessages();
     loadAppInfo();
+
+    if (appId) {
+      // 标记当前应用的所有消息为已读
+      MessageRepository.markAllAsReadByAppId(appId);
+      // 同步更新未读消息 store
+      useUnreadStore.getState().clearUnread(appId);
+    }
 
     return () => {
       // TODO 是否已经保存到书签

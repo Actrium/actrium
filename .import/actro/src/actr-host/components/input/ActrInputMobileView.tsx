@@ -17,6 +17,7 @@ import type { PanResponderInstance } from 'react-native';
 import { StableTextInput } from './StableTextInput';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { BookmarkRepository } from '../../../repository/BookmarkRepository';
+import { useUnreadStore } from '../../store/useUnreadStore';
 
 type ActrInputMobileSharedStyles = Pick<ActrInputStyles, 'input' | 'mobileInputText'>;
 
@@ -52,6 +53,7 @@ interface ActrInputMobileViewProps {
 
 export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const { t } = useTranslation();
+  const totalUnread = useUnreadStore((state) => state.totalUnread);
   const {
     sharedStyles,
     appId,
@@ -546,6 +548,14 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
               onPress={handleAddBookmark}
             >
               <Icon type='tab_preview' size={20} color='#666' />
+              {/* 未读消息角标 */}
+              {totalUnread > 0 && (
+                <View style={styles.unreadBadge}>
+                  <Text style={styles.unreadBadgeText}>
+                    {totalUnread > 99 ? '99+' : totalUnread}
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
           )}
 
@@ -755,5 +765,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2C2C2C',
     fontWeight: '500',
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#F2F2F6',
+  },
+  unreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 14,
   },
 });

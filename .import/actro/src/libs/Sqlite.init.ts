@@ -60,6 +60,7 @@ export const initDatabase = async () => {
         attachments TEXT,               -- 附件信息 (JSON: images, files, location)
         is_preset INTEGER DEFAULT 0,    -- 是否为预设问题 (0/1)
         is_edited INTEGER DEFAULT 0,    -- 是否编辑过 (0/1)
+        is_read INTEGER DEFAULT 0,      -- 是否已读 (0 未读/1 已读)
         progress INTEGER DEFAULT 0,     -- 进度状态 (0 pending/1 processing/2 completed/3 failed/4 canceled/5 overdue)
         FOREIGN KEY (app_id) REFERENCES apps (app_id) ON DELETE CASCADE
       );
@@ -76,11 +77,17 @@ export const initDatabase = async () => {
 
     // 6. 为 auth 表添加触发器，以自动维护 updated_at
     await db.executeSql(`
-      CREATE TRIGGER IF NOT EXISTS update_auth_updated_at 
+      CREATE TRIGGER IF NOT EXISTS update_auth_updated_at
       AFTER UPDATE ON auth
       BEGIN
         UPDATE auth SET updated_at = (strftime('%s','now') * 1000) WHERE env = OLD.env;
       END;
+    `, [], true);
+
+    // 7. 为 app_chat_history 创建索引以优化未读消息查询
+    await db.executeSql(`
+      CREATE INDEX IF NOT EXISTS idx_chat_history_app_read
+      ON app_chat_history (app_id, is_read);
     `, [], true);
 
     console.log('[SQLite] Database tables reset and initialized successfully');
