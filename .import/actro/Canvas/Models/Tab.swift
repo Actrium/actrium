@@ -8,6 +8,7 @@ enum SystemTabType: String, Codable {
     case bookmarks
     case login
     case settings
+    case globalSearch
 
     var title: String {
         switch self {
@@ -15,6 +16,7 @@ enum SystemTabType: String, Codable {
         case .bookmarks: return "Bookmarks"
         case .login: return "Login"
         case .settings: return "Settings"
+        case .globalSearch: return "Search"
         }
     }
 
@@ -24,6 +26,7 @@ enum SystemTabType: String, Codable {
         case .bookmarks: return "bookmark"
         case .login: return "lock"
         case .settings: return "gearshape"
+        case .globalSearch: return "magnifyingglass"
         }
     }
 }

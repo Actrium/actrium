@@ -286,7 +286,7 @@ class TabEventEmitter: RCTEventEmitter {
             if UIDevice.current.userInterfaceIdiom == .phone {
                 // Phone 端：发送通知进入全屏
                 NotificationCenter.default.post(
-                    name: .openTabFromRN,
+                    name: .openTabFullscreenFromRN,
                     object: nil,
                     userInfo: ["tabId": tab.id.uuidString]
                 )
@@ -309,5 +309,5 @@ extension Notification.Name {
     static let tabEnteredFullscreenFromNative = Notification.Name("tabEnteredFullscreenFromNative")
     static let tabExitedFullscreenFromNative = Notification.Name("tabExitedFullscreenFromNative")
     static let exitFullscreenFromRN = Notification.Name("exitFullscreenFromRN")
-    static let openTabFromRN = Notification.Name("openTabFromRN")
+    static let openTabFullscreenFromRN = Notification.Name("openTabFullscreenFromRN")
 }
