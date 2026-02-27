@@ -18,10 +18,11 @@ defaultConfig.resolver.sourceExts = [
 const subsystemPath = path.resolve(__dirname, 'Subsystem');
 
 const config = {
-  watchFolders: [subsystemPath],
+  watchFolders: [
+    //path.resolve(__dirname, '../loom'),
+  ],
   resolver: {
     nodeModulesPaths: [
-      path.resolve(__dirname, 'Subsystem/node_modules'),
       path.resolve(__dirname, 'node_modules'),
     ],
     // 确保 react 和 react-native 使用主项目的版本，避免冲突
@@ -34,6 +35,8 @@ const config = {
       // 忽略 Subsystem 自己的 react 和 react-native
       /Subsystem\/node_modules\/react\/.*/,
       /Subsystem\/node_modules\/react-native\/.*/,
+      /..\/loom\/node_modules\/react\/.*/,
+      /..\/loom\/node_modules\/react-native\/.*/,
     ]
   }
 };
