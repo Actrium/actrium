@@ -216,6 +216,34 @@ class TabEventEmitter: RCTEventEmitter {
         logger.debug("[TabEventEmitter] Sending onTabExitedFullscreen: \(tabId)")
         sendEvent(withName: "onTabExitedFullscreen", body: event)
     }
+    
+    // MARK: - Public Methods
+    
+    /// Exit fullscreen mode and return to tab list (iPhone only)
+    @objc
+    public func exitFullscreen(
+        _ resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom != .phone {
+            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
+            return
+        }
+        #else
+        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
+        return
+        #endif
+
+        DispatchQueue.main.async {
+            // 发送通知，让 PhoneMainView 退出全屏
+            NotificationCenter.default.post(
+                name: .exitFullscreenFromRN,
+                object: nil
+            )
+            resolve(true)
+        }
+    }
 }
 
 // MARK: - Notification Names
