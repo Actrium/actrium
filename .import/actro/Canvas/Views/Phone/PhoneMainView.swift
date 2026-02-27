@@ -59,7 +59,10 @@ struct PhoneMainView: View {
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                 .interactiveDismissDisabled(true)
         }
-        .onAppear {
+        .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
+            // RN 请求退出全屏
+            fullscreenTab = nil
+        }        .onAppear {
             // 初始进入时，如果有选中的 tab，直接进入全屏模式
             if let currentId = viewModel.currentTabId,
                let tab = viewModel.tabs.first(where: { $0.id == currentId }) {

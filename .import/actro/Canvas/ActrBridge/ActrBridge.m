@@ -52,8 +52,8 @@ RCT_EXTERN_METHOD(unregisterStream:(NSDictionary *)params
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
-/// Close current tab and return to list (iPhone only)
-RCT_EXTERN_METHOD(closeCurrentTab:(RCTPromiseResolveBlock)resolve
+/// Exit fullscreen mode and return to tab list (iPhone only)
+RCT_EXTERN_METHOD(exitFullscreen:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
 @end

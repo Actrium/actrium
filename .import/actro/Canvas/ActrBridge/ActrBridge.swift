@@ -471,9 +471,9 @@ extension ActrBridge {
         }
     }
     
-    /// Close current tab and return to list (iPhone only)
+    /// Exit fullscreen mode and return to tab list (iPhone only)
     @objc
-    public func closeCurrentTab(
+    public func exitFullscreen(
         _ resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
@@ -488,13 +488,11 @@ extension ActrBridge {
         #endif
 
         Task { @MainActor in
-            guard let viewModel = BrowserViewModel.active,
-                  let currentTabId = viewModel.currentTabId else {
-                reject("NO_ACTIVE_TAB", "No active tab to close", nil)
-                return
-            }
-
-            viewModel.closeTab(id: currentTabId)
+            // 发送通知，让 PhoneMainView 退出全屏
+            NotificationCenter.default.post(
+                name: .exitFullscreenFromRN,
+                object: nil
+            )
             resolve(true)
         }
     }
