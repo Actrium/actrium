@@ -197,37 +197,34 @@ struct PhoneBrowserView: View {
     var historyVM: HistoryViewModel
     var bookmarkVM: BookmarkViewModel
     
-    @Environment(\.dismiss) var dismiss
     
     var body: some View {
-        NavigationStack {
-            GeometryReader { geometry in
-                SingleTabRootView(
-                    tab: tab,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
-                    containerSize: geometry.size
-                )
-                .id(tab.id)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea(.container)
-            .onAppear {
-                // Tab 进入全屏视图
-                NotificationCenter.default.post(
-                    name: .tabEnteredFullscreenFromNative,
-                    object: nil,
-                    userInfo: [
-                        "tabId": tab.id.uuidString,
-                        "title": tab.title
-                    ]
-                )
-            }
+        GeometryReader { geometry in
+            SingleTabRootView(
+                tab: tab,
+                viewModel: viewModel,
+                historyVM: historyVM,
+                bookmarkVM: bookmarkVM,
+                containerSize: geometry.size
+            )
+            .id(tab.id)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea(.container)
+        .onAppear {
+            // Tab 进入全屏视图
+            NotificationCenter.default.post(
+                name: .tabEnteredFullscreenFromNative,
+                object: nil,
+                userInfo: [
+                    "tabId": tab.id.uuidString,
+                    "title": tab.title
+                ]
+            )
         }
     }
     
-    private func takeSnapshotAndDismiss() {
+    private func takeSnapshot() {
         // Tab 退出全屏视图
         NotificationCenter.default.post(
             name: .tabExitedFullscreenFromNative,
@@ -270,7 +267,6 @@ struct PhoneBrowserView: View {
                     viewModel.tabSnapshots[tab.id] = fullImage
                 }
             }
-            dismiss()
         }
     }
 }

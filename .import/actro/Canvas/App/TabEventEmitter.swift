@@ -228,4 +228,5 @@ extension Notification.Name {
     static let tabsReorderedFromNative = Notification.Name("tabsReorderedFromNative")
     static let tabEnteredFullscreenFromNative = Notification.Name("tabEnteredFullscreenFromNative")
     static let tabExitedFullscreenFromNative = Notification.Name("tabExitedFullscreenFromNative")
+    static let exitFullscreenFromRN = Notification.Name("exitFullscreenFromRN")
 }
