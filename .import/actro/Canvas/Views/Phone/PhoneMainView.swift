@@ -57,6 +57,7 @@ struct PhoneMainView: View {
         .accentColor(.blue)
         .sheet(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                .interactiveDismissDisabled(true)
         }
         .onAppear {
             // 初始进入时，如果有选中的 tab，直接进入全屏模式

@@ -27,7 +27,9 @@ class TabEventEmitter: RCTEventEmitter {
             "onTabClosed",
             "onTabSwitched",
             "onTabUpdated",
-            "onTabsReordered"
+            "onTabsReordered",
+            "onTabEnteredFullscreen",
+            "onTabExitedFullscreen"
         ]
     }
     
@@ -75,6 +77,22 @@ class TabEventEmitter: RCTEventEmitter {
             self,
             selector: #selector(handleTabsReordered(_:)),
             name: .tabsReorderedFromNative,
+            object: nil
+        )
+        
+        // Tab entered fullscreen
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTabEnteredFullscreen(_:)),
+            name: .tabEnteredFullscreenFromNative,
+            object: nil
+        )
+        
+        // Tab exited fullscreen
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTabExitedFullscreen(_:)),
+            name: .tabExitedFullscreenFromNative,
             object: nil
         )
     }
@@ -165,6 +183,39 @@ class TabEventEmitter: RCTEventEmitter {
         logger.debug("[TabEventEmitter] Sending onTabsReordered")
         sendEvent(withName: "onTabsReordered", body: event)
     }
+    
+    @objc private func handleTabEnteredFullscreen(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tabId = userInfo["tabId"] as? String else {
+            logger.warning("[TabEventEmitter] Invalid tabEnteredFullscreen notification")
+            return
+        }
+        
+        let event: [String: Any] = [
+            "tabId": tabId,
+            "title": userInfo["title"] as? String ?? NSNull(),
+            "timestamp": Date().timeIntervalSince1970 * 1000
+        ]
+        
+        logger.debug("[TabEventEmitter] Sending onTabEnteredFullscreen: \(tabId)")
+        sendEvent(withName: "onTabEnteredFullscreen", body: event)
+    }
+    
+    @objc private func handleTabExitedFullscreen(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tabId = userInfo["tabId"] as? String else {
+            logger.warning("[TabEventEmitter] Invalid tabExitedFullscreen notification")
+            return
+        }
+        
+        let event: [String: Any] = [
+            "tabId": tabId,
+            "timestamp": Date().timeIntervalSince1970 * 1000
+        ]
+        
+        logger.debug("[TabEventEmitter] Sending onTabExitedFullscreen: \(tabId)")
+        sendEvent(withName: "onTabExitedFullscreen", body: event)
+    }
 }
 
 // MARK: - Notification Names
@@ -175,4 +226,6 @@ extension Notification.Name {
     static let tabSwitchedFromNative = Notification.Name("tabSwitchedFromNative")
     static let tabUpdatedFromNative = Notification.Name("tabUpdatedFromNative")
     static let tabsReorderedFromNative = Notification.Name("tabsReorderedFromNative")
+    static let tabEnteredFullscreenFromNative = Notification.Name("tabEnteredFullscreenFromNative")
+    static let tabExitedFullscreenFromNative = Notification.Name("tabExitedFullscreenFromNative")
 }

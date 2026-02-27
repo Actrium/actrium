@@ -212,28 +212,29 @@ struct PhoneBrowserView: View {
                 .id(tab.id)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle(tab.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button(action: {
-                        UIApplication.shared.hideKeyboard()
-                        viewModel.toggleLeftPanelForCurrentTab()
-                    }) {
-                        Image(systemName: "line.3.horizontal")
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel", systemImage: "xmark") {
-                        takeSnapshotAndDismiss()
-                    }
-                }
-            }
             .ignoresSafeArea(.container)
+            .onAppear {
+                // Tab 进入全屏视图
+                NotificationCenter.default.post(
+                    name: .tabEnteredFullscreenFromNative,
+                    object: nil,
+                    userInfo: [
+                        "tabId": tab.id.uuidString,
+                        "title": tab.title
+                    ]
+                )
+            }
         }
     }
     
     private func takeSnapshotAndDismiss() {
+        // Tab 退出全屏视图
+        NotificationCenter.default.post(
+            name: .tabExitedFullscreenFromNative,
+            object: nil,
+            userInfo: ["tabId": tab.id.uuidString]
+        )
+        
         // 尝试捕获当前窗口的快照并裁剪掉导航栏，只保留内容区
         DispatchQueue.main.async {
             let window = UIApplication.shared.connectedScenes
