@@ -6,29 +6,69 @@ private let logger = AppLogger.reactNative
 @objc(TabModule)
 class TabModule: NSObject {
 
-    @objc
+    @objc(openTab:resolve:reject:)
     func openTab(_ options: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         logger.notice("[TabModule] openTab called with options: \(options)")
         
-        guard let systemAppType = options["systemAppType"] as? String else {
-            reject("invalid_options", "systemAppType is required", nil)
+        // 如果提供了 systemAppType，打开系统 tab
+        if let systemAppType = options["systemAppType"] as? String {
+            let newTabId = UUID()
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .openTabFromRN,
+                    object: nil,
+                    userInfo: [
+                        "tabId": newTabId,
+                        "systemAppType": systemAppType
+                    ]
+                )
+                resolve(newTabId.uuidString)
+            }
             return
         }
         
-        // Generate a new tab ID to return to JS
-        let newTabId = UUID()
-        
+        // 否则打开/创建普通 tab
         DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .openTabFromRN,
-                object: nil,
-                userInfo: [
-                    "tabId": newTabId,
-                    "systemAppType": systemAppType
-                ]
-            )
-            // Resolve with the new tab ID so JS can register tasks
-            resolve(newTabId.uuidString)
+            guard let viewModel = BrowserViewModel.active else {
+                reject("NO_VIEW_MODEL", "BrowserViewModel not available", nil)
+                return
+            }
+            
+            let tabId = options["tabId"] as? String
+            var targetTab: Tab?
+            
+            // 如果提供了 tabId，尝试查找对应的 tab
+            if let tabId = tabId, !tabId.isEmpty,
+               let uuid = UUID(uuidString: tabId) {
+                targetTab = viewModel.tabs.first(where: { $0.id == uuid })
+            }
+            
+            // 如果没有找到 tab（或 tabId 为空），创建新 tab
+            if targetTab == nil {
+                targetTab = viewModel.addNewTab()
+                logger.info("[TabModule] Created new tab: \(targetTab!.id.uuidString)")
+            }
+            
+            guard let tab = targetTab else {
+                reject("TAB_ERROR", "Failed to create or find tab", nil)
+                return
+            }
+            
+            // 切换到目标 tab
+            viewModel.currentTabId = tab.id
+            
+            #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // Phone 端：发送通知进入全屏
+                NotificationCenter.default.post(
+                    name: .openTabFullscreenFromRN,
+                    object: nil,
+                    userInfo: ["tabId": tab.id.uuidString]
+                )
+            }
+            #endif
+            
+            resolve(["tabId": tab.id.uuidString])
         }
     }
 
@@ -63,6 +103,30 @@ class TabModule: NSObject {
             resolve(true)
         }
     }
+    
+    @objc(exitFullscreen:reject:)
+    func exitFullscreen(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        logger.notice("[TabModule] exitFullscreen called")
+        
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom != .phone {
+            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
+            return
+        }
+        #else
+        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
+        return
+        #endif
+
+        DispatchQueue.main.async {
+            // 发送通知，让 PhoneMainView 退出全屏
+            NotificationCenter.default.post(
+                name: .exitFullscreenFromRN,
+                object: nil
+            )
+            resolve(true)
+        }
+    }
 
     @objc
     static func requiresMainQueueSetup() -> Bool {
@@ -74,4 +138,6 @@ extension Notification.Name {
     static let openTabFromRN = Notification.Name("openTabFromRN")
     static let selectTabFromRN = Notification.Name("selectTabFromRN")
     static let closeTabFromRN = Notification.Name("closeTabFromRN")
+    static let exitFullscreenFromRN = Notification.Name("exitFullscreenFromRN")
+    static let openTabFullscreenFromRN = Notification.Name("openTabFullscreenFromRN")
 }
