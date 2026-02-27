@@ -9,4 +9,9 @@ RCT_EXTERN_METHOD(supportedEvents)
 RCT_EXTERN_METHOD(exitFullscreen:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+/// Open a specific tab by ID
+RCT_EXTERN_METHOD(openTab:(NSDictionary *)params
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
 @end

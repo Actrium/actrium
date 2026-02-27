@@ -244,6 +244,58 @@ class TabEventEmitter: RCTEventEmitter {
             resolve(true)
         }
     }
+    
+    /// Open a specific tab by ID (Phone: enter fullscreen, Pad: switch tab)
+    /// If tabId is empty or not found, creates a new tab
+    @objc
+    public func openTab(
+        _ dict: [String: Any],
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        DispatchQueue.main.async {
+            guard let viewModel = BrowserViewModel.active else {
+                reject("NO_VIEW_MODEL", "BrowserViewModel not available", nil)
+                return
+            }
+            
+            let tabId = dict["tabId"] as? String
+            var targetTab: Tab?
+            
+            // 如果提供了 tabId，尝试查找对应的 tab
+            if let tabId = tabId, !tabId.isEmpty,
+               let uuid = UUID(uuidString: tabId) {
+                targetTab = viewModel.tabs.first(where: { $0.id == uuid })
+            }
+            
+            // 如果没有找到 tab（或 tabId 为空），创建新 tab
+            if targetTab == nil {
+                targetTab = viewModel.addNewTab()
+                logger.info("[TabEventEmitter] Created new tab: \(targetTab!.id.uuidString)")
+            }
+            
+            guard let tab = targetTab else {
+                reject("TAB_ERROR", "Failed to create or find tab", nil)
+                return
+            }
+            
+            // 切换到目标 tab
+            viewModel.currentTabId = tab.id
+            
+            #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // Phone 端：发送通知进入全屏
+                NotificationCenter.default.post(
+                    name: .openTabFromRN,
+                    object: nil,
+                    userInfo: ["tabId": tab.id.uuidString]
+                )
+            }
+            #endif
+            
+            resolve(["tabId": tab.id.uuidString])
+        }
+    }
 }
 
 // MARK: - Notification Names
@@ -257,4 +309,5 @@ extension Notification.Name {
     static let tabEnteredFullscreenFromNative = Notification.Name("tabEnteredFullscreenFromNative")
     static let tabExitedFullscreenFromNative = Notification.Name("tabExitedFullscreenFromNative")
     static let exitFullscreenFromRN = Notification.Name("exitFullscreenFromRN")
+    static let openTabFromRN = Notification.Name("openTabFromRN")
 }

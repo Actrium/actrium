@@ -62,7 +62,16 @@ struct PhoneMainView: View {
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
             // RN 请求退出全屏
             fullscreenTab = nil
-        }        .onAppear {
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openTabFromRN)) { notification in
+            // RN 请求打开指定 tab
+            if let tabIdString = notification.userInfo?["tabId"] as? String,
+               let tabId = UUID(uuidString: tabIdString),
+               let tab = viewModel.tabs.first(where: { $0.id == tabId }) {
+                fullscreenTab = tab
+            }
+        }
+        .onAppear {
             // 初始进入时，如果有选中的 tab，直接进入全屏模式
             if let currentId = viewModel.currentTabId,
                let tab = viewModel.tabs.first(where: { $0.id == currentId }) {
