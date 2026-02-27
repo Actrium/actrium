@@ -29,8 +29,12 @@ export class AppSessionService {
    * 包含：获取 App 信息、同步用户信息、校验授权状态
    *
    * @param appId 应用 ID
+   * @param url 应用加载来源地址
    */
-  static async initSession(appId: string): Promise<TInitSessionResult> {
+  static async initSession(
+    appId: string,
+    url?: string,
+  ): Promise<TInitSessionResult> {
     if (!appId) {
       return {
         ok: false,
@@ -40,7 +44,7 @@ export class AppSessionService {
 
     try {
       console.log(
-        `[AppSessionService] Initializing session for appId: ${appId}`,
+        `[AppSessionService] Initializing session for appId: ${appId}, url: ${url}`,
       );
 
       // 1. 获取并保存 App 信息
@@ -54,6 +58,11 @@ export class AppSessionService {
           ok: false,
           reason: 'APP_NOT_FOUND',
         };
+      }
+
+      // 将 url 挂载到 appInfo 对象中，以便统一存储到 Store 和 SQLite
+      if (url) {
+        appRes.data.url = url;
       }
 
       useAppStore.getState().setAppInfo(appId, appRes.data);

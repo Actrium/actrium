@@ -12,8 +12,8 @@ export class AppRepository {
 
       const sql = `
         INSERT OR REPLACE INTO apps 
-        (app_id, app_name, full_description, full_title, logo, details, last_opened) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (app_id, app_name, full_description, full_title, logo, url, details, last_opened) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       await db.executeSql(sql, [
@@ -22,6 +22,7 @@ export class AppRepository {
         langContent?.description || '',
         langContent?.title || '',
         appInfo.info?.logo || '',
+        appInfo.url || '', // 保存原始 URL
         JSON.stringify(appInfo),
         Date.now(),
       ]);

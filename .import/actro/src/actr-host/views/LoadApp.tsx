@@ -125,7 +125,7 @@ const LoadApp = () => {
       isResolvingRef.current = true;
       setIsResolving(true);
       try {
-        const initResult = await AppSessionService.initSession(appId);
+        const initResult = await AppSessionService.initSession(appId, url);
         if (!initResult.ok) {
           if (initResult.reason === 'APP_NOT_FOUND') {
             Alert.alert('应用不存在');

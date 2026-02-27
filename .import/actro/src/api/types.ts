@@ -87,6 +87,7 @@ export interface AppInfo {
   creator_id_transfer: string; // 创建人、租户姓名
   created_at: string; // 创建时间
   updated_at: string; // 最后更新时间
+  url?: string; // 应用加载来源地址 (扫码或手动输入的 URL)
 }
 
 export interface AuthAppInfo {

@@ -4,7 +4,8 @@ export type SystemAppType =
   | 'bookmarks'
   | 'login'
   | 'settings'
-  | 'bookmarkTags';
+  | 'bookmarkTags'
+  | 'globalSearch';
 
 // History item passed from native
 export type HistoryItemData = {

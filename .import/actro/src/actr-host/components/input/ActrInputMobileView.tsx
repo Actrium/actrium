@@ -18,6 +18,8 @@ import { StableTextInput } from './StableTextInput';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { BookmarkRepository } from '../../../repository/BookmarkRepository';
 import { useUnreadStore } from '../../store/useUnreadStore';
+import { useTab } from '../../contexts/TabContext';
+import { exitFullscreen } from '../../../native-bridge';
 
 type ActrInputMobileSharedStyles = Pick<ActrInputStyles, 'input' | 'mobileInputText'>;
 
@@ -53,6 +55,7 @@ interface ActrInputMobileViewProps {
 
 export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const { t } = useTranslation();
+  const { tab } = useTab();
   const totalUnread = useUnreadStore((state) => state.totalUnread);
   const {
     sharedStyles,
@@ -126,15 +129,17 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
       // 直接添加书签，不指定分类（category_id 为 null）
       await BookmarkRepository.addBookmark({
         app_id: appId,
+        tab_id: tab.id,
         sort_order: 0,
       });
 
       // 调用外部回调（如果有）
       onAddBookmark?.();
+      await exitFullscreen();
     } catch (error) {
       console.error('[ActrInputMobileView] Failed to add bookmark', error);
     }
-  }, [appId, onAddBookmark]);
+  }, [appId, tab.id, onAddBookmark]);
 
   React.useEffect(() => {
     if (inputText.length > 0 && mobileInputMode !== 'text') {
