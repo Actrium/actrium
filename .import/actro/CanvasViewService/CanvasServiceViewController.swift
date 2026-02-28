@@ -256,11 +256,38 @@ private class ResizableContainerView: NSView {
             }
         }
 
-        // 详细日志：检查 jail 和 Container 的尺寸/位置是否一致
+        // 详细日志：检查整个视图层级的尺寸/位置
         let jailSize = superview?.bounds.size ?? .zero
+        let jailFrame = superview?.frame ?? .zero
         let rnFrame = rnView?.frame ?? .zero
         let rnBounds = rnView?.bounds ?? .zero
-        ipcLog("📐 applyHostSize: container=\(Int(newSize.width))x\(Int(newSize.height)) jail=\(Int(jailSize.width))x\(Int(jailSize.height)) origin=\(frame.origin) rnFrame=\(Int(rnFrame.width))x\(Int(rnFrame.height)) rnBounds=\(Int(rnBounds.width))x\(Int(rnBounds.height))")
+        let containerFrame = self.frame
+        let containerBounds = self.bounds
+
+        // 检查 RN 子视图
+        var rnSubviewInfo = ""
+        if let rnView = rnView {
+            for (i, subview) in rnView.subviews.enumerated() {
+                rnSubviewInfo += " sub[\(i)]=\(Int(subview.frame.origin.x)),\(Int(subview.frame.origin.y)),\(Int(subview.frame.width))x\(Int(subview.frame.height))"
+            }
+        }
+
+        ipcLog("📐 applyHostSize: container=(\(Int(containerFrame.origin.x)),\(Int(containerFrame.origin.y)),\(Int(containerFrame.width))x\(Int(containerFrame.height))) bounds=(\(Int(containerBounds.origin.x)),\(Int(containerBounds.origin.y)),\(Int(containerBounds.width))x\(Int(containerBounds.height))) jail=(\(Int(jailFrame.origin.x)),\(Int(jailFrame.origin.y)),\(Int(jailFrame.width))x\(Int(jailFrame.height))) rnView=(\(Int(rnFrame.origin.x)),\(Int(rnFrame.origin.y)),\(Int(rnFrame.width))x\(Int(rnFrame.height)))\(rnSubviewInfo)")
+
+        // 🔍 延迟检查：查看是否有回调修改了尺寸
+        let expectedSize = newSize
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let actualContainerFrame = self.frame
+            let actualRnFrame = self.rnView?.frame ?? .zero
+            let actualJailFrame = self.superview?.frame ?? .zero
+            if abs(actualContainerFrame.width - expectedSize.width) > 1 ||
+               abs(actualContainerFrame.height - expectedSize.height) > 1 ||
+               abs(actualRnFrame.width - expectedSize.width) > 1 ||
+               abs(actualRnFrame.height - expectedSize.height) > 1 {
+                ipcLog("⚠️ POST-applyHostSize: SIZE CHANGED! expected=\(Int(expectedSize.width))x\(Int(expectedSize.height)) actual.container=\(Int(actualContainerFrame.width))x\(Int(actualContainerFrame.height)) actual.rnView=\(Int(actualRnFrame.width))x\(Int(actualRnFrame.height)) actual.jail=\(Int(actualJailFrame.width))x\(Int(actualJailFrame.height))")
+            }
+        }
 
         if newSize.width > 0 && newSize.height > 0 {
             onSizeChanged?(newSize)
