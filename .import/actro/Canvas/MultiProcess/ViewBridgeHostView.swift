@@ -238,15 +238,18 @@ public class ViewBridgeHostView: NSView {
     private func updateRemoteViewLayout() {
         guard let remoteView = remoteViewController?.view else { return }
 
-        // 🔑 关键：忽略无效的 0x0 尺寸
-        // 当 hostView 从一个容器移到另一个容器时（Overview ↔ Focus 切换），
-        // bounds.size 会暂时变为 0x0，不应该用这个无效尺寸更新 remoteView
-        guard bounds.size.width > 0 && bounds.size.height > 0 else {
+        // 🔑 关键修复：使用 currentContentSize 而不是 bounds.size
+        // bounds.size 在 Retina 显示器上可能返回 @2x 像素尺寸
+        // currentContentSize 是由 SwiftUI 正确计算的 point 尺寸
+        let targetSize = currentContentSize
+
+        // 忽略无效尺寸
+        guard targetSize.width > 0 && targetSize.height > 0 else {
             return
         }
 
         // 强制从 (0,0) 开始，确保填满整个 hostView
-        let expectedFrame = NSRect(origin: .zero, size: bounds.size)
+        let expectedFrame = NSRect(origin: .zero, size: targetSize)
         if remoteView.frame != expectedFrame {
             remoteView.frame = expectedFrame
         }
