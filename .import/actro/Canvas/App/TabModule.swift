@@ -6,7 +6,7 @@ private let logger = AppLogger.reactNative
 @objc(TabModule)
 class TabModule: NSObject {
 
-    @objc(openTab:resolve:reject:)
+    @objc
     func openTab(_ options: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         logger.notice("[TabModule] openTab called with options: \(options)")
         
@@ -104,7 +104,7 @@ class TabModule: NSObject {
         }
     }
     
-    @objc(exitFullscreen:reject:)
+    @objc
     func exitFullscreen(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         logger.notice("[TabModule] exitFullscreen called")
         
@@ -127,6 +127,30 @@ class TabModule: NSObject {
             resolve(true)
         }
     }
+    
+    @objc
+    func exitSearch(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        logger.notice("[TabModule] exitSearch called")
+        
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom != .phone {
+            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
+            return
+        }
+        #else
+        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
+        return
+        #endif
+
+        DispatchQueue.main.async {
+            // 发送通知，让 PhoneMainView 退出搜索页
+            NotificationCenter.default.post(
+                name: .exitSearchFromRN,
+                object: nil
+            )
+            resolve(true)
+        }
+    }
 
     @objc
     static func requiresMainQueueSetup() -> Bool {
@@ -140,4 +164,5 @@ extension Notification.Name {
     static let closeTabFromRN = Notification.Name("closeTabFromRN")
     static let exitFullscreenFromRN = Notification.Name("exitFullscreenFromRN")
     static let openTabFullscreenFromRN = Notification.Name("openTabFullscreenFromRN")
+    static let exitSearchFromRN = Notification.Name("exitSearchFromRN")
 }

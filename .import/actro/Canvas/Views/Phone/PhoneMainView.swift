@@ -60,6 +60,7 @@ struct PhoneMainView: View {
                         fullscreenTab = tab
                     }
                 )
+                .toolbar(.hidden, for: .tabBar)
             }
         }
         .accentColor(.blue)
@@ -86,6 +87,12 @@ struct PhoneMainView: View {
                 takeSnapshot(for: tab)
             }
             fullscreenTab = nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
+            // RN 请求退出搜索页 - 切换回页签列表
+            withAnimation {
+                selectedTab = .tabs
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openTabFullscreenFromRN)) { notification in
             // RN 请求打开指定 tab
