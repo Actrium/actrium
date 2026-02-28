@@ -113,10 +113,14 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         // 设置导航栏选择监听器
         setupNavigationListener()
 
-        // 初始化导航指示器位置
+        // 初始化导航指示器位置和内容显隐
         binding.rgNavigation.post {
-            alignIndicatorToSelectedButton()
+            // 先设置 navActivity 为选中状态
+            binding.navActivity.isChecked = true
+            // 不使用动画，直接对齐到 navActivity 位置
+            alignIndicatorToSelectedButton(animate = false)
         }
+
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
@@ -152,10 +156,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                 }
             }
         }
-//        lifecycleScope.launch {
-//            delay(3000) // 等待界面完全加载
-//            viewModel.addApp()
-//        }
     }
 
     /**
