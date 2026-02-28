@@ -17,4 +17,7 @@ RCT_EXTERN_METHOD(closeTab:(NSString *)tabId
 RCT_EXTERN_METHOD(exitFullscreen:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(exitSearch:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
 @end
