@@ -77,6 +77,9 @@ struct Tab: Identifiable {
     /// Additional properties from RN (excluding tabId)
     var additionalProps: [String: Any]?
 
+    /// Has unread message indicator (red dot on tab card)
+    var hasUnreadMessage: Bool
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -95,7 +98,8 @@ struct Tab: Identifiable {
         leftPanelDefaultVisible: Bool = false,
         rightPanelDefaultVisible: Bool = false,
         backgroundColor: String? = nil,
-        additionalProps: [String: Any]? = nil
+        additionalProps: [String: Any]? = nil,
+        hasUnreadMessage: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -115,6 +119,7 @@ struct Tab: Identifiable {
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
         self.backgroundColor = backgroundColor ?? Self.generateRandomColor()
         self.additionalProps = additionalProps
+        self.hasUnreadMessage = hasUnreadMessage
     }
 
     /// 生成随机的十六进制颜色字符串（深色调）

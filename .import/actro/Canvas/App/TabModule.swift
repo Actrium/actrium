@@ -175,6 +175,31 @@ class TabModule: NSObject {
             resolve(true)
         }
     }
+    
+    @objc
+    func setTabUnreadStatus(_ tabId: String, hasUnread: Bool, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        logger.notice("[TabModule] setTabUnreadStatus called for tabId: \(tabId), hasUnread: \(hasUnread)")
+        
+        DispatchQueue.main.async {
+            guard let viewModel = BrowserViewModel.active else {
+                reject("NO_VIEW_MODEL", "BrowserViewModel not available", nil)
+                return
+            }
+            
+            guard let uuid = UUID(uuidString: tabId) else {
+                reject("INVALID_TAB_ID", "Invalid tab ID format", nil)
+                return
+            }
+            
+            // 查找并更新 tab
+            if let index = viewModel.tabs.firstIndex(where: { $0.id == uuid }) {
+                viewModel.tabs[index].hasUnreadMessage = hasUnread
+                resolve(true)
+            } else {
+                reject("TAB_NOT_FOUND", "Tab with ID \(tabId) not found", nil)
+            }
+        }
+    }
 
     @objc
     static func requiresMainQueueSetup() -> Bool {
