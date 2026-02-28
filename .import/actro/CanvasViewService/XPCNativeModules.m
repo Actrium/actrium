@@ -7,6 +7,25 @@
 //
 
 #import <React/RCTBridgeModule.h>
+#import <objc/message.h>
+
+// MARK: - RCTHost Event Emitter Helper (Bridgeless Mode)
+
+/// Helper function to call RCTHost's callFunctionOnJSModule:method:args:
+/// Swift's performSelector only supports up to 2 arguments, so we use this ObjC helper.
+/// @param host The RCTHost instance (obtained from rootViewFactory.reactHost)
+/// @param module The JS module name (e.g., "RCTDeviceEventEmitter")
+/// @param method The method name (e.g., "emit")
+/// @param args The arguments array
+void RCTHostCallFunction(id host, NSString *module, NSString *method, NSArray *args) {
+    if (!host) return;
+    SEL sel = NSSelectorFromString(@"callFunctionOnJSModule:method:args:");
+    if ([host respondsToSelector:sel]) {
+        typedef void (*MsgSendFunc)(id, SEL, NSString *, NSString *, NSArray *);
+        MsgSendFunc func = (MsgSendFunc)objc_msgSend;
+        func(host, sel, module, method, args);
+    }
+}
 
 // MARK: - StartPageModule
 
