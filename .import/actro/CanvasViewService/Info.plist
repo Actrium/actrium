@@ -8,14 +8,16 @@
 	<string>XPC!</string>
 	<key>NSPrincipalClass</key>
 	<string>NSViewServiceApplication</string>
+	<key>RCTNewArchEnabled</key>
+	<true/>
 	<key>XPCService</key>
 	<dict>
-		<key>ServiceType</key>
-		<string>Application</string>
 		<key>JoinExistingSession</key>
 		<true/>
 		<key>RunLoopType</key>
 		<string>_NSApplicationMain</string>
+		<key>ServiceType</key>
+		<string>Application</string>
 	</dict>
 </dict>
 </plist>
