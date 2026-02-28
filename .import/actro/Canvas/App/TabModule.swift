@@ -225,6 +225,35 @@ class TabModule: NSObject {
             }
         }
     }
+    
+    @objc
+    func getCurrentFullscreenTab(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        logger.notice("[TabModule] getCurrentFullscreenTab called")
+        
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom != .phone {
+            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
+            return
+        }
+        #else
+        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
+        return
+        #endif
+        
+        DispatchQueue.main.async {
+            guard let viewModel = BrowserViewModel.active else {
+                reject("NO_VIEW_MODEL", "BrowserViewModel not available", nil)
+                return
+            }
+            
+            // 返回当前全屏 tab 的 ID（不包括系统 tab）
+            if let fullscreenTabId = viewModel.fullscreenTabId {
+                resolve(fullscreenTabId.uuidString)
+            } else {
+                resolve("") // 没有全屏 tab 时返回空字符串
+            }
+        }
+    }
 
     @objc
     static func requiresMainQueueSetup() -> Bool {

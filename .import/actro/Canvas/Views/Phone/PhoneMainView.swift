@@ -122,6 +122,10 @@ struct PhoneMainView: View {
                 }
             }
         }
+        .onChange(of: fullscreenTab) { oldValue, newValue in
+            // 更新 ViewModel 中的全屏 tab ID
+            viewModel.fullscreenTabId = newValue?.id
+        }
     }
     
     /// 截取当前全屏 tab 的快照
