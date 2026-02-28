@@ -165,9 +165,23 @@ struct WorkspaceView<Content: View>: View {
                 return floor(geometry.size.height)
             }()
 
-            let _ = NSLog("📐 [WorkspaceView] geometry=%.1fx%.1f, shouldShowDevTools=%d, displayMode=%@, contentSize=%.1fx%.1f",
-                          geometry.size.width, geometry.size.height, shouldShowDevTools ? 1 : 0,
-                          String(describing: devTools.displayMode), contentWidth, contentHeight)
+            // 🔍 写入共享日志文件
+            let _ = {
+                let timestamp = String(format: "%02d:%02d:%02d.%03d",
+                    Calendar.current.component(.hour, from: Date()),
+                    Calendar.current.component(.minute, from: Date()),
+                    Calendar.current.component(.second, from: Date()),
+                    Int(Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1) * 1000))
+                let line = "[\(timestamp)] [HOST] 📐 [WorkspaceView] geometry=\(Int(geometry.size.width))x\(Int(geometry.size.height)) devTools=\(shouldShowDevTools ? 1 : 0) contentSize=\(Int(contentWidth))x\(Int(contentHeight))\n"
+                let logPath = "/tmp/canvas_ipc_debug.log"
+                if let handle = FileHandle(forWritingAtPath: logPath) {
+                    handle.seekToEndOfFile()
+                    if let data = line.data(using: .utf8) {
+                        handle.write(data)
+                    }
+                    handle.closeFile()
+                }
+            }()
 
             // Use ZStack with explicit positioning to keep view hierarchy stable
             ZStack(alignment: .topLeading) {
@@ -215,6 +229,10 @@ struct WorkspaceView<Content: View>: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
+        // 🔑 忽略 safe area，让 GeometryReader 获取完整的可用空间
+        // 这样 ViewBridge 内容可以正确填充到 titlebar 下方
+        // 只忽略顶部 safe area (titlebar)，避免覆盖 sidebar
+        // .ignoresSafeArea(.container, edges: .top) // 暂时完全移除，确保完全尊重 sidebar 和 titlebar 区域
     }
 }
 

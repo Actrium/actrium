@@ -256,6 +256,9 @@ struct WorkspaceMainView: View {
                             viewModel.navigateCurrentTab(to: newURL.absoluteString)
                             // Enter focus mode for the new tab
                             enterFocus(tabId: newTab.id)
+                        },
+                        onThemeColorChanged: { color in
+                            viewModel.updateTabBackgroundColor(for: focusedTabId, color: color)
                         }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

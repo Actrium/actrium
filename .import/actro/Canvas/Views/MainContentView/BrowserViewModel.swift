@@ -72,7 +72,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         // Create initial StartUp tab
         let startTab = Tab(
             title: "Start Page",
-            systemTabType: .startPage
+            systemTabType: .startPage,
+            backgroundColor: "#1e1e1e" // Fixed dark color
         )
         tabs.append(startTab)
         currentTabId = startTab.id
@@ -85,7 +86,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         logger.debug("🆕 开始创建新标签页...")
         let newTab = Tab(
             title: "New Tab",
-            systemTabType: .startPage
+            systemTabType: .startPage,
+            backgroundColor: "#1e1e1e" // Fixed dark color
         )
         tabs.append(newTab)
         currentTabId = newTab.id
@@ -629,6 +631,16 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         logger.notice("🔗 [updateTabURL] Tab \(tabId) URL updated from \(oldURL) to \(url.absoluteString)")
     }
 
+    /// Update background color for a specific tab
+    func updateTabBackgroundColor(for tabId: UUID, color: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        // Only update if changed
+        if tabs[index].backgroundColor != color {
+            logger.notice("🎨 [BrowserViewModel] Updating background color for tab \(self.tabs[index].title): \(color)")
+            tabs[index].backgroundColor = color
+        }
+    }
+
     /// 导航当前 Tab 到指定 URL 或应用 ID
     /// 统一的导航入口 - 处理所有类型的输入
     /// - 如果输入是 about: URL，导航到对应系统应用
@@ -1150,7 +1162,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
-                    rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                    rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
+                    themeColor: manifestInfo.themeColor
                 )
             }
             // Legacy: 双 Engine 架构
@@ -1165,7 +1178,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
-                    rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                    rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
+                    themeColor: manifestInfo.themeColor
                 )
             } else if let script = guestScript {
                 // 旧架构：兼容单一的 guest.js
@@ -1176,7 +1190,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                     guestScript: script,
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
-                    permissions: manifestInfo.permissions
+                    permissions: manifestInfo.permissions,
+                    themeColor: manifestInfo.themeColor
                 )
             } else {
                 // 没有脚本，显示应用信息页面
@@ -1267,7 +1282,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
-                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
+                        themeColor: manifestInfo.themeColor
                     )
                 } else if leftPanelScript != nil || rightPanelScript != nil {
                     self?.appendACTRTab(
@@ -1279,7 +1295,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
-                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
+                        themeColor: manifestInfo.themeColor
                     )
                 } else if let script = guestScript {
                     self?.appendACTRTab(
@@ -1288,7 +1305,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                         guestScript: script,
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
-                        permissions: manifestInfo.permissions
+                        permissions: manifestInfo.permissions,
+                        themeColor: manifestInfo.themeColor
                     )
                 } else {
                     let html = self?.renderACTRInfoHTML(
@@ -1383,7 +1401,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
-                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
+                        themeColor: manifestInfo.themeColor
                     )
                 } else if leftPanelScript != nil || rightPanelScript != nil {
                     self?.appendACTRTab(
@@ -1395,7 +1414,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
-                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                        rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
+                        themeColor: manifestInfo.themeColor
                     )
                 } else if let script = guestScript {
                     self?.appendACTRTab(
@@ -1404,7 +1424,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                         guestScript: script,
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
-                        permissions: manifestInfo.permissions
+                        permissions: manifestInfo.permissions,
+                        themeColor: manifestInfo.themeColor
                     )
                 } else {
                     logger.warning(" [loadFromDevDirectory] 没有找到任何脚本文件")
@@ -1485,7 +1506,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         contractVersion: Int? = nil,
         permissions: [String] = [],
         leftPanelDefaultVisible: Bool = true,
-        rightPanelDefaultVisible: Bool = false
+        rightPanelDefaultVisible: Bool = false,
+        themeColor: String? = nil
     ) {
         // Use askw:// URL for History and address bar
         let askwURL = URL(string: "askw://\(sourceURL.path)") ?? sourceURL
@@ -1501,8 +1523,10 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             contractVersion: contractVersion,
             permissions: permissions,
             leftPanelDefaultVisible: leftPanelDefaultVisible,
-            rightPanelDefaultVisible: rightPanelDefaultVisible
+            rightPanelDefaultVisible: rightPanelDefaultVisible,
+            backgroundColor: themeColor
         )
+        logger.debug("📝 [appendACTRTab] 创建新 Tab: \(title), ID=\(newTab.id.uuidString.prefix(8)), bg=\(newTab.backgroundColor)")
         tabs.append(newTab)
         currentTabId = newTab.id
         tabSlotPositions[newTab.id] = tabs.count - 1
@@ -1550,7 +1574,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         }
     }
 
-    private func readManifestJSON(fromRoot root: URL) throws -> (name: String?, version: String?, description: String?, bundleId: String?, icon: String?, contractName: String?, contractVersion: Int?, permissions: [String], leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, leftPanelScript: String?, rightPanelScript: String?, unifiedScript: String?, systemAppType: SystemTabType?) {
+    private func readManifestJSON(fromRoot root: URL) throws -> (name: String?, version: String?, description: String?, bundleId: String?, icon: String?, contractName: String?, contractVersion: Int?, permissions: [String], leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, leftPanelScript: String?, rightPanelScript: String?, unifiedScript: String?, systemAppType: SystemTabType?, themeColor: String?) {
         guard let manifestURL = findManifestJSON(in: root) else {
             throw NSError(
                 domain: "ACTRPackage",
@@ -1567,6 +1591,11 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         // bundleId can be specified as "id" or "bundleId" in manifest
         let bundleId = (json?["id"] as? String) ?? (json?["bundleId"] as? String)
         let icon = json?["icon"] as? String
+        // Read theme color (themeColor or backgroundColor)
+        let themeColor = (json?["themeColor"] as? String) ?? (json?["backgroundColor"] as? String)
+        if let color = themeColor {
+            logger.notice("🎨 [BrowserViewModel] 从 manifest 读取 themeColor: \(color)")
+        }
 
         // MARK: - Contracts / Permissions (Phase 1: gating + logging)
         let supportedContractName = "ask"
@@ -1631,7 +1660,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             systemAppType = SystemTabType(rawValue: typeStr)
         }
 
-        return (name, version, description, bundleId, icon, contractNameValue, contractVersionValue, permissionsValue, leftPanelDefaultVisible, rightPanelDefaultVisible, leftPanelScript, rightPanelScript, unifiedScript, systemAppType)
+        return (name, version, description, bundleId, icon, contractNameValue, contractVersionValue, permissionsValue, leftPanelDefaultVisible, rightPanelDefaultVisible, leftPanelScript, rightPanelScript, unifiedScript, systemAppType, themeColor)
     }
 
     private func findManifestJSON(in root: URL) -> URL? {

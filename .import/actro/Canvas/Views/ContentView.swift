@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
+import Combine
 
 // MARK: - Sidebar Width Preference Key
 
@@ -153,6 +154,31 @@ private class WindowDelegateProxy: NSObject, NSWindowDelegate {
     // MARK: - Forward all other delegate methods to original
 
     func windowDidResize(_ notification: Notification) {
+        // 🔑 如果不是在 live resize 过程中（比如双击最大化/zoom），
+        // 需要触发尺寸同步，因为不会有 windowDidEndLiveResize 事件
+        // 延迟发送，等待 SwiftUI 布局更新完成
+        if !WindowResizeState.shared.isLiveResizing {
+            // 获取当前窗口尺寸用于日志
+            let windowSize = (notification.object as? NSWindow)?.frame.size ?? .zero
+            NSLog("🔔 [ZOOM] windowDidResize (non-live), window=%.0fx%.0f, scheduling delayed notification", windowSize.width, windowSize.height)
+
+            // 延迟后触发尺寸同步
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                // 再次检查，确保不是在 live resize 过程中
+                if !WindowResizeState.shared.isLiveResizing {
+                    NSLog("🔔 [ZOOM] Posting windowLiveResizeEnded after delay")
+                    NotificationCenter.default.post(name: .windowLiveResizeEnded, object: nil)
+                }
+            }
+
+            // 🔑 额外延迟后再次触发，确保捕获动画结束后的最终状态
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if !WindowResizeState.shared.isLiveResizing {
+                    NSLog("🔔 [ZOOM] Posting second windowLiveResizeEnded after 500ms")
+                    NotificationCenter.default.post(name: .windowLiveResizeEnded, object: nil)
+                }
+            }
+        }
         originalDelegate?.windowDidResize?(notification)
     }
 
@@ -254,6 +280,7 @@ private class WindowObserverView: NSView {
     var useNativeToolbar: Bool = false
     private var toolbarConfigured: Bool = false
     private var observersConfigured: Bool = false
+    private var cancellables = Set<AnyCancellable>()
 
     /// Current maximum window size based on connected screens
     private var currentMaxSize: NSSize = NSSize(width: 4096, height: 4096)
@@ -265,11 +292,12 @@ private class WindowObserverView: NSView {
         super.viewDidMoveToWindow()
         configureWindow()
         setupObservers()
+        setupThemeObserver()
     }
 
     func configureWindow() {
         guard let window = window else { return }
-        window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
+        updateWindowBackgroundColor()
         window.titlebarSeparatorStyle = .line
         window.titleVisibility = .hidden
         window.title = ""
@@ -282,6 +310,39 @@ private class WindowObserverView: NSView {
            let bookmarkVM = bookmarkVM {
             toolbarConfigured = true
             TitlebarManager.shared.setupTitlebar(for: window, viewModel: viewModel, bookmarkVM: bookmarkVM)
+        }
+    }
+    
+    private func setupThemeObserver() {
+        guard let viewModel = viewModel else { return }
+        
+        // Observe tabs changes to update background color when current tab changes or its color updates
+        viewModel.$tabs
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateWindowBackgroundColor()
+            }
+            .store(in: &cancellables)
+            
+        viewModel.$currentTabId
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateWindowBackgroundColor()
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func updateWindowBackgroundColor() {
+        guard let window = window, let viewModel = viewModel else { return }
+        let colorHex = viewModel.currentTab?.backgroundColor ?? "#1e1e1e"
+        
+        // Debug
+        NSLog("🎨 [WindowObserverView] updateWindowBackgroundColor: Tab '\(viewModel.currentTab?.title ?? "nil")' color=\(colorHex)")
+        
+        if let nsColor = NSColor(hexString: colorHex) {
+            window.backgroundColor = nsColor
+        } else {
+            window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
         }
     }
 
@@ -475,6 +536,39 @@ private class WindowObserverView: NSView {
         maxHeight = min(maxHeight, 16384)
 
         return NSSize(width: maxWidth, height: maxHeight)
+    }
+}
+
+// MARK: - NSColor Extension
+
+private extension NSColor {
+    convenience init?(hexString: String) {
+        var hexSanitized = hexString.trimmingCharacters(in: .whitespacesAndNewlines)
+        hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
+
+        var rgb: UInt64 = 0
+        guard Scanner(string: hexSanitized).scanHexInt64(&rgb) else {
+            return nil
+        }
+
+        let length = hexSanitized.count
+        let r, g, b, a: CGFloat
+
+        if length == 6 {
+            r = CGFloat((rgb & 0xFF0000) >> 16) / 255.0
+            g = CGFloat((rgb & 0x00FF00) >> 8) / 255.0
+            b = CGFloat(rgb & 0x0000FF) / 255.0
+            a = 1.0
+        } else if length == 8 {
+            r = CGFloat((rgb & 0xFF000000) >> 24) / 255.0
+            g = CGFloat((rgb & 0x00FF0000) >> 16) / 255.0
+            b = CGFloat((rgb & 0x0000FF00) >> 8) / 255.0
+            a = CGFloat(rgb & 0x000000FF) / 255.0
+        } else {
+            return nil
+        }
+
+        self.init(red: r, green: g, blue: b, alpha: a)
     }
 }
 
