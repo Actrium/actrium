@@ -34,6 +34,7 @@ enum SystemTabType: String, Codable {
 struct Tab: Identifiable {
     let id: UUID
     var title: String
+    var icon: String?  // Tab icon (SF Symbol name or URL string)
     var url: URL?
     var htmlContent: String?
 
@@ -86,6 +87,7 @@ struct Tab: Identifiable {
     init(
         id: UUID = UUID(),
         title: String,
+        icon: String? = nil,
         url: URL? = nil,
         htmlContent: String? = nil,
         systemTabType: SystemTabType? = nil,
@@ -107,6 +109,7 @@ struct Tab: Identifiable {
     ) {
         self.id = id
         self.title = title
+        self.icon = icon
         self.url = url
         self.htmlContent = htmlContent
         self.systemTabType = systemTabType

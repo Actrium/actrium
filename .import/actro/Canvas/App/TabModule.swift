@@ -227,6 +227,44 @@ class TabModule: NSObject {
     }
     
     @objc
+    func updateTabInfo(_ options: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        logger.notice("[TabModule] updateTabInfo called with options: \(options)")
+        
+        guard let tabId = options["tabId"] as? String else {
+            reject("MISSING_TAB_ID", "tabId is required", nil)
+            return
+        }
+        
+        DispatchQueue.main.async {
+            guard let viewModel = BrowserViewModel.active else {
+                reject("NO_VIEW_MODEL", "BrowserViewModel not available", nil)
+                return
+            }
+            
+            guard let uuid = UUID(uuidString: tabId) else {
+                reject("INVALID_TAB_ID", "Invalid tab ID format", nil)
+                return
+            }
+            
+            // 查找并更新 tab
+            if let index = viewModel.tabs.firstIndex(where: { $0.id == uuid }) {
+                if let icon = options["icon"] as? String {
+                    viewModel.tabs[index].icon = icon
+                }
+                if let title = options["title"] as? String {
+                    viewModel.tabs[index].title = title
+                }
+                if let urlString = options["url"] as? String, let newURL = URL(string: urlString) {
+                    viewModel.tabs[index].url = newURL
+                }
+                resolve(true)
+            } else {
+                reject("TAB_NOT_FOUND", "Tab with ID \(tabId) not found", nil)
+            }
+        }
+    }
+    
+    @objc
     func getCurrentFullscreenTab(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         logger.notice("[TabModule] getCurrentFullscreenTab called")
         
