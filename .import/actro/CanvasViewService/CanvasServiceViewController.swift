@@ -108,16 +108,10 @@ private class ResizableContainerView: NSView {
     /// hierarchy dispatch).
     override func mouseDown(with event: NSEvent) {
         // Do NOT call super — default NSView.mouseDown enters a tracking loop.
-        let gr = rnView?.subviews.first?.gestureRecognizers.first
-        let nativeTouches = gr?.value(forKey: "_nativeTouches") as? NSOrderedSet
-        ipcLog("🖱️ mouseDown: tab=\(tabId ?? "?") gr=\(gr != nil) grState=\(gr?.state.rawValue ?? -1) nativeTouches=\(nativeTouches?.count ?? -1) loc=\(Int(event.locationInWindow.x)),\(Int(event.locationInWindow.y))")
     }
 
     override func mouseUp(with event: NSEvent) {
         // Match mouseDown override — do NOT call super.
-        let gr = rnView?.subviews.first?.gestureRecognizers.first
-        let nativeTouches = gr?.value(forKey: "_nativeTouches") as? NSOrderedSet
-        ipcLog("🖱️ mouseUp: tab=\(tabId ?? "?") gr=\(gr != nil) nativeTouches=\(nativeTouches?.count ?? -1)")
     }
 
     /// Setup view when added to hierarchy
@@ -326,19 +320,44 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
         fatalError("init(coder:) has not been implemented")
     }
 
-    // MARK: - Bridgeless + TurboModule (no Fabric on macOS)
+    // MARK: - Bridgeless + TurboModule
 
     override func bridgelessEnabled() -> Bool { return true }
     override func turboModuleEnabled() -> Bool { return true }
 
+    /// Lazily resolved host app bundle URL
+    private lazy var _hostAppBundleURL: URL? = {
+        // Bundle.main in XPC service may be the XPC bundle, not the host app bundle.
+        if let url = Bundle.main.url(forResource: "main.rctnapp", withExtension: "jsbundle") {
+            ipcLog("🔧 bundleURL: resolved via Bundle.main")
+            return url
+        }
+        // Construct host app bundle path from executable path
+        let execPath = ProcessInfo.processInfo.arguments[0]
+        var dir = (execPath as NSString).deletingLastPathComponent
+        dir = (dir as NSString).deletingLastPathComponent
+        dir = (dir as NSString).deletingLastPathComponent
+        dir = (dir as NSString).deletingLastPathComponent
+        dir = (dir as NSString).deletingLastPathComponent
+        let path = (dir as NSString).appendingPathComponent("Resources/main.rctnapp.jsbundle")
+        if FileManager.default.fileExists(atPath: path) {
+            ipcLog("🔧 bundleURL: resolved via host app path: \(path)")
+            return URL(fileURLWithPath: path)
+        }
+        ipcLog("❌ bundleURL: not found! Bundle.main=\(Bundle.main.bundlePath) hostPath=\(path)")
+        return nil
+    }()
+
     override func bundleURL() -> URL? {
-        // Always load from local bundle file (no Metro dev server dependency)
-        return Bundle.main.url(forResource: "main.rctnapp", withExtension: "jsbundle")
+        let url = _hostAppBundleURL
+        ipcLog("📎 bundleURL() called → \(url?.lastPathComponent ?? "nil") [thread=\(Thread.isMainThread ? "main" : "bg")]")
+        return url
     }
 
     override func sourceURL(for bridge: RCTBridge) -> URL? {
         return bundleURL()
     }
+
 }
 
 // MARK: - Tab View Controller Entry
@@ -356,7 +375,8 @@ private class TabViewControllerEntry {
     weak var containerView: ResizableContainerView?
     /// Reference to the ViewController (runtime-created Objective-C class)
     weak var viewController: AnyObject?
-    var rootView: RCTRootView?
+    /// Root view — RCTRootView (bridge) or RCTSurfaceHostingProxyRootView (bridgeless)
+    var rootView: NSView?
     var currentProperties: [String: Any] = [:]
     var containerSize: CGSize = .zero
     var pendingConfig: [String: Any]?
@@ -445,6 +465,10 @@ private class ServiceReactNativeHost {
             debugLog("⚠️ Failed to get XPC service bundle ID, using fallback: \(serviceBundleId)")
         }
 
+        // Create RCTReactNativeFactory FIRST — RN 0.81 feature flags must be
+        // overridden before any other RN API (RCTRedBox, Inspector, etc.) accesses them.
+        ensureBridgeCreated()
+
         #if DEBUG
         RCTRedBoxSetEnabled(false)
         // Disable default packager server access check (we use dynamic port, not 8081)
@@ -454,7 +478,7 @@ private class ServiceReactNativeHost {
         RCTInspectorDevServerHelper.disableDebugger()
         #endif
 
-        // Setup listeners and create RCTBridge (loads from local bundle)
+        // Setup listeners
         setupTabConfigListener()
 
         // Start XPC listener for new IPC module
@@ -474,6 +498,10 @@ private class ServiceReactNativeHost {
         debugLog("XPC listener started for service: \(serviceBundleId)")
     }
 
+    /// Track whether JS bundle loaded successfully
+    var bundleLoaded = false
+    var bundleLoadFailed = false
+
     /// Create RCTBridge (loads from local bundle file)
     private func ensureBridgeCreated() {
         guard !bridgeCreated else {
@@ -482,10 +510,51 @@ private class ServiceReactNativeHost {
         }
         bridgeCreated = true
 
+        // Monitor ALL notifications to catch any RCT-related ones
+        NotificationCenter.default.addObserver(forName: nil, object: nil, queue: nil) { [weak self] notification in
+            let name = notification.name.rawValue
+            if name.contains("RCT") || name.contains("React") || name.contains("JavaScript") || name.contains("Bridge") || name.contains("Bundle") {
+                ipcLog("📡 [NOTIF] \(name)")
+                if name.contains("DidLoadBundle") {
+                    self?.bundleLoaded = true
+                }
+                if name.contains("FailToLoad") || name.contains("DidFailToLoad") {
+                    self?.bundleLoadFailed = true
+                    let error = notification.userInfo?["error"] ?? "?"
+                    ipcLog("❌ [NOTIF] error: \(error)")
+                }
+            }
+        }
+
+        // Install error handlers BEFORE creating factory
+        RCTSetFatalHandler { error in
+            let nsError = error as NSError?
+            ipcLog("💀 [FATAL] \(nsError?.localizedDescription ?? "(nil)") domain=\(nsError?.domain ?? "?") code=\(nsError?.code ?? 0)")
+        }
+        RCTAddLogFunction { level, source, fileName, lineNumber, message in
+            let levelStr: String
+            switch level.rawValue {
+            case 0: levelStr = "TRACE"
+            case 1: levelStr = "INFO"
+            case 2: levelStr = "WARN"
+            case 3: levelStr = "ERROR"
+            case 4: levelStr = "FATAL"
+            default: levelStr = "L\(level.rawValue)"
+            }
+            ipcLog("📋 [RCT:\(levelStr)] \(message ?? "(nil)") [\(fileName ?? "?"):\(lineNumber)]")
+        }
+
         ipcLog("🔧 ensureBridgeCreated: Creating RCTBridge (loading from local bundle)")
         factoryDelegate = ServiceReactNativeFactoryDelegate()
         factory = RCTReactNativeFactory(delegate: factoryDelegate!)
         ipcLog("🔧 ensureBridgeCreated: factory created = \(factory != nil)")
+
+        // Log bundle URL
+        if let url = factoryDelegate?.bundleURL() {
+            ipcLog("🔧 bundleURL = \(url)")
+        } else {
+            ipcLog("❌ bundleURL is NIL!")
+        }
     }
 
     /// Track which internalIds have already been bound to prevent duplicate bindings
@@ -708,9 +777,6 @@ private class ServiceReactNativeHost {
     }
 
     private func setupTabConfigListener() {
-        // Create RCTBridge immediately - apps load from local bundles (no Metro dependency)
-        ensureBridgeCreated()
-
         // Listen for tab config with service-specific notification
         let notificationName = "com.canvas.tabConfig.\(serviceBundleId)"
         ipcLog("🎧 Setting up tabConfig listener: \(notificationName)")
@@ -958,7 +1024,7 @@ private class ServiceReactNativeHost {
         guard changed else { return }
 
         entry.currentProperties = properties
-        entry.rootView?.appProperties = properties
+        setAppProperties(properties, on: entry.rootView)
 
         // Emit props update event to RN (more reliable than appProperties)
         emitPropsUpdate(for: entry)
@@ -971,18 +1037,6 @@ private class ServiceReactNativeHost {
             let sizeChanged = entry.containerSize != size
             let currentOverviewMode = entry.currentProperties["isOverviewMode"] as? Bool ?? false
             let overviewChanged = isOverviewMode != nil && currentOverviewMode != isOverviewMode
-
-            // 🔑 检查是否有显著的尺寸变化（从 Focus 到 Overview 的过渡）
-            // Overview 卡片尺寸通常约为 196x124，而 Focus 模式约为 630x398
-            // 当尺寸变化超过 50% 时，认为是显著变化，需要重新创建 RCTRootView
-            let significantSizeChange: Bool = {
-                let oldSize = entry.containerSize
-                guard oldSize.width > 0 && oldSize.height > 0 else { return false }
-                let widthRatio = min(size.width, oldSize.width) / max(size.width, oldSize.width)
-                let heightRatio = min(size.height, oldSize.height) / max(size.height, oldSize.height)
-                // 如果宽度或高度变化超过 50%，认为是显著变化
-                return widthRatio < 0.5 || heightRatio < 0.5
-            }()
 
             guard sizeChanged || overviewChanged else { return }
 
@@ -1000,44 +1054,20 @@ private class ServiceReactNativeHost {
             properties["containerHeight"] = size.height
             entry.currentProperties = properties
 
-            // 🔑 CRITICAL: appProperties setter may not trigger React re-render on macOS
-            // So we need to force a re-render by recreating the RCTRootView when:
-            // 1. isOverviewMode changes
-            // 2. There's a significant size change (Focus ↔ Overview transition)
-            let needsRecreate = overviewChanged || significantSizeChange
-            if needsRecreate, let container = entry.containerView, let oldRootView = entry.rootView {
-                let reason = overviewChanged ? "isOverviewMode changed (\(currentOverviewMode) → \(isOverviewMode ?? false))" : "significant size change"
-                ipcLog("🔄 \(reason), recreating RCTRootView for tab=\(String(tabId.prefix(8)))")
-
-                // Remove old view
-                oldRootView.removeFromSuperview()
-                entry.rootView = nil
-
-                // Create new RCTRootView with updated props
+            // 🔑 不重建 RCTRootView：避免 Focus↔Overview 时丢失 JS 状态（例如 counter 值）
+            // 通过 appProperties + DeviceEventEmitter 强制刷新 props，保证 RN 能感知变化。
+            if entry.rootView == nil, let container = entry.containerView {
                 if let newRootView = ServiceReactNativeHost.shared.createRootView(for: entry, initialProperties: properties) {
                     entry.rootView = newRootView
                     newRootView.frame = CGRect(origin: .zero, size: size)
                     container.addSubview(newRootView)
                     container.setRNView(newRootView)
-                    // Force layoutSubviews directly (XPC has no window, layout() won't cascade)
-                    let sel = NSSelectorFromString("layoutSubviews")
-                    if newRootView.responds(to: sel) {
-                        newRootView.perform(sel)
-                    }
-                    for subview in newRootView.subviews {
-                        if subview.responds(to: sel) {
-                            subview.perform(sel)
-                        }
-                    }
-                    ipcLog("✅ Recreated RCTRootView: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverviewMode ?? false) size=\(Int(size.width))x\(Int(size.height))")
-                } else {
-                    ipcLog("⚠️ Failed to recreate RCTRootView for tab=\(String(tabId.prefix(8)))")
                 }
-            } else {
-                // Just update appProperties (may not work reliably, but try anyway)
-                entry.rootView?.appProperties = properties
-                ipcLog("📱 Updated RN props: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverviewMode ?? false) size=\(Int(size.width))x\(Int(size.height))")
             }
+
+            setAppProperties(properties, on: entry.rootView)
+            emitPropsUpdate(for: entry)
+            ipcLog("📱 Updated RN props: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverviewMode ?? false) size=\(Int(size.width))x\(Int(size.height))")
 
             // 先更新 viewController 的 preferredContentSize
             // 这会让 ViewBridge 知道我们需要更大的 jail view
@@ -1287,6 +1317,7 @@ private class ServiceReactNativeHost {
         if let s = config["leftPanelScript"] as? String { tabDict["leftPanelScript"] = s }
         if let s = config["rightPanelScript"] as? String { tabDict["rightPanelScript"] = s }
         if let s = config["guestScript"] as? String { tabDict["guestScript"] = s }
+        if let reloadKey = config["reloadKey"] { tabDict["reloadKey"] = reloadKey }
 
         // System app data
         if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }
@@ -1315,14 +1346,14 @@ private class ServiceReactNativeHost {
 
         entry.currentProperties = properties
 
-        if let rootView = entry.rootView {
-            rootView.appProperties = properties
+        if entry.rootView != nil {
+            setAppProperties(properties, on: entry.rootView)
 
             // RN bridge may still be loading, re-apply properties multiple times to ensure render
             for delay in [0.3, 0.8, 1.5] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak entry] in
-                    guard let entry = entry, let rootView = entry.rootView else { return }
-                    rootView.appProperties = entry.currentProperties
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak entry] in
+                    guard let self = self, let entry = entry else { return }
+                    self.setAppProperties(entry.currentProperties, on: entry.rootView)
                 }
             }
         }
@@ -1333,10 +1364,9 @@ private class ServiceReactNativeHost {
 
     // MARK: - RCTRootView Creation
 
-    /// Create a new RCTRootView for a specific Tab
-    /// Each Tab gets its own RCTRootView, sharing the same RCTBridge
-    func createRootView(for entry: TabViewControllerEntry, initialProperties: [String: Any]) -> RCTRootView? {
-        // Ensure RCTBridge is created (should have been done when Metro config was received)
+    /// Create a new root view for a specific Tab
+    /// Returns RCTRootView (bridge) or RCTSurfaceHostingProxyRootView (bridgeless)
+    func createRootView(for entry: TabViewControllerEntry, initialProperties: [String: Any]) -> NSView? {
         ensureBridgeCreated()
 
         guard let factory = factory else {
@@ -1356,16 +1386,30 @@ private class ServiceReactNativeHost {
             launchOptions: nil
         )
 
-        guard let rootView = view as? RCTRootView else {
-            ipcLog("⚠️ createRootView: view is not RCTRootView, got \(type(of: view))")
-            return nil
+        // Accept both RCTRootView (bridge) and RCTSurfaceHostingProxyRootView (bridgeless)
+        if let rctRootView = view as? RCTRootView {
+            rctRootView.sizeFlexibility = .none
+            rctRootView.backgroundColor = NSColor.clear
+            entry.rootView = rctRootView
+            ipcLog("📦 createRootView: got RCTRootView")
+            return rctRootView
         }
 
-        rootView.sizeFlexibility = .none
-        rootView.backgroundColor = NSColor.clear
-        entry.rootView = rootView
+        // Bridgeless mode returns RCTSurfaceHostingProxyRootView
+        ipcLog("📦 createRootView: got \(type(of: view)) (bridgeless) frame=\(view.frame)")
 
-        return rootView
+        // Diagnostic: check RCTBridge.currentBridge (bridgeProxy in bridgeless mode)
+        if let bridgeClass = NSClassFromString("RCTBridge") {
+            let currentBridge = bridgeClass.value(forKey: "currentBridge")
+            ipcLog("🔍 [DIAG] RCTBridge.currentBridge = \(currentBridge.map { "\(type(of: $0))" } ?? "nil")")
+        }
+        if view.responds(to: NSSelectorFromString("setSizeFlexibility:")) {
+            view.setValue(0, forKey: "sizeFlexibility")  // 0 = .none
+        }
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        entry.rootView = view
+        return view
     }
 
     /// Update container size for a specific Tab
@@ -1381,13 +1425,41 @@ private class ServiceReactNativeHost {
         properties["containerHeight"] = size.height
         entry.currentProperties = properties
 
-        entry.rootView?.appProperties = properties
+        setAppProperties(properties, on: entry.rootView)
         updateDimensionsForEntry(entry)
     }
 
-    func updateDimensionsForEntry(_ entry: TabViewControllerEntry) {
-        guard let bridge = entry.rootView?.bridge else { return }
+    /// Set appProperties on root view (works for both RCTRootView and RCTSurfaceHostingProxyRootView)
+    private func setAppProperties(_ properties: [String: Any], on view: NSView?) {
+        guard let view = view else { return }
+        if let rctRootView = view as? RCTRootView {
+            rctRootView.appProperties = properties
+        } else if view.responds(to: NSSelectorFromString("setAppProperties:")) {
+            view.setValue(properties, forKey: "appProperties")
+        }
+    }
 
+    /// Get bridge from root view (nil in bridgeless mode)
+    private func getBridge(from view: NSView?) -> RCTBridge? {
+        return (view as? RCTRootView)?.bridge
+    }
+
+    /// Emit DeviceEventEmitter event via RCTBridge.currentBridge (works in both bridge and bridgeless modes)
+    /// In bridgeless mode, currentBridge returns a bridgeProxy that supports enqueueJSCall.
+    /// Returns true if dispatched successfully.
+    private func emitDeviceEventViaCurrentBridge(_ name: String, body: Any) -> Bool {
+        // RCTBridge.currentBridge works in both modes:
+        // - Bridge mode: returns the actual bridge
+        // - Bridgeless mode: returns a bridgeProxy (RCTBridgeProxy)
+        guard let bridgeClass = NSClassFromString("RCTBridge"),
+              let currentBridge = bridgeClass.value(forKey: "currentBridge") as? RCTBridge else {
+            return false
+        }
+        currentBridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: [name, body], completion: nil)
+        return true
+    }
+
+    func updateDimensionsForEntry(_ entry: TabViewControllerEntry) {
         let size = entry.containerSize
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
 
@@ -1402,18 +1474,18 @@ private class ServiceReactNativeHost {
             "window": dims,
             "screen": dims
         ]
-
-        bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["didUpdateDimensions", dimensions], completion: nil)
+        if let bridge = getBridge(from: entry.rootView) {
+            bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["didUpdateDimensions", dimensions], completion: nil)
+            return
+        }
+        if emitDeviceEventViaCurrentBridge("didUpdateDimensions", body: dimensions) {
+            ipcLog("📤 didUpdateDimensions via reactHost")
+        }
     }
 
     /// 🔑 通过 DeviceEventEmitter 发送 props 更新事件
     /// appProperties 更新可能不可靠（已 deprecated），使用事件更可靠
     func emitPropsUpdate(for entry: TabViewControllerEntry) {
-        guard let bridge = entry.rootView?.bridge else {
-            ipcLog("⚠️ emitPropsUpdate: no bridge available")
-            return
-        }
-
         let props = entry.currentProperties
         let tabId = props["tab"].flatMap { ($0 as? [String: Any])?["id"] as? String } ?? "unknown"
         let isOverviewMode = props["isOverviewMode"] as? Bool ?? false
@@ -1421,7 +1493,15 @@ private class ServiceReactNativeHost {
         ipcLog("📤 emitPropsUpdate: tab=\(String(tabId.prefix(8))) isOverviewMode=\(isOverviewMode)")
 
         // 发送自定义事件通知 RN props 变化
-        bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["onPropsUpdate", props], completion: nil)
+        if let bridge = getBridge(from: entry.rootView) {
+            bridge.enqueueJSCall("RCTDeviceEventEmitter", method: "emit", args: ["onPropsUpdate", props], completion: nil)
+            return
+        }
+        if emitDeviceEventViaCurrentBridge("onPropsUpdate", body: props) {
+            ipcLog("📤 emitPropsUpdate via reactHost: tab=\(String(tabId.prefix(8)))")
+        } else {
+            ipcLog("⚠️ emitPropsUpdate: no bridge/host available")
+        }
     }
 }
 
@@ -1750,6 +1830,7 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     if let unifiedScript = config["unifiedScript"] as? String {
         tabDict["unifiedScript"] = unifiedScript
     }
+    if let reloadKey = config["reloadKey"] { tabDict["reloadKey"] = reloadKey }
     // Copy other tab properties
     if let historyItems = config["historyItems"] { tabDict["historyItems"] = historyItems }
     if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }
@@ -1809,6 +1890,49 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak entry] in
         guard let entry = entry else { return }
         ServiceReactNativeHost.shared.updateContainerSize(for: entry, size: entry.containerSize)
+    }
+
+    // Diagnostic: log surface state at multiple intervals
+    let diagCheck: @convention(block) (Double) -> Void = { delay in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak entry, weak container] in
+            guard let entry = entry, let rv = entry.rootView else { return }
+            let logId = String((entry.tabId ?? entry.internalId).prefix(8))
+            let host = ServiceReactNativeHost.shared
+            var stageStr = "?"
+            if rv.responds(to: NSSelectorFromString("surface")) {
+                if let surface = rv.value(forKey: "surface") as? NSObject {
+                    let stage = surface.value(forKey: "stage") as? Int ?? -1
+                    stageStr = "\(stage)"
+                }
+            }
+            ipcLog("🔍 [DIAG:\(logId)] t+\(delay)s: subviews=\(rv.subviews.count) stage=\(stageStr) bundleLoaded=\(host.bundleLoaded) bundleFailed=\(host.bundleLoadFailed)")
+        }
+    }
+
+    for t in [1.0, 2.0, 3.0, 5.0, 8.0] {
+        diagCheck(t)
+    }
+
+    // Detailed diagnostic at +3.0s
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak entry, weak container] in
+        guard let entry = entry, let container = container, let rv = entry.rootView else { return }
+        let logId = String((entry.tabId ?? entry.internalId).prefix(8))
+        ipcLog("🔍 [DIAG:\(logId)] rootView type=\(type(of: rv)) frame=\(rv.frame) hidden=\(rv.isHidden) alpha=\(rv.alphaValue)")
+        ipcLog("🔍 [DIAG:\(logId)] rootView.subviews=\(rv.subviews.count)")
+        for (i, sub) in rv.subviews.enumerated() {
+            ipcLog("🔍 [DIAG:\(logId)]   subview[\(i)] type=\(type(of: sub)) frame=\(sub.frame) hidden=\(sub.isHidden)")
+            for (j, subsub) in sub.subviews.enumerated() {
+                ipcLog("🔍 [DIAG:\(logId)]     subview[\(i)][\(j)] type=\(type(of: subsub)) frame=\(subsub.frame)")
+            }
+        }
+        ipcLog("🔍 [DIAG:\(logId)] container frame=\(container.frame) bounds=\(container.bounds)")
+        // Check surface stage via KVC
+        if rv.responds(to: NSSelectorFromString("surface")) {
+            if let surface = rv.value(forKey: "surface") as? NSObject {
+                let stage = surface.value(forKey: "stage") as? Int ?? -1
+                ipcLog("🔍 [DIAG:\(logId)] surface stage=\(stage) (7=Preparing, 127=Running)")
+            }
+        }
     }
 }
 

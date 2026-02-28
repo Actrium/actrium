@@ -5,21 +5,9 @@ react_native_macos_path = 'RCTNApps/node_modules/react-native-macos'
 
 # Require react_native_pods via a stable absolute path.
 require File.join(rctnapps_path, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
+require File.join(rctnapps_path, 'node_modules', 'rill', 'scripts', 'rill_post_install')
 
 prepare_react_native_project!
-
-# Patch react-native-macos 0.81.1: HermesExecutorFactory.cpp missing <thread> include
-# (macOS SDK 26.2 C++ headers no longer transitively include <thread>)
-hermes_executor = File.join(__dir__, react_native_macos_path,
-  'ReactCommon/hermes/executor/HermesExecutorFactory.cpp')
-if File.exist?(hermes_executor)
-  content = File.read(hermes_executor)
-  unless content.include?('#include <thread>')
-    content = content.sub('#include "HermesExecutorFactory.h"',
-      "#include \"HermesExecutorFactory.h\"\n\n#include <thread>")
-    File.write(hermes_executor, content)
-  end
-end
 
 # rill sandbox engine: JSC for guest sandbox (Hermes is main runtime)
 ENV['RILL_SANDBOX_ENGINE'] = 'jsc'
@@ -50,6 +38,12 @@ end
 post_install do |installer|
   # 告诉 React Native 正确的源码位置，避免 Codegen 误报
   react_native_post_install(installer, react_native_macos_path)
+  rill_post_install(installer, react_native_path: react_native_macos_path)
+
+  # NOTE: hermes.framework embedding for CanvasViewService XPC target is done via
+  # a manually-added build phase in Canvas.xcodeproj (not via CocoaPods).
+  # CocoaPods' xcodeproj gem doesn't support Xcode 26's PBXFileSystemSynchronizedRootGroup,
+  # so we can't programmatically modify the user project from post_install.
 
   # 抑制所有 Pods 项目的警告
   installer.pods_project.targets.each do |target|
