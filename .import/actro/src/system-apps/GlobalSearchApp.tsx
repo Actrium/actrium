@@ -191,7 +191,7 @@ export default function GlobalSearchApp() {
       // 应用类型
       openTab({
         tabId: item.tabId ?? '',
-        openUrl: item.url || item.appId || '',
+        appUrl: item.url || item.appId || '',
       });
     }
     exitSearch();
@@ -338,9 +338,8 @@ export default function GlobalSearchApp() {
                   styles.phoneInputContainer,
                 ])}
               </View>
-              {keyboardInset > 0 && (
-                <View style={{ height: keyboardInset - 20 }} />
-              )}
+              {/* Phone: 键盘避让已由 SwiftUI（PhoneSystemAppView）在 Native 层处理，
+                   通过缩小 RCTRootView.frame 实现上移，无需 RN 层重复添加 keyboardInset 偏移 */}
             </SafeAreaView>
           </View>
         </View>
