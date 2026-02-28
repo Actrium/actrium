@@ -9,9 +9,15 @@ export type TabFullscreenEvent = {
   timestamp: number;
 };
 
+export type TabUnreadStatusEvent = {
+  tabId: string;
+  unread: boolean;
+};
+
 type Unsubscribe = () => void;
 
 export const TabEvents = {
+  // 进入 tab 事件
   onTabEnteredFullscreen: (
     callback: (event: TabFullscreenEvent) => void,
   ): Unsubscribe => {
@@ -22,6 +28,7 @@ export const TabEvents = {
     return () => subscription.remove();
   },
 
+  // 退出 tab 事件
   onTabExitedFullscreen: (
     callback: (event: TabFullscreenEvent) => void,
   ): Unsubscribe => {

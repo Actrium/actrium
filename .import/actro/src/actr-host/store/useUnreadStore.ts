@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { MessageRepository } from '../../repository/MessageRepository';
+import { setTabUnreadStatus } from '../../native-bridge/tab/TabModule';
 
 interface UnreadState {
   // appId -> 未读消息数量
@@ -8,10 +9,10 @@ interface UnreadState {
   totalUnread: number;
 
   // 增加指定应用的未读数
-  incrementUnread: (appId: string) => void;
+  incrementUnread: (appId: string, tabId: string) => void;
 
   // 清空指定应用的未读数
-  clearUnread: (appId: string) => void;
+  clearUnread: (appId: string, tabId: string) => void;
 
   // 批量设置未读数（用于初始化）
   setUnreadCounts: (counts: Record<string, number>) => void;
@@ -24,7 +25,7 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
   unreadCounts: {},
   totalUnread: 0,
 
-  incrementUnread: (appId: string) => {
+  incrementUnread: (appId: string, tabId: string) => {
     set((state) => {
       const currentCount = state.unreadCounts[appId] || 0;
       const newUnreadCounts = {
@@ -45,9 +46,13 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
         totalUnread: newTotalUnread,
       };
     });
+    // set() 回调必须同步，async 调用放在外部 fire-and-forget
+    setTabUnreadStatus(tabId, true).catch((e) =>
+      console.error('[UnreadStore] Failed to notify native increment:', e),
+    );
   },
 
-  clearUnread: (appId: string) => {
+  clearUnread: (appId: string, tabId: string) => {
     set((state) => {
       const { [appId]: _, ...restCounts } = state.unreadCounts;
       const newTotalUnread = Object.values(restCounts).reduce(
@@ -62,6 +67,10 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
         totalUnread: newTotalUnread,
       };
     });
+    // set() 回调必须同步，async 调用放在外部 fire-and-forget
+    setTabUnreadStatus(tabId, false).catch((e) =>
+      console.error('[UnreadStore] Failed to notify native clear:', e),
+    );
   },
 
   setUnreadCounts: (counts: Record<string, number>) => {

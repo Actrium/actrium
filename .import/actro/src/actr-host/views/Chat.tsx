@@ -31,6 +31,7 @@ import { AppSessionService } from '../../services/AppSessionService';
 import { getHostLayoutTokens } from '../../utils/layout';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { useUnreadStore } from '../store/useUnreadStore';
+import { setTabUnreadStatus } from '../../../src/native-bridge/tab/TabModule';
 
 const PAGE_SIZE = 20;
 
@@ -125,7 +126,7 @@ export default function Chat() {
       // 标记当前应用的所有消息为已读
       MessageRepository.markAllAsReadByAppId(appId);
       // 同步更新未读消息 store
-      useUnreadStore.getState().clearUnread(appId);
+      useUnreadStore.getState().clearUnread(appId, tab.id);
     }
 
     return () => {
