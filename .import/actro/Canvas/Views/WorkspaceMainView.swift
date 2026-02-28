@@ -264,63 +264,69 @@ struct WorkspaceMainView: View {
                 // 🔑 Live 层：统一的 ViewBridge 内容层（canvas 变换之外）
                 // 始终渲染，不论 Focus/Overview 模式，避免模式切换时连接断开
                 // 注意：Live 层在 canvas 外部，需要将 canvas 坐标转换为视口坐标
-                ForEach(viewModel.tabs.filter { tab in
-                    if case .reactNative = tab.contentType { return true }
-                    return false
-                }) { tab in
-                    if case .reactNative(let fingerprint) = tab.contentType {
-                        let isFocused = {
-                            if case .focus(let focusedId) = viewModel.canvasMode {
-                                return focusedId == tab.id
-                            }
-                            return false
-                        }()
+                // 🔑 使用固定 frame 的 ZStack 限制坐标系，否则父 ZStack 的 canvasSize 会导致 .position() 错误
+                ZStack(alignment: .topLeading) {
+                    ForEach(viewModel.tabs.filter { tab in
+                        if case .reactNative = tab.contentType { return true }
+                        return false
+                    }) { tab in
+                        if case .reactNative(let fingerprint) = tab.contentType {
+                            let isFocused = {
+                                if case .focus(let focusedId) = viewModel.canvasMode {
+                                    return focusedId == tab.id
+                                }
+                                return false
+                            }()
 
-                        let isOverviewMode = {
-                            if case .overview = viewModel.canvasMode {
-                                return true
-                            }
-                            return false
-                        }()
+                            let isOverviewMode = {
+                                if case .overview = viewModel.canvasMode {
+                                    return true
+                                }
+                                return false
+                            }()
 
-                        // 计算卡片在 canvas 坐标系中的位置和尺寸
-                        let slotPosition = filteredTabPositions[tab.id] ?? 0
-                        let canvasCardTopLeft = slotPosition < gridResult.positions.count
-                            ? gridResult.positions[slotPosition]
-                            : .zero
-                        let canvasCardSize = CGSize(
-                            width: gridResult.cardWidth,
-                            height: gridResult.cardHeight
-                        )
+                            // 计算卡片在 canvas 坐标系中的位置和尺寸
+                            let slotPosition = filteredTabPositions[tab.id] ?? 0
+                            let canvasCardTopLeft = slotPosition < gridResult.positions.count
+                                ? gridResult.positions[slotPosition]
+                                : .zero
+                            let canvasCardSize = CGSize(
+                                width: gridResult.cardWidth,
+                                height: gridResult.cardHeight
+                            )
 
-                        // 🔑 将 canvas 坐标转换为视口坐标
-                        // Live 层在 canvas 外部，需要手动应用 canvas transform
-                        let viewportCardPosition = CGPoint(
-                            x: canvasCardTopLeft.x * transform.scale + transform.offset.x,
-                            y: canvasCardTopLeft.y * transform.scale + transform.offset.y
-                        )
-                        let viewportCardSize = CGSize(
-                            width: canvasCardSize.width * transform.scale,
-                            height: canvasCardSize.height * transform.scale
-                        )
+                            // 🔑 将 canvas 坐标转换为视口坐标
+                            // Live 层在 canvas 外部，需要手动应用 canvas transform
+                            let viewportCardPosition = CGPoint(
+                                x: canvasCardTopLeft.x * transform.scale + transform.offset.x,
+                                y: canvasCardTopLeft.y * transform.scale + transform.offset.y
+                            )
+                            let viewportCardSize = CGSize(
+                                width: canvasCardSize.width * transform.scale,
+                                height: canvasCardSize.height * transform.scale
+                            )
 
-                        UnifiedReactNativeLayer(
-                            tab: tab,
-                            fingerprint: fingerprint,
-                            viewportSize: safeViewportSize,
-                            cardSize: viewportCardSize,
-                            cardPosition: viewportCardPosition,
-                            isFocused: isFocused,
-                            isOverviewMode: isOverviewMode,
-                            isTransitioning: modeTransitionController.phase.isTransitioning,
-                            isDragSource: draggingTabId == tab.id,
-                            isDropTarget: dropTargetTabId == tab.id,
-                            coordinator: viewBridgeCoordinatorManager.coordinator(for: tab.id),
-                            bookmarks: bookmarksForRN,
-                            recentHistory: recentHistoryForRN
-                        )
+                            UnifiedReactNativeLayer(
+                                tab: tab,
+                                fingerprint: fingerprint,
+                                viewportSize: safeViewportSize,
+                                cardSize: viewportCardSize,
+                                cardPosition: viewportCardPosition,
+                                isFocused: isFocused,
+                                isOverviewMode: isOverviewMode,
+                                isTransitioning: modeTransitionController.phase.isTransitioning,
+                                isDragSource: draggingTabId == tab.id,
+                                isDropTarget: dropTargetTabId == tab.id,
+                                coordinator: viewBridgeCoordinatorManager.coordinator(for: tab.id),
+                                bookmarks: bookmarksForRN,
+                                recentHistory: recentHistoryForRN
+                            )
+                        }
                     }
                 }
+                .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
 
                 // Search Tabs 搜索框 - 仅在 Overview 模式显示
                 // 放在 AnimationLayer 之前，让动画层能遮盖它

@@ -212,24 +212,11 @@ private class ResizableContainerView: NSView {
     }
 
     private static func computeMaximumJailSize() -> NSSize {
-        let screens = NSScreen.screens
-        guard !screens.isEmpty else {
-            return NSSize(width: 4096, height: 4096)
-        }
-
-        var maxWidth: CGFloat = 0
-        var maxHeight: CGFloat = 0
-        for screen in screens {
-            let size = screen.frame.size
-            maxWidth = max(maxWidth, size.width)
-            maxHeight = max(maxHeight, size.height)
-        }
-
-        // 防御性上限：避免异常值导致 ViewBridge jail 被扩到不可控
-        maxWidth = min(maxWidth, 16384)
-        maxHeight = min(maxHeight, 16384)
-
-        return NSSize(width: maxWidth, height: maxHeight)
+        // 🔑 XPC 服务在沙盒中运行，NSScreen.screens 可能返回受限的尺寸
+        // (例如：1728x1117 而不是实际的显示器尺寸)
+        // 使用足够大的默认值来支持 4K/5K 显示器和多显示器配置
+        // 8192x8192 足够覆盖大多数使用场景，同时不会导致内存问题
+        return NSSize(width: 8192, height: 8192)
     }
 
     /// Called when Host sends a valid size (via containerSizeChanged or tabConfig)

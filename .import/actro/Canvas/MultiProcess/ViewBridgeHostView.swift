@@ -222,15 +222,16 @@ public class ViewBridgeHostView: NSView {
         updateRemoteViewLayout()
 
         // 🔑 兜底：当 AppKit 实际 frame 变化但 SwiftUI 没及时触发 updateNSView 时，
-        // 通过 coordinator 同步 viewportSize，避免出现“新视图不完整”的情况。
+        // 通过 coordinator 同步 viewportSize，避免出现"新视图不完整"的情况。
         // 使用 floor() 与 WorkspaceMainViewport 一致，减少 1px 抖动。
-        if let coordinator = coordinator {
-            let rounded = CGSize(width: floor(newSize.width), height: floor(newSize.height))
-            if rounded.width >= 50 && rounded.height >= 50,
-               rounded != coordinator.currentViewportSize {
-                coordinator.updateViewportSize(rounded)
-            }
-        }
+        //
+        // ⚠️ 注意：这里不再直接使用 newSize 更新 coordinator.currentViewportSize
+        // 因为 newSize 可能是 @2x 像素尺寸（由 AppKit 在某些场景下传入），
+        // 而 coordinator.currentViewportSize 应该始终是 point 尺寸。
+        // 改为：只更新 remoteView layout，尺寸由 SwiftUI 的 updateNSView 统一管理。
+        //
+        // 如果确实需要在这里更新尺寸，需要先检查并转换 @2x 尺寸。
+        // 但为了避免与 SwiftUI 的尺寸更新冲突，这里选择不更新 coordinator。
     }
 
     /// Update remote view frame to fill bounds
@@ -986,7 +987,19 @@ final class ViewBridgeCoordinator {
                   self.isWaitingForFinalSize,
                   let view = notification.object as? NSView else { return }
 
-            let newSize = view.bounds.size
+            // 🔑 修复 @2x 问题：bounds 可能返回像素尺寸，需要转换为 point 尺寸
+            let rawBounds = view.bounds.size
+            let scaleFactor = view.window?.backingScaleFactor ?? 1.0
+
+            // 检测是否是 @2x：如果与当前尺寸相差约 2 倍，则需要转换
+            let newSize: CGSize
+            if scaleFactor > 1.0 && rawBounds.width > self.currentViewportSize.width * 1.8 {
+                // bounds 是像素尺寸，转换为 point 尺寸
+                newSize = CGSize(width: rawBounds.width / scaleFactor, height: rawBounds.height / scaleFactor)
+            } else {
+                newSize = rawBounds
+            }
+
             // 忽略无效尺寸
             guard newSize.width > 50 && newSize.height > 50 else { return }
 
@@ -1062,25 +1075,9 @@ final class ViewBridgeCoordinator {
             self.isWaitingForFinalSize = false
             ipcLog("⏱️ scheduleFinalSizeDebounce: timer fired")
 
-            // 优先从 hostView 的实际 bounds 获取尺寸（比 SwiftUI state 更准确）
-            // SwiftUI GeometryReader 可能滞后于实际窗口 frame
-            var finalSize = self.currentViewportSize
-
-            if let hostView = self.hostView {
-                // 检查 hostView 的 superview（SwiftUI 容器）的尺寸
-                if let superview = hostView.superview {
-                    let containerSize = superview.bounds.size
-                    if containerSize.width > finalSize.width || containerSize.height > finalSize.height {
-                        finalSize = containerSize
-                    }
-                }
-
-                // 备用检查：hostView 自身的 bounds
-                let actualBounds = hostView.bounds.size
-                if actualBounds.width > finalSize.width || actualBounds.height > finalSize.height {
-                    finalSize = actualBounds
-                }
-            }
+            // 🔑 简化：始终使用 currentViewportSize（由 SwiftUI 正确计算的 point 尺寸）
+            // 不再使用 bounds.size，因为它可能返回 @2x 像素尺寸
+            let finalSize = self.currentViewportSize
 
             ipcLog("⏱️ scheduleFinalSizeDebounce: finalSize=\(Int(finalSize.width))x\(Int(finalSize.height)), hasServiceId=\(self.allocatedServiceId != nil), hasConn=\(self.hasConnection), xpcReady=\(self.xpcServiceReady)")
 
@@ -1690,42 +1687,47 @@ struct PersistentViewBridgeView: NSViewRepresentable {
         // SwiftUI 使用 .position() 定位时，可能不会更新 container.bounds
         // 传入的 size 参数才是正确的目标尺寸（Overview 模式下是 cardSize）
         let targetSize = size
-        let containerBounds = container.bounds.size
+
+        // 🔑 修复 @2x 问题：container.bounds 在 Retina 显示器上可能返回像素尺寸
+        // 需要检测并转换为 point 尺寸
+        let rawBounds = container.bounds.size
+        let scaleFactor = container.window?.backingScaleFactor ?? 1.0
+
+        // 检测 bounds 是否是 @2x：如果 bounds 约等于 targetSize * scaleFactor，则需要转换
+        let boundsLooksLikePixels = scaleFactor > 1.0 &&
+            abs(rawBounds.width - targetSize.width * scaleFactor) < 2 &&
+            abs(rawBounds.height - targetSize.height * scaleFactor) < 2
+
+        let containerBounds: CGSize
+        if boundsLooksLikePixels {
+            // bounds 是像素尺寸，转换为 point 尺寸
+            containerBounds = CGSize(width: rawBounds.width / scaleFactor, height: rawBounds.height / scaleFactor)
+            ipcLog("⚠️ updateNSView: converted @\(Int(scaleFactor))x bounds: \(Int(rawBounds.width))x\(Int(rawBounds.height)) → \(Int(containerBounds.width))x\(Int(containerBounds.height))")
+        } else {
+            containerBounds = rawBounds
+        }
+
         let isLiveResizing = WindowResizeState.shared.isLiveResizing
 
         // 调试日志
-        ipcLog("📐 updateNSView: tab=\(String(tabId.uuidString.prefix(8))), targetSize=\(Int(targetSize.width))x\(Int(targetSize.height)), containerBounds=\(Int(containerBounds.width))x\(Int(containerBounds.height)), allowsHitTesting=\(allowsHitTesting)")
+        ipcLog("📐 updateNSView: tab=\(String(tabId.uuidString.prefix(8))), targetSize=\(Int(targetSize.width))x\(Int(targetSize.height)), containerBounds=\(Int(containerBounds.width))x\(Int(containerBounds.height)), rawBounds=\(Int(rawBounds.width))x\(Int(rawBounds.height)), scale=\(scaleFactor), allowsHitTesting=\(allowsHitTesting)")
 
         guard targetSize.width > 10 && targetSize.height > 10 else {
             ipcLog("⚠️ updateNSView: skipping - targetSize too small")
             return
         }
 
-        // 🔑 不要在 updateNSView 里强行 setFrameSize(container)
-        // 这会与 SwiftUI 的 .frame/.position 布局打架，导致拖动窗口（尤其是 Y 向）内容明显抖动。
-        // 改为：
-        // - live resize 期间：优先使用 AppKit 实际 bounds（更贴近屏幕上的真实尺寸）
-        // - 非 live resize：优先使用 SwiftUI 传入的 targetSize（解决 .position 下 bounds 不更新的场景）
-        // - 如果两者差异较大：异步在下一轮 RunLoop 再读一次 bounds，避免“旧 bounds”导致 Service 频繁来回改尺寸
-        let effectiveSize: CGSize
-        let boundsLooksValid = containerBounds.width > 10 && containerBounds.height > 10
-        let boundsCloseToTarget = abs(containerBounds.width - targetSize.width) < 1 && abs(containerBounds.height - targetSize.height) < 1
+        // 🔑 简化逻辑：始终优先使用 SwiftUI 传入的 targetSize
+        // 之前尝试在 live resize 期间使用 bounds，但 bounds 可能返回 @2x 像素尺寸，造成问题
+        // targetSize 是由 SwiftUI 正确计算的 point 尺寸，更可靠
+        let effectiveSize = targetSize
 
-        if isLiveResizing, boundsLooksValid {
-            effectiveSize = containerBounds
-        } else {
-            effectiveSize = targetSize
-            if boundsLooksValid, !boundsCloseToTarget {
-                DispatchQueue.main.async {
-                    let updated = container.bounds.size
-                    guard updated.width > 10 && updated.height > 10 else { return }
-                    coordinator.updateViewportSize(updated)
-                }
-            }
-        }
+        // 🔑 关键：无论 hostView 是否存在，都更新 coordinator 的尺寸
+        // 这确保 currentViewportSize 始终是正确的 point 尺寸
+        // 之前只在 hostView 存在时才更新，导致初始化时 currentViewportSize 可能被其他代码路径设置为 @2x
+        coordinator.updateViewportSize(effectiveSize)
 
         // 更新 hostView frame 使用目标尺寸
-        // 🔑 只通过 coordinator 统一更新，避免多源竞争导致尺寸抖动
         if let hostView = container.subviews.first as? ViewBridgeHostView {
             if !WindowResizeState.shared.isLiveResizing {
                 let hostSize = hostView.frame.size
@@ -1736,8 +1738,6 @@ struct PersistentViewBridgeView: NSViewRepresentable {
             }
             // Update hit testing state on hostView as well
             hostView.allowsHitTesting = allowsHitTesting
-            // 通知 coordinator 更新尺寸（coordinator 会调用 hostView.applyFrameSize）
-            coordinator.updateViewportSize(effectiveSize)
         }
     }
 
@@ -1835,6 +1835,29 @@ struct NineGridDebugOverlay: View {
 
 /// 统一的 ViewBridge 内容层 - 始终渲染，永不销毁
 ///
+// MARK: - Conditional Position Modifier
+
+/// 条件性应用 `.position()` 修饰符
+/// - Focus 模式: 不应用 position，让视图自然填充父容器（避免坐标计算问题）
+/// - Overview 模式: 应用 position 定位到卡片位置
+private struct ConditionalPositionModifier: ViewModifier {
+    let usePosition: Bool
+    let x: CGFloat
+    let y: CGFloat
+
+    func body(content: Content) -> some View {
+        if usePosition {
+            // Overview/过渡模式：使用 position 绝对定位到卡片位置
+            content.position(x: x, y: y)
+        } else {
+            // Focus 模式：填充父容器，对齐到左上角
+            // 🔑 必须使用 frame(maxWidth/maxHeight) 让 NSViewRepresentable 获得正确的 bounds
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
 /// 🔑 核心设计：解决模式切换时 ViewBridge 连接断开的问题
 /// - PersistentViewBridgeView 始终挂载，hostView 永不从容器中移除
 /// - scale 始终为 1，不使用 scaleEffect
@@ -2025,12 +2048,14 @@ struct UnifiedReactNativeLayer: View {
         // 🔑 Overview 模式添加圆角和阴影，与 TabPanel/NewTabPanel 统一
         .cornerRadius(isFocused ? 0 : CardStyle.cornerRadius)
         .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
-        // 🔑 使用 position 定位：Focus=(0,0), Overview=卡片位置
-        // position 使用中心点坐标
-        .position(
+        // 🔑 定位策略：
+        // - Focus 模式: 不使用 position，通过 frame(maxWidth/maxHeight) 自然填充父容器
+        // - Overview/过渡模式: 使用 position 定位到卡片位置（position 使用中心点坐标）
+        .modifier(ConditionalPositionModifier(
+            usePosition: !isFocused || isTransitioning,
             x: currentPosition.x + currentSize.width / 2,
             y: currentPosition.y + currentSize.height / 2
-        )
+        ))
         // 🔑 禁用 Live 层的所有隐式动画（由 Animation 层快照遮盖）
         .animation(nil, value: currentSize)
         .animation(nil, value: currentPosition)
