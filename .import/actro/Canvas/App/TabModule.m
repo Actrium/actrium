@@ -20,4 +20,9 @@ RCT_EXTERN_METHOD(exitFullscreen:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(exitSearch:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(setTabUnreadStatus:(NSString *)tabId
+                  hasUnread:(BOOL)hasUnread
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
 @end

@@ -144,14 +144,29 @@ struct PhoneTabCardView: View {
             // 底部服务条
             HStack(alignment: .center, spacing: 12) {
                 // 应用图标
-                Circle()
-                    .fill(Color(hslString: tab.backgroundColor))
-                    .frame(width: iconWidth, height: iconWidth)
-                    .overlay {
-                        Image(systemName: "safari")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white.opacity(0.9))
+                ZStack(alignment: .topTrailing) {
+                    Circle()
+                        .fill(Color(hslString: tab.backgroundColor))
+                        .frame(width: iconWidth, height: iconWidth)
+                        .overlay {
+                            Image(systemName: "safari")
+                                .font(.system(size: 14))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    
+                    // 未读消息小红点
+                    if tab.hasUnreadMessage {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 10, height: 10)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color(.systemBackground), lineWidth: 2)
+                            )
+                            .offset(x: 2, y: -2)
                     }
+                }
+                .frame(width: iconWidth, height: iconWidth)
                 
                 // 标题
                 VStack(alignment: .leading, spacing: 2) {
