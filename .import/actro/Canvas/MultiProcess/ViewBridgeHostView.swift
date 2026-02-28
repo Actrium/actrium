@@ -215,8 +215,25 @@ public class ViewBridgeHostView: NSView {
         updateRemoteViewLayout()
     }
 
+    /// 捕获直接设置 frame 的情况
+    public override var frame: NSRect {
+        didSet {
+            if abs(oldValue.width - frame.width) > 1 || abs(oldValue.height - frame.height) > 1 {
+                // 直接设置 frame 时，确保 remoteView 也被更新
+                let remoteFrame = remoteViewController?.view.frame ?? .zero
+                if abs(remoteFrame.width - frame.width) > 1 || abs(remoteFrame.height - frame.height) > 1 {
+                    ipcLog("🔧 frame.didSet: \(Int(oldValue.width))x\(Int(oldValue.height)) → \(Int(frame.width))x\(Int(frame.height)), remote=\(Int(remoteFrame.width))x\(Int(remoteFrame.height)), syncing remoteView")
+                    remoteViewController?.view.frame = NSRect(origin: .zero, size: frame.size)
+                }
+            }
+        }
+    }
+
     /// 接受外部尺寸设置
     public override func setFrameSize(_ newSize: NSSize) {
+        let oldSize = frame.size
+        let remoteOldSize = remoteViewController?.view.frame.size ?? .zero
+
         // 🔑 关键修复：检测并拒绝 @2x 像素尺寸
         // AppKit 在某些情况下（wantsLayer=true）会传入 @2x 像素尺寸
         // 如果接受这个尺寸，hostView 会占据 @2x 空间，但 remoteView 只有 1x
@@ -240,6 +257,12 @@ public class ViewBridgeHostView: NSView {
 
         // 使用 bounds.size 更新 remoteView（bounds 是 point 尺寸）
         updateRemoteViewLayoutWithBounds()
+
+        // 🔍 诊断日志：检查 setFrameSize 的调用
+        let remoteNewSize = remoteViewController?.view.frame.size ?? .zero
+        if abs(newSize.width - oldSize.width) > 1 || abs(newSize.height - oldSize.height) > 1 {
+            ipcLog("🔧 setFrameSize: \(Int(oldSize.width))x\(Int(oldSize.height)) → \(Int(newSize.width))x\(Int(newSize.height)), bounds=\(Int(bounds.width))x\(Int(bounds.height)), remote: \(Int(remoteOldSize.width))x\(Int(remoteOldSize.height)) → \(Int(remoteNewSize.width))x\(Int(remoteNewSize.height)), currentContentSize=\(Int(currentContentSize.width))x\(Int(currentContentSize.height))")
+        }
     }
 
     /// 使用 bounds.size 更新 remoteView frame（用于 setFrameSize 回调）
