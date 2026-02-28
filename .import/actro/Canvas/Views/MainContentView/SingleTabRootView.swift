@@ -256,7 +256,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
         }
 
         // Single tab mode - 包装成数组以兼容旧版 JS 逻辑
-        return [
+        var props: [String: Any] = [
             "singleTabMode": true,
             "tabs": [tabDict],
             "tab": tabDict,
@@ -267,6 +267,15 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             "containerWidth": containerSize.width,
             "containerHeight": containerSize.height
         ]
+        
+        // 合并额外参数（从 openTab 传入的参数）
+        if let additionalProps = tab.additionalProps {
+            for (key, value) in additionalProps {
+                props[key] = value
+            }
+        }
+        
+        return props
     }
 
     @MainActor

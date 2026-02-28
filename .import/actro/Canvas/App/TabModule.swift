@@ -37,16 +37,40 @@ class TabModule: NSObject {
             let tabId = options["tabId"] as? String
             var targetTab: Tab?
             
+            // 提取额外参数（排除 tabId 和 systemAppType）
+            var additionalProps = [String: Any]()
+            for (key, value) in options {
+                if let keyString = key as? String, keyString != "tabId" && keyString != "systemAppType" {
+                    additionalProps[keyString] = value
+                }
+            }
+            
             // 如果提供了 tabId，尝试查找对应的 tab
             if let tabId = tabId, !tabId.isEmpty,
                let uuid = UUID(uuidString: tabId) {
                 targetTab = viewModel.tabs.first(where: { $0.id == uuid })
+                // 更新已存在 tab 的额外参数
+                if var tab = targetTab, targetTab != nil {
+                    tab.additionalProps = additionalProps.isEmpty ? nil : additionalProps
+                    if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+                        viewModel.tabs[index] = tab
+                    }
+                    targetTab = tab
+                }
             }
             
             // 如果没有找到 tab（或 tabId 为空），创建新 tab
             if targetTab == nil {
                 targetTab = viewModel.addNewTab()
                 logger.info("[TabModule] Created new tab: \(targetTab!.id.uuidString)")
+                // 设置新 tab 的额外参数
+                if var tab = targetTab {
+                    tab.additionalProps = additionalProps.isEmpty ? nil : additionalProps
+                    if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+                        viewModel.tabs[index] = tab
+                    }
+                    targetTab = tab
+                }
             }
             
             guard let tab = targetTab else {
