@@ -10,20 +10,25 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../actr-host/components/Icon';
+import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
 
 interface SettingsMainProps {
   onAccountPress: () => void;
+  onLoginPress: () => void;
   onLogout: () => void;
   isTablet: boolean;
 }
 
 export const SettingsMain = ({
   onAccountPress,
+  onLoginPress,
   onLogout,
   isTablet,
 }: SettingsMainProps) => {
   const { t } = useTranslation();
+  const userInfo = useUserStore((state) => state.userInfo);
+  const isLoggedIn = !!userInfo;
 
   const handleFeedback = () => {
     const subject = encodeURIComponent('#吐个槽关于');
@@ -49,16 +54,25 @@ export const SettingsMain = ({
       <TouchableOpacity
         style={styles.accountCard}
         activeOpacity={0.8}
-        onPress={onAccountPress}
+        onPress={isLoggedIn ? onAccountPress : onLoginPress}
       >
-        <Image
-          source={{
-            uri: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?ixlib=rb-4.0.3&auto=format&fit=crop&w=150&q=80',
-          }}
-          style={styles.avatar}
-        />
+        {isLoggedIn ? (
+          <Image
+            source={{
+              uri: userInfo.user.avatar || 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?ixlib=rb-4.0.3&auto=format&fit=crop&w=150&q=80',
+            }}
+            style={styles.avatar}
+          />
+        ) : (
+          <Image
+            source={require('../../assets/login/avatar_default.png')}
+            style={styles.avatar}
+          />
+        )}
         <View style={styles.accountInfo}>
-          <Text style={styles.accountName}>Account</Text>
+          <Text style={styles.accountName}>
+            {isLoggedIn ? (userInfo.user.display_name || 'Account') : t('actr.auth.login')}
+          </Text>
         </View>
         <Icon type='next' size={16} color='#fff' />
       </TouchableOpacity>
@@ -116,6 +130,7 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 32,
     backgroundColor: '#2C2C2E',
+    overflow: 'hidden',
   },
   accountInfo: {
     flex: 1,
