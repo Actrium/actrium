@@ -30,7 +30,8 @@ struct DevToolsPanel: View {
         case .reactNative:
             // Actr apps have no systemTabType, system tabs (history/bookmarks) have one
             return tab.systemTabType == nil ? .actr : .unavailable
-        case .empty:
+        case .native, .empty:
+            // Native SwiftUI content (e.g., StartPage) has no DevTools
             return .unavailable
         }
     }

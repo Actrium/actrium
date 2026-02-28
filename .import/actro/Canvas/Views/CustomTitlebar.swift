@@ -714,6 +714,7 @@ private struct LiquidGlassToolbar: View {
         switch tab.contentType {
         case .web: return .web
         case .reactNative: return .app
+        case .native: return .app  // Native tabs (like StartPage) show as app mode
         case .empty: return .empty
         }
     }
