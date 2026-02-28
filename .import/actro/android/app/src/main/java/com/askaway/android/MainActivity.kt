@@ -209,10 +209,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         when (checkedId) {
             R.id.navTag -> {
                 // 显示书签页
-                binding.flBookmark.visibility = View.VISIBLE
-                binding.llActive.visibility = View.GONE
-                binding.flSet.visibility = View.GONE
-                Log.d("MainActivity", "Show Bookmark")
+                showBookmark()
             }
             R.id.navActivity -> {
                 // 显示活动页
@@ -223,9 +220,21 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             }
             R.id.navSettings -> {
                 // 显示设置页
-             showSet()
+                showSet()
             }
         }
+    }
+
+    private fun showBookmark() {
+        binding.flBookmark.visibility = View.VISIBLE
+        binding.llActive.visibility = View.GONE
+        binding.flSet.visibility = View.GONE
+        if (binding.flBookmark.childCount == 0) {
+            val bundle = ReactNativeBundle.getBookmarkBundle()
+            val targetView = createReactRootView("canvas-kotlin", bundle)
+            binding.flBookmark.addView(targetView)
+        }
+        Log.d("MainActivity", "Show Bookmark")
     }
 
     private fun showSet(){
