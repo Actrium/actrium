@@ -143,7 +143,7 @@
     "auth": {
       "serviceInitFailed": "服务初始化失败",
       "login": "登录",
-      "loginTip": "登录后可同步数据并体验更多 AI 功能",
+      "loginTip": "你可以通过以下方式登录",
       "wechatLogin": "微信登录",
       "appleLogin": "通过 Apple 登录",
       "readAndAgree": "我已阅读并同意",

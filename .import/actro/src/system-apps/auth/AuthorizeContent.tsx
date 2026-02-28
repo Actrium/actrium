@@ -176,10 +176,10 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   authorizeButtonText: {
-    fontWeight: '600',
+    fontWeight: '500',
   },
   rejectButton: {
     width: '100%',
@@ -187,7 +187,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
   },
   rejectButtonText: {
     fontWeight: '500',

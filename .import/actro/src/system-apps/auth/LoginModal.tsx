@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { LoginContent } from './LoginContent';
 import { AuthorizeContent } from './AuthorizeContent';
 import { useLoginFlow, LoginStep } from '../../hooks/useLoginFlow';
 import { useAppStore } from '../../actr-host/store/useAppStore';
+import { Icon } from '../../actr-host/components/Icon';
 
 interface LoginModalProps {
   visible: boolean;
@@ -79,14 +81,13 @@ export const LoginModal = ({
       );
     }
 
-    // login_options
     return (
       <LoginContent
         variant="light"
-        logoSize={100}
+        logoSize={0}
         buttonMaxWidth={280}
-        fontSize={{ tagline: 14, button: 15 }}
-        spacing={{ logoTop: 10, spacer: 20, buttonBottom: 16, policyBottom: 0 }}
+        fontSize={{ tagline: 17, button: 17 }}
+        spacing={{ logoTop: 0, spacer: 16, buttonBottom: 25, policyBottom: 0 }}
       />
     );
   };
@@ -95,7 +96,7 @@ export const LoginModal = ({
     if (currentStep === 'authorizing') {
       return appInfo?.app_name || t('actr.app.officialService');
     }
-    return `${t('actr.auth.login')} AskAway`;
+    return t('actr.auth.login') + ' AskAway';
   };
 
   return (
@@ -109,21 +110,32 @@ export const LoginModal = ({
         <View style={styles.overlay}>
           <TouchableWithoutFeedback>
             <View style={styles.modalContainer}>
-              {/* Header */}
-              <View style={styles.header}>
-                <Text style={styles.title}>{getTitle(step)}</Text>
-                <TouchableOpacity
-                  style={styles.closeButton}
-                  onPress={onClose}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Text style={styles.closeIcon}>×</Text>
-                </TouchableOpacity>
-              </View>
+              <View style={styles.modalContentWrapper}>
+                {/* Header (Title & Close Button) */}
+                <View style={styles.header}>
+                  <Text style={styles.title}>{getTitle(step)}</Text>
+                  <TouchableOpacity
+                    style={styles.closeButton}
+                    onPress={onClose}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Icon type="close" size={20} color="#666" />
+                  </TouchableOpacity>
+                </View>
 
-              {/* Content */}
-              <View style={styles.content}>
-                {renderContent()}
+                {/* Logo Container */}
+                <View style={styles.logoRow}>
+                  <Image
+                    source={require('../../assets/login/login_logo.png')}
+                    style={{ width: 100, height: 100 }}
+                    resizeMode="contain"
+                  />
+                </View>
+
+                {/* Content */}
+                <View style={styles.content}>
+                  {renderContent()}
+                </View>
               </View>
             </View>
           </TouchableWithoutFeedback>
@@ -143,43 +155,46 @@ const styles = StyleSheet.create({
   modalContainer: {
     width: '85%',
     maxWidth: 360,
-    backgroundColor: '#fff',
-    borderRadius: 20,
+    backgroundColor: 'rgba(203, 214, 253, 1)', // 更加浅的蓝色
+    borderRadius: 33,
     overflow: 'hidden',
   },
+  modalContentWrapper: {
+    paddingTop: 16,
+    paddingBottom: 59,
+    paddingHorizontal: 16,
+  },
   header: {
+    width: '100%',
+    height: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E5E5',
+    marginBottom: 28,
+    position: 'relative',
   },
   title: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#333',
+    color: '#333333',
+  },
+  logoRow: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   closeButton: {
     position: 'absolute',
-    right: 16,
-    top: 12,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    right: 0,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#F0F0F0',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  closeIcon: {
-    fontSize: 20,
-    color: '#666',
-    marginTop: -2,
-  },
   content: {
-    paddingHorizontal: 24,
-    paddingVertical: 20,
+    width: '100%',
   },
   loadingContainer: {
     padding: 40,

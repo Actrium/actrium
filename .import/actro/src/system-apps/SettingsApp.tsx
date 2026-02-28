@@ -5,11 +5,19 @@ import React, { useState } from 'react';
 import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import { SettingsMain } from './settings/SettingsMain';
 import { AccountDetail } from './settings/AccountDetail';
+import { LoginModal } from './auth/LoginModal';
+
+const SETTINGS_CLIENT_ID = '02094310-3454-4929-80b5-8ee85d09f34b';
 
 export default function SettingsApp() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const [showAccountDetail, setShowAccountDetail] = useState(false);
+  const [loginModalVisible, setLoginModalVisible] = useState(false);
+
+  const handleLoginPress = () => {
+    setLoginModalVisible(true);
+  };
 
   const handleLogout = () => {
     // TODO: Implement logout logic
@@ -26,6 +34,7 @@ export default function SettingsApp() {
       {!showAccountDetail ? (
         <SettingsMain
           onAccountPress={() => setShowAccountDetail(true)}
+          onLoginPress={handleLoginPress}
           onLogout={handleLogout}
           isTablet={isTablet}
         />
@@ -37,6 +46,12 @@ export default function SettingsApp() {
           isTablet={isTablet}
         />
       )}
+
+      <LoginModal
+        visible={loginModalVisible}
+        onClose={() => setLoginModalVisible(false)}
+        clientId={SETTINGS_CLIENT_ID}
+      />
     </View>
   );
 }

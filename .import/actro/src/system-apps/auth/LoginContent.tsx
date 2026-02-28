@@ -32,8 +32,8 @@ interface LoginContentProps {
 
 const themeColors = {
   light: {
-    tagline: '#666',
-    buttonBg: '#F5F5F5',
+    tagline: '#000000',
+    buttonBg: '#FFFFFF',
     buttonBorder: '#E5E5E5',
     buttonText: '#333',
     iconTint: '#000',
@@ -101,13 +101,15 @@ export const LoginContent = ({
 
   return (
     <View style={styles.container}>
-      <View style={[styles.logoContainer, { marginTop: logoTop }]}>
-        <Image
-          source={require('../../assets/login/login_logo.png')}
-          style={[styles.logo, { width: logoSize, height: logoSize }]}
-          resizeMode="contain"
-        />
-      </View>
+      {logoSize > 0 && (
+        <View style={[styles.logoContainer, { marginTop: logoTop }]}>
+          <Image
+            source={require('../../assets/login/login_logo.png')}
+            style={[styles.logo, { width: logoSize, height: logoSize }]}
+            resizeMode="contain"
+          />
+        </View>
+      )}
 
       <View style={{ height: spacer }} />
 
@@ -198,13 +200,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     height: 48,
     borderRadius: 24,
-    marginBottom: 12,
-    borderWidth: 1,
+    marginBottom: 10,
+    borderWidth: 0,
   },
   btnIcon: {
-    width: 20,
-    height: 20,
-    marginRight: 10,
+    width: 16,
+    height: 16,
+    marginRight: 4,
   },
   btnText: {
     fontWeight: '500',
@@ -236,7 +238,7 @@ const styles = StyleSheet.create({
   },
   policyText: {
     fontSize: 12,
-    marginLeft: 4,
+    marginLeft: 6,
   },
   linkText: {},
 });

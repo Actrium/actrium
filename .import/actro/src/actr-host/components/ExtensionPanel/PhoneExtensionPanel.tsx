@@ -4,11 +4,30 @@ import { LAYOUT } from '../../constants';
 import type { ExtensionPanelProps } from './types';
 
 /**
+ * 骨架屏组件 - 内容加载前的占位
+ */
+const SkeletonPlaceholder: React.FC = () => (
+  <View style={styles.skeletonContainer}>
+    {/* 顶部标题骨架 */}
+    <View style={styles.skeletonHeader}>
+      <View style={[styles.skeletonBlock, { width: 120, height: 24 }]} />
+    </View>
+    {/* 内容骨架 */}
+    <View style={styles.skeletonContent}>
+      <View style={[styles.skeletonBlock, { width: '100%', height: 60, marginBottom: 12 }]} />
+      <View style={[styles.skeletonBlock, { width: '80%', height: 40, marginBottom: 12 }]} />
+      <View style={[styles.skeletonBlock, { width: '90%', height: 40 }]} />
+    </View>
+  </View>
+);
+
+/**
  * Phone 扩展面板
  * - 从左侧滑入
  * - 推动中间窗口 80%
  * - 右侧保留 20% 显示对话页面
  * - 有右侧分割线
+ * - 内容未加载时显示骨架屏
  */
 const PhoneExtensionPanel: React.FC<ExtensionPanelProps> = ({
   visible,
@@ -20,14 +39,17 @@ const PhoneExtensionPanel: React.FC<ExtensionPanelProps> = ({
   const slideAnim = useRef(new Animated.Value(0)).current;
 
   // 控制面板的实际渲染（动画结束后再移除）
-  const [shouldRender, setShouldRender] = useState(visible && !!content);
+  const [shouldRender, setShouldRender] = useState(visible);
+
+  // Debug log
+  console.log('[PhoneExtensionPanel] visible:', visible, 'hasContent:', !!content, 'shouldRender:', shouldRender);
 
   useEffect(() => {
-    const shouldShow = visible && !!content;
-    const targetValue = shouldShow ? width * 0.8 : 0;
+    const targetValue = visible ? width * 0.8 : 0;
+    console.log('[PhoneExtensionPanel] useEffect - visible:', visible, 'targetValue:', targetValue);
 
     // 如果要显示，先渲染组件再播放动画
-    if (shouldShow) {
+    if (visible) {
       setShouldRender(true);
     }
 
@@ -46,15 +68,16 @@ const PhoneExtensionPanel: React.FC<ExtensionPanelProps> = ({
         useNativeDriver: true,
       }),
     ]).start(({ finished }) => {
+      console.log('[PhoneExtensionPanel] animation finished:', finished, 'visible:', visible);
       // 动画结束后，如果是隐藏状态，才移除组件
-      if (finished && !shouldShow) {
+      if (finished && !visible) {
         setShouldRender(false);
       }
     });
-  }, [visible, content, width, slideAnim, centerAnimValue]);
+  }, [visible, width, slideAnim, centerAnimValue]);
 
   // 不渲染
-  if (!shouldRender || !content) {
+  if (!shouldRender) {
     return null;
   }
 
@@ -76,7 +99,7 @@ const PhoneExtensionPanel: React.FC<ExtensionPanelProps> = ({
       ]}
     >
       <View style={styles.borderRight} />
-      {content}
+      {content || <SkeletonPlaceholder />}
     </Animated.View>
   );
 };
@@ -89,7 +112,7 @@ const styles = StyleSheet.create({
     left: 0,
     height: '100%',
     flexShrink: 1,
-    // paddingTop: 64,
+    backgroundColor: '#000',
   },
   borderRight: {
     position: 'absolute',
@@ -98,5 +121,22 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: 1,
     backgroundColor: LAYOUT.BORDER_COLOR,
+  },
+  // 骨架屏样式
+  skeletonContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    paddingTop: 80,
+  },
+  skeletonHeader: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  skeletonContent: {
+    paddingHorizontal: 20,
+  },
+  skeletonBlock: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
   },
 });
