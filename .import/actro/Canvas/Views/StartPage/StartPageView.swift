@@ -9,14 +9,11 @@ struct StartPageView: View {
     let isCompactMode: Bool
     let onNavigate: (URL) -> Void
 
-    // Compact mode threshold matching RN implementation
-    private let compactThreshold: CGFloat = 300
-
     var body: some View {
-        let shouldShowCompact = isCompactMode ||
-            (containerSize.width < compactThreshold && containerSize.height < compactThreshold)
-
-        if shouldShowCompact {
+        // 🔑 Only use isCompactMode flag, not containerSize
+        // Native views are rendered inside TabPanel and scaled by canvas transform,
+        // so containerSize is cardSize (small), but actual display size is viewportSize (large)
+        if isCompactMode {
             CompactStartPageView(bookmarkCount: bookmarks.count)
         } else {
             FullStartPageView(

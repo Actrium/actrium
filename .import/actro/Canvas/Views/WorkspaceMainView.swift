@@ -190,6 +190,28 @@ struct WorkspaceMainView: View {
                 .contentShape(Rectangle())
                 // 地址栏退出焦点已由全局鼠标事件监听处理（mouseEventMonitor）
 
+                // Focus 模式下的 Native 内容层（canvas 变换之外）
+                // Native SwiftUI views need to render at viewportSize in Focus mode,
+                // otherwise they would be scaled up (blurry) by canvas transform
+                if case .focus(let focusedTabId) = viewModel.canvasMode,
+                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
+                   case .native(let nativeType) = focusedTab.contentType {
+                    switch nativeType {
+                    case .startPage:
+                        StartPageView(
+                            bookmarks: bookmarkVM.bookmarks,
+                            recentHistory: historyVM.recentItems,
+                            containerSize: safeViewportSize,
+                            isCompactMode: false,
+                            onNavigate: { url in
+                                viewModel.navigateCurrentTab(to: url.absoluteString)
+                            }
+                        )
+                        .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                }
+
                 // Focus 模式下的 Web 内容层（canvas 变换之外）
                 // scaleEffect 对 NSViewRepresentable 不生效，所以 Web 内容需要独立渲染
                 if case .focus(let focusedTabId) = viewModel.canvasMode,
@@ -2259,23 +2281,27 @@ private struct TabPanel: View {
 
             case .native(let nativeType):
                 // Native SwiftUI content - rendered in main process, no XPC
-                // 🔑 Unlike RN (XPC) and Web (FocusedWebOverlay), native views are rendered
-                // directly in TabPanel and will be scaled by canvas transform.
-                // So we should NOT use viewportSize here - use cardWidth/cardHeight instead.
-                // The canvas scale will automatically enlarge the content in Focus mode.
-                let nativeSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
-                switch nativeType {
-                case .startPage:
-                    StartPageView(
-                        bookmarks: bookmarkVM.bookmarks,
-                        recentHistory: historyVM.recentItems,
-                        containerSize: nativeSize,
-                        isCompactMode: !isFocused,
-                        onNavigate: { url in
-                            onNavigate?(url)
-                        }
-                    )
-                    .frame(width: nativeSize.width, height: nativeSize.height)
+                // 🔑 Focus mode: rendered by FocusedNativeOverlay (outside canvas transform)
+                // 🔑 Overview mode: rendered here at cardSize (will be shown as thumbnail)
+                if isFocused {
+                    // Focus mode: placeholder only, actual content rendered by FocusedNativeOverlay
+                    Color.clear
+                } else {
+                    // Overview mode: render at cardSize for thumbnail
+                    let nativeSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
+                    switch nativeType {
+                    case .startPage:
+                        StartPageView(
+                            bookmarks: bookmarkVM.bookmarks,
+                            recentHistory: historyVM.recentItems,
+                            containerSize: nativeSize,
+                            isCompactMode: true,  // Always compact in Overview
+                            onNavigate: { url in
+                                onNavigate?(url)
+                            }
+                        )
+                        .frame(width: nativeSize.width, height: nativeSize.height)
+                    }
                 }
 
             case .empty:
