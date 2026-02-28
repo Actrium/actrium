@@ -21,7 +21,6 @@ struct PhoneSystemAppView: View {
                     bookmarkVM: bookmarkVM,
                     containerSize: geometry.size
                 )
-                .id(tab.id)
             } else {
                 // 占位视图
                 VStack {

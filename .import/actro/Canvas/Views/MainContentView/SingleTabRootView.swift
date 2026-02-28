@@ -22,7 +22,7 @@ struct SingleTabRootView: View {
             bookmarkVM: bookmarkVM,
             containerSize: containerSize
         )
-        .id(tab.id)
+        .id("\(tab.id)-\(tab.reloadNonce)")
     }
 }
 
