@@ -2216,7 +2216,7 @@ private struct TabPanel: View {
                       cardWidth, cardHeight,
                       renderSize.width, renderSize.height)
 
-        return ZStack {
+        return ZStack(alignment: .topLeading) {
             // 底层背景 - 使用 Tab 的随机背景颜色
             // 🔑 React Native 标签在 Overview 模式使用透明背景
             //    因为 UnifiedReactNativeLayer 在 canvas 外以 zIndex(50) 渲染

@@ -65,7 +65,7 @@ private struct FullStartPageView: View {
     let onNavigate: (URL) -> Void
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topLeading) {
             StartPageColors.background
 
             ScrollView {
