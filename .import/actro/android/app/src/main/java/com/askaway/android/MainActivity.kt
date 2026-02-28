@@ -26,6 +26,7 @@ import com.facebook.react.uimanager.PixelUtil.pxToDp
 import kotlinx.coroutines.launch
 import com.askaway.android.global.Constants
 import kotlinx.coroutines.delay
+import com.askaway.android.core.ReactNativeBundle
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     private lateinit var binding: ActivityMainBinding
@@ -222,12 +223,21 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             }
             R.id.navSettings -> {
                 // 显示设置页
-                binding.flBookmark.visibility = View.GONE
-                binding.llActive.visibility = View.GONE
-                binding.flSet.visibility = View.VISIBLE
-                Log.d("MainActivity", "Show Settings")
+             showSet()
             }
         }
+    }
+
+    private fun showSet(){
+        binding.flBookmark.visibility = View.GONE
+        binding.llActive.visibility = View.GONE
+        binding.flSet.visibility = View.VISIBLE
+        if(binding.flSet.childCount == 0) {
+            val bundle = ReactNativeBundle.getSetBundle()
+            val targetView = createReactRootView("canvas-kotlin", bundle)
+            binding.flSet.addView(targetView)
+        }
+        Log.d("MainActivity", "Show Settings")
     }
 
     /**
