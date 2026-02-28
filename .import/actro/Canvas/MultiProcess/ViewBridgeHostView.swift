@@ -218,20 +218,34 @@ public class ViewBridgeHostView: NSView {
     /// 接受外部尺寸设置
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+
+        // 🔑 关键修复：在 setFrameSize 中也更新 currentContentSize
+        // 当 AppKit 直接调用 setFrameSize（如通过 autoresizingMask）时，
+        // updateRemoteViewLayout 需要使用最新的尺寸。
+        // 需要先检测并转换 @2x 尺寸。
+        let scaleFactor = window?.backingScaleFactor ?? 1.0
+        let effectiveSize: CGSize
+
+        // 检测是否是 @2x 尺寸：如果 newSize 约等于 currentContentSize * scaleFactor，则需要转换
+        let looksLikePixels = scaleFactor > 1.0 &&
+            currentContentSize.width > 10 &&  // 确保有有效的基准尺寸
+            abs(newSize.width - currentContentSize.width * scaleFactor) < 2 &&
+            abs(newSize.height - currentContentSize.height * scaleFactor) < 2
+
+        if looksLikePixels {
+            // 转换为 point 尺寸
+            effectiveSize = CGSize(width: newSize.width / scaleFactor, height: newSize.height / scaleFactor)
+        } else {
+            effectiveSize = newSize
+        }
+
+        // 更新 currentContentSize（如果尺寸合理）
+        if effectiveSize.width > 10 && effectiveSize.height > 10 {
+            currentContentSize = effectiveSize
+        }
+
         // 🔑 始终更新 remoteView frame，确保与 bounds 同步
         updateRemoteViewLayout()
-
-        // 🔑 兜底：当 AppKit 实际 frame 变化但 SwiftUI 没及时触发 updateNSView 时，
-        // 通过 coordinator 同步 viewportSize，避免出现"新视图不完整"的情况。
-        // 使用 floor() 与 WorkspaceMainViewport 一致，减少 1px 抖动。
-        //
-        // ⚠️ 注意：这里不再直接使用 newSize 更新 coordinator.currentViewportSize
-        // 因为 newSize 可能是 @2x 像素尺寸（由 AppKit 在某些场景下传入），
-        // 而 coordinator.currentViewportSize 应该始终是 point 尺寸。
-        // 改为：只更新 remoteView layout，尺寸由 SwiftUI 的 updateNSView 统一管理。
-        //
-        // 如果确实需要在这里更新尺寸，需要先检查并转换 @2x 尺寸。
-        // 但为了避免与 SwiftUI 的尺寸更新冲突，这里选择不更新 coordinator。
     }
 
     /// Update remote view frame to fill bounds
@@ -560,9 +574,14 @@ public class ViewBridgeHostView: NSView {
             }
         }
 
-        // 调试日志
+        // 调试日志 - 包含 origin 信息以诊断位置问题
         let remoteFrame = remoteViewController?.view.frame ?? .zero
-        ipcLog("📐 applyFrameSize: oldBounds=\(Int(oldBounds.width))x\(Int(oldBounds.height)) newSize=\(Int(newSize.width))x\(Int(newSize.height)) bounds=\(Int(bounds.width))x\(Int(bounds.height)) remoteView=\(Int(remoteFrame.width))x\(Int(remoteFrame.height)) isLiveResizing=\(isLiveResizing)")
+        let selfFrame = frame
+        let superFrame = superview?.frame ?? .zero
+        let superBounds = superview?.bounds ?? .zero
+        let windowFrame = window?.frame ?? .zero
+        let convertedOrigin = superview?.convert(frame.origin, to: nil) ?? .zero  // 转换到窗口坐标
+        ipcLog("📐 applyFrameSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)) self.frame=(\(Int(selfFrame.origin.x)),\(Int(selfFrame.origin.y)),\(Int(selfFrame.width))x\(Int(selfFrame.height))) remoteFrame=(\(Int(remoteFrame.origin.x)),\(Int(remoteFrame.origin.y)),\(Int(remoteFrame.width))x\(Int(remoteFrame.height))) superFrame=(\(Int(superFrame.origin.x)),\(Int(superFrame.origin.y)),\(Int(superFrame.width))x\(Int(superFrame.height))) superBounds=(\(Int(superBounds.origin.x)),\(Int(superBounds.origin.y)),\(Int(superBounds.width))x\(Int(superBounds.height))) convertedToWindow=(\(Int(convertedOrigin.x)),\(Int(convertedOrigin.y)))")
     }
 
     private func handleError(_ message: String) {
