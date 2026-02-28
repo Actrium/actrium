@@ -21,10 +21,20 @@ export const selectTab = async (tabId: string): Promise<boolean> => {
 // 退出 tab
 export const exitFullscreen = async (): Promise<boolean> => {
   try {
-
     return TabModule.exitFullscreen();
   } catch(e) {
     console.error(e)
   }
   return false
 };
+
+// 退出搜索
+export const exitSearch = async (): Promise<boolean> => {
+  try {
+    return TabModule.exitSearch();
+  } catch(e) {
+    console.error(e)
+  }
+  return false
+};
+

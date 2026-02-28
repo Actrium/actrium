@@ -1,7 +1,13 @@
 /**
  * Global Search App - 全局搜索页面
  */
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  useCallback,
+} from 'react';
 import {
   View,
   Text,
@@ -13,15 +19,18 @@ import {
   TouchableWithoutFeedback,
   useWindowDimensions,
   Linking,
+  TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { MyTouchableOpacity } from 'askit';
 import { Icon } from '../actr-host/components/Icon';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../actr-host/styles/shadows';
 import { useAppStore } from '../actr-host/store/useAppStore';
-import { BookmarkRepository, TBookmarkItem } from '../repository/BookmarkRepository';
-import { openTab } from '../native-bridge/tab/TabModule';
+import {
+  BookmarkRepository,
+  TBookmarkItem,
+} from '../repository/BookmarkRepository';
+import { openTab, exitSearch } from '../native-bridge/tab/TabModule';
 
 // 搜索结果类型
 type SearchResultType = 'active' | 'bookmark' | 'setting';
@@ -46,11 +55,7 @@ interface SearchResultGroup {
   items: SearchResultItem[];
 }
 
-interface GlobalSearchAppProps {
-  onClose?: () => void;
-}
-
-export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
+export default function GlobalSearchApp() {
   const { t } = useTranslation();
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState(''); // 回车后才更新
@@ -138,7 +143,7 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
 
     // 3. 搜索设置
     const settingResults = searchableSettings.filter((s) =>
-      s.name.toLowerCase().includes(q)
+      s.name.toLowerCase().includes(q),
     );
 
     const groups: SearchResultGroup[] = [];
@@ -179,36 +184,33 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
   }, []);
 
   // 点击搜索结果项
-  const handleItemPress = useCallback(
-    (item: SearchResultItem) => {
-      if (item.type === 'setting') {
-        item.action?.();
-      } else {
-        // 应用类型
-        openTab({
-          tabId: item.tabId ?? '',
-          openUrl: item.url || item.appId || '',
-        });
-      }
-      onClose?.();
-    },
-    [onClose]
-  );
+  const handleItemPress = useCallback((item: SearchResultItem) => {
+    if (item.type === 'setting') {
+      item.action?.();
+    } else {
+      // 应用类型
+      openTab({
+        tabId: item.tabId ?? '',
+        openUrl: item.url || item.appId || '',
+      });
+    }
+    exitSearch();
+  }, []);
 
   // 渲染搜索结果项
   const renderResultItem = (item: SearchResultItem, isLast: boolean) => {
     if (item.type === 'setting') {
       return (
         <React.Fragment key={item.id}>
-          <MyTouchableOpacity
+          <TouchableOpacity
             style={styles.listItem}
             onPress={() => handleItemPress(item)}
           >
-            <Icon type={item.icon!} size={22} color="#9e9ea7" />
+            <Icon type={item.icon!} size={22} color='#9e9ea7' />
             <Text style={styles.listItemName} numberOfLines={1}>
               {item.name}
             </Text>
-          </MyTouchableOpacity>
+          </TouchableOpacity>
           {!isLast && <View style={styles.listItemDivider} />}
         </React.Fragment>
       );
@@ -216,7 +218,7 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
     // 应用类型（active/bookmark）
     return (
       <React.Fragment key={item.id}>
-        <MyTouchableOpacity
+        <TouchableOpacity
           style={styles.listItem}
           onPress={() => handleItemPress(item)}
         >
@@ -228,7 +230,7 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
           <Text style={styles.listItemName} numberOfLines={1}>
             {item.name}
           </Text>
-        </MyTouchableOpacity>
+        </TouchableOpacity>
         {!isLast && <View style={styles.listItemDivider} />}
       </React.Fragment>
     );
@@ -263,7 +265,7 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
             <Text style={styles.groupTitle}>{group.title}</Text>
             <View style={styles.groupCard}>
               {group.items.map((item, index) =>
-                renderResultItem(item, index === group.items.length - 1)
+                renderResultItem(item, index === group.items.length - 1),
               )}
             </View>
           </View>
@@ -276,39 +278,41 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
     <View style={styles.searchRow}>
       <View style={containerStyle}>
         <Icon
-          type="link"
+          type='search'
           size={18}
-          color="#999"
+          color='#999'
           style={styles.inputPrefixIcon}
         />
         <TextInput
           ref={inputRef}
           style={inputStyle}
           placeholder={t('actr.search.placeholder', 'Search Term')}
-          placeholderTextColor="#999"
+          placeholderTextColor='#999'
           value={inputText}
           onChangeText={setInputText}
           onSubmitEditing={handleSubmit}
-          returnKeyType="search"
+          returnKeyType='search'
           autoFocus={true}
-          clearButtonMode="never"
-          keyboardAppearance="dark"
+          clearButtonMode='never'
+          keyboardAppearance='dark'
         />
         {inputText.length > 0 && (
-          <MyTouchableOpacity
+          <TouchableOpacity
             style={styles.clearButton}
             onPress={handleClearSearch}
           >
-            <Icon type="input_clear" size={19} color="#666" />
-          </MyTouchableOpacity>
+            <Icon type='input_clear' size={19} color='#666' />
+          </TouchableOpacity>
         )}
       </View>
-      <MyTouchableOpacity
+      <TouchableOpacity
         style={styles.standaloneCloseButton}
-        onPress={onClose}
+        onPress={() => {
+          exitSearch();
+        }}
       >
-        <Icon type="close" size={16} color="#404040" />
-      </MyTouchableOpacity>
+        <Icon type='close' size={16} color='#404040' />
+      </TouchableOpacity>
     </View>
   );
 
@@ -321,7 +325,7 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
             style={styles.content}
             contentContainerStyle={styles.phoneScrollContent}
             showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
+            keyboardShouldPersistTaps='handled'
           >
             {renderResults()}
           </ScrollView>
@@ -352,7 +356,7 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
           styles.scrollContent,
           { paddingBottom: keyboardInset },
         ]}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps='handled'
       >
         <View style={[styles.GlobalSearchContainer, { gap: containerGap }]}>
           {/* 结果区域 */}
@@ -387,7 +391,7 @@ export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
             [
               styles.inputContainer,
               { borderRadius: inputBorderRadius, backgroundColor: '#FFF' },
-            ]
+            ],
           )}
         </View>
       </ScrollView>

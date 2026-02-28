@@ -410,7 +410,7 @@ export default function ChatBubble({
                     setShowFeedbackModal(true);
                   }}
                 >
-                  <Icon type='more' size={16} />
+                  <Icon type='suggest' size={16} />
                   <DropdownMenuText>{t('actr.chat.feedback')}</DropdownMenuText>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -465,7 +465,7 @@ export default function ChatBubble({
                   setTimeout(() => setShowFeedbackModal(true), 100);
                 }}
               >
-                <Icon type='more' size={16} />
+                <Icon type='suggest' size={16} />
                 <Text style={styles.moreMenuText}>{t('actr.chat.feedback')}</Text>
               </Pressable>
             </View>
