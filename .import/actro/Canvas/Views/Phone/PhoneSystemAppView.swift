@@ -41,6 +41,10 @@ struct PhoneSystemAppView: View {
         .onChange(of: systemType) { _, _ in
             loadSystemTab()
         }
+        .onChange(of: viewModel.systemTabs[systemType]?.reloadNonce) { _, _ in
+            // 当 reloadNonce 变化时，重新获取 tab
+            loadSystemTab()
+        }
     }
     
     private func loadSystemTab() {

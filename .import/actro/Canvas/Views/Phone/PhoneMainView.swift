@@ -7,9 +7,8 @@ struct PhoneMainView: View {
     
     @State private var selectedTab: PhoneTab = .tabs
     @State private var fullscreenTab: Tab?
-    @State private var tabRefreshKeys: [PhoneTab: Int] = [:]
     
-    enum PhoneTab: Hashable {
+    enum PhoneTab {
         case bookmarks
         case tabs
         case settings
@@ -29,7 +28,6 @@ struct PhoneMainView: View {
                         fullscreenTab = tab
                     }
                 )
-                .id("bookmarks-\(tabRefreshKeys[.bookmarks, default: 0])")
             }
             
             SwiftUI.Tab("页签", systemImage: "square.grid.2x2.fill", value: PhoneTab.tabs) {
@@ -49,7 +47,6 @@ struct PhoneMainView: View {
                         fullscreenTab = tab
                     }
                 )
-                .id("settings-\(tabRefreshKeys[.settings, default: 0])")
             }
 
             // 搜索页：独立显示（不占用固定 tab 位置）
@@ -63,14 +60,20 @@ struct PhoneMainView: View {
                         fullscreenTab = tab
                     }
                 )
-                .id("search-\(tabRefreshKeys[.search, default: 0])")
             }
         }
         .accentColor(.blue)
         .onChange(of: selectedTab) { oldValue, newValue in
-            // 切换到系统页签时，增加刷新计数以触发重新加载
-            if [.bookmarks, .settings, .search].contains(newValue) {
-                tabRefreshKeys[newValue, default: 0] += 1
+            // 切换到系统页签时，刷新系统页签
+            switch newValue {
+            case .bookmarks:
+                viewModel.reloadSystemTab(.bookmarks)
+            case .settings:
+                viewModel.reloadSystemTab(.settings)
+            case .search:
+                viewModel.reloadSystemTab(.globalSearch)
+            case .tabs:
+                break // 页签列表不需要刷新
             }
         }
         .sheet(item: $fullscreenTab) { tab in
