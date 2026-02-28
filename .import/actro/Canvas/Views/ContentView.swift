@@ -41,9 +41,15 @@ struct ContentView: View {
                     )
             } detail: {
                 // Workspace: main canvas + optional docked DevTools panel
+                // 🎨 Dia/ARC 风格：主内容区域（下圆角，上直角）
+                // 四边都有 4px 边距
                 WorkspaceView(devTools: devTools, viewModel: viewModel) {
                     WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar)
                 }
+                .clipShape(BottomRoundedRectangle(bottomRadius: 16))
+                .padding(.leading, 4)
+                .padding(.trailing, 4)
+                .padding(.bottom, 4)
             }
             // 让 toolbar 背景透明，内容区域背景通栏
             .toolbarBackground(.hidden, for: .windowToolbar)
@@ -98,6 +104,47 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Bottom Rounded Rectangle (Dia/ARC Style)
+
+/// 下圆角上直角的矩形（左右下角都有圆角）
+/// 与 toolbar 的 TopRoundedRectangle 形成对接
+private struct BottomRoundedRectangle: Shape {
+    let bottomRadius: CGFloat
+    
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        
+        // 从左上角开始，顺时针
+        path.move(to: CGPoint(x: 0, y: 0))
+        // 顶边（直角）
+        path.addLine(to: CGPoint(x: rect.maxX, y: 0))
+        // 右边 - 直线下来到圆角开始处
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - bottomRadius))
+        // 右下圆角
+        path.addArc(
+            center: CGPoint(x: rect.maxX - bottomRadius, y: rect.maxY - bottomRadius),
+            radius: bottomRadius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        // 底边
+        path.addLine(to: CGPoint(x: bottomRadius, y: rect.maxY))
+        // 左下圆角
+        path.addArc(
+            center: CGPoint(x: bottomRadius, y: rect.maxY - bottomRadius),
+            radius: bottomRadius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        // 左边 - 直线上去
+        path.closeSubpath()
+        
+        return path
+    }
+}
+
 // MARK: - Window Accessor (配置 NSWindow 透明标题栏)
 
 private struct WindowAccessor: NSViewRepresentable {
@@ -133,6 +180,22 @@ private class WindowDelegateProxy: NSObject, NSWindowDelegate {
     /// from ever reaching ViewBridge or remote service
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
         var newSize = frameSize
+        
+        // Clamp to min size (use both minSize & contentMinSize for safety)
+        let minSize = sender.minSize
+        if newSize.width < minSize.width {
+            newSize.width = minSize.width
+        }
+        if newSize.height < minSize.height {
+            newSize.height = minSize.height
+        }
+        let contentMin = sender.contentMinSize
+        if contentMin.width > 0, newSize.width < contentMin.width {
+            newSize.width = contentMin.width
+        }
+        if contentMin.height > 0, newSize.height < contentMin.height {
+            newSize.height = contentMin.height
+        }
 
         // Clamp to max size
         if newSize.width > maxSize.width {
@@ -301,8 +364,12 @@ private class WindowObserverView: NSView {
         window.titlebarSeparatorStyle = .line
         window.titleVisibility = .hidden
         window.title = ""
-        // 设置窗口最小尺寸
-        window.minSize = NSSize(width: 500, height: 400)
+        // 设置窗口最小尺寸（备用，主要由 SwiftUI frame 控制）
+        window.minSize = NSSize(width: 640, height: 480)
+        
+        // macOS 26+: 设置窗口圆角
+        // 通过 setValue:forKey: 访问私有属性
+        window.setValue(18.0, forKey: "cornerRadius")
 
         // 配置自定义 AppKit 标题栏（只执行一次）
         if useNativeToolbar && !toolbarConfigured,
@@ -334,16 +401,8 @@ private class WindowObserverView: NSView {
     
     private func updateWindowBackgroundColor() {
         guard let window = window, let viewModel = viewModel else { return }
-        let colorHex = viewModel.currentTab?.backgroundColor ?? "#1e1e1e"
-        
-        // Debug
-        NSLog("🎨 [WindowObserverView] updateWindowBackgroundColor: Tab '\(viewModel.currentTab?.title ?? "nil")' color=\(colorHex)")
-        
-        if let nsColor = NSColor(hexString: colorHex) {
-            window.backgroundColor = nsColor
-        } else {
-            window.backgroundColor = NSColor(white: 0.12, alpha: 1.0)
-        }
+        // 调试用：蓝色背景方便观察
+        window.backgroundColor = NSColor.systemBlue
     }
 
     private func setupObservers() {
