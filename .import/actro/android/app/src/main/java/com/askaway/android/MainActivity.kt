@@ -1,9 +1,16 @@
 package com.askaway.android
 
+import android.animation.ObjectAnimator
 import android.content.Intent
+import android.graphics.Outline
+import android.graphics.Path
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.view.ViewOutlineProvider
+import android.view.ViewTreeObserver
+import android.view.animation.DecelerateInterpolator
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.forEach
@@ -17,36 +24,100 @@ import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.uimanager.PixelUtil.pxToDp
 import kotlinx.coroutines.launch
+import com.askaway.android.global.Constants
+import kotlinx.coroutines.delay
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
     private var reactRootView: ReactRootView? = null
     private val appViews = mutableMapOf<String, ReactRootView>()
+    private var isReactNativeVisible = false
+    private var isLayoutComplete = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // 初始化 flReactNative 为隐藏状态
+        binding.flReactNative.visibility = View.INVISIBLE // 使用 INVISIBLE 而不是 GONE，以便能获取高度
+
+        // 使用 ViewTreeObserver 确保视图完全布局后再设置初始位置
+        binding.flRNContent.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (!isLayoutComplete && binding.flReactNative.height > 0) {
+                    binding.flReactNative.translationY = binding.flReactNative.height.toFloat()
+                    binding.flReactNative.visibility = View.GONE
+                    isLayoutComplete = true
+                    binding.flReactNative.viewTreeObserver.removeOnGlobalLayoutListener(this)
+
+                    // 设置自定义 OutlineProvider 以支持圆角裁剪（仅上方圆角）
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        // 38dp 转换为 px
+                        val cornerRadiusDp = 38f
+                        val cornerRadiusPx = cornerRadiusDp * resources.displayMetrics.density
+
+                        binding.flRNContent.outlineProvider = object : ViewOutlineProvider() {
+                            override fun getOutline(view: View, outline: Outline) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    // Android 11+ 使用 setPath
+                                    val path = Path()
+                                    val width = view.width.toFloat()
+                                    val height = view.height.toFloat()
+                                    val radius = cornerRadiusPx
+
+                                    // 从左上角开始
+                                    path.moveTo(radius, 0f)
+                                    // 顶部直线到右上角
+                                    path.lineTo(width - radius, 0f)
+                                    // 右上角圆角 (90度圆弧)
+                                    path.arcTo(width - radius * 2, 0f, width, radius * 2, 270f, 90f, false)
+                                    // 右侧直线到右下角
+                                    path.lineTo(width, height)
+                                    // 底部直线到左下角
+                                    path.lineTo(0f, height)
+                                    // 左侧直线到左上角
+                                    path.lineTo(0f, radius)
+                                    // 左上角圆角 (90度圆弧)
+                                    path.arcTo(0f, 0f, radius * 2, radius * 2, 180f, 90f, false)
+                                    path.close()
+
+                                    outline.setPath(path)
+                                } else {
+                                    // Android 5.0-10 使用 setRoundRect，所有角都会有圆角
+                                    outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx)
+                                }
+                            }
+                        }
+                        binding.flRNContent.elevation = 0.0f
+                        binding.flRNContent.clipToOutline = true
+                    }
+
+                    Log.d("MainActivity", "flReactNative initial height: ${binding.flReactNative.height}")
+                }
+            }
+        })
+
         binding.flContent.post {
             viewModel.containerWidth = binding.flContent.width.pxToDp().toInt()
             viewModel.containerHeight = binding.flContent.height.pxToDp().toInt()
         }
 
         binding.ivAdd.setOnClickListener {
-            // 移除旧的 ReactRootView
             viewModel.addApp()
+            showReactNativeView()
         }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     viewModel.currentReactNativeStatus.collect {
-                        reactRootView?.unmountReactApplication()
+//                        reactRootView?.unmountReactApplication()
 //                        binding.flContent.removeAllViews()
                         val targetView = createReactRootView("canvas-kotlin", it)
                         Log.e("MainActivity", "Received new React Native status: ${it.getString("currentTabId")}")
                         targetView.tag = it.getString("currentTabId")
-                        binding.flContent.addView(targetView)
+                        binding.flRNContent.addView(targetView)
                     }
                 }
                 launch {
@@ -72,6 +143,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                 }
             }
         }
+//        lifecycleScope.launch {
+//            delay(3000) // 等待界面完全加载
+//            viewModel.addApp()
+//        }
     }
 
     /**
@@ -89,6 +164,49 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
 
             // 启动 React 应用
             startReactApplication(reactInstanceManager, componentName, launchOptions)
+        }
+    }
+
+    /**
+     * 从底部显示 ReactNative 视图
+     */
+    private fun showReactNativeView() {
+        if (isReactNativeVisible) return
+
+        isReactNativeVisible = true
+        val startY = binding.flReactNative.height.toFloat()
+
+        Log.d("MainActivity", "showReactNativeView - height: ${binding.flReactNative.height}, startY: $startY")
+
+        // 确保起始位置在底部
+        binding.flReactNative.translationY = startY
+        binding.flReactNative.visibility = View.VISIBLE
+
+        // 创建从底部滑入的动画
+        ObjectAnimator.ofFloat(binding.flReactNative, "translationY", startY, 0f).apply {
+            duration = 300
+            interpolator = DecelerateInterpolator()
+            start()
+        }
+    }
+
+    /**
+     * 隐藏 ReactNative 视图到底部
+     */
+    private fun hideReactNativeView() {
+        if (!isReactNativeVisible) return
+
+        // 创建滑出到底部的动画
+        ObjectAnimator.ofFloat(binding.flReactNative, "translationY", 0f, binding.flReactNative.height.toFloat()).apply {
+            duration = 300
+            interpolator = DecelerateInterpolator()
+            start()
+            addUpdateListener { animation ->
+                if (animation.animatedFraction == 1f) {
+                    binding.flReactNative.visibility = View.GONE
+                    isReactNativeVisible = false
+                }
+            }
         }
     }
 
@@ -111,6 +229,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        // 如果 flReactNative 正在显示，则隐藏它
+        if (isReactNativeVisible) {
+            hideReactNativeView()
+            return
+        }
+
         val application = application as MainApplication
         val reactInstanceManager = application.reactNativeHost.reactInstanceManager
         if (reactInstanceManager.hasStartedCreatingInitialContext()) {

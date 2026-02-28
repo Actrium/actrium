@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.SharedFlow
 class MainViewModel : ViewModel() {
     private val _tabIndex = MutableLiveData(0)
     val tabIndex: LiveData<Int> = _tabIndex
-    var containerHeight = 600
-    var containerWidth = 800
+    var containerHeight = 1000
+    var containerWidth = 720
     private val _currentReactNativeStatus = MutableSharedFlow<Bundle>(replay = 0, extraBufferCapacity = 1)
     val currentReactNativeStatus: SharedFlow<Bundle> = _currentReactNativeStatus
 
