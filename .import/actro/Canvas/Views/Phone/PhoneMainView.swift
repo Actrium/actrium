@@ -81,7 +81,10 @@ struct PhoneMainView: View {
                 .interactiveDismissDisabled(true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
-            // RN 请求退出全屏
+            // RN 请求退出全屏 - 先截图再关闭
+            if let tab = fullscreenTab {
+                takeSnapshot(for: tab)
+            }
             fullscreenTab = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: .openTabFullscreenFromRN)) { notification in
@@ -110,6 +113,55 @@ struct PhoneMainView: View {
                 if let tab = viewModel.tabs.first(where: { $0.id == newValue }) {
                     fullscreenTab = tab
                 }
+            }
+        }
+    }
+    
+    /// 截取当前全屏 tab 的快照
+    private func takeSnapshot(for tab: Tab) {
+        // 延迟一帧，确保捕获正确的内容
+        DispatchQueue.main.async {
+            let window = UIApplication.shared.connectedScenes
+                .filter { $0.activationState == .foregroundActive }
+                .compactMap { $0 as? UIWindowScene }
+                .first?.windows
+                .filter { $0.isKeyWindow }.first
+            
+            if let window = window {
+                let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+                let fullImage = renderer.image { context in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+                }
+                
+                // 根据 PhoneTabCardView 的宽高比计算截图区域
+                let screenWidth = window.bounds.width
+                let cardWidth = screenWidth - 32  // 减去左右 padding (16 + 16)
+                let cardHeight = cardWidth * 0.54  // 卡片宽高比
+                
+                // 从底部开始截取，去掉底部 tab bar 高度（约 49 + safeArea）
+                let bottomOffset = window.safeAreaInsets.bottom + 49  // tab bar 高度
+                let cropY = window.bounds.height - bottomOffset - cardHeight
+                
+                let cropRect = CGRect(
+                    x: 0,
+                    y: max(0, cropY),  // 确保不超出顶部
+                    width: screenWidth,
+                    height: cardHeight
+                )
+                
+                if let croppedImage = fullImage.cropped(to: cropRect) {
+                    viewModel.tabSnapshots[tab.id] = croppedImage
+                } else {
+                    // 如果裁剪失败，保留全屏图作为 fallback
+                    viewModel.tabSnapshots[tab.id] = fullImage
+                }
+                
+                // 发送退出全屏通知到 RN
+                NotificationCenter.default.post(
+                    name: .tabExitedFullscreenFromNative,
+                    object: nil,
+                    userInfo: ["tabId": tab.id.uuidString]
+                )
             }
         }
     }
