@@ -179,6 +179,19 @@ class BrowserViewModel: ObservableObject {
         
         return newTab
     }
+    
+    /// Reload system tab by incrementing reloadNonce
+    func reloadSystemTab(_ type: SystemTabType) {
+        guard var tab = systemTabs[type] else {
+            logger.warning("⚠️ [reloadSystemTab] 系统标签不存在: \(type.title)")
+            return
+        }
+        
+        logger.notice("🔄 [reloadSystemTab] 刷新系统标签: \(type.title), reloadNonce: \(tab.reloadNonce) -> \(tab.reloadNonce + 1)")
+        tab.reloadNonce &+= 1
+        systemTabs[type] = tab
+        objectWillChange.send()
+    }
 
     func switchToTab(id: UUID) {
         let previousTabId = currentTabId
