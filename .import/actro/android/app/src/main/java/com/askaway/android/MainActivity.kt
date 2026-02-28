@@ -108,6 +108,14 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             viewModel.addApp()
             showReactNativeView()
         }
+
+        // 设置导航栏选择监听器
+        setupNavigationListener()
+
+        // 初始化导航指示器位置
+        binding.rgNavigation.post {
+            alignIndicatorToSelectedButton()
+        }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
@@ -147,6 +155,49 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
 //            delay(3000) // 等待界面完全加载
 //            viewModel.addApp()
 //        }
+    }
+
+    /**
+     * 设置导航栏监听器
+     */
+    private fun setupNavigationListener() {
+        binding.rgNavigation.setOnCheckedChangeListener { _, checkedId ->
+            alignIndicatorToSelectedButton(animate = true)
+        }
+    }
+
+    /**
+     * 将指示器对齐到选中的 RadioButton
+     */
+    private fun alignIndicatorToSelectedButton(animate: Boolean = false) {
+        val checkedId = binding.rgNavigation.checkedRadioButtonId
+        if (checkedId == -1) return
+
+        // 获取选中的 RadioButton
+        val selectedButton = binding.rgNavigation.findViewById<View>(checkedId) ?: return
+
+        // 计算选中按钮的中心位置
+        val buttonCenterX = selectedButton.left + selectedButton.width / 2f
+
+        // 计算指示器应该移动到的位置（使指示器中心与按钮中心对齐）
+        val indicatorCenterOffset = binding.flNavIndicator.width / 2f
+        val targetX = buttonCenterX - indicatorCenterOffset
+
+        Log.d("MainActivity", "Align indicator: checkedId=$checkedId, buttonCenterX=$buttonCenterX, targetX=$targetX")
+
+        if (animate) {
+            // 创建滑动动画
+            ObjectAnimator.ofFloat(binding.flNavIndicator, "translationX", targetX).apply {
+                duration = 200
+                interpolator = DecelerateInterpolator()
+                start()
+            }
+        } else {
+            // 直接设置位置（初始化时不需要动画）
+            binding.flNavIndicator.translationX = targetX
+        }
+
+        // TODO: 根据选中的标签切换对应的内容
     }
 
     /**
