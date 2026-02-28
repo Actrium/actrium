@@ -122,9 +122,8 @@ struct PhoneMainView: View {
                 }
             }
         }
-        .onChange(of: fullscreenTab) { oldValue, newValue in
-            // 更新 ViewModel 中的全屏 tab ID
-            viewModel.fullscreenTabId = newValue?.id
+        .onChange(of: fullscreenTab?.id) { oldValue, newValue in
+            viewModel.fullscreenTabId = newValue
         }
     }
     
