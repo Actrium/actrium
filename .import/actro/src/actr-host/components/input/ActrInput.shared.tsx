@@ -31,6 +31,7 @@ import { StableTextInput } from './StableTextInput';
 import { useActrVoiceController } from './hooks/useActrVoiceController';
 import { LoginModal } from '../../../system-apps/auth';
 import { useUnreadStore } from '../../store/useUnreadStore';
+import { getCurrentFullscreenTab } from '../../../../src/native-bridge/tab/TabModule';
 
 const { NativeLogger } = NativeModules;
 
@@ -49,7 +50,10 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
 
   // 登录弹窗状态
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [authParams, setAuthParams] = useState<{ clientId: string; appId: string } | null>(null);
+  const [authParams, setAuthParams] = useState<{
+    clientId: string;
+    appId: string;
+  } | null>(null);
 
   const inputText = useInputStore((state) => state.inputs[appId]?.text || '');
   const editingMessageId = useInputStore(
@@ -72,8 +76,14 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
 
   const [showMapModal, setShowMapModal] = useState(false);
   // Hook for attachment logic
-  const { attachments, removeAttachment, handleConfirmLocation, takePhoto, pickImage, pickDocument } =
-    useAttachmentManager(appId);
+  const {
+    attachments,
+    removeAttachment,
+    handleConfirmLocation,
+    takePhoto,
+    pickImage,
+    pickDocument,
+  } = useAttachmentManager(appId);
 
   // Hook for toolbox states
   const {
@@ -94,10 +104,13 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   const appInfo = useAppStore((state) => state.apps[appId]);
 
   // Mobile 模式使用弹窗，Pad 模式使用 Tab
-  const handleNeedAuth = useCallback((params: { clientId: string; appId: string }) => {
-    setAuthParams(params);
-    setShowLoginModal(true);
-  }, []);
+  const handleNeedAuth = useCallback(
+    (params: { clientId: string; appId: string }) => {
+      setAuthParams(params);
+      setShowLoginModal(true);
+    },
+    [],
+  );
 
   const { hasAuth } = useAuth(appId, {
     useModal: isMobileVariant,
@@ -132,10 +145,17 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       // 2. 更新 Store，如果是结束状态则触发持久化
       updateMessage(appId, currentMsg.message_id, updates, isFinished);
 
-      // 3. 当消息接收完成时，增加未读数
+      // 3. 消息接收完成时，判断当前是否为活跃 tab
       if (data.isEnd) {
-        console.warn('更新未读消息数量')
-        useUnreadStore.getState().incrementUnread(appId, tab.id);
+        getCurrentFullscreenTab().then((currentTabId) => {
+          if (currentTabId === tab.id) {
+            // 当前 tab 正在前台，直接标为已读，无需增加未读数
+            updateMessage(appId, currentMsg.message_id, { is_read: 1 }, true);
+          } else {
+            // 后台 tab，增加未读计数并通知 native
+            useUnreadStore.getState().incrementUnread(appId, tab.id);
+          }
+        });
       }
     },
     [appId, updateMessage],
@@ -154,7 +174,8 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       if (!currentMsg) return;
 
       const isFinished = data.status === 2;
-      const newContent = currentMsg.answer_content + t('actr.voice.voiceMessageReceived');
+      const newContent =
+        currentMsg.answer_content + t('actr.voice.voiceMessageReceived');
 
       const updates = {
         answer_time: Date.now(),

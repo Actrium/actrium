@@ -144,7 +144,7 @@ export class BookmarkRepository {
   /**
    * 删除一个书签
    */
-  static async removeBookmark(id: number) {
-    return await db.executeSql('DELETE FROM bookmark_items WHERE id = ?', [id]);
+  static async removeBookmark(tabId: string) {
+    return await db.executeSql('DELETE FROM bookmark_items WHERE tab_id = ?', [tabId]);
   }
 }
