@@ -39,8 +39,10 @@ const customConfig = {
       require.resolve('./src/ensure-console-assert.js'),
       ...defaultPolyfills,
     ],
+    // InitializeCore must run before the main module to set up globals (window, etc.)
+    // Use react-native-macos path since react-native is redirected for macos platform
     getModulesRunBeforeMainModule: () => [
-      require.resolve('./src/ensure-console-assert.js'),
+      require.resolve('react-native-macos/Libraries/Core/InitializeCore'),
     ],
   },
   resolver: {
@@ -49,10 +51,14 @@ const customConfig = {
       path.resolve(projectRoot, 'node_modules'),
     ],
     resolveRequest: (context, moduleName, platform) => {
-      // macOS platform: redirect react-native to react-native-macos
+      // macOS platform: redirect react-native (and deep imports) to react-native-macos
       // This ensures platform-specific implementations (Image.macos.js, etc.) are found
-      if (platform === 'macos' && moduleName === 'react-native') {
-        return resolve(context, 'react-native-macos', platform);
+      // and prevents bundling both react-native and react-native-macos.
+      if (platform === 'macos' && (moduleName === 'react-native' || moduleName.startsWith('react-native/'))) {
+        const redirected = moduleName === 'react-native'
+          ? 'react-native-macos'
+          : 'react-native-macos' + moduleName.slice('react-native'.length);
+        return resolve(context, redirected, platform);
       }
 
       // Resolve rill/host to the host entry point

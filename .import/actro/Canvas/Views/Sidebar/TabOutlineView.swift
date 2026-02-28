@@ -1420,8 +1420,18 @@ private class TabRowView: NSView {
 
         // Set default icon if no cached favicon was found
         if !usedCachedFavicon {
-            iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
-            iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+            if let appIcon = tab.appIcon,
+               let image = NSImage(systemSymbolName: appIcon, accessibilityDescription: nil) {
+                iconView.image = image
+                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+            } else if let systemType = tab.systemTabType,
+                      let image = NSImage(systemSymbolName: systemType.icon, accessibilityDescription: nil) {
+                iconView.image = image
+                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+            } else {
+                iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
+                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+            }
         }
 
         // Fetch favicon asynchronously for web tabs if not cached
@@ -1500,4 +1510,3 @@ private class TabRowView: NSView {
         isHovering = false
     }
 }
-

@@ -3,6 +3,8 @@ import {
   ActivityIndicator as RNActivityIndicator,
   Text as RNText,
   View as RNView,
+  Pressable,
+  StyleSheet,
 } from 'react-native';
 import { logger } from '../logger';
 
@@ -136,6 +138,65 @@ const WrappedScrollView: React.FC<Record<string, unknown>> = (props) => {
   });
 };
 
+const FeedbackPressable: React.FC<any> = ({
+  style,
+  children,
+  onPress,
+  onPressIn,
+  onPressOut,
+  onLongPress,
+  activeOpacity = 0.6,
+  disabled = false,
+  hitSlop,
+  ...rest
+}) => {
+  return (
+    <Pressable
+      {...rest}
+      disabled={disabled}
+      hitSlop={hitSlop}
+      onPress={onPress ? () => onPress() : undefined}
+      onPressIn={onPressIn ? () => onPressIn() : undefined}
+      onPressOut={onPressOut ? () => onPressOut() : undefined}
+      onLongPress={onLongPress ? () => onLongPress() : undefined}
+    >
+      {({ pressed }) => {
+        const baseStyle = typeof style === 'function' ? style({ pressed }) : style;
+        const flattened = StyleSheet.flatten(baseStyle) as { borderRadius?: number } | undefined;
+        const radius = flattened?.borderRadius ?? 8;
+        return (
+          <RNView
+            style={[
+              baseStyle,
+              pressed ? { opacity: activeOpacity, transform: [{ scale: 0.98 }] } : null,
+            ]}
+          >
+            {typeof children === 'function' ? children({ pressed }) : children}
+            {pressed && (
+              <RNView
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  borderRadius: radius,
+                  backgroundColor: 'rgba(255,255,255,0.18)',
+                }}
+              />
+            )}
+          </RNView>
+        );
+      }}
+    </Pressable>
+  );
+};
+
+const FeedbackTouchableOpacity: React.FC<any> = (props) => {
+  return <FeedbackPressable {...props} />;
+};
+
 // Host 组件映射：使用 rill preset 组件，这些组件已正确处理事件序列化
 // 防止 GestureResponderEvent 等复杂事件对象导致 JSI 边界序列化 OOM
 export const hostComponents: ComponentMap = {
@@ -144,7 +205,8 @@ export const hostComponents: ComponentMap = {
   Text: Text as unknown as React.ComponentType<Record<string, unknown>>,
   Image: Image as unknown as React.ComponentType<Record<string, unknown>>,
   ScrollView: WrappedScrollView as unknown as React.ComponentType<Record<string, unknown>>,
-  TouchableOpacity: TouchableOpacity as unknown as React.ComponentType<Record<string, unknown>>,
+  TouchableOpacity: FeedbackTouchableOpacity as unknown as React.ComponentType<Record<string, unknown>>,
+  Pressable: FeedbackPressable as unknown as React.ComponentType<Record<string, unknown>>,
   Button: Button as unknown as React.ComponentType<Record<string, unknown>>,
   ActivityIndicator: ActivityIndicator as unknown as React.ComponentType<Record<string, unknown>>,
   TextInput: TextInput as unknown as React.ComponentType<Record<string, unknown>>,
