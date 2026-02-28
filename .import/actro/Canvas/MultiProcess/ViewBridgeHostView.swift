@@ -217,35 +217,43 @@ public class ViewBridgeHostView: NSView {
 
     /// 接受外部尺寸设置
     public override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
+        // 🔑 关键修复：检测并拒绝 @2x 像素尺寸
+        // AppKit 在某些情况下（wantsLayer=true）会传入 @2x 像素尺寸
+        // 如果接受这个尺寸，hostView 会占据 @2x 空间，但 remoteView 只有 1x
+        let scaleFactor = window?.backingScaleFactor ?? 2.0  // 默认假设 Retina
 
-        // 🔑 关键修复：在 setFrameSize 中也更新 currentContentSize
-        // 当 AppKit 直接调用 setFrameSize（如通过 autoresizingMask）时，
-        // updateRemoteViewLayout 需要使用最新的尺寸。
-        // 需要先检测并转换 @2x 尺寸。
-        let scaleFactor = window?.backingScaleFactor ?? 1.0
-        let effectiveSize: CGSize
-
-        // 检测是否是 @2x 尺寸：如果 newSize 约等于 currentContentSize * scaleFactor，则需要转换
+        // 检测：如果 newSize 明显大于 currentContentSize（超过 1.5x），可能是 @2x
+        // 使用 superview.bounds 作为参考（superview 尺寸应该是正确的 point 尺寸）
+        let referenceSize = superview?.bounds.size ?? currentContentSize
         let looksLikePixels = scaleFactor > 1.0 &&
-            currentContentSize.width > 10 &&  // 确保有有效的基准尺寸
-            abs(newSize.width - currentContentSize.width * scaleFactor) < 2 &&
-            abs(newSize.height - currentContentSize.height * scaleFactor) < 2
+            referenceSize.width > 10 &&
+            newSize.width > referenceSize.width * 1.5 &&
+            newSize.height > referenceSize.height * 1.5
 
         if looksLikePixels {
-            // 转换为 point 尺寸
-            effectiveSize = CGSize(width: newSize.width / scaleFactor, height: newSize.height / scaleFactor)
+            // 拒绝 @2x 尺寸，使用 superview.bounds 作为正确尺寸
+            ipcLog("⚠️ setFrameSize: rejected @2x size \(Int(newSize.width))x\(Int(newSize.height)), using superview.bounds \(Int(referenceSize.width))x\(Int(referenceSize.height))")
+            super.setFrameSize(referenceSize)
         } else {
-            effectiveSize = newSize
+            super.setFrameSize(newSize)
         }
 
-        // 更新 currentContentSize（如果尺寸合理）
-        if effectiveSize.width > 10 && effectiveSize.height > 10 {
-            currentContentSize = effectiveSize
-        }
+        // 使用 bounds.size 更新 remoteView（bounds 是 point 尺寸）
+        updateRemoteViewLayoutWithBounds()
+    }
 
-        // 🔑 始终更新 remoteView frame，确保与 bounds 同步
-        updateRemoteViewLayout()
+    /// 使用 bounds.size 更新 remoteView frame（用于 setFrameSize 回调）
+    private func updateRemoteViewLayoutWithBounds() {
+        guard let remoteView = remoteViewController?.view else { return }
+
+        // bounds.size 是 point 尺寸（与 frame.size 相同，但更可靠）
+        let targetSize = bounds.size
+        guard targetSize.width > 0 && targetSize.height > 0 else { return }
+
+        let expectedFrame = NSRect(origin: .zero, size: targetSize)
+        if remoteView.frame != expectedFrame {
+            remoteView.frame = expectedFrame
+        }
     }
 
     /// Update remote view frame to fill bounds
@@ -552,16 +560,16 @@ public class ViewBridgeHostView: NSView {
     /// 由 coordinator.applyViewportSize 调用，不发送通知（通知由 coordinator 统一处理）
     func applyFrameSize(_ newSize: CGSize) {
         currentContentSize = newSize
-        let oldBounds = bounds.size
 
-        // 🔑 重要：不要在这里强行 setFrameSize
-        // ViewBridgeHostView 的尺寸由上层 SwiftUI/ContainerView 驱动（autoresizingMask / layout）
-        // 如果在 resize 过程中反向 setFrameSize，会与 SwiftUI/.position 的布局反馈相互“拉扯”，
-        // 造成 Y 向抖动（尤其是当 SwiftUI 给出 0.5pt 的几何尺寸时）。
-        invalidateIntrinsicContentSize()
+        // 🔑 关键修复：同步更新 hostView 和 remoteView 的 frame
+        // 之前只更新 remoteView，导致 remoteView 超出 hostView 边界被裁剪
+        // 现在同时更新 hostView 的 frame，确保两者一致
+        let newFrame = NSRect(origin: frame.origin, size: newSize)
+        if frame.size != newSize {
+            frame = newFrame
+        }
 
-        // 🔑 始终更新 remoteView frame，确保与 bounds 同步
-        // 之前错误地在 Live resize 期间跳过此调用，导致 remoteView 滞后 10-20px
+        // 更新 remoteView frame
         updateRemoteViewLayout()
 
         let isLiveResizing = WindowResizeState.shared.isLiveResizing
@@ -576,12 +584,36 @@ public class ViewBridgeHostView: NSView {
 
         // 调试日志 - 包含 origin 信息以诊断位置问题
         let remoteFrame = remoteViewController?.view.frame ?? .zero
+        let remoteBounds = remoteViewController?.view.bounds ?? .zero
         let selfFrame = frame
+        let selfBounds = bounds
         let superFrame = superview?.frame ?? .zero
         let superBounds = superview?.bounds ?? .zero
         let windowFrame = window?.frame ?? .zero
         let convertedOrigin = superview?.convert(frame.origin, to: nil) ?? .zero  // 转换到窗口坐标
-        ipcLog("📐 applyFrameSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)) self.frame=(\(Int(selfFrame.origin.x)),\(Int(selfFrame.origin.y)),\(Int(selfFrame.width))x\(Int(selfFrame.height))) remoteFrame=(\(Int(remoteFrame.origin.x)),\(Int(remoteFrame.origin.y)),\(Int(remoteFrame.width))x\(Int(remoteFrame.height))) superFrame=(\(Int(superFrame.origin.x)),\(Int(superFrame.origin.y)),\(Int(superFrame.width))x\(Int(superFrame.height))) superBounds=(\(Int(superBounds.origin.x)),\(Int(superBounds.origin.y)),\(Int(superBounds.width))x\(Int(superBounds.height))) convertedToWindow=(\(Int(convertedOrigin.x)),\(Int(convertedOrigin.y)))")
+
+        // 🔍 检查 layer 状态
+        let remoteLayer = remoteViewController?.view.layer
+        let layerBounds = remoteLayer?.bounds ?? .zero
+        let layerFrame = remoteLayer?.frame ?? .zero
+        let layerTransform = remoteLayer?.transform ?? CATransform3DIdentity
+        let isIdentityTransform = CATransform3DIsIdentity(layerTransform)
+
+        ipcLog("📐 applyFrameSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)) self.frame=(\(Int(selfFrame.origin.x)),\(Int(selfFrame.origin.y)),\(Int(selfFrame.width))x\(Int(selfFrame.height))) self.bounds=\(Int(selfBounds.width))x\(Int(selfBounds.height)) remoteFrame=(\(Int(remoteFrame.origin.x)),\(Int(remoteFrame.origin.y)),\(Int(remoteFrame.width))x\(Int(remoteFrame.height))) remoteBounds=\(Int(remoteBounds.width))x\(Int(remoteBounds.height)) layer.frame=\(Int(layerFrame.width))x\(Int(layerFrame.height)) layer.bounds=\(Int(layerBounds.width))x\(Int(layerBounds.height)) identityTransform=\(isIdentityTransform)")
+
+        // 🔍 延迟检查：查看是否有回调修改了尺寸
+        let expectedSize = newSize
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let actualSelfFrame = self.frame
+            let actualRemoteFrame = self.remoteViewController?.view.frame ?? .zero
+            if abs(actualSelfFrame.width - expectedSize.width) > 1 ||
+               abs(actualSelfFrame.height - expectedSize.height) > 1 ||
+               abs(actualRemoteFrame.width - expectedSize.width) > 1 ||
+               abs(actualRemoteFrame.height - expectedSize.height) > 1 {
+                ipcLog("⚠️ POST-applyFrameSize: SIZE CHANGED! expected=\(Int(expectedSize.width))x\(Int(expectedSize.height)) actual.self=\(Int(actualSelfFrame.width))x\(Int(actualSelfFrame.height)) actual.remote=\(Int(actualRemoteFrame.width))x\(Int(actualRemoteFrame.height))")
+            }
+        }
     }
 
     private func handleError(_ message: String) {
@@ -1174,44 +1206,10 @@ final class ViewBridgeCoordinator {
         let previousSize = currentViewportSize
         currentViewportSize = roundedSize
 
-        // 如果处于 resize 结束后的 debounce 状态，重置 debounce 定时器
-        // 这确保我们等待 SwiftUI 布局完全稳定后再发送最终尺寸
-        if isWaitingForFinalSize {
-            scheduleFinalSizeDebounce()
-            // 本地 frame 更新仍需执行
-            hostView?.applyFrameSize(roundedSize)
-            return
-        }
-
-        // 检查是否需要补发：如果刚刚发送过通知（1秒内），但又收到新尺寸变化
-        // 这处理了 debounce 触发后 SwiftUI 仍在更新的情况
-        let timeSinceLastNotification = Date().timeIntervalSince(lastSizeNotificationTime)
-        if timeSinceLastNotification < Self.resendWindowInterval {
-            // 在补发窗口期内收到新尺寸，重新启动 debounce
-            isWaitingForFinalSize = true
-            setupFrameChangeObserverIfNeeded()
-            scheduleFinalSizeDebounce()
-            hostView?.applyFrameSize(roundedSize)
-            return
-        }
-
-        // 大变化（> 50px）立即应用
-        let sizeDiff = abs(roundedSize.width - previousSize.width) + abs(roundedSize.height - previousSize.height)
-        let isLargeChange = sizeDiff > 50
-        let now = Date()
-        let timeSinceLastUpdate = now.timeIntervalSince(lastUpdateTime)
-
-        if isLargeChange || timeSinceLastUpdate >= Self.throttleInterval {
-            // 立即应用 - 同时清除待处理的旧尺寸，防止定时器发送过时数据
-            pendingSize = nil
-            throttleTimer?.invalidate()
-            throttleTimer = nil
-            applyViewportSize(roundedSize)
-        } else {
-            // 节流：记录待处理的尺寸，稍后处理
-            pendingSize = roundedSize
-            scheduleThrottledUpdate()
-        }
+        // 🔑 关键修改：始终立即更新 hostView frame + 发送通知到 Service
+        // 之前的 debounce/节流逻辑导致 Host 和 Service 尺寸不同步
+        // 简化为：立即应用所有尺寸变化
+        applyViewportSize(roundedSize)
     }
 
     /// 调度节流后的更新（必须在主线程调用）

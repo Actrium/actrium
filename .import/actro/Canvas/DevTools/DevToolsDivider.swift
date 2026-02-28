@@ -28,15 +28,22 @@ struct WorkspaceMainViewport<Content: View>: View {
                 height: floor(geometry.size.height)
             )
 
-            // 🔍 调试日志：检查 geometry 是否有小数
+            // 🔍 详细日志：每次 GeometryReader 重新评估都记录
             let _ = {
-                let wDiff = geometry.size.width - roundedSize.width
-                let hDiff = geometry.size.height - roundedSize.height
-                if wDiff > 0.01 || hDiff > 0.01 {
-                    NSLog("📐 [Viewport] geometry=%.2fx%.2f → rounded=%.0fx%.0f (diff=%.2f,%.2f)",
-                          geometry.size.width, geometry.size.height,
-                          roundedSize.width, roundedSize.height,
-                          wDiff, hDiff)
+                // 写入共享日志文件
+                let timestamp = String(format: "%02d:%02d:%02d.%03d",
+                    Calendar.current.component(.hour, from: Date()),
+                    Calendar.current.component(.minute, from: Date()),
+                    Calendar.current.component(.second, from: Date()),
+                    Int(Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1) * 1000))
+                let line = "[\(timestamp)] [HOST] 📐 [GeometryReader] raw=\(Int(geometry.size.width))x\(Int(geometry.size.height)) → rounded=\(Int(roundedSize.width))x\(Int(roundedSize.height))\n"
+                let logPath = "/tmp/canvas_ipc_debug.log"
+                if let handle = FileHandle(forWritingAtPath: logPath) {
+                    handle.seekToEndOfFile()
+                    if let data = line.data(using: .utf8) {
+                        handle.write(data)
+                    }
+                    handle.closeFile()
                 }
             }()
 
