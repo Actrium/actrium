@@ -511,6 +511,7 @@ struct CanvasApp: App {
         // Main window group - each window gets its own BrowserViewModel
         WindowGroup(id: "browser") {
             BrowserWindowView(historyVM: historyVM, bookmarkVM: bookmarkVM)
+                .frame(minWidth: 640, minHeight: 428)
                 .onReceive(NotificationCenter.default.publisher(for: .openNewWindowWithGroup)) { _ in
                     openWindow(id: "browser")
                 }
