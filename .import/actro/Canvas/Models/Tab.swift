@@ -74,6 +74,9 @@ struct Tab: Identifiable {
     /// Background color for this tab (Hex format: "#rrggbb")
     var backgroundColor: String
 
+    /// Additional properties from RN (excluding tabId)
+    var additionalProps: [String: Any]?
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -91,7 +94,8 @@ struct Tab: Identifiable {
         reloadNonce: Int = 0,
         leftPanelDefaultVisible: Bool = false,
         rightPanelDefaultVisible: Bool = false,
-        backgroundColor: String? = nil
+        backgroundColor: String? = nil,
+        additionalProps: [String: Any]? = nil
     ) {
         self.id = id
         self.title = title
@@ -110,6 +114,7 @@ struct Tab: Identifiable {
         self.leftPanelDefaultVisible = leftPanelDefaultVisible
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
         self.backgroundColor = backgroundColor ?? Self.generateRandomColor()
+        self.additionalProps = additionalProps
     }
 
     /// 生成随机的十六进制颜色字符串（深色调）
