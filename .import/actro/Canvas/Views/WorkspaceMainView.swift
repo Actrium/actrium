@@ -2259,18 +2259,23 @@ private struct TabPanel: View {
 
             case .native(let nativeType):
                 // Native SwiftUI content - rendered in main process, no XPC
+                // 🔑 Unlike RN (XPC) and Web (FocusedWebOverlay), native views are rendered
+                // directly in TabPanel and will be scaled by canvas transform.
+                // So we should NOT use viewportSize here - use cardWidth/cardHeight instead.
+                // The canvas scale will automatically enlarge the content in Focus mode.
+                let nativeSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
                 switch nativeType {
                 case .startPage:
                     StartPageView(
                         bookmarks: bookmarkVM.bookmarks,
                         recentHistory: historyVM.recentItems,
-                        containerSize: renderSize,
+                        containerSize: nativeSize,
                         isCompactMode: !isFocused,
                         onNavigate: { url in
                             onNavigate?(url)
                         }
                     )
-                    .frame(width: renderSize.width, height: renderSize.height)
+                    .frame(width: nativeSize.width, height: nativeSize.height)
                 }
 
             case .empty:
