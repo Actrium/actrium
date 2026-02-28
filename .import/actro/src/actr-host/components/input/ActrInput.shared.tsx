@@ -135,7 +135,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       // 3. 当消息接收完成时，增加未读数
       if (data.isEnd) {
         console.warn('更新未读消息数量')
-        useUnreadStore.getState().incrementUnread(appId);
+        useUnreadStore.getState().incrementUnread(appId, tab.id);
       }
     },
     [appId, updateMessage],
