@@ -29,7 +29,8 @@ public class TabEventEmitter: RCTEventEmitter {
             "onTabUpdated",
             "onTabsReordered",
             "onTabEnteredFullscreen",
-            "onTabExitedFullscreen"
+            "onTabExitedFullscreen",
+            "onTabBookmarkChanged"
         ]
     }
     
@@ -93,6 +94,14 @@ public class TabEventEmitter: RCTEventEmitter {
             self,
             selector: #selector(handleTabExitedFullscreen(_:)),
             name: .tabExitedFullscreenFromNative,
+            object: nil
+        )
+        
+        // Tab bookmark changed
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTabBookmarkChanged(_:)),
+            name: .tabBookmarkChangedFromNative,
             object: nil
         )
     }
@@ -216,6 +225,24 @@ public class TabEventEmitter: RCTEventEmitter {
         logger.debug("[TabEventEmitter] Sending onTabExitedFullscreen: \(tabId)")
         sendEvent(withName: "onTabExitedFullscreen", body: event)
     }
+    
+    @objc private func handleTabBookmarkChanged(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tabId = userInfo["tabId"] as? String,
+              let isBookmarked = userInfo["isBookmarked"] as? Bool else {
+            logger.warning("[TabEventEmitter] Invalid tabBookmarkChanged notification")
+            return
+        }
+        
+        let event: [String: Any] = [
+            "tabId": tabId,
+            "isBookmarked": isBookmarked,
+            "timestamp": Date().timeIntervalSince1970 * 1000
+        ]
+        
+        logger.debug("[TabEventEmitter] Sending onTabBookmarkChanged: \(tabId), isBookmarked: \(isBookmarked)")
+        sendEvent(withName: "onTabBookmarkChanged", body: event)
+    }
 }
 
 // MARK: - Notification Names
@@ -228,4 +255,5 @@ extension Notification.Name {
     static let tabsReorderedFromNative = Notification.Name("tabsReorderedFromNative")
     static let tabEnteredFullscreenFromNative = Notification.Name("tabEnteredFullscreenFromNative")
     static let tabExitedFullscreenFromNative = Notification.Name("tabExitedFullscreenFromNative")
+    static let tabBookmarkChangedFromNative = Notification.Name("tabBookmarkChangedFromNative")
 }
