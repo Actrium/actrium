@@ -51,6 +51,8 @@ interface ActrInputMobileViewProps {
   onClearInput: () => void;
   handleSendRef: React.MutableRefObject<() => void>;
   onAddBookmark?: () => void;
+  editingMessageId?: string | null;
+  handleCancelEdit?: () => void;
 }
 
 export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
@@ -85,6 +87,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     onClearInput,
     handleSendRef,
     onAddBookmark,
+    editingMessageId,
+    handleCancelEdit,
   } = props;
   const [mobileInputMode, setMobileInputMode] = React.useState<'text' | 'voice_hold'>(
     'text',
@@ -290,11 +294,22 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   );
 
   const hasAttachments = attachments.length > 0;
+  const isEditing = !!editingMessageId;
 
   return (
     <SafeAreaView style={styles.mobileSafeArea}>
       <View style={[styles.mobileContainer, { paddingHorizontal: 26 }]}>
         <View style={styles.mobileInputRow}>
+          {/* 左侧取消编辑按钮 - 编辑状态时显示 */}
+          {isEditing && (
+            <TouchableOpacity
+              style={styles.mobileReservedButton}
+              onPress={handleCancelEdit}
+            >
+              <Icon type='close' size={16} color='#666' />
+            </TouchableOpacity>
+          )}
+
           <View style={styles.mobilePrimaryArea}>
             {!isVoiceSurfaceMode ? (
               <View style={[
@@ -315,7 +330,6 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                 )}
                 <View style={styles.mobileInputInnerRow}>
                   <DropdownMenu
-                    dropdownStyle={styles.mobilePlusMenu}
                     trigger={
                       <View style={styles.mobilePlusButton}>
                         <Icon type='link' size={20} color='#404040' />
@@ -546,41 +560,46 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
           </View>
 
-          {/* 收藏按钮 - 未聚焦时显示 */}
-          {!isInputFocused && (
-            <TouchableOpacity
-              style={styles.mobileReservedButton}
-              onPress={handleAddBookmark}
-            >
-              <Icon type='tab_preview' size={20} color='#666' />
-              {/* 未读消息角标 */}
-              {totalUnread > 0 && (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadBadgeText}>
-                    {totalUnread > 99 ? '99+' : totalUnread}
-                  </Text>
-                </View>
+          {/* 右侧按钮 - 非编辑状态时显示 */}
+          {!isEditing && (
+            <>
+              {/* 收藏按钮 - 未聚焦时显示 */}
+              {!isInputFocused && (
+                <TouchableOpacity
+                  style={styles.mobileReservedButton}
+                  onPress={handleAddBookmark}
+                >
+                  <Icon type='tab_preview' size={20} color='#666' />
+                  {/* 未读消息角标 */}
+                  {totalUnread > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeText}>
+                        {totalUnread > 99 ? '99+' : totalUnread}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
-          )}
 
-          {/* send 按钮 - 聚焦 + isSendOnEnter 时显示 */}
-          {isInputFocused && isSendOnEnter && (
-            <TouchableOpacity
-              style={styles.mobileReservedButton}
-              onPress={() => {
-                if (hasInputText) {
-                  handleSendRef.current();
-                }
-              }}
-              disabled={!hasInputText}
-            >
-              <Icon
-                type='send'
-                size={20}
-                color={hasInputText ? '#000000' : '#666'}
-              />
-            </TouchableOpacity>
+              {/* send 按钮 - 聚焦 + isSendOnEnter 时显示 */}
+              {isInputFocused && isSendOnEnter && (
+                <TouchableOpacity
+                  style={styles.mobileReservedButton}
+                  onPress={() => {
+                    if (hasInputText) {
+                      handleSendRef.current();
+                    }
+                  }}
+                  disabled={!hasInputText}
+                >
+                  <Icon
+                    type='send'
+                    size={20}
+                    color={hasInputText ? '#000000' : '#666'}
+                  />
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
       </View>
@@ -712,16 +731,6 @@ const styles = StyleSheet.create({
     color: '#333333',
     fontSize: 17,
     fontWeight: '500',
-  },
-  mobilePlusMenu: {
-    left: -10,
-    bottom: 54,
-    width: 228,
-    borderRadius: 30,
-    paddingTop: 10,
-    paddingBottom: 12,
-    paddingHorizontal: 12,
-    minWidth: 228,
   },
   mobileMenuItem: {
     flexDirection: 'row',
