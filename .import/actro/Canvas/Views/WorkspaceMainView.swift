@@ -423,7 +423,7 @@ struct WorkspaceMainView: View {
                             switch tab.contentType {
                             case .reactNative: return .menu
                             case .web: return isWebLoading ? .loading : .none
-                            case .empty: return .none
+                            case .native, .empty: return .none
                             }
                         }()
 
@@ -528,7 +528,8 @@ struct WorkspaceMainView: View {
                     case .reactNative:
                         // ViewBridge tab: 同步截图
                         ViewBridgeHostViewManager.shared.takeSnapshot(for: focusedTabId)
-                    case .empty:
+                    case .native, .empty:
+                        // Native SwiftUI and empty tabs don't need snapshots
                         break
                     }
                 }
@@ -2255,6 +2256,22 @@ private struct TabPanel: View {
                     containerSize: renderSize,
                     isFocused: isFocused
                 )
+
+            case .native(let nativeType):
+                // Native SwiftUI content - rendered in main process, no XPC
+                switch nativeType {
+                case .startPage:
+                    StartPageView(
+                        bookmarks: bookmarkVM.bookmarks,
+                        recentHistory: historyVM.recentItems,
+                        containerSize: renderSize,
+                        isCompactMode: !isFocused,
+                        onNavigate: { url in
+                            onNavigate?(url)
+                        }
+                    )
+                    .frame(width: renderSize.width, height: renderSize.height)
+                }
 
             case .empty:
                 // Empty placeholder - new tabs now use system startPage

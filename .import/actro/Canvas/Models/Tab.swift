@@ -17,6 +17,11 @@ extension String {
 
 // MARK: - Tab Content Type
 
+/// Native content types rendered by SwiftUI in the main process
+enum NativeContentType: Equatable {
+    case startPage
+}
+
 /// Tab 内容类型：决定使用哪种渲染引擎
 enum TabContentType: Equatable {
     /// React Native 应用
@@ -25,6 +30,9 @@ enum TabContentType: Equatable {
 
     /// Web 内容（使用 WKWebView）
     case web(url: URL)
+
+    /// Native SwiftUI content (runs in main process, no XPC needed)
+    case native(type: NativeContentType)
 
     /// 空白 Tab（无内容）
     case empty
@@ -173,7 +181,7 @@ struct Tab: Identifiable {
     // MARK: - Content Type Detection
 
     /// 计算 Tab 的内容类型
-    /// 优先级：Web URL > RN 应用 > 空白
+    /// 优先级：Web URL > RN 应用 > Native 系统页面 > 空白
     var contentType: TabContentType {
         let result: TabContentType
 
@@ -185,9 +193,14 @@ struct Tab: Identifiable {
         else if let fingerprint = bundleFingerprint {
             result = .reactNative(bundleFingerprint: fingerprint)
         }
-        // 3. 系统 Tab 也使用 RN 渲染
+        // 3. 系统 Tab - startPage 使用原生 SwiftUI，其他系统页面仍用 RN
         else if let systemType = systemTabType {
-            result = .reactNative(bundleFingerprint: "system.\(systemType.rawValue)")
+            switch systemType {
+            case .startPage:
+                result = .native(type: .startPage)
+            case .history, .bookmarks, .debug:
+                result = .reactNative(bundleFingerprint: "system.\(systemType.rawValue)")
+            }
         }
         // 4. 空白 Tab
         else {
