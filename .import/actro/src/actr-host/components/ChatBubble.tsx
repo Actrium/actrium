@@ -400,7 +400,6 @@ export default function ChatBubble({
                 <Icon type='more' size={18} />
               </View>
             }
-            dropdownStyle={{ bottom: 44, left: -180 }}
             disabled={selectionMode}
           >
             {(close) => (

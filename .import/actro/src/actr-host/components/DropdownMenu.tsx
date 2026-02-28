@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
-  TouchableOpacity,
   StyleSheet,
   TouchableWithoutFeedback,
   Text,
   Pressable,
   ViewStyle,
   StyleProp,
+  Modal,
+  Dimensions,
 } from 'react-native';
 
 interface DropdownMenuProps {
@@ -30,18 +31,55 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<View>(null);
+
+  const calculatePosition = useCallback(() => {
+    triggerRef.current?.measureInWindow((x, y, width, height) => {
+      const screenWidth = Dimensions.get('window').width;
+      const screenHeight = Dimensions.get('window').height;
+      const menuWidth = 228;
+      const estimatedMenuHeight = 120; // 菜单估算高度
+      const gap = 8; // 菜单与按钮的间距
+
+      // 默认显示在触发器上方，紧贴按钮
+      let top = y - estimatedMenuHeight - gap;
+      let left = x + width / 2 - menuWidth / 2;
+
+      // 如果上方空间不足，显示在下方
+      if (top < 20) {
+        top = y + height + gap;
+      }
+
+      // 左右边界检查
+      if (left + menuWidth > screenWidth - 16) {
+        left = screenWidth - menuWidth - 16;
+      }
+      if (left < 16) left = 16;
+
+      setMenuPosition({ top, left });
+      setIsOpen(true);
+    });
+  }, []);
 
   const toggle = () => {
     if (disabled) return;
-    console.log('[DropdownMenu] Toggle called, current state:', !isOpen, 'type:', triggerType);
-    setIsOpen(!isOpen);
+    if (isOpen) {
+      setIsOpen(false);
+    } else {
+      calculatePosition();
+    }
   };
-  const close = () => setIsOpen(false);
+
+  const close = () => {
+    setIsOpen(false);
+    setMenuPosition(null);
+  };
 
   return (
-    <View style={[{ zIndex: isOpen ? 9999 : 1000 }, style]}>
+    <View ref={triggerRef} collapsable={false} style={style}>
       <Pressable
-        delayLongPress={350} // 稍微缩短，变得更灵敏
+        delayLongPress={350}
         onPress={triggerType === 'press' ? toggle : () => {}}
         onLongPress={triggerType === 'longPress' ? toggle : undefined}
         disabled={disabled}
@@ -53,15 +91,29 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         {trigger}
       </Pressable>
 
-      {isOpen && (
-        <>
+      {isOpen && menuPosition && (
+        <Modal
+          visible={isOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={close}
+        >
           <TouchableWithoutFeedback onPress={close}>
-            <View style={styles.backdrop} />
+            <View style={styles.modalBackdrop}>
+              <View
+                style={[
+                  styles.dropdown,
+                  {
+                    top: menuPosition.top,
+                    left: menuPosition.left,
+                  },
+                ]}
+              >
+                {typeof children === 'function' ? children(close) : children}
+              </View>
+            </View>
           </TouchableWithoutFeedback>
-          <View style={[styles.dropdown, dropdownStyle]}>
-            {typeof children === 'function' ? children(close) : children}
-          </View>
-        </>
+        </Modal>
       )}
     </View>
   );
@@ -111,15 +163,16 @@ export const DropdownMenuSubText: React.FC<{
 };
 
 const styles = StyleSheet.create({
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   dropdown: {
     position: 'absolute',
-    bottom: 50,
-    left: 0,
     backgroundColor: '#FFFFFF',
     borderRadius: 34,
     padding: 10,
     minWidth: 228,
-    zIndex: 1001,
     gap: 8,
 
     // iOS Shadow
@@ -129,15 +182,6 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     // Android Shadow
     elevation: 8,
-  },
-  backdrop: {
-    position: 'absolute',
-    top: -1000,
-    left: -1000,
-    right: -1000,
-    bottom: -1000,
-    backgroundColor: 'transparent',
-    zIndex: 1000,
   },
   dropdownItem: {
     flexDirection: 'row',

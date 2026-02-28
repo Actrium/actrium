@@ -353,6 +353,8 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
           inputText={inputText}
           onClearInput={handleClearInput}
           handleSendRef={handleSendRef}
+          editingMessageId={editingMessageId}
+          handleCancelEdit={handleCancelEdit}
         />
       ) : (
         <ActrInputPadView

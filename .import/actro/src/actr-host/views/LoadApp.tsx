@@ -98,10 +98,6 @@ const LoadApp = () => {
     }
   }, [dismissKeyboard, isSupported]);
 
-  // TODO 临时
-  // setTabIdMap(tabCtx.tab.id, '02094310-3454-4929-80b5-8ee85d09f34b', 'https://gate.actrium-beta.example/with/02094310-3454-4929-80b5-8ee85d09f34b');
-  // setTabIdMap(tabCtx.tab.id, '9fa7fb70-d227-4b0f-959e-3f634eeee4a9', 'https://gate.actrium-beta.example/with/9fa7fb70-d227-4b0f-959e-3f634eeee4a9');
-
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
     onCodeScanned: (codes) => {
@@ -151,7 +147,9 @@ const LoadApp = () => {
     e: NativeSyntheticEvent<TextInputSubmitEditingEventData>,
   ) => {
     // const url = e.nativeEvent.text;
-    const url = e.nativeEvent.text || 'https://gate.actrium-beta.example/with/e3d2dd77-1957-48b4-9789-f2e8bf950358';
+    const url =
+      e.nativeEvent.text ||
+      'https://gate.actrium-beta.example/with/a495b23c-71f1-4f5c-910a-d3d8fa692d1a';
     if (!url) return;
 
     void handleResolveUrl(url);
@@ -248,18 +246,33 @@ const LoadApp = () => {
   return (
     <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: keyboardInset }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: keyboardInset },
+        ]}
         keyboardShouldPersistTaps='handled'
       >
         <View style={[styles.LoadAppContainer, { gap: containerGap }]}>
           {/* camera scan qrcode */}
-          <View style={[styles.scanArea, { width: scanSize, height: scanSize, borderRadius: scanBorderRadius }]}>
+          <View
+            style={[
+              styles.scanArea,
+              {
+                width: scanSize,
+                height: scanSize,
+                borderRadius: scanBorderRadius,
+              },
+            ]}
+          >
             {renderScanContent()}
           </View>
 
           {/* input app url */}
           {renderInput(
-            [styles.input, { width: inputWidth, borderRadius: inputBorderRadius }],
+            [
+              styles.input,
+              { width: inputWidth, borderRadius: inputBorderRadius },
+            ],
             [styles.inputContainer, { borderRadius: inputBorderRadius }],
           )}
         </View>
