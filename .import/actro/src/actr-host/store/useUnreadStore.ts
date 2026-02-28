@@ -71,9 +71,9 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
     // 更新数据库，标为已读
     MessageRepository.markAllAsReadByAppId(appId);
     // 通知 native 更新 tab 未读状态
-    setTabUnreadStatus(tabId, false).catch((e) =>
-      console.error('[UnreadStore] Failed to notify native clear:', e),
-    );
+    setTabUnreadStatus(tabId, false).catch((e) => {
+      // console.error('[UnreadStore] Failed to notify native clear:', e),
+    });
   },
 
   setUnreadCounts: (counts: Record<string, number>) => {

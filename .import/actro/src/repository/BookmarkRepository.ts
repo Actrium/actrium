@@ -147,4 +147,15 @@ export class BookmarkRepository {
   static async removeBookmark(tabId: string) {
     return await db.executeSql('DELETE FROM bookmark_items WHERE tab_id = ?', [tabId]);
   }
+
+  /**
+   * 更新收藏项的 tab_id（按 app_id 匹配）
+   * 用于应用加载成功后，将当前 tab 与收藏记录关联
+   */
+  static async updateTabId(appId: string, tabId: string) {
+    return await db.executeSql(
+      'UPDATE bookmark_items SET tab_id = ? WHERE app_id = ?',
+      [tabId, appId]
+    );
+  }
 }

@@ -76,8 +76,8 @@ export default function Chat() {
 
   const loadAppInfo = useCallback(async () => {
     if (!appId || appInfo) return;
-    await AppSessionService.initSession(appId);
-  }, [appId, appInfo]);
+    await AppSessionService.initSession(tab.id, appId);
+  }, [appId, appInfo, tab.id]);
 
   // 初始化加载第一页
   const loadInitialMessages = useCallback(async () => {

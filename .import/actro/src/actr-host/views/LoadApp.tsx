@@ -1,4 +1,10 @@
-import React, { useCallback, useState, useMemo, useRef } from 'react';
+import React, {
+  useCallback,
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+} from 'react';
 import {
   Image,
   NativeSyntheticEvent,
@@ -29,8 +35,10 @@ import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { useTab } from '../contexts/TabContext';
 import { extractAppIdFromUrl } from '../utils';
 import { AppSessionService } from '../../services/AppSessionService';
+import { BookmarkRepository } from '../../repository/BookmarkRepository';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../styles/shadows';
+import { setTabBookmarkStatus } from '../../../src/native-bridge/tab/TabModule';
 
 const LoadApp = () => {
   const [hasPermission, setHasPermission] = useState(false);
@@ -53,6 +61,16 @@ const LoadApp = () => {
   const inputBorderRadius = 24;
 
   const device = useCameraDevice('back');
+
+  // 若 tab 预设了 appUrl，视为从收藏加载，mount 时自动触发加载，无需用户手动输入
+  useEffect(() => {
+    if (tabCtx.tab.appUrl) {
+      void handleResolveUrl(tabCtx.tab.appUrl);
+
+      // FIXME 要手动再通知 native 更新收藏标识
+      void setTabBookmarkStatus(tabCtx.tab.id, true);
+    }
+  }, []);
 
   // 检查是否为模拟器 (通过简单的硬件特征判断，无需额外依赖)
   const isSimulator = useMemo(() => {
@@ -121,7 +139,11 @@ const LoadApp = () => {
       isResolvingRef.current = true;
       setIsResolving(true);
       try {
-        const initResult = await AppSessionService.initSession(appId, url);
+        const initResult = await AppSessionService.initSession(
+          tabCtx.tab.id,
+          appId,
+          url,
+        );
         if (!initResult.ok) {
           if (initResult.reason === 'APP_NOT_FOUND') {
             Alert.alert('应用不存在');
@@ -132,6 +154,8 @@ const LoadApp = () => {
         }
 
         setTabIdMap(tabCtx.tab.id, appId, url);
+        // 将收藏表中对应的收藏项 tab_id 更新为当前 tab
+        void BookmarkRepository.updateTabId(appId, tabCtx.tab.id);
       } catch (error) {
         console.error('[LoadApp] Failed to resolve app from url:', error);
         Alert.alert('加载失败', '请稍后重试');
