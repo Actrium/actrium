@@ -1146,7 +1146,7 @@ final class ViewBridgeCoordinator {
     /// 当定时器触发时（尺寸稳定），发送最终尺寸到 Service
     private func scheduleFinalSizeDebounce() {
         finalSizeDebounceTimer?.invalidate()
-        ipcLog("⏱️ scheduleFinalSizeDebounce: starting 300ms debounce timer")
+        ipcLog("⏱️ scheduleFinalSizeDebounce: starting \(Int(Self.finalSizeDebounceInterval * 1000))ms debounce timer")
         finalSizeDebounceTimer = Timer.scheduledTimer(withTimeInterval: Self.finalSizeDebounceInterval, repeats: false) { [weak self] _ in
             guard let self = self else { return }
 
@@ -1777,14 +1777,18 @@ struct PersistentViewBridgeView: NSViewRepresentable {
         // 之前只在 hostView 存在时才更新，导致初始化时 currentViewportSize 可能被其他代码路径设置为 @2x
         coordinator.updateViewportSize(effectiveSize)
 
-        // 更新 hostView frame 使用目标尺寸
+        // 🔑 关键改进：始终更新 hostView frame，包括 live resize 期间
+        // 之前在 live resize 期间跳过更新，可能导致 resize 结束后
+        // hostView.frame 与 SwiftUI 期望的尺寸不一致
         if let hostView = container.subviews.first as? ViewBridgeHostView {
-            if !WindowResizeState.shared.isLiveResizing {
-                let hostSize = hostView.frame.size
-                let sizeDiff = abs(hostSize.width - effectiveSize.width) + abs(hostSize.height - effectiveSize.height)
-                if sizeDiff > 1 {
-                    hostView.frame = NSRect(origin: .zero, size: effectiveSize)
-                }
+            let hostSize = hostView.frame.size
+            let sizeDiff = abs(hostSize.width - effectiveSize.width) + abs(hostSize.height - effectiveSize.height)
+            if sizeDiff > 0.5 {
+                // 使用 CATransaction 避免隐式动画
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                hostView.frame = NSRect(origin: .zero, size: effectiveSize)
+                CATransaction.commit()
             }
             // Update hit testing state on hostView as well
             hostView.allowsHitTesting = allowsHitTesting
