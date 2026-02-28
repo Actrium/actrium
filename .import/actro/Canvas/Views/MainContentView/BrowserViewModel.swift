@@ -25,6 +25,9 @@ class BrowserViewModel: ObservableObject {
     // 默认所有标签页左侧面板可见；仅在用户切换时记录覆盖值
     @Published private var leftPanelVisibility: [UUID: Bool] = [:]
     
+    /// Current fullscreen tab ID (for iPhone only, excluding system tabs)
+    @Published var fullscreenTabId: UUID?
+    
     // MARK: - System Tabs (单独管理，不混入 tabs 数组)
     @Published var systemTabs: [SystemTabType: Tab] = [:]
 
