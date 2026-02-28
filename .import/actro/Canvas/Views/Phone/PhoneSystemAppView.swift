@@ -38,6 +38,7 @@ struct PhoneSystemAppView: View {
         .onAppear {
             loadSystemTab()
         }
+        .ignoresSafeArea(.container)
         .onChange(of: systemType) { _, _ in
             loadSystemTab()
         }

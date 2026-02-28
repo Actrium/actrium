@@ -9,66 +9,58 @@ struct PhoneMainView: View {
     @State private var fullscreenTab: Tab?
     
     enum PhoneTab {
-        case search
         case bookmarks
         case tabs
         case settings
+        case search
     }
     
     var body: some View {
         TabView(selection: $selectedTab) {
             // 书签页：使用 RN 渲染
-            PhoneSystemAppView(
-                systemType: .bookmarks,
-                viewModel: viewModel,
-                historyVM: historyVM,
-                bookmarkVM: bookmarkVM,
-                onSelect: { tab in
-                    fullscreenTab = tab
-                }
-            )
-            .tabItem {
-                Label("书签", systemImage: "bookmark.fill")
+            SwiftUI.Tab("书签", systemImage: "bookmark.fill", value: PhoneTab.bookmarks) {
+                PhoneSystemAppView(
+                    systemType: .bookmarks,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    onSelect: { tab in
+                        fullscreenTab = tab
+                    }
+                )
             }
-            .tag(PhoneTab.bookmarks)
             
-            PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, onSelect: { tab in
-                fullscreenTab = tab
-            })
-            .tabItem {
-                Label("页签", systemImage: "square.grid.2x2.fill")
+            SwiftUI.Tab("页签", systemImage: "square.grid.2x2.fill", value: PhoneTab.tabs) {
+                PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, onSelect: { tab in
+                    fullscreenTab = tab
+                })
             }
-            .tag(PhoneTab.tabs)
             
             // 设置页：使用 RN 渲染
-            PhoneSystemAppView(
-                systemType: .settings,
-                viewModel: viewModel,
-                historyVM: historyVM,
-                bookmarkVM: bookmarkVM,
-                onSelect: { tab in
-                    fullscreenTab = tab
-                }
-            )
-            .tabItem {
-                Label("偏好设置", systemImage: "gearshape.fill")
+            SwiftUI.Tab("偏好设置", systemImage: "gearshape.fill", value: PhoneTab.settings) {
+                PhoneSystemAppView(
+                    systemType: .settings,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    onSelect: { tab in
+                        fullscreenTab = tab
+                    }
+                )
             }
-            .tag(PhoneTab.settings)
 
-            // 搜索页：使用 RN 渲染
-            PhoneSystemAppView(
-                systemType: .globalSearch,
-                viewModel: viewModel,
-                historyVM: historyVM,
-                bookmarkVM: bookmarkVM,
-                onSelect: { tab in
-                    fullscreenTab = tab
-                }
-            )
-            .tabItem {
-                Label("搜索", systemImage: "magnifyingglass")
+            // 搜索页：独立显示（不占用固定 tab 位置）
+            SwiftUI.Tab("搜索", systemImage: "magnifyingglass", value: PhoneTab.search, role: .search) {
+                PhoneSystemAppView(
+                    systemType: .globalSearch,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    onSelect: { tab in
+                        fullscreenTab = tab
+                    }
+                )
             }
-            .tag(PhoneTab.search)
         }
         .accentColor(.blue)
         .sheet(item: $fullscreenTab) { tab in
