@@ -8,6 +8,7 @@ import { useAuthTaskStore } from '../actr-host/store/useAuthTaskStore';
 import { AccountUserInfo } from '../api/types';
 import { actrLoader } from '../actr-host/utils';
 import { Utils } from '../utils/utils';
+import { updateTabInfo } from '../../src/native-bridge/tab/TabModule';
 
 export type TInitSessionResult =
   | {
@@ -32,6 +33,7 @@ export class AppSessionService {
    * @param url 应用加载来源地址
    */
   static async initSession(
+    tabId: string,
     appId: string,
     url?: string,
   ): Promise<TInitSessionResult> {
@@ -64,6 +66,14 @@ export class AppSessionService {
       if (url) {
         appRes.data.url = url;
       }
+
+      // 更新 native 处 tab 信息
+      void updateTabInfo({
+        tabId: tabId,
+        title: appRes.data.app_name,
+        icon: appRes.data.info?.logo || '',
+        url: appRes.data.url || '',
+      })
 
       useAppStore.getState().setAppInfo(appId, appRes.data);
       await AppRepository.saveApp(appRes.data);

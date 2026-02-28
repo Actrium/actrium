@@ -2,19 +2,10 @@ import { NativeModules } from 'react-native';
 
 const { TabModule } = NativeModules;
 
-// 关闭 tab
-export const closeCurrentTab = async (tabId: string): Promise<boolean> => {
-  try {
-    return TabModule.closeTab(tabId);
-  } catch (e) {
-    console.error(e);
-  }
-  return false;
-};
-
+// 打开 tab
 export const openTab = async (data: {
   tabId: string;
-  openUrl: string;
+  appUrl: string;
 }): Promise<string> => {
   try {
     return TabModule.openTab(data);
@@ -22,15 +13,6 @@ export const openTab = async (data: {
     console.error(e);
   }
   return '';
-};
-
-export const selectTab = async (tabId: string): Promise<boolean> => {
-  try {
-    return TabModule.selectTab(tabId);
-  } catch (e) {
-    console.error(e);
-  }
-  return false;
 };
 
 // 退出 tab
@@ -76,13 +58,33 @@ export const getCurrentFullscreenTab = async (): Promise<string> => {
   return '';
 };
 
-// 设置 native 收藏状态
+// 设置 tab 收藏状态
 export const setTabBookmarkStatus = async (
   tabId: string,
   isBookmarked: boolean,
 ): Promise<boolean> => {
   try {
     return TabModule.setTabBookmarkStatus(tabId, isBookmarked);
+  } catch (e) {
+    console.error(e);
+  }
+  return false;
+};
+
+// 设置 tab 信息
+export const updateTabInfo = async ({
+  tabId,
+  title,
+  icon,
+  url,
+}: {
+  tabId: string;
+  title: string;
+  icon: string;
+  url: string;
+}): Promise<boolean> => {
+  try {
+    return TabModule.updateTabInfo({ tabId, title, icon, url });
   } catch (e) {
     console.error(e);
   }

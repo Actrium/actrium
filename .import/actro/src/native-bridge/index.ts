@@ -22,4 +22,4 @@ export {
 // Tab
 export { TabEvents } from './tab/TabEvents';
 export type { TabFullscreenEvent } from './tab/TabEvents';
-export { closeCurrentTab, openTab, selectTab, exitFullscreen } from './tab/TabModule';
+export { openTab, exitFullscreen } from './tab/TabModule';

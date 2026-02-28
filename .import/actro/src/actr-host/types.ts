@@ -58,6 +58,8 @@ export type TabConfig = {
   historyItems?: HistoryItemData[];
   historyGroups?: HistoryGroupData[];
   bookmarks?: BookmarkData[];
+  // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
+  appUrl?: string;
 };
 
 export type ActrProps = {
@@ -78,4 +80,7 @@ export type TabRouterProps = ActrProps & {
   // Native 传递的容器尺寸（确保窗口缩小时 RN 能感知）
   containerWidth?: number;
   containerHeight?: number;
+
+  // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
+  appUrl?: string;
 };
