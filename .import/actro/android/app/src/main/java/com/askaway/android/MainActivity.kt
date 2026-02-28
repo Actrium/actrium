@@ -17,8 +17,10 @@ import androidx.core.view.forEach
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.askaway.android.databinding.ActivityMainBinding
 import com.askaway.android.global.Params
+import com.askaway.android.model.ActiveModel
 import com.askaway.android.view.HeadTabView
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
@@ -27,6 +29,7 @@ import kotlinx.coroutines.launch
 import com.askaway.android.global.Constants
 import kotlinx.coroutines.delay
 import com.askaway.android.core.ReactNativeBundle
+import java.util.UUID
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     private lateinit var binding: ActivityMainBinding
@@ -35,6 +38,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     private val appViews = mutableMapOf<String, ReactRootView>()
     private var isReactNativeVisible = false
     private var isLayoutComplete = false
+    private lateinit var activeRecyclerAdapter: com.askaway.android.adapter.ActiveRecyclerAdapter
+    private lateinit var activeAdapter: ActiveAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,6 +113,14 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         binding.ivAdd.setOnClickListener {
             viewModel.addApp()
             showReactNativeView()
+            // 每次点击 ivAdd 时添加一条 ActiveModel 数据到列表
+            val activeModel = ActiveModel(
+                id = UUID.randomUUID().toString(),
+                name = "Active App ${System.currentTimeMillis()}",
+                icon = "",
+                screenshot = ""
+            )
+            viewModel.addActiveModel(activeModel)
         }
 
         // 设置导航栏选择监听器
@@ -121,6 +134,16 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             alignIndicatorToSelectedButton(animate = false)
         }
 
+        // 初始化 RecyclerView 和 Adapter
+        activeRecyclerAdapter = com.askaway.android.adapter.ActiveRecyclerAdapter()
+        binding.recyApps.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            adapter = activeRecyclerAdapter
+        }
+
+        binding.ivAdd.post {
+            binding.ivAdd.performClick()
+        }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
@@ -152,6 +175,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
 //                            tabView.setAppName("123")
 //                            binding.llTabs.addView(tabView)
 //                        }
+                    }
+                }
+                launch {
+                    viewModel.activeList.collect { activeModels ->
+                        Log.d("MainActivity", "activeList changed: ${activeModels.size}")
+                        activeRecyclerAdapter.updateData(activeModels)
                     }
                 }
             }
@@ -211,6 +240,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                 // 显示书签页
                 showBookmark()
             }
+
             R.id.navActivity -> {
                 // 显示活动页
                 binding.flBookmark.visibility = View.GONE
@@ -218,6 +248,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                 binding.flSet.visibility = View.GONE
                 Log.d("MainActivity", "Show Active")
             }
+
             R.id.navSettings -> {
                 // 显示设置页
                 showSet()
@@ -237,11 +268,11 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         Log.d("MainActivity", "Show Bookmark")
     }
 
-    private fun showSet(){
+    private fun showSet() {
         binding.flBookmark.visibility = View.GONE
         binding.llActive.visibility = View.GONE
         binding.flSet.visibility = View.VISIBLE
-        if(binding.flSet.childCount == 0) {
+        if (binding.flSet.childCount == 0) {
             val bundle = ReactNativeBundle.getSetBundle()
             val targetView = createReactRootView("canvas-kotlin", bundle)
             binding.flSet.addView(targetView)
