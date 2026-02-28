@@ -123,8 +123,6 @@ export default function Chat() {
     loadAppInfo();
 
     if (appId) {
-      // 标记当前应用的所有消息为已读
-      MessageRepository.markAllAsReadByAppId(appId);
       // 同步更新未读消息 store
       useUnreadStore.getState().clearUnread(appId, tab.id);
     }
@@ -293,7 +291,9 @@ export default function Chat() {
                   }
                 />
               </View>
-            ) : isLatest && (item.progress === Progress.pending || item.progress === Progress.processing) ? (
+            ) : isLatest &&
+              (item.progress === Progress.pending ||
+                item.progress === Progress.processing) ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size='small' color='#999' />
                 <Text style={styles.loadingText}>正在思考...</Text>
@@ -369,72 +369,72 @@ export default function Chat() {
   }, [appId, deleteSelectedMessages, exitSelectionMode]);
 
   return (
+    <View
+      style={[
+        styles.mainContainer,
+        { backgroundColor: layoutTokens.isTablet ? '#ffffff' : '#F2F2F6' },
+      ]}
+    >
+      <View style={styles.contentArea}>
+        {!messages || (messages.length === 0 && !isLoadingMore) ? (
+          <TouchableWithoutFeedback onPress={dismissKeyboard}>
+            <View style={{ flex: 1 }}>
+              <ChatEmpty />
+            </View>
+          </TouchableWithoutFeedback>
+        ) : (
+          <FlatList
+            data={messages}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.message_id}
+            inverted={true}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.1}
+            style={styles.chatScrollView}
+            contentContainerStyle={[
+              styles.chatContent,
+              { paddingBottom: layoutTokens.chatListBottomPadding },
+            ]}
+            ListFooterComponent={ListHeaderComponent}
+            showsHorizontalScrollIndicator={false}
+            horizontal={false}
+            keyboardShouldPersistTaps='handled'
+            keyboardDismissMode='on-drag'
+          />
+        )}
+      </View>
+
+      {/* 输入框 */}
       <View
         style={[
-          styles.mainContainer,
-          { backgroundColor: layoutTokens.isTablet ? '#ffffff' : '#F2F2F6' },
+          styles.inputContainer,
+          {
+            backgroundColor: layoutTokens.isTablet ? '#fff' : '#F2F2F6',
+            marginBottom: layoutTokens.isTablet ? keyboardInset : 0,
+          },
         ]}
       >
-        <View style={styles.contentArea}>
-          {!messages || (messages.length === 0 && !isLoadingMore) ? (
-            <TouchableWithoutFeedback onPress={dismissKeyboard}>
-              <View style={{ flex: 1 }}>
-                <ChatEmpty />
-              </View>
-            </TouchableWithoutFeedback>
-          ) : (
-            <FlatList
-              data={messages}
-              renderItem={renderItem}
-              keyExtractor={(item) => item.message_id}
-              inverted={true}
-              onEndReached={handleLoadMore}
-              onEndReachedThreshold={0.1}
-              style={styles.chatScrollView}
-              contentContainerStyle={[
-                styles.chatContent,
-                { paddingBottom: layoutTokens.chatListBottomPadding },
-              ]}
-              ListFooterComponent={ListHeaderComponent}
-              showsHorizontalScrollIndicator={false}
-              horizontal={false}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-            />
-          )}
-        </View>
+        <View style={styles.inputInner}>{input}</View>
+      </View>
 
-        {/* 输入框 */}
+      {/* 删除按钮 - 绝对定位在输入框中心 */}
+      {selectionMode && (
         <View
           style={[
-            styles.inputContainer,
-            {
-              backgroundColor: layoutTokens.isTablet ? '#fff' : '#F2F2F6',
-              marginBottom: layoutTokens.isTablet ? keyboardInset : 0,
-            },
+            styles.deleteButtonContainer,
+            { bottom: layoutTokens.deleteButtonBottom },
           ]}
         >
-          <View style={styles.inputInner}>{input}</View>
+          <DeleteButton
+            selectedCount={selectedCount}
+            onPress={handleDeletePress}
+            onCancel={exitSelectionMode}
+          />
         </View>
+      )}
 
-        {/* 删除按钮 - 绝对定位在输入框中心 */}
-        {selectionMode && (
-          <View
-            style={[
-              styles.deleteButtonContainer,
-              { bottom: layoutTokens.deleteButtonBottom },
-            ]}
-          >
-            <DeleteButton
-              selectedCount={selectedCount}
-              onPress={handleDeletePress}
-              onCancel={exitSelectionMode}
-            />
-          </View>
-        )}
-
-        <Toast ref={toastRef} />
-      </View>
+      <Toast ref={toastRef} />
+    </View>
   );
 }
 

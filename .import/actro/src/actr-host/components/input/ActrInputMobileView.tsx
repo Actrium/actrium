@@ -128,17 +128,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     }, 0);
   }, []);
 
-  const handleAddBookmark = React.useCallback(async () => {
+  const handleExitTab = React.useCallback(async () => {
     try {
-      // 直接添加书签，不指定分类（category_id 为 null）
-      await BookmarkRepository.addBookmark({
-        app_id: appId,
-        tab_id: tab.id,
-        sort_order: 0,
-      });
-
-      // 调用外部回调（如果有）
-      onAddBookmark?.();
       await exitFullscreen();
     } catch (error) {
       console.error('[ActrInputMobileView] Failed to add bookmark', error);
@@ -567,7 +558,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
               {!isInputFocused && (
                 <TouchableOpacity
                   style={styles.mobileReservedButton}
-                  onPress={handleAddBookmark}
+                  onPress={handleExitTab}
                 >
                   <Icon type='tab_preview' size={20} color='#666' />
                   {/* 未读消息角标 */}

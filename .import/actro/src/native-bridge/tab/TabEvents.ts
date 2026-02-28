@@ -14,6 +14,11 @@ export type TabUnreadStatusEvent = {
   unread: boolean;
 };
 
+export type TabBookmarkEvent = {
+  tabId: string;
+  isBookmarked: boolean;
+};
+
 type Unsubscribe = () => void;
 
 export const TabEvents = {
@@ -34,6 +39,17 @@ export const TabEvents = {
   ): Unsubscribe => {
     const subscription = eventEmitter.addListener(
       'onTabExitedFullscreen',
+      callback,
+    );
+    return () => subscription.remove();
+  },
+
+  // native 端设置收藏状态
+  onTabBookmarkChanged: (
+    callback: (event: TabBookmarkEvent) => void,
+  ): Unsubscribe => {
+    const subscription = eventEmitter.addListener(
+      'onTabBookmarkChanged',
       callback,
     );
     return () => subscription.remove();

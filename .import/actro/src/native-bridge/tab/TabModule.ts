@@ -65,3 +65,26 @@ export const setTabUnreadStatus = async (
   }
   return false;
 };
+
+// 获取当前打开的 tab id
+export const getCurrentFullscreenTab = async (): Promise<string> => {
+  try {
+    return TabModule.getCurrentFullscreenTab();
+  } catch (e) {
+    console.error(e);
+  }
+  return '';
+};
+
+// 设置 native 收藏状态
+export const setTabBookmarkStatus = async (
+  tabId: string,
+  isBookmarked: boolean,
+): Promise<boolean> => {
+  try {
+    return TabModule.setTabBookmarkStatus(tabId, isBookmarked);
+  } catch (e) {
+    console.error(e);
+  }
+  return false;
+};
