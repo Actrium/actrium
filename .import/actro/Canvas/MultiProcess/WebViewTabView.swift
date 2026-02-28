@@ -178,6 +178,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Callback when a new window should be opened (target="_blank")
     var onOpenNewWindow: ((URL) -> Void)?
+    
+    /// Callback when theme color changes
+    var onThemeColorChanged: ((String) -> Void)?
 
     /// Current loading state
     private(set) var isLoading: Bool = false
@@ -205,10 +208,110 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         let config = WKWebViewConfiguration()
         config.processPool = sharedProcessPool
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        
+        // Add script message handler for theme color
+        let userContentController = WKUserContentController()
+        config.userContentController = userContentController
 
         // Use custom DownloadableWebView for context menu download support
         self.webView = DownloadableWebView(frame: .zero, configuration: config)
         super.init()
+
+        // Register self as message handler
+        userContentController.add(self, name: "canvasThemeColor")
+        userContentController.add(self, name: "canvasLog")
+        
+        // Inject script to observe theme color
+        let script = """
+        (function() {
+            function log(msg) {
+                window.webkit.messageHandlers.canvasLog.postMessage(msg);
+            }
+
+            function toHex(color) {
+                if (!color) return null;
+                if (color.startsWith('#')) return color;
+                if (color.startsWith('rgb')) {
+                    var parts = color.match(/\\d+/g);
+                    if (!parts || parts.length < 3) return null;
+                    var r = parseInt(parts[0]).toString(16).padStart(2, '0');
+                    var g = parseInt(parts[1]).toString(16).padStart(2, '0');
+                    var b = parseInt(parts[2]).toString(16).padStart(2, '0');
+                    return '#' + r + g + b;
+                }
+                return null; // Handle named colors if needed, but computed style usually returns rgb
+            }
+
+            function reportColor() {
+                var color = null;
+                var source = 'none';
+
+                // Priority 1: meta theme-color
+                var meta = document.querySelector('meta[name="theme-color"]');
+                if (meta) {
+                    color = meta.content;
+                    source = 'meta';
+                }
+                
+                // Priority 2: computed body background color
+                if (!color) {
+                    var style = window.getComputedStyle(document.body);
+                    if (style && style.backgroundColor && 
+                        style.backgroundColor !== 'rgba(0, 0, 0, 0)' && 
+                        style.backgroundColor !== 'transparent') {
+                        color = style.backgroundColor;
+                        source = 'body';
+                    }
+                }
+                
+                // Priority 3: computed html background color
+                if (!color) {
+                    var style = window.getComputedStyle(document.documentElement);
+                    if (style && style.backgroundColor && 
+                        style.backgroundColor !== 'rgba(0, 0, 0, 0)' && 
+                        style.backgroundColor !== 'transparent') {
+                        color = style.backgroundColor;
+                        source = 'html';
+                    }
+                }
+
+                // Fallback: If no color found, use browser default based on color scheme
+                if (!color) {
+                    // Check prefers-color-scheme
+                    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                        color = '#1e1e1e'; // Default dark background
+                        source = 'fallback-dark';
+                    } else {
+                        color = '#ffffff'; // Default light background
+                        source = 'fallback-light';
+                    }
+                }
+                
+                var hex = toHex(color);
+                if (hex) {
+                    log('Found color: ' + hex + ' from ' + source + ' (raw: ' + color + ')');
+                    window.webkit.messageHandlers.canvasThemeColor.postMessage(hex);
+                } else {
+                    log('No color found (checked meta, body, html)');
+                }
+            }
+            
+            // Initial check
+            if (document.readyState === 'complete') {
+                reportColor();
+            } else {
+                window.addEventListener('load', reportColor);
+            }
+            
+            // Observe meta tag changes
+            var observer = new MutationObserver(function(mutations) {
+                reportColor();
+            });
+            observer.observe(document.head, { subtree: true, childList: true, attributes: true });
+        })();
+        """
+        let userScript = WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        userContentController.addUserScript(userScript)
 
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
@@ -1121,6 +1224,8 @@ struct FocusedWebOverlay: View {
     var onLoadingStateChanged: ((Bool) -> Void)?
     /// Callback when a new window should be opened (target="_blank")
     var onOpenNewWindow: ((URL) -> Void)?
+    /// Callback when theme color changes
+    var onThemeColorChanged: ((String) -> Void)?
 
     /// 从全局 Manager 获取持久化的 WebViewHolder
     private let holder: WebViewHolder
@@ -1129,7 +1234,8 @@ struct FocusedWebOverlay: View {
          onNavigationFinished: ((String?, URL?) -> Void)? = nil,
          onURLChanged: ((URL?) -> Void)? = nil,
          onLoadingStateChanged: ((Bool) -> Void)? = nil,
-         onOpenNewWindow: ((URL) -> Void)? = nil) {
+         onOpenNewWindow: ((URL) -> Void)? = nil,
+         onThemeColorChanged: ((String) -> Void)? = nil) {
         self.tab = tab
         self.url = url
         self.viewportSize = viewportSize
@@ -1137,6 +1243,7 @@ struct FocusedWebOverlay: View {
         self.onURLChanged = onURLChanged
         self.onLoadingStateChanged = onLoadingStateChanged
         self.onOpenNewWindow = onOpenNewWindow
+        self.onThemeColorChanged = onThemeColorChanged
         self.holder = WebViewHolderManager.shared.holder(for: tab.id)
 
         // Set callbacks immediately in init (SwiftUI View init can be called multiple times)
@@ -1144,6 +1251,7 @@ struct FocusedWebOverlay: View {
         holder.onURLChanged = onURLChanged
         holder.onLoadingStateChanged = onLoadingStateChanged
         holder.onOpenNewWindow = onOpenNewWindow
+        holder.onThemeColorChanged = onThemeColorChanged
     }
 
     var body: some View {
@@ -1158,5 +1266,21 @@ struct FocusedWebOverlay: View {
             .onChange(of: url) { _, newURL in
                 holder.loadIfNeeded(newURL)
             }
+    }
+}
+
+// MARK: - Script Message Handler
+
+extension WebViewHolder: WKScriptMessageHandler {
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "canvasThemeColor", let colorHex = message.body as? String {
+            if colorHex.hasPrefix("#") {
+                Task { @MainActor [weak self] in
+                    self?.onThemeColorChanged?(colorHex)
+                }
+            }
+        } else if message.name == "canvasLog", let logMsg = message.body as? String {
+            NSLog("🎨 [JS Color Log] %@", logMsg)
+        }
     }
 }

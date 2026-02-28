@@ -174,7 +174,7 @@ struct Tab: Identifiable {
         self.reloadNonce = reloadNonce
         self.leftPanelDefaultVisible = leftPanelDefaultVisible
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
-        self.backgroundColor = backgroundColor ?? Self.generateRandomColor()
+        self.backgroundColor = backgroundColor ?? "#1e1e1e"
         self.appIcon = appIcon
     }
 

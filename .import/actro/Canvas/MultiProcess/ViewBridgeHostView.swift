@@ -169,7 +169,6 @@ public class ViewBridgeHostView: NSView {
 
     private func setupView() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor(white: 0.12, alpha: 1.0).cgColor  // Match content background
         layer?.masksToBounds = true  // 裁剪超出边界的内容，避免拖尾
         // 禁用 layer 隐式动画
         layer?.actions = ["bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
@@ -212,7 +211,20 @@ public class ViewBridgeHostView: NSView {
     /// 布局时确保 remoteView 填满整个 hostView
     public override func layout() {
         super.layout()
-        updateRemoteViewLayout()
+        // 🔑 强制使用 bounds.size 同步 remoteView，不依赖 currentContentSize
+        if let remoteView = remoteViewController?.view {
+            let targetSize = bounds.size
+            if targetSize.width > 0 && targetSize.height > 0 {
+                let expectedFrame = NSRect(origin: .zero, size: targetSize)
+                if remoteView.frame != expectedFrame {
+                    // 禁用隐式动画
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    remoteView.frame = expectedFrame
+                    CATransaction.commit()
+                }
+            }
+        }
     }
 
     /// 捕获直接设置 frame 的情况
@@ -223,7 +235,12 @@ public class ViewBridgeHostView: NSView {
             // 任何尺寸变化都立即同步 remoteView
             let remoteFrame = remoteViewController?.view.frame ?? .zero
             if abs(remoteFrame.width - frame.width) > 0.5 || abs(remoteFrame.height - frame.height) > 0.5 {
+                // 禁用隐式动画
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
                 remoteViewController?.view.frame = NSRect(origin: .zero, size: frame.size)
+                CATransaction.commit()
+                
                 // 同时更新 currentContentSize，确保下次 updateRemoteViewLayout 使用正确的值
                 currentContentSize = frame.size
             }
@@ -242,18 +259,37 @@ public class ViewBridgeHostView: NSView {
 
         // 检测：如果 newSize 明显大于 currentContentSize（超过 1.5x），可能是 @2x
         // 使用 superview.bounds 作为参考（superview 尺寸应该是正确的 point 尺寸）
+        // 🔑 修正：如果 superview.bounds 太小（例如还没更新），则不作为参考
+        // 只有当 superview.bounds 看起来"合理"（不是 0 且不比 currentContentSize 小太多）才使用
         let referenceSize = superview?.bounds.size ?? currentContentSize
+        let isReferenceValid = referenceSize.width > 10 && referenceSize.width >= currentContentSize.width * 0.8
+        let effectiveReference = isReferenceValid ? referenceSize : currentContentSize
+        
         let looksLikePixels = scaleFactor > 1.0 &&
-            referenceSize.width > 10 &&
-            newSize.width > referenceSize.width * 1.5 &&
-            newSize.height > referenceSize.height * 1.5
+            effectiveReference.width > 10 &&
+            newSize.width > effectiveReference.width * 1.5 &&
+            newSize.height > effectiveReference.height * 1.5
 
         if looksLikePixels {
             // 拒绝 @2x 尺寸，使用 superview.bounds 作为正确尺寸
-            ipcLog("⚠️ setFrameSize: rejected @2x size \(Int(newSize.width))x\(Int(newSize.height)), using superview.bounds \(Int(referenceSize.width))x\(Int(referenceSize.height))")
-            super.setFrameSize(referenceSize)
+            // 如果 reference 不可用，则保持 currentContentSize 或使用 newSize / scale
+            let fallbackSize: NSSize
+            if isReferenceValid {
+                fallbackSize = effectiveReference
+            } else {
+                fallbackSize = NSSize(width: newSize.width / scaleFactor, height: newSize.height / scaleFactor)
+            }
+            ipcLog("⚠️ setFrameSize: rejected @2x size \(Int(newSize.width))x\(Int(newSize.height)), using fallback \(Int(fallbackSize.width))x\(Int(fallbackSize.height))")
+            
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            super.setFrameSize(fallbackSize)
+            CATransaction.commit()
         } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             super.setFrameSize(newSize)
+            CATransaction.commit()
         }
 
         // 使用 bounds.size 更新 remoteView（bounds 是 point 尺寸）
@@ -276,7 +312,18 @@ public class ViewBridgeHostView: NSView {
 
         let expectedFrame = NSRect(origin: .zero, size: targetSize)
         if remoteView.frame != expectedFrame {
+            ipcLog("🔧 updateRemoteViewLayoutWithBounds: resizing remoteView \(Int(remoteView.frame.width))x\(Int(remoteView.frame.height)) → \(Int(targetSize.width))x\(Int(targetSize.height))")
+            
+            // 禁用隐式动画
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             remoteView.frame = expectedFrame
+            CATransaction.commit()
+            
+            // 确保 currentContentSize 也同步更新
+            if currentContentSize != targetSize {
+                currentContentSize = targetSize
+            }
         }
     }
 
@@ -297,7 +344,11 @@ public class ViewBridgeHostView: NSView {
         // 强制从 (0,0) 开始，确保填满整个 hostView
         let expectedFrame = NSRect(origin: .zero, size: targetSize)
         if remoteView.frame != expectedFrame {
+            // 禁用隐式动画
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             remoteView.frame = expectedFrame
+            CATransaction.commit()
         }
     }
 
@@ -535,6 +586,13 @@ public class ViewBridgeHostView: NSView {
         remoteView.frame = targetFrame
         // Disable autoresizing mask as we manage layout manually
         remoteView.autoresizingMask = []
+
+        // 🔑 确保 remoteView 的 layer 坐标系匹配 flipped 父视图
+        remoteView.wantsLayer = true
+        remoteView.layer?.isGeometryFlipped = true
+        // 禁用 remoteView layer 的隐式动画
+        remoteView.layer?.actions = ["bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
+
         addSubview(remoteView)
 
         // Configure ViewBridge content size range
@@ -625,6 +683,10 @@ public class ViewBridgeHostView: NSView {
 
         ipcLog("📐 applyFrameSize: newSize=\(Int(newSize.width))x\(Int(newSize.height)) self.frame=(\(Int(selfFrame.origin.x)),\(Int(selfFrame.origin.y)),\(Int(selfFrame.width))x\(Int(selfFrame.height))) self.bounds=\(Int(selfBounds.width))x\(Int(selfBounds.height)) remoteFrame=(\(Int(remoteFrame.origin.x)),\(Int(remoteFrame.origin.y)),\(Int(remoteFrame.width))x\(Int(remoteFrame.height))) remoteBounds=\(Int(remoteBounds.width))x\(Int(remoteBounds.height)) layer.frame=\(Int(layerFrame.width))x\(Int(layerFrame.height)) layer.bounds=\(Int(layerBounds.width))x\(Int(layerBounds.height)) identityTransform=\(isIdentityTransform)")
 
+        // 🔑 强制刷新 remoteView，确保 NSRemoteView 重新渲染
+        // 这在窗口 zoom 动画后特别重要
+        forceRemoteViewRefresh()
+
         // 🔍 延迟检查：查看是否有回调修改了尺寸
         let expectedSize = newSize
         DispatchQueue.main.async { [weak self] in
@@ -668,6 +730,77 @@ public class ViewBridgeHostView: NSView {
         } else {
             NSLog("ViewBridgeHostView: deinit skipped disconnect (replaced by new view)")
         }
+    }
+
+    // MARK: - Diagnostics
+
+    /// 强制刷新 remoteView 显示
+    /// 使用多种策略确保 NSRemoteView 重新渲染其内容
+    func forceRemoteViewRefresh() {
+        guard let remoteView = remoteViewController?.view else { return }
+
+        let targetSize = bounds.size
+        let remoteFrame = remoteView.frame
+        ipcLog("🔄 forceRemoteViewRefresh: hostBounds=\(Int(targetSize.width))x\(Int(targetSize.height)) remoteFrame=\(Int(remoteFrame.width))x\(Int(remoteFrame.height))")
+
+        // 🔑 策略 0: "Frame Jitter" - 先设置不同尺寸再设置正确尺寸
+        // 这可以强制 NSRemoteView 重新同步其内容，打破可能的缓存
+        let jitterSize = CGSize(width: targetSize.width - 1, height: targetSize.height - 1)
+        remoteView.frame = NSRect(origin: .zero, size: jitterSize)
+        remoteView.frame = NSRect(origin: .zero, size: targetSize)
+        ipcLog("🔧 forceRemoteViewRefresh: jitter applied, final frame=\(Int(targetSize.width))x\(Int(targetSize.height))")
+
+        // 策略 1: 标记 view 需要重新显示和布局
+        remoteView.needsDisplay = true
+        remoteView.needsLayout = true
+
+        // 策略 2: 同时刷新 layer
+        if let layer = remoteView.layer {
+            layer.setNeedsDisplay()
+            layer.setNeedsLayout()
+        }
+
+        // 策略 3: 遍历子视图，强制它们也刷新
+        for subview in remoteView.subviews {
+            subview.needsDisplay = true
+            subview.needsLayout = true
+            subview.layer?.setNeedsDisplay()
+        }
+
+        // 策略 4: 触发 window 重绘
+        remoteView.window?.displayIfNeeded()
+
+        // 策略 5: 延迟再次刷新（确保动画完成后）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self = self else { return }
+            guard let remoteView = self.remoteViewController?.view else { return }
+            let finalSize = self.bounds.size
+            // 再次 jitter
+            let jitter = CGSize(width: finalSize.width - 1, height: finalSize.height - 1)
+            remoteView.frame = NSRect(origin: .zero, size: jitter)
+            remoteView.frame = NSRect(origin: .zero, size: finalSize)
+            ipcLog("🔧 forceRemoteViewRefresh (delayed): jitter applied, final frame=\(Int(finalSize.width))x\(Int(finalSize.height))")
+            remoteView.needsDisplay = true
+            remoteView.needsLayout = true
+            remoteView.layer?.setNeedsDisplay()
+            remoteView.window?.displayIfNeeded()
+        }
+    }
+
+    /// 打印视图层级的 frame 状态（用于调试 resize 问题）
+    func logViewHierarchy(prefix: String) {
+        let containerFrame = superview?.frame ?? .zero
+        let hostFrame = frame
+        let remoteFrame = remoteViewController?.view.frame ?? .zero
+        let remoteBounds = remoteViewController?.view.bounds ?? .zero
+        // 检查 remoteView 的子视图
+        var subviewInfo = ""
+        if let remoteView = remoteViewController?.view {
+            for (i, subview) in remoteView.subviews.enumerated() {
+                subviewInfo += " sub[\(i)]=(\(Int(subview.frame.origin.x)),\(Int(subview.frame.origin.y)),\(Int(subview.frame.width))x\(Int(subview.frame.height)))"
+            }
+        }
+        ipcLog("🔍 \(prefix): container=(\(Int(containerFrame.origin.x)),\(Int(containerFrame.origin.y)),\(Int(containerFrame.width))x\(Int(containerFrame.height))) host=(\(Int(hostFrame.origin.x)),\(Int(hostFrame.origin.y)),\(Int(hostFrame.width))x\(Int(hostFrame.height))) remote=(\(Int(remoteFrame.origin.x)),\(Int(remoteFrame.origin.y)),\(Int(remoteFrame.width))x\(Int(remoteFrame.height))) remoteBounds=\(Int(remoteBounds.width))x\(Int(remoteBounds.height))\(subviewInfo)")
     }
 
     // MARK: - Snapshot
@@ -1002,6 +1135,12 @@ final class ViewBridgeCoordinator {
 
                 ipcLog("🔔 windowLiveResizeEnded received, tab=\(self.tabId?.uuidString.prefix(8) ?? "nil")")
 
+                // 🔍 诊断：延迟 500ms 后打印完整的视图层级状态
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self, let hostView = self.hostView else { return }
+                    hostView.logViewHierarchy(prefix: "DIAG 500ms")
+                }
+
                 // 只在 resize 结束后进入等待状态，避免 live resize 期间卡在旧快照
                 if let tabId = self.tabId {
                     WindowResizeState.shared.activeTabId = tabId
@@ -1184,6 +1323,10 @@ final class ViewBridgeCoordinator {
                 self.lastSizeNotificationTime = Date()
                 ipcLog("📤 scheduleFinalSizeDebounce: sending containerSizeNotification size=\(Int(finalSize.width))x\(Int(finalSize.height))")
                 self.sendContainerSizeNotification(size: finalSize)
+
+                // 🔑 强制 remoteView 刷新显示
+                // NSRemoteView 有时不会自动刷新其内容
+                self.hostView?.forceRemoteViewRefresh()
             }
 
             // 移除 frame 变化监听器（debounce 结束）
@@ -1640,9 +1783,19 @@ private class ContainerView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        // 🔑 不再直接调用 hostView.applyFrameSize
-        // 尺寸更新统一由 coordinator.updateViewportSize 处理，避免多源竞争导致 1px 抖动
-        // hostView 有 autoresizingMask = [.width, .height]，会自动跟随 container 调整 frame
+        
+        // 禁用隐式动画，确保一步到位
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        
+        // 🔑 强制同步所有子视图的 frame（autoresizingMask 不可靠）
+        for subview in subviews {
+            if subview.frame.size != newSize {
+                subview.frame = NSRect(origin: .zero, size: newSize)
+            }
+        }
+        
+        CATransaction.commit()
     }
 
     /// 重写 hitTest 以支持条件性手势穿透

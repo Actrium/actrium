@@ -140,6 +140,11 @@ private class ResizableContainerView: NSView {
         // 🔑 固定在 (0,0)，让 Host 端处理坐标转换
         super.setFrameOrigin(.zero)
 
+        // 🔍 DEBUG: 使用蓝色背景来区分 Service 端 container
+        // 如果看到蓝色 = container 大但 RN 内容小（RN 层问题）
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.blue.cgColor  // DEBUG: 蓝色背景
+
         ipcLog("🔧 Container at (0,0), no position calculation")
     }
 
@@ -234,7 +239,14 @@ private class ResizableContainerView: NSView {
 
         // 设置 Container 尺寸（位置固定在 (0,0)）
         super.setFrameSize(newSize)
-        rnView?.frame = bounds
+
+        // 🔑 "Frame Jitter" - 先设置不同尺寸再设置正确尺寸
+        // 这可以强制 RN 视图重新布局，打破可能的缓存
+        if let rnView = rnView {
+            let jitterSize = CGSize(width: newSize.width - 1, height: newSize.height - 1)
+            rnView.frame = NSRect(origin: .zero, size: jitterSize)
+            rnView.frame = bounds
+        }
 
         CATransaction.commit()
 
@@ -273,6 +285,19 @@ private class ResizableContainerView: NSView {
         }
 
         ipcLog("📐 applyHostSize: container=(\(Int(containerFrame.origin.x)),\(Int(containerFrame.origin.y)),\(Int(containerFrame.width))x\(Int(containerFrame.height))) bounds=(\(Int(containerBounds.origin.x)),\(Int(containerBounds.origin.y)),\(Int(containerBounds.width))x\(Int(containerBounds.height))) jail=(\(Int(jailFrame.origin.x)),\(Int(jailFrame.origin.y)),\(Int(jailFrame.width))x\(Int(jailFrame.height))) rnView=(\(Int(rnFrame.origin.x)),\(Int(rnFrame.origin.y)),\(Int(rnFrame.width))x\(Int(rnFrame.height)))\(rnSubviewInfo)")
+
+        // 🔍 深度检查 RN view 层级（检查 RCTSurfaceView 等内部视图）
+        if let rnView = rnView {
+            var depth2Info = ""
+            for subview in rnView.subviews {
+                for (j, sub2) in subview.subviews.enumerated() {
+                    depth2Info += " d2[\(j)]=\(type(of: sub2)):\(Int(sub2.frame.width))x\(Int(sub2.frame.height))"
+                }
+            }
+            if !depth2Info.isEmpty {
+                ipcLog("📐 applyHostSize depth2:\(depth2Info)")
+            }
+        }
 
         // 🔍 延迟检查：查看是否有回调修改了尺寸
         let expectedSize = newSize
