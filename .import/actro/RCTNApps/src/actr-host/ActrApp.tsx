@@ -12,11 +12,9 @@
  * @version 8.0.0 - Single Engine + usePanels Hook Pattern
  */
 import React, { useCallback, useRef, useState, useEffect, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, NativeModules, NativeEventEmitter, StyleSheet, findNodeHandle, UIManager, DeviceEventEmitter } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Pressable, ActivityIndicator, NativeModules, NativeEventEmitter, StyleSheet, findNodeHandle, UIManager, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
 
-// Import RN's Inspector API for accurate view hit testing
-// This uses React's internal renderer to find views at a point
-const getInspectorDataForViewAtPoint = require('react-native/src/private/inspector/getInspectorDataForViewAtPoint').default as (
+type GetInspectorDataForViewAtPoint = (
   inspectedView: unknown,
   locationX: number,
   locationY: number,
@@ -24,7 +22,9 @@ const getInspectorDataForViewAtPoint = require('react-native/src/private/inspect
     hierarchy: Array<{
       name: string;
       getInspectorData: (findNodeHandle: (component: unknown) => number | null) => {
-        measure: (callback: (x: number, y: number, width: number, height: number, left: number, top: number) => void) => void;
+        measure: (
+          callback: (x: number, y: number, width: number, height: number, left: number, top: number) => void
+        ) => void;
         props: Record<string, unknown>;
       };
     }>;
@@ -36,6 +36,25 @@ const getInspectorDataForViewAtPoint = require('react-native/src/private/inspect
     closestInstance: unknown;
   }) => boolean
 ) => void;
+
+// Import RN's Inspector API for accurate view hit testing (best-effort).
+// react-native-macos 的内部路径在不同版本间会变；这里必须做兼容，否则会因为 `.default` 取值导致
+// “Cannot read property 'default' of undefined” 直接把整个 ActrApp 渲染打爆（用户点击触发时最常见）。
+function resolveGetInspectorDataForViewAtPoint(): GetInspectorDataForViewAtPoint | null {
+  // 注意：Metro 不允许 `require(variable)`，这里必须保持静态 require。
+  try {
+    // react-native-macos: src/private/devsupport/devmenu/elementinspector/getInspectorDataForViewAtPoint
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('react-native/src/private/devsupport/devmenu/elementinspector/getInspectorDataForViewAtPoint') as unknown;
+    const fn = (mod as any)?.default ?? mod;
+    if (typeof fn === 'function') return fn as GetInspectorDataForViewAtPoint;
+  } catch {}
+
+  return null;
+}
+
+const getInspectorDataForViewAtPoint: GetInspectorDataForViewAtPoint | null =
+  resolveGetInspectorDataForViewAtPoint();
 import { logger } from '../logger';
 import { installConsoleInterceptor } from '../devtools-console';
 import { Engine } from 'rill/host';
@@ -283,6 +302,7 @@ type ActrTabViewProps = {
   tab: TabConfig;
   isActive: boolean;
   isLeftPanelVisible: boolean;
+  isOverviewMode?: boolean;
   containerWidth?: number;
   containerHeight?: number;
   onEngineChange?: (tabId: string, engine: Engine | null) => void;
@@ -316,6 +336,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   tab,
   isActive,
   isLeftPanelVisible,
+  isOverviewMode,
   containerWidth: propsContainerWidth,
   containerHeight: propsContainerHeight,
   onContractViolation,
@@ -323,6 +344,25 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 }) => {
   nlog(`[ActrTabView] render: tabId=${tab.id?.substring(0,8)}, isActive=${isActive}, isLeftPanelVisible=${isLeftPanelVisible}, script=${tab.unifiedScript ? `${tab.unifiedScript.length}chars` : 'nil'}`);
   const gate = evaluateTabGate(tab);
+  const [layoutSize, setLayoutSize] = useState<{ width: number; height: number } | null>(null);
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0 && height > 0) {
+      setLayoutSize(prev => {
+        if (prev && Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) {
+          return prev;
+        }
+        return { width, height };
+      });
+    }
+  }, []);
+
+  const effectiveWidth = layoutSize?.width ?? propsContainerWidth;
+  const effectiveHeight = layoutSize?.height ?? propsContainerHeight;
+  const isCompactMode =
+    !!isOverviewMode ||
+    (typeof effectiveWidth === 'number' && effectiveWidth > 0 && effectiveWidth < 520) ||
+    (typeof effectiveHeight === 'number' && effectiveHeight > 0 && effectiveHeight < 360);
 
   // 右侧面板可见性（按 tab 维度保存）
   const [isRightPanelVisible, setIsRightPanelVisible] = useState(tab.rightPanelDefaultVisible ?? true);
@@ -338,6 +378,10 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const engineRef = useRef<Engine | null>(null);
   const adapterRef = useRef<{ dispose: () => void } | null>(null);
   const loadedUnifiedScriptRef = useRef<string | null>(null);
+  const initInProgressRef = useRef(false);
+  const initTokenRef = useRef(0);
+  const initTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
   const isActiveRef = useRef(isActive);
   const pendingUpdateRef = useRef(false);
   const lastBatchesRef = useRef<number>(0);
@@ -389,6 +433,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // 组件卸载时清理（tab 关闭）
   React.useEffect(() => {
     return () => {
+      unmountedRef.current = true;
+      if (initTimeoutRef.current) {
+        clearTimeout(initTimeoutRef.current);
+        initTimeoutRef.current = null;
+      }
+      initInProgressRef.current = false;
       adapterRef.current?.dispose();
       adapterRef.current = null;
       engineRef.current?.destroy();
@@ -417,12 +467,17 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   // 仅在首次进入该 tab（active）时初始化 Engine
   React.useEffect(() => {
-    nlog(`[ActrTabView] Engine init effect: isActive=${isActive}, gate=${gate.status}, hasEngine=${!!engineRef.current}, tabId=${tab.id?.substring(0,8)}`);
+    nlog(`[ActrTabView] Engine init effect: isActive=${isActive}, gate=${gate.status}, hasEngine=${!!engineRef.current}, inProgress=${initInProgressRef.current}, tabId=${tab.id?.substring(0,8)}`);
     if (!isActive) return;
     if (gate.status === 'blocked') return;
-    if (engineRef.current) return;
+    if (engineRef.current) {
+      if (isLoading) setIsLoading(false);
+      return;
+    }
+    if (initInProgressRef.current) return;
 
-    let cancelled = false;
+    initInProgressRef.current = true;
+    const token = ++initTokenRef.current;
     let currentEngine: Engine | null = null;
     let currentAdapter: { dispose: () => void } | null = null;
 
@@ -432,6 +487,21 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         nlog(`[ActrTabView] Engine init starting... t=${t0}`);
         setIsLoading(true);
         setLoadError(null);
+
+        if (initTimeoutRef.current) {
+          clearTimeout(initTimeoutRef.current);
+          initTimeoutRef.current = null;
+        }
+        initTimeoutRef.current = setTimeout(() => {
+          if (unmountedRef.current) return;
+          if (initTokenRef.current !== token) return;
+          if (engineRef.current) return;
+          nerror(`[ActrTabView] Engine init timeout (>8s), tabId=${tab.id?.substring(0,8)}`);
+          initTokenRef.current += 1; // invalidate this attempt
+          initInProgressRef.current = false;
+          setLoadError(new Error('Engine 初始化超时，请重试'));
+          setIsLoading(false);
+        }, 8000);
 
         currentEngine = new Engine({
           debug: false,
@@ -528,7 +598,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           originalDispose();
         };
 
-        if (cancelled) {
+        if (unmountedRef.current || initTokenRef.current !== token) {
           currentAdapter?.dispose();
           currentEngine?.destroy();
           return;
@@ -541,22 +611,45 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         nlog(`[ActrTabView] Engine created successfully, tabId=${tab.id?.substring(0,8)}, elapsed=${Date.now() - t0}ms`);
         setIsLoading(false);
       } catch (e: any) {
-        if (cancelled) return;
+        if (unmountedRef.current || initTokenRef.current !== token) return;
         nerror(`[ActrTabView] init failed: ${e?.message}`);
         setLoadError(e instanceof Error ? e : new Error(String(e)));
         setIsLoading(false);
+      } finally {
+        if (initTimeoutRef.current) {
+          clearTimeout(initTimeoutRef.current);
+          initTimeoutRef.current = null;
+        }
+        if (initTokenRef.current === token) {
+          initInProgressRef.current = false;
+        }
       }
     }
 
     init();
 
     return () => {
-      cancelled = true;
-      // 这里不销毁 Engine（保持 tab 状态）；仅取消未完成的 init
-      void currentEngine;
-      void currentAdapter;
+      // 不在切换 tab 时取消 init，让 Engine 在后台完成，避免反复卡住
+      // 清理 timeout，避免泄漏
+      if (initTimeoutRef.current) {
+        clearTimeout(initTimeoutRef.current);
+        initTimeoutRef.current = null;
+      }
     };
-  }, [isActive, tab.id, tab.unifiedScript]);
+  }, [isActive, tab.id, tab.unifiedScript, gate.status, isLoading, onContractViolation, onEngineChange, tab.permissions]);
+
+  // 动态更新 Guest config：让 `useConfig()` 能及时拿到 containerSize/isOverviewMode
+  // 这对 Overview Card 的 compact 渲染以及状态保持都很关键。
+  React.useEffect(() => {
+    if (!engine) return;
+    if (engine.isDestroyed) return;
+    if (!engine.isLoaded) return;
+    engine.updateConfig({
+      containerWidth: effectiveWidth ?? 1400,
+      containerHeight: effectiveHeight ?? 977,
+      isOverviewMode: !!isCompactMode,
+    } as any);
+  }, [engine, effectiveWidth, effectiveHeight, isCompactMode]);
 
   // 加载 unified bundle（每个 tab 的 Engine 各加载一次）
   React.useEffect(() => {
@@ -614,8 +707,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           tabId: tab.id,
           title: tab.title,
           backgroundColor: tab.backgroundColor,
-          containerWidth: propsContainerWidth ?? 1400,
-          containerHeight: propsContainerHeight ?? 977,
+          containerWidth: effectiveWidth ?? 1400,
+          containerHeight: effectiveHeight ?? 977,
+          isOverviewMode: !!isCompactMode,
         });
         nlog(`[ActrTabView] loadBundle done, elapsed=${Date.now() - tBundleStart}ms`);
 
@@ -652,7 +746,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   if (isActive && gate.status === 'blocked') {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
+      <View onLayout={handleLayout} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
         <Text style={{ color: '#ff6b6b', fontSize: 18, fontWeight: '600', marginBottom: 12 }}>
           已阻止运行
         </Text>
@@ -666,7 +760,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // 加载中（仅显示当前 active 的 tab）
   if (isActive && isLoading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
+      <View onLayout={handleLayout} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a' }}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={{ color: '#888', fontSize: 14, marginTop: 16 }}>初始化 Single Engine (usePanels mode)...</Text>
       </View>
@@ -676,7 +770,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // 加载错误
   if (isActive && loadError) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
+      <View onLayout={handleLayout} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
         <Text style={{ color: '#ff6b6b', fontSize: 18, fontWeight: '600', marginBottom: 12 }}>
           Engine 初始化失败
         </Text>
@@ -685,8 +779,21 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     );
   }
 
+  // Overview 卡片模式：只渲染 Guest 的 compact 视图（左侧面板占满）
+  if (isCompactMode) {
+    return (
+      <View onLayout={handleLayout} style={{ flex: 1, backgroundColor: '#0a0a0a' }}>
+        {leftPanel || (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <Text style={{ color: '#888', fontSize: 12 }}>Loading...</Text>
+          </View>
+        )}
+      </View>
+    );
+  }
+
   return (
-    <View style={threeColumnStyle}>
+    <View onLayout={handleLayout} style={threeColumnStyle}>
       {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
       {isLeftPanelVisible && (
         <View
@@ -708,11 +815,22 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
       {/* 中间对话窗口 - flex 自适应 */}
       <View style={[styles.centerColumn]}>
-        {mainPanel || (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: '#FF9800', fontSize: 24, fontWeight: 'bold' }}>main panel</Text>
-          </View>
-        )}
+        <View style={styles.mainPanelContainer}>
+          <Pressable
+            onPress={() => setIsRightPanelVisible((prev) => !prev)}
+            style={({ pressed }) => [
+              styles.toggleRightPanelButton,
+              pressed ? { transform: [{ scale: 0.98 }], opacity: 0.9 } : null,
+            ]}
+          >
+            <Text style={styles.toggleRightPanelButtonText}>Toggle 右栏面板</Text>
+          </Pressable>
+          {mainPanel || (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Text style={{ color: '#FF9800', fontSize: 24, fontWeight: 'bold' }}>main panel</Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {/* 右侧扩展面板 - 基准宽度，窗口变小时允许收缩 */}
@@ -748,7 +866,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     effectiveProps = cachedValidProps;
   }
 
-  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth, containerHeight } = effectiveProps || {};
+  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth, containerHeight, isOverviewMode } = effectiveProps || {};
 
   if (!tabs.length) {
     return <View style={{ flex: 1, backgroundColor: '#111' }} />;
@@ -1215,6 +1333,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   // Handle inspect hover - highlight element without selecting
   const handleInspectHover = useCallback((x: number, y: number) => {
     if (!inspectedViewRef.current) return;
+    if (!getInspectorDataForViewAtPoint) return;
 
     try {
       getInspectorDataForViewAtPoint(
@@ -1279,6 +1398,18 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
     if (!inspectedViewRef.current) {
       console.log('[DevTools] No inspected view ref');
+      return;
+    }
+    if (!getInspectorDataForViewAtPoint) {
+      console.log('[DevTools] Inspector API not available, falling back to manual hit testing');
+      const activeEngine = engineMapRef.current.get(activeTabId);
+      if (activeEngine) {
+        const nodeId = findNodeAtPosition(x, y, activeEngine);
+        if (nodeId) {
+          DevToolsBridge?.selectNodeFromInspect?.(nodeId);
+          measureAndHighlightNode(nodeId, activeEngine);
+        }
+      }
       return;
     }
 
@@ -1458,6 +1589,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                 tab={tab}
                 isActive={isActive}
                 isLeftPanelVisible={isLeftPanelVisible}
+                isOverviewMode={isOverviewMode}
                 containerWidth={containerWidth}
                 containerHeight={containerHeight}
                 onContractViolation={recordContractViolation}
@@ -1542,6 +1674,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0a0a0a',
     minWidth: LAYOUT.CENTER_MIN_WIDTH,
+  },
+  mainPanelContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  toggleRightPanelButton: {
+    position: 'absolute',
+    left: 10,
+    top: 10,
+    zIndex: 10,
+    backgroundColor: 'rgba(33, 150, 243, 0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  toggleRightPanelButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   rightPanel: {
     borderLeftWidth: 1,

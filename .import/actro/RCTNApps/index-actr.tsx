@@ -46,16 +46,21 @@ const LoadingFallback = () => <View style={styles.loading} />;
 // Error boundary
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { error: Error | null }
+  { error: Error | null; componentStack: string | null }
 > {
-  state = { error: null as Error | null };
+  state: { error: Error | null; componentStack: string | null } = { error: null, componentStack: null };
 
   static getDerivedStateFromError(error: Error) {
-    return { error };
+    return { error, componentStack: null };
   }
 
-  componentDidCatch(error: Error) {
-    nerror(`💥 [ErrorBoundary] ${error.message}`);
+  componentDidCatch(error: Error, info: any) {
+    const componentStack = typeof info?.componentStack === 'string' ? info.componentStack : null;
+    this.setState({ error, componentStack });
+    const stack = (error as any)?.stack ?? '';
+    const msg = `💥 [ErrorBoundary] ${error.message}\n${stack}\n${componentStack ?? ''}`;
+    nerror(msg);
+    try { console.error(msg); } catch {}
   }
 
   render() {
@@ -64,6 +69,12 @@ class ErrorBoundary extends React.Component<
       <View style={styles.errorContainer}>
         <Text style={styles.errorTitle}>Render Error</Text>
         <Text style={styles.errorMessage}>{this.state.error.message}</Text>
+        {this.state.error.stack ? (
+          <Text style={styles.errorStack}>{this.state.error.stack}</Text>
+        ) : null}
+        {this.state.componentStack ? (
+          <Text style={styles.componentStack}>{this.state.componentStack}</Text>
+        ) : null}
       </View>
     );
   }
@@ -170,13 +181,35 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
   },
+  errorStack: {
+    color: '#cbd5e1',
+    fontSize: 10,
+    marginTop: 10,
+  },
+  componentStack: {
+    color: '#ddd',
+    fontSize: 10,
+    marginTop: 12,
+  },
 });
 
 // Global error handler
-const originalErrorHandler = (globalThis as any).ErrorUtils?.getGlobalHandler?.();
-(globalThis as any).ErrorUtils?.setGlobalHandler?.((error: any, isFatal: boolean) => {
-  nerror(`🔴 [GLOBAL ERROR] ${isFatal ? 'FATAL' : ''}: ${error?.message || error}`);
-});
+try {
+  const ErrorUtils = (globalThis as any).ErrorUtils;
+  const originalErrorHandler = ErrorUtils?.getGlobalHandler?.();
+  ErrorUtils?.setGlobalHandler?.((error: any, isFatal: boolean) => {
+    try {
+      const msg = String(error?.message ?? error ?? 'unknown error');
+      const stack = typeof error?.stack === 'string' ? error.stack : '';
+      const line = `🔴 [GLOBAL ERROR] ${isFatal ? 'FATAL' : ''}: ${msg}\n${stack}`;
+      nerror(line);
+      try { console.error(line); } catch {}
+    } catch {}
+    try {
+      originalErrorHandler?.(error, isFatal);
+    } catch {}
+  });
+} catch {}
 
 // Register the app
 AppRegistry.registerComponent('ActrApp', () => ActrHostRouter);

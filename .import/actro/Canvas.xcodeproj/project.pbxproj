@@ -249,6 +249,7 @@
 				B3312B182F066DB70018A0B4 /* Frameworks */,
 				B3312B192F066DB70018A0B4 /* Resources */,
 				5D734BB00FC54E42D7283398 /* [CP] Copy Pods Resources */,
+				A1B2C3D4E5F60718DEADBEEF /* [CP] Embed Pods Frameworks (CanvasViewService) */,
 			);
 			buildRules = (
 			);
@@ -492,6 +493,23 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		A1B2C3D4E5F60718DEADBEEF /* [CP] Embed Pods Frameworks (CanvasViewService) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_ROOT}/hermes-engine/destroot/Library/Frameworks/macosx/hermes.framework",
+			);
+			name = "[CP] Embed Pods Frameworks (CanvasViewService)";
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermes.framework",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "#!/bin/sh\nset -e\nHERMES_FW=\"${PODS_ROOT}/hermes-engine/destroot/Library/Frameworks/macosx/hermes.framework\"\nDEST=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nmkdir -p \"$DEST\"\nrsync --delete -av --links --filter \"- Headers\" --filter \"- PrivateHeaders\" --filter \"- Modules\" \"$HERMES_FW\" \"$DEST\"\nif [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ] && [ \"${CODE_SIGNING_REQUIRED:-}\" != \"NO\" ] && [ \"${CODE_SIGNING_ALLOWED}\" != \"NO\" ]; then\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" ${OTHER_CODE_SIGN_FLAGS:-} --preserve-metadata=identifier,entitlements \"$DEST/hermes.framework\"\nfi\n";
 			showEnvVarsInLog = 0;
 		};
 		B34F77EA2F042240002AF804 /* Generate XPC Service Pool */ = {

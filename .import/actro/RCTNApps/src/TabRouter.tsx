@@ -147,6 +147,7 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
             isRightPanelVisible={isRightPanelVisible}
             containerWidth={containerWidth}
             containerHeight={containerHeight}
+            isOverviewMode={isOverviewMode}
           />
         </React.Suspense>
       </View>
@@ -191,6 +192,7 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
               isLeftPanelVisible={isLeftPanelVisible}
               containerWidth={containerWidth}
               containerHeight={containerHeight}
+              isOverviewMode={isOverviewMode}
             />
           </View>
         </React.Suspense>

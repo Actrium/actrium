@@ -200,11 +200,6 @@ struct Tab: Identifiable {
     /// RN 应用的 bundle 指纹
     /// 用于标识同一应用（相同指纹 = 相同应用 = 共享 XPC 进程）
     var bundleFingerprint: String? {
-        // 优先使用 contractName（应用标识）
-        if let name = contractName {
-            return "contract.\(name)"
-        }
-
         // 使用 unifiedScript 的 hash 作为指纹
         if let script = unifiedScript {
             return "script.\(script.stableHash)"
@@ -213,6 +208,13 @@ struct Tab: Identifiable {
         // Legacy: 使用 leftPanelScript 或 guestScript
         if let script = leftPanelScript ?? guestScript {
             return "legacy.\(script.stableHash)"
+        }
+
+        // contractName 是 Host/Guest 兼容合约名，不是“应用身份”。
+        // 不能用它做进程指纹，否则不同应用只要使用同一合约就会被错误地分配到同一进程，
+        // 导致 Overview/Tab 内容与标题错位（严重）。
+        if let name = contractName {
+            return "contract.\(name)"
         }
 
         return nil

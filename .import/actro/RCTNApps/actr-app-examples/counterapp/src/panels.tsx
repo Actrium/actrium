@@ -4,7 +4,13 @@
  * 与 counterapp 保持一致
  */
 import React, {useState, useCallback, useMemo, useEffect, useRef} from 'react';
-import {View, Text, TouchableOpacity, ScrollView, ActivityIndicator, useSendToHost, useHostEvent} from 'rill/guest';
+import {View, Text, TouchableOpacity, ScrollView, ActivityIndicator, useConfig, useSendToHost, useHostEvent} from 'rill/guest';
+
+function useReactiveConfig<T>() {
+  const [, setTick] = useState(0);
+  useHostEvent('CONFIG_UPDATE', () => setTick(t => t + 1));
+  return useConfig<T>();
+}
 
 // ============ Weather Types ============
 interface WeatherData {
@@ -24,6 +30,78 @@ interface FetchResponse {
   status: number;
   data?: unknown;
   error?: string;
+}
+
+function Tap({
+  onPress,
+  children,
+  style,
+  hitSlop,
+  disabled,
+}: {
+  onPress?: () => void;
+  children: React.ReactNode;
+  style?: any;
+  hitSlop?: any;
+  disabled?: boolean;
+}) {
+  const [pressed, setPressed] = useState(false);
+  const [flash, setFlash] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  return (
+    <TouchableOpacity
+      hitSlop={hitSlop}
+      disabled={disabled}
+      activeOpacity={0.6}
+      delayPressIn={0}
+      delayPressOut={0}
+      onPress={() => {
+        if (disabled) return;
+        setPressed(true);
+        setFlash(true);
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => {
+          setPressed(false);
+          setFlash(false);
+        }, 160);
+        onPress?.();
+      }}
+      onPressIn={() => {
+        if (disabled) return;
+        setPressed(true);
+      }}
+      onPressOut={() => {
+        if (disabled) return;
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => setPressed(false), 90);
+      }}
+    >
+      <View style={[style, { position: 'relative' }, pressed ? { transform: [{ scale: 0.98 }], opacity: 0.85 } : null, disabled ? { opacity: 0.5 } : null]}>
+        {children}
+        {(pressed || flash) && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0,
+              borderRadius: style?.borderRadius ?? 8,
+              backgroundColor: 'rgba(255,255,255,0.22)',
+            }}
+          />
+        )}
+      </View>
+    </TouchableOpacity>
+  );
 }
 
 // ============ Left Panel: Counter ============
@@ -178,7 +256,7 @@ function Counter({
       </View>
 
       {/* 红色按钮 */}
-      <TouchableOpacity
+      <Tap
         onPress={() => {
           console.log('[CLICK_TEST] Red button pressed, count=' + (redCount + 1));
           setRedCount(c => c + 1);
@@ -197,10 +275,10 @@ function Counter({
         <Text style={{color: '#ffcccc', fontSize: 14, marginTop: 4}}>
           点击: {redCount}
         </Text>
-      </TouchableOpacity>
+      </Tap>
 
       {/* 蓝色按钮 */}
-      <TouchableOpacity
+      <Tap
         onPress={() => {
           console.log('[CLICK_TEST] Blue button pressed, count=' + (blueCount + 1));
           setBlueCount(c => c + 1);
@@ -219,10 +297,10 @@ function Counter({
         <Text style={{color: '#ccccff', fontSize: 14, marginTop: 4}}>
           点击: {blueCount}
         </Text>
-      </TouchableOpacity>
+      </Tap>
 
       {/* 绿色按钮 */}
-      <TouchableOpacity
+      <Tap
         onPress={() => {
           console.log('[CLICK_TEST] Green button pressed, count=' + (greenCount + 1));
           setGreenCount(c => c + 1);
@@ -241,10 +319,10 @@ function Counter({
         <Text style={{color: '#006600', fontSize: 14, marginTop: 4}}>
           点击: {greenCount}
         </Text>
-      </TouchableOpacity>
+      </Tap>
 
       {/* 重置按钮 */}
-      <TouchableOpacity
+      <Tap
         onPress={() => {
           setRedCount(0);
           setBlueCount(0);
@@ -262,7 +340,7 @@ function Counter({
         <Text style={{color: '#ffffff', fontSize: 16, fontWeight: 'bold'}}>
           🔄 重置所有计数
         </Text>
-      </TouchableOpacity>
+      </Tap>
 
       {/* 说明 */}
       <View
@@ -299,7 +377,7 @@ function Counter({
         </Text>
 
         {/* Weather Button */}
-        <TouchableOpacity
+        <Tap
           onPress={fetchWeather}
           disabled={weatherLoading}
           style={{
@@ -316,7 +394,7 @@ function Counter({
               {weatherData ? `${weatherData.temperature}°C` : '🌤️'}
             </Text>
           )}
-        </TouchableOpacity>
+        </Tap>
       </View>
 
       {/* Expandable Weather Card */}
@@ -341,11 +419,11 @@ function Counter({
             <Text style={{color: '#ffffff', fontSize: 16, fontWeight: 'bold'}}>
               {weatherData.city}
             </Text>
-            <TouchableOpacity onPress={() => setWeatherExpanded(false)}>
+            <Tap hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }} onPress={() => setWeatherExpanded(false)}>
               <Text style={{color: '#88b8e8', fontSize: 12}}>
                 收起 ▲
               </Text>
-            </TouchableOpacity>
+            </Tap>
           </View>
 
           {/* Main Info */}
@@ -446,7 +524,7 @@ function Stats({
           快速测试
         </Text>
 
-        <TouchableOpacity
+        <Tap
           onPress={() => onAddRecord('快速点击', '⚡', '#ffaa00')}
           style={{
             backgroundColor: '#ffaa00',
@@ -458,9 +536,9 @@ function Stats({
           <Text style={{color: '#000000', fontSize: 14, fontWeight: 'bold'}}>
             ⚡ 快速测试
           </Text>
-        </TouchableOpacity>
+        </Tap>
 
-        <TouchableOpacity
+        <Tap
           onPress={() => onAddRecord('星标动作', '⭐', '#ff88ff')}
           style={{
             backgroundColor: '#ff88ff',
@@ -472,9 +550,9 @@ function Stats({
           <Text style={{color: '#000000', fontSize: 14, fontWeight: 'bold'}}>
             ⭐ 星标测试
           </Text>
-        </TouchableOpacity>
+        </Tap>
 
-        <TouchableOpacity
+        <Tap
           onPress={() => onAddRecord('火箭发射', '🚀', '#00aaff')}
           style={{
             backgroundColor: '#00aaff',
@@ -485,7 +563,7 @@ function Stats({
           <Text style={{color: '#ffffff', fontSize: 14, fontWeight: 'bold'}}>
             🚀 火箭测试
           </Text>
-        </TouchableOpacity>
+        </Tap>
       </View>
 
       {/* 点击历史 */}
@@ -499,9 +577,9 @@ function Stats({
           }}>
           <Text style={{color: '#888888', fontSize: 12}}>点击历史</Text>
           {records.length > 0 && (
-            <TouchableOpacity onPress={onClear} style={{padding: 4}}>
+            <Tap hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }} onPress={onClear} style={{padding: 4}}>
               <Text style={{color: '#ff6666', fontSize: 11}}>清空</Text>
-            </TouchableOpacity>
+            </Tap>
           )}
         </View>
 
@@ -575,6 +653,12 @@ function Stats({
 
 // ============ 导出 Hook ============
 export function usePanels() {
+  const config = useReactiveConfig<{ containerWidth?: number; containerHeight?: number; isOverviewMode?: boolean }>();
+  const isCompact =
+    config.isOverviewMode === true ||
+    (typeof config.containerWidth === 'number' && config.containerWidth > 0 && config.containerWidth < 520) ||
+    (typeof config.containerHeight === 'number' && config.containerHeight > 0 && config.containerHeight < 360);
+
   const [records, setRecords] = useState<ClickRecord[]>([]);
   const [sessionClicks, setSessionClicks] = useState(0);
 
@@ -599,15 +683,40 @@ export function usePanels() {
     setSessionClicks(0);
   }, []);
 
-  const left = useMemo(() => <Counter onChange={addRecord} />, [addRecord]);
-  const right = useMemo(() => (
-    <Stats
-      records={records}
-      sessionClicks={sessionClicks}
-      onAddRecord={addRecord}
-      onClear={clearRecords}
-    />
-  ), [records, sessionClicks, addRecord, clearRecords]);
+  const left = useMemo(() => {
+    if (isCompact) {
+      return (
+        <View
+          style={{
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 12,
+            backgroundColor: '#101022',
+          }}
+        >
+          <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '700' }}>
+            Count: {sessionClicks}
+          </Text>
+        </View>
+      );
+    }
+    return <Counter onChange={addRecord} />;
+  }, [isCompact, addRecord, sessionClicks]);
+
+  const right = useMemo(() => {
+    if (isCompact) {
+      return <View style={{ flex: 1, backgroundColor: '#0b0b12' }} />;
+    }
+    return (
+      <Stats
+        records={records}
+        sessionClicks={sessionClicks}
+        onAddRecord={addRecord}
+        onClear={clearRecords}
+      />
+    );
+  }, [isCompact, records, sessionClicks, addRecord, clearRecords]);
 
   return { left, right };
 }

@@ -220,6 +220,17 @@ public class ViewBridgeHostView: NSView {
         super.setFrameSize(newSize)
         // 🔑 始终更新 remoteView frame，确保与 bounds 同步
         updateRemoteViewLayout()
+
+        // 🔑 兜底：当 AppKit 实际 frame 变化但 SwiftUI 没及时触发 updateNSView 时，
+        // 通过 coordinator 同步 viewportSize，避免出现“新视图不完整”的情况。
+        // 使用 floor() 与 WorkspaceMainViewport 一致，减少 1px 抖动。
+        if let coordinator = coordinator {
+            let rounded = CGSize(width: floor(newSize.width), height: floor(newSize.height))
+            if rounded.width >= 50 && rounded.height >= 50,
+               rounded != coordinator.currentViewportSize {
+                coordinator.updateViewportSize(rounded)
+            }
+        }
     }
 
     /// Update remote view frame to fill bounds
@@ -756,6 +767,7 @@ final class ViewBridgeCoordinator {
             if let script = tabConfig.leftPanelScript { config["leftPanelScript"] = script }
             config["leftPanelVisible"] = tabConfig.leftPanelVisible
             config["rightPanelVisible"] = tabConfig.rightPanelVisible
+            config["reloadKey"] = tabConfig.reloadKey
             // 🔑 StartPage 需要的数据
             if !tabConfig.bookmarks.isEmpty { config["bookmarks"] = tabConfig.bookmarks }
             if !tabConfig.recentHistory.isEmpty { config["recentHistory"] = tabConfig.recentHistory }
@@ -822,6 +834,8 @@ final class ViewBridgeCoordinator {
     }
     /// 上次发送 tabConfig 时的尺寸 - 用于防止重复发送
     var lastSentConfigSize: CGSize?
+    /// 上次发送 tabConfig 的 reloadKey - 用于防止重复发送
+    var lastSentReloadKey: Int?
     /// 上次发送 containerSizeChanged 时的尺寸 - 用于防止重复发送
     private var lastSentContainerSize: CGSize?
 
@@ -892,7 +906,6 @@ final class ViewBridgeCoordinator {
                 if let snapshot = hostView.captureSnapshot() {
                     TabSnapshotCacheManager.shared.setFocusSnapshot(snapshot, for: tabId)
                     WindowResizeState.shared.activeTabId = tabId
-                    WindowResizeState.shared.isWaitingForSizeApplied = true
                 }
             }
         }
@@ -909,6 +922,12 @@ final class ViewBridgeCoordinator {
                 guard let self = self else { return }
 
                 ipcLog("🔔 windowLiveResizeEnded received, tab=\(self.tabId?.uuidString.prefix(8) ?? "nil")")
+
+                // 只在 resize 结束后进入等待状态，避免 live resize 期间卡在旧快照
+                if let tabId = self.tabId {
+                    WindowResizeState.shared.activeTabId = tabId
+                    WindowResizeState.shared.isWaitingForSizeApplied = true
+                }
 
                 // 标记进入 debounce 状态
                 self.isWaitingForFinalSize = true
@@ -1708,6 +1727,13 @@ struct PersistentViewBridgeView: NSViewRepresentable {
         // 更新 hostView frame 使用目标尺寸
         // 🔑 只通过 coordinator 统一更新，避免多源竞争导致尺寸抖动
         if let hostView = container.subviews.first as? ViewBridgeHostView {
+            if !WindowResizeState.shared.isLiveResizing {
+                let hostSize = hostView.frame.size
+                let sizeDiff = abs(hostSize.width - effectiveSize.width) + abs(hostSize.height - effectiveSize.height)
+                if sizeDiff > 1 {
+                    hostView.frame = NSRect(origin: .zero, size: effectiveSize)
+                }
+            }
             // Update hit testing state on hostView as well
             hostView.allowsHitTesting = allowsHitTesting
             // 通知 coordinator 更新尺寸（coordinator 会调用 hostView.applyFrameSize）
@@ -2033,7 +2059,8 @@ struct UnifiedReactNativeLayer: View {
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
                 bookmarks: bookmarks,
-                recentHistory: recentHistory
+                recentHistory: recentHistory,
+                reloadKey: tab.reloadNonce
             )
             coordinator.currentViewportSize = currentSize
             ipcLog("📱 UnifiedReactNativeLayer.onAppear: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
@@ -2063,6 +2090,26 @@ struct UnifiedReactNativeLayer: View {
             }
             NSLog("🔄 [UnifiedRN] unifiedScript changed, resending config")
             coordinator.lastSentConfigSize = nil
+            sendTabConfigIfReady()
+        }
+        .onChange(of: tab.reloadNonce) { _, _ in
+            // 🔑 Reload 触发：强制发送新的 config（包含 reloadKey）
+            coordinator.tabConfig = XPCTabConfig(
+                tabId: tab.id,
+                title: tab.title,
+                backgroundColor: tab.backgroundColor,
+                containerSize: isFocused ? viewportSize : cardSize,
+                systemAppType: tab.systemTabType?.rawValue,
+                unifiedScript: tab.unifiedScript,
+                leftPanelScript: tab.leftPanelScript,
+                leftPanelVisible: tab.leftPanelDefaultVisible,
+                rightPanelVisible: tab.rightPanelDefaultVisible,
+                bookmarks: bookmarks,
+                recentHistory: recentHistory,
+                reloadKey: tab.reloadNonce
+            )
+            coordinator.lastSentConfigSize = nil
+            coordinator.lastSentReloadKey = nil
             sendTabConfigIfReady()
         }
         // 🔑 尺寸变化由 PersistentViewBridgeView.updateNSView 统一处理
@@ -2237,11 +2284,13 @@ struct UnifiedReactNativeLayer: View {
             return
         }
 
-        // 防止重复发送相同尺寸的 config
-        if coordinator.lastSentConfigSize == currentSize {
+        let reloadKey = tab.reloadNonce
+        // 防止重复发送相同尺寸且 reloadKey 未变化的 config
+        if coordinator.lastSentConfigSize == currentSize && coordinator.lastSentReloadKey == reloadKey {
             return
         }
         coordinator.lastSentConfigSize = currentSize
+        coordinator.lastSentReloadKey = reloadKey
 
         // 发送 tab config - 使用 coordinator 中的最新尺寸
         var tabConfig: [String: Any] = [
@@ -2251,7 +2300,8 @@ struct UnifiedReactNativeLayer: View {
             "containerWidth": currentSize.width,
             "containerHeight": currentSize.height,
             // 🔑 从状态管理器读取最新状态，而不是 coordinator 本地缓存
-            "isOverviewMode": ViewBridgeCoordinatorManager.shared.currentOverviewMode
+            "isOverviewMode": ViewBridgeCoordinatorManager.shared.currentOverviewMode,
+            "reloadKey": reloadKey
         ]
 
         // Add optional scripts
@@ -2391,7 +2441,8 @@ struct ViewBridgeMultiProcessTabView: View {
             leftPanelVisible: tab.leftPanelDefaultVisible,
             rightPanelVisible: tab.rightPanelDefaultVisible,
             bookmarks: [],
-            recentHistory: []
+            recentHistory: [],
+            reloadKey: tab.reloadNonce
         )
     }
 

@@ -1,8 +1,30 @@
+# Canvas 开发指引（在本目录执行）
 
-# 编译
-`xcodebuild -workspace Canvas/Canvas.xcworkspace -scheme Canvas build`
+## 1) 生成 RN Bundle（rill 更新后必须重打包）
+System bundle（包含 StartPage/History/Bookmarks/Debug，同时也包含 `ActrApp` 宿主）：
 
-# 运行
-`open /Users/leo/Library/Developer/Xcode/DerivedData/Canvas-bfrmsauxlmtqwybyzrckiznxvqhp/Build/Products/Debug/Canvas.app`k
+`./scripts/bundle-rctnapp.sh --target system --dev`
 
-# 查看日志
+## 2) 构建 HelloWorld（Guest）
+`cd RCTNApps/actr-app-examples/helloworld && bun run build`
+
+## 3) 编译
+`xcodebuild -workspace Canvas.xcworkspace -scheme Canvas build`
+
+## 4) 运行
+直接启动：
+
+`open /Users/leo/Library/Developer/Xcode/DerivedData/Canvas-bfrmsauxlmtqwybyzrckiznxvqhp/Build/Products/Debug/Canvas.app`
+
+启动后自动打开 HelloWorld（推荐用于验证 rill/Bundle 是否匹配）：
+
+`open -a /Users/leo/Library/Developer/Xcode/DerivedData/Canvas-bfrmsauxlmtqwybyzrckiznxvqhp/Build/Products/Debug/Canvas.app --args --url "askw:///Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/helloworld"`
+
+## 5) 查看日志
+IPC 调试日志：
+
+`tail -f /tmp/canvas_ipc_debug.log`
+
+系统日志（含 RN/JS Error）：
+
+`log stream --predicate 'process CONTAINS "Canvas" OR process CONTAINS "RCTViewService"' --style compact`
