@@ -197,7 +197,37 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             binding.flNavIndicator.translationX = targetX
         }
 
-        // TODO: 根据选中的标签切换对应的内容
+        // 根据选中的标签切换对应的内容显隐
+        updateContentVisibility(checkedId)
+    }
+
+    /**
+     * 更新内容组件的显隐状态
+     */
+    private fun updateContentVisibility(checkedId: Int) {
+        when (checkedId) {
+            R.id.navTag -> {
+                // 显示书签页
+                binding.flBookmark.visibility = View.VISIBLE
+                binding.llActive.visibility = View.GONE
+                binding.flSet.visibility = View.GONE
+                Log.d("MainActivity", "Show Bookmark")
+            }
+            R.id.navActivity -> {
+                // 显示活动页
+                binding.flBookmark.visibility = View.GONE
+                binding.llActive.visibility = View.VISIBLE
+                binding.flSet.visibility = View.GONE
+                Log.d("MainActivity", "Show Active")
+            }
+            R.id.navSettings -> {
+                // 显示设置页
+                binding.flBookmark.visibility = View.GONE
+                binding.llActive.visibility = View.GONE
+                binding.flSet.visibility = View.VISIBLE
+                Log.d("MainActivity", "Show Settings")
+            }
+        }
     }
 
     /**
