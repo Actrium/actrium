@@ -1664,7 +1664,8 @@ struct PersistentViewBridgeView: NSViewRepresentable {
         }
 
         // 使用 autoresizingMask - 强制从 (0,0) 开始
-        hostView.frame = NSRect(origin: .zero, size: container.bounds.size)
+        // 🔑 使用 size 参数（point 尺寸），不用 container.bounds.size（可能是 @2x 像素尺寸）
+        hostView.frame = NSRect(origin: .zero, size: size)
         hostView.autoresizingMask = [.width, .height]
         container.addSubview(hostView)
 
