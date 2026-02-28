@@ -25,4 +25,9 @@ RCT_EXTERN_METHOD(setTabUnreadStatus:(NSString *)tabId
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(setTabBookmarkStatus:(NSString *)tabId
+                  isBookmarked:(BOOL)isBookmarked
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
 @end

@@ -187,11 +187,27 @@ struct PhoneTabCardView: View {
                 
                 // 收藏星
                 Button(action: {
-                    bookmarkVM.toggleBookmark(for: tab)
+                    // 切换收藏状态并发送通知给 RN
+                    let newBookmarkStatus = !tab.isBookmarked
+                    
+                    // 立即更新本地状态（UI 响应）
+                    if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+                        viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                    }
+                    
+                    // 发送通知给 RN 侧处理实际的收藏逻辑
+                    NotificationCenter.default.post(
+                        name: .tabBookmarkChangedFromNative,
+                        object: nil,
+                        userInfo: [
+                            "tabId": tab.id.uuidString,
+                            "isBookmarked": newBookmarkStatus
+                        ]
+                    )
                 }) {
                     Image(systemName: "star.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundColor(bookmarkVM.isBookmarked(tab: tab) ? Color(hex: "#EAC15B") : Color(hex: "#404040"))
+                        .foregroundColor(tab.isBookmarked ? Color(hex: "#EAC15B") : Color(hex: "#404040"))
                         .frame(width: 36, height: 36)
                         .background(Circle().fill(Color.clear))
                 }
