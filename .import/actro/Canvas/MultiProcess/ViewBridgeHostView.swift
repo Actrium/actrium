@@ -216,15 +216,16 @@ public class ViewBridgeHostView: NSView {
     }
 
     /// 捕获直接设置 frame 的情况
+    /// 🔑 关键：每次 frame 变化都立即同步 remoteView，不做节流
+    /// Safari/Chrome 使用同进程渲染没有这个问题，我们必须尽可能快地同步
     public override var frame: NSRect {
         didSet {
-            if abs(oldValue.width - frame.width) > 1 || abs(oldValue.height - frame.height) > 1 {
-                // 直接设置 frame 时，确保 remoteView 也被更新
-                let remoteFrame = remoteViewController?.view.frame ?? .zero
-                if abs(remoteFrame.width - frame.width) > 1 || abs(remoteFrame.height - frame.height) > 1 {
-                    ipcLog("🔧 frame.didSet: \(Int(oldValue.width))x\(Int(oldValue.height)) → \(Int(frame.width))x\(Int(frame.height)), remote=\(Int(remoteFrame.width))x\(Int(remoteFrame.height)), syncing remoteView")
-                    remoteViewController?.view.frame = NSRect(origin: .zero, size: frame.size)
-                }
+            // 任何尺寸变化都立即同步 remoteView
+            let remoteFrame = remoteViewController?.view.frame ?? .zero
+            if abs(remoteFrame.width - frame.width) > 0.5 || abs(remoteFrame.height - frame.height) > 0.5 {
+                remoteViewController?.view.frame = NSRect(origin: .zero, size: frame.size)
+                // 同时更新 currentContentSize，确保下次 updateRemoteViewLayout 使用正确的值
+                currentContentSize = frame.size
             }
         }
     }
@@ -1034,7 +1035,7 @@ final class ViewBridgeCoordinator {
     /// 最终尺寸 debounce 定时器
     private var finalSizeDebounceTimer: Timer?
     /// Debounce 时间（等待尺寸稳定）
-    private static let finalSizeDebounceInterval: TimeInterval = 0.30  // 300ms
+    private static let finalSizeDebounceInterval: TimeInterval = 0.10  // 100ms - 减少等待时间
 
     /// 上次发送尺寸的时间（用于检测是否需要补发）
     private var lastSizeNotificationTime: Date = .distantPast
@@ -1152,11 +1153,16 @@ final class ViewBridgeCoordinator {
             self.isWaitingForFinalSize = false
             ipcLog("⏱️ scheduleFinalSizeDebounce: timer fired")
 
-            // 🔑 简化：始终使用 currentViewportSize（由 SwiftUI 正确计算的 point 尺寸）
-            // 不再使用 bounds.size，因为它可能返回 @2x 像素尺寸
-            let finalSize = self.currentViewportSize
+            // 🔑 关键修复：使用 hostView 的实际 frame 作为最终尺寸
+            // 之前使用 currentViewportSize，但它可能与 hostView.frame 不一致
+            // （SwiftUI 可能在最后修改了 hostView.frame 但没有更新 currentViewportSize）
+            let hostViewSize = self.hostView?.frame.size ?? self.currentViewportSize
+            let finalSize = CGSize(
+                width: floor(hostViewSize.width),
+                height: floor(hostViewSize.height)
+            )
 
-            ipcLog("⏱️ scheduleFinalSizeDebounce: finalSize=\(Int(finalSize.width))x\(Int(finalSize.height)), hasServiceId=\(self.allocatedServiceId != nil), hasConn=\(self.hasConnection), xpcReady=\(self.xpcServiceReady)")
+            ipcLog("⏱️ scheduleFinalSizeDebounce: hostViewSize=\(Int(hostViewSize.width))x\(Int(hostViewSize.height)), currentViewportSize=\(Int(self.currentViewportSize.width))x\(Int(self.currentViewportSize.height)), finalSize=\(Int(finalSize.width))x\(Int(finalSize.height)), hasServiceId=\(self.allocatedServiceId != nil), hasConn=\(self.hasConnection), xpcReady=\(self.xpcServiceReady)")
 
             // 验证并发送
             if finalSize.width > 50 && finalSize.height > 50 {
