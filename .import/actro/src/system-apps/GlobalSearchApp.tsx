@@ -1,7 +1,7 @@
 /**
  * Global Search App - 全局搜索页面
  */
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,20 +9,41 @@ import {
   ScrollView,
   StyleSheet,
   Image,
+  SafeAreaView,
+  TouchableWithoutFeedback,
+  useWindowDimensions,
+  Linking,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { MyTouchableOpacity } from 'askit';
 import { Icon } from '../actr-host/components/Icon';
+import { useKeyboardInset } from '../hooks/useKeyboardInset';
+import { HOST_SHADOWS } from '../actr-host/styles/shadows';
+import { useAppStore } from '../actr-host/store/useAppStore';
+import { BookmarkRepository, TBookmarkItem } from '../repository/BookmarkRepository';
+import { openTab } from '../native-bridge/tab/TabModule';
 
-interface SearchItem {
+// 搜索结果类型
+type SearchResultType = 'active' | 'bookmark' | 'setting';
+
+interface SearchResultItem {
   id: string;
+  type: SearchResultType;
   name: string;
+  // 应用类型
   logo?: string;
+  appId?: string;
+  tabId?: string;
+  url?: string;
+  // 设置类型
+  icon?: string;
+  action?: () => void;
 }
 
-interface SearchGroup {
+interface SearchResultGroup {
+  type: SearchResultType;
   title: string;
-  items: SearchItem[];
+  items: SearchResultItem[];
 }
 
 interface GlobalSearchAppProps {
@@ -31,135 +52,392 @@ interface GlobalSearchAppProps {
 
 export default function GlobalSearchApp({ onClose }: GlobalSearchAppProps) {
   const { t } = useTranslation();
-  const [searchQuery, setSearchQuery] = useState('');
+  const [inputText, setInputText] = useState('');
+  const [searchQuery, setSearchQuery] = useState(''); // 回车后才更新
+  const [bookmarks, setBookmarks] = useState<TBookmarkItem[]>([]);
+  const inputRef = useRef<TextInput>(null);
+  const { keyboardInset, dismissKeyboard } = useKeyboardInset();
+  const { width: screenWidth } = useWindowDimensions();
+  const apps = useAppStore((s) => s.apps);
 
-  // TODO: 替换为实际搜索逻辑
-  const searchGroups: SearchGroup[] = [
-    {
-      title: t('actr.search.active', '活跃'),
-      items: [
-        { id: '1', name: 'name', logo: 'https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=100' },
-        { id: '2', name: 'name', logo: 'https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=100' },
-        { id: '3', name: 'name', logo: 'https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=100' },
-      ],
-    },
-    {
-      title: t('actr.search.bookmarks', '书签'),
-      items: [
-        { id: '4', name: 'name', logo: 'https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=100' },
-        { id: '5', name: 'name', logo: 'https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=100' },
-      ],
-    },
-    {
-      title: t('actr.search.settings', '设置'),
-      items: [
-        { id: '6', name: 'namename' },
-      ],
-    },
-  ];
+  const isPhone = screenWidth < 600;
+  const inputWidth = isPhone ? screenWidth * 0.85 : 500;
+  const resultsAreaSize = isPhone ? 'auto' : 500;
+  const containerGap = isPhone ? 24 : 36;
+  const inputBorderRadius = 24;
 
-  const settingsItems = [
-    { id: 'appearance', name: t('actr.search.appearance', '外观设置') },
-  ];
+  // 自动聚焦输入框
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, []);
 
-  const handleClearSearch = () => {
+  // 加载书签数据
+  useEffect(() => {
+    BookmarkRepository.getBookmarksHierarchy().then((groups) => {
+      const allItems = groups.flatMap((g) => g.items);
+      setBookmarks(allItems);
+    });
+  }, []);
+
+  // 可搜索的设置项
+  const searchableSettings: SearchResultItem[] = useMemo(() => {
+    const handleFeedback = () => {
+      const subject = encodeURIComponent('#吐个槽关于');
+      const mailto = `mailto:support@actrium.example?subject=${subject}`;
+      Linking.openURL(mailto);
+    };
+
+    return [
+      {
+        id: 'setting-feedback',
+        type: 'setting',
+        name: t('actr.settings.feedback', '反馈'),
+        icon: 'feedback',
+        action: handleFeedback,
+      },
+      {
+        id: 'setting-logout',
+        type: 'setting',
+        name: t('actr.settings.logout', '退出登录'),
+        icon: 'logout',
+      },
+    ];
+  }, [t]);
+
+  // 搜索结果
+  const searchResults: SearchResultGroup[] = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+
+    // 1. 搜索活跃应用
+    const activeResults: SearchResultItem[] = Object.values(apps)
+      .filter((app) => app.app_name?.toLowerCase().includes(q))
+      .map((app) => ({
+        id: `active-${app.app_id}`,
+        type: 'active' as const,
+        name: app.app_name,
+        logo: app.info?.logo,
+        appId: app.app_id,
+      }));
+
+    // 2. 搜索收藏
+    const bookmarkResults: SearchResultItem[] = bookmarks
+      .filter((b) => b.app_name?.toLowerCase().includes(q))
+      .map((b) => ({
+        id: `bookmark-${b.id}`,
+        type: 'bookmark' as const,
+        name: b.app_name || '',
+        logo: b.logo || undefined,
+        appId: b.app_id,
+        tabId: b.tab_id || undefined,
+        url: b.url || undefined,
+      }));
+
+    // 3. 搜索设置
+    const settingResults = searchableSettings.filter((s) =>
+      s.name.toLowerCase().includes(q)
+    );
+
+    const groups: SearchResultGroup[] = [];
+    if (activeResults.length > 0) {
+      groups.push({
+        type: 'active',
+        title: t('actr.search.active', '活跃'),
+        items: activeResults,
+      });
+    }
+    if (bookmarkResults.length > 0) {
+      groups.push({
+        type: 'bookmark',
+        title: t('actr.search.bookmarks', '书签'),
+        items: bookmarkResults,
+      });
+    }
+    if (settingResults.length > 0) {
+      groups.push({
+        type: 'setting',
+        title: t('actr.search.settings', '设置'),
+        items: settingResults,
+      });
+    }
+
+    return groups;
+  }, [searchQuery, apps, bookmarks, searchableSettings, t]);
+
+  // 回车触发搜索
+  const handleSubmit = useCallback(() => {
+    setSearchQuery(inputText.trim());
+    dismissKeyboard();
+  }, [inputText, dismissKeyboard]);
+
+  const handleClearSearch = useCallback(() => {
+    setInputText('');
     setSearchQuery('');
+  }, []);
+
+  // 点击搜索结果项
+  const handleItemPress = useCallback(
+    (item: SearchResultItem) => {
+      if (item.type === 'setting') {
+        item.action?.();
+      } else {
+        // 应用类型
+        openTab({
+          tabId: item.tabId ?? '',
+          openUrl: item.url || item.appId || '',
+        });
+      }
+      onClose?.();
+    },
+    [onClose]
+  );
+
+  // 渲染搜索结果项
+  const renderResultItem = (item: SearchResultItem, isLast: boolean) => {
+    if (item.type === 'setting') {
+      return (
+        <React.Fragment key={item.id}>
+          <MyTouchableOpacity
+            style={styles.listItem}
+            onPress={() => handleItemPress(item)}
+          >
+            <Icon type={item.icon!} size={22} color="#9e9ea7" />
+            <Text style={styles.listItemName} numberOfLines={1}>
+              {item.name}
+            </Text>
+          </MyTouchableOpacity>
+          {!isLast && <View style={styles.listItemDivider} />}
+        </React.Fragment>
+      );
+    }
+    // 应用类型（active/bookmark）
+    return (
+      <React.Fragment key={item.id}>
+        <MyTouchableOpacity
+          style={styles.listItem}
+          onPress={() => handleItemPress(item)}
+        >
+          {item.logo ? (
+            <Image source={{ uri: item.logo }} style={styles.listItemLogo} />
+          ) : (
+            <View style={styles.listItemLogo} />
+          )}
+          <Text style={styles.listItemName} numberOfLines={1}>
+            {item.name}
+          </Text>
+        </MyTouchableOpacity>
+        {!isLast && <View style={styles.listItemDivider} />}
+      </React.Fragment>
+    );
   };
 
-  return (
-    <View style={styles.container}>
-      {/* 标题 */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>
-          {t('actr.search.resultsIn', '在书签内搜索到')}
-        </Text>
-      </View>
+  // 渲染搜索结果列表
+  const renderResults = () => {
+    if (!searchQuery.trim()) {
+      return (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>
+            {t('actr.search.inputHint', '输入关键词后按回车搜索')}
+          </Text>
+        </View>
+      );
+    }
 
-      {/* 搜索结果列表 */}
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {searchGroups.map((group, groupIndex) => (
-          <View key={groupIndex} style={styles.groupContainer}>
+    if (searchResults.length === 0) {
+      return (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>
+            {t('actr.search.noResults', '无搜索结果')}
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <>
+        {searchResults.map((group) => (
+          <View key={group.type} style={styles.groupContainer}>
             <Text style={styles.groupTitle}>{group.title}</Text>
             <View style={styles.groupCard}>
-              {group.items.map((item, index) => (
-                <React.Fragment key={item.id}>
-                  <MyTouchableOpacity style={styles.listItem}>
-                    <Image
-                      source={{ uri: item.logo }}
-                      style={styles.listItemLogo}
-                    />
-                    <Text style={styles.listItemName} numberOfLines={1}>
-                      {item.name}
-                    </Text>
-                  </MyTouchableOpacity>
-                  {index < group.items.length - 1 && (
-                    <View style={styles.listItemDivider} />
-                  )}
-                </React.Fragment>
-              ))}
+              {group.items.map((item, index) =>
+                renderResultItem(item, index === group.items.length - 1)
+              )}
             </View>
           </View>
         ))}
+      </>
+    );
+  };
 
-        {/* 设置项 */}
-        {settingsItems.map((item) => (
-          <MyTouchableOpacity key={item.id} style={styles.settingsItem}>
-            <Text style={styles.settingsIcon}>🌐</Text>
-            <Text style={styles.settingsItemName}>{item.name}</Text>
+  const renderSearchInput = (inputStyle: any, containerStyle: any) => (
+    <View style={styles.searchRow}>
+      <View style={containerStyle}>
+        <Icon
+          type="link"
+          size={18}
+          color="#999"
+          style={styles.inputPrefixIcon}
+        />
+        <TextInput
+          ref={inputRef}
+          style={inputStyle}
+          placeholder={t('actr.search.placeholder', 'Search Term')}
+          placeholderTextColor="#999"
+          value={inputText}
+          onChangeText={setInputText}
+          onSubmitEditing={handleSubmit}
+          returnKeyType="search"
+          autoFocus={true}
+          clearButtonMode="never"
+          keyboardAppearance="dark"
+        />
+        {inputText.length > 0 && (
+          <MyTouchableOpacity
+            style={styles.clearButton}
+            onPress={handleClearSearch}
+          >
+            <Icon type="input_clear" size={19} color="#666" />
           </MyTouchableOpacity>
-        ))}
-      </ScrollView>
+        )}
+      </View>
+      <MyTouchableOpacity
+        style={styles.standaloneCloseButton}
+        onPress={onClose}
+      >
+        <Icon type="close" size={16} color="#404040" />
+      </MyTouchableOpacity>
+    </View>
+  );
 
-      {/* 底部搜索框 */}
-      <View style={styles.searchBarContainer}>
-        <View style={styles.searchBar}>
-          <Icon type="link" size={20} color="#8E8E93" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder={t('actr.search.placeholder', 'Search Term')}
-            placeholderTextColor="#8E8E93"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <MyTouchableOpacity onPress={handleClearSearch}>
-              <Icon type="input_clear" size={18} color="#8E8E93" />
-            </MyTouchableOpacity>
+  if (isPhone) {
+    return (
+      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+        <View style={styles.phoneContainer}>
+          {/* 搜索结果列表 */}
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.phoneScrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {renderResults()}
+          </ScrollView>
+
+          {/* 底部输入框 */}
+          <View style={styles.phoneInputDock}>
+            <SafeAreaView style={styles.phoneInputSafeArea}>
+              <View style={styles.phoneInputSection}>
+                {renderSearchInput(styles.phoneInput, [
+                  styles.phoneInputContainer,
+                ])}
+              </View>
+              {keyboardInset > 0 && (
+                <View style={{ height: keyboardInset - 20 }} />
+              )}
+            </SafeAreaView>
+          </View>
+        </View>
+      </TouchableWithoutFeedback>
+    );
+  }
+
+  // iPad 布局
+  return (
+    <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: keyboardInset },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={[styles.GlobalSearchContainer, { gap: containerGap }]}>
+          {/* 结果区域 */}
+          <View
+            style={[
+              styles.resultsArea,
+              { width: inputWidth, height: resultsAreaSize },
+            ]}
+          >
+            <View style={styles.resultsHeader}>
+              <Text style={styles.resultsHeaderTitle}>
+                {searchQuery.length > 0
+                  ? t('actr.search.resultsIn', '搜索结果')
+                  : t('actr.search.recent', '最近搜索')}
+              </Text>
+            </View>
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={styles.resultsListContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {renderResults()}
+            </ScrollView>
+          </View>
+
+          {/* 搜索框 */}
+          {renderSearchInput(
+            [
+              styles.input,
+              { width: inputWidth, borderRadius: inputBorderRadius },
+            ],
+            [
+              styles.inputContainer,
+              { borderRadius: inputBorderRadius, backgroundColor: '#FFF' },
+            ]
           )}
         </View>
-        <MyTouchableOpacity style={styles.closeButton} onPress={onClose}>
-          <Icon type="close" size={16} color="#8E8E93" />
-        </MyTouchableOpacity>
-      </View>
-    </View>
+      </ScrollView>
+    </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  phoneContainer: {
     flex: 1,
+    width: '100%',
     backgroundColor: '#000',
-  },
-  header: {
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 16,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '500',
-    color: '#fff',
   },
   content: {
     flex: 1,
   },
-  scrollContent: {
-    paddingHorizontal: 24,
+  phoneScrollContent: {
+    paddingHorizontal: 26,
+    paddingTop: 60,
     paddingBottom: 100,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  GlobalSearchContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'column',
+    paddingVertical: 40,
+  },
+  resultsArea: {
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
+    borderRadius: 34,
+  },
+  resultsHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2C2C2E',
+  },
+  resultsHeaderTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  resultsListContent: {
+    padding: 20,
   },
   groupContainer: {
     marginBottom: 16,
@@ -172,7 +450,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   groupCard: {
-    borderRadius: 16,
+    borderRadius: 26,
     backgroundColor: '#1C1C1E',
     overflow: 'hidden',
   },
@@ -196,61 +474,94 @@ const styles = StyleSheet.create({
   listItemName: {
     flex: 1,
     fontSize: 17,
-    color: '#fff',
-    marginLeft: 12,
+    color: '#FFF',
+    marginLeft: 11,
     fontWeight: '400',
   },
-  settingsItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-  },
-  settingsIcon: {
-    fontSize: 20,
-    marginRight: 12,
-  },
-  settingsItemName: {
-    fontSize: 17,
-    color: '#fff',
-    fontWeight: '400',
-  },
-  searchBarContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingBottom: 34,
-    backgroundColor: '#000',
-  },
-  searchBar: {
+  emptyState: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1C1C1E',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 17,
-    color: '#fff',
-  },
-  closeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#1C1C1E',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 12,
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    fontSize: 15,
+    color: '#8E8E93',
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+  },
+  inputContainer: {
+    flex: 1,
+    position: 'relative',
+    backgroundColor: '#FFF',
+    ...HOST_SHADOWS.inputPill,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  input: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    fontSize: 17,
+    color: '#000',
+  },
+  phoneInputDock: {
+    width: '100%',
+  },
+  phoneInputSafeArea: {
+    width: '100%',
+    backgroundColor: '#000',
+  },
+  phoneInputSection: {
+    width: '100%',
+    alignItems: 'stretch',
+    justifyContent: 'flex-end',
+    paddingTop: 6,
+    paddingHorizontal: 26,
+    paddingBottom: 10,
+  },
+  phoneInputContainer: {
+    flex: 1,
+    position: 'relative',
+    height: 48,
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    ...HOST_SHADOWS.inputPill,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  phoneInput: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+    fontSize: 17,
+    color: '#000',
+  },
+  inputPrefixIcon: {
+    marginLeft: 11,
+  },
+  clearButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
+  },
+  standaloneCloseButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#ECECEF',
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...HOST_SHADOWS.inputPill,
   },
 });
