@@ -11,6 +11,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let historyVM: HistoryViewModel
     private let bookmarkVM: BookmarkViewModel
 
+    private var containerViewController: EdgeInsetContainerViewController!
     private var splitViewController: MainSplitViewController!
     private var cancellables = Set<AnyCancellable>()
 
@@ -73,8 +74,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             edgeInset: edgeInset
         )
 
-        // Set as window's content view controller
-        window.contentViewController = splitViewController
+        // Wrap in container with edge insets
+        containerViewController = EdgeInsetContainerViewController(
+            childViewController: splitViewController,
+            edgeInset: edgeInset
+        )
+
+        // Set container as window's content view controller
+        window.contentViewController = containerViewController
     }
 
     // MARK: - Toolbar Setup
