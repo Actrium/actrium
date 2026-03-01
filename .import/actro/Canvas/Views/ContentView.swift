@@ -24,86 +24,143 @@ struct ContentView: View {
     @State private var sidebarWidth: CGFloat = 250
 
     var body: some View {
-        ZStack {
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
-                    .toolbar(removing: .sidebarToggle)
-                    .overlay(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onChange(of: geo.size.width) { _, newWidth in
-                                    sidebarWidth = newWidth
-                                }
-                                .onAppear {
-                                    sidebarWidth = geo.size.width
-                                }
-                        }
-                    )
-            } detail: {
-                // Workspace: main canvas + optional docked DevTools panel
-                // 🎨 Dia/ARC 风格：主内容区域（下圆角，上直角）
-                // 四边都有 4px 边距
-                WorkspaceView(devTools: devTools, viewModel: viewModel) {
-                    WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar)
-                }
-                .clipShape(BottomRoundedRectangle(bottomRadius: 16))
-                // 🔑 让 titlebar 的 AppKit toolbar 精确对齐正文区本体（拖动分割线时也实时对齐）
-                // 注意：必须放在 padding 之前，这样探针测到的是“可见内容”的左边界，而不是 detail 列的左边界。
-                .background(TitlebarContentLeadingReporter())
-                .padding(.leading, 4)
-                .padding(.trailing, 4)
-                .padding(.bottom, 4)
-            }
-            // 让 toolbar 背景透明，内容区域背景通栏
-            .toolbarBackground(.hidden, for: .windowToolbar)
-            // 顶层兜底：拖入 .actr 或目录时创建新标签
-            .dropDestination(for: URL.self) { urls, location in
-                guard let url = urls.first else {
-                    return false
-                }
+        GeometryReader { rootGeo in
+            // Sidebar drag constraints:
+            // 1) 右拖不超过窗口宽度 50%
+            // 2) 宽度除非为 0（收起），否则不低于 180
+            let windowWidth = rootGeo.size.width
+            let maxSidebarWidth = max(180, windowWidth * 0.5)
+            let minSidebarWidth: CGFloat = (columnVisibility == .detailOnly) ? 0 : 180
+            let idealSidebarWidth: CGFloat = min(maxSidebarWidth, max(minSidebarWidth, 250))
 
-                // Check if it's a .actr file or a directory with manifest.json
-                var isDirectory: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-                    return false
+            ZStack {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
+                        .toolbar(removing: .sidebarToggle)
+                        .navigationSplitViewColumnWidth(min: minSidebarWidth, ideal: idealSidebarWidth, max: maxSidebarWidth)
+                        .overlay(
+                            GeometryReader { geo in
+                                Color.clear
+                                    .onChange(of: geo.size.width) { _, newWidth in
+                                        sidebarWidth = newWidth
+                                    }
+                                    .onAppear {
+                                        sidebarWidth = geo.size.width
+                                    }
+                            }
+                        )
+                } detail: {
+                    // Workspace: main canvas + optional docked DevTools panel
+                    // 🎨 Dia/ARC 风格：主内容区域（下圆角，上直角）
+                    // 四边都有 4px 边距
+                    WorkspaceView(devTools: devTools, viewModel: viewModel) {
+                        WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar)
+                    }
+                    .clipShape(BottomRoundedRectangle(bottomRadius: 16))
+                    // 🔑 让 titlebar 的 AppKit toolbar 精确对齐正文区本体（拖动分割线时也实时对齐）
+                    // 注意：必须放在 padding 之前，这样探针测到的是"可见内容"的左边界，而不是 detail 列的左边界。
+                    .background(TitlebarContentLeadingReporter())
+                    .padding(.leading, 4)
+                    .padding(.bottom, 4)
                 }
-
-                if isDirectory.boolValue {
-                    // Directory - check if it has manifest.json
-                    let manifestPath = url.appendingPathComponent("manifest.json").path
-                    guard FileManager.default.fileExists(atPath: manifestPath) else {
+                // 让 toolbar 背景透明，内容区域背景通栏
+                .toolbarBackground(.hidden, for: .windowToolbar)
+                // 顶层兜底：拖入 .actr 或目录时创建新标签
+                .dropDestination(for: URL.self) { urls, location in
+                    guard let url = urls.first else {
                         return false
                     }
-                    Task { @MainActor in
-                        viewModel.loadFromDevDirectory(url)
-                    }
-                    return true
-                } else if url.pathExtension.lowercased() == "actr" {
-                    // .actr file
-                    Task { @MainActor in
-                        viewModel.importACTRPackage(from: url)
-                    }
-                    return true
-                }
 
-                return false
-            } isTargeted: { isTargeted in
-                isACTRDropTarget = isTargeted
+                    // Check if it's a .actr file or a directory with manifest.json
+                    var isDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+                        return false
+                    }
+
+                    if isDirectory.boolValue {
+                        // Directory - check if it has manifest.json
+                        let manifestPath = url.appendingPathComponent("manifest.json").path
+                        guard FileManager.default.fileExists(atPath: manifestPath) else {
+                            return false
+                        }
+                        Task { @MainActor in
+                            viewModel.loadFromDevDirectory(url)
+                        }
+                        return true
+                    } else if url.pathExtension.lowercased() == "actr" {
+                        // .actr file
+                        Task { @MainActor in
+                            viewModel.importACTRPackage(from: url)
+                        }
+                        return true
+                    }
+
+                    return false
+                } isTargeted: { isTargeted in
+                    isACTRDropTarget = isTargeted
+                }
+                // 配置窗口：透明标题栏，让背景通栏
+                .background(WindowAccessor(viewModel: viewModel, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar))
+                // 强制清空窗口标题
+                .navigationTitle("")
+                // 监听 sidebar 宽度变化
+                .onChange(of: sidebarWidth) { _, newWidth in
+                    TitlebarManager.shared.updateSidebarWidth(newWidth)
+                }
+                // 监听 sidebar 显示/隐藏
+                .onChange(of: columnVisibility) { _, newValue in
+                    let isVisible = newValue != .detailOnly
+                    TitlebarManager.shared.updateSidebarVisibility(isVisible)
+                }
             }
-            // 配置窗口：透明标题栏，让背景通栏
-            .background(WindowAccessor(viewModel: viewModel, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar))
-            // 强制清空窗口标题
-            .navigationTitle("")
-            // 监听 sidebar 宽度变化
-            .onChange(of: sidebarWidth) { _, newWidth in
-                TitlebarManager.shared.updateSidebarWidth(newWidth)
-            }
-            // 监听 sidebar 显示/隐藏
-            .onChange(of: columnVisibility) { _, newValue in
-                let isVisible = newValue != .detailOnly
-                TitlebarManager.shared.updateSidebarVisibility(isVisible)
-            }
+            // 🔑 硬性边界：在 GeometryReader 层面限制整体尺寸，确保右边 4px 不被侵入
+            // 使用圆角裁剪，避免动画时圆角被切成直角
+            // radius=16 对应主工作区圆角，bottomInset=4 对应主工作区的 bottom padding
+            .frame(width: windowWidth - 4, height: rootGeo.size.height, alignment: .leading)
+            .clipShape(RightEdgeRoundedRectangle(radius: 16, bottomInset: 4))
         }
+    }
+}
+
+// MARK: - Right Edge Rounded Rectangle
+
+/// 右边有圆角切口的矩形，用于裁剪防止动画溢出时保持圆角
+/// 形状：矩形，但右边从 (bottomInset + radius) 到 bottomInset 处有一个向内的圆角
+private struct RightEdgeRoundedRectangle: Shape {
+    let radius: CGFloat
+    let bottomInset: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+
+        // 圆角切口的底部 Y 位置
+        let cutoutBottom = rect.maxY - bottomInset
+        // 圆角切口的顶部 Y 位置
+        let cutoutTop = cutoutBottom - radius
+
+        // 从左上角开始，顺时针
+        path.move(to: CGPoint(x: 0, y: 0))
+        // 顶边
+        path.addLine(to: CGPoint(x: rect.maxX, y: 0))
+        // 右边 - 直线下来到圆角开始处
+        path.addLine(to: CGPoint(x: rect.maxX, y: cutoutTop))
+        // 右下圆角（向内凹）
+        path.addArc(
+            center: CGPoint(x: rect.maxX - radius, y: cutoutTop),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        // 圆角结束后水平向左（到圆角内侧）
+        // 然后向下到底边
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.maxY))
+        // 底边到左下角
+        path.addLine(to: CGPoint(x: 0, y: rect.maxY))
+        // 关闭路径
+        path.closeSubpath()
+
+        return path
     }
 }
 
@@ -122,6 +179,7 @@ private struct TitlebarContentLeadingReporter: NSViewRepresentable {
 
     private final class ReporterView: NSView {
         private var lastReportedX: CGFloat = .nan
+        private var frameChangeObserver: NSObjectProtocol?
 
         override func hitTest(_ point: NSPoint) -> NSView? {
             // 透明探针：不拦截任何交互
@@ -130,7 +188,33 @@ private struct TitlebarContentLeadingReporter: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+
+            // 🔑 监听祖先视图的 frame 变化（捕获 NSSplitView divider 拖动）
+            if let window = window {
+                postsFrameChangedNotifications = true
+                frameChangeObserver = NotificationCenter.default.addObserver(
+                    forName: NSView.frameDidChangeNotification,
+                    object: nil,
+                    queue: nil  // 使用 posting thread（同步）
+                ) { [weak self] notification in
+                    guard let self = self,
+                          let changedView = notification.object as? NSView,
+                          changedView.window === window,
+                          self.isDescendant(of: changedView)
+                    else { return }
+                    self.reportIfNeeded()
+                }
+            }
+
             reportIfNeeded()
+        }
+
+        override func removeFromSuperview() {
+            if let observer = frameChangeObserver {
+                NotificationCenter.default.removeObserver(observer)
+                frameChangeObserver = nil
+            }
+            super.removeFromSuperview()
         }
 
         override func layout() {
@@ -148,9 +232,8 @@ private struct TitlebarContentLeadingReporter: NSViewRepresentable {
             }
             lastReportedX = x
 
-            Task { @MainActor in
-                TitlebarManager.shared.updateContentLeadingXInWindow(x)
-            }
+            // 🔑 同步调用，不使用 Task，避免延迟一个 runloop
+            TitlebarManager.shared.updateContentLeadingXInWindow(x)
         }
     }
 }

@@ -23,9 +23,8 @@ final class TitlebarManager: NSObject {
     // MARK: - Sidebar State
     private var currentSidebarWidth: CGFloat = 250
     private var isSidebarCollapsed: Bool = false
-
-    /// Split view handler width
-    private let splitHandlerWidth: CGFloat = 1
+    /// Precise content leading X from SwiftUI measurement
+    private var measuredContentLeadingX: CGFloat?
 
     func setupTitlebar(for window: NSWindow, viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel) {
         self.viewModel = viewModel
@@ -99,19 +98,32 @@ final class TitlebarManager: NSObject {
         }
     }
 
-    /// Update content leading X from SwiftUI measurement
+    /// Update content leading X from SwiftUI measurement (precise alignment)
     func updateContentLeadingXInWindow(_ xInWindow: CGFloat) {
-        // Use this for precise alignment if needed
+        guard xInWindow.isFinite, xInWindow >= 0 else { return }
+
+        // Store measured value (window coordinates = toolbar coordinates since both start at 0)
+        measuredContentLeadingX = xInWindow
+
+        // Always follow the measured value - this keeps toolbar background
+        // in sync with NavigationSplitView animation during sidebar toggle
+        toolbarContainerView?.updateBackgroundLeading(max(contentPadding, xInWindow))
     }
+
+    /// Content edge padding (matches main workspace padding)
+    private let contentPadding: CGFloat = 4
 
     private func updateBackgroundPosition() {
         let backgroundLeadingX: CGFloat
         if isSidebarCollapsed {
-            // Full width black background
-            backgroundLeadingX = 0
+            // Collapsed: 4px left padding to match main workspace
+            backgroundLeadingX = contentPadding
+        } else if let measured = measuredContentLeadingX, measured.isFinite {
+            // Use precise measurement from SwiftUI
+            backgroundLeadingX = max(0, measured)
         } else {
-            // Background starts after sidebar + handler
-            backgroundLeadingX = currentSidebarWidth + splitHandlerWidth
+            // Fallback: estimate from sidebar width + padding
+            backgroundLeadingX = currentSidebarWidth + contentPadding
         }
         toolbarContainerView?.updateBackgroundLeading(backgroundLeadingX)
     }
@@ -119,7 +131,8 @@ final class TitlebarManager: NSObject {
     @objc private func toggleSidebar() {
         isSidebarCollapsed.toggle()
         toolbarContainerView?.updateSidebarState(collapsed: isSidebarCollapsed)
-        updateBackgroundPosition()
+        // Don't call updateBackgroundPosition() here - let it follow the measured value
+        // from TitlebarContentLeadingReporter to stay in sync with NavigationSplitView animation
 
         // Trigger system sidebar toggle
         NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
