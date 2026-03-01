@@ -149,11 +149,8 @@ final class TitlebarManager: NSObject {
     @objc private func toggleSidebar() {
         isSidebarCollapsed.toggle()
         layoutState.isSidebarCollapsed = isSidebarCollapsed
-        // Don't call updateBackgroundPosition() here - let it follow the measured value
-        // from TitlebarContentLeadingReporter to stay in sync with NavigationSplitView animation
-
-        // Trigger system sidebar toggle
-        NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
+        // Post notification for ContentView to handle sidebar toggle
+        NotificationCenter.default.post(name: .toggleSidebarRequested, object: nil)
     }
 
     private func findTitlebarContainerView(in window: NSWindow) -> NSView? {
