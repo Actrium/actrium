@@ -20,7 +20,7 @@ struct ContentView: View {
             let maxSidebarWidth = max(180, windowWidth * 0.5)
 
             HStack(spacing: 0) {
-                // Sidebar (transparent background)
+                // Sidebar
                 if !isSidebarCollapsed {
                     SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
                         .frame(width: sidebarWidth)
@@ -32,18 +32,15 @@ struct ContentView: View {
                     )
                 }
 
-                // Main content area
+                // Main content
                 WorkspaceView(devTools: devTools, viewModel: viewModel) {
                     WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar)
                 }
-                .clipShape(BottomRoundedRectangle(bottomRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
                 .background(TitlebarContentLeadingReporter())
-                .padding(.leading, isSidebarCollapsed ? 4 : 0)
-                .padding(.bottom, 4)
-                .padding(.top, 52)
             }
-            .frame(width: windowWidth - 4, height: rootGeo.size.height, alignment: .leading)
-            .clipShape(RightEdgeRoundedRectangle(radius: 16, bottomInset: 4))
+            .padding(4)           // 窗体四周统一 4px
+            .padding(.top, 48)    // toolbar 额外空间 (52 - 4)
             .dropDestination(for: URL.self) { urls, location in
                 guard let url = urls.first else { return false }
 

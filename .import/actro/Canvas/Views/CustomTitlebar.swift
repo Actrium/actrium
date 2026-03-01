@@ -81,11 +81,11 @@ final class TitlebarManager: NSObject {
         // Add to titlebar - must be on top for hit testing
         titlebarView.addSubview(containerView)
 
-        // Full width constraints (4px margin on right only)
+        // Constraints with 4px margin on top and right (matching window edge inset)
         NSLayoutConstraint.activate([
             containerView.leadingAnchor.constraint(equalTo: titlebarView.leadingAnchor),
             containerView.trailingAnchor.constraint(equalTo: titlebarView.trailingAnchor, constant: -4),
-            containerView.topAnchor.constraint(equalTo: titlebarView.topAnchor),
+            containerView.topAnchor.constraint(equalTo: titlebarView.topAnchor, constant: 4),
             containerView.bottomAnchor.constraint(equalTo: titlebarView.bottomAnchor),
         ])
 
@@ -331,15 +331,14 @@ private class ToolbarContainerView: NSView {
     private func updateBackgroundPath() {
         guard let bgLayer = backgroundLayer else { return }
 
-        let topInset: CGFloat = 4
         let cornerRadius: CGFloat = 16
 
-        // Background rect starts at backgroundLeadingX
+        // Background fills the view (view itself is already inset by constraints)
         let adjustedRect = CGRect(
             x: backgroundLeadingX,
             y: 0,
             width: bounds.width - backgroundLeadingX,
-            height: bounds.height - topInset
+            height: bounds.height
         )
 
         guard adjustedRect.width > 0 else {

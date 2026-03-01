@@ -108,6 +108,7 @@ struct TabOutlineView: NSViewRepresentable {
         let outlineView = NSOutlineView()
         outlineView.headerView = nil
         outlineView.style = .sourceList
+        outlineView.backgroundColor = .clear  // 移除默认背景
         // selectionHighlightStyle.sourceList is deprecated on macOS 12+. Outline style already provides source-list look.
         // outlineView.selectionHighlightStyle = .sourceList
         outlineView.rowSizeStyle = .default
