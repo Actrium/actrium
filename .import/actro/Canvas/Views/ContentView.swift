@@ -3,128 +3,88 @@ import UniformTypeIdentifiers
 import AppKit
 import Combine
 
-// MARK: - Sidebar Width Preference Key
-
-private struct SidebarWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 250
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 struct ContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var devTools: DevToolsManager = .shared
     @ObservedObject var windowState: WindowStateManager = .shared
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var isACTRDropTarget: Bool = false
-    @State private var useNativeToolbar: Bool = true  // 使用原生 NSToolbar
+    @State private var isSidebarCollapsed: Bool = false
     @State private var sidebarWidth: CGFloat = 250
+    @State private var isACTRDropTarget: Bool = false
+    @State private var useNativeToolbar: Bool = true
 
     var body: some View {
         GeometryReader { rootGeo in
-            // Sidebar drag constraints:
-            // 1) 右拖不超过窗口宽度 50%
-            // 2) 宽度除非为 0（收起），否则不低于 180
             let windowWidth = rootGeo.size.width
             let maxSidebarWidth = max(180, windowWidth * 0.5)
-            let minSidebarWidth: CGFloat = (columnVisibility == .detailOnly) ? 0 : 180
-            let idealSidebarWidth: CGFloat = min(maxSidebarWidth, max(minSidebarWidth, 250))
 
-            ZStack {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
+            HStack(spacing: 0) {
+                // Sidebar (transparent background)
+                if !isSidebarCollapsed {
                     SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
-                        .toolbar(removing: .sidebarToggle)
-                        .navigationSplitViewColumnWidth(min: minSidebarWidth, ideal: idealSidebarWidth, max: maxSidebarWidth)
-                        // 移除 sidebar 默认的 glass 效果和圆角背景
-                        .scrollContentBackground(.hidden)
-                        .background(.clear)
-                        .overlay(
-                            GeometryReader { geo in
-                                Color.clear
-                                    .onChange(of: geo.size.width) { _, newWidth in
-                                        sidebarWidth = newWidth
-                                    }
-                                    .onAppear {
-                                        sidebarWidth = geo.size.width
-                                    }
-                            }
-                        )
-                } detail: {
-                    // Workspace: main canvas + optional docked DevTools panel
-                    // 🎨 Dia/ARC 风格：主内容区域（下圆角，上直角）
-                    // 四边都有 4px 边距
-                    WorkspaceView(devTools: devTools, viewModel: viewModel) {
-                        WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar)
-                    }
-                    .clipShape(BottomRoundedRectangle(bottomRadius: 16))
-                    // 🔑 让 titlebar 的 AppKit toolbar 精确对齐正文区本体（拖动分割线时也实时对齐）
-                    // 注意：必须放在 padding 之前，这样探针测到的是"可见内容"的左边界，而不是 detail 列的左边界。
-                    .background(TitlebarContentLeadingReporter())
-                    .padding(.leading, 4)
-                    .padding(.bottom, 4)
-                    // 顶部留出 toolbar 高度，避免内容被遮挡
-                    .padding(.top, 52)
-                }
-                // 让 toolbar 背景透明，内容区域背景通栏
-                .toolbarBackground(.hidden, for: .windowToolbar)
-                // 顶层兜底：拖入 .actr 或目录时创建新标签
-                .dropDestination(for: URL.self) { urls, location in
-                    guard let url = urls.first else {
-                        return false
-                    }
+                        .frame(width: sidebarWidth)
 
-                    // Check if it's a .actr file or a directory with manifest.json
-                    var isDirectory: ObjCBool = false
-                    guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-                        return false
-                    }
+                    SidebarDivider(
+                        width: $sidebarWidth,
+                        minWidth: 180,
+                        maxWidth: maxSidebarWidth
+                    )
+                }
 
-                    if isDirectory.boolValue {
-                        // Directory - check if it has manifest.json
-                        let manifestPath = url.appendingPathComponent("manifest.json").path
-                        guard FileManager.default.fileExists(atPath: manifestPath) else {
-                            return false
-                        }
-                        Task { @MainActor in
-                            viewModel.loadFromDevDirectory(url)
-                        }
-                        return true
-                    } else if url.pathExtension.lowercased() == "actr" {
-                        // .actr file
-                        Task { @MainActor in
-                            viewModel.importACTRPackage(from: url)
-                        }
-                        return true
-                    }
-
-                    return false
-                } isTargeted: { isTargeted in
-                    isACTRDropTarget = isTargeted
+                // Main content area
+                WorkspaceView(devTools: devTools, viewModel: viewModel) {
+                    WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar)
                 }
-                // 配置窗口：透明标题栏，让背景通栏
-                .background(WindowAccessor(viewModel: viewModel, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar))
-                // 强制清空窗口标题
-                .navigationTitle("")
-                // 监听 sidebar 宽度变化
-                .onChange(of: sidebarWidth) { _, newWidth in
-                    TitlebarManager.shared.updateSidebarWidth(newWidth)
-                }
-                // 监听 sidebar 显示/隐藏
-                .onChange(of: columnVisibility) { _, newValue in
-                    let isVisible = newValue != .detailOnly
-                    TitlebarManager.shared.updateSidebarVisibility(isVisible)
-                }
+                .clipShape(BottomRoundedRectangle(bottomRadius: 16))
+                .background(TitlebarContentLeadingReporter())
+                .padding(.leading, isSidebarCollapsed ? 4 : 0)
+                .padding(.bottom, 4)
+                .padding(.top, 52)
             }
-            // 🔑 硬性边界：在 GeometryReader 层面限制整体尺寸，确保右边 4px 不被侵入
-            // 使用圆角裁剪，避免动画时圆角被切成直角
-            // radius=16 对应主工作区圆角，bottomInset=4 对应主工作区的 bottom padding
             .frame(width: windowWidth - 4, height: rootGeo.size.height, alignment: .leading)
             .clipShape(RightEdgeRoundedRectangle(radius: 16, bottomInset: 4))
+            .dropDestination(for: URL.self) { urls, location in
+                guard let url = urls.first else { return false }
+
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+                    return false
+                }
+
+                if isDirectory.boolValue {
+                    let manifestPath = url.appendingPathComponent("manifest.json").path
+                    guard FileManager.default.fileExists(atPath: manifestPath) else { return false }
+                    Task { @MainActor in viewModel.loadFromDevDirectory(url) }
+                    return true
+                } else if url.pathExtension.lowercased() == "actr" {
+                    Task { @MainActor in viewModel.importACTRPackage(from: url) }
+                    return true
+                }
+                return false
+            } isTargeted: { isTargeted in
+                isACTRDropTarget = isTargeted
+            }
+            .background(WindowAccessor(viewModel: viewModel, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar))
+            // Listen for sidebar toggle notification
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSidebarRequested)) { _ in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isSidebarCollapsed.toggle()
+                }
+                TitlebarManager.shared.updateSidebarVisibility(!isSidebarCollapsed)
+            }
+            // Sync sidebar width with titlebar
+            .onChange(of: sidebarWidth) { _, newWidth in
+                TitlebarManager.shared.updateSidebarWidth(newWidth)
+            }
         }
     }
+}
+
+// MARK: - Notification for Sidebar Toggle
+
+extension Notification.Name {
+    static let toggleSidebarRequested = Notification.Name("toggleSidebarRequested")
 }
 
 // MARK: - Right Edge Rounded Rectangle
@@ -505,7 +465,7 @@ private class WindowObserverView: NSView {
         window.title = ""
         // 设置窗口最小尺寸（备用，主要由 SwiftUI frame 控制）
         window.minSize = NSSize(width: 640, height: 480)
-        
+
         // macOS 26+: 设置窗口圆角
         // 通过 setValue:forKey: 访问私有属性
         window.setValue(18.0, forKey: "cornerRadius")
