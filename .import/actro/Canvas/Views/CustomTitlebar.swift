@@ -5,10 +5,18 @@ import Combine
 // MARK: - Custom Titlebar Manager
 
 @MainActor
+private final class ToolbarLayoutState: ObservableObject {
+    @Published var isSidebarExpanded: Bool = true
+}
+
+@MainActor
 final class TitlebarManager: NSObject {
     static let shared = TitlebarManager()
 
     private var customToolbarView: ToolbarContainerView?
+    private var externalLeadingButtonsView: NSHostingView<AnyView>?
+    private var externalLeadingButtonsLeadingConstraint: NSLayoutConstraint?
+    private let toolbarLayoutState = ToolbarLayoutState()
     private var cancellables = Set<AnyCancellable>()
     private weak var viewModel: BrowserViewModel?
     private weak var bookmarkVM: BookmarkViewModel?
@@ -26,6 +34,39 @@ final class TitlebarManager: NSObject {
     private let contentInset: CGFloat = 4
     /// SwiftUI 量到的 sidebar 宽度不包含 split divider 的厚度；这里补偿 1px 以对齐正文区。
     private let splitDividerCompensation: CGFloat = 1
+    /// 红绿灯到 + 的间距（收起状态）
+    private let trafficLightsToPlusSpacing: CGFloat = 24
+    /// ToggleSidebar 为基点，Overview 在其左侧（展开状态 24px，收起状态 16px）
+    private let toggleToOverviewOffsetExpanded: CGFloat = 24
+    private let toggleToOverviewOffsetCollapsed: CGFloat = 16
+    /// Overview 为基点，+ 在其左侧 16px
+    private let overviewToPlusOffset: CGFloat = 16
+    /// Sidebar 收起时 ToggleSidebar 的固定 x（titlebar 坐标）
+    private let collapsedToggleLeadingX: CGFloat = 170
+    /// LiquidGlassToolbar 自身的左内边距（.padding(.leading, 10)）
+    private let toolbarContentLeadingPadding: CGFloat = 10
+
+    /// 🔑 分离布局更新，确保同步响应
+    /// 使用约束更新 + 即时布局的策略
+    private func applyLeadingConstraintAndLayout(_ newConstant: CGFloat) {
+        guard let leadingConstraint else { return }
+        if abs(leadingConstraint.constant - newConstant) <= 0.25 {
+            return
+        }
+
+        // 🔑 更新约束值
+        leadingConstraint.constant = newConstant
+        updateToolbarContentLeadingInset(containerLeadingConstant: newConstant)
+        updateExternalLeadingButtonsPosition(containerLeadingConstant: newConstant)
+
+        // 🔑 在同一 runloop 中延迟触发布局，避免 layout 重入问题
+        // 使用 CFRunLoopPerformBlock 确保在当前 runloop 迭代内执行
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
+            guard let self = self else { return }
+            self.customToolbarView?.superview?.layoutSubtreeIfNeeded()
+        }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
 
     func setupTitlebar(for window: NSWindow, viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel) {
         self.viewModel = viewModel
@@ -59,6 +100,7 @@ final class TitlebarManager: NSObject {
         let containerView = ToolbarContainerView(
             viewModel: viewModel,
             bookmarkVM: bookmarkVM,
+            layoutState: toolbarLayoutState,
             onOverview: { [weak self] in self?.onToggleFocusOverview?() },
             onToggleSidebar: { [weak self] in self?.toggleSidebar() }
         )
@@ -66,6 +108,8 @@ final class TitlebarManager: NSObject {
         self.customToolbarView = containerView
 
         // Add to titlebar
+        // 🔑 必须放在最上层：否则会出现“视觉可见但点击被系统 titlebar 覆盖”的情况，导致按钮不可点
+        // 红绿灯与左侧留白区域通过 ToolbarContainerView.hitTest 做事件穿透
         titlebarView.addSubview(containerView)
 
         // Main toolbar - 与正文区左边对齐
@@ -80,6 +124,37 @@ final class TitlebarManager: NSObject {
             containerView.topAnchor.constraint(equalTo: titlebarView.topAnchor),
             containerView.bottomAnchor.constraint(equalTo: titlebarView.bottomAnchor),
         ])
+
+        // Sidebar 展开时：[+][Overview] 在黑底外（sidebar 区域）
+        externalLeadingButtonsView?.removeFromSuperview()
+        let externalLeadingButtons = NSHostingView(
+            rootView: AnyView(
+                LeadingTabButtonsView(
+                    viewModel: viewModel,
+                    onOverview: { [weak self] in self?.onToggleFocusOverview?() }
+                )
+            )
+        )
+        externalLeadingButtons.translatesAutoresizingMaskIntoConstraints = false
+        externalLeadingButtons.wantsLayer = true
+        externalLeadingButtons.layer?.backgroundColor = .clear
+        titlebarView.addSubview(externalLeadingButtons)
+        let extSize = externalLeadingButtons.fittingSize
+        let extLeading = externalLeadingButtons.leadingAnchor.constraint(
+            equalTo: titlebarView.leadingAnchor,
+            constant: leadingButtonsLeadingFor(containerLeadingConstant: leading.constant)
+        )
+        externalLeadingButtonsLeadingConstraint = extLeading
+        NSLayoutConstraint.activate([
+            extLeading,
+            externalLeadingButtons.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+            externalLeadingButtons.widthAnchor.constraint(equalToConstant: extSize.width),
+            externalLeadingButtons.heightAnchor.constraint(equalToConstant: extSize.height),
+        ])
+        externalLeadingButtonsView = externalLeadingButtons
+
+        // 初始时同步一次 inset（通常为 0，但避免某些窗口初始状态下越界）
+        refreshLeadingLayoutForCurrentState()
 
         // Observe viewModel changes
         setupObservers(viewModel: viewModel, bookmarkVM: bookmarkVM)
@@ -110,39 +185,50 @@ final class TitlebarManager: NSObject {
         return max(xInTitlebar, minTogglePosition + contentInset)
     }
 
-    /// SwiftUI/NavigationSplitView 里“正文区外框（含 4px padding）”的窗口坐标系 x。
+    /// SwiftUI/NavigationSplitView 里"正文区外框（含 4px padding）"的窗口坐标系 x。
     /// 用这个值对齐 AppKit titlebar 的 toolbar，可以消除各种系统 inset/divider/hit-area 带来的像素偏差。
     func updateContentLeadingXInWindow(_ xInWindow: CGFloat) {
-        // Sidebar 收起时仍沿用红绿灯后的最小位置（避免 toolbar 跑到红绿灯下面）
-        guard isSidebarExpanded else { return }
-        guard let titlebarView = titlebarContainerView, let leadingConstraint else { return }
+        guard let titlebarView = titlebarContainerView else { return }
 
         lastReportedContentLeadingXInWindow = xInWindow
 
-        let pointInTitlebar = titlebarView.convert(NSPoint(x: xInWindow, y: 0), from: nil)
-        guard pointInTitlebar.x.isFinite else { return }
+        // 🔑 计算 titlebarView 的 leading 在窗口坐标系中的位置
+        let titlebarLeadingInWindow = titlebarView.convert(NSPoint(x: 0, y: 0), to: nil).x
 
-        let newConstant = max(pointInTitlebar.x, minTogglePosition + contentInset)
-        if abs(leadingConstraint.constant - newConstant) <= 0.25 {
-            return
-        }
-        leadingConstraint.constant = newConstant
+        // 🔑 toolbar 的 leading 约束是相对于 titlebarView 的
+        // 所以约束值 = 内容区域位置（窗口坐标）- titlebarView 的位置（窗口坐标）
+        let newConstant = xInWindow - titlebarLeadingInWindow
+        guard newConstant.isFinite else { return }
+
+        // 背景衬底应当严格对齐正文区（包括 sidebar 收起宽度为 0 的情况）
+        // 内容（图标）的位置通过 hostingView 的 inset 来保证不会跑到红绿灯下面
+        let clampedConstant = max(0, newConstant)
+        // 🔑 同步更新约束并立即布局
+        applyLeadingConstraintAndLayout(clampedConstant)
     }
 
     /// Called from SwiftUI when sidebar width changes (including drag resize)
     func updateSidebarWidth(_ width: CGFloat) {
+        // Sidebar 已收起时不更新（避免收起动画过程中把 lastKnownSidebarWidth 覆盖成很小的值）
+        guard isSidebarExpanded else { return }
+        // Sidebar 收起（宽度=0）时不要覆盖 lastKnownSidebarWidth，否则展开会丢失用户拖动宽度
+        if width <= 0.5 {
+            return
+        }
         // Clamp to minimum toggle position so toolbar 不会压到红绿灯
         let effectiveWidth = max(width, minTogglePosition)
         lastKnownSidebarWidth = effectiveWidth
 
-        // 一旦拿到正文区的真实坐标，就不要再用 sidebarWidth 推导（会产生像素级偏差）
-        if isSidebarExpanded, lastReportedContentLeadingXInWindow != nil {
+        // 🔑 如果已经拿到了正文区真实 leading（测量法），就不要再用 sidebarWidth 推导（会把对齐值覆盖回去）
+        if isSidebarExpanded, lastReportedContentLeadingXInWindow?.isFinite == true {
             return
         }
 
         // Update toolbar position immediately when sidebar is expanded
         if isSidebarExpanded {
-            leadingConstraint?.constant = desiredLeadingConstant(fallbackSidebarWidth: effectiveWidth)
+            let newConstant = desiredLeadingConstant(fallbackSidebarWidth: effectiveWidth)
+            // 🔑 同步更新约束并立即布局
+            applyLeadingConstraintAndLayout(newConstant)
         }
     }
 
@@ -153,46 +239,109 @@ final class TitlebarManager: NSObject {
         // Handle sidebar toggled by other means (keyboard shortcut, menu, etc.)
         if isSidebarExpanded != visible {
             isSidebarExpanded = visible
-
-            let targetToolbarPosition: CGFloat
+            toolbarLayoutState.isSidebarExpanded = visible
+            refreshLeadingLayoutForCurrentState()
 
             if visible {
-                targetToolbarPosition = desiredLeadingConstant(fallbackSidebarWidth: lastKnownSidebarWidth)
-            } else {
-                // Sidebar 收起时，toolbar 从红绿灯后开始
-                targetToolbarPosition = minTogglePosition + contentInset
+                if let xInWindow = lastReportedContentLeadingXInWindow, xInWindow.isFinite {
+                    // 优先用测量值，避免刚展开时出现像素偏差
+                    updateContentLeadingXInWindow(xInWindow)
+                    return
+                }
+                let newConstant = desiredLeadingConstant(fallbackSidebarWidth: lastKnownSidebarWidth)
+                applyLeadingConstraintAndLayout(newConstant)
+                return
             }
-
-            // 直接同步位置，不用动画，避免相对主体区域的延时
-            leadingConstraint?.constant = targetToolbarPosition
+            // visible == false:
+            // 不在这里强行设置位置，交给 TitlebarContentLeadingReporter 的真实测量值驱动，
+            // 这样在 sidebar 收起动画/布局变化过程中 toolbar 会持续对齐正文区。
         }
     }
 
     private var isSidebarExpanded: Bool = true
 
     @objc private func toggleSidebar() {
-        // Toggle state and start animation IMMEDIATELY (same time as sidebar)
+        // Toggle state; 位置由 TitlebarContentLeadingReporter 的真实测量值驱动
         isSidebarExpanded.toggle()
-
-        let targetToolbarPosition: CGFloat
-
-        if isSidebarExpanded {
-            // Expanding to last known width
-            targetToolbarPosition = desiredLeadingConstant(fallbackSidebarWidth: lastKnownSidebarWidth)
-        } else {
-            // Collapsing to minimum position
-            targetToolbarPosition = minTogglePosition + contentInset
-        }
-
-        // Start animation immediately
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            leadingConstraint?.animator().constant = targetToolbarPosition
-        }
+        toolbarLayoutState.isSidebarExpanded = isSidebarExpanded
+        refreshLeadingLayoutForCurrentState()
 
         // Trigger sidebar toggle at the same time
         NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
+    }
+
+    /// 允许背景衬底对齐正文区，但 toolbar 内容（图标/地址栏）必须避开红绿灯区域：
+    /// 留出红绿灯后，再留白，再出现 Toggle Sidebar icon 和其它控件。
+    private func updateToolbarContentLeadingInset(containerLeadingConstant: CGFloat) {
+        let inset = toolbarContentInsetFor(containerLeadingConstant: containerLeadingConstant)
+        customToolbarView?.setContentLeftInset(inset)
+    }
+
+    private func updateExternalLeadingButtonsPosition(containerLeadingConstant: CGFloat) {
+        guard let extLeading = externalLeadingButtonsLeadingConstraint else { return }
+        let targetX = leadingButtonsLeadingFor(containerLeadingConstant: containerLeadingConstant)
+        if abs(extLeading.constant - targetX) <= 0.25 {
+            return
+        }
+        extLeading.constant = targetX
+    }
+
+    private func refreshLeadingLayoutForCurrentState() {
+        guard let leadingConstraint else { return }
+        let currentLeading = leadingConstraint.constant
+        updateToolbarContentLeadingInset(containerLeadingConstant: currentLeading)
+        updateExternalLeadingButtonsPosition(containerLeadingConstant: currentLeading)
+        customToolbarView?.superview?.needsLayout = true
+    }
+
+    private func trafficLightsRightInTitlebar() -> CGFloat? {
+        guard let window, let titlebarView = titlebarContainerView else { return nil }
+        let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        var maxX: CGFloat = -.greatestFiniteMagnitude
+        var hasValue = false
+
+        for type in buttons {
+            guard let button = window.standardWindowButton(type) else { continue }
+            let rectInWindow = button.convert(button.bounds, to: nil)
+            let rectInTitlebar = titlebarView.convert(rectInWindow, from: nil)
+            guard rectInTitlebar.maxX.isFinite else { continue }
+            maxX = max(maxX, rectInTitlebar.maxX)
+            hasValue = true
+        }
+
+        return hasValue ? maxX : nil
+    }
+
+    private func minimumPlusLeadingInTitlebar() -> CGFloat {
+        let fallback = minTogglePosition + contentInset
+        guard let trafficRight = trafficLightsRightInTitlebar() else { return fallback }
+        return max(trafficRight + trafficLightsToPlusSpacing, contentInset)
+    }
+
+    private var toggleToPlusOffset: CGFloat {
+        let toggleToOverview = isSidebarExpanded ? toggleToOverviewOffsetExpanded : toggleToOverviewOffsetCollapsed
+        return toggleToOverview + overviewToPlusOffset
+    }
+
+    private func expandedToggleLeadingInTitlebar() -> CGFloat {
+        minimumPlusLeadingInTitlebar() + toggleToPlusOffset
+    }
+
+    private func desiredToggleLeadingInTitlebar(containerLeadingConstant: CGFloat) -> CGFloat {
+        if isSidebarExpanded {
+            return expandedToggleLeadingInTitlebar()
+        }
+        return collapsedToggleLeadingX
+    }
+
+    private func toolbarContentInsetFor(containerLeadingConstant: CGFloat) -> CGFloat {
+        let desiredToggleX = desiredToggleLeadingInTitlebar(containerLeadingConstant: containerLeadingConstant)
+        return max(0, desiredToggleX - containerLeadingConstant - toolbarContentLeadingPadding)
+    }
+
+    private func leadingButtonsLeadingFor(containerLeadingConstant: CGFloat) -> CGFloat {
+        let desiredToggleX = desiredToggleLeadingInTitlebar(containerLeadingConstant: containerLeadingConstant)
+        return desiredToggleX - toggleToPlusOffset
     }
 
     private func findTitlebarContainerView(in window: NSWindow) -> NSView? {
@@ -247,7 +396,9 @@ private class ToolbarContainerView: NSView {
 
     weak var viewModel: BrowserViewModel?
     weak var bookmarkVM: BookmarkViewModel?
+    private let layoutState: ToolbarLayoutState
     private var hostingView: NSHostingView<AnyView>?
+    private var hostingLeadingConstraint: NSLayoutConstraint?
     private var backgroundLayer: CAShapeLayer?  // 🔑 AppKit 原生背景层
 
     // Callbacks
@@ -256,9 +407,10 @@ private class ToolbarContainerView: NSView {
     var onOverview: (() -> Void)?
     var onToggleSidebar: (() -> Void)?
 
-    init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel, onOverview: @escaping () -> Void, onToggleSidebar: @escaping () -> Void) {
+    init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel, layoutState: ToolbarLayoutState, onOverview: @escaping () -> Void, onToggleSidebar: @escaping () -> Void) {
         self.viewModel = viewModel
         self.bookmarkVM = bookmarkVM
+        self.layoutState = layoutState
         self.onOverview = onOverview
         self.onToggleSidebar = onToggleSidebar
 
@@ -284,12 +436,55 @@ private class ToolbarContainerView: NSView {
         self.backgroundLayer = bgLayer
     }
 
+    // MARK: - Event Passthrough
+
+    /// 让红绿灯区域、以及左侧留白（hostingView 之外）完全点击穿透到系统 titlebar。
+    /// 否则自定义 view 放在最上层时会挡住系统按钮，或导致 titlebar 拖动/双击失效。
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // 左侧留白（hostingView 之外）直接穿透
+        if let hostingView, !hostingView.frame.contains(point) {
+            return nil
+        }
+
+        // 红绿灯区域穿透（防止遮挡）
+        if let trafficRect = trafficLightsUnionRectInSelf(padding: 6), trafficRect.contains(point) {
+            return nil
+        }
+
+        // 其余区域交给 SwiftUI/NSHostingView 正常处理，否则会出现按钮不可点的问题
+        return super.hitTest(point)
+    }
+
+    private func trafficLightsUnionRectInSelf(padding: CGFloat) -> CGRect? {
+        guard let window else { return nil }
+        let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        let views = buttons.compactMap { window.standardWindowButton($0) }
+        guard !views.isEmpty else { return nil }
+
+        var union = CGRect.null
+        for v in views {
+            let rectInWindow = v.convert(v.bounds, to: nil)
+            let rectInSelf = convert(rectInWindow, from: nil)
+            union = union.union(rectInSelf)
+        }
+
+        if union.isNull {
+            return nil
+        }
+        let isFiniteRect = union.origin.x.isFinite && union.origin.y.isFinite && union.size.width.isFinite && union.size.height.isFinite
+        if !isFiniteRect {
+            return nil
+        }
+        return union.insetBy(dx: -padding, dy: -padding)
+    }
+
     private func setupSwiftUIView() {
         guard let viewModel = viewModel, let bookmarkVM = bookmarkVM else { return }
 
         let swiftUIView = LiquidGlassToolbar(
             viewModel: viewModel,
             bookmarkVM: bookmarkVM,
+            layoutState: layoutState,
             onOverview: { [weak self] in self?.onOverview?() },
             onBookmarkTap: { [weak self] in self?.onBookmarkTap?() },
             onToggleSidebar: { [weak self] in self?.onToggleSidebar?() }
@@ -302,8 +497,11 @@ private class ToolbarContainerView: NSView {
         hosting.layer?.backgroundColor = .clear
         addSubview(hosting)
 
+        let leading = hosting.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 0)
+        self.hostingLeadingConstraint = leading
+
         NSLayoutConstraint.activate([
-            hosting.leadingAnchor.constraint(equalTo: leadingAnchor),
+            leading,
             hosting.trailingAnchor.constraint(equalTo: trailingAnchor),
             hosting.topAnchor.constraint(equalTo: topAnchor),
             hosting.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -312,24 +510,46 @@ private class ToolbarContainerView: NSView {
         self.hostingView = hosting
     }
 
+    func setContentLeftInset(_ inset: CGFloat) {
+        guard let hostingLeadingConstraint else { return }
+        if abs(hostingLeadingConstraint.constant - inset) <= 0.25 {
+            return
+        }
+        hostingLeadingConstraint.constant = inset
+    }
+
     func updateState() {
         // SwiftUI handles updates via @ObservedObject
     }
 
     func forceLayoutUpdate() {
-        // Force the hosting view to recalculate its geometry
-        hostingView?.needsLayout = true
-        hostingView?.layoutSubtreeIfNeeded()
+        // Force layout by invalidating and letting system handle it
+        // 避免在 layout 过程中调用 layoutSubtreeIfNeeded() 导致重入
         needsLayout = true
-        layoutSubtreeIfNeeded()
+        hostingView?.needsLayout = true
+        // 立即更新背景层
+        updateBackgroundPath()
+    }
+    
+    // 🔑 立即更新背景（跳过 layout cycle，直接重绘）
+    func updateBackgroundImmediately() {
+        updateBackgroundPath()
+    }
+    
+    // 🔑 重写 setFrameSize，在 frame 变化时立即更新背景（参考 ViewBridge 的模式）
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        // 立即更新背景，不等待 layout()
+        updateBackgroundPath()
     }
     
     override func layout() {
         super.layout()
         // 🔑 每次 layout 时立即更新背景层路径（完全同步，无延迟）
         updateBackgroundPath()
-        // 当 NSView 布局变化时（窗口拖动），立即更新 SwiftUI
-        hostingView?.needsLayout = true
+        // 注意：不在这里设置 hostingView?.needsLayout = true
+        // 因为这会导致 "NSHostingView is being laid out reentrantly" 警告
+        // NSHostingView 会自动响应父视图的 frame 变化
     }
     
     // 🔑 更新背景层的圆角路径（上左、上右两角弧 16，下两角直角）
@@ -375,7 +595,7 @@ private class ToolbarContainerView: NSView {
                     clockwise: false)
         // 左边直线下去
         path.closeSubpath()
-        
+
         // 禁用隐式动画，确保完全同步
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -384,11 +604,48 @@ private class ToolbarContainerView: NSView {
     }
 }
 
+private struct LeadingTabButtonsView: View {
+    @ObservedObject var viewModel: BrowserViewModel
+    var onOverview: () -> Void
+    private let overviewOffsetFromPlus: CGFloat = 16
+    private let iconPointSize: CGFloat = 16
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Button(action: {
+                NSLog("🔘 [Toolbar] New tab button tapped (leading)")
+                _ = viewModel.addNewTab()
+            }) {
+                Image(systemName: "plus")
+                    .font(.system(size: iconPointSize, weight: .medium))
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            Button(action: {
+                NSLog("🔘 [Toolbar] Overview button tapped (leading)")
+                onOverview()
+            }) {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: iconPointSize, weight: .medium))
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .offset(x: overviewOffsetFromPlus)
+        }
+        .frame(width: 50, height: 36, alignment: .leading)
+        .foregroundStyle(.secondary)
+    }
+}
+
 // MARK: - SwiftUI Liquid Glass Toolbar
 
 private struct LiquidGlassToolbar: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
+    @ObservedObject var layoutState: ToolbarLayoutState
     var onOverview: () -> Void
     var onBookmarkTap: () -> Void
     var onToggleSidebar: () -> Void
@@ -478,6 +735,7 @@ private struct LiquidGlassToolbar: View {
     // Narrow: flexible address bar + [>>] circle
     private let compactThreshold: CGFloat = 500
     private let narrowThreshold: CGFloat = 380
+    private let leadingIconPointSize: CGFloat = 16
 
     var body: some View {
         GeometryReader { geo in
@@ -487,16 +745,7 @@ private struct LiquidGlassToolbar: View {
             let addressBarWidth: CGFloat = max(200, geo.size.width * 0.5)
 
             HStack(spacing: 12) {
-                // === Sidebar Toggle Button ===
-                Button(action: onToggleSidebar) {
-                    Image(systemName: "sidebar.left")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Toggle Sidebar (⌃⌘S)")
+                toggleSidebarButton
                 
                 // === Navigation Buttons (hidden in narrow mode) ===
                 if !isNarrow {
@@ -514,11 +763,10 @@ private struct LiquidGlassToolbar: View {
 
                 // === Right side buttons ===
                 if isNormal {
-                    // Normal: [Share + Tabs] capsule
-                    actionButtonsGroup
+                    // Normal: Share only (New Tab + Overview moved to leading side)
+                    shareButton
                 } else if isCompact {
-                    // Compact: [+] circle + [>>] circle
-                    newTabButton
+                    // Compact: [>>] circle
                     overflowMenuButton(showNavActions: false)
                 } else {
                     // Narrow: [>>] circle only
@@ -573,6 +821,18 @@ private struct LiquidGlassToolbar: View {
     private func updateDisplayText() {
         guard !isAddressFocused else { return }
         updateAddressTextFromTab()
+    }
+
+    private var toggleSidebarButton: some View {
+        Button(action: onToggleSidebar) {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: leadingIconPointSize, weight: .medium))
+                .frame(width: 30, height: 30)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help("Toggle Sidebar (⌃⌘S)")
     }
     
     private func handleBlur() {
@@ -851,38 +1111,14 @@ private struct LiquidGlassToolbar: View {
     }
 
     /// Action buttons group [Share + Tabs] in capsule (normal mode)
-    private var actionButtonsGroup: some View {
-        HStack(spacing: 4) {
-            ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 15, weight: .medium))
-                    .frame(width: 30, height: 30)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-
-            Button(action: {
-                NSLog("🔘 [Toolbar] New tab button tapped (normal mode)")
-                _ = viewModel.addNewTab()
-            }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .medium))
-                    .frame(width: 30, height: 30)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-
-            Button(action: {
-                NSLog("🔘 [Toolbar] Overview button tapped")
-                onOverview()
-            }) {
-                Image(systemName: "square.on.square")
-                    .font(.system(size: 15, weight: .medium))
-                    .frame(width: 30, height: 30)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
+    private var shareButton: some View {
+        ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 30, height: 30)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 5)
         .padding(.vertical, 3)
