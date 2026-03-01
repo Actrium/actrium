@@ -89,14 +89,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private func setupToolbar() {
         guard let window = window else { return }
 
-        // Create toolbar
-        let toolbar = NSToolbar(identifier: "MainToolbar")
-        toolbar.displayMode = .iconOnly
-        toolbar.delegate = self
-        toolbar.showsBaselineSeparator = false
+        // Use TitlebarManager to setup custom toolbar
+        TitlebarManager.shared.setupTitlebar(
+            for: window,
+            viewModel: viewModel,
+            bookmarkVM: bookmarkVM
+        )
 
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
+        // Setup overview toggle callback - post notification for WorkspaceMainView to handle
+        TitlebarManager.shared.onToggleFocusOverview = {
+            NotificationCenter.default.post(name: .toggleFocusOverviewRequested, object: nil)
+        }
     }
 
     // MARK: - Public Methods
@@ -118,20 +121,3 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
-// MARK: - NSToolbarDelegate
-
-extension MainWindowController: NSToolbarDelegate {
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        // Toolbar items will be handled by ToolbarViewController
-        return nil
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        return []
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        return []
-    }
-}

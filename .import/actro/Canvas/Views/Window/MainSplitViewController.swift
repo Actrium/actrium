@@ -41,13 +41,6 @@ final class MainSplitViewController: NSSplitViewController {
 
     // MARK: - Lifecycle
 
-    override func loadView() {
-        // Create a container view with edge insets
-        let containerView = NSView()
-        containerView.wantsLayer = true
-        self.view = containerView
-    }
-
     override func viewDidLoad() {
         super.viewDidLoad()
 
