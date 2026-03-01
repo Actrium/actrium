@@ -38,6 +38,9 @@ struct ContentView: View {
                     SidebarView(viewModel: viewModel, bookmarkVM: bookmarkVM, historyVM: historyVM)
                         .toolbar(removing: .sidebarToggle)
                         .navigationSplitViewColumnWidth(min: minSidebarWidth, ideal: idealSidebarWidth, max: maxSidebarWidth)
+                        // 移除 sidebar 默认的 glass 效果和圆角背景
+                        .scrollContentBackground(.hidden)
+                        .background(.clear)
                         .overlay(
                             GeometryReader { geo in
                                 Color.clear
@@ -62,6 +65,8 @@ struct ContentView: View {
                     .background(TitlebarContentLeadingReporter())
                     .padding(.leading, 4)
                     .padding(.bottom, 4)
+                    // 顶部留出 toolbar 高度，避免内容被遮挡
+                    .padding(.top, 52)
                 }
                 // 让 toolbar 背景透明，内容区域背景通栏
                 .toolbarBackground(.hidden, for: .windowToolbar)
@@ -534,9 +539,9 @@ private class WindowObserverView: NSView {
     }
     
     private func updateWindowBackgroundColor() {
-        guard let window = window, let viewModel = viewModel else { return }
-        // 调试用：蓝色背景方便观察
-        window.backgroundColor = NSColor.systemBlue
+        guard let window = window else { return }
+        // 透明背景，让内容区域自己处理背景
+        window.backgroundColor = .clear
     }
 
     private func setupObservers() {
