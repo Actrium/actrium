@@ -47,6 +47,9 @@ struct ContentView: View {
                     WorkspaceMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, useNativeToolbar: useNativeToolbar)
                 }
                 .clipShape(BottomRoundedRectangle(bottomRadius: 16))
+                // 🔑 让 titlebar 的 AppKit toolbar 精确对齐正文区本体（拖动分割线时也实时对齐）
+                // 注意：必须放在 padding 之前，这样探针测到的是“可见内容”的左边界，而不是 detail 列的左边界。
+                .background(TitlebarContentLeadingReporter())
                 .padding(.leading, 4)
                 .padding(.trailing, 4)
                 .padding(.bottom, 4)
@@ -99,6 +102,54 @@ struct ContentView: View {
             .onChange(of: columnVisibility) { _, newValue in
                 let isVisible = newValue != .detailOnly
                 TitlebarManager.shared.updateSidebarVisibility(isVisible)
+            }
+        }
+    }
+}
+
+// MARK: - Titlebar Alignment Reporter
+
+/// 报告“正文区外框（含 padding）”在窗口坐标系中的精确 x，用来对齐 AppKit titlebar 的 toolbar。
+/// 直接测量实际布局，避免依赖 sidebarWidth 推导导致的像素误差。
+private struct TitlebarContentLeadingReporter: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        ReporterView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // no-op: layout() 会在尺寸变化时被调用
+    }
+
+    private final class ReporterView: NSView {
+        private var lastReportedX: CGFloat = .nan
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            // 透明探针：不拦截任何交互
+            nil
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            reportIfNeeded()
+        }
+
+        override func layout() {
+            super.layout()
+            reportIfNeeded()
+        }
+
+        private func reportIfNeeded() {
+            guard window != nil else { return }
+            let originInWindow = convert(NSPoint(x: 0, y: 0), to: nil)
+            let x = originInWindow.x
+
+            if lastReportedX.isFinite, abs(lastReportedX - x) <= 0.25 {
+                return
+            }
+            lastReportedX = x
+
+            Task { @MainActor in
+                TitlebarManager.shared.updateContentLeadingXInWindow(x)
             }
         }
     }
