@@ -2,6 +2,17 @@ import AppKit
 import SwiftUI
 import Combine
 
+// MARK: - Toolbar Layout State
+
+/// Shared state for toolbar layout, allowing AppKit to communicate with SwiftUI
+@MainActor
+final class ToolbarLayoutState: ObservableObject {
+    /// Background leading X position (where the black background starts)
+    @Published var backgroundLeadingX: CGFloat = 0
+    /// Whether sidebar is collapsed
+    @Published var isSidebarCollapsed: Bool = false
+}
+
 // MARK: - Custom Titlebar Manager
 
 @MainActor
@@ -12,6 +23,9 @@ final class TitlebarManager: NSObject {
     private var cancellables = Set<AnyCancellable>()
     private weak var viewModel: BrowserViewModel?
     private weak var bookmarkVM: BookmarkViewModel?
+
+    /// Shared layout state for toolbar
+    private let layoutState = ToolbarLayoutState()
 
     private override init() {
         super.init()
@@ -25,6 +39,9 @@ final class TitlebarManager: NSObject {
     private var isSidebarCollapsed: Bool = false
     /// Precise content leading X from SwiftUI measurement
     private var measuredContentLeadingX: CGFloat?
+
+    /// Content edge padding (matches main workspace padding)
+    private let contentPadding: CGFloat = 4
 
     func setupTitlebar(for window: NSWindow, viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel) {
         self.viewModel = viewModel
@@ -54,6 +71,7 @@ final class TitlebarManager: NSObject {
         let containerView = ToolbarContainerView(
             viewModel: viewModel,
             bookmarkVM: bookmarkVM,
+            layoutState: layoutState,
             onOverview: { [weak self] in self?.onToggleFocusOverview?() },
             onToggleSidebar: { [weak self] in self?.toggleSidebar() }
         )
@@ -93,7 +111,7 @@ final class TitlebarManager: NSObject {
         let collapsed = !visible
         if isSidebarCollapsed != collapsed {
             isSidebarCollapsed = collapsed
-            toolbarContainerView?.updateSidebarState(collapsed: collapsed)
+            layoutState.isSidebarCollapsed = collapsed
             updateBackgroundPosition()
         }
     }
@@ -107,11 +125,10 @@ final class TitlebarManager: NSObject {
 
         // Always follow the measured value - this keeps toolbar background
         // in sync with NavigationSplitView animation during sidebar toggle
-        toolbarContainerView?.updateBackgroundLeading(max(contentPadding, xInWindow))
+        let newLeading = max(contentPadding, xInWindow)
+        toolbarContainerView?.updateBackgroundLeading(newLeading)
+        layoutState.backgroundLeadingX = newLeading
     }
-
-    /// Content edge padding (matches main workspace padding)
-    private let contentPadding: CGFloat = 4
 
     private func updateBackgroundPosition() {
         let backgroundLeadingX: CGFloat
@@ -126,11 +143,12 @@ final class TitlebarManager: NSObject {
             backgroundLeadingX = currentSidebarWidth + contentPadding
         }
         toolbarContainerView?.updateBackgroundLeading(backgroundLeadingX)
+        layoutState.backgroundLeadingX = backgroundLeadingX
     }
 
     @objc private func toggleSidebar() {
         isSidebarCollapsed.toggle()
-        toolbarContainerView?.updateSidebarState(collapsed: isSidebarCollapsed)
+        layoutState.isSidebarCollapsed = isSidebarCollapsed
         // Don't call updateBackgroundPosition() here - let it follow the measured value
         // from TitlebarContentLeadingReporter to stay in sync with NavigationSplitView animation
 
@@ -187,11 +205,10 @@ private class ToolbarContainerView: NSView {
     weak var bookmarkVM: BookmarkViewModel?
     private var hostingView: NSHostingView<AnyView>?
     private var backgroundLayer: CAShapeLayer?
+    private let layoutState: ToolbarLayoutState
 
     /// Current background leading X position
     private var backgroundLeadingX: CGFloat = 0
-    /// Current sidebar collapsed state
-    private var isSidebarCollapsed: Bool = false
 
     // Callbacks
     var onAddressBarTap: (() -> Void)?
@@ -199,9 +216,10 @@ private class ToolbarContainerView: NSView {
     var onOverview: (() -> Void)?
     var onToggleSidebar: (() -> Void)?
 
-    init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel, onOverview: @escaping () -> Void, onToggleSidebar: @escaping () -> Void) {
+    init(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel, layoutState: ToolbarLayoutState, onOverview: @escaping () -> Void, onToggleSidebar: @escaping () -> Void) {
         self.viewModel = viewModel
         self.bookmarkVM = bookmarkVM
+        self.layoutState = layoutState
         self.onOverview = onOverview
         self.onToggleSidebar = onToggleSidebar
 
@@ -272,7 +290,7 @@ private class ToolbarContainerView: NSView {
         let swiftUIView = ToolbarContentView(
             viewModel: viewModel,
             bookmarkVM: bookmarkVM,
-            isSidebarCollapsed: isSidebarCollapsed,
+            layoutState: layoutState,
             onOverview: { [weak self] in self?.onOverview?() },
             onBookmarkTap: { [weak self] in self?.onBookmarkTap?() },
             onToggleSidebar: { [weak self] in self?.onToggleSidebar?() }
@@ -297,13 +315,6 @@ private class ToolbarContainerView: NSView {
     func updateBackgroundLeading(_ leading: CGFloat) {
         backgroundLeadingX = leading
         updateBackgroundPath()
-    }
-
-    func updateSidebarState(collapsed: Bool) {
-        isSidebarCollapsed = collapsed
-        // Recreate SwiftUI view with new state
-        hostingView?.removeFromSuperview()
-        setupSwiftUIView()
     }
 
     func updateState() {
@@ -376,7 +387,7 @@ private class ToolbarContainerView: NSView {
 private struct ToolbarContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
-    let isSidebarCollapsed: Bool
+    @ObservedObject var layoutState: ToolbarLayoutState
     var onOverview: () -> Void
     var onBookmarkTap: () -> Void
     var onToggleSidebar: () -> Void
@@ -388,74 +399,48 @@ private struct ToolbarContentView: View {
     @State private var focusRingScaleY: CGFloat = 1.0
     @State private var hasInputActivity: Bool = false
 
-    // MARK: - Spacing Configuration
-
-    /// Spacing from traffic lights to first button (collapsed state)
-    private let trafficLightsToFirstButton: CGFloat = 24
-    /// Spacing between +, Overview, and Sidebar Toggle
-    private let iconSpacing: CGFloat = 16
-    /// Additional spacing after Sidebar Toggle (before nav buttons) when expanded
-    private let toggleToNavSpacingExpanded: CGFloat = 24
-    /// Additional spacing after Sidebar Toggle when collapsed
-    private let toggleToNavSpacingCollapsed: CGFloat = 16
+    // MARK: - Layout Constants
 
     /// Traffic lights right edge (approximate)
     private let trafficLightsRightEdge: CGFloat = 78
-
+    /// Minimum spacing from traffic lights to first button
+    private let trafficLightsMinSpacing: CGFloat = 24
+    /// Icon button size
+    private let iconButtonSize: CGFloat = 30
+    /// Icon font size
     private let iconPointSize: CGFloat = 16
-
-    // Responsive thresholds
-    private let compactThreshold: CGFloat = 500
-    private let narrowThreshold: CGFloat = 380
+    /// Minimum spacing between icons
+    private let minIconSpacing: CGFloat = 8
+    /// Standard icon spacing
+    private let standardIconSpacing: CGFloat = 16
+    /// Padding inside background area
+    private let backgroundInnerPadding: CGFloat = 12
+    /// Right edge padding
+    private let rightPadding: CGFloat = 10
+    /// Minimum address bar width
+    private let minAddressBarWidth: CGFloat = 150
 
     var body: some View {
         GeometryReader { geo in
-            let isNarrow = geo.size.width < narrowThreshold
-            let isCompact = geo.size.width < compactThreshold && !isNarrow
-            let isNormal = !isNarrow && !isCompact
-            let addressBarWidth: CGFloat = max(200, geo.size.width * 0.5)
+            let totalWidth = geo.size.width
+            let bgLeading = layoutState.backgroundLeadingX
 
-            // Calculate leading padding to clear traffic lights
-            let leadingPadding = trafficLightsRightEdge + trafficLightsToFirstButton
+            // Calculate available width for main toolbar (from background start to right edge)
+            let mainToolbarWidth = totalWidth - bgLeading - rightPadding
 
-            HStack(spacing: iconSpacing) {
-                // === Leading Icons: + | Overview | Sidebar Toggle ===
-                newTabButton
-                overviewButton
-                sidebarToggleButton
+            // Adaptive layout calculations
+            let layout = calculateLayout(mainToolbarWidth: mainToolbarWidth, totalWidth: totalWidth)
 
-                // Extra spacing before nav buttons
-                Spacer()
-                    .frame(width: isSidebarCollapsed ? toggleToNavSpacingCollapsed : toggleToNavSpacingExpanded)
-
-                // === Navigation Buttons (hidden in narrow mode) ===
-                if !isNarrow {
-                    navButtonsGroup
-                }
-
-                Spacer(minLength: 0)
-
-                // === Address Bar ===
-                addressBarView
-                    .frame(width: isNormal ? addressBarWidth : nil)
-                    .frame(maxWidth: isNormal ? nil : .infinity)
-
-                Spacer(minLength: 0)
-
-                // === Right side buttons ===
-                if isNormal {
-                    shareButton
-                } else if isCompact {
-                    overflowMenuButton(showNavActions: false)
-                } else {
-                    overflowMenuButton(showNavActions: true)
-                }
-            }
-            .frame(maxHeight: .infinity)
-            .padding(.leading, leadingPadding)
-            .padding(.trailing, 10)
-            .animation(.easeInOut(duration: 0.2), value: isNarrow)
-            .animation(.easeInOut(duration: 0.2), value: isCompact)
+            // === All toolbar buttons in single HStack, fixed order ===
+            // Order: [+] [Overview] [ToggleSidebar] [NavButtons] [AddressBar] [Share]
+            // Only X positions change based on sidebar state, never the order
+            mainToolbarContent(
+                layout: layout,
+                bgLeading: bgLeading,
+                mainToolbarWidth: mainToolbarWidth,
+                totalWidth: totalWidth
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onChange(of: viewModel.currentTab?.url) { _, _ in updateDisplayText() }
         .onChange(of: viewModel.currentTab?.title) { _, _ in updateDisplayText() }
@@ -475,7 +460,138 @@ private struct ToolbarContentView: View {
         }
     }
 
-    // MARK: - Leading Buttons
+    // MARK: - Layout Calculation
+
+    private struct LayoutConfig {
+        var leftButtonsLeadingX: CGFloat = 0
+        var showNavButtons: Bool = true
+        var showShareButton: Bool = true
+        var iconSpacing: CGFloat = 16
+        var addressBarFlex: CGFloat = 0.5 // Fraction of available space
+        var isCompact: Bool = false
+        var isVeryCompact: Bool = false
+    }
+
+    private func calculateLayout(mainToolbarWidth: CGFloat, totalWidth: CGFloat) -> LayoutConfig {
+        var config = LayoutConfig()
+
+        // Left buttons position (in sidebar area)
+        config.leftButtonsLeadingX = trafficLightsRightEdge + trafficLightsMinSpacing
+
+        // Thresholds for different layout modes
+        let veryCompactThreshold: CGFloat = 320
+        let compactThreshold: CGFloat = 450
+        let normalThreshold: CGFloat = 550
+
+        if mainToolbarWidth < veryCompactThreshold {
+            // Very compact: hide nav buttons, use overflow menu
+            config.isVeryCompact = true
+            config.isCompact = true
+            config.showNavButtons = false
+            config.showShareButton = false
+            config.iconSpacing = minIconSpacing
+            config.addressBarFlex = 0.6
+        } else if mainToolbarWidth < compactThreshold {
+            // Compact: show nav buttons, hide share, tighter spacing
+            config.isCompact = true
+            config.showNavButtons = true
+            config.showShareButton = false
+            config.iconSpacing = minIconSpacing + 4
+            config.addressBarFlex = 0.55
+        } else if mainToolbarWidth < normalThreshold {
+            // Medium: show all, slightly tighter
+            config.showNavButtons = true
+            config.showShareButton = true
+            config.iconSpacing = standardIconSpacing - 4
+            config.addressBarFlex = 0.5
+        } else {
+            // Normal/Wide: full layout
+            config.showNavButtons = true
+            config.showShareButton = true
+            config.iconSpacing = standardIconSpacing
+            config.addressBarFlex = 0.45
+        }
+
+        return config
+    }
+
+    // MARK: - Main Toolbar Content
+
+    /// Unified toolbar layout - positions animate based on bgLeading changes
+    /// All buttons stay in same view hierarchy to enable smooth animations
+    @ViewBuilder
+    private func mainToolbarContent(layout: LayoutConfig, bgLeading: CGFloat, mainToolbarWidth: CGFloat, totalWidth: CGFloat) -> some View {
+        let leftSectionLeading: CGFloat = trafficLightsRightEdge + trafficLightsMinSpacing
+
+        // Calculate [+] [Overview] position:
+        // - Expanded: right-aligned to bgLeading (in sidebar area)
+        // - Collapsed: left-aligned after traffic lights
+        let leftButtonsWidth: CGFloat = iconButtonSize * 2 + standardIconSpacing
+        let leftButtonsLeading: CGFloat = {
+            if layoutState.isSidebarCollapsed {
+                // Collapsed: start after traffic lights
+                return leftSectionLeading
+            } else {
+                // Expanded: right-align to background edge
+                return max(leftSectionLeading, bgLeading - backgroundInnerPadding - leftButtonsWidth)
+            }
+        }()
+
+        // Calculate spacing between [Overview] and [ToggleSidebar]
+        let gapToNavGroup: CGFloat = {
+            if layoutState.isSidebarCollapsed {
+                return layout.iconSpacing
+            } else {
+                // In expanded mode, they're in different sections (gap handled by bgLeading)
+                return 0
+            }
+        }()
+
+        ZStack(alignment: .leading) {
+            // === Left buttons: [+] [Overview] ===
+            HStack(spacing: standardIconSpacing) {
+                newTabButton
+                overviewButton
+            }
+            .padding(.leading, leftButtonsLeading)
+
+            // === Nav group + main content: [ToggleSidebar] [<] [>] [AddressBar] [Share] ===
+            HStack(spacing: layout.iconSpacing) {
+                // Nav group
+                HStack(spacing: layout.isCompact ? 4 : 8) {
+                    sidebarToggleButton
+
+                    if layout.showNavButtons {
+                        navButtonsGroup
+                    }
+                }
+
+                Spacer(minLength: layout.isCompact ? 4 : 8)
+
+                // Address bar
+                addressBarView
+                    .frame(minWidth: minAddressBarWidth)
+                    .frame(maxWidth: mainToolbarWidth * layout.addressBarFlex)
+
+                Spacer(minLength: layout.isCompact ? 4 : 8)
+
+                // Right side
+                if layout.showShareButton {
+                    shareButton
+                } else {
+                    overflowMenuButton(showNavActions: !layout.showNavButtons)
+                }
+            }
+            .padding(.leading, layoutState.isSidebarCollapsed
+                ? leftButtonsLeading + leftButtonsWidth + gapToNavGroup
+                : bgLeading + backgroundInnerPadding)
+            .padding(.trailing, rightPadding)
+        }
+        .animation(.easeInOut(duration: 0.25), value: layoutState.isSidebarCollapsed)
+        .animation(.easeInOut(duration: 0.25), value: bgLeading)
+    }
+
+    // MARK: - Buttons
 
     private var newTabButton: some View {
         Button(action: {
@@ -484,7 +600,7 @@ private struct ToolbarContentView: View {
         }) {
             Image(systemName: "plus")
                 .font(.system(size: iconPointSize, weight: .medium))
-                .frame(width: 30, height: 30)
+                .frame(width: iconButtonSize, height: iconButtonSize)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -498,7 +614,7 @@ private struct ToolbarContentView: View {
         }) {
             Image(systemName: "square.on.square")
                 .font(.system(size: iconPointSize, weight: .medium))
-                .frame(width: 30, height: 30)
+                .frame(width: iconButtonSize, height: iconButtonSize)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -509,15 +625,13 @@ private struct ToolbarContentView: View {
         Button(action: onToggleSidebar) {
             Image(systemName: "sidebar.left")
                 .font(.system(size: iconPointSize, weight: .medium))
-                .frame(width: 30, height: 30)
+                .frame(width: iconButtonSize, height: iconButtonSize)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .help("Toggle Sidebar (⌃⌘S)")
     }
-
-    // MARK: - Navigation Buttons
 
     private var navButtonsGroup: some View {
         HStack(spacing: 0) {
@@ -527,7 +641,7 @@ private struct ToolbarContentView: View {
             }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 16, weight: .medium))
-                    .frame(width: 30, height: 30)
+                    .frame(width: iconButtonSize, height: iconButtonSize)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -543,15 +657,13 @@ private struct ToolbarContentView: View {
             }) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 16, weight: .medium))
-                    .frame(width: 30, height: 30)
+                    .frame(width: iconButtonSize, height: iconButtonSize)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .disabled(!viewModel.canGoForward)
         }
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 3)
     }
 
     // MARK: - Address Bar
@@ -690,13 +802,11 @@ private struct ToolbarContentView: View {
         ShareLink(item: viewModel.currentTab?.url ?? URL(string: "about:blank")!) {
             Image(systemName: "square.and.arrow.up")
                 .font(.system(size: 15, weight: .medium))
-                .frame(width: 30, height: 30)
+                .frame(width: iconButtonSize, height: iconButtonSize)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 3)
     }
 
     @ViewBuilder
@@ -736,9 +846,9 @@ private struct ToolbarContentView: View {
                 Label("Tab Overview", systemImage: "square.on.square")
             }
         } label: {
-            Image(systemName: "chevron.right.2")
+            Image(systemName: "ellipsis")
                 .font(.system(size: 14, weight: .medium))
-                .frame(width: 36, height: 36)
+                .frame(width: iconButtonSize, height: iconButtonSize)
                 .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)

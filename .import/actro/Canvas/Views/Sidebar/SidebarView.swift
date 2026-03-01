@@ -8,8 +8,15 @@ struct SidebarView: View {
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var windowState: WindowStateManager = .shared
 
+    /// Toolbar height to avoid content overlap
+    private let toolbarHeight: CGFloat = 52
+
     var body: some View {
         VStack(spacing: 0) {
+            // Top spacing to avoid toolbar overlap
+            Spacer()
+                .frame(height: toolbarHeight)
+
             // NSOutlineView for tabs and groups
             TabOutlineView(viewModel: viewModel, historyVM: historyVM)
 
