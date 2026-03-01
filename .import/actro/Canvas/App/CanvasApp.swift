@@ -436,19 +436,27 @@ struct DebugLaunchConfig {
 
 @main
 struct CanvasApp: App {
-    // Shared view models for history/bookmarks (global across all windows)
-    @StateObject private var historyVM = HistoryViewModel()
-    @StateObject private var bookmarkVM = BookmarkViewModel()
-    @StateObject private var windowState = WindowStateManager.shared
+    // Use AppDelegate for window management
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     @ObservedObject private var devTools = DevToolsManager.shared
     @Environment(\.openWindow) private var openWindow
 
-    // The focused window's viewModel
-    @FocusedValue(\.browserViewModel) private var focusedViewModel
+    // Access focused viewModel via AppDelegate
+    private var focusedViewModel: BrowserViewModel? {
+        appDelegate.focusedViewModel
+    }
+
+    private var historyVM: HistoryViewModel {
+        appDelegate.historyVM
+    }
+
+    private var bookmarkVM: BookmarkViewModel {
+        appDelegate.bookmarkVM
+    }
 
     /// 从命令行参数解析的启动 URL
     static var launchURL: URL? = {
-        // 支持 --url https://example.com 或 -url https://example.com
         let args = CommandLine.arguments
         NSLog("🚀 Canvas: Command line args: \(args)")
         if let urlIndex = args.firstIndex(where: { $0 == "--url" || $0 == "-url" }),
@@ -462,60 +470,18 @@ struct CanvasApp: App {
         return nil
     }()
 
-    /// Debug launch configuration from command line arguments
-    /// Supports:
-    /// - `--window-frame=x,y,width,height` - Set window position and size
-    /// - `--mode=focus|overview` - Start in focus or overview mode
-    /// - `--tab=startPage|history|bookmarks` - Initial tab type
-    /// - `--log-file=/path/to/log` - Redirect logs to file
+    /// Debug launch configuration
     static let debugConfig: DebugLaunchConfig = DebugLaunchConfig.parse(CommandLine.arguments)
 
-    init() {
-        // Setup crash handler to log crashes
-        CrashHandler.setup()
-
-        // Disable window state restoration to prevent multiple windows on launch
-        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
-
-        // Suppress common system warnings in development
-        UserDefaults.standard.set(false, forKey: "NSConstraintBasedLayoutLogUnsatisfiable")
-
-        // 🔥 Prewarm XPC Services for faster tab creation
-        // Only prewarm slot 0 (system apps) + slot 1 (app reserve)
-        // Metro is no longer auto-started - apps load from local bundles
-        let prewarmStart = Date()
-        Task { @MainActor in
-            #if DEBUG
-            logger.notice("⚠️ 注意：控制台中关于 Metal shader、字体沙盒、WebKit 的警告是系统级警告，不影响应用运行")
-            #endif
-
-            // Verify service bundles exist
-            _ = XPCServicePool.shared.verifyServiceBundles()
-            // Prewarm XPC services for faster startup
-            // Service 端会发送 xpcConnectionCreated 通知，Host 捕获 internalId
-            // 后续消费 prewarm VC 时通过 bindTab 通知绑定 tabId
-            await XPCServicePool.shared.prewarmInitialServicesAsync()
-
-            let elapsed = Date().timeIntervalSince(prewarmStart) * 1000
-            logger.info("✅ System startup complete - prewarm took \(Int(elapsed))ms")
-        }
-
-        // Initialize TabProcessManager early
-        _ = TabProcessManager.shared
-
-        // Initialize XPC notification bridge (listens for notifications from XPC services)
-        _ = XPCNotificationBridge.shared
-    }
-
     var body: some Scene {
-        // Main window group - each window gets its own BrowserViewModel
-        WindowGroup(id: "browser") {
-            BrowserWindowView(historyVM: historyVM, bookmarkVM: bookmarkVM)
-                .frame(minWidth: 640, minHeight: 428)
-                .onReceive(NotificationCenter.default.publisher(for: .openNewWindowWithGroup)) { _ in
-                    openWindow(id: "browser")
-                }
+        // Minimal window group for menu commands
+        // Main windows are managed by AppDelegate
+        WindowGroup(id: "placeholder") {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .hidden()
         }
+        .defaultSize(width: 0, height: 0)
         .commands {
             // New Window command
             CommandGroup(before: .newItem) {
@@ -754,7 +720,7 @@ struct CanvasApp: App {
     }
 
     private func openNewWindow() {
-        openWindow(id: "browser")
+        appDelegate.createNewWindow()
     }
 
     private func switchToTab(at index: Int) {
