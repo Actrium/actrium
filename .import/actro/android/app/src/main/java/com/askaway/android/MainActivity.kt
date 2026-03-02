@@ -10,6 +10,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
+import android.view.WindowInsets
 import android.view.animation.DecelerateInterpolator
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -367,6 +368,42 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         // 初始位置在屏幕右侧
         binding.flSearch.translationX = binding.flSearch.width.toFloat()
         binding.flSearch.visibility = View.VISIBLE
+
+        // 为 flSearch 添加 WindowInsets 监听，处理键盘问题
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            binding.flSearch.setOnApplyWindowInsetsListener { v, insets ->
+                val imeHeight = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+
+                // 当键盘弹出时，为 flSearch 的子视图添加下方 padding
+                if (imeHeight > 0) {
+                    binding.flSearch.setPadding(0, 0, 0, imeHeight)
+                } else {
+                    binding.flSearch.setPadding(0, 0, 0, 0)
+                }
+
+                // 消费 insets 以防止默认处理
+                WindowInsets.CONSUMED
+            }
+        } else {
+            // Android 5.0-10 的兼容性处理
+            binding.flSearch.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    val rect = android.graphics.Rect()
+                    binding.root.getWindowVisibleDisplayFrame(rect)
+                    val heightDiff = binding.root.rootView.height - rect.bottom
+                    if (heightDiff > 100) { // 键盘高度大于 100px
+                        binding.flSearch.setPadding(0, 0, 0, heightDiff)
+                    } else {
+                        binding.flSearch.setPadding(0, 0, 0, 0)
+                    }
+                }
+            })
+        }
+
+        // 请求应用 window insets
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            binding.flSearch.requestApplyInsets()
+        }
 
         // 创建从右侧滑入的动画
         ObjectAnimator.ofFloat(binding.flSearch, "translationX", binding.flSearch.width.toFloat(), 0f).apply {
