@@ -15,6 +15,7 @@ interface DropdownMenuProps {
   trigger: React.ReactNode;
   children: React.ReactNode | ((close: () => void) => React.ReactNode);
   triggerType?: 'press' | 'longPress';
+  verticalGap?: number;
   dropdownStyle?: StyleProp<ViewStyle>;
   style?: StyleProp<ViewStyle>;
   triggerStyle?: StyleProp<ViewStyle>;
@@ -25,42 +26,58 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   trigger,
   children,
   triggerType = 'press',
+  verticalGap = 8,
   dropdownStyle,
   style,
   triggerStyle,
   disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [triggerRect, setTriggerRect] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [menuSize, setMenuSize] = useState<{ width: number; height: number }>({
+    width: 228,
+    height: 120,
+  });
   const triggerRef = useRef<View>(null);
 
   const calculatePosition = useCallback(() => {
     triggerRef.current?.measureInWindow((x, y, width, height) => {
-      const screenWidth = Dimensions.get('window').width;
-      const screenHeight = Dimensions.get('window').height;
-      const menuWidth = 228;
-      const estimatedMenuHeight = 120; // 菜单估算高度
-      const gap = 8; // 菜单与按钮的间距
-
-      // 默认显示在触发器上方，紧贴按钮
-      let top = y - estimatedMenuHeight - gap;
-      let left = x + width / 2 - menuWidth / 2;
-
-      // 如果上方空间不足，显示在下方
-      if (top < 20) {
-        top = y + height + gap;
-      }
-
-      // 左右边界检查
-      if (left + menuWidth > screenWidth - 16) {
-        left = screenWidth - menuWidth - 16;
-      }
-      if (left < 16) left = 16;
-
-      setMenuPosition({ top, left });
+      setTriggerRect({ x, y, width, height });
       setIsOpen(true);
     });
   }, []);
+
+  const menuPosition = React.useMemo(() => {
+    if (!triggerRect) return null;
+
+    const screenWidth = Dimensions.get('window').width;
+    const screenHeight = Dimensions.get('window').height;
+    const horizontalMargin = 16;
+    const verticalMargin = 12;
+    const gap = verticalGap;
+
+    const menuWidth = Math.max(228, menuSize.width || 0);
+    const menuHeight = Math.max(120, menuSize.height || 0);
+
+    const aboveTop = triggerRect.y - menuHeight - gap;
+    const belowTop = triggerRect.y + triggerRect.height + gap;
+    const maxTop = Math.max(verticalMargin, screenHeight - verticalMargin - menuHeight);
+
+    // 优先显示在触发器上方；如果上方空间不足再显示到下方。
+    const preferredTop = aboveTop >= verticalMargin ? aboveTop : belowTop;
+    const top = Math.max(verticalMargin, Math.min(preferredTop, maxTop));
+
+    const centeredLeft = triggerRect.x + triggerRect.width / 2 - menuWidth / 2;
+    const maxLeft = screenWidth - menuWidth - horizontalMargin;
+    const left = Math.max(horizontalMargin, Math.min(centeredLeft, maxLeft));
+
+    return { top, left };
+  }, [menuSize.height, menuSize.width, triggerRect, verticalGap]);
 
   const toggle = () => {
     if (disabled) return;
@@ -73,7 +90,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
 
   const close = () => {
     setIsOpen(false);
-    setMenuPosition(null);
+    setTriggerRect(null);
   };
 
   return (
@@ -91,7 +108,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         {trigger}
       </Pressable>
 
-      {isOpen && menuPosition && (
+      {isOpen && triggerRect && menuPosition && (
         <Modal
           visible={isOpen}
           transparent
@@ -107,7 +124,14 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
                     top: menuPosition.top,
                     left: menuPosition.left,
                   },
+                  dropdownStyle,
                 ]}
+                onLayout={(event) => {
+                  const { width, height } = event.nativeEvent.layout;
+                  if (Math.abs(width - menuSize.width) > 1 || Math.abs(height - menuSize.height) > 1) {
+                    setMenuSize({ width, height });
+                  }
+                }}
               >
                 {typeof children === 'function' ? children(close) : children}
               </View>
