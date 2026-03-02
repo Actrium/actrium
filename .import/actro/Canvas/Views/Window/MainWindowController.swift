@@ -38,6 +38,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
+    // MARK: - Layout Constants
+
+    /// Extra Y offset to move traffic lights down from default position
+    private let trafficLightYOffset: CGFloat = 11
+
+    /// Extra X offset to move traffic lights right from default position
+    private let trafficLightXOffset: CGFloat = 9
+
     // MARK: - Window Configuration
 
     private func configureWindow(_ window: NSWindow) {
@@ -56,6 +64,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         // Center on screen
         window.center()
+
+        // Adjust traffic light positions after a brief delay to ensure layout is complete
+        DispatchQueue.main.async { [weak self] in
+            self?.adjustTrafficLights()
+        }
+    }
+
+    // MARK: - Traffic Light Positioning
+
+    private func adjustTrafficLights() {
+        guard let window = window else { return }
+
+        let buttonTypes: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+
+        for buttonType in buttonTypes {
+            guard let button = window.standardWindowButton(buttonType) else { continue }
+
+            // Move button down and right by offsets
+            var frame = button.frame
+            frame.origin.x += trafficLightXOffset
+            frame.origin.y -= trafficLightYOffset
+            button.setFrameOrigin(frame.origin)
+        }
     }
 
     // MARK: - Content Setup
@@ -90,5 +121,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
         // Update DevTools reference
         DevToolsManager.shared.activeBrowserViewModel = viewModel
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        adjustTrafficLights()
     }
 }

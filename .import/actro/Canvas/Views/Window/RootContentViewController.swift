@@ -178,7 +178,7 @@ struct SelfDrawnToolbarView: View {
             // Content area (navigation + address bar + actions)
             contentToolbarSection
         }
-        .padding(.top, 4)  // Position icons to align with traffic lights
+        .padding(.top, -18)  // Move icons up to align with traffic lights
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(toolbarBackground)
         .onReceive(NotificationCenter.default.publisher(for: .sidebarWidthChanged)) { notification in
