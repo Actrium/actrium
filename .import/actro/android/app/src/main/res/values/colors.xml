@@ -4,6 +4,13 @@
     <color name="home_bg">#000000</color>
     <color name="primary">#34A8FB</color>
     <color name="gray">#8E8E93</color>
+    <color name="gray5">#E5E5EA</color>
     <color name="nav_text_inactive">#404040</color>
     <color name="labels_vibrant_controls_primary">#404040</color>
+    <color name="active_item_bg">#F2F2F6</color>
+    <color name="app_bg">#1C1C1E</color>
+    <color name="app_preview">#FFFFFF</color>
+    <color name="ask_msg_bg">#FF9500</color>
+    <color name="icon_1">#404040</color>
 </resources>
+

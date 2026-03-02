@@ -159,22 +159,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                 launch {
                     Params.appList.collect {
                         Log.e("MainActivity", "appList changed: ${it.size}")
-//                        binding.llTabs.removeAllViews()
-//                        it.forEach {
-//                            val tabView = HeadTabView(this@MainActivity)
-//                            tabView.setOnClickListener { tabView ->
-//                                val tabId = it.id
-//                                binding.flContent.forEach { child ->
-//                                    if(child.tag == tabId) {
-//                                        binding.flContent.removeView(child)
-//                                        binding.flContent.addView(child)
-//                                        return@setOnClickListener
-//                                    }
-//                                }
-//                            }
-//                            tabView.setAppName("123")
-//                            binding.llTabs.addView(tabView)
-//                        }
                     }
                 }
                 launch {
