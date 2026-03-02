@@ -4757,7 +4757,7 @@ logkitty@^0.7.1:
     "@babel/runtime" "^7.28.4"
     "@bam.tech/react-native-image-resizer" "^3.0.11"
     "@react-native-clipboard/clipboard" "^1.16.3"
-    askit "file:../../../../../Library/Caches/Yarn/v6/npm-loom-1.0.0-66a72ede-3a95-4314-9bf4-8a9ad9490e6d-1772182667256/node_modules/askit"
+    askit "file:../../../../../Library/Caches/Yarn/v6/npm-loom-1.0.0-7b4050ef-a45f-432f-92f8-752b002c72be-1772431615267/node_modules/askit"
     buffer "^6.0.3"
     cos-js-sdk-v5 "^1.10.1"
     crypto-js "^4.2.0"
@@ -4781,6 +4781,7 @@ logkitty@^0.7.1:
     react-native-vision-camera "^4.7.3"
     react-native-zip-archive "^7.0.2"
     react-reconciler "0.31.0"
+    rill "file:../../../../../Library/Caches/Yarn/v6/npm-loom-1.0.0-7b4050ef-a45f-432f-92f8-752b002c72be-1772431615267/node_modules/rill"
     uuid "^13.0.0"
     zustand "^5.0.10"
 
