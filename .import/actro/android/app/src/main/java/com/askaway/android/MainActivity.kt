@@ -141,6 +141,36 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
             adapter = activeRecyclerAdapter
         }
 
+        // 设置 item 点击事件
+        activeRecyclerAdapter.onItemClick = { activeModel ->
+            // 显示 flRNContent
+            showReactNativeView()
+            // 遍历 flRNContent 的子 view，将 tag == activeModel.id 的 view bringToFront
+            for (i in 0 until binding.flRNContent.childCount) {
+                val child = binding.flRNContent.getChildAt(i)
+                if (child.tag == activeModel.id) {
+                    child.bringToFront()
+                    binding.flRNContent.invalidate()
+                    break
+                }
+            }
+        }
+
+        // 设置删除点击事件
+        activeRecyclerAdapter.onDeleteClick = { activeModel ->
+            // 先移除 flRNContent 中对应的 child
+            for (i in binding.flRNContent.childCount - 1 downTo 0) {
+                val child = binding.flRNContent.getChildAt(i)
+                if (child.tag == activeModel.id) {
+                    binding.flRNContent.removeViewAt(i)
+                    break
+                }
+            }
+            // 移除当前 item
+            viewModel.removeActiveModel(activeModel.id)
+            // 不再在这里 finish，由 updateData 回调判断
+        }
+
         binding.ivAdd.post {
             binding.ivAdd.performClick()
         }
@@ -163,8 +193,11 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                 }
                 launch {
                     viewModel.activeList.collect { activeModels ->
-                        Log.d("MainActivity", "activeList changed: ${activeModels.size}")
+                        Log.d("MainActivity", "activeList changed: "+activeModels.size)
                         activeRecyclerAdapter.updateData(activeModels)
+                        if (activeModels.isEmpty()) {
+                            finish()
+                        }
                     }
                 }
             }
@@ -220,23 +253,14 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
      */
     private fun updateContentVisibility(checkedId: Int) {
         when (checkedId) {
-            R.id.navTag -> {
-                // 显示书签页
-                showBookmark()
-            }
-
+            R.id.navTag -> showBookmark()
             R.id.navActivity -> {
                 // 显示活动页
                 binding.flBookmark.visibility = View.GONE
                 binding.llActive.visibility = View.VISIBLE
                 binding.flSet.visibility = View.GONE
-                Log.d("MainActivity", "Show Active")
             }
-
-            R.id.navSettings -> {
-                // 显示设置页
-                showSet()
-            }
+            R.id.navSettings -> showSet()
         }
     }
 
