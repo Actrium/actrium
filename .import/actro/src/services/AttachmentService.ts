@@ -1,6 +1,7 @@
 import { launchCamera, launchImageLibrary, Asset } from 'react-native-image-picker';
 import DocumentPicker, { DocumentPickerResponse } from 'react-native-document-picker';
 import { Alert } from 'react-native';
+import i18n from '../i18n';
 
 export class AttachmentService {
   /**
@@ -15,7 +16,7 @@ export class AttachmentService {
       return result.assets || [];
     } catch (error) {
       console.error('[AttachmentService] Camera error:', error);
-      Alert.alert('错误', '打开相机失败');
+      Alert.alert(i18n.t('common.error'), i18n.t('actr.attachment.cameraError'));
       return [];
     }
   }
@@ -33,7 +34,7 @@ export class AttachmentService {
       return result.assets || [];
     } catch (error) {
       console.error('[AttachmentService] Gallery error:', error);
-      Alert.alert('错误', '打开相册失败');
+      Alert.alert(i18n.t('common.error'), i18n.t('actr.attachment.galleryError'));
       return [];
     }
   }
@@ -63,7 +64,7 @@ export class AttachmentService {
         console.log('[AttachmentService] Document selection cancelled');
       } else {
         console.error('[AttachmentService] Document picker error:', err);
-        Alert.alert('错误', '选择文件出错');
+        Alert.alert(i18n.t('common.error'), i18n.t('actr.attachment.fileError'));
       }
       return [];
     }

@@ -4,6 +4,7 @@ import { authApi, CURRENT_ENV } from '../../api/auth';
 import { AuthRepository } from '../../repository/AuthRepository';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { AccountUserInfo } from '../../api/types';
+import { useTranslation } from 'react-i18next';
 
 const UserInfoModule = NativeModules.UserInfoModule;
 const UserInfoEvents = new NativeEventEmitter(UserInfoModule);
@@ -28,6 +29,7 @@ interface UseLoginResult {
  * 纯登录 hook - 仅处理登录逻辑，不包含授权
  */
 export const useLogin = (): UseLoginResult => {
+  const { t } = useTranslation();
   const [step, setStep] = useState<LoginStep>('idle');
   const [loading, setLoading] = useState(false);
 
@@ -118,12 +120,12 @@ export const useLogin = (): UseLoginResult => {
           await checkSession(loginRes.data);
         } else {
           setStep('login_options');
-          Alert.alert('Login Failed', loginRes.message || 'Unknown error');
+          Alert.alert(t('actr.auth.loginFailed'), loginRes.message || t('common.unknownError'));
         }
       } catch {
         setLoading(false);
         setStep('login_options');
-        Alert.alert('Error', 'Login failed');
+        Alert.alert(t('common.error'), t('actr.auth.loginFailed'));
       }
     };
 
@@ -131,7 +133,7 @@ export const useLogin = (): UseLoginResult => {
       if (res.error) {
         setLoading(false);
         setStep('login_options');
-        Alert.alert('Login Error', res.message || 'Unknown error');
+        Alert.alert(t('actr.auth.loginError'), res.message || t('common.unknownError'));
         return;
       }
 

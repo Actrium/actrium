@@ -58,15 +58,15 @@ export default function BookmarkTagsApp() {
 
   const handleDeleteTag = (id: string) => {
     Alert.alert(
-      t('bookmarkTags.deleteTitle') || '删除标签',
-      t('bookmarkTags.deleteMessage') || '确定要删除这个标签吗？',
+      t('actr.bookmarkTags.deleteTitle'),
+      t('actr.bookmarkTags.deleteMessage'),
       [
         {
-          text: t('common.cancel') || '取消',
+          text: t('common.cancel'),
           style: 'cancel',
         },
         {
-          text: t('common.delete') || '删除',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: () => {
             setTags(tags.filter((tag) => tag.id !== id));
@@ -113,7 +113,7 @@ export default function BookmarkTagsApp() {
           <View style={styles.addTagInputContainer}>
             <TextInput
               style={styles.addTagInput}
-              placeholder={t('bookmarkTags.enterTagName') || '输入标签名称...'}
+              placeholder={t('actr.bookmarkTags.enterTagName')}
               placeholderTextColor="#999"
               value={newTagName}
               onChangeText={setNewTagName}
@@ -130,7 +130,7 @@ export default function BookmarkTagsApp() {
               onPress={handleAddTag}
             >
               <Text style={styles.addTagConfirmText}>
-                {t('common.confirm') || '确认'}
+                {t('common.confirm')}
               </Text>
             </MyTouchableOpacity>
           </View>
@@ -144,7 +144,7 @@ export default function BookmarkTagsApp() {
               <Text style={styles.addIconText}>+</Text>
             </View>
             <Text style={styles.addButtonText}>
-              {t('bookmarkTags.addNewTag') || '添加新标签...'}
+              {t('actr.bookmarkTags.addNewTag')}
             </Text>
           </MyTouchableOpacity>
         )}

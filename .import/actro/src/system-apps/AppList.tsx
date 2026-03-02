@@ -49,19 +49,19 @@ const BOOKMARK_CARDS = [
   {
     titleKey: 'actr.app.mockTitle1',
     referenceKey: 'actr.app.reference',
-    labelKey: 'Label',
+    labelKey: 'actr.app.officialService',
     labelIcon: '📍',
   },
   {
     titleKey: 'actr.app.mockTitle1',
     referenceKey: 'actr.app.reference',
-    labelKey: 'Label',
+    labelKey: 'actr.app.officialService',
     labelIcon: '📍',
   },
   {
     titleKey: 'actr.app.mockTitle1',
     referenceKey: 'actr.app.reference',
-    labelKey: 'Label',
+    labelKey: 'actr.app.officialService',
     labelIcon: '📍',
   },
 ];

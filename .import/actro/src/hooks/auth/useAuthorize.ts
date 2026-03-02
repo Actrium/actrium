@@ -4,6 +4,7 @@ import { authApi } from '../../api/auth';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { useAuthTaskStore } from '../../actr-host/store/useAuthTaskStore';
 import { useTabIdMapStore } from '../../actr-host/store/useTabIdMapStore';
+import { useTranslation } from 'react-i18next';
 
 export type AuthorizeStep = 'idle' | 'authorizing' | 'authorized' | 'failed';
 
@@ -32,6 +33,7 @@ export const useAuthorize = ({
   isModal = false,
   currentTabId,
 }: UseAuthorizeOptions): UseAuthorizeResult => {
+  const { t } = useTranslation();
   const [step, setStep] = useState<AuthorizeStep>('idle');
   const [loading, setLoading] = useState(false);
 
@@ -67,7 +69,7 @@ export const useAuthorize = ({
             sessionToken!,
           );
           if (!tokenRes.success) {
-            Alert.alert('Activation Failed', tokenRes.message);
+            Alert.alert(t('actr.auth.activationFailed'), tokenRes.message);
             return false;
           }
         }
@@ -97,7 +99,7 @@ export const useAuthorize = ({
         }
         return true;
       } catch (e) {
-        Alert.alert('Error', 'Failed to activate with temp code');
+        Alert.alert(t('common.error'), t('actr.auth.activationFailed'));
         return false;
       }
     },
@@ -127,12 +129,12 @@ export const useAuthorize = ({
           return true;
         }
       } else {
-        Alert.alert('Authorization Failed', res.message);
+        Alert.alert(t('actr.auth.authorizationFailed'), res.message);
       }
       setStep('failed');
       return false;
     } catch {
-      Alert.alert('Error', 'An error occurred during authorization');
+      Alert.alert(t('common.error'), t('actr.auth.authorizationError'));
       setStep('failed');
       return false;
     } finally {

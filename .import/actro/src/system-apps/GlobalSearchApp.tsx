@@ -99,14 +99,14 @@ export default function GlobalSearchApp() {
       {
         id: 'setting-feedback',
         type: 'setting',
-        name: t('actr.settings.feedback', '反馈'),
+        name: t('actr.settings.feedback'),
         icon: 'feedback',
         action: handleFeedback,
       },
       {
         id: 'setting-logout',
         type: 'setting',
-        name: t('actr.settings.logout', '退出登录'),
+        name: t('actr.settings.logout'),
         icon: 'logout',
       },
     ];
@@ -150,21 +150,21 @@ export default function GlobalSearchApp() {
     if (activeResults.length > 0) {
       groups.push({
         type: 'active',
-        title: t('actr.search.active', '活跃'),
+        title: t('actr.search.active'),
         items: activeResults,
       });
     }
     if (bookmarkResults.length > 0) {
       groups.push({
         type: 'bookmark',
-        title: t('actr.search.bookmarks', '书签'),
+        title: t('actr.search.bookmarks'),
         items: bookmarkResults,
       });
     }
     if (settingResults.length > 0) {
       groups.push({
         type: 'setting',
-        title: t('actr.search.settings', '设置'),
+        title: t('actr.search.settings'),
         items: settingResults,
       });
     }
@@ -242,7 +242,7 @@ export default function GlobalSearchApp() {
       return (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>
-            {t('actr.search.inputHint', '输入关键词后按回车搜索')}
+            {t('actr.search.inputHint')}
           </Text>
         </View>
       );
@@ -252,7 +252,7 @@ export default function GlobalSearchApp() {
       return (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>
-            {t('actr.search.noResults', '无搜索结果')}
+            {t('actr.search.noResults')}
           </Text>
         </View>
       );
@@ -286,7 +286,7 @@ export default function GlobalSearchApp() {
         <TextInput
           ref={inputRef}
           style={inputStyle}
-          placeholder={t('actr.search.placeholder', 'Search Term')}
+          placeholder={t('actr.search.placeholder')}
           placeholderTextColor='#999'
           value={inputText}
           onChangeText={setInputText}
@@ -368,8 +368,8 @@ export default function GlobalSearchApp() {
             <View style={styles.resultsHeader}>
               <Text style={styles.resultsHeaderTitle}>
                 {searchQuery.length > 0
-                  ? t('actr.search.resultsIn', '搜索结果')
-                  : t('actr.search.recent', '最近搜索')}
+                  ? t('actr.search.resultsIn')
+                  : t('actr.search.recent')}
               </Text>
             </View>
             <ScrollView

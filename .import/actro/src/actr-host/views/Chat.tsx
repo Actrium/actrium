@@ -9,6 +9,7 @@ import {
   TouchableWithoutFeedback,
   useWindowDimensions,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
 import ActrInput from '../components/ActrInput';
 import {
@@ -36,6 +37,7 @@ import { setTabUnreadStatus } from '../../../src/native-bridge/tab/TabModule';
 const PAGE_SIZE = 20;
 
 export default function Chat() {
+  const { t } = useTranslation();
   const { tab } = useTab();
   const { width } = useWindowDimensions();
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
@@ -67,10 +69,10 @@ export default function Chat() {
     if (!text) return;
     try {
       Clipboard.setString(text);
-      toastRef.current?.show('已复制');
+      toastRef.current?.show(t('actr.chat.copySuccess'));
     } catch (e) {
       console.error('Failed to copy to clipboard', e);
-      toastRef.current?.show('复制失败，请重试');
+      toastRef.current?.show(t('actr.chat.copyFailed'));
     }
   }, []);
 
@@ -296,7 +298,7 @@ export default function Chat() {
                 item.progress === Progress.processing) ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size='small' color='#999' />
-                <Text style={styles.loadingText}>正在思考...</Text>
+                <Text style={styles.loadingText}>{t('actr.chat.thinking')}</Text>
               </View>
             ) : null}
           </View>
@@ -323,7 +325,7 @@ export default function Chat() {
           <ActivityIndicator size='small' color='#999' />
         ) : (
           <Text style={{ textAlign: 'center', color: '#999', fontSize: 12 }}>
-            上拉加载更多历史
+            {t('actr.chat.loadMore')}
           </Text>
         )}
       </View>
@@ -341,16 +343,16 @@ export default function Chat() {
 
   // 处理删除按钮点击
   const handleDeletePress = useCallback(() => {
-    Alert.alert('是否删除已选？', '删除后，无法恢复。', [
+    Alert.alert(t('actr.chat.deleteConfirmTitle'), t('actr.chat.deleteConfirmMsg'), [
       {
-        text: '取消',
+        text: t('common.cancel'),
         style: 'cancel',
         onPress: () => {
           exitSelectionMode();
         },
       },
       {
-        text: '删除',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: () => {
           // 使用 setTimeout 避免阻塞 Alert 关闭动画
@@ -360,13 +362,13 @@ export default function Chat() {
                 '[Chat] Failed to delete selected messages:',
                 error,
               );
-              toastRef.current?.show('删除失败，请重试');
+              toastRef.current?.show(t('actr.chat.deleteFailed'));
             });
           }, 0);
         },
       },
     ]);
-  }, [appId, deleteSelectedMessages, exitSelectionMode]);
+  }, [appId, deleteSelectedMessages, exitSelectionMode, t]);
 
   return (
     <View

@@ -25,6 +25,7 @@ import {
   Platform,
   SafeAreaView,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import {
   Camera,
   useCameraDevice,
@@ -41,6 +42,7 @@ import { HOST_SHADOWS } from '../styles/shadows';
 import { setTabBookmarkStatus } from '../../../src/native-bridge/tab/TabModule';
 
 const LoadApp = () => {
+  const { t } = useTranslation();
   const [hasPermission, setHasPermission] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [requesting, setRequesting] = useState(false);
@@ -146,9 +148,9 @@ const LoadApp = () => {
         );
         if (!initResult.ok) {
           if (initResult.reason === 'APP_NOT_FOUND') {
-            Alert.alert('应用不存在');
+            Alert.alert(t('actr.app.notExist'));
           } else {
-            Alert.alert('加载失败', '请检查网络后重试');
+            Alert.alert(t('actr.app.loadFailed'), t('actr.app.networkRetry'));
           }
           return;
         }
@@ -158,7 +160,7 @@ const LoadApp = () => {
         void BookmarkRepository.updateTabId(appId, tabCtx.tab.id);
       } catch (error) {
         console.error('[LoadApp] Failed to resolve app from url:', error);
-        Alert.alert('加载失败', '请稍后重试');
+        Alert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));
       } finally {
         isResolvingRef.current = false;
         setIsResolving(false);
@@ -186,7 +188,7 @@ const LoadApp = () => {
           {requesting ? (
             <>
               <ActivityIndicator size='large' color='#34A8FB' />
-              <Text style={styles.infoText}>正在申请相机权限...</Text>
+              <Text style={styles.infoText}>{t('actr.app.requestCameraPermission')}</Text>
             </>
           ) : (
             <TouchableOpacity
@@ -194,7 +196,7 @@ const LoadApp = () => {
               onPress={handleOpenCamera}
               activeOpacity={0.7}
             >
-              <Text style={styles.openCameraBtnText}>打开相机扫码</Text>
+              <Text style={styles.openCameraBtnText}>{t('actr.app.openCameraScan')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -205,7 +207,7 @@ const LoadApp = () => {
       return (
         <View style={styles.centerContent}>
           <ActivityIndicator size='large' color='#34A8FB' />
-          <Text style={styles.infoText}>正在初始化相机...</Text>
+          <Text style={styles.infoText}>{t('actr.app.initCamera')}</Text>
         </View>
       );
     }
@@ -233,7 +235,7 @@ const LoadApp = () => {
         <TextInput
           ref={inputRef}
           style={inputStyle}
-          placeholder='请输入 URL'
+          placeholder={t('actr.app.inputUrl')}
           placeholderTextColor='#999'
           onSubmitEditing={handleLoadWithUrl}
           blurOnSubmit={true}

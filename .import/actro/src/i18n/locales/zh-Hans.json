@@ -14,7 +14,9 @@
     "success": "成功",
     "tip": "提示",
     "save": "保存",
-    "and": "和"
+    "and": "和",
+    "retry": "重试",
+    "unknownError": "未知错误"
   },
   "actr": {
     "appTitle": "Askaway Subsystem",
@@ -108,7 +110,18 @@
       "clearHistory": "清除历史记录...",
       "itemsCount": "{{count}} 条记录",
       "tabsCount_one": "{{count}} 个标签页",
-      "tabsCount_other": "{{count}} 个标签页"
+      "tabsCount_other": "{{count}} 个标签页",
+      "noResult": "没有找到关于“{{query}}”的结果"
+    },
+    "search": {
+      "active": "活跃",
+      "bookmarks": "书签",
+      "settings": "设置",
+      "inputHint": "输入关键词后按回车搜索",
+      "noResults": "无搜索结果",
+      "placeholder": "搜索...",
+      "resultsIn": "搜索结果",
+      "recent": "最近搜索"
     },
     "app": {
       "mockTitle1": "成游景由成约？什么改善怎么样，送合由周打事组?",
@@ -157,7 +170,12 @@
       "authTitle": "应用授权",
       "authTip": "希望访问你的信息，用于提供个性化服务",
       "agreeAuth": "同意授权",
-      "logoutHint": "登录失效，请重新登录"
+      "logoutHint": "登录失效，请重新登录",
+      "loginFailed": "登录失败",
+      "loginError": "登录出错",
+      "activationFailed": "激活失败",
+      "authorizationFailed": "授权失败",
+      "authorizationError": "授权出错"
     },
     "attachment": {
       "overwriteConfirm": "已添加内容，继续将覆盖当前内容。",
@@ -166,11 +184,23 @@
       "fileSizeLimit": "单个文件不超过 10 MB",
       "unsupportedType": "不支持的文件类型",
       "limitPartial": "已达到 6 个上限，仅添加了前 {{count}} 个附件",
-      "locationTag": "位置"
+      "locationTag": "位置",
+      "cameraError": "打开相机失败",
+      "galleryError": "打开相册失败",
+      "fileError": "选择文件出错"
     },
     "bookmark": {
       "all": "全部",
-      "defaultCategory": "默认分类"
+      "defaultCategory": "默认分类",
+      "loadError": "加载书签失败",
+      "empty": "暂无书签",
+      "emptyHint": "收藏的应用会显示在这里"
+    },
+    "bookmarkTags": {
+      "deleteTitle": "删除标签",
+      "deleteMessage": "确定要删除这个标签吗？",
+      "enterTagName": "输入标签名称...",
+      "addNewTag": "添加新标签..."
     },
     "settings": {
       "title": "设置",
