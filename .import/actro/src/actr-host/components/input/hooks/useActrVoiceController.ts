@@ -2,6 +2,7 @@ import { Alert, Linking } from 'react-native';
 import { Camera } from 'react-native-vision-camera';
 import React, { useCallback, useRef, useState } from 'react';
 import { useAudioStream } from '../../../hooks/useAudioStream';
+import { useTranslation } from 'react-i18next';
 
 interface UseActrVoiceControllerParams {
   processVoiceMessageSend: (
@@ -25,6 +26,7 @@ interface UseActrVoiceControllerResult {
 export function useActrVoiceController(
   params: UseActrVoiceControllerParams,
 ): UseActrVoiceControllerResult {
+  const { t } = useTranslation();
   const { processVoiceMessageSend, sendVoiceChunk, startVoice, endVoice } = params;
 
   // 语音流本地缓冲：<1s 先入队，达到阈值后再按序发送。
@@ -83,7 +85,7 @@ export function useActrVoiceController(
     isStartingRef.current = true;
 
     try {
-      const reqMsg = await processVoiceMessageSend('😌 发送一条语音消息', { isVoice: true });
+      const reqMsg = await processVoiceMessageSend(t('actr.input.sendVoicePlaceholder'), { isVoice: true });
 
       if (stopRequestedRef.current) {
         console.log('[Voice] Stop requested during threshold commit, aborting');
@@ -115,7 +117,7 @@ export function useActrVoiceController(
       setVoiceRecording(false);
       stopRecording();
       chunkQueueRef.current = [];
-      Alert.alert('录音失败', '无法启动语音会话，请重试');
+      Alert.alert(t('actr.voice.recordingFailed'), t('actr.voice.voiceSessionFailed'));
     }
   }, [
     drainQueue,
@@ -130,9 +132,9 @@ export function useActrVoiceController(
     const status = Camera.getMicrophonePermissionStatus();
 
     if (status === 'denied') {
-      Alert.alert('需要麦克风权限', '需要麦克风权限才能使用语音输入', [
-        { text: '取消', style: 'cancel' },
-        { text: '去设置', onPress: () => Linking.openSettings() },
+      Alert.alert(t('actr.voice.micPermissionTitle'), t('actr.voice.micPermissionMsg'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('actr.voice.goToSettings'), onPress: () => Linking.openSettings() },
       ]);
       return;
     }
@@ -185,7 +187,7 @@ export function useActrVoiceController(
         clearTimeout(thresholdTimerRef.current);
         thresholdTimerRef.current = null;
       }
-      Alert.alert('录音失败', '无法启动录制，请重试');
+      Alert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingStartFailed'));
     }
   }, [onThresholdReached, setVoiceRecording, startRecording, stopRecording]);
 
@@ -269,7 +271,7 @@ export function useActrVoiceController(
         console.error('[Voice] handleVoiceEnd failed:', e);
         chunkQueueRef.current = [];
         isSendingRef.current = false;
-        Alert.alert('录音失败', '录音处理发生错误');
+        Alert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingError'));
       }
     },
     [drainQueue, duration, endVoice, hookIsRecording, setVoiceRecording, stopRecording],

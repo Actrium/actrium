@@ -163,7 +163,7 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
             <Text style={styles.emptyTitle}>{t('actr.history.noHistory')}</Text>
             <Text style={styles.emptySubtitle}>
               {searchQuery
-                ? t('actr.history.noResult', { defaultValue: `No results for "${searchQuery}"`, query: searchQuery }) as string
+                ? t('actr.history.noResult', { query: searchQuery })
                 : t('actr.history.visitEmptyTip')}
             </Text>
           </View>
