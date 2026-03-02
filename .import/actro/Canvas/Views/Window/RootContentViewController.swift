@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
+import Combine
 
-/// Root content view controller - manages 4px edge insets and unified content
-/// Layout: Window -> 4px inset -> Rounded container -> (Toolbar + SplitView)
+/// Root content view controller - manages 4px edge inset and contains toolbar + split view
 final class RootContentViewController: NSViewController {
 
     // MARK: - Properties
@@ -42,7 +42,7 @@ final class RootContentViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        // Root view - transparent, window-sized
+        // Root view with transparent background
         let rootView = NSView()
         rootView.wantsLayer = true
         rootView.layer?.backgroundColor = NSColor.clear.cgColor
@@ -61,27 +61,22 @@ final class RootContentViewController: NSViewController {
     // MARK: - Setup
 
     private func setupRoundedContainer() {
-        // Rounded container with all corners rounded
+        // Rounded container that holds all content
         roundedContainer = NSView()
         roundedContainer.wantsLayer = true
         roundedContainer.layer?.cornerRadius = cornerRadius
         roundedContainer.layer?.masksToBounds = true
-        roundedContainer.layer?.backgroundColor = NSColor(white: 0.10, alpha: 1.0).cgColor
+        roundedContainer.layer?.backgroundColor = NSColor(white: 0.12, alpha: 1.0).cgColor
         roundedContainer.translatesAutoresizingMaskIntoConstraints = false
+
         view.addSubview(roundedContainer)
     }
 
     private func setupToolbar() {
-        // Create custom toolbar as SwiftUI view
-        let toolbarView = CustomToolbarView(
+        // Create SwiftUI toolbar
+        let toolbarView = SelfDrawnToolbarView(
             viewModel: viewModel,
-            bookmarkVM: bookmarkVM,
-            onToggleSidebar: { [weak self] in
-                self?.toggleSidebar()
-            },
-            onToggleFocusOverview: {
-                NotificationCenter.default.post(name: .toggleFocusOverviewRequested, object: nil)
-            }
+            bookmarkVM: bookmarkVM
         )
 
         toolbarHostingView = NSHostingView(rootView: AnyView(toolbarView))
@@ -95,29 +90,31 @@ final class RootContentViewController: NSViewController {
             viewModel: viewModel,
             historyVM: historyVM,
             bookmarkVM: bookmarkVM,
-            edgeInset: 0  // No extra inset needed, container handles it
+            edgeInset: 0  // No additional inset needed, container handles it
         )
 
         addChild(splitViewController)
-        splitViewController.view.translatesAutoresizingMaskIntoConstraints = false
-        roundedContainer.addSubview(splitViewController.view)
+
+        let splitView = splitViewController.view
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+        roundedContainer.addSubview(splitView)
     }
 
     private func setupConstraints() {
         NSLayoutConstraint.activate([
-            // Rounded container with 4px inset on all sides
+            // Rounded container: 4px inset on all sides
             roundedContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: edgeInset),
             roundedContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -edgeInset),
             roundedContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: edgeInset),
             roundedContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -edgeInset),
 
-            // Toolbar at top of container
+            // Toolbar: top of container, full width, fixed height
             toolbarHostingView.leadingAnchor.constraint(equalTo: roundedContainer.leadingAnchor),
             toolbarHostingView.trailingAnchor.constraint(equalTo: roundedContainer.trailingAnchor),
             toolbarHostingView.topAnchor.constraint(equalTo: roundedContainer.topAnchor),
             toolbarHostingView.heightAnchor.constraint(equalToConstant: toolbarHeight),
 
-            // Split view below toolbar
+            // Split view: below toolbar, fills remaining space
             splitViewController.view.leadingAnchor.constraint(equalTo: roundedContainer.leadingAnchor),
             splitViewController.view.trailingAnchor.constraint(equalTo: roundedContainer.trailingAnchor),
             splitViewController.view.topAnchor.constraint(equalTo: toolbarHostingView.bottomAnchor),
@@ -125,21 +122,40 @@ final class RootContentViewController: NSViewController {
         ])
     }
 
-    // MARK: - Actions
+    // MARK: - Sidebar Width Sync
 
-    private func toggleSidebar() {
-        splitViewController.toggleSidebar(nil)
+    override func viewDidLayout() {
+        super.viewDidLayout()
+
+        // Sync sidebar width for toolbar background alignment
+        if let sidebarView = splitViewController?.splitViewItems.first?.viewController.view {
+            let sidebarWidth = sidebarView.frame.width
+            if sidebarWidth > 0 {
+                // Notify toolbar of sidebar width change
+                NotificationCenter.default.post(
+                    name: .sidebarWidthChanged,
+                    object: nil,
+                    userInfo: ["width": sidebarWidth]
+                )
+            }
+        }
     }
 }
 
-// MARK: - Custom Toolbar View (SwiftUI)
+// MARK: - Notification Names
 
-private struct CustomToolbarView: View {
+extension Notification.Name {
+    static let sidebarWidthChanged = Notification.Name("sidebarWidthChanged")
+}
+
+// MARK: - Self-Drawn Toolbar View
+
+struct SelfDrawnToolbarView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
-    var onToggleSidebar: () -> Void
-    var onToggleFocusOverview: () -> Void
 
+    @State private var sidebarWidth: CGFloat = 250
+    @State private var isSidebarCollapsed: Bool = false
     @State private var addressText: String = ""
     @State private var isAddressFocused: Bool = false
     @State private var showingBookmarkPopover: Bool = false
@@ -149,33 +165,66 @@ private struct CustomToolbarView: View {
     private let iconPointSize: CGFloat = 16
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Left section: traffic lights space + buttons
-            HStack(spacing: 12) {
-                // Space for traffic lights (~78px)
-                Color.clear.frame(width: 70)
+        HStack(spacing: 0) {
+            // Sidebar area (traffic lights + sidebar toggle + new tab)
+            sidebarToolbarSection
+                .frame(width: isSidebarCollapsed ? 78 : sidebarWidth)
 
-                // New tab button
-                Button(action: { _ = viewModel.addNewTab() }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: iconPointSize, weight: .medium))
-                        .frame(width: iconButtonSize, height: iconButtonSize)
+            // Content area (navigation + address bar + actions)
+            contentToolbarSection
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(toolbarBackground)
+        .onReceive(NotificationCenter.default.publisher(for: .sidebarWidthChanged)) { notification in
+            if let width = notification.userInfo?["width"] as? CGFloat {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    sidebarWidth = width
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-
-                // Overview button
-                Button(action: onToggleFocusOverview) {
-                    Image(systemName: "square.on.square")
-                        .font(.system(size: iconPointSize, weight: .medium))
-                        .frame(width: iconButtonSize, height: iconButtonSize)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleSidebarRequested)) { _ in
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isSidebarCollapsed.toggle()
+            }
+        }
+    }
 
+    // MARK: - Sidebar Section
+
+    private var sidebarToolbarSection: some View {
+        HStack(spacing: 8) {
+            // Space for traffic lights (~70px from left edge)
+            Spacer()
+                .frame(width: 70)
+
+            // New tab button
+            Button(action: { _ = viewModel.addNewTab() }) {
+                Image(systemName: "plus")
+                    .font(.system(size: iconPointSize, weight: .medium))
+                    .frame(width: iconButtonSize, height: iconButtonSize)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            // Overview toggle button
+            Button(action: { toggleOverview() }) {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: iconPointSize, weight: .medium))
+                    .frame(width: iconButtonSize, height: iconButtonSize)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Content Section
+
+    private var contentToolbarSection: some View {
+        HStack(spacing: 12) {
             // Sidebar toggle
-            Button(action: onToggleSidebar) {
+            Button(action: { toggleSidebar() }) {
                 Image(systemName: "sidebar.left")
                     .font(.system(size: iconPointSize, weight: .medium))
                     .frame(width: iconButtonSize, height: iconButtonSize)
@@ -184,28 +233,25 @@ private struct CustomToolbarView: View {
             .foregroundStyle(.secondary)
 
             // Navigation buttons
-            HStack(spacing: 0) {
+            HStack(spacing: 4) {
                 Button(action: { viewModel.goBack() }) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: iconButtonSize, height: iconButtonSize)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
                 .disabled(!viewModel.canGoBack)
-
-                Divider().frame(height: 18)
 
                 Button(action: { viewModel.goForward() }) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: iconButtonSize, height: iconButtonSize)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
                 .disabled(!viewModel.canGoForward)
             }
-            .foregroundStyle(.secondary)
-
-            Spacer()
 
             // Address bar
             addressBar
@@ -213,61 +259,50 @@ private struct CustomToolbarView: View {
 
             Spacer()
 
-            // Share button
-            if let url = viewModel.currentTab?.url {
-                ShareLink(item: url) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .medium))
-                        .frame(width: iconButtonSize, height: iconButtonSize)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-            }
-
-            // More button
-            Menu {
-                Button("New Tab") { _ = viewModel.addNewTab() }
-                Button("Reload") { viewModel.reloadCurrentTab() }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: iconButtonSize, height: iconButtonSize)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .foregroundStyle(.secondary)
+            // Right side actions
+            rightActions
         }
         .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: viewModel.currentTab?.url) { _, _ in updateDisplayText() }
-        .onChange(of: viewModel.currentTabId) { _, _ in updateDisplayText() }
-        .onAppear { updateDisplayText() }
     }
 
     // MARK: - Address Bar
 
     private var addressBar: some View {
-        HStack(spacing: 0) {
-            // Left icon
-            if viewModel.isCurrentTabLoading {
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .frame(width: 32, height: 32)
-            } else {
-                Image(systemName: addressBarIcon)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary.opacity(0.5))
-                    .frame(width: 32, height: 32)
-            }
+        HStack(spacing: 8) {
+            // Page icon
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
 
             // Address text
-            Text(addressText.isEmpty ? "Search or enter website" : addressText)
+            Text(currentDisplayURL)
                 .font(.system(size: 13))
-                .foregroundStyle(addressText.isEmpty ? .secondary : .primary)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .truncationMode(.middle)
 
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(white: 0.15))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var currentDisplayURL: String {
+        if let tab = viewModel.currentTab {
+            if tab.systemTabType != nil {
+                return "about:blank"
+            }
+            return tab.url?.host ?? tab.url?.absoluteString ?? "about:blank"
+        }
+        return "about:blank"
+    }
+
+    // MARK: - Right Actions
+
+    private var rightActions: some View {
+        HStack(spacing: 8) {
             // Bookmark button
             Button(action: { toggleBookmark() }) {
                 Image(systemName: isBookmarked ? "star.fill" : "star")
@@ -285,52 +320,61 @@ private struct CustomToolbarView: View {
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary.opacity(0.5))
+            .foregroundStyle(.secondary)
+
+            // More button
+            Button(action: {}) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
-        .frame(height: 30)
-        .padding(.horizontal, 4)
-        .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private var addressBarIcon: String {
-        guard let tab = viewModel.currentTab else { return "magnifyingglass" }
-        switch tab.contentType {
-        case .web: return "globe"
-        case .reactNative, .native: return "list.bullet"
-        case .empty: return "magnifyingglass"
+    // MARK: - Background
+
+    private var toolbarBackground: some View {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                // Sidebar background (transparent)
+                Color.clear
+                    .frame(width: isSidebarCollapsed ? 0 : sidebarWidth)
+
+                // Content background (dark)
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(white: 0.10))
+                    .padding(.top, 0)  // Top corners rounded
+            }
         }
     }
+
+    // MARK: - Actions
 
     private var isBookmarked: Bool {
-        guard let tab = viewModel.currentTab else { return false }
-        return bookmarkVM.isBookmarked(tab: tab)
+        guard let url = viewModel.currentTab?.url else { return false }
+        return bookmarkVM.bookmarks.contains(where: { $0.appURL == url })
+    }
+
+    private func toggleSidebar() {
+        NotificationCenter.default.post(name: .toggleSidebarRequested, object: nil)
+    }
+
+    private func toggleOverview() {
+        NotificationCenter.default.post(name: .toggleFocusOverviewRequested, object: nil)
     }
 
     private func toggleBookmark() {
         guard let tab = viewModel.currentTab else { return }
+
         if isBookmarked {
-            if let bookmark = bookmarkVM.getBookmark(for: tab) {
+            if let url = tab.url,
+               let bookmark = bookmarkVM.bookmarks.first(where: { $0.appURL == url }) {
                 bookmarkVM.removeBookmark(id: bookmark.id)
             }
         } else {
-            let bookmark = Bookmark.from(tab: tab, manufacturer: nil)
-            bookmarkVM.addBookmark(bookmark)
-        }
-    }
-
-    private func updateDisplayText() {
-        guard let tab = viewModel.currentTab else {
-            addressText = ""
-            return
-        }
-        if let systemType = tab.systemTabType {
-            addressText = systemType.aboutURL.absoluteString
-        } else if let url = tab.url {
-            let host = url.host ?? url.absoluteString
-            addressText = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-        } else {
-            addressText = tab.title
+            bookmarkVM.addBookmark(from: tab)
         }
     }
 }

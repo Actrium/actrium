@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import Combine
 
-/// Main window controller - manages window chrome, 4px edge inset, and toolbar
+/// Main window controller - manages window chrome with self-drawn toolbar
 final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Properties
@@ -11,12 +11,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let historyVM: HistoryViewModel
     private let bookmarkVM: BookmarkViewModel
 
-    private var containerViewController: EdgeInsetContainerViewController!
-    private var splitViewController: MainSplitViewController!
-    private var cancellables = Set<AnyCancellable>()
-
-    /// Window edge inset (transparent border)
-    private let edgeInset: CGFloat = 4
+    private var rootViewController: RootContentViewController!
 
     // MARK: - Initialization
 
@@ -25,7 +20,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.historyVM = historyVM
         self.bookmarkVM = bookmarkVM
 
-        // Create window
+        // Create window with transparent titlebar
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -37,7 +32,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         configureWindow(window)
         setupContentViewController()
-        setupToolbar()
     }
 
     required init?(coder: NSCoder) {
@@ -49,13 +43,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private func configureWindow(_ window: NSWindow) {
         window.delegate = self
 
-        // Transparent titlebar for custom appearance
+        // Transparent titlebar - traffic lights float over content
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.backgroundColor = .clear
 
+        // No system toolbar - we draw our own
+        window.toolbar = nil
+
         // Minimum size
-        window.minSize = NSSize(width: 640, height: 428)
+        window.minSize = NSSize(width: 640, height: 480)
 
         // Center on screen
         window.center()
@@ -66,40 +63,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private func setupContentViewController() {
         guard let window = window else { return }
 
-        // Create the split view controller
-        splitViewController = MainSplitViewController(
+        // Create root content view controller with 4px edge inset
+        rootViewController = RootContentViewController(
             viewModel: viewModel,
             historyVM: historyVM,
-            bookmarkVM: bookmarkVM,
-            edgeInset: edgeInset
-        )
-
-        // Wrap in container with edge insets
-        containerViewController = EdgeInsetContainerViewController(
-            childViewController: splitViewController,
-            edgeInset: edgeInset
-        )
-
-        // Set container as window's content view controller
-        window.contentViewController = containerViewController
-    }
-
-    // MARK: - Toolbar Setup
-
-    private func setupToolbar() {
-        guard let window = window else { return }
-
-        // Use TitlebarManager to setup custom toolbar
-        TitlebarManager.shared.setupTitlebar(
-            for: window,
-            viewModel: viewModel,
             bookmarkVM: bookmarkVM
         )
 
-        // Setup overview toggle callback - post notification for WorkspaceMainView to handle
-        TitlebarManager.shared.onToggleFocusOverview = {
-            NotificationCenter.default.post(name: .toggleFocusOverviewRequested, object: nil)
-        }
+        // Set as window's content view controller
+        window.contentViewController = rootViewController
     }
 
     // MARK: - Public Methods
@@ -120,4 +92,3 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         DevToolsManager.shared.activeBrowserViewModel = viewModel
     }
 }
-
