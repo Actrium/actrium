@@ -71,12 +71,15 @@ final class ContentViewController: NSViewController {
 
 // MARK: - SwiftUI Content Area
 
-/// SwiftUI view for main content area
+/// SwiftUI view for main content area with XPC notification handling
 private struct ContentAreaView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var devTools: DevToolsManager = .shared
+
+    @State private var hasHandledLaunchURL = false
+    @State private var hasAppliedDebugConfig = false
 
     let cornerRadius: CGFloat
 
@@ -88,6 +91,198 @@ private struct ContentAreaView: View {
                 bookmarkVM: bookmarkVM,
                 useNativeToolbar: true
             )
+        }
+        .onAppear {
+            // Inject historyVM for ACTR app history recording
+            viewModel.historyVM = historyVM
+            // Check for pending group transfer
+            checkPendingGroupTransfer()
+            // Handle launch URL (only once)
+            handleLaunchURLIfNeeded()
+            // Apply debug configuration (only once)
+            applyDebugConfigIfNeeded()
+        }
+        // Handle bookmark open from XPC service
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openBookmark)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let urlString = userInfo["url"] as? String else { return }
+            viewModel.navigateCurrentTab(to: urlString)
+
+            // Mark bookmark as used if we can find it
+            if let bookmarkId = userInfo["bookmarkId"] as? String,
+               let uuid = UUID(uuidString: bookmarkId),
+               let bookmark = bookmarkVM.bookmarks.first(where: { $0.id == uuid }) {
+                bookmarkVM.markAsUsed(bookmark)
+            }
+        }
+        // Handle history item open from XPC service
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openHistoryItem)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let urlString = userInfo["url"] as? String else { return }
+            viewModel.navigateCurrentTab(to: urlString)
+        }
+        // Handle bookmark delete from XPC service
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteBookmark)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let bookmarkId = userInfo["bookmarkId"] as? String,
+                  let uuid = UUID(uuidString: bookmarkId) else { return }
+            bookmarkVM.removeBookmark(id: uuid)
+        }
+        // Handle history item delete from XPC service
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteHistoryItem)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let itemId = userInfo["itemId"] as? String,
+                  let uuid = UUID(uuidString: itemId),
+                  let item = historyVM.recentItems.first(where: { $0.id == uuid }) else { return }
+            historyVM.deleteItem(item)
+        }
+        // Handle clear history from XPC service
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.clearHistory)) { _ in
+            historyVM.clearHistory()
+        }
+        // Handle internal URI navigation (e.g., canvas://bookmarks/tags/{tagId})
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.canvas.openURI"))) { notification in
+            guard let userInfo = notification.userInfo,
+                  let uri = userInfo["uri"] as? String else { return }
+
+            if uri.hasPrefix("canvas://bookmarks") {
+                _ = viewModel.openSystemTab(.bookmarks)
+                if let tagId = userInfo["tagId"] as? String,
+                   let tagName = userInfo["tagName"] as? String {
+                    NSLog("🏷️ Opening bookmarks with tag filter: \(tagName) (\(tagId))")
+                }
+            }
+        }
+        // Handle URL open from Start Page (XPC service)
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openURLFromStartPage)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let urlString = userInfo["url"] as? String else { return }
+            viewModel.navigateCurrentTab(to: urlString)
+        }
+    }
+
+    // MARK: - Pending Group Transfer
+
+    private func checkPendingGroupTransfer() {
+        guard let groupData = UserDefaults.standard.dictionary(forKey: "pendingGroupTransfer"),
+              let tabsData = groupData["tabs"] as? [[String: Any]],
+              !tabsData.isEmpty else {
+            return
+        }
+
+        // Clear the pending transfer immediately
+        UserDefaults.standard.removeObject(forKey: "pendingGroupTransfer")
+
+        let groupName = groupData["groupName"] as? String ?? ""
+        let colorRaw = groupData["groupColor"] as? String ?? "gray"
+        let color = TabGroupColor(rawValue: colorRaw) ?? .gray
+
+        // Create tabs from serialized data
+        var newTabIds: [UUID] = []
+        for tabData in tabsData {
+            let title = tabData["title"] as? String ?? "Untitled"
+            let urlString = tabData["urlString"] as? String
+            let url = urlString.flatMap { URL(string: $0) }
+            let systemTypeRaw = tabData["systemTabType"] as? String
+            let systemTabType = systemTypeRaw.flatMap { SystemTabType(rawValue: $0) }
+
+            let tab = Tab(
+                title: title,
+                url: url,
+                htmlContent: tabData["htmlContent"] as? String,
+                systemTabType: systemTabType,
+                guestScript: tabData["guestScript"] as? String,
+                leftPanelScript: tabData["leftPanelScript"] as? String,
+                rightPanelScript: tabData["rightPanelScript"] as? String,
+                unifiedScript: tabData["unifiedScript"] as? String,
+                contractName: tabData["contractName"] as? String,
+                contractVersion: tabData["contractVersion"] as? Int,
+                permissions: tabData["permissions"] as? [String] ?? [],
+                rightPanelDefaultVisible: tabData["rightPanelDefaultVisible"] as? Bool ?? false,
+                backgroundColor: tabData["backgroundColor"] as? String
+            )
+
+            viewModel.tabs.append(tab)
+            viewModel.tabSlotPositions[tab.id] = viewModel.tabs.count - 1
+            newTabIds.append(tab.id)
+        }
+
+        // Set current tab to first imported tab
+        if let firstId = newTabIds.first {
+            viewModel.currentTabId = firstId
+        }
+
+        // Create group from imported tabs
+        if !newTabIds.isEmpty {
+            viewModel.createGroupFromTabs(newTabIds, name: groupName, color: color)
+        }
+    }
+
+    // MARK: - Launch URL Handling
+
+    private func handleLaunchURLIfNeeded() {
+        guard !hasHandledLaunchURL,
+              let launchURL = CanvasApp.launchURL else { return }
+        hasHandledLaunchURL = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let tab = viewModel.addNewTab(focusAddressBar: false)
+            viewModel.navigateCurrentTab(to: launchURL.absoluteString)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                viewModel.canvasMode = .focus(tabId: tab.id)
+            }
+        }
+    }
+
+    // MARK: - Debug Config
+
+    private func applyDebugConfigIfNeeded() {
+        guard !hasAppliedDebugConfig else { return }
+        hasAppliedDebugConfig = true
+
+        let config = CanvasApp.debugConfig
+        guard config.hasDebugOptions else { return }
+
+        NSLog("🔧 [Debug] Applying debug configuration...")
+
+        if let frame = config.windowFrame {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let window = NSApp.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) {
+                    window.setFrame(frame, display: true, animate: false)
+                    NSLog("🔧 [Debug] Window frame set to: \(frame)")
+                }
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if let tabType = config.tabType {
+                switch tabType {
+                case "startPage":
+                    _ = viewModel.openSystemTab(.startPage)
+                case "history":
+                    _ = viewModel.openSystemTab(.history)
+                case "bookmarks":
+                    _ = viewModel.openSystemTab(.bookmarks)
+                default:
+                    NSLog("🔧 [Debug] Unknown tab type: \(tabType)")
+                }
+            }
+
+            if let mode = config.mode {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    switch mode {
+                    case "focus":
+                        if let currentTab = viewModel.currentTab {
+                            viewModel.canvasMode = .focus(tabId: currentTab.id)
+                        }
+                    case "overview":
+                        viewModel.canvasMode = .overview
+                    default:
+                        NSLog("🔧 [Debug] Unknown mode: \(mode)")
+                    }
+                }
+            }
         }
     }
 }
