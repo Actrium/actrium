@@ -321,6 +321,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                 )}
                 <View style={styles.mobileInputInnerRow}>
                   <DropdownMenu
+                    verticalGap={24}
                     trigger={
                       <View style={styles.mobilePlusButton}>
                         <Icon type='link' size={20} color='#404040' />

@@ -31,7 +31,7 @@ import { StableTextInput } from './StableTextInput';
 import { useActrVoiceController } from './hooks/useActrVoiceController';
 import { LoginModal, AuthorizeModal } from '../../../system-apps/auth';
 import { useUnreadStore } from '../../store/useUnreadStore';
-import { getCurrentFullscreenTab } from '../../../../src/native-bridge/tab/TabModule';
+import { getCurrentFullscreenTab, openTab } from '../../../../src/native-bridge/tab/TabModule';
 
 const { NativeLogger } = NativeModules;
 
@@ -121,7 +121,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       if (status === 'not_logged_in') {
         if (layoutTokens.isTablet) {
           // iPad：打开登录 Tab
-          NativeModules.TabModule?.openTab?.({ systemAppType: 'login' })
+          openTab?.({ systemAppType: 'login' })
             .then((newTabId: string) => {
               if (newTabId) {
                 useAuthTaskStore.getState().regTask(newTabId, clientId, appId);
