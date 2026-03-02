@@ -30,16 +30,6 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
         fun bind(item: ActiveModel) {
             val flActive = binding.root.findViewById<android.widget.FrameLayout>(com.askaway.android.R.id.fl_active)
 
-            // 移除之前的 view
-            if (item.view?.parent != null) {
-                (item.view!!.parent as ViewGroup).removeView(item.view)
-            }
-            flActive.removeAllViews()
-
-            // 添加新的 view
-            if (item.view != null) {
-                flActive.addView(item.view)
-            }
         }
     }
 }

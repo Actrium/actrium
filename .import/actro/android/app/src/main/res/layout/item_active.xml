@@ -1,14 +1,83 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="12dp">
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="8dp">
 
-    <!-- 用于放置 ActiveModel.view 的容器 -->
+    <!-- 外层容器：200dp高，圆角背景 -->
     <FrameLayout
         android:id="@+id/fl_active"
         android:layout_width="match_parent"
-        android:layout_height="250dp"
-        android:background="@android:color/darker_gray" />
-</LinearLayout>
+        android:layout_height="200dp"
+        android:background="@drawable/item_active_bg">
+
+        <!-- 底部操作栏：56dp高，灰色背景 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_gravity="bottom"
+            android:background="@drawable/app_bottom_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="13dp"
+            android:paddingEnd="20dp">
+
+            <!-- 圆形图标容器 -->
+            <FrameLayout
+                android:layout_width="32dp"
+                android:layout_height="32dp">
+
+                <ImageView
+                    android:id="@+id/ivAppIcon"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:contentDescription="@string/app_icon"
+                    android:scaleType="centerCrop" />
+
+                <!-- 未读标记圆点 -->
+                <View
+                    android:id="@+id/vUnreadBadge"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:layout_gravity="top|end"
+                    android:background="@color/ask_msg_bg"
+                    android:visibility="gone" />
+            </FrameLayout>
+
+            <!-- 应用名称 -->
+            <TextView
+                android:id="@+id/tvAppName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="11dp"
+                android:layout_weight="1"
+                android:text="App Name"
+                android:textColor="@color/icon_1"
+                android:textSize="17sp" />
+
+            <!-- 标记图标 -->
+            <ImageView
+                android:id="@+id/ivMark"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:contentDescription="@string/mark"
+                android:src="@drawable/ic_mark"
+                android:tint="@color/icon_1" />
+
+            <!-- 分隔空间 -->
+            <Space
+                android:layout_width="20dp"
+                android:layout_height="1dp" />
+
+            <!-- 删除图标 -->
+            <ImageView
+                android:id="@+id/ivDelete"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:contentDescription="@string/delete"
+                android:src="@drawable/ic_delete"
+                android:tint="@color/icon_1" />
+        </LinearLayout>
+    </FrameLayout>
+</FrameLayout>

@@ -4,4 +4,8 @@
     <string name="tab_bookmark">书签</string>
     <string name="tab_set">偏好设置</string>
     <string name="back">返回</string>
+    <string name="app_icon">应用图标</string>
+    <string name="mark">标记</string>
+    <string name="delete">删除</string>
+    <string name="app_screenshot">应用截图</string>
 </resources>
