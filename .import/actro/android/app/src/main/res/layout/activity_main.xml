@@ -5,7 +5,6 @@
     android:background="@android:color/black"
     android:fitsSystemWindows="false">
 
-
     <FrameLayout
         android:id="@+id/flContent"
         android:layout_width="match_parent"
@@ -151,6 +150,7 @@
                 android:layout_weight="1" />
 
             <ImageView
+                android:id="@+id/ivSearch"
                 android:layout_width="62dp"
                 android:layout_height="62dp"
                 android:background="@drawable/bottom_nav_bg"
@@ -171,4 +171,10 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
     </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/flSearch"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
 </FrameLayout>

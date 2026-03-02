@@ -17,4 +17,13 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
             }
         }
     }
+
+    @ReactMethod
+    fun exitSearch(){
+        if(reactApplicationContext.hasCurrentActivity()){
+            reactApplicationContext.currentActivity?.runOnUiThread {
+                reactApplicationContext.currentActivity?.onBackPressed()
+            }
+        }
+    }
 }

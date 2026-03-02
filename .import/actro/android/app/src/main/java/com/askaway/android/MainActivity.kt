@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     private var reactRootView: ReactRootView? = null
     private val appViews = mutableMapOf<String, ReactRootView>()
     private var isReactNativeVisible = false
+    private var isSearchVisible = false
     private var isLayoutComplete = false
     private lateinit var activeRecyclerAdapter: com.askaway.android.adapter.ActiveRecyclerAdapter
     private lateinit var activeAdapter: ActiveAdapter
@@ -135,6 +136,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
                 screenshot = ""
             )
             viewModel.addActiveModel(activeModel)
+        }
+
+        binding.ivSearch.setOnClickListener {
+            showSearch()
         }
 
         // 设置导航栏选择监听器
@@ -344,6 +349,54 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     }
 
     /**
+     * 从右侧显示搜索视图
+     */
+    private fun showSearch() {
+        if (isSearchVisible) return
+
+        isSearchVisible = true
+
+        // 移除 flSearch 中的所有子组件
+        binding.flSearch.removeAllViews()
+
+        // 加载搜索 React Native 视图
+        val bundle = ReactNativeBundle.getSearchBundle()
+        val targetView = createReactRootView("canvas-kotlin", bundle)
+        binding.flSearch.addView(targetView)
+
+        // 初始位置在屏幕右侧
+        binding.flSearch.translationX = binding.flSearch.width.toFloat()
+        binding.flSearch.visibility = View.VISIBLE
+
+        // 创建从右侧滑入的动画
+        ObjectAnimator.ofFloat(binding.flSearch, "translationX", binding.flSearch.width.toFloat(), 0f).apply {
+            duration = 300
+            interpolator = DecelerateInterpolator()
+            start()
+        }
+    }
+
+    /**
+     * 隐藏搜索视图到右侧
+     */
+    private fun hideSearch() {
+        if (!isSearchVisible) return
+
+        // 创建滑出到右侧的动画
+        ObjectAnimator.ofFloat(binding.flSearch, "translationX", 0f, binding.flSearch.width.toFloat()).apply {
+            duration = 300
+            interpolator = DecelerateInterpolator()
+            start()
+            addUpdateListener { animation ->
+                if (animation.animatedFraction == 1f) {
+                    binding.flSearch.visibility = View.GONE
+                    isSearchVisible = false
+                }
+            }
+        }
+    }
+
+    /**
      * 隐藏 ReactNative 视图到底部
      */
     private fun hideReactNativeView() {
@@ -382,6 +435,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        // 如果搜索视图正在显示，则隐藏它
+        if (isSearchVisible) {
+            hideSearch()
+            return
+        }
+
         // 如果 flReactNative 正在显示，则隐藏它
         if (isReactNativeVisible) {
             hideReactNativeView()
