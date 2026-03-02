@@ -2,6 +2,12 @@ import AppKit
 import SwiftUI
 import Combine
 
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let toggleSidebarRequested = Notification.Name("toggleSidebarRequested")
+}
+
 // MARK: - Toolbar Layout State
 
 /// Shared state for toolbar layout, allowing AppKit to communicate with SwiftUI
