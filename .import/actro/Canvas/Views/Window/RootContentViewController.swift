@@ -61,12 +61,15 @@ final class RootContentViewController: NSViewController {
     // MARK: - Setup
 
     private func setupRoundedContainer() {
-        // Rounded container that holds all content
+        // Container that holds all content
+        // Only bottom corners are rounded (top has 4px transparent edge inside toolbar)
         roundedContainer = NSView()
         roundedContainer.wantsLayer = true
+        // Use CACornerMask to only round bottom corners
         roundedContainer.layer?.cornerRadius = cornerRadius
+        roundedContainer.layer?.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]  // Bottom left & right
         roundedContainer.layer?.masksToBounds = true
-        roundedContainer.layer?.backgroundColor = NSColor(white: 0.12, alpha: 1.0).cgColor
+        roundedContainer.layer?.backgroundColor = NSColor.clear.cgColor  // Transparent - content provides background
         roundedContainer.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(roundedContainer)
@@ -102,10 +105,11 @@ final class RootContentViewController: NSViewController {
 
     private func setupConstraints() {
         NSLayoutConstraint.activate([
-            // Rounded container: 4px inset on all sides
+            // Rounded container: 4px inset on left, right, bottom; NO top inset
+            // Top 4px transparency is handled inside toolbar background
             roundedContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: edgeInset),
             roundedContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -edgeInset),
-            roundedContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: edgeInset),
+            roundedContainer.topAnchor.constraint(equalTo: view.topAnchor),  // No top inset
             roundedContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -edgeInset),
 
             // Toolbar: top of container, full width, fixed height
@@ -165,6 +169,7 @@ struct SelfDrawnToolbarView: View {
     private let iconPointSize: CGFloat = 16
 
     var body: some View {
+        // Toolbar content area - icons aligned near top to match traffic lights
         HStack(spacing: 0) {
             // Sidebar area (traffic lights + sidebar toggle + new tab)
             sidebarToolbarSection
@@ -173,7 +178,8 @@ struct SelfDrawnToolbarView: View {
             // Content area (navigation + address bar + actions)
             contentToolbarSection
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, 4)  // Position icons to align with traffic lights
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(toolbarBackground)
         .onReceive(NotificationCenter.default.publisher(for: .sidebarWidthChanged)) { notification in
             if let width = notification.userInfo?["width"] as? CGFloat {
@@ -337,15 +343,25 @@ struct SelfDrawnToolbarView: View {
 
     private var toolbarBackground: some View {
         GeometryReader { geo in
-            HStack(spacing: 0) {
-                // Sidebar background (transparent)
-                Color.clear
-                    .frame(width: isSidebarCollapsed ? 0 : sidebarWidth)
+            VStack(spacing: 0) {
+                // Top 4px transparent (window edge effect) - background only
+                Color.clear.frame(height: 4)
 
-                // Content background (dark)
-                RoundedRectangle(cornerRadius: 12)
+                // Content background starts 4px from top
+                HStack(spacing: 0) {
+                    // Sidebar background (transparent)
+                    Color.clear
+                        .frame(width: isSidebarCollapsed ? 0 : sidebarWidth)
+
+                    // Content background (dark with top rounded corners)
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 12,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 12
+                    )
                     .fill(Color(white: 0.10))
-                    .padding(.top, 0)  // Top corners rounded
+                }
             }
         }
     }
