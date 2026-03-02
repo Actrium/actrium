@@ -193,6 +193,7 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     width: '100%',
+    paddingHorizontal: 8,
   },
   loginButton: {
     flexDirection: 'row',

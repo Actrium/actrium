@@ -14,14 +14,14 @@ type ThemeVariant = 'light' | 'dark';
 const themeColors = {
   light: {
     title: '#333',
-    tip: '#666',
+    tip: '#252525',
     appName: '#333',
     loadingIndicator: '#1C69FF',
     loadingText: '#666',
-    authButtonBg: '#1C69FF',
+    authButtonBg: '#34A8FB',
     authButtonText: '#fff',
-    rejectButtonBg: '#F5F5F5',
-    rejectButtonBorder: '#E5E5E5',
+    rejectButtonBg: '#78788029',
+    rejectButtonBorder: 'transparent',
     rejectButtonText: '#333',
   },
   dark: {
@@ -52,6 +52,8 @@ interface AuthorizeContentProps {
   };
   padding?: number;
   maxWidth?: number;
+  /** 是否显示应用信息行（logo + 名称），在外部已有 header 显示时可设为 false */
+  showAppInfo?: boolean;
 }
 
 export const AuthorizeContent = ({
@@ -64,12 +66,13 @@ export const AuthorizeContent = ({
   fontSize = {},
   padding = 24,
   maxWidth = 400,
+  showAppInfo = true,
 }: AuthorizeContentProps) => {
   const { t } = useTranslation();
   const colors = themeColors[variant];
 
   const {
-    title: titleFontSize = 18,
+    title: titleFontSize = 17,
     appName: appNameFontSize = 16,
     button: buttonFontSize = 16,
   } = fontSize;
@@ -88,19 +91,21 @@ export const AuthorizeContent = ({
   return (
     <View style={[styles.container, { padding, maxWidth }]}>
       {/* App Info */}
-      <View style={styles.appInfoRow}>
-        {appLogo ? (
-          <Image source={{ uri: appLogo }} style={styles.appLogo} />
-        ) : (
-          <View style={[styles.appLogo, styles.appLogoPlaceholder]} />
-        )}
-        <Text style={[styles.appName, { fontSize: appNameFontSize, color: colors.appName }]}>
-          {appName || t('actr.app.officialService')}
-        </Text>
-      </View>
+      {showAppInfo && (
+        <View style={styles.appInfoRow}>
+          {appLogo ? (
+            <Image source={{ uri: appLogo }} style={styles.appLogo} />
+          ) : (
+            <View style={[styles.appLogo, styles.appLogoPlaceholder]} />
+          )}
+          <Text style={[styles.appName, { fontSize: appNameFontSize, color: colors.appName }]}>
+            {appName || t('actr.app.officialService')}
+          </Text>
+        </View>
+      )}
 
       {/* Permission Tip */}
-      <Text style={[styles.title, { fontSize: titleFontSize, color: colors.tip }]}>
+      <Text style={[styles.title, { fontSize: titleFontSize, color: colors.tip, fontWeight: '600' }]}>
         {t('actr.auth.authTip')}
       </Text>
 
@@ -155,10 +160,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   appLogo: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    marginRight: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    marginRight: 10,
   },
   appLogoPlaceholder: {
     backgroundColor: '#E5E5E5',

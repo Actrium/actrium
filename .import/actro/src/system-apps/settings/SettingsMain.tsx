@@ -56,21 +56,16 @@ export const SettingsMain = ({
         activeOpacity={0.8}
         onPress={isLoggedIn ? onAccountPress : onLoginPress}
       >
-        {isLoggedIn ? (
-          <Image
-            source={{
-              uri: userInfo.user.avatar || 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?ixlib=rb-4.0.3&auto=format&fit=crop&w=150&q=80',
-            }}
-            style={styles.avatar}
-          />
-        ) : (
-          <Image
-            source={require('../../assets/login/avatar_default.png')}
-            style={styles.avatar}
-          />
-        )}
+        <Image
+          source={
+            isLoggedIn && userInfo.user.avatar && userInfo.user.avatar !== 'none'
+              ? { uri: userInfo.user.avatar }
+              : require('../../assets/login/avatar_default.png')
+          }
+          style={styles.avatar}
+        />
         <View style={styles.accountInfo}>
-          <Text style={styles.accountName}>
+          <Text style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
             {isLoggedIn ? (userInfo.user.display_name || 'Account') : t('actr.auth.login')}
           </Text>
         </View>
@@ -86,17 +81,19 @@ export const SettingsMain = ({
         />
       </View>
 
-      {/* Logout Section */}
-      <View style={styles.logoutCard}>
-        <SettingsItem
-          icon='logout'
-          iconColor='#FF383C'
-          label={t('actr.settings.logout')}
-          showChevron={false}
-          destructive={true}
-          onPress={onLogout}
-        />
-      </View>
+      {/* Logout Section - 仅登录后显示 */}
+      {isLoggedIn && (
+        <View style={styles.logoutCard}>
+          <SettingsItem
+            icon='logout'
+            iconColor='#FF383C'
+            label={t('actr.settings.logout')}
+            showChevron={false}
+            destructive={true}
+            onPress={onLogout}
+          />
+        </View>
+      )}
     </ScrollView>
   );
 };

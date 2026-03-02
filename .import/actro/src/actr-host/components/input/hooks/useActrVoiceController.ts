@@ -6,7 +6,7 @@ import { useAudioStream } from '../../../hooks/useAudioStream';
 interface UseActrVoiceControllerParams {
   processVoiceMessageSend: (
     content: string,
-    isVoice?: boolean,
+    options?: { isVoice?: boolean; skipAuthCheck?: boolean },
   ) => Promise<any>;
   sendVoiceChunk: (chunk: Uint8Array) => Promise<unknown>;
   startVoice: (payload: any) => void;
@@ -83,7 +83,7 @@ export function useActrVoiceController(
     isStartingRef.current = true;
 
     try {
-      const reqMsg = await processVoiceMessageSend('😌 发送一条语音消息', true);
+      const reqMsg = await processVoiceMessageSend('😌 发送一条语音消息', { isVoice: true });
 
       if (stopRequestedRef.current) {
         console.log('[Voice] Stop requested during threshold commit, aborting');
