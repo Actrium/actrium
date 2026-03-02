@@ -46,6 +46,20 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // 处理状态栏 insets，确保内容不会延伸到状态栏下方
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            binding.root.setOnApplyWindowInsetsListener { v, insets ->
+                val statusBarHeight = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top
+                binding.root.setPadding(0, statusBarHeight, 0, 0)
+                insets
+            }
+        } else {
+            // 对于 Android R 以下的版本，手动处理状态栏高度
+            val statusBarHeight = getStatusBarHeight()
+            binding.flContent.setPadding(0, statusBarHeight, 0, 0)
+        }
+
         // 初始化 flReactNative 为隐藏状态
         binding.flReactNative.visibility = View.INVISIBLE // 使用 INVISIBLE 而不是 GONE，以便能获取高度
 
@@ -387,5 +401,17 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     override fun invokeDefaultOnBackPressed() {
         @Suppress("DEPRECATION")
         super.onBackPressed()
+    }
+
+    /**
+     * 获取状态栏高度
+     */
+    private fun getStatusBarHeight(): Int {
+        var result = 0
+        val resourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (resourceId > 0) {
+            result = resources.getDimensionPixelSize(resourceId)
+        }
+        return result
     }
 }
