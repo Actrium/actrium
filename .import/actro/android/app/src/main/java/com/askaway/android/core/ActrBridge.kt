@@ -34,8 +34,7 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
     @ReactMethod
     fun initializeService(dict: ReadableMap, promise: Promise) {
         Log.e("ActrBridge", "initializeService called with config: $dict")
-//        val tabId = dict.getString("tabId")
-        val tabId = "e6c6fefa-51c1-4ac0-baea-4f4ad00fff72"
+        val tabId = dict.getString("tabId")
         val actorType = dict.getString("actorType")
         val path = dict.getString("path")
         if (tabId == null || actorType == null || path == null) {
@@ -56,10 +55,8 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
 
     @ReactMethod
     fun sendTextMessage(dict: ReadableMap, promise: Promise) {
-        //val tabId = dict.getString("tabId")
-        val tabId = "e6c6fefa-51c1-4ac0-baea-4f4ad00fff72"
+        val tabId = dict.getString("tabId")
         Log.e("ActrBridge", "sendTextMessage called with: $dict")
-
         try {
             val builder = TextMessage.newBuilder()
             // Required fields from dict
