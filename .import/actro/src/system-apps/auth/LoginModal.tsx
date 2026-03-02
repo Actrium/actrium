@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { LoginContent } from './LoginContent';
-import { AuthorizeContent } from './AuthorizeContent';
-import { useLoginFlow, LoginStep } from '../../hooks/useLoginFlow';
-import { useAppStore } from '../../actr-host/store/useAppStore';
+import { useLoginFlow, LoginFlowMode } from '../../hooks/auth';
 import { Icon } from '../../actr-host/components/Icon';
 
 interface LoginModalProps {
@@ -22,6 +20,8 @@ interface LoginModalProps {
   clientId: string;
   appId?: string;
   onSuccess?: () => void;
+  /** 登录模式：login_only 仅登录，login_and_authorize 登录后自动授权 */
+  mode?: LoginFlowMode;
 }
 
 export const LoginModal = ({
@@ -30,46 +30,55 @@ export const LoginModal = ({
   clientId,
   appId,
   onSuccess,
+  mode = 'login_and_authorize',
 }: LoginModalProps) => {
   const { t } = useTranslation();
-  const { step, loading, authorize } = useLoginFlow({
+  const { step, loading } = useLoginFlow({
+    mode,
     clientId,
     appId,
-    isModal: true,
+    autoInit: visible,
   });
-  const appInfo = useAppStore((state) => appId ? state.apps[appId] : null);
 
-  const handleAuthorize = async () => {
-    await authorize();
-    onSuccess?.();
-    onClose();
-  };
+  // 记录上一次的 step，用于检测状态变化
+  const prevStepRef = useRef<typeof step | null>(null);
 
-  const handleReject = () => {
-    onClose();
-  };
+  // 登录/授权成功后自动关闭弹窗（只在弹窗可见且状态变为 success 时触发）
+  useEffect(() => {
+    if (visible && step === 'success' && prevStepRef.current !== 'success') {
+      const timer = setTimeout(() => {
+        onSuccess?.();
+        onClose();
+      }, 500);
+      prevStepRef.current = step;
+      return () => clearTimeout(timer);
+    }
+    prevStepRef.current = step;
+  }, [visible, step, onSuccess, onClose]);
+
+  // 弹窗关闭时重置状态，确保下次打开时能正确检测变化
+  useEffect(() => {
+    if (!visible) {
+      prevStepRef.current = null;
+    }
+  }, [visible]);
 
   const renderContent = () => {
-    if (step === 'check_status' || (loading && step !== 'authorizing')) {
+    if (step === 'checking' || step === 'logging_in') {
       return (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1C69FF" />
-          <Text style={styles.loadingText}>{t('actr.auth.authorizing')}</Text>
+          <Text style={styles.loadingText}>{t('actr.auth.loggingIn')}</Text>
         </View>
       );
     }
 
     if (step === 'authorizing') {
       return (
-        <AuthorizeContent
-          variant="light"
-          appLogo={appInfo?.info?.logo}
-          appName={appInfo?.app_name}
-          loading={loading}
-          onAuthorize={handleAuthorize}
-          onReject={handleReject}
-          padding={0}
-        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#1C69FF" />
+          <Text style={styles.loadingText}>{t('actr.auth.authorizing')}</Text>
+        </View>
       );
     }
 
@@ -85,19 +94,14 @@ export const LoginModal = ({
       <LoginContent
         variant="light"
         logoSize={0}
-        buttonMaxWidth={280}
+        // buttonMaxWidth={280}
         fontSize={{ tagline: 17, button: 17 }}
-        spacing={{ logoTop: 0, spacer: 16, buttonBottom: 25, policyBottom: 0 }}
+        spacing={{ logoTop: 0, spacer: 16, buttonBottom: 0, policyBottom: 0 }}
       />
     );
   };
 
-  const getTitle = (currentStep: LoginStep) => {
-    if (currentStep === 'authorizing') {
-      return appInfo?.app_name || t('actr.app.officialService');
-    }
-    return t('actr.auth.login') + ' AskAway';
-  };
+  const showLogo = step === 'login_options' || step === 'idle';
 
   return (
     <Modal
@@ -111,9 +115,8 @@ export const LoginModal = ({
           <TouchableWithoutFeedback>
             <View style={styles.modalContainer}>
               <View style={styles.modalContentWrapper}>
-                {/* Header (Title & Close Button) */}
                 <View style={styles.header}>
-                  <Text style={styles.title}>{getTitle(step)}</Text>
+                  <Text style={styles.title}>{t('actr.auth.login') + ' AskAway'}</Text>
                   <TouchableOpacity
                     style={styles.closeButton}
                     onPress={onClose}
@@ -123,16 +126,16 @@ export const LoginModal = ({
                   </TouchableOpacity>
                 </View>
 
-                {/* Logo Container */}
-                <View style={styles.logoRow}>
-                  <Image
-                    source={require('../../assets/login/login_logo.png')}
-                    style={{ width: 100, height: 100 }}
-                    resizeMode="contain"
-                  />
-                </View>
+                {showLogo && (
+                  <View style={styles.logoRow}>
+                    <Image
+                      source={require('../../assets/login/login_logo.png')}
+                      style={{ width: 100, height: 100 }}
+                      resizeMode="contain"
+                    />
+                  </View>
+                )}
 
-                {/* Content */}
                 <View style={styles.content}>
                   {renderContent()}
                 </View>
@@ -153,9 +156,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContainer: {
-    width: '85%',
-    maxWidth: 360,
-    backgroundColor: 'rgba(203, 214, 253, 1)', // 更加浅的蓝色
+    width: '95%',
+    // maxWidth: 360,
+    backgroundColor: 'rgba(203, 214, 253, 1)',
     borderRadius: 33,
     overflow: 'hidden',
   },

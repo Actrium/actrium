@@ -153,8 +153,9 @@
       "agreePolicyDetail": "勾选同意《用户协议》和《隐私政策》后即可登录。",
       "agreeAndLogin": "同意并登录",
       "authorizing": "正在授权...",
+      "loggingIn": "登录中...",
       "authTitle": "应用授权",
-      "authTip": "该应用申请获取以下权限：",
+      "authTip": "希望访问你的信息，用于提供个性化服务",
       "agreeAuth": "同意授权",
       "logoutHint": "登录失效，请重新登录"
     },

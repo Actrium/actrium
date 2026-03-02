@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useUserStore } from '../../actr-host/store/useUserStore';
 
 interface AccountDetailProps {
   onBack: () => void;
@@ -23,6 +24,7 @@ export const AccountDetail = ({
   isTablet,
 }: AccountDetailProps) => {
   const { t } = useTranslation();
+  const userInfo = useUserStore((state) => state.userInfo);
 
   return (
     <ScrollView
@@ -47,9 +49,11 @@ export const AccountDetail = ({
       {/* Avatar */}
       <View style={styles.avatarContainer}>
         <Image
-          source={{
-            uri: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80',
-          }}
+          source={
+            userInfo?.user.avatar && userInfo.user.avatar !== 'none'
+              ? { uri: userInfo.user.avatar }
+              : require('../../assets/login/avatar_default.png')
+          }
           style={styles.largeAvatar}
         />
       </View>
@@ -58,12 +62,16 @@ export const AccountDetail = ({
       <View style={styles.detailCard}>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>{t('actr.settings.nickname')}</Text>
-          <Text style={styles.detailValue}>Account</Text>
+          <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
+            {userInfo?.user.display_name || userInfo?.user.cn || '-'}
+          </Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>{t('actr.settings.email')}</Text>
-          <Text style={styles.detailValue}>user@example.com</Text>
+          <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
+            {userInfo?.user.mail || '-'}
+          </Text>
         </View>
       </View>
 
@@ -152,6 +160,9 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: '#8C8C8C',
     fontWeight: '400',
+    flex: 1,
+    textAlign: 'right',
+    marginLeft: 16,
   },
   divider: {
     height: 1,

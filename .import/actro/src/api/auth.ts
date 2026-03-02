@@ -9,7 +9,7 @@ export const ENVS = {
   prod: 'https://account.actrium.example',
 };
 
-export const CURRENT_ENV: keyof typeof ENVS = 'beta';
+export const CURRENT_ENV: keyof typeof ENVS = 'prod';
 export const BASE_URL = ENVS[CURRENT_ENV];
 
 export const authApi = {

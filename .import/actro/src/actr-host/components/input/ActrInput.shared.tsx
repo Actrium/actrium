@@ -17,19 +17,19 @@ import { IMessage } from '../../../repository/MessageRepository';
 import { VoiceOverlay } from '../VoiceOverlay';
 import { useTab } from '../../contexts/TabContext';
 import { useActrConnection } from '../../../hooks/useActrConnection';
-import { IAttachmentItem } from '../../types/attachment';
 import {
   TActrMessageResponse,
   TLocation,
 } from '../../../native-bridge/actr/ActrConnection.type';
-import useAuth from '../../../hooks/useAuth';
+import { useAuth, AuthStatus } from '../../../hooks/auth';
+import { useAuthTaskStore } from '../../store/useAuthTaskStore';
 import { Utils } from '../../../utils/utils';
 import { getHostLayoutTokens } from '../../../utils/layout';
 import ActrInputMobileView from './ActrInputMobileView';
 import ActrInputPadView from './ActrInputPadView';
 import { StableTextInput } from './StableTextInput';
 import { useActrVoiceController } from './hooks/useActrVoiceController';
-import { LoginModal } from '../../../system-apps/auth';
+import { LoginModal, AuthorizeModal } from '../../../system-apps/auth';
 import { useUnreadStore } from '../../store/useUnreadStore';
 import { getCurrentFullscreenTab } from '../../../../src/native-bridge/tab/TabModule';
 
@@ -54,6 +54,9 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     clientId: string;
     appId: string;
   } | null>(null);
+
+  // 授权弹窗状态（已登录未授权时使用）
+  const [showAuthorizeModal, setShowAuthorizeModal] = useState(false);
 
   const inputText = useInputStore((state) => state.inputs[appId]?.text || '');
   const editingMessageId = useInputStore(
@@ -103,19 +106,48 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   const updateMessage = useMessageStore((state) => state.updateMessage);
   const appInfo = useAppStore((state) => state.apps[appId]);
 
-  // Mobile 模式使用弹窗，Pad 模式使用 Tab
-  const handleNeedAuth = useCallback(
-    (params: { clientId: string; appId: string }) => {
-      setAuthParams(params);
-      setShowLoginModal(true);
-    },
-    [],
-  );
+  const { checkAuth } = useAuth(appId);
 
-  const { hasAuth } = useAuth(appId, {
-    useModal: isMobileVariant,
-    onNeedAuth: handleNeedAuth,
-  });
+  /**
+   * 处理授权状态，根据设备类型和状态决定行为
+   * @returns true 表示已授权可继续，false 表示需要登录/授权
+   */
+  const handleAuthStatus = useCallback(
+    (status: AuthStatus, clientId: string): boolean => {
+      if (status === 'authorized') {
+        return true;
+      }
+
+      if (status === 'not_logged_in') {
+        if (layoutTokens.isTablet) {
+          // iPad：打开登录 Tab
+          NativeModules.TabModule?.openTab?.({ systemAppType: 'login' })
+            .then((newTabId: string) => {
+              if (newTabId) {
+                useAuthTaskStore.getState().regTask(newTabId, clientId, appId);
+              }
+            })
+            .catch((err: any) => {
+              console.error('[ActrInput] Failed to open login tab:', err);
+            });
+        } else {
+          // 手机：弹登录窗口
+          setAuthParams({ clientId, appId });
+          setShowLoginModal(true);
+        }
+        return false;
+      }
+
+      if (status === 'not_authorized') {
+        // 两端均弹授权窗口
+        setShowAuthorizeModal(true);
+        return false;
+      }
+
+      return false;
+    },
+    [appId, layoutTokens.isTablet],
+  );
 
   // 文本消息接收回调
   const onReceiveMessage = useCallback(
@@ -217,7 +249,9 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     },
   });
 
-  const processMessageSend = async (content: string, isVoice?: boolean) => {
+  const processMessageSend = async (content: string, options?: { isVoice?: boolean; skipAuthCheck?: boolean }) => {
+    const { isVoice, skipAuthCheck } = options || {};
+
     if (connection?.reason) {
       Alert.alert(t('actr.auth.serviceInitFailed'), connection.reason);
       return;
@@ -229,9 +263,12 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       return;
     }
 
-    // 1. 权限校验
-    if (!hasAuth()) {
-      return;
+    // 1. 权限校验（登录/授权成功后的回调可跳过）
+    if (!skipAuthCheck) {
+      const { status, clientId } = checkAuth();
+      if (!handleAuthStatus(status, clientId)) {
+        return;
+      }
     }
 
     // 2. 处理编辑模式：若是在修改旧消息，发送前先从库中移除旧版本
@@ -426,11 +463,22 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
           clientId={authParams.clientId}
           appId={authParams.appId}
           onSuccess={() => {
-            // 授权成功后重新发送消息
-            processMessageSend(inputText);
+            // 登录+授权成功后直接发送消息，跳过权限检查
+            processMessageSend(inputText, { skipAuthCheck: true });
           }}
         />
       )}
+
+      {/* 已登录未授权时弹出授权窗口（两端均支持） */}
+      <AuthorizeModal
+        visible={showAuthorizeModal}
+        onClose={() => setShowAuthorizeModal(false)}
+        appId={appId}
+        onSuccess={() => {
+          // 授权成功后直接发送消息，跳过权限检查
+          processMessageSend(inputText, { skipAuthCheck: true });
+        }}
+      />
     </View>
   );
 }
