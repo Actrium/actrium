@@ -117,6 +117,7 @@ struct TabOutlineView: NSViewRepresentable {
         outlineView.autoresizesOutlineColumn = true
         outlineView.allowsMultipleSelection = false
         outlineView.floatsGroupRows = false
+        outlineView.intercellSpacing = NSSize(width: 0, height: 3)
 
         // Setup column
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabColumn"))
@@ -1340,7 +1341,7 @@ private class ColorCircleView: NSView {
 private class RoundedRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10)
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7)
         NSColor.controlAccentColor.setFill()
         path.fill()
     }
