@@ -2,6 +2,42 @@ import AppKit
 import SwiftUI
 import Combine
 
+// MARK: - Root View (layout-cycle traffic light correction)
+
+/// Custom root view that repositions traffic lights in its `layout()` override.
+///
+/// AppKit's layout cycle is top-down: the window's theme-frame lays out
+/// the NSTitlebarContainerView (which positions the standard window buttons
+/// at their default location) **before** laying out this content view.
+/// By calling `adjustTrafficLights()` in our `layout()`, we always run
+/// after the system and override its positioning — within the same frame,
+/// no deferred dispatch, no visual flash.
+///
+/// `viewDidMoveToWindow()` installs a KVO observation on `window.title`.
+/// Setting `window.title` is the trigger that causes the system to
+/// re-layout the titlebar; the KVO fires synchronously in the setter,
+/// marks this view for layout, and the layout system does the rest.
+private class TrafficLightAwareRootView: NSView {
+    weak var controller: RootContentViewController?
+    private var titleObservation: NSKeyValueObservation?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window {
+            titleObservation = window.observe(\.title, options: []) { [weak self] _, _ in
+                self?.needsLayout = true
+            }
+        } else {
+            titleObservation = nil
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        controller?.handleRootViewLayout()
+    }
+}
+
 /// Root content view controller - manages 4px edge inset and contains toolbar + split view
 final class RootContentViewController: NSViewController {
 
@@ -38,7 +74,6 @@ final class RootContentViewController: NSViewController {
     private var toolbarHostingView: NSHostingView<AnyView>!
     private var splitViewController: MainSplitViewController!
     private let sidebarLayoutState = SidebarLayoutState()
-    private var cancellables = Set<AnyCancellable>()
 
     // DEBUG: dashed border layer for roundedContainer
     private var debugBorderLayer: CAShapeLayer?
@@ -64,8 +99,8 @@ final class RootContentViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        // Root view - background visible through 4px edge padding
-        let rootView = NSView()
+        let rootView = TrafficLightAwareRootView()
+        rootView.controller = self
         rootView.wantsLayer = true
         rootView.layer?.backgroundColor = windowBackgroundColor.cgColor
         self.view = rootView
@@ -78,7 +113,6 @@ final class RootContentViewController: NSViewController {
         setupToolbar()
         setupSplitView()
         setupConstraints()
-        observeTabChanges()
     }
 
     // MARK: - Setup
@@ -173,32 +207,11 @@ final class RootContentViewController: NSViewController {
         ])
     }
 
-    // MARK: - Tab Change Observation
-
-    private func observeTabChanges() {
-        // When the active tab changes, MainWindowController updates window.title,
-        // which causes the system's NSTitlebarContainerView to re-layout and
-        // reposition the traffic lights at their default location.
-        //
-        // By marking our view for layout here, AppKit's layout cycle guarantees
-        // the correct execution order within the SAME frame:
-        //   1. Titlebar container layout() → buttons at system default position
-        //   2. Our content view layout()   → viewDidLayout → adjustTrafficLights
-        //      → buttons moved back to our position
-        // No deferred dispatch, no visual flash.
-        viewModel.$currentTabId
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.view.needsLayout = true
-            }
-            .store(in: &cancellables)
-    }
-
     // MARK: - Layout Updates
 
-    override func viewDidLayout() {
-        super.viewDidLayout()
-
+    /// Called from `TrafficLightAwareRootView.layout()` — guaranteed to run
+    /// after the system's titlebar layout in the same layout pass.
+    fileprivate func handleRootViewLayout() {
         // Update content mask to match roundedContainer bounds
         if let maskLayer = contentMaskLayer {
             let bounds = roundedContainer.bounds
