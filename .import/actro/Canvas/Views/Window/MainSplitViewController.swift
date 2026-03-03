@@ -78,11 +78,6 @@ final class MainSplitViewController: NSSplitViewController {
 
     // MARK: - Lifecycle
 
-    override func loadView() {
-        self.splitView = InvisibleDividerSplitView()
-        super.loadView()
-    }
-
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -100,6 +95,9 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - Setup
 
     private func setupSplitView() {
+        // Swap the existing splitView's class to suppress divider drawing.
+        // Safe because InvisibleDividerSplitView adds no stored properties.
+        object_setClass(splitView, InvisibleDividerSplitView.self)
         splitView.isVertical = true
         splitView.dividerStyle = .thin
         splitView.delegate = self
