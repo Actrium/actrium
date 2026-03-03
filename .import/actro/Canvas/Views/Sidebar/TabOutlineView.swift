@@ -324,6 +324,10 @@ struct TabOutlineView: NSViewRepresentable {
             return 28
         }
 
+        func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+            return RoundedRowView()
+        }
+
         func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
             return false // Don't use system group style, we customize it
         }
@@ -1330,6 +1334,17 @@ private class ColorCircleView: NSView {
 }
 
 // MARK: - Tab Row View with Hover Close Button
+
+// MARK: - Rounded Selection Row View
+
+private class RoundedRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 2, yRadius: 2)
+        NSColor.controlAccentColor.setFill()
+        path.fill()
+    }
+}
 
 private class TabRowView: NSView {
     private let tab: Tab
