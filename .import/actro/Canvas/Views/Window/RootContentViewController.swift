@@ -121,6 +121,9 @@ final class RootContentViewController: NSViewController {
         toolbarHostingView = NSHostingView(rootView: AnyView(toolbarView))
         toolbarHostingView.translatesAutoresizingMaskIntoConstraints = false
         toolbarHostingView.wantsLayer = true
+        // Disable titlebar safe area — we manage our own toolbar layout;
+        // the system titlebar is only meaningful in fullscreen.
+        toolbarHostingView.safeAreaRegions = []
         toolbarHostingView.layer?.borderColor = NSColor.systemGreen.cgColor  // DEBUG
         toolbarHostingView.layer?.borderWidth = 1  // DEBUG
         roundedContainer.addSubview(toolbarHostingView)
@@ -273,7 +276,6 @@ struct SelfDrawnToolbarView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let topInset = geo.safeAreaInsets.top
             let metrics = ToolbarLayoutMetrics(state: layoutState)
             let totalWidth = max(0, geo.size.width)
             let sidebarWidth = min(totalWidth, max(0, metrics.sidebarSectionWidth))
@@ -283,11 +285,9 @@ struct SelfDrawnToolbarView: View {
             )
             let contentWidth = max(0, totalWidth - contentLeading)
 
-            // Buttons positioned to align centers with traffic lights:
-            // trafficLightTopInset=17, ~14px tall → center ≈ 24px
-            // iconButtonSize=30 → need top at 9px from hosting view top
-            // Compensate for titlebar safe area offset dynamically.
             ZStack(alignment: .topLeading) {
+                toolbarBackground(metrics: metrics)
+
                 sidebarToolbarSection(metrics: metrics)
                     .frame(width: sidebarWidth, alignment: .leading)
 
@@ -295,15 +295,12 @@ struct SelfDrawnToolbarView: View {
                     .frame(width: contentWidth, alignment: .leading)
                     .offset(x: contentLeading)
             }
-            .padding(.top, 9 - topInset)
+            // Align button centers with traffic lights (center ≈ 24px):
+            // trafficLightTopInset=17, ~14px tall → center at 24px
+            // iconButtonSize=30 → top at 24-15 = 9px
+            .padding(.top, 9)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(alignment: .topLeading) {
-                // Background extends into safe area to fill from the very top
-                toolbarBackground(metrics: metrics)
-                    .ignoresSafeArea(.container, edges: .top)
-            }
         }
-        .ignoresSafeArea(.container, edges: .top)
         .overlay {
             // DEBUG: border for SwiftUI toolbar content bounds
             Rectangle()
