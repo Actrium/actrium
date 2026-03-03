@@ -61,8 +61,8 @@ final class RootContentViewController: NSViewController {
 
     /// Traffic lights position (absolute, in our view's coordinates)
     private let trafficLightPosition = NSPoint(x: 15, y: 0)
-    private let trafficLightSpacing: CGFloat = 8  // Gap between buttons (system default ~6-8px)
-    private let trafficLightTopInset: CGFloat = 17  // Distance from top
+    private let trafficLightSpacing: CGFloat = 9  // Gap between buttons (nudged by +1px)
+    private let trafficLightTopInset: CGFloat = 15  // Distance from top (nudged up by 2pt)
     private let trafficLightButtonTypes: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
 
     /// Keep original system superviews so fullscreen can restore native behavior.
@@ -326,6 +326,7 @@ struct SelfDrawnToolbarView: View {
     // Layout constants
     private let iconButtonSize: CGFloat = 30
     private let iconPointSize: CGFloat = 16
+    private let iconVerticalNudge: CGFloat = -2
 
     var body: some View {
         GeometryReader { geo in
@@ -339,10 +340,10 @@ struct SelfDrawnToolbarView: View {
             let contentWidth = max(0, totalWidth - contentLeading)
 
             ZStack(alignment: .topLeading) {
-                // Background in same coordinate space; cancel 9px button
+                // Background in same coordinate space; cancel button
                 // padding so it fills from the hosting view's top edge.
                 toolbarBackground(metrics: metrics)
-                    .padding(.top, -9)
+                    .padding(.top, -(9 + iconVerticalNudge))
 
                 sidebarToolbarSection(metrics: metrics)
                     .frame(width: sidebarWidth, alignment: .leading)
@@ -351,10 +352,10 @@ struct SelfDrawnToolbarView: View {
                     .frame(width: contentWidth, alignment: .leading)
                     .offset(x: contentLeading)
             }
-            // Align button centers with traffic lights (center ≈ 24px):
-            // trafficLightTopInset=17, ~14px tall → center at 24px
-            // iconButtonSize=30 → top at 24-15 = 9px
-            .padding(.top, 9)
+            // Align button centers with traffic lights (center ≈ 22px):
+            // trafficLightTopInset=15, ~14px tall → center at 22px
+            // iconButtonSize=30 → top at 22-15 = 7px
+            .padding(.top, 9 + iconVerticalNudge)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .overlay {

@@ -15,7 +15,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var fullScreenTitleLabel: NSTextField?
     private let fullScreenTrafficLightLeftInset: CGFloat = 18
-    private let fullScreenTrafficLightGap: CGFloat = 8
+    private let fullScreenTrafficLightGap: CGFloat = 9
+    private let fullScreenTrafficLightVerticalNudge: CGFloat = 2
     private let fullScreenTitleGapAfterTrafficLights: CGFloat = 12
     private let fullScreenTitleFontSize: CGFloat = 12
     private let fullScreenTitleLineHeight: CGFloat = 22
@@ -257,7 +258,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             let size = button.frame.size == .zero ? button.fittingSize : button.frame.size
             let width = max(size.width, 12)
             let centeredY = floor((titlebarView.bounds.height - max(size.height, 12)) / 2)
-            let y = centeredY.isFinite ? centeredY : fallbackY
+            let baseY = centeredY.isFinite ? centeredY : fallbackY
+            let y = titlebarView.isFlipped
+                ? (baseY - fullScreenTrafficLightVerticalNudge)
+                : (baseY + fullScreenTrafficLightVerticalNudge)
             button.setFrameOrigin(NSPoint(x: x, y: y))
             rightEdge = max(rightEdge, x + width)
             x += width + fullScreenTrafficLightGap
