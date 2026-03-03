@@ -163,9 +163,14 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - Public Methods
 
     @objc override func toggleSidebar(_ sender: Any?) {
-        // Set isCollapsed directly instead of calling super.toggleSidebar,
-        // which internally uses animator() and always animates.
+        // Bypass super.toggleSidebar which always uses animator().
+        // Wrap in explicit no-animation context to suppress any
+        // implicit Core Animation the split view might trigger.
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        NSAnimationContext.current.allowsImplicitAnimation = false
         sidebarItem.isCollapsed.toggle()
+        NSAnimationContext.endGrouping()
         syncSidebarLayoutState()
     }
 }
