@@ -432,8 +432,8 @@ struct CanvasApp: App {
                 .disabled(focusedViewModel == nil)
             }
 
-            // View menu - Zoom controls
-            CommandGroup(after: .toolbar) {
+            // View menu - keep zoom shortcuts and route fullscreen toggle to active browser window.
+            CommandGroup(replacing: .toolbar) {
                 Button("放大") {
                     zoomIn()
                 }
@@ -454,10 +454,11 @@ struct CanvasApp: App {
 
                 Divider()
 
-                Button("进入全屏") {
+                Button("切换全屏") {
                     toggleFullScreen()
                 }
                 .keyboardShortcut("f", modifiers: [.command, .control])
+                .disabled(NSApp.keyWindow == nil)
             }
 
             // Tab switching shortcuts
@@ -607,8 +608,6 @@ struct CanvasApp: App {
     // MARK: - Fullscreen
 
     private func toggleFullScreen() {
-        guard let window = NSApp.keyWindow else { return }
-        window.toggleFullScreen(nil)
+        appDelegate.toggleNativeFullScreenForKeyWindow()
     }
 }
-
