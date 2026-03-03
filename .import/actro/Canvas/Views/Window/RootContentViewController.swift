@@ -561,7 +561,7 @@ struct SelfDrawnToolbarView: View {
         init(state: SidebarLayoutState) {
             let widthRef = max(640, state.windowWidth)
             let t = Self.normalized(widthRef, min: 780, max: 1680)
-            let splitBoundaryX = Self.pixelAligned(max(0, state.splitBoundaryX))
+            let splitBoundaryX = max(0, state.splitBoundaryX)
 
             trafficLightsReservedWidth = state.isWindowFullScreen
                 ? 0
@@ -601,10 +601,6 @@ struct SelfDrawnToolbarView: View {
 
         private static func lerp(_ start: CGFloat, _ end: CGFloat, _ t: CGFloat) -> CGFloat {
             start + (end - start) * t
-        }
-
-        private static func pixelAligned(_ value: CGFloat) -> CGFloat {
-            value.rounded(.toNearestOrEven)
         }
 
         private static let toolbarButtonSize: CGFloat = 30
