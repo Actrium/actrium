@@ -20,10 +20,30 @@ final class RootContentViewController: NSViewController {
     /// Toolbar height
     private let toolbarHeight: CGFloat = 52
 
+    /// Window background color (TODO: make configurable via settings)
+    private let windowBackgroundColor = NSColor(red: 0.1, green: 0.2, blue: 0.4, alpha: 1.0)
+
+    /// Traffic lights position (absolute, in our view's coordinates)
+    private let trafficLightPosition = NSPoint(x: 15, y: 0)
+    private let trafficLightSpacing: CGFloat = 8  // Gap between buttons (system default ~6-8px)
+    private let trafficLightTopInset: CGFloat = 17  // Distance from top
+    private let trafficLightButtonTypes: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+
+    /// Keep original system superviews so fullscreen can restore native behavior.
+    private var trafficLightOriginalSuperviews: [NSWindow.ButtonType: NSView] = [:]
+    private var trafficLightConstraints: [NSWindow.ButtonType: [NSLayoutConstraint]] = [:]
+
     // Child views
     private var roundedContainer: NSView!
     private var toolbarHostingView: NSHostingView<AnyView>!
     private var splitViewController: MainSplitViewController!
+
+    // DEBUG: dashed border layer for roundedContainer
+    private var debugBorderLayer: CAShapeLayer?
+
+    // Mask layer for content clipping (separate from debug border)
+    private var contentMaskLayer: CAShapeLayer?
+
 
     // MARK: - Initialization
 
@@ -42,10 +62,10 @@ final class RootContentViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        // Root view with transparent background
+        // Root view - background visible through 4px edge padding
         let rootView = NSView()
         rootView.wantsLayer = true
-        rootView.layer?.backgroundColor = NSColor.clear.cgColor
+        rootView.layer?.backgroundColor = windowBackgroundColor.cgColor
         self.view = rootView
     }
 
@@ -61,18 +81,29 @@ final class RootContentViewController: NSViewController {
     // MARK: - Setup
 
     private func setupRoundedContainer() {
-        // Container that holds all content
-        // Only bottom corners are rounded (top has 4px transparent edge inside toolbar)
+        // Container that holds all content with rounded corners on all sides
         roundedContainer = NSView()
         roundedContainer.wantsLayer = true
-        // Use CACornerMask to only round bottom corners
-        roundedContainer.layer?.cornerRadius = cornerRadius
-        roundedContainer.layer?.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]  // Bottom left & right
-        roundedContainer.layer?.masksToBounds = true
-        roundedContainer.layer?.backgroundColor = NSColor.clear.cgColor  // Transparent - content provides background
+        roundedContainer.layer?.backgroundColor = NSColor.clear.cgColor  // Transparent - content views provide their own background
         roundedContainer.translatesAutoresizingMaskIntoConstraints = false
 
+        // Content mask for rounded corners (clip content but not debug border)
+        let maskLayer = CAShapeLayer()
+        roundedContainer.layer?.mask = maskLayer
+        contentMaskLayer = maskLayer
+
+        // DEBUG: Add dashed border using CAShapeLayer (added to parent so it's not clipped)
+        let borderLayer = CAShapeLayer()
+        borderLayer.strokeColor = NSColor.red.cgColor
+        borderLayer.fillColor = nil
+        borderLayer.lineWidth = 1
+        borderLayer.lineDashPattern = [4, 4]  // 4px dash, 4px gap
+        debugBorderLayer = borderLayer
+
         view.addSubview(roundedContainer)
+
+        // Add debug border to parent view (will be positioned over roundedContainer)
+        view.layer?.addSublayer(borderLayer)
     }
 
     private func setupToolbar() {
@@ -84,6 +115,9 @@ final class RootContentViewController: NSViewController {
 
         toolbarHostingView = NSHostingView(rootView: AnyView(toolbarView))
         toolbarHostingView.translatesAutoresizingMaskIntoConstraints = false
+        toolbarHostingView.wantsLayer = true
+        toolbarHostingView.layer?.borderColor = NSColor.systemGreen.cgColor  // DEBUG
+        toolbarHostingView.layer?.borderWidth = 1  // DEBUG
         roundedContainer.addSubview(toolbarHostingView)
     }
 
@@ -100,16 +134,18 @@ final class RootContentViewController: NSViewController {
 
         let splitView = splitViewController.view
         splitView.translatesAutoresizingMaskIntoConstraints = false
+        splitView.wantsLayer = true
+        splitView.layer?.borderColor = NSColor.systemYellow.cgColor  // DEBUG
+        splitView.layer?.borderWidth = 1  // DEBUG
         roundedContainer.addSubview(splitView)
     }
 
     private func setupConstraints() {
         NSLayoutConstraint.activate([
-            // Rounded container: 4px inset on left, right, bottom; NO top inset
-            // Top 4px transparency is handled inside toolbar background
+            // Rounded container: 4px inset on all sides
             roundedContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: edgeInset),
             roundedContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -edgeInset),
-            roundedContainer.topAnchor.constraint(equalTo: view.topAnchor),  // No top inset
+            roundedContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: edgeInset),
             roundedContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -edgeInset),
 
             // Toolbar: top of container, full width, fixed height
@@ -126,10 +162,24 @@ final class RootContentViewController: NSViewController {
         ])
     }
 
-    // MARK: - Sidebar Width Sync
+    // MARK: - Layout Updates
 
     override func viewDidLayout() {
         super.viewDidLayout()
+
+        // Update content mask to match roundedContainer bounds
+        if let maskLayer = contentMaskLayer {
+            let bounds = roundedContainer.bounds
+            let path = CGPath(roundedRect: bounds, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+            maskLayer.path = path
+        }
+
+        // DEBUG: Update dashed border path to match roundedContainer frame (in parent coordinates)
+        if let borderLayer = debugBorderLayer {
+            let frame = roundedContainer.frame
+            let path = CGPath(roundedRect: frame, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+            borderLayer.path = path
+        }
 
         // Sync sidebar width for toolbar background alignment
         if let sidebarView = splitViewController?.splitViewItems.first?.viewController.view {
@@ -141,6 +191,70 @@ final class RootContentViewController: NSViewController {
                     object: nil,
                     userInfo: ["width": sidebarWidth]
                 )
+            }
+        }
+
+        // Adjust traffic lights position
+        adjustTrafficLights()
+    }
+
+    // MARK: - Traffic Lights
+
+    private func adjustTrafficLights() {
+        guard let window = view.window else { return }
+
+        if window.styleMask.contains(.fullScreen) {
+            // Fullscreen traffic lights are handled by MainWindowController.
+            return
+        }
+
+        var xOffset: CGFloat = 0
+
+        for buttonType in trafficLightButtonTypes {
+            guard let button = window.standardWindowButton(buttonType) else { continue }
+
+            if trafficLightOriginalSuperviews[buttonType] == nil, let original = button.superview {
+                trafficLightOriginalSuperviews[buttonType] = original
+            }
+
+            let leadingConstant = trafficLightPosition.x + xOffset
+
+            if button.superview != roundedContainer {
+                button.removeFromSuperview()
+                button.translatesAutoresizingMaskIntoConstraints = false
+                roundedContainer.addSubview(button)
+
+                let constraints = [
+                    button.leadingAnchor.constraint(equalTo: roundedContainer.leadingAnchor, constant: leadingConstant),
+                    button.topAnchor.constraint(equalTo: roundedContainer.topAnchor, constant: trafficLightTopInset)
+                ]
+                trafficLightConstraints[buttonType] = constraints
+                NSLayoutConstraint.activate(constraints)
+            } else if let constraints = trafficLightConstraints[buttonType], constraints.count == 2 {
+                constraints[0].constant = leadingConstant
+                constraints[1].constant = trafficLightTopInset
+            }
+
+            // Next button position: current position + button width + gap
+            let buttonWidth = max(button.frame.width, button.fittingSize.width)
+            xOffset += buttonWidth + trafficLightSpacing
+        }
+    }
+
+    private func restoreTrafficLightsToSystemContainer(_ window: NSWindow) {
+        for buttonType in trafficLightButtonTypes {
+            guard let button = window.standardWindowButton(buttonType) else { continue }
+            guard let originalSuperview = trafficLightOriginalSuperviews[buttonType] else { continue }
+
+            if let constraints = trafficLightConstraints[buttonType] {
+                NSLayoutConstraint.deactivate(constraints)
+                trafficLightConstraints[buttonType] = nil
+            }
+
+            if button.superview != originalSuperview {
+                button.removeFromSuperview()
+                button.translatesAutoresizingMaskIntoConstraints = true
+                originalSuperview.addSubview(button)
             }
         }
     }
@@ -169,7 +283,7 @@ struct SelfDrawnToolbarView: View {
     private let iconPointSize: CGFloat = 16
 
     var body: some View {
-        // Toolbar content area - icons aligned near top to match traffic lights
+        // Toolbar content pinned to the top edge of the hosting container
         HStack(spacing: 0) {
             // Sidebar area (traffic lights + sidebar toggle + new tab)
             sidebarToolbarSection
@@ -178,9 +292,17 @@ struct SelfDrawnToolbarView: View {
             // Content area (navigation + address bar + actions)
             contentToolbarSection
         }
-        .padding(.top, -18)  // Move icons up to align with traffic lights
+        .padding(.top, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(toolbarBackground)
+        .background(alignment: .topLeading) {
+            toolbarBackground
+        }
+        .overlay {
+            // DEBUG: border for SwiftUI toolbar content bounds
+            Rectangle()
+                .stroke(Color.blue.opacity(0.8), lineWidth: 1)
+        }
+        .ignoresSafeArea(.container, edges: .top)
         .onReceive(NotificationCenter.default.publisher(for: .sidebarWidthChanged)) { notification in
             if let width = notification.userInfo?["width"] as? CGFloat {
                 withAnimation(.easeInOut(duration: 0.15)) {
@@ -243,7 +365,7 @@ struct SelfDrawnToolbarView: View {
                 Button(action: { viewModel.goBack() }) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 28, height: 28)
+                        .frame(width: iconButtonSize, height: iconButtonSize)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -252,7 +374,7 @@ struct SelfDrawnToolbarView: View {
                 Button(action: { viewModel.goForward() }) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 28, height: 28)
+                        .frame(width: iconButtonSize, height: iconButtonSize)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -313,7 +435,7 @@ struct SelfDrawnToolbarView: View {
             Button(action: { toggleBookmark() }) {
                 Image(systemName: isBookmarked ? "star.fill" : "star")
                     .font(.system(size: 14, weight: .medium))
-                    .frame(width: 32, height: 32)
+                    .frame(width: iconButtonSize, height: iconButtonSize)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -323,7 +445,7 @@ struct SelfDrawnToolbarView: View {
             Button(action: { viewModel.reloadCurrentTab() }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 14, weight: .medium))
-                    .frame(width: 32, height: 32)
+                    .frame(width: iconButtonSize, height: iconButtonSize)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -332,7 +454,7 @@ struct SelfDrawnToolbarView: View {
             Button(action: {}) {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 14, weight: .medium))
-                    .frame(width: 32, height: 32)
+                    .frame(width: iconButtonSize, height: iconButtonSize)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -342,28 +464,15 @@ struct SelfDrawnToolbarView: View {
     // MARK: - Background
 
     private var toolbarBackground: some View {
-        GeometryReader { geo in
-            VStack(spacing: 0) {
-                // Top 4px transparent (window edge effect) - background only
-                Color.clear.frame(height: 4)
-
-                // Content background starts 4px from top
-                HStack(spacing: 0) {
-                    // Sidebar background (transparent)
-                    Color.clear
-                        .frame(width: isSidebarCollapsed ? 0 : sidebarWidth)
-
-                    // Content background (dark with top rounded corners)
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 12,
-                        bottomLeadingRadius: 0,
-                        bottomTrailingRadius: 0,
-                        topTrailingRadius: 12
-                    )
-                    .fill(Color(white: 0.10))
-                }
-            }
-        }
+        // Content background (dark with top-left rounded corner only)
+        UnevenRoundedRectangle(
+            topLeadingRadius: 12,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 0  // roundedContainer mask handles right corner
+        )
+        .fill(Color(white: 0.10))
+        .padding(.leading, isSidebarCollapsed ? 0 : sidebarWidth)
     }
 
     // MARK: - Actions
