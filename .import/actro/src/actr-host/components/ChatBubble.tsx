@@ -316,21 +316,32 @@ export default function ChatBubble({
                       !isLast && { marginRight: 8 },
                     ]}
                   >
-                    <SmartImage
-                      cdnUrl={item.cdn_url}
-                      localUrl={item.local_url}
-                      style={[
-                        styles.attachmentImage,
-                        item.aspect_ratio
-                          ? { aspectRatio: item.aspect_ratio }
-                          : null,
-                      ]}
-                      resizeMode='cover'
-                    />
-                    <View style={styles.locationTag}>
-                      <Icon type='geolocation' size={12} color='#fff' />
-                      <Text style={styles.locationTagText}>{t('actr.attachment.locationTag')}</Text>
-                    </View>
+                    {item.local_url || item.cdn_url ? (
+                      <>
+                        <SmartImage
+                          cdnUrl={item.cdn_url}
+                          localUrl={item.local_url}
+                          style={[
+                            styles.attachmentImage,
+                            item.aspect_ratio
+                              ? { aspectRatio: item.aspect_ratio }
+                              : null,
+                          ]}
+                          resizeMode='cover'
+                        />
+                        <View style={styles.locationTag}>
+                          <Icon type='geolocation' size={12} color='#fff' />
+                          <Text style={styles.locationTagText}>{t('actr.attachment.locationTag')}</Text>
+                        </View>
+                      </>
+                    ) : (
+                      <View style={styles.locationPlaceholder}>
+                        <Icon type='geolocation' size={20} color='#34A8FB' />
+                        <Text style={styles.locationPlaceholderText}>
+                          {item.latitude?.toFixed(4)}, {item.longitude?.toFixed(4)}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 );
               }
@@ -652,6 +663,23 @@ const styles = StyleSheet.create({
   locationTagText: {
     color: '#fff',
     fontSize: 10,
+  },
+  locationPlaceholder: {
+    width: 100,
+    height: 80,
+    backgroundColor: '#F0F8FF',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#34A8FB',
+    paddingHorizontal: 6,
+  },
+  locationPlaceholderText: {
+    fontSize: 9,
+    color: '#34A8FB',
+    marginTop: 4,
+    textAlign: 'center',
   },
   bubblePressed: {
     opacity: 0.7,

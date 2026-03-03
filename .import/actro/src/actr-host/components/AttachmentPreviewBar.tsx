@@ -35,16 +35,21 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
       >
         {attachments.map((item) => (
           <View key={item.id} style={styles.attachmentItem}>
-            {item.attachment_type === 'image' ||
-            item.attachment_type === 'location' ? (
+            {item.attachment_type === 'image' ? (
+              <SmartImage
+                cdnUrl={item.cdn_url}
+                localUrl={item.local_url}
+                style={[
+                  styles.previewImage,
+                  { aspectRatio: item.aspect_ratio },
+                ]}
+                resizeMode='cover'
+              />
+            ) : item.attachment_type === 'location' ? (
               <TouchableOpacity
-                activeOpacity={item.attachment_type === 'location' ? 0.7 : 1}
+                activeOpacity={0.7}
                 onPress={() => {
-                  if (
-                    item.attachment_type === 'location' &&
-                    item.latitude &&
-                    item.longitude
-                  ) {
+                  if (item.latitude && item.longitude) {
                     const url = Platform.select({
                       ios: `http://maps.apple.com/?ll=${item.latitude},${item.longitude}`,
                       android: `geo:${item.latitude},${item.longitude}?q=${item.latitude},${item.longitude}`,
@@ -56,19 +61,29 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
                     }
                   }
                 }}
+                style={styles.locationContainer}
               >
-                <SmartImage
-                  cdnUrl={item.cdn_url}
-                  localUrl={item.local_url}
-                  style={[
-                    styles.previewImage,
-                    { aspectRatio: item.aspect_ratio },
-                  ]}
-                  resizeMode='cover'
-                />
-                {item.attachment_type === 'location' && (
-                  <View style={styles.locationOverlay}>
-                    <Icon type='geolocation' size={14} color='#fff' />
+                {item.local_url ? (
+                  <>
+                    <SmartImage
+                      cdnUrl={item.cdn_url}
+                      localUrl={item.local_url}
+                      style={[
+                        styles.previewImage,
+                        { aspectRatio: item.aspect_ratio },
+                      ]}
+                      resizeMode='cover'
+                    />
+                    <View style={styles.locationOverlay}>
+                      <Icon type='geolocation' size={14} color='#fff' />
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.locationPlaceholder}>
+                    <Icon type='geolocation' size={24} color='#34A8FB' />
+                    <Text style={styles.locationText}>
+                      {item.latitude?.toFixed(4)}, {item.longitude?.toFixed(4)}
+                    </Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -135,6 +150,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(52, 168, 251, 0.8)',
     borderRadius: 6,
     padding: 4,
+  },
+  locationContainer: {
+    height: '100%',
+  },
+  locationPlaceholder: {
+    width: 120,
+    height: '100%',
+    backgroundColor: '#F0F8FF',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#34A8FB',
+    paddingHorizontal: 8,
+  },
+  locationText: {
+    fontSize: 11,
+    color: '#34A8FB',
+    marginTop: 6,
+    textAlign: 'center',
   },
   fileInfo: {
     flex: 1,

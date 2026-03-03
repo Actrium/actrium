@@ -22,15 +22,16 @@ import {
   ScrollView,
   useWindowDimensions,
   Alert,
+  Linking,
   Platform,
   SafeAreaView,
+  AppState,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import {
   Camera,
   useCameraDevice,
   useCodeScanner,
-  CameraPermissionStatus,
 } from 'react-native-vision-camera';
 import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { useTab } from '../contexts/TabContext';
@@ -46,6 +47,7 @@ const LoadApp = () => {
   const [hasPermission, setHasPermission] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [cameraLoadTimedOut, setCameraLoadTimedOut] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const isResolvingRef = useRef(false);
@@ -74,20 +76,87 @@ const LoadApp = () => {
     }
   }, []);
 
-  // 检查是否为模拟器 (通过简单的硬件特征判断，无需额外依赖)
-  const isSimulator = useMemo(() => {
-    return Platform.OS === 'ios' && (Platform.isTV || !device);
-  }, [device]);
 
-  const isSupported = Platform.OS === 'ios' && !isSimulator;
+  const isSupported = Platform.OS === 'ios' || Platform.OS === 'android';
+
+  const delay = useCallback((ms: number) => {
+    return new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }, []);
+
+  const requestCameraPermissionWithRetry = useCallback(async () => {
+    if (Platform.OS !== 'android') {
+      let status = await Camera.getCameraPermissionStatus();
+      if (status !== 'granted') {
+        status = await Camera.requestCameraPermission();
+      }
+      return status;
+    }
+
+    let status = await Camera.getCameraPermissionStatus();
+    if (status === 'granted') return status;
+
+    // Android 端首次进入页面时，PermissionAwareActivity 可能尚未就绪，短暂重试避免 NO_ACTIVITY 误报。
+    const maxRetry = 4;
+    let lastError: unknown;
+    for (let i = 0; i < maxRetry; i += 1) {
+      try {
+        if (Platform.OS === 'android' && AppState.currentState !== 'active') {
+          await delay(120);
+          continue;
+        }
+        return await Camera.requestCameraPermission();
+      } catch (error) {
+        lastError = error;
+        const message =
+          error instanceof Error ? error.message : String(error ?? '');
+        const isNoActivity = message.includes('NO_ACTIVITY');
+        if (!isNoActivity || i === maxRetry - 1) {
+          throw error;
+        }
+        await delay(180);
+      }
+    }
+
+    if (lastError) throw lastError;
+    return status;
+  }, [delay]);
+
+  useEffect(() => {
+    if (!cameraActive || device) {
+      setCameraLoadTimedOut(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setCameraLoadTimedOut(true);
+    }, 2500);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [cameraActive, device]);
 
   console.log('[LoadApp] Rendering...', {
     hasPermission,
     cameraActive,
     device: !!device,
     isSupported,
-    isSimulator,
+    cameraLoadTimedOut,
   });
+
+  const showPermissionDeniedAlert = useCallback(() => {
+    Alert.alert('需要相机权限', '请开启相机权限后重试', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '去设置',
+        onPress: () => {
+          void Linking.openSettings();
+        },
+      },
+    ]);
+  }, []);
 
   // 点击按钮后才申请相机权限并打开相机
   const handleOpenCamera = useCallback(async () => {
@@ -96,27 +165,66 @@ const LoadApp = () => {
 
     if (!isSupported) {
       console.log(
-        '[LoadApp] Camera not supported or running on Simulator, skipping hardware init.',
+        '[LoadApp] Camera not supported on this platform, skipping hardware init.',
       );
+      Alert.alert('当前平台不支持扫码', '请手动输入 URL 加载应用');
+      return;
+    }
+
+    // 模拟器/无摄像头设备：不触发权限请求，直接走 UI 兜底提示
+    if (!device) {
+      setCameraActive(true);
       return;
     }
 
     setRequesting(true);
     console.log('[LoadApp] Requesting camera permission...');
     try {
-      const status = await Camera.requestCameraPermission();
+      const status = await requestCameraPermissionWithRetry();
+
       console.log('[LoadApp] Camera permission status:', status);
       const granted = status === 'granted';
       setHasPermission(granted);
       if (granted) {
         setCameraActive(true);
+      } else if (status === 'denied') {
+        Alert.alert('未授予相机权限', '请允许相机权限后重试');
+      } else {
+        showPermissionDeniedAlert();
       }
     } catch (e) {
       console.error('[LoadApp] Camera permission request failed:', e);
+      const errorMsg =
+        e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+      const isNoActivityError = errorMsg.includes('NO_ACTIVITY');
+      const maybeMissingManifestPermission =
+        errorMsg.includes('android.permission.CAMERA') ||
+        errorMsg.includes('AndroidManifest') ||
+        errorMsg.toLowerCase().includes('permission');
+
+      if (Platform.OS === 'android' && isNoActivityError) {
+        Alert.alert(
+          '相机初始化中',
+          '页面初始化尚未完成，请稍等 1 秒后再试',
+        );
+      } else if (Platform.OS === 'android' && maybeMissingManifestPermission) {
+        Alert.alert(
+          '相机权限配置缺失',
+          'Android 宿主工程可能未声明 CAMERA 权限，请在 AndroidManifest.xml 中添加 android.permission.CAMERA',
+        );
+      } else {
+        Alert.alert('相机初始化失败', '请稍后重试');
+      }
     } finally {
       setRequesting(false);
     }
-  }, [dismissKeyboard, isSupported]);
+  }, [
+    device,
+    dismissKeyboard,
+    isSupported,
+    requestCameraPermissionWithRetry,
+    showPermissionDeniedAlert,
+  ]);
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
@@ -204,6 +312,17 @@ const LoadApp = () => {
     }
 
     if (device == null) {
+      if (cameraLoadTimedOut) {
+        return (
+          <View style={styles.centerContent}>
+            <Text style={styles.infoText}>未检测到可用相机</Text>
+            <Text style={styles.secondaryInfoText}>
+              模拟器或无摄像头设备请改用下方 URL 输入
+            </Text>
+          </View>
+        );
+      }
+
       return (
         <View style={styles.centerContent}>
           <ActivityIndicator size='large' color='#34A8FB' />
@@ -370,6 +489,13 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: 16,
     color: '#666',
+    textAlign: 'center',
+  },
+  secondaryInfoText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
   openCameraBtn: {
     paddingHorizontal: 32,
