@@ -105,8 +105,8 @@ final class MainSplitViewController: NSSplitViewController {
             bookmarkVM: bookmarkVM
         )
 
-        // Create split view items
-        sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarViewController)
+        // Create split view items (plain item to avoid system source-list rounded background)
+        sidebarItem = NSSplitViewItem(viewController: sidebarViewController)
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = minSidebarWidth
         sidebarItem.maximumThickness = 400  // Updated dynamically in syncSidebarLayoutState()
