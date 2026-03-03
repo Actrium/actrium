@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Divider-Aware Container
+
+/// Content container that can expose a narrow leading-edge passthrough zone,
+/// allowing divider drag gestures to reach NSSplitView when content overlays
+/// (e.g. RN/XPC host views) aggressively capture mouse events.
+private final class DividerAwareContainerView: NSView {
+    var leadingPassthroughWidth: CGFloat = 0
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if leadingPassthroughWidth > 0, point.x <= leadingPassthroughWidth {
+            return nil
+        }
+        return super.hitTest(point)
+    }
+}
+
 /// Content view controller - hosts SwiftUI WorkspaceView with rounded corners
 final class ContentViewController: NSViewController {
 
@@ -14,6 +30,7 @@ final class ContentViewController: NSViewController {
 
     /// Corner radius for content area (matches roundedContainer)
     private let cornerRadius: CGFloat = 12
+    private var containerView: DividerAwareContainerView?
 
     // MARK: - Initialization
 
@@ -45,7 +62,7 @@ final class ContentViewController: NSViewController {
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         // Container view with rounded corners only on bottom (top connects to toolbar)
-        let container = NSView()
+        let container = DividerAwareContainerView()
         container.wantsLayer = true
         container.layer?.cornerRadius = cornerRadius
         // CALayer corner constants use geometric minY/maxY; on macOS non-flipped layer
@@ -61,6 +78,7 @@ final class ContentViewController: NSViewController {
             hostingView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
+        containerView = container
         self.view = container
     }
 
@@ -69,6 +87,14 @@ final class ContentViewController: NSViewController {
 
         // Set background color
         view.layer?.backgroundColor = NSColor(white: 0.10, alpha: 1.0).cgColor
+    }
+
+    // MARK: - Divider Hit Passthrough
+
+    func setLeadingDividerPassthroughWidth(_ width: CGFloat) {
+        let normalized = max(0, width)
+        containerView?.leadingPassthroughWidth = normalized
+        NSLog("🧭 [DividerDebug] contentLeadingPassthroughWidth=%.1f", normalized)
     }
 }
 
