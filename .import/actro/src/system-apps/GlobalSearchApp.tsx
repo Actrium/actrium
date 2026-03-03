@@ -15,7 +15,6 @@ import {
   ScrollView,
   StyleSheet,
   Image,
-  SafeAreaView,
   TouchableWithoutFeedback,
   useWindowDimensions,
   Linking,
@@ -23,6 +22,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../actr-host/components/Icon';
+import SafeBottomView from '../actr-host/components/SafeBottomView';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../actr-host/styles/shadows';
 import { useAppStore } from '../actr-host/store/useAppStore';
@@ -332,7 +332,7 @@ export default function GlobalSearchApp() {
 
           {/* 底部输入框 */}
           <View style={styles.phoneInputDock}>
-            <SafeAreaView style={styles.phoneInputSafeArea}>
+            <SafeBottomView style={styles.phoneInputSafeArea} minBottom={10}>
               <View style={styles.phoneInputSection}>
                 {renderSearchInput(styles.phoneInput, [
                   styles.phoneInputContainer,
@@ -340,7 +340,7 @@ export default function GlobalSearchApp() {
               </View>
               {/* Phone: 键盘避让已由 SwiftUI（PhoneSystemAppView）在 Native 层处理，
                    通过缩小 RCTRootView.frame 实现上移，无需 RN 层重复添加 keyboardInset 偏移 */}
-            </SafeAreaView>
+            </SafeBottomView>
           </View>
         </View>
       </TouchableWithoutFeedback>
@@ -514,6 +514,7 @@ const styles = StyleSheet.create({
   },
   phoneInputDock: {
     width: '100%',
+    paddingBottom: 10,
   },
   phoneInputSafeArea: {
     width: '100%',

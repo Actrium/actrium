@@ -57,6 +57,12 @@ const customConfig = {
       if (platform === 'macos' && moduleName === 'react-native') {
         return resolve(context, 'react-native-macos', platform);
       }
+      if (platform === 'macos' && moduleName === 'react-native-safe-area-context') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(projectRoot, 'src', 'actr-host', 'shims', 'react-native-safe-area-context.js'),
+        };
+      }
 
       // Workaround: rill root package.json exports points to source, but we want to be explicit
       // Pin to the actual host entry to keep Metro + TS consistent.
