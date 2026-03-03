@@ -1,25 +1,6 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Divider-Aware Container View
-
-/// Container view that lets NSSplitView divider events pass through
-/// its leading edge.  Without this, content views (e.g. ViewBridge /
-/// React Native layers) capture mouseDown near the divider, preventing
-/// the user from dragging the divider when approaching from the right.
-private class DividerAwareContainerView: NSView {
-    /// Width of the leading-edge hit-test passthrough zone (points).
-    static let dividerHitZoneWidth: CGFloat = 6
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let local = convert(point, from: superview)
-        if local.x < Self.dividerHitZoneWidth {
-            return nil
-        }
-        return super.hitTest(point)
-    }
-}
-
 /// Content view controller - hosts SwiftUI WorkspaceView with rounded corners
 final class ContentViewController: NSViewController {
 
@@ -63,10 +44,8 @@ final class ContentViewController: NSViewController {
         hostingView = NSHostingView(rootView: contentView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Container view with rounded corners only on bottom (top connects to toolbar).
-        // Uses DividerAwareContainerView so the split view divider can be dragged
-        // when the mouse approaches from the content (right) side.
-        let container = DividerAwareContainerView()
+        // Container view with rounded corners only on bottom (top connects to toolbar)
+        let container = NSView()
         container.wantsLayer = true
         container.layer?.cornerRadius = cornerRadius
         // CALayer corner constants use geometric minY/maxY; on macOS non-flipped layer
