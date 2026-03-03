@@ -173,13 +173,6 @@ public class ViewBridgeHostView: NSView {
         // 禁用 layer 隐式动画
         layer?.actions = ["bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
 
-        // Do not let this host's intrinsic size become a hard layout constraint.
-        // The split view must be able to shrink/expand content freely while dragging.
-        setContentHuggingPriority(.defaultLow, for: .horizontal)
-        setContentHuggingPriority(.defaultLow, for: .vertical)
-        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-
         // Disable automatic subview resizing to allow manual control in updateRemoteViewLayout
         autoresizesSubviews = false
 
@@ -212,7 +205,7 @@ public class ViewBridgeHostView: NSView {
 
     /// 返回 intrinsicContentSize
     public override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+        return currentContentSize
     }
 
     /// 布局时确保 remoteView 填满整个 hostView
