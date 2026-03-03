@@ -11,6 +11,7 @@ final class MainSplitViewController: NSSplitViewController {
     private let historyVM: HistoryViewModel
     private let bookmarkVM: BookmarkViewModel
     private let edgeInset: CGFloat
+    private let sidebarLayoutState: SidebarLayoutState
 
     private var sidebarItem: NSSplitViewItem!
     private var contentItem: NSSplitViewItem!
@@ -26,11 +27,18 @@ final class MainSplitViewController: NSSplitViewController {
 
     // MARK: - Initialization
 
-    init(viewModel: BrowserViewModel, historyVM: HistoryViewModel, bookmarkVM: BookmarkViewModel, edgeInset: CGFloat) {
+    init(
+        viewModel: BrowserViewModel,
+        historyVM: HistoryViewModel,
+        bookmarkVM: BookmarkViewModel,
+        edgeInset: CGFloat,
+        sidebarLayoutState: SidebarLayoutState
+    ) {
         self.viewModel = viewModel
         self.historyVM = historyVM
         self.bookmarkVM = bookmarkVM
         self.edgeInset = edgeInset
+        self.sidebarLayoutState = sidebarLayoutState
 
         super.init(nibName: nil, bundle: nil)
     }
@@ -55,6 +63,7 @@ final class MainSplitViewController: NSSplitViewController {
         // Configure split view
         splitView.isVertical = true
         splitView.dividerStyle = .thin
+        splitView.delegate = self
         // Note: Don't use autosaveName with delegate methods that conflict with autolayout
     }
 
@@ -77,7 +86,7 @@ final class MainSplitViewController: NSSplitViewController {
         sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarViewController)
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = minSidebarWidth
-        sidebarItem.maximumThickness = 400  // Will be updated dynamically
+        sidebarItem.maximumThickness = 400  // Updated dynamically in syncSidebarLayoutState()
 
         contentItem = NSSplitViewItem(viewController: contentViewController)
         contentItem.minimumThickness = 300
@@ -101,22 +110,60 @@ final class MainSplitViewController: NSSplitViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        syncSidebarLayoutState()
+    }
 
-        // Sync sidebar width with TitlebarManager after layout
-        if let sidebarView = sidebarViewController?.view {
-            let sidebarWidth = sidebarView.frame.width
-            if sidebarWidth > 0 {
-                TitlebarManager.shared.updateSidebarWidth(sidebarWidth + edgeInset)
-            }
+    override func splitViewDidResizeSubviews(_ notification: Notification) {
+        syncSidebarLayoutState()
+    }
+
+    private func syncSidebarLayoutState() {
+        guard let sidebarView = sidebarViewController?.view else { return }
+        let contentView = contentViewController?.view
+
+        // Keep sidebar maximum width proportional to current container width.
+        let dynamicMaxSidebarWidth = max(minSidebarWidth, floor(view.bounds.width * maxSidebarWidthRatio))
+        if abs(sidebarItem.maximumThickness - dynamicMaxSidebarWidth) > 0.5 {
+            sidebarItem.maximumThickness = dynamicMaxSidebarWidth
         }
+
+        let sidebarWidth = max(0, sidebarView.frame.width)
+        let dividerThickness = max(0, splitView.dividerThickness)
+
+        // If the split view item reports the sidebar is open but the view
+        // has zero width, the subview hasn't been laid out yet.  Skip this
+        // sync so the toolbar doesn't flash the collapsed state on launch.
+        if !sidebarItem.isCollapsed && sidebarWidth <= 0.5 { return }
+
+        let isCollapsed = sidebarItem.isCollapsed
+        let splitBoundaryX: CGFloat
+        if isCollapsed {
+            // Keep toolbar/background collapse synchronized with sidebar snap-to-zero.
+            splitBoundaryX = 0
+        } else {
+            let splitBoundaryXFromSidebar = max(0, sidebarWidth + dividerThickness)
+            let splitBoundaryXFromContent = max(0, contentView?.frame.minX ?? 0)
+            splitBoundaryX = splitBoundaryXFromContent > dividerThickness
+                ? splitBoundaryXFromContent
+                : splitBoundaryXFromSidebar
+        }
+
+        sidebarLayoutState.update(
+            sidebarWidth: sidebarWidth,
+            splitBoundaryX: splitBoundaryX,
+            isSidebarCollapsed: isCollapsed,
+            windowWidth: view.bounds.width
+        )
+
+        // Keep legacy titlebar path in sync for the alternative custom titlebar implementation.
+        TitlebarManager.shared.updateSidebarWidth(splitBoundaryX + edgeInset)
+        TitlebarManager.shared.updateSidebarVisibility(!isCollapsed)
     }
 
     // MARK: - Public Methods
 
     @objc override func toggleSidebar(_ sender: Any?) {
         super.toggleSidebar(sender)
-
-        let isCollapsed = sidebarItem.isCollapsed
-        TitlebarManager.shared.updateSidebarVisibility(!isCollapsed)
+        syncSidebarLayoutState()
     }
 }
