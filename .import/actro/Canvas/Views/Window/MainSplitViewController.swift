@@ -87,6 +87,8 @@ final class MainSplitViewController: NSSplitViewController {
     private func setupSplitView() {
         splitView.isVertical = true
         splitView.dividerStyle = .thin
+        splitView.wantsLayer = true
+        splitView.layer?.backgroundColor = NSColor(white: 0.10, alpha: 1.0).cgColor
         splitView.delegate = self
     }
 
