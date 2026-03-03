@@ -176,24 +176,22 @@ final class RootContentViewController: NSViewController {
     // MARK: - Tab Change Observation
 
     private func observeTabChanges() {
-        // When the active tab changes, the system may update the window title
-        // and re-layout its titlebar container, which can reposition the traffic
-        // lights after our viewDidLayout has run.  Observe tab changes and
-        // schedule a deferred correction.
+        // When the active tab changes, MainWindowController updates window.title,
+        // which causes the system's NSTitlebarContainerView to re-layout and
+        // reposition the traffic lights at their default location.
+        //
+        // By marking our view for layout here, AppKit's layout cycle guarantees
+        // the correct execution order within the SAME frame:
+        //   1. Titlebar container layout() → buttons at system default position
+        //   2. Our content view layout()   → viewDidLayout → adjustTrafficLights
+        //      → buttons moved back to our position
+        // No deferred dispatch, no visual flash.
         viewModel.$currentTabId
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.scheduleTrafficLightCorrection()
+                self?.view.needsLayout = true
             }
             .store(in: &cancellables)
-    }
-
-    /// Schedule a deferred traffic-light adjustment on the next run-loop
-    /// iteration so it runs after any system titlebar layout pass.
-    private func scheduleTrafficLightCorrection() {
-        DispatchQueue.main.async { [weak self] in
-            self?.adjustTrafficLights()
-        }
     }
 
     // MARK: - Layout Updates
@@ -215,11 +213,7 @@ final class RootContentViewController: NSViewController {
             borderLayer.path = path
         }
 
-        // Adjust traffic lights position immediately …
         adjustTrafficLights()
-        // … and again after the current layout cycle to catch any system
-        // titlebar re-layout that runs after our viewDidLayout.
-        scheduleTrafficLightCorrection()
     }
 
     // MARK: - Traffic Lights
