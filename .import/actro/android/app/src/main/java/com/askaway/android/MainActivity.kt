@@ -1,6 +1,7 @@
 package com.askaway.android
 
 import android.animation.ObjectAnimator
+import android.app.Activity
 import android.content.Intent
 import android.graphics.Outline
 import android.graphics.Path
@@ -14,6 +15,7 @@ import android.view.WindowInsets
 import android.view.animation.DecelerateInterpolator
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.forEach
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -25,6 +27,8 @@ import com.askaway.android.model.ActiveModel
 import com.askaway.android.view.HeadTabView
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
+import com.facebook.react.modules.core.PermissionAwareActivity
+import com.facebook.react.modules.core.PermissionListener
 import com.facebook.react.uimanager.PixelUtil.pxToDp
 import kotlinx.coroutines.launch
 import com.askaway.android.global.Constants
@@ -32,7 +36,7 @@ import kotlinx.coroutines.delay
 import com.askaway.android.core.ReactNativeBundle
 import java.util.UUID
 
-class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
+class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
     private var reactRootView: ReactRootView? = null
@@ -40,6 +44,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     private var isReactNativeVisible = false
     private var isSearchVisible = false
     private var isLayoutComplete = false
+    private var permissionListener: PermissionListener? = null
     private lateinit var activeRecyclerAdapter: com.askaway.android.adapter.ActiveRecyclerAdapter
     private lateinit var activeAdapter: ActiveAdapter
 
@@ -497,6 +502,53 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
     override fun invokeDefaultOnBackPressed() {
         @Suppress("DEPRECATION")
         super.onBackPressed()
+    }
+
+    override fun checkPermission(permission: String, pid: Int, uid: Int): Int {
+        return super.checkPermission(permission, pid, uid)
+    }
+
+    override fun checkSelfPermission(permission: String): Int {
+        return ContextCompat.checkSelfPermission(this, permission)
+    }
+
+    override fun shouldShowRequestPermissionRationale(permission: String): Boolean {
+        return super.shouldShowRequestPermissionRationale(permission)
+    }
+
+    override fun requestPermissions(
+        permissions: Array<String>,
+        requestCode: Int,
+        listener: PermissionListener?,
+    ) {
+        permissionListener = listener
+        super.requestPermissions(permissions, requestCode)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray,
+    ) {
+        val handled =
+            permissionListener?.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults,
+            ) ?: false
+        if (handled) {
+            permissionListener = null
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val application = application as MainApplication
+        application.reactNativeHost.reactInstanceManager
+            .onActivityResult(this, requestCode, resultCode, data)
     }
 
     /**

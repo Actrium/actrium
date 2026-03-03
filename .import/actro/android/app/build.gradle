@@ -1,8 +1,17 @@
+import java.util.Properties
+
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "kotlin-parcelize"
 apply plugin: "com.google.protobuf"
+
+// Initialize local.properties to read local configurations
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
+}
 
 // Match build config to gradle.properties newArchEnabled.
 
@@ -29,7 +38,8 @@ react {
 
     /* Bundling */
     //   A list containing the node command and its flags. Default is just 'node'.
-    // nodeExecutableAndArgs = ["node"]
+    def nodeBinaryPath = localProperties.getProperty('reactNative.nodeExecutableAndArgs') ?: "node"
+    nodeExecutableAndArgs = [nodeBinaryPath]
     //
     //   The command to run when bundling. By default is 'bundle'
     // bundleCommand = "ram-bundle"
@@ -119,13 +129,6 @@ android {
     viewBinding {
         enabled = true
     }
-    // Commenting out custom externalNativeBuild to allow React Native new-arch libs to be packaged
-    // TODO: Build rillsandbox as a separate Gradle module or use prefab to consume it
-//     externalNativeBuild {
-//         cmake {
-//             path '/Users/qibao_an/Documents/Project/huanqiu/GoAskAway/rill/native/platform/android/CMakeLists.txt'
-//         }
-//     }
 }
 
 protobuf {
@@ -145,6 +148,7 @@ dependencies {
         implementation jscFlavor
     }
     implementation(project(":actr-kotlin"))
+    implementation(project(":rill-sandbox-native"))
     // AndroidX and Material Design
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
