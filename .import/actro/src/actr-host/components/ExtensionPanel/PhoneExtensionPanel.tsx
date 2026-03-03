@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     left: 0,
     height: '100%',
     flexShrink: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#fff',
   },
   borderRight: {
     position: 'absolute',
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
   // 骨架屏样式
   skeletonContainer: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#fff',
     paddingTop: 80,
   },
   skeletonHeader: {
@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   skeletonBlock: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#e7e7e7',
     borderRadius: 8,
   },
 });
