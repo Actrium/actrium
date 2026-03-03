@@ -47,7 +47,7 @@ final class SidebarViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             hostingView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 1),
-            hostingView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -7),
+            hostingView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
             hostingView.topAnchor.constraint(equalTo: container.topAnchor, constant: 1),
             hostingView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -1),
         ])
