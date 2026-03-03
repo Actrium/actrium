@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   PanResponder,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -20,6 +19,7 @@ import { BookmarkRepository } from '../../../repository/BookmarkRepository';
 import { useUnreadStore } from '../../store/useUnreadStore';
 import { useTab } from '../../contexts/TabContext';
 import { exitFullscreen } from '../../../native-bridge';
+import SafeBottomView from '../SafeBottomView';
 
 type ActrInputMobileSharedStyles = Pick<ActrInputStyles, 'input' | 'mobileInputText'>;
 
@@ -288,7 +288,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const isEditing = !!editingMessageId;
 
   return (
-    <SafeAreaView style={styles.mobileSafeArea}>
+    <SafeBottomView style={styles.mobileSafeArea} minBottom={10}>
       <View style={[styles.mobileContainer, { paddingHorizontal: 26 }]}>
         <View style={styles.mobileInputRow}>
           {/* 左侧取消编辑按钮 - 编辑状态时显示 */}
@@ -595,7 +595,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
           )}
         </View>
       </View>
-    </SafeAreaView>
+    </SafeBottomView>
   );
 }
 
@@ -603,7 +603,7 @@ const styles = StyleSheet.create({
   mobileContainer: {
     width: '100%',
     paddingTop: 6,
-    paddingBottom: 10,
+    // paddingBottom: 10,
     backgroundColor: '#F2F2F6',
   },
   mobileSafeArea: {

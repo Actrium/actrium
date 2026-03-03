@@ -1018,6 +1018,11 @@
   resolved "https://registry.npmmirror.com/@react-native-community/slider/-/slider-5.1.2.tgz#b7255c27b52d74440bcf146a05dcf13c94e7d91c"
   integrity sha512-UV/MjCyCtSjS5BQDrrGIMmCXm309xEG6XbR0Dj65kzTraJSVDxSjQS2uBUXgX+5SZUOCzCxzv3OufOZBdtQY4w==
 
+"@react-native-documents/picker@^11.0.1":
+  version "11.0.4"
+  resolved "https://registry.npmmirror.com/@react-native-documents/picker/-/picker-11.0.4.tgz#3e5141be521f237305cb98f3951c298218c5e23e"
+  integrity sha512-lbwcBwXMwZ5eTvNI6j/HqPjyB87moRCA8k7EoLCXF4KsLNt2jYDBXkUONX/WcMRMyQEaJPWB77W2zMCcRdX4jw==
+
 "@react-native/assets-registry@0.79.6":
   version "0.79.6"
   resolved "https://registry.npmmirror.com/@react-native/assets-registry/-/assets-registry-0.79.6.tgz#cecc2a1140a9584d590000b951a08a0611ec30c3"
@@ -3414,13 +3419,6 @@ react-is@^18.0.0:
   resolved "https://registry.npmmirror.com/react-is/-/react-is-18.3.1.tgz#e83557dc12eae63a99e003a46388b1dcbb44db7e"
   integrity sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==
 
-react-native-document-picker@^9.3.1:
-  version "9.3.1"
-  resolved "https://registry.npmmirror.com/react-native-document-picker/-/react-native-document-picker-9.3.1.tgz#f2c33237a906fd0893130e0605c8f18a3aef1605"
-  integrity sha512-Vcofv9wfB0j67zawFjfq9WQPMMzXxOZL9kBmvWDpjVuEcVK73ndRmlXHlkeFl5ZHVsv4Zb6oZYhqm9u5omJOPA==
-  dependencies:
-    invariant "^2.2.4"
-
 react-native-fs@^2.20.0:
   version "2.20.0"
   resolved "https://registry.npmmirror.com/react-native-fs/-/react-native-fs-2.20.0.tgz#05a9362b473bfc0910772c0acbb73a78dbc810f6"
@@ -3474,6 +3472,11 @@ react-native-nitro-sound@^0.2.10:
   integrity sha512-hzTk74gbGqIms7jnKG0rQzNj/eI118Zcw3a9+lnXi+TLRzIuhqvEehKImvfa1NdyqA+oi9eZAsIQTtvnlKbb9w==
   dependencies:
     "@react-native-community/slider" "^5.0.1"
+
+react-native-safe-area-context@^5.7.0:
+  version "5.7.0"
+  resolved "https://registry.npmmirror.com/react-native-safe-area-context/-/react-native-safe-area-context-5.7.0.tgz#035699d5ec17fefb98cc1fa44a9ec852c7d530d0"
+  integrity sha512-/9/MtQz8ODphjsLdZ+GZAIcC/RtoqW9EeShf7Uvnfgm/pzYrJ75y3PV/J1wuAV1T5Dye5ygq4EAW20RoBq0ABQ==
 
 react-native-sqlite-storage@^6.0.1:
   version "6.0.1"

@@ -24,7 +24,6 @@ import {
   Alert,
   Linking,
   Platform,
-  SafeAreaView,
   AppState,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
@@ -41,6 +40,7 @@ import { BookmarkRepository } from '../../repository/BookmarkRepository';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../styles/shadows';
 import { setTabBookmarkStatus } from '../../../src/native-bridge/tab/TabModule';
+import SafeBottomView from '../components/SafeBottomView';
 
 const LoadApp = () => {
   const { t } = useTranslation();
@@ -377,11 +377,11 @@ const LoadApp = () => {
             <View style={styles.phoneScanArea}>{renderScanContent()}</View>
           </View>
           <View style={styles.phoneInputDock}>
-            <SafeAreaView style={styles.phoneInputSafeArea}>
+            <SafeBottomView style={styles.phoneInputSafeArea} minBottom={12}>
               <View style={styles.phoneInputSection}>
                 {renderInput(styles.phoneInput, styles.phoneInputContainer)}
               </View>
-            </SafeAreaView>
+            </SafeBottomView>
           </View>
         </View>
       </TouchableWithoutFeedback>
@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
   phoneInputDock: {
     width: '100%',
     marginTop: 24,
-    paddingBottom: 12,
+    // paddingBottom: 12,
   },
   phoneInputSafeArea: {
     width: '100%',
