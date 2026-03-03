@@ -2,6 +2,8 @@ package com.askaway.android
 
 import android.app.Application
 import com.askaway.android.core.AskAwayPackage
+import com.th3rdwave.safeareacontext.SafeAreaContextPackage
+import com.rill.sandbox.RillSandboxNativePackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -22,6 +24,8 @@ class MainApplication : Application(), ReactApplication {
                     // Packages that cannot be autolinked yet can be added manually here, for example:
                     // add(MyReactNativePackage())
                     add(AskAwayPackage())
+                    add(SafeAreaContextPackage())
+                    add(RillSandboxNativePackage())
                 }
 
             override fun getJSMainModuleName(): String = "index"
