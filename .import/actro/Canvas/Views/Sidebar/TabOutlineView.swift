@@ -117,7 +117,7 @@ struct TabOutlineView: NSViewRepresentable {
         outlineView.autoresizesOutlineColumn = true
         outlineView.allowsMultipleSelection = false
         outlineView.floatsGroupRows = false
-        outlineView.intercellSpacing = NSSize(width: 0, height: 7)
+        outlineView.intercellSpacing = NSSize(width: 0, height: 10)
 
         // Setup column
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabColumn"))
@@ -1526,7 +1526,7 @@ private class TabRowView: NSView {
         addSubview(closeButton)
 
         // Adjust leading constraint to account for color bar
-        let stackLeading: CGFloat = group != nil ? (colorBarLeading + colorBarWidth + 8) : 4
+        let stackLeading: CGFloat = group != nil ? (colorBarLeading + colorBarWidth + 6) : 2
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: stackLeading),
             stackView.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
