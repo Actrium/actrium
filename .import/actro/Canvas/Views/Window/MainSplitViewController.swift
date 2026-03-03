@@ -44,14 +44,16 @@ final class MainSplitViewController: NSSplitViewController {
     /// but expands the draggable area for better usability.
     private let dividerHitWidth: CGFloat = 5
     private let contentLeadingPassthroughWidth: CGFloat = 24
-    private let dividerMinSidebarTolerance: CGFloat = 2
     private let dividerCollapseTrigger: CGFloat = 24
     private let dividerDebugNearRange: CGFloat = 80
     private let dividerDebugLogPath = "/tmp/canvas_divider_debug.log"
+    private let dividerLogMouseMovedEvents = false
 
     private var dividerHitHalfWidth: CGFloat {
         dividerHitWidth * 0.5
     }
+
+    private var lastLoggedEffectiveRectSnapshot: (drawn: NSRect, proposed: NSRect, returned: NSRect)?
 
     /// Sidebar width constraints
     private let minSidebarWidth: CGFloat = 180
@@ -198,7 +200,9 @@ final class MainSplitViewController: NSSplitViewController {
             height: splitView.bounds.height
         )
 
-        debugLog("effectiveRect idx=\(dividerIndex) drawn=\(formatRect(drawnRect)) proposed=\(formatRect(proposedEffectiveRect)) return=\(formatRect(effective))")
+        if shouldLogEffectiveRectChange(drawn: drawnRect, proposed: proposedEffectiveRect, returned: effective) {
+            debugLog("effectiveRect idx=\(dividerIndex) drawn=\(formatRect(drawnRect)) proposed=\(formatRect(proposedEffectiveRect)) return=\(formatRect(effective))")
+        }
         return effective
     }
 
@@ -280,7 +284,10 @@ final class MainSplitViewController: NSSplitViewController {
         view.window?.acceptsMouseMovedEvents = true
         debugLog("=== divider debug start ===")
 
-        let eventTypes: [NSEvent.EventTypeMask] = [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        var eventTypes: [NSEvent.EventTypeMask] = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        if dividerLogMouseMovedEvents {
+            eventTypes.insert(.mouseMoved, at: 0)
+        }
         for type in eventTypes {
             guard let monitor = NSEvent.addLocalMonitorForEvents(matching: type, handler: { [weak self] event in
                 guard let self else { return event }
@@ -308,40 +315,55 @@ final class MainSplitViewController: NSSplitViewController {
 
         let globalPointInSplit = splitPointFromGlobalMouse(in: window)
         let eventPointInSplit = splitView.convert(event.locationInWindow, from: nil)
+        let screenPointInSplit = splitPointFromScreenMouse(in: window)
         switch event.type {
         case .leftMouseDown:
             if dividerMonitorDragActive {
-                debugLog("monitor=down_ignored reason=already_active split=\(formatPoint(globalPointInSplit))")
+                debugLog(
+                    "monitor=down_ignored reason=already_active " +
+                    "eventSplit=\(formatPoint(eventPointInSplit)) splitGlobal=\(formatPoint(globalPointInSplit))"
+                )
                 return true
             }
-            guard shouldArmMonitorDrag(at: globalPointInSplit) else {
+            let downSource: String
+            let armPoint: CGPoint
+            if shouldArmMonitorDrag(at: eventPointInSplit) {
+                armPoint = eventPointInSplit
+                downSource = "event"
+            } else if shouldArmMonitorDrag(at: screenPointInSplit) {
+                // NSRemoteView occasionally reports incorrect event.locationInWindow on first down.
+                // Fallback to current screen mouse location to avoid missing the first drag attempt.
+                armPoint = screenPointInSplit
+                downSource = "screen"
+            } else {
                 return false
             }
             dividerMonitorDragActive = true
-            dividerMonitorStartMouseX = globalPointInSplit.x
+            dividerMonitorStartMouseX = armPoint.x
             dividerMonitorStartDividerX = currentDividerRect(in: splitView, dividerIndex: 0).midX
             dividerMonitorHasDragged = false
             debugLog(
-                "monitor=monitor_down_local action=arm split=\(formatPoint(globalPointInSplit)) " +
-                "eventSplit=\(formatPoint(eventPointInSplit)) " +
+                "monitor=monitor_down_local action=arm source=\(downSource) " +
+                "armSplit=\(formatPoint(armPoint)) eventSplit=\(formatPoint(eventPointInSplit)) " +
+                "splitScreen=\(formatPoint(screenPointInSplit)) splitGlobal=\(formatPoint(globalPointInSplit)) " +
                 "startMouseX=\(String(format: "%.1f", dividerMonitorStartMouseX)) " +
                 "startDividerX=\(String(format: "%.1f", dividerMonitorStartDividerX))"
             )
             return true
         case .leftMouseDragged:
             guard dividerMonitorDragActive else { return false }
-            handleMonitorDividerDrag(at: globalPointInSplit, phase: "monitor_dragged_local")
+            handleMonitorDividerDrag(at: eventPointInSplit, phase: "monitor_dragged_local")
             return true
         case .leftMouseUp:
             guard dividerMonitorDragActive else { return false }
             if (NSEvent.pressedMouseButtons & 1) != 0 {
-                debugLog("monitor=monitor_up_local action=ignore_pressed split=\(formatPoint(globalPointInSplit))")
+                debugLog("monitor=monitor_up_local action=ignore_pressed split=\(formatPoint(eventPointInSplit))")
                 return true
             }
             if dividerMonitorHasDragged {
-                handleMonitorDividerDrag(at: globalPointInSplit, phase: "monitor_up_local")
+                handleMonitorDividerDrag(at: eventPointInSplit, phase: "monitor_up_local")
             } else {
-                debugLog("monitor=monitor_up_local action=no_drag split=\(formatPoint(globalPointInSplit))")
+                debugLog("monitor=monitor_up_local action=no_drag split=\(formatPoint(eventPointInSplit))")
             }
             dividerMonitorDragActive = false
             return true
@@ -379,13 +401,14 @@ final class MainSplitViewController: NSSplitViewController {
         return splitView.convert(pointInWindow, from: nil)
     }
 
+    private func splitPointFromScreenMouse(in window: NSWindow) -> CGPoint {
+        let pointInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        return splitView.convert(pointInWindow, from: nil)
+    }
+
     private func shouldArmMonitorDrag(at pointInSplit: CGPoint) -> Bool {
         guard splitView.isVertical,
               !sidebarItem.isCollapsed else { return false }
-
-        let sidebarWidth = sidebarViewController?.view.frame.width ?? 0
-        let isAtMinimum = abs(sidebarWidth - minSidebarWidth) <= dividerMinSidebarTolerance
-        guard isAtMinimum else { return false }
 
         let dividerRect = currentDividerRect(in: splitView, dividerIndex: 0)
         let triggerRect = NSRect(
@@ -437,6 +460,10 @@ final class MainSplitViewController: NSSplitViewController {
     private func logDividerMouseEvent(_ event: NSEvent) {
         guard let window = view.window,
               event.window === window else { return }
+
+        if event.type == .mouseMoved, !dividerLogMouseMovedEvents {
+            return
+        }
 
         let pointInSplit = splitView.convert(event.locationInWindow, from: nil)
         let pointInSplitGlobal = splitPointFromGlobalMouse(in: window)
@@ -509,6 +536,30 @@ final class MainSplitViewController: NSSplitViewController {
             width: max(splitView.dividerThickness, 1),
             height: splitView.bounds.height
         )
+    }
+
+    private func shouldLogEffectiveRectChange(drawn: NSRect, proposed: NSRect, returned: NSRect) -> Bool {
+        guard let last = lastLoggedEffectiveRectSnapshot else {
+            lastLoggedEffectiveRectSnapshot = (drawn, proposed, returned)
+            return true
+        }
+
+        let unchanged = rectApproximatelyEqual(last.drawn, drawn)
+            && rectApproximatelyEqual(last.proposed, proposed)
+            && rectApproximatelyEqual(last.returned, returned)
+        if unchanged {
+            return false
+        }
+
+        lastLoggedEffectiveRectSnapshot = (drawn, proposed, returned)
+        return true
+    }
+
+    private func rectApproximatelyEqual(_ lhs: NSRect, _ rhs: NSRect, tolerance: CGFloat = 0.25) -> Bool {
+        abs(lhs.origin.x - rhs.origin.x) <= tolerance
+            && abs(lhs.origin.y - rhs.origin.y) <= tolerance
+            && abs(lhs.size.width - rhs.size.width) <= tolerance
+            && abs(lhs.size.height - rhs.size.height) <= tolerance
     }
 
     private func debugLog(_ message: String) {
