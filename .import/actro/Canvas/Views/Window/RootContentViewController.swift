@@ -37,6 +37,7 @@ final class RootContentViewController: NSViewController {
     private var roundedContainer: NSView!
     private var toolbarHostingView: NSHostingView<AnyView>!
     private var splitViewController: MainSplitViewController!
+    private let sidebarLayoutState = SidebarLayoutState()
 
     // DEBUG: dashed border layer for roundedContainer
     private var debugBorderLayer: CAShapeLayer?
@@ -110,7 +111,11 @@ final class RootContentViewController: NSViewController {
         // Create SwiftUI toolbar
         let toolbarView = SelfDrawnToolbarView(
             viewModel: viewModel,
-            bookmarkVM: bookmarkVM
+            bookmarkVM: bookmarkVM,
+            layoutState: sidebarLayoutState,
+            onToggleSidebar: { [weak self] in
+                self?.splitViewController?.toggleSidebar(nil)
+            }
         )
 
         toolbarHostingView = NSHostingView(rootView: AnyView(toolbarView))
@@ -127,7 +132,8 @@ final class RootContentViewController: NSViewController {
             viewModel: viewModel,
             historyVM: historyVM,
             bookmarkVM: bookmarkVM,
-            edgeInset: 0  // No additional inset needed, container handles it
+            edgeInset: 0,  // No additional inset needed, container handles it
+            sidebarLayoutState: sidebarLayoutState
         )
 
         addChild(splitViewController)
@@ -179,19 +185,6 @@ final class RootContentViewController: NSViewController {
             let frame = roundedContainer.frame
             let path = CGPath(roundedRect: frame, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
             borderLayer.path = path
-        }
-
-        // Sync sidebar width for toolbar background alignment
-        if let sidebarView = splitViewController?.splitViewItems.first?.viewController.view {
-            let sidebarWidth = sidebarView.frame.width
-            if sidebarWidth > 0 {
-                // Notify toolbar of sidebar width change
-                NotificationCenter.default.post(
-                    name: .sidebarWidthChanged,
-                    object: nil,
-                    userInfo: ["width": sidebarWidth]
-                )
-            }
         }
 
         // Adjust traffic lights position
@@ -258,12 +251,12 @@ final class RootContentViewController: NSViewController {
             }
         }
     }
-}
 
-// MARK: - Notification Names
+    // MARK: - External Layout State
 
-extension Notification.Name {
-    static let sidebarWidthChanged = Notification.Name("sidebarWidthChanged")
+    func updateWindowFullScreenState(_ isFullScreen: Bool) {
+        sidebarLayoutState.updateWindowFullScreen(isFullScreen)
+    }
 }
 
 // MARK: - Self-Drawn Toolbar View
@@ -271,94 +264,76 @@ extension Notification.Name {
 struct SelfDrawnToolbarView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
-
-    @State private var sidebarWidth: CGFloat = 250
-    @State private var isSidebarCollapsed: Bool = false
-    @State private var addressText: String = ""
-    @State private var isAddressFocused: Bool = false
-    @State private var showingBookmarkPopover: Bool = false
+    @ObservedObject var layoutState: SidebarLayoutState
+    var onToggleSidebar: () -> Void
 
     // Layout constants
     private let iconButtonSize: CGFloat = 30
     private let iconPointSize: CGFloat = 16
 
     var body: some View {
-        // Toolbar content pinned to the top edge of the hosting container
-        HStack(spacing: 0) {
-            // Sidebar area (traffic lights + sidebar toggle + new tab)
-            sidebarToolbarSection
-                .frame(width: isSidebarCollapsed ? 78 : sidebarWidth)
+        GeometryReader { geo in
+            let topInset = geo.safeAreaInsets.top
+            let metrics = ToolbarLayoutMetrics(state: layoutState)
+            let totalWidth = max(0, geo.size.width)
+            let sidebarWidth = min(totalWidth, max(0, metrics.sidebarSectionWidth))
+            let contentLeading = min(
+                max(0, metrics.contentLeadingX),
+                max(0, totalWidth - 120)
+            )
+            let contentWidth = max(0, totalWidth - contentLeading)
 
-            // Content area (navigation + address bar + actions)
-            contentToolbarSection
+            // Buttons positioned to align centers with traffic lights:
+            // trafficLightTopInset=17, ~14px tall → center ≈ 24px
+            // iconButtonSize=30 → need top at 9px from hosting view top
+            // Compensate for titlebar safe area offset dynamically.
+            ZStack(alignment: .topLeading) {
+                sidebarToolbarSection(metrics: metrics)
+                    .frame(width: sidebarWidth, alignment: .leading)
+
+                contentToolbarSection
+                    .frame(width: contentWidth, alignment: .leading)
+                    .offset(x: contentLeading)
+            }
+            .padding(.top, 9 - topInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(alignment: .topLeading) {
+                // Background extends into safe area to fill from the very top
+                toolbarBackground(metrics: metrics)
+                    .ignoresSafeArea(.container, edges: .top)
+            }
         }
-        .padding(.top, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(alignment: .topLeading) {
-            toolbarBackground
-        }
+        .ignoresSafeArea(.container, edges: .top)
         .overlay {
             // DEBUG: border for SwiftUI toolbar content bounds
             Rectangle()
                 .stroke(Color.blue.opacity(0.8), lineWidth: 1)
         }
-        .ignoresSafeArea(.container, edges: .top)
-        .onReceive(NotificationCenter.default.publisher(for: .sidebarWidthChanged)) { notification in
-            if let width = notification.userInfo?["width"] as? CGFloat {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    sidebarWidth = width
-                }
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleSidebarRequested)) { _ in
-            withAnimation(.easeInOut(duration: 0.25)) {
-                isSidebarCollapsed.toggle()
-            }
-        }
     }
 
     // MARK: - Sidebar Section
 
-    private var sidebarToolbarSection: some View {
-        HStack(spacing: 8) {
-            // Space for traffic lights (~70px from left edge)
-            Spacer()
-                .frame(width: 70)
+    private func sidebarToolbarSection(metrics: ToolbarLayoutMetrics) -> some View {
+        HStack(spacing: 0) {
+            // Non-fullscreen: reserve space for native traffic lights region.
+            Color.clear
+                .frame(width: metrics.trafficLightsReservedWidth)
 
-            // New tab button
-            Button(action: { _ = viewModel.addNewTab() }) {
-                Image(systemName: "plus")
-                    .font(.system(size: iconPointSize, weight: .medium))
-                    .frame(width: iconButtonSize, height: iconButtonSize)
+            Spacer(minLength: metrics.sidebarMinGap)
+
+            HStack(spacing: metrics.sidebarButtonsSpacing) {
+                newTabButton
+                overviewButton
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-
-            // Overview toggle button
-            Button(action: { toggleOverview() }) {
-                Image(systemName: "square.on.square")
-                    .font(.system(size: iconPointSize, weight: .medium))
-                    .frame(width: iconButtonSize, height: iconButtonSize)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-
-            Spacer()
         }
+        .padding(.trailing, metrics.sidebarButtonsTrailingInset)
     }
 
     // MARK: - Content Section
 
     private var contentToolbarSection: some View {
         HStack(spacing: 12) {
-            // Sidebar toggle
-            Button(action: { toggleSidebar() }) {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: iconPointSize, weight: .medium))
-                    .frame(width: iconButtonSize, height: iconButtonSize)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            sidebarToggleButton
 
             // Navigation buttons
             HStack(spacing: 4) {
@@ -390,7 +365,7 @@ struct SelfDrawnToolbarView: View {
             // Right side actions
             rightActions
         }
-        .padding(.horizontal, 12)
+        .padding(.trailing, 12)
     }
 
     // MARK: - Address Bar
@@ -463,7 +438,7 @@ struct SelfDrawnToolbarView: View {
 
     // MARK: - Background
 
-    private var toolbarBackground: some View {
+    private func toolbarBackground(metrics: ToolbarLayoutMetrics) -> some View {
         // Content background (dark with top-left rounded corner only)
         UnevenRoundedRectangle(
             topLeadingRadius: 12,
@@ -472,7 +447,7 @@ struct SelfDrawnToolbarView: View {
             topTrailingRadius: 0  // roundedContainer mask handles right corner
         )
         .fill(Color(white: 0.10))
-        .padding(.leading, isSidebarCollapsed ? 0 : sidebarWidth)
+        .padding(.leading, metrics.backgroundLeadingX)
     }
 
     // MARK: - Actions
@@ -483,7 +458,7 @@ struct SelfDrawnToolbarView: View {
     }
 
     private func toggleSidebar() {
-        NotificationCenter.default.post(name: .toggleSidebarRequested, object: nil)
+        onToggleSidebar()
     }
 
     private func toggleOverview() {
@@ -501,5 +476,100 @@ struct SelfDrawnToolbarView: View {
         } else {
             bookmarkVM.addBookmark(from: tab)
         }
+    }
+
+    // MARK: - Buttons
+
+    private var newTabButton: some View {
+        Button(action: { _ = viewModel.addNewTab() }) {
+            Image(systemName: "plus")
+                .font(.system(size: iconPointSize, weight: .medium))
+                .frame(width: iconButtonSize, height: iconButtonSize)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+    }
+
+    private var overviewButton: some View {
+        Button(action: { toggleOverview() }) {
+            Image(systemName: "square.on.square")
+                .font(.system(size: iconPointSize, weight: .medium))
+                .frame(width: iconButtonSize, height: iconButtonSize)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+    }
+
+    private var sidebarToggleButton: some View {
+        Button(action: { toggleSidebar() }) {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: iconPointSize, weight: .medium))
+                .frame(width: iconButtonSize, height: iconButtonSize)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Layout Metrics
+
+    private struct ToolbarLayoutMetrics {
+        let sidebarSectionWidth: CGFloat
+        let trafficLightsReservedWidth: CGFloat
+        let sidebarButtonsSpacing: CGFloat
+        let sidebarButtonsTrailingInset: CGFloat
+        let sidebarMinGap: CGFloat
+        let backgroundLeadingX: CGFloat
+        let contentLeadingX: CGFloat
+
+        init(state: SidebarLayoutState) {
+            let widthRef = max(640, state.windowWidth)
+            let t = Self.normalized(widthRef, min: 780, max: 1680)
+            let splitBoundaryX = Self.pixelAligned(max(0, state.splitBoundaryX))
+
+            trafficLightsReservedWidth = state.isWindowFullScreen
+                ? 0
+                : Self.lerp(64, 76, t)
+            sidebarButtonsSpacing = Self.lerp(8, 14, t)
+            sidebarButtonsTrailingInset = Self.lerp(8, 20, t)
+            sidebarMinGap = Self.lerp(8, 18, t)
+
+            let collapsedWidth = state.collapsedToolbarWidth
+            let sidebarButtonsWidth = (Self.toolbarButtonSize * 2) + sidebarButtonsSpacing
+            let minCollapsedSidebarSectionWidth = trafficLightsReservedWidth
+                + sidebarMinGap
+                + sidebarButtonsWidth
+                + sidebarButtonsTrailingInset
+            sidebarSectionWidth = state.isSidebarCollapsed
+                ? max(collapsedWidth, minCollapsedSidebarSectionWidth)
+                : splitBoundaryX
+
+            backgroundLeadingX = state.isSidebarCollapsed
+                ? 0
+                : splitBoundaryX
+
+            // Keep ToggleSidebar anchored to background-leading + fixed inset,
+            // while avoiding overlap with [+]/[Overview] section.
+            let toggleInsetFromBackground = Self.lerp(10, 16, t)
+            let minSeparationFromSidebarSection = Self.lerp(8, 14, t)
+            contentLeadingX = max(
+                backgroundLeadingX + toggleInsetFromBackground,
+                sidebarSectionWidth + minSeparationFromSidebarSection
+            )
+        }
+
+        private static func normalized(_ value: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
+            guard max > min else { return 0 }
+            return Swift.max(0, Swift.min(1, (value - min) / (max - min)))
+        }
+
+        private static func lerp(_ start: CGFloat, _ end: CGFloat, _ t: CGFloat) -> CGFloat {
+            start + (end - start) * t
+        }
+
+        private static func pixelAligned(_ value: CGFloat) -> CGFloat {
+            value.rounded(.toNearestOrEven)
+        }
+
+        private static let toolbarButtonSize: CGFloat = 30
     }
 }
