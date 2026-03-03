@@ -2,6 +2,16 @@ import AppKit
 import SwiftUI
 import Combine
 
+// MARK: - Invisible Divider Split View
+
+/// NSSplitView subclass that hides the divider line while keeping drag functionality.
+private class InvisibleDividerSplitView: NSSplitView {
+    override var dividerColor: NSColor { .clear }
+    override func drawDivider(in rect: NSRect) {
+        // Don't draw — the divider hit zone is handled by effectiveRect delegate methods.
+    }
+}
+
 /// Split view controller managing sidebar and content areas
 final class MainSplitViewController: NSSplitViewController {
 
@@ -68,6 +78,11 @@ final class MainSplitViewController: NSSplitViewController {
 
     // MARK: - Lifecycle
 
+    override func loadView() {
+        self.splitView = InvisibleDividerSplitView()
+        super.loadView()
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -87,8 +102,6 @@ final class MainSplitViewController: NSSplitViewController {
     private func setupSplitView() {
         splitView.isVertical = true
         splitView.dividerStyle = .thin
-        splitView.wantsLayer = true
-        splitView.layer?.backgroundColor = NSColor(white: 0.10, alpha: 1.0).cgColor
         splitView.delegate = self
     }
 
