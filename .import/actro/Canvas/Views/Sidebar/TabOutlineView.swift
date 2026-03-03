@@ -1339,6 +1339,36 @@ private class ColorCircleView: NSView {
 // MARK: - Rounded Selection Row View
 
 private class RoundedRowView: NSTableRowView {
+    private var isHovering = false
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        needsDisplay = true
+    }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        if !isSelected && isHovering {
+            let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+            NSColor.white.withAlphaComponent(0.06).setFill()
+            path.fill()
+        }
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
         let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
