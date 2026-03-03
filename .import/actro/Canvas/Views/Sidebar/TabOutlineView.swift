@@ -1340,7 +1340,7 @@ private class ColorCircleView: NSView {
 private class RoundedRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 2, yRadius: 2)
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10)
         NSColor.controlAccentColor.setFill()
         path.fill()
     }
