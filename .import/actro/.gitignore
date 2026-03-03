@@ -41,3 +41,6 @@ Subsystem/actr-app-examples/**/unified-app.js
 Subsystem/bun.lock
 Subsystem/package-lock.json
 Packages/CanvasIPC/.build/
+
+# Code coverage
+*.profraw
