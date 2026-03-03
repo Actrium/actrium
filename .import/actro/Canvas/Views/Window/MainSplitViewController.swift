@@ -113,6 +113,13 @@ final class MainSplitViewController: NSSplitViewController {
         syncSidebarLayoutState()
     }
 
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        // By viewDidAppear the split view subviews have their real frames.
+        // Force a sync to replace any stale default values in SidebarLayoutState.
+        syncSidebarLayoutState()
+    }
+
     override func splitViewDidResizeSubviews(_ notification: Notification) {
         syncSidebarLayoutState()
     }
@@ -131,8 +138,10 @@ final class MainSplitViewController: NSSplitViewController {
         let dividerThickness = max(0, splitView.dividerThickness)
 
         // If the split view item reports the sidebar is open but the view
-        // has zero width, the subview hasn't been laid out yet.  Skip this
-        // sync so the toolbar doesn't flash the collapsed state on launch.
+        // has zero width, the subview hasn't been laid out yet.  Keep
+        // isSidebarCollapsed=false (so the toolbar doesn't flash the
+        // collapsed state) but don't update geometry — we don't have
+        // real values yet.
         if !sidebarItem.isCollapsed && sidebarWidth <= 0.5 { return }
 
         let isCollapsed = sidebarItem.isCollapsed
@@ -141,11 +150,23 @@ final class MainSplitViewController: NSSplitViewController {
             // Keep toolbar/background collapse synchronized with sidebar snap-to-zero.
             splitBoundaryX = 0
         } else {
-            let splitBoundaryXFromSidebar = max(0, sidebarWidth + dividerThickness)
-            let splitBoundaryXFromContent = max(0, contentView?.frame.minX ?? 0)
-            splitBoundaryX = splitBoundaryXFromContent > dividerThickness
-                ? splitBoundaryXFromContent
-                : splitBoundaryXFromSidebar
+            // NSSplitViewController may wrap each VC's view in a container,
+            // so contentView.frame.minX is relative to the wrapper (often 0),
+            // not to the split view.  Use coordinate conversion to get the
+            // content's actual leading edge in the split view's space.
+            let contentOriginX: CGFloat
+            if let cv = contentView {
+                contentOriginX = max(0, cv.convert(CGPoint.zero, to: splitView).x)
+            } else {
+                contentOriginX = 0
+            }
+
+            if contentOriginX > dividerThickness {
+                splitBoundaryX = contentOriginX
+            } else {
+                // Fallback: sidebar width + divider
+                splitBoundaryX = max(0, sidebarWidth + dividerThickness)
+            }
         }
 
         sidebarLayoutState.update(
