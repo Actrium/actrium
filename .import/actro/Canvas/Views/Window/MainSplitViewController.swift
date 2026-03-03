@@ -4,11 +4,14 @@ import Combine
 
 // MARK: - Invisible Divider Split View
 
-/// NSSplitView subclass that hides the divider line while keeping drag functionality.
-private class InvisibleDividerSplitView: NSSplitView {
+/// Keep split behavior but remove the visual divider line.
+/// Drag hit area is provided by delegate effectiveRect callbacks.
+private final class InvisibleDividerSplitView: NSSplitView {
     override var dividerColor: NSColor { .clear }
+    override var dividerThickness: CGFloat { 0 }
+
     override func drawDivider(in rect: NSRect) {
-        // Don't draw — the divider hit zone is handled by effectiveRect delegate methods.
+        // Intentionally no-op to keep divider visually hidden.
     }
 }
 
@@ -36,8 +39,6 @@ final class MainSplitViewController: NSSplitViewController {
     private var dividerMonitorStartMouseX: CGFloat = 0
     private var dividerMonitorStartDividerX: CGFloat = 0
     private var dividerMonitorHasDragged = false
-    private var pendingDividerRestoreX: CGFloat?
-    private var pendingDividerRestoreAttempts: Int = 0
 
     /// Divider hit zone extensions (points). Keeps visual divider thin,
     /// but expands the draggable area for better usability.
@@ -45,8 +46,6 @@ final class MainSplitViewController: NSSplitViewController {
     private let contentLeadingPassthroughWidth: CGFloat = 24
     private let dividerMinSidebarTolerance: CGFloat = 2
     private let dividerCollapseTrigger: CGFloat = 24
-    private let dividerRestoreTolerance: CGFloat = 0.75
-    private let dividerRestoreMaxAttempts: Int = 8
     private let dividerDebugNearRange: CGFloat = 80
     private let dividerDebugLogPath = "/tmp/canvas_divider_debug.log"
 
@@ -74,6 +73,10 @@ final class MainSplitViewController: NSSplitViewController {
         self.sidebarLayoutState = sidebarLayoutState
 
         super.init(nibName: nil, bundle: nil)
+
+        // AppKit-documented path: set custom splitView before view is loaded.
+        // This avoids runtime class swapping side effects.
+        self.splitView = InvisibleDividerSplitView(frame: .zero)
     }
 
     required init?(coder: NSCoder) {
@@ -99,9 +102,6 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - Setup
 
     private func setupSplitView() {
-        // Swap the existing splitView's class to suppress divider drawing.
-        // Safe because InvisibleDividerSplitView adds no stored properties.
-        object_setClass(splitView, InvisibleDividerSplitView.self)
         splitView.isVertical = true
         splitView.dividerStyle = .thin
         splitView.delegate = self
@@ -127,11 +127,9 @@ final class MainSplitViewController: NSSplitViewController {
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = minSidebarWidth
         sidebarItem.maximumThickness = 400  // Updated dynamically in syncSidebarLayoutState()
-        sidebarItem.holdingPriority = .defaultHigh
 
         contentItem = NSSplitViewItem(viewController: contentViewController)
         contentItem.minimumThickness = 300
-        contentItem.holdingPriority = .defaultLow
 
         // Add items
         addSplitViewItem(sidebarItem)
@@ -149,21 +147,6 @@ final class MainSplitViewController: NSSplitViewController {
                 self?.toggleSidebar(nil)
             }
             .store(in: &cancellables)
-
-        let windowEvents: [(Notification.Name, String)] = [
-            (NSWindow.willEnterFullScreenNotification, "will_enter"),
-            (NSWindow.didEnterFullScreenNotification, "did_enter"),
-            (NSWindow.willExitFullScreenNotification, "will_exit"),
-            (NSWindow.didExitFullScreenNotification, "did_exit")
-        ]
-        for (event, phase) in windowEvents {
-            NotificationCenter.default.publisher(for: event)
-                .receive(on: RunLoop.main)
-                .sink { [weak self] note in
-                    self?.handleWindowFullScreenEvent(note, phase: phase)
-                }
-                .store(in: &cancellables)
-        }
     }
 
     // MARK: - Split View Updates
@@ -171,9 +154,6 @@ final class MainSplitViewController: NSSplitViewController {
     override func viewDidLayout() {
         super.viewDidLayout()
         syncSidebarLayoutState()
-        if pendingDividerRestoreX != nil {
-            applyPendingDividerRestoreIfNeeded(reason: "view_did_layout")
-        }
     }
 
     override func viewDidAppear() {
@@ -186,9 +166,6 @@ final class MainSplitViewController: NSSplitViewController {
 
     override func splitViewDidResizeSubviews(_ notification: Notification) {
         syncSidebarLayoutState()
-        if pendingDividerRestoreX != nil {
-            applyPendingDividerRestoreIfNeeded(reason: "split_resized")
-        }
     }
 
     override func splitView(
@@ -293,105 +270,6 @@ final class MainSplitViewController: NSSplitViewController {
         TitlebarManager.shared.updateSidebarVisibility(!isCollapsed)
     }
 
-    // MARK: - FullScreen Transition
-
-    private func handleWindowFullScreenEvent(_ notification: Notification, phase: String) {
-        guard let currentWindow = view.window,
-              let eventWindow = notification.object as? NSWindow,
-              eventWindow === currentWindow else { return }
-
-        let sidebarW = sidebarViewController?.view.frame.width ?? -1
-        let dividerX = currentDividerRect(in: splitView, dividerIndex: 0).midX
-        debugLog(
-            "fullscreen=\(phase) event collapsed=\(sidebarItem.isCollapsed ? 1 : 0) " +
-            "sidebarW=\(String(format: "%.1f", sidebarW)) dividerX=\(String(format: "%.1f", dividerX)) " +
-            "windowW=\(String(format: "%.1f", view.bounds.width)) split=\(formatRect(splitView.bounds))"
-        )
-
-        switch phase {
-        case "will_enter", "will_exit":
-            captureDividerRestoreTarget(reason: phase)
-        case "did_enter", "did_exit":
-            applyPendingDividerRestoreIfNeeded(reason: phase)
-            DispatchQueue.main.async { [weak self] in
-                self?.applyPendingDividerRestoreIfNeeded(reason: "\(phase)_next")
-            }
-        default:
-            break
-        }
-    }
-
-    private func captureDividerRestoreTarget(reason: String) {
-        guard !sidebarItem.isCollapsed else {
-            pendingDividerRestoreX = nil
-            pendingDividerRestoreAttempts = 0
-            debugLog("fullscreen=\(reason) capture skip collapsed=1")
-            return
-        }
-
-        let dividerX = currentDividerRect(in: splitView, dividerIndex: 0).midX
-        guard dividerX.isFinite else {
-            pendingDividerRestoreX = nil
-            pendingDividerRestoreAttempts = 0
-            debugLog("fullscreen=\(reason) capture skip invalid_divider")
-            return
-        }
-
-        pendingDividerRestoreX = dividerX
-        pendingDividerRestoreAttempts = 0
-        let sidebarW = sidebarViewController?.view.frame.width ?? -1
-        debugLog(
-            "fullscreen=\(reason) capture dividerX=\(String(format: "%.1f", dividerX)) " +
-            "sidebarW=\(String(format: "%.1f", sidebarW))"
-        )
-    }
-
-    private func applyPendingDividerRestoreIfNeeded(reason: String) {
-        guard let target = pendingDividerRestoreX else { return }
-        guard !sidebarItem.isCollapsed else {
-            debugLog("fullscreen=\(reason) restore skip collapsed=1")
-            pendingDividerRestoreX = nil
-            pendingDividerRestoreAttempts = 0
-            return
-        }
-
-        let minPos = splitView.minPossiblePositionOfDivider(at: 0)
-        let maxPos = splitView.maxPossiblePositionOfDivider(at: 0)
-        let clamped = min(max(target, minPos), maxPos)
-        let current = currentDividerRect(in: splitView, dividerIndex: 0).midX
-
-        if abs(current - clamped) <= dividerRestoreTolerance {
-            debugLog(
-                "fullscreen=\(reason) restore done current=\(String(format: "%.1f", current)) " +
-                "target=\(String(format: "%.1f", clamped)) attempts=\(pendingDividerRestoreAttempts)"
-            )
-            pendingDividerRestoreX = nil
-            pendingDividerRestoreAttempts = 0
-            return
-        }
-
-        NSAnimationContext.beginGrouping()
-        NSAnimationContext.current.duration = 0
-        NSAnimationContext.current.allowsImplicitAnimation = false
-        splitView.setPosition(clamped, ofDividerAt: 0)
-        NSAnimationContext.endGrouping()
-        syncSidebarLayoutState()
-
-        pendingDividerRestoreAttempts += 1
-        debugLog(
-            "fullscreen=\(reason) restore set current=\(String(format: "%.1f", current)) " +
-            "target=\(String(format: "%.1f", clamped)) attempt=\(pendingDividerRestoreAttempts) " +
-            "min=\(String(format: "%.1f", minPos)) max=\(String(format: "%.1f", maxPos))"
-        )
-
-        guard pendingDividerRestoreAttempts < dividerRestoreMaxAttempts else {
-            debugLog("fullscreen=\(reason) restore giveup")
-            pendingDividerRestoreX = nil
-            pendingDividerRestoreAttempts = 0
-            return
-        }
-    }
-
     // MARK: - Divider Debug Logs
 
     private func setupDividerDebugMonitorsIfNeeded() {
@@ -428,46 +306,34 @@ final class MainSplitViewController: NSSplitViewController {
         guard let window = view.window,
               event.window === window else { return false }
 
+        let globalPointInSplit = splitPointFromGlobalMouse(in: window)
         let eventPointInSplit = splitView.convert(event.locationInWindow, from: nil)
         switch event.type {
         case .leftMouseDown:
-            let downPoint = resolveDownPointInSplit(window: window, eventPoint: eventPointInSplit)
             if dividerMonitorDragActive {
-                debugLog("monitor=down_ignored reason=already_active split=\(formatPoint(downPoint.point))")
+                debugLog("monitor=down_ignored reason=already_active split=\(formatPoint(globalPointInSplit))")
                 return true
             }
-            guard shouldArmMonitorDrag(at: downPoint.point) else {
-                debugLog(
-                    "monitor=down_reject chosen=\(formatPoint(downPoint.point)) source=\(downPoint.source) " +
-                    "outside=\(formatPoint(downPoint.outside)) screen=\(formatPoint(downPoint.screen)) event=\(formatPoint(eventPointInSplit)) " +
-                    "divider=\(formatRect(currentDividerRect(in: splitView, dividerIndex: 0)))"
-                )
+            guard shouldArmMonitorDrag(at: globalPointInSplit) else {
                 return false
             }
             dividerMonitorDragActive = true
-            dividerMonitorStartMouseX = downPoint.point.x
-            if sidebarItem.isCollapsed {
-                dividerMonitorStartDividerX = max(splitView.minPossiblePositionOfDivider(at: 0), splitView.bounds.minX)
-            } else {
-                dividerMonitorStartDividerX = currentDividerRect(in: splitView, dividerIndex: 0).midX
-            }
+            dividerMonitorStartMouseX = globalPointInSplit.x
+            dividerMonitorStartDividerX = currentDividerRect(in: splitView, dividerIndex: 0).midX
             dividerMonitorHasDragged = false
             debugLog(
-                "monitor=monitor_down_local action=arm split=\(formatPoint(downPoint.point)) source=\(downPoint.source) " +
-                "outside=\(formatPoint(downPoint.outside)) screen=\(formatPoint(downPoint.screen)) event=\(formatPoint(eventPointInSplit)) " +
-                "collapsed=\(sidebarItem.isCollapsed ? 1 : 0) " +
+                "monitor=monitor_down_local action=arm split=\(formatPoint(globalPointInSplit)) " +
+                "eventSplit=\(formatPoint(eventPointInSplit)) " +
                 "startMouseX=\(String(format: "%.1f", dividerMonitorStartMouseX)) " +
                 "startDividerX=\(String(format: "%.1f", dividerMonitorStartDividerX))"
             )
             return true
         case .leftMouseDragged:
             guard dividerMonitorDragActive else { return false }
-            let globalPointInSplit = splitPointFromGlobalMouse(in: window)
             handleMonitorDividerDrag(at: globalPointInSplit, phase: "monitor_dragged_local")
             return true
         case .leftMouseUp:
             guard dividerMonitorDragActive else { return false }
-            let globalPointInSplit = splitPointFromGlobalMouse(in: window)
             if (NSEvent.pressedMouseButtons & 1) != 0 {
                 debugLog("monitor=monitor_up_local action=ignore_pressed split=\(formatPoint(globalPointInSplit))")
                 return true
@@ -513,29 +379,13 @@ final class MainSplitViewController: NSSplitViewController {
         return splitView.convert(pointInWindow, from: nil)
     }
 
-    private func splitPointFromScreenMouse(in window: NSWindow) -> CGPoint {
-        let pointInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-        return splitView.convert(pointInWindow, from: nil)
-    }
-
-    private func resolveDownPointInSplit(window: NSWindow, eventPoint: CGPoint) -> (point: CGPoint, source: String, outside: CGPoint, screen: CGPoint) {
-        let outsidePoint = splitPointFromGlobalMouse(in: window)
-        let screenPoint = splitPointFromScreenMouse(in: window)
-        let dividerX = currentDividerRect(in: splitView, dividerIndex: 0).midX
-
-        let candidates: [(CGPoint, String)] = [
-            (outsidePoint, "outside"),
-            (screenPoint, "screen"),
-            (eventPoint, "event")
-        ]
-        let chosen = candidates.min { lhs, rhs in
-            abs(lhs.0.x - dividerX) < abs(rhs.0.x - dividerX)
-        } ?? (outsidePoint, "outside")
-        return (chosen.0, chosen.1, outsidePoint, screenPoint)
-    }
-
     private func shouldArmMonitorDrag(at pointInSplit: CGPoint) -> Bool {
-        guard splitView.isVertical else { return false }
+        guard splitView.isVertical,
+              !sidebarItem.isCollapsed else { return false }
+
+        let sidebarWidth = sidebarViewController?.view.frame.width ?? 0
+        let isAtMinimum = abs(sidebarWidth - minSidebarWidth) <= dividerMinSidebarTolerance
+        guard isAtMinimum else { return false }
 
         let dividerRect = currentDividerRect(in: splitView, dividerIndex: 0)
         let triggerRect = NSRect(
@@ -577,21 +427,10 @@ final class MainSplitViewController: NSSplitViewController {
 
         let clamped = min(max(proposed, minPos), maxPos)
         splitView.setPosition(clamped, ofDividerAt: 0)
-        splitView.layoutSubtreeIfNeeded()
         syncSidebarLayoutState()
-        let appliedX = currentDividerRect(in: splitView, dividerIndex: 0).midX
-        if abs(appliedX - clamped) > 1 {
-            debugLog(
-                "monitor=\(phase) action=applied_mismatch " +
-                "clamped=\(String(format: "%.1f", clamped)) applied=\(String(format: "%.1f", appliedX)) " +
-                "arranged=\(describeViews(splitView.arrangedSubviews)) " +
-                "subviews=\(describeViews(splitView.subviews))"
-            )
-        }
         debugLog(
             "monitor=\(phase) action=setPosition split=\(formatPoint(pointInSplit)) delta=\(String(format: "%.1f", delta)) proposed=\(String(format: "%.1f", proposed)) " +
-            "clamped=\(String(format: "%.1f", clamped)) applied=\(String(format: "%.1f", appliedX)) " +
-            "min=\(String(format: "%.1f", minPos)) max=\(String(format: "%.1f", maxPos))"
+            "clamped=\(String(format: "%.1f", clamped)) min=\(String(format: "%.1f", minPos)) max=\(String(format: "%.1f", maxPos))"
         )
     }
 
@@ -649,49 +488,19 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     private func currentDividerRect(in splitView: NSSplitView, dividerIndex: Int) -> NSRect {
-        if sidebarItem?.isCollapsed == true {
-            let logicalWidth = max(splitView.dividerThickness, 1)
-            let x = max(splitView.minPossiblePositionOfDivider(at: dividerIndex), splitView.bounds.minX)
-            return NSRect(
-                x: x,
-                y: splitView.bounds.minY,
-                width: logicalWidth,
-                height: splitView.bounds.height
-            )
-        }
-
-        // Prefer live geometry from split subviews; AppKit may not refresh
-        // effectiveRect callbacks at drag frequency, so cache can go stale.
-        if let live = liveDividerRect(in: splitView, dividerIndex: dividerIndex) {
-            lastKnownDividerRects[dividerIndex] = live
-            return live
-        }
-
         if let cached = lastKnownDividerRects[dividerIndex], cached.width > 0, cached.height > 0 {
             return cached
         }
 
-        return .zero
-    }
-
-    private func liveDividerRect(in splitView: NSSplitView, dividerIndex: Int) -> NSRect? {
-        guard splitView.isVertical else {
-            return nil
+        guard splitView.isVertical,
+              splitView.subviews.count >= 2 else {
+            return .zero
         }
 
-        // arrangedSubviews only contains pane views (excludes divider decoration views),
-        // so it is the most reliable source for live divider geometry.
-        let panes: [NSView]
-        if splitView.arrangedSubviews.count >= 2 {
-            panes = splitView.arrangedSubviews
-        } else {
-            panes = splitView.subviews
-        }
-        guard panes.count >= 2 else { return nil }
-
-        // Order by x to obtain the visual left pane for divider 0.
-        let ordered = panes.sorted { $0.frame.minX < $1.frame.minX }
-        guard ordered.count > dividerIndex else { return nil }
+        // NSSplitView subviews order is not guaranteed to be visual left-to-right.
+        // Sort by x to get the visual left pane for divider 0 fallback.
+        let ordered = splitView.subviews.sorted { $0.frame.minX < $1.frame.minX }
+        guard ordered.count > dividerIndex else { return .zero }
         let leftSubview = ordered[dividerIndex]
         let x = leftSubview.frame.maxX
         return NSRect(
@@ -732,16 +541,6 @@ final class MainSplitViewController: NSSplitViewController {
     private func typeName(_ view: NSView?) -> String {
         guard let view else { return "nil" }
         return String(describing: type(of: view))
-    }
-
-    private func describeViews(_ views: [NSView]) -> String {
-        guard !views.isEmpty else { return "[]" }
-        let maxCount = min(views.count, 4)
-        let desc = views.prefix(maxCount).enumerated().map { idx, v in
-            "#\(idx):\(typeName(v))\(formatRect(v.frame))"
-        }
-        let suffix = views.count > maxCount ? ",..." : ""
-        return "[\(desc.joined(separator: ","))\(suffix)]"
     }
 
     // MARK: - Public Methods
