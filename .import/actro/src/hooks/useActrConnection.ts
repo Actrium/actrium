@@ -15,6 +15,8 @@ import {
 import { Utils } from '../utils/utils';
 import { useAppStore } from '../actr-host/store/useAppStore';
 import { Alert } from 'react-native';
+import { useMessageStore } from '../actr-host/store/useMessageStore';
+import { Progress } from '../repository/MessageRepository';
 
 /**
  * useActrConnection Hook
@@ -152,22 +154,31 @@ export function useActrConnection({
   }) => {
     if (!connection) return;
 
-    const attachmentIds = attachments?.length
-      ? await uploadAttachment(attachments)
-      : [];
-
-    const reqMessage = {
-      messageId: message_id, // message_id
-      sessionId: session_id, // session_id
-      text: message, // Text question (if applicable)
-      location: location, // Optional location context
-      attachmentIds: attachmentIds, // Optional: Attachment IDs
-    };
-
     try {
+      const attachmentIds = attachments?.length
+        ? await uploadAttachment(attachments)
+        : [];
+
+      const reqMessage = {
+        messageId: message_id, // message_id
+        sessionId: session_id, // session_id
+        text: message, // Text question (if applicable)
+        location: location, // Optional location context
+        attachmentIds: attachmentIds, // Optional: Attachment IDs
+      };
+
       const res = await connection.sendMessage(reqMessage);
       return res;
     } catch (e: any) {
+      useMessageStore.getState().updateMessage(
+        appId,
+        message_id,
+        {
+          progress: Progress.failed,
+          answer_time: Date.now(),
+        },
+        true,
+      );
       Alert.alert('Failed to send message', e.message || e);
       return null;
     }

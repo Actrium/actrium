@@ -390,11 +390,13 @@ export class ActrConnection {
       throw new Error(`[ActrConnection:${this.appId}] Not initialized.`);
     }
 
+    const router = ActrStreamRouter.getInstance();
+    let streamIdMap: TActrStreamMap | null = null;
+
     try {
       console.log(`[ActrConnection:${this.appId}] Start send message`);
 
-      const router = ActrStreamRouter.getInstance();
-      const streamIdMap = router.bindStream(content.messageId, this);
+      streamIdMap = router.bindStream(content.messageId, this);
 
       const req = {
         messageId: content.messageId,
@@ -415,6 +417,10 @@ export class ActrConnection {
 
       return await ActrBridge.sendTextMessage(req);
     } catch (error: any) {
+      if (streamIdMap) {
+        router.unregisterStream(streamIdMap.textResponseStreamId);
+        router.unregisterStream(streamIdMap.voiceResponseStreamId);
+      }
       console.error(
         `[ActrConnection:${this.appId}] Send message failed:`,
         error.message || error,
