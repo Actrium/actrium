@@ -286,8 +286,6 @@ struct SelfDrawnToolbarView: View {
             let contentWidth = max(0, totalWidth - contentLeading)
 
             ZStack(alignment: .topLeading) {
-                toolbarBackground(metrics: metrics)
-
                 sidebarToolbarSection(metrics: metrics)
                     .frame(width: sidebarWidth, alignment: .leading)
 
@@ -300,6 +298,9 @@ struct SelfDrawnToolbarView: View {
             // iconButtonSize=30 → top at 24-15 = 9px
             .padding(.top, 9)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(alignment: .topLeading) {
+                toolbarBackground(metrics: metrics)
+            }
         }
         .overlay {
             // DEBUG: border for SwiftUI toolbar content bounds
