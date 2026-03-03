@@ -1341,6 +1341,13 @@ private class ColorCircleView: NSView {
 private class RoundedRowView: NSTableRowView {
     private var isHovering = false
 
+    /// Content rect excluding intercellSpacing
+    private var contentRect: NSRect {
+        let spacing = (superview as? NSTableView)?.intercellSpacing.height ?? 0
+        let half = floor(spacing / 2)
+        return bounds.insetBy(dx: 0, dy: half)
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas { removeTrackingArea(area) }
@@ -1363,7 +1370,7 @@ private class RoundedRowView: NSTableRowView {
 
     override func drawBackground(in dirtyRect: NSRect) {
         if !isSelected && isHovering {
-            let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+            let path = NSBezierPath(roundedRect: contentRect, xRadius: 8, yRadius: 8)
             NSColor.white.withAlphaComponent(0.06).setFill()
             path.fill()
         }
@@ -1371,7 +1378,7 @@ private class RoundedRowView: NSTableRowView {
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+        let path = NSBezierPath(roundedRect: contentRect, xRadius: 8, yRadius: 8)
         NSColor.controlAccentColor.setFill()
         path.fill()
     }
