@@ -1344,7 +1344,7 @@ private class RoundedRowView: NSTableRowView {
     /// Content rect excluding intercellSpacing
     private var contentRect: NSRect {
         let spacing = (superview as? NSTableView)?.intercellSpacing.height ?? 0
-        let half = floor(spacing / 2) - 1
+        let half = floor(spacing / 2) - 2
         return bounds.insetBy(dx: 0, dy: half)
     }
 
