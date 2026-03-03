@@ -38,6 +38,7 @@ final class RootContentViewController: NSViewController {
     private var toolbarHostingView: NSHostingView<AnyView>!
     private var splitViewController: MainSplitViewController!
     private let sidebarLayoutState = SidebarLayoutState()
+    private var cancellables = Set<AnyCancellable>()
 
     // DEBUG: dashed border layer for roundedContainer
     private var debugBorderLayer: CAShapeLayer?
@@ -77,6 +78,7 @@ final class RootContentViewController: NSViewController {
         setupToolbar()
         setupSplitView()
         setupConstraints()
+        observeTabChanges()
     }
 
     // MARK: - Setup
@@ -171,6 +173,29 @@ final class RootContentViewController: NSViewController {
         ])
     }
 
+    // MARK: - Tab Change Observation
+
+    private func observeTabChanges() {
+        // When the active tab changes, the system may update the window title
+        // and re-layout its titlebar container, which can reposition the traffic
+        // lights after our viewDidLayout has run.  Observe tab changes and
+        // schedule a deferred correction.
+        viewModel.$currentTabId
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.scheduleTrafficLightCorrection()
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Schedule a deferred traffic-light adjustment on the next run-loop
+    /// iteration so it runs after any system titlebar layout pass.
+    private func scheduleTrafficLightCorrection() {
+        DispatchQueue.main.async { [weak self] in
+            self?.adjustTrafficLights()
+        }
+    }
+
     // MARK: - Layout Updates
 
     override func viewDidLayout() {
@@ -190,8 +215,11 @@ final class RootContentViewController: NSViewController {
             borderLayer.path = path
         }
 
-        // Adjust traffic lights position
+        // Adjust traffic lights position immediately …
         adjustTrafficLights()
+        // … and again after the current layout cycle to catch any system
+        // titlebar re-layout that runs after our viewDidLayout.
+        scheduleTrafficLightCorrection()
     }
 
     // MARK: - Traffic Lights
@@ -286,6 +314,11 @@ struct SelfDrawnToolbarView: View {
             let contentWidth = max(0, totalWidth - contentLeading)
 
             ZStack(alignment: .topLeading) {
+                // Background in same coordinate space; cancel 9px button
+                // padding so it fills from the hosting view's top edge.
+                toolbarBackground(metrics: metrics)
+                    .padding(.top, -9)
+
                 sidebarToolbarSection(metrics: metrics)
                     .frame(width: sidebarWidth, alignment: .leading)
 
@@ -298,9 +331,6 @@ struct SelfDrawnToolbarView: View {
             // iconButtonSize=30 → top at 24-15 = 9px
             .padding(.top, 9)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(alignment: .topLeading) {
-                toolbarBackground(metrics: metrics)
-            }
         }
         .overlay {
             // DEBUG: border for SwiftUI toolbar content bounds
