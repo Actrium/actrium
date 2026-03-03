@@ -165,7 +165,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
         return;
       }
 
-      const isFinished = true || data.status === 2;
+      const isFinished = data.isEnd || data.status === 2;
       const newContent = (currentMsg.answer_content || '') + data.message;
 
       const updates = {
