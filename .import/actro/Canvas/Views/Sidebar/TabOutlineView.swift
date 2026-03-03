@@ -117,7 +117,7 @@ struct TabOutlineView: NSViewRepresentable {
         outlineView.autoresizesOutlineColumn = true
         outlineView.allowsMultipleSelection = false
         outlineView.floatsGroupRows = false
-        outlineView.intercellSpacing = NSSize(width: 0, height: 4)
+        outlineView.intercellSpacing = NSSize(width: 0, height: 5)
 
         // Setup column
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabColumn"))
