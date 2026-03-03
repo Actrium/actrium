@@ -1,10 +1,13 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
   NativeSyntheticEvent,
+  StyleSheet,
   StyleProp,
+  Text,
   TextInput,
   TextInputContentSizeChangeEventData,
   TextStyle,
+  View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useInputStore } from '../../store/useInputStore';
@@ -43,12 +46,12 @@ export const StableTextInput = React.memo(function StableTextInput({
   const MOBILE_MAX_HEIGHT = MOBILE_LINE_HEIGHT * MOBILE_MAX_LINES;
   const inputRef = useRef<TextInput>(null);
   const localTextRef = useRef('');
-  const [mobileInputHeight, setMobileInputHeight] = useState(MOBILE_MIN_HEIGHT);
-
-  const setInputText = useInputStore((state) => state.setInputText);
   const [initialText] = useState(
     () => useInputStore.getState().inputs[appId]?.text ?? '',
   );
+  const [mobileInputHeight, setMobileInputHeight] = useState(MOBILE_MIN_HEIGHT);
+  const [isEmpty, setIsEmpty] = useState(initialText.length === 0);
+  const setInputText = useInputStore((state) => state.setInputText);
 
   // 不订阅组件重渲染：仅同步 ref，避免输入中被父级 render 打断。
   React.useEffect(() => {
@@ -61,7 +64,21 @@ export const StableTextInput = React.memo(function StableTextInput({
       if (text !== localTextRef.current) {
         // 外部清空/回填时，直接改原生文本，不触发输入组件重建。
         localTextRef.current = text;
-        inputRef.current?.setNativeProps({ text });
+        setIsEmpty((prev) => {
+          const next = text.length === 0;
+          return prev === next ? prev : next;
+        });
+        if (text.length === 0) {
+          if (mobileMode) {
+            setMobileInputHeight((prev) =>
+              prev === MOBILE_MIN_HEIGHT ? prev : MOBILE_MIN_HEIGHT,
+            );
+          }
+          // Android multiline 对 setNativeProps({ text: '' }) 有时不稳定，clear() 更可靠。
+          inputRef.current?.clear();
+        } else {
+          inputRef.current?.setNativeProps({ text });
+        }
       }
     });
     return unsubscribe;
@@ -80,9 +97,18 @@ export const StableTextInput = React.memo(function StableTextInput({
   const handleChangeText = useCallback(
     (text: string) => {
       localTextRef.current = text;
+      setIsEmpty((prev) => {
+        const next = text.length === 0;
+        return prev === next ? prev : next;
+      });
+      if (mobileMode && text.length === 0) {
+        setMobileInputHeight((prev) =>
+          prev === MOBILE_MIN_HEIGHT ? prev : MOBILE_MIN_HEIGHT,
+        );
+      }
       setInputText(appId, text);
     },
-    [appId, setInputText],
+    [appId, mobileMode, setInputText],
   );
 
   const inputStyle = React.useMemo(
@@ -119,26 +145,56 @@ export const StableTextInput = React.memo(function StableTextInput({
     [mobileInputHeight, mobileMode],
   );
 
+  const shouldShowPlaceholder = isEmpty;
+
   return (
-    <TextInput
-      ref={inputRef}
-      style={inputStyle}
-      editable={editable}
-      placeholder={t('actr.input.placeholder')}
-      placeholderTextColor='#999'
-      multiline={true}
-      scrollEnabled={mobileMode && mobileInputHeight >= MOBILE_MAX_HEIGHT}
-      defaultValue={initialText}
-      onChangeText={handleChangeText}
-      onContentSizeChange={handleContentSizeChange}
-      blurOnSubmit={isSendOnEnter}
-      onSubmitEditing={() => {
-        if (isSendOnEnter) {
-          handleSendRef.current();
-        }
-      }}
-      onFocus={onFocus}
-      onBlur={onBlur}
-    />
+    <View style={styles.container}>
+      {shouldShowPlaceholder && (
+        <View pointerEvents='none' style={styles.placeholderOverlay}>
+          <Text numberOfLines={1} ellipsizeMode='tail' style={styles.placeholderText}>
+            {t('actr.input.placeholder')}
+          </Text>
+        </View>
+      )}
+      <TextInput
+        ref={inputRef}
+        style={inputStyle}
+        editable={editable}
+        placeholder=''
+        multiline={true}
+        scrollEnabled={mobileMode && mobileInputHeight >= MOBILE_MAX_HEIGHT}
+        defaultValue={initialText}
+        onChangeText={handleChangeText}
+        onContentSizeChange={handleContentSizeChange}
+        blurOnSubmit={isSendOnEnter}
+        onSubmitEditing={() => {
+          if (isSendOnEnter) {
+            handleSendRef.current();
+          }
+        }}
+        onFocus={onFocus}
+        onBlur={onBlur}
+      />
+    </View>
   );
+});
+
+const styles = StyleSheet.create({
+  container: {
+    position: 'relative',
+  },
+  placeholderOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  placeholderText: {
+    color: '#999',
+    fontSize: 17,
+    lineHeight: 22,
+  },
 });
