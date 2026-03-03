@@ -45,12 +45,11 @@ final class SidebarViewController: NSViewController {
         container.wantsLayer = true
         container.addSubview(hostingView)
 
-        let inset: CGFloat = 4
         NSLayoutConstraint.activate([
-            hostingView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: inset),
-            hostingView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -inset),
-            hostingView.topAnchor.constraint(equalTo: container.topAnchor),
-            hostingView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -inset),
+            hostingView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 1),
+            hostingView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -5),
+            hostingView.topAnchor.constraint(equalTo: container.topAnchor, constant: 1),
+            hostingView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -1),
         ])
 
         self.view = container
