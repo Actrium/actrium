@@ -129,6 +129,15 @@ android {
     viewBinding {
         enabled = true
     }
+    packaging {
+        jniLibs {
+            // 当遇到重复的 libjsi.so 时，选择第一个遇到的文件（通常是主框架的文件）
+            pickFirst '**/libjsi.so'
+
+            // 建议同时也加上 libc++_shared.so，这是另一个常见的冲突库
+            pickFirst '**/libc++_shared.so'
+        }
+    }
 }
 
 protobuf {
