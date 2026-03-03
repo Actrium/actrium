@@ -15,6 +15,7 @@ import { SettingsItem } from './SettingsItem';
 
 interface SettingsMainProps {
   onAccountPress: () => void;
+  onAboutPress: () => void;
   onLoginPress: () => void;
   onLogout: () => void;
   isTablet: boolean;
@@ -22,6 +23,7 @@ interface SettingsMainProps {
 
 export const SettingsMain = ({
   onAccountPress,
+  onAboutPress,
   onLoginPress,
   onLogout,
   isTablet,
@@ -78,6 +80,12 @@ export const SettingsMain = ({
           icon='feedback'
           label={t('actr.settings.feedback')}
           onPress={handleFeedback}
+        />
+        <View style={styles.itemDivider} />
+        <SettingsItem
+          icon='askaway_gery'
+          label='AskAway'
+          onPress={onAboutPress}
         />
       </View>
 
@@ -149,5 +157,11 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     overflow: 'hidden',
     marginBottom: 18,
+  },
+  itemDivider: {
+    height: 1,
+    backgroundColor: '#2C2C2E',
+    marginLeft: 55,
+    marginRight: 12,
   },
 });

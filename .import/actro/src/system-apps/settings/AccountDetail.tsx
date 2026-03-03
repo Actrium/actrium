@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useUserStore } from '../../actr-host/store/useUserStore';
+import { SettingsBackHeader } from './SettingsBackHeader';
 
 interface AccountDetailProps {
   onBack: () => void;
@@ -37,14 +38,7 @@ export const AccountDetail = ({
       ]}
       showsVerticalScrollIndicator={false}
     >
-      {/* Back Button */}
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={onBack}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.backButtonText}>‹</Text>
-      </TouchableOpacity>
+      <SettingsBackHeader onBack={onBack} />
 
       {/* Avatar */}
       <View style={styles.avatarContainer}>
@@ -112,21 +106,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: 60,
     paddingBottom: 40,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#3a3a3c',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 32,
-  },
-  backButtonText: {
-    fontSize: 32,
-    color: '#fff',
-    fontWeight: '300',
-    marginTop: -4,
   },
   avatarContainer: {
     alignItems: 'center',
