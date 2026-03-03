@@ -154,11 +154,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     (data: TActrMessageResponse) => {
       const message_id = data.message_id;
       // 1. 获取当前 Store 中的消息进行累加
-      const currentMessages = useMessageStore.getState().messages[appId] || [];
-      // 暂时不根据 message_id 查找，直接取最后一条（最新的一条在数组首位）
-      const currentMsg = currentMessages.find(
-        (m) => m.message_id === message_id,
-      );
+      const currentMsg = useMessageStore.getState().getMessage(appId, message_id);
 
       if (!currentMsg) {
         console.warn('[ActrInput] No messages in store to update');
@@ -198,10 +194,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     (data: TActrMessageResponse) => {
       const messageId = data.message_id;
 
-      const currentMessages = useMessageStore.getState().messages[appId] || [];
-      const currentMsg = currentMessages.find(
-        (m) => m.message_id === messageId,
-      );
+      const currentMsg = useMessageStore.getState().getMessage(appId, messageId);
 
       if (!currentMsg) return;
 

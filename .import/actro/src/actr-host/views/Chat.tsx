@@ -35,6 +35,145 @@ import { useUnreadStore } from '../store/useUnreadStore';
 import { setTabUnreadStatus } from '../../../src/native-bridge/tab/TabModule';
 
 const PAGE_SIZE = 20;
+const EMPTY_MESSAGE_IDS: string[] = [];
+const EMPTY_SELECTED_PARTS = new Set<'attachments' | 'question' | 'answer'>();
+
+interface MessageRowProps {
+  appId: string;
+  messageId: string;
+  index: number;
+  layoutTokens: ReturnType<typeof getHostLayoutTokens>;
+  selectionMode: boolean;
+  selectedParts: Set<'attachments' | 'question' | 'answer'>;
+  toggleSelection: (messageId: string, part: 'attachments' | 'question' | 'answer') => void;
+  handleEdit: (msg: IMessage) => void;
+  handleCopy: (text: string) => void;
+}
+
+const MessageRow = React.memo(function MessageRow({
+  appId,
+  messageId,
+  index,
+  layoutTokens,
+  selectionMode,
+  selectedParts,
+  toggleSelection,
+  handleEdit,
+  handleCopy,
+}: MessageRowProps) {
+  const { t } = useTranslation();
+  const item = useMessageStore(
+    useCallback(
+      (state) => state.messageById[appId]?.[messageId],
+      [appId, messageId],
+    ),
+  );
+
+  if (!item) return null;
+
+  const isLatest = index === 0;
+
+  return (
+    <View
+      style={[
+        styles.messageListWrapper,
+        {
+          maxWidth: layoutTokens.contentMaxWidth,
+          paddingHorizontal: layoutTokens.messageHorizontalPadding,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.messageGroup,
+          selectionMode && styles.messageGroupWithCheckbox,
+        ]}
+      >
+        {item.attachments && (
+          <View style={styles.bubbleWithCheckbox}>
+            {selectionMode && (
+              <View style={styles.checkboxContainer}>
+                <Checkbox
+                  checked={selectedParts.has('attachments')}
+                  onPress={() => toggleSelection(item.message_id, 'attachments')}
+                />
+              </View>
+            )}
+            <View style={styles.questionBubbleWrapper}>
+              <ChatBubble
+                type='question'
+                attachments={item.attachments}
+                containerStyle={{ marginBottom: 4 }}
+                onEdit={isLatest && !selectionMode ? () => handleEdit(item) : undefined}
+                onCopy={() => handleCopy(item.question_content)}
+                msgId={item.message_id}
+                appId={appId}
+                selectionKey={`${item.message_id}:attachments`}
+                isSelected={selectedParts.has('attachments')}
+                onToggleSelection={() => toggleSelection(item.message_id, 'attachments')}
+              />
+            </View>
+          </View>
+        )}
+        {item.question_content ? (
+          <View style={styles.bubbleWithCheckbox}>
+            {selectionMode && (
+              <View style={styles.checkboxContainer}>
+                <Checkbox
+                  checked={selectedParts.has('question')}
+                  onPress={() => toggleSelection(item.message_id, 'question')}
+                />
+              </View>
+            )}
+            <View style={styles.questionBubbleWrapper}>
+              <ChatBubble
+                type='question'
+                msgId={item.message_id}
+                appId={appId}
+                content={item.question_content}
+                onEdit={isLatest && !selectionMode ? () => handleEdit(item) : undefined}
+                onCopy={() => handleCopy(item.question_content)}
+                selectionKey={`${item.message_id}:question`}
+                isSelected={selectedParts.has('question')}
+                onToggleSelection={() => toggleSelection(item.message_id, 'question')}
+              />
+            </View>
+          </View>
+        ) : null}
+        {item.answer_content ? (
+          <View style={styles.bubbleWithCheckbox}>
+            {selectionMode && (
+              <View style={styles.checkboxContainer}>
+                <Checkbox
+                  checked={selectedParts.has('answer')}
+                  onPress={() => toggleSelection(item.message_id, 'answer')}
+                />
+              </View>
+            )}
+            <ChatBubble
+              type='answer'
+              msgId={item.message_id}
+              appId={appId}
+              content={item.answer_content}
+              isLatest={isLatest}
+              onCopy={() => handleCopy(item.answer_content)}
+              selectionKey={`${item.message_id}:answer`}
+              isSelected={selectedParts.has('answer')}
+              onToggleSelection={() => toggleSelection(item.message_id, 'answer')}
+            />
+          </View>
+        ) : isLatest &&
+          (item.progress === Progress.pending ||
+            item.progress === Progress.processing) ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size='small' color='#999' />
+            <Text style={styles.loadingText}>{t('actr.chat.thinking')}</Text>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+});
 
 export default function Chat() {
   const { t } = useTranslation();
@@ -43,7 +182,12 @@ export default function Chat() {
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
 
-  const messages = useMessageStore((state) => state.messages[appId]);
+  const messageIds = useMessageStore(
+    useCallback(
+      (state) => state.messageIds[appId] || EMPTY_MESSAGE_IDS,
+      [appId],
+    ),
+  );
   const setMessagesInStore = useMessageStore((state) => state.setMessages);
   const appendOldMessages = useMessageStore((state) => state.appendOldMessages);
   const cleanMessage = useMessageStore((state) => state.cleanMessage);
@@ -96,11 +240,11 @@ export default function Chat() {
   // 加载更多
   const handleLoadMore = useCallback(async () => {
     // 防止在第一页加载完成前或 messages 为空时触发
-    if (isLoadingMore || !hasMore || !messages || messages.length === 0) return;
+    if (isLoadingMore || !hasMore || messageIds.length === 0) return;
 
     setIsLoadingMore(true);
     try {
-      const offset = messages?.length || 0;
+      const offset = messageIds.length;
       const data = await MessageRepository.getAllMessages(
         appId,
         PAGE_SIZE,
@@ -117,7 +261,7 @@ export default function Chat() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [appId, messages?.length, isLoadingMore, hasMore, appendOldMessages]);
+  }, [appId, messageIds.length, isLoadingMore, hasMore, appendOldMessages]);
 
   useEffect(() => {
     // 🌟 无条件执行：确保每次挂载都能同步最新第一页数据，覆盖旧缓存导致的错乱
@@ -182,139 +326,22 @@ export default function Chat() {
   }, [appId]);
 
   const renderItem = useCallback(
-    ({ item, index }: { item: IMessage; index: number }) => {
-      const isLatest = index === 0;
-      const messageSelectedParts = selectedItems[item.message_id] || new Set();
-
+    ({ item: messageId, index }: { item: string; index: number }) => {
       return (
-        <View
-          style={[
-            styles.messageListWrapper,
-            {
-              maxWidth: layoutTokens.contentMaxWidth,
-              paddingHorizontal: layoutTokens.messageHorizontalPadding,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.messageGroup,
-              selectionMode && styles.messageGroupWithCheckbox,
-            ]}
-          >
-            {item.attachments && (
-              <View style={styles.bubbleWithCheckbox}>
-                {selectionMode && (
-                  <View style={styles.checkboxContainer}>
-                    <Checkbox
-                      checked={messageSelectedParts.has('attachments')}
-                      onPress={() =>
-                        toggleSelection(item.message_id, 'attachments')
-                      }
-                    />
-                  </View>
-                )}
-                <View style={styles.questionBubbleWrapper}>
-                  <ChatBubble
-                    type='question'
-                    attachments={item.attachments}
-                    containerStyle={{ marginBottom: 4 }}
-                    onEdit={
-                      isLatest && !selectionMode
-                        ? () => handleEdit(item)
-                        : undefined
-                    }
-                    onCopy={() => handleCopy(item.question_content)}
-                    msgId={item.message_id}
-                    appId={appId}
-                    selectionKey={`${item.message_id}:attachments`}
-                    isSelected={messageSelectedParts.has('attachments')}
-                    onToggleSelection={() =>
-                      toggleSelection(item.message_id, 'attachments')
-                    }
-                  />
-                </View>
-              </View>
-            )}
-            {item.question_content ? (
-              <View style={styles.bubbleWithCheckbox}>
-                {selectionMode && (
-                  <View style={styles.checkboxContainer}>
-                    <Checkbox
-                      checked={messageSelectedParts.has('question')}
-                      onPress={() =>
-                        toggleSelection(item.message_id, 'question')
-                      }
-                    />
-                  </View>
-                )}
-                <View style={styles.questionBubbleWrapper}>
-                  <ChatBubble
-                    type='question'
-                    msgId={item.message_id}
-                    appId={appId}
-                    content={item.question_content}
-                    onEdit={
-                      isLatest && !selectionMode
-                        ? () => handleEdit(item)
-                        : undefined
-                    }
-                    onCopy={() => handleCopy(item.question_content)}
-                    selectionKey={`${item.message_id}:question`}
-                    isSelected={messageSelectedParts.has('question')}
-                    onToggleSelection={() =>
-                      toggleSelection(item.message_id, 'question')
-                    }
-                  />
-                </View>
-              </View>
-            ) : null}
-            {item.answer_content ? (
-              <View style={styles.bubbleWithCheckbox}>
-                {selectionMode && (
-                  <View style={styles.checkboxContainer}>
-                    <Checkbox
-                      checked={messageSelectedParts.has('answer')}
-                      onPress={() => toggleSelection(item.message_id, 'answer')}
-                    />
-                  </View>
-                )}
-                <ChatBubble
-                  type='answer'
-                  msgId={item.message_id}
-                  appId={appId}
-                  content={item.answer_content}
-                  isLatest={isLatest}
-                  onCopy={() => handleCopy(item.answer_content)}
-                  selectionKey={`${item.message_id}:answer`}
-                  isSelected={messageSelectedParts.has('answer')}
-                  onToggleSelection={() =>
-                    toggleSelection(item.message_id, 'answer')
-                  }
-                />
-              </View>
-            ) : isLatest &&
-              (item.progress === Progress.pending ||
-                item.progress === Progress.processing) ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size='small' color='#999' />
-                <Text style={styles.loadingText}>{t('actr.chat.thinking')}</Text>
-              </View>
-            ) : null}
-          </View>
-        </View>
+        <MessageRow
+          appId={appId}
+          messageId={messageId}
+          index={index}
+          layoutTokens={layoutTokens}
+          selectionMode={selectionMode}
+          selectedParts={selectedItems[messageId] || EMPTY_SELECTED_PARTS}
+          toggleSelection={toggleSelection}
+          handleEdit={handleEdit}
+          handleCopy={handleCopy}
+        />
       );
     },
-    [
-      handleEdit,
-      handleCopy,
-      selectionMode,
-      selectedItems,
-      toggleSelection,
-      appId,
-      layoutTokens.contentMaxWidth,
-      layoutTokens.messageHorizontalPadding,
-    ],
+    [appId, layoutTokens, selectionMode, selectedItems, toggleSelection, handleEdit, handleCopy],
   );
 
   const ListHeaderComponent = useMemo(() => {
@@ -378,7 +405,7 @@ export default function Chat() {
       ]}
     >
       <View style={styles.contentArea}>
-        {!messages || (messages.length === 0 && !isLoadingMore) ? (
+        {messageIds.length === 0 && !isLoadingMore ? (
           <TouchableWithoutFeedback onPress={dismissKeyboard}>
             <View style={{ flex: 1 }}>
               <ChatEmpty />
@@ -386,9 +413,9 @@ export default function Chat() {
           </TouchableWithoutFeedback>
         ) : (
           <FlatList
-            data={messages}
+            data={messageIds}
             renderItem={renderItem}
-            keyExtractor={(item) => item.message_id}
+            keyExtractor={(item) => item}
             inverted={true}
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.1}
