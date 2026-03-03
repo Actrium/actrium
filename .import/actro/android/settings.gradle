@@ -18,3 +18,6 @@ project(':actr-kotlin').projectDir =file('../../actr-kotlin/actr-kotlin')
 
 include ':rill-sandbox-native'
 project(':rill-sandbox-native').projectDir = file('../../rill/native/platform/android')
+
+include ':react-native-safe-area-context'
+project(':react-native-safe-area-context').projectDir = file('../node_modules/react-native-safe-area-context/android')
