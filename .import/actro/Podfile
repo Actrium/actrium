@@ -21,6 +21,7 @@ target 'Canvas' do
   # 自动链接原生模块 (暂时手动添加以解决项目结构导致的路径问题)
   # use_native_modules!
   pod 'RNLocalize', :path => 'Subsystem/node_modules/react-native-localize'
+  pod 'react-native-safe-area-context', :path => 'Subsystem/node_modules/react-native-safe-area-context'
   pod 'react-native-sqlite-storage', :path => 'Subsystem/node_modules/react-native-sqlite-storage'
   pod 'VisionCamera', :path => 'Subsystem/node_modules/react-native-vision-camera'
   pod 'react-native-image-picker', :path => 'Subsystem/node_modules/react-native-image-picker'
