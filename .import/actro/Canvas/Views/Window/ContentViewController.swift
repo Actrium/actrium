@@ -12,8 +12,8 @@ final class ContentViewController: NSViewController {
 
     private var hostingView: NSHostingView<ContentAreaView>!
 
-    /// Corner radius for content area
-    private let cornerRadius: CGFloat = 16
+    /// Corner radius for content area (matches roundedContainer)
+    private let cornerRadius: CGFloat = 12
 
     // MARK: - Initialization
 
@@ -44,10 +44,13 @@ final class ContentViewController: NSViewController {
         hostingView = NSHostingView(rootView: contentView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Container view with rounded corners
+        // Container view with rounded corners only on bottom (top connects to toolbar)
         let container = NSView()
         container.wantsLayer = true
         container.layer?.cornerRadius = cornerRadius
+        // CALayer corner constants use geometric minY/maxY; on macOS non-flipped layer
+        // bottom corners are MinY (not MaxY).
+        container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         container.layer?.masksToBounds = true
         container.addSubview(hostingView)
 

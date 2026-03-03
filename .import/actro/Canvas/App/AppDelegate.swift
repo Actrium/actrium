@@ -102,5 +102,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func removeWindowController(_ controller: MainWindowController) {
         windowControllers.removeAll { $0 === controller }
     }
-}
 
+    func toggleNativeFullScreenForKeyWindow() {
+        if let controller = windowControllers.first(where: { $0.window?.isKeyWindow == true }) {
+            controller.toggleNativeFullScreen()
+            return
+        }
+
+        if let keyWindow = NSApp.keyWindow,
+           let controller = windowControllers.first(where: { $0.window === keyWindow }) {
+            controller.toggleNativeFullScreen()
+            return
+        }
+
+        NSApp.keyWindow?.toggleFullScreen(nil)
+    }
+}
