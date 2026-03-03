@@ -35,6 +35,7 @@ import com.askaway.android.global.Constants
 import kotlinx.coroutines.delay
 import com.askaway.android.core.ReactNativeBundle
 import java.util.UUID
+import com.rill.sandbox.RillSandbox
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
     private lateinit var binding: ActivityMainBinding
@@ -52,6 +53,11 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+//        val reactContext = reactNativeHost.reactInstanceManager.currentReactContext
+//        if (reactContext != null) {
+//            val runtimePtr = reactContext.javaScriptContextHolder.get()
+//            RillSandbox.install(runtimePtr)
+//        }
 
         // 处理状态栏 insets，确保内容不会延伸到状态栏下方
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -197,7 +203,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         }
 
         binding.ivAdd.post {
-            binding.ivAdd.performClick()
+//            binding.ivAdd.performClick()
         }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -563,3 +569,4 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         return result
     }
 }
+
