@@ -163,11 +163,9 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - Public Methods
 
     @objc override func toggleSidebar(_ sender: Any?) {
-        // Disable animation so sidebar and toolbar state change in lockstep.
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0
-            super.toggleSidebar(sender)
-        }
+        // Set isCollapsed directly instead of calling super.toggleSidebar,
+        // which internally uses animator() and always animates.
+        sidebarItem.isCollapsed.toggle()
         syncSidebarLayoutState()
     }
 }
