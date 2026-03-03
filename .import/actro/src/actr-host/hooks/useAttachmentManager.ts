@@ -1,4 +1,4 @@
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { IAttachmentItem } from '../types/attachment';
 import { AttachmentService } from '../../services/AttachmentService';
@@ -34,17 +34,24 @@ export const useAttachmentManager = (appId: string) => {
         await RNFS.mkdir(tempDir);
       }
 
-      const cleanUri = uri.startsWith('file://')
-        ? uri.replace('file://', '')
-        : uri;
-      // 使用传入的 ID 作为文件名的一部分，不再使用时间戳
       const destPath = `${tempDir}/${id}-${filename}`;
 
-      await RNFS.copyFile(cleanUri, destPath);
+      if (Platform.OS === 'android' && uri.startsWith('content://')) {
+        // Android content:// URI: read as base64 then write to temp file
+        const base64Data = await RNFS.readFile(uri, 'base64');
+        await RNFS.writeFile(destPath, base64Data, 'base64');
+      } else {
+        // iOS or file:// URI: direct copy
+        const cleanUri = uri.startsWith('file://')
+          ? uri.replace('file://', '')
+          : uri;
+        await RNFS.copyFile(cleanUri, destPath);
+      }
+
       return `file://${destPath}`;
     } catch (error) {
       console.error('[useAttachmentManager] copyAssetToTemp failed:', error);
-      return uri; // 失败则降级使用原始 URI
+      return uri;
     }
   };
 
@@ -71,71 +78,80 @@ export const useAttachmentManager = (appId: string) => {
       return;
     }
 
-    const results = await getAssets();
-    if (results && results.length > 0) {
-      // 检查文件大小是否超过 10MB
-      const maxSize = 10 * 1024 * 1024;
-      const validResults = results.filter((res) => {
-        const size = res.fileSize || res.size || 0;
-        return size <= maxSize;
-      });
-
-      if (validResults.length < results.length) {
-        Alert.alert(t('actr.attachment.fileTooLarge'), t('actr.attachment.fileSizeLimit'));
-      }
-
-      // Check for unsupported file types (e.g., no type found)
-      const supportedResults = validResults.filter((res) => {
-        // Simple check: if it's a file but has no type/extension that we filters for
-        // DocumentPicker usually returns types like 'application/pdf', etc.
-        return !!res.type || !!res.mimeType || type === 'image';
-      });
-
-      if (supportedResults.length < validResults.length) {
-        Alert.alert(t('common.tip'), t('actr.attachment.unsupportedType'));
-      }
-
-      if (supportedResults.length === 0) return;
-
-      const isDifferentType =
-        attachments.length > 0 && attachments[0].attachment_type !== type;
-      const currentList = isDifferentType ? [] : attachments;
-      const remainingSlots = 6 - currentList.length;
-
-      if (remainingSlots <= 0) return;
-
-      const newItemsToAdd: IAttachmentItem[] = await Promise.all(
-        supportedResults.slice(0, remainingSlots).map(async (res) => {
-          const id = Utils.generateId();
-          const fileName =
-            res.fileName ||
-            res.name ||
-            (type === 'image' ? `img-${Date.now()}.jpg` : `file-${Date.now()}`);
-
-          // 复制到临时目录
-          const localUrl = await copyAssetToTemp(res.uri, fileName, id);
-
-          return {
-            id,
-            attachment_type: type,
-            local_url: localUrl,
-            cdn_url: '',
-            type: res.type,
-            name: fileName,
-            aspect_ratio: res.width && res.height ? res.width / res.height : 1,
-          };
-        }),
-      );
-
-      if (supportedResults.length > remainingSlots) {
-        Alert.alert(
-          t('common.tip'),
-          t('actr.attachment.limitPartial', { count: remainingSlots }),
-        );
-      }
-
-      setStoreAttachments(appId, [...currentList, ...newItemsToAdd]);
+    let results: any[];
+    try {
+      results = await getAssets();
+    } catch (error) {
+      console.error('[useAttachmentManager] getAssets failed:', error);
+      return;
     }
+
+    if (!results || results.length === 0) {
+      return;
+    }
+
+    // 检查文件大小是否超过 10MB
+    const maxSize = 10 * 1024 * 1024;
+    const validResults = results.filter((res) => {
+      const size = res.fileSize || res.size || 0;
+      return size <= maxSize;
+    });
+
+    if (validResults.length < results.length) {
+      Alert.alert(t('actr.attachment.fileTooLarge'), t('actr.attachment.fileSizeLimit'));
+    }
+
+    // Check for unsupported file types (e.g., no type found)
+    const supportedResults = validResults.filter((res) => {
+      // Simple check: if it's a file but has no type/extension that we filters for
+      // DocumentPicker usually returns types like 'application/pdf', etc.
+      return !!res.type || !!res.mimeType || type === 'image';
+    });
+
+    if (supportedResults.length < validResults.length) {
+      Alert.alert(t('common.tip'), t('actr.attachment.unsupportedType'));
+    }
+
+    if (supportedResults.length === 0) return;
+
+    const isDifferentType =
+      attachments.length > 0 && attachments[0].attachment_type !== type;
+    const currentList = isDifferentType ? [] : attachments;
+    const remainingSlots = 6 - currentList.length;
+
+    if (remainingSlots <= 0) return;
+
+    const newItemsToAdd: IAttachmentItem[] = await Promise.all(
+      supportedResults.slice(0, remainingSlots).map(async (res) => {
+        const id = Utils.generateId();
+        const fileName =
+          res.fileName ||
+          res.name ||
+          (type === 'image' ? `img-${Date.now()}.jpg` : `file-${Date.now()}`);
+
+        // 复制到临时目录
+        const localUrl = await copyAssetToTemp(res.uri, fileName, id);
+
+        return {
+          id,
+          attachment_type: type,
+          local_url: localUrl,
+          cdn_url: '',
+          type: res.type,
+          name: fileName,
+          aspect_ratio: res.width && res.height ? res.width / res.height : 1,
+        };
+      }),
+    );
+
+    if (supportedResults.length > remainingSlots) {
+      Alert.alert(
+        t('common.tip'),
+        t('actr.attachment.limitPartial', { count: remainingSlots }),
+      );
+    }
+
+    setStoreAttachments(appId, [...currentList, ...newItemsToAdd]);
   };
 
   const handleConfirmLocation = async (data: {
@@ -155,9 +171,14 @@ export const useAttachmentManager = (appId: string) => {
       if (!confirmed) return;
     }
 
-    const snapshotFileName = `map-${Date.now()}.png`;
     const id = Utils.generateId();
-    const localUrl = await copyAssetToTemp(data.snapshot, snapshotFileName, id);
+
+    // Android 无截图，iOS 有截图
+    let localUrl = '';
+    if (data.snapshot) {
+      const snapshotFileName = `map-${Date.now()}.png`;
+      localUrl = await copyAssetToTemp(data.snapshot, snapshotFileName, id);
+    }
 
     const locationItem: IAttachmentItem = {
       id: id,

@@ -231,3 +231,6 @@ try {
 }
 
 nlog('🏁 Bundle 执行完毕，等待 runApplication...');
+
+
+export default Component

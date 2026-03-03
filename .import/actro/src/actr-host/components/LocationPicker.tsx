@@ -8,11 +8,13 @@ import {
   Modal,
   Alert,
   Linking,
+  Platform,
+  PermissionsAndroid,
 } from 'react-native';
-import MapView, { Marker, Region } from 'react-native-maps';
-import Geolocation from 'react-native-geolocation-service';
+import MapView, { Region } from 'react-native-maps';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
+import type Geolocation from '@react-native-community/geolocation';
 
 interface LocationPickerProps {
   visible: boolean;
@@ -33,16 +35,117 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   const [mapRegion, setMapRegion] = useState<Region | null>(null);
   const mapRef = useRef<MapView>(null);
   const currentRegionRef = useRef<Region | null>(null);
+  const getGeolocation = (): typeof Geolocation | null => {
+    try {
+      return require('@react-native-community/geolocation').default as typeof Geolocation;
+    } catch (error) {
+      console.error('[LocationPicker] Geolocation native module unavailable:', error);
+      return null;
+    }
+  };
 
   // 当弹窗打开时，尝试获取当前位置
   React.useEffect(() => {
     if (visible) {
-      handleInitialLocation();
+      if (Platform.OS === 'android') {
+        handleAndroidLocation();
+      } else {
+        handleInitialLocation();
+      }
     }
   }, [visible]);
 
+  // Android: 直接申请权限获取经纬度，不显示地图
+  const handleAndroidLocation = async () => {
+    try {
+      const geolocation = getGeolocation();
+      if (!geolocation) {
+        Alert.alert(
+          t('common.error', '错误'),
+          t('actr.input.locationFailed', '无法获取当前位置'),
+        );
+        onClose();
+        return;
+      }
+
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        {
+          title: t('actr.input.locationPermissionTitle'),
+          message: t('actr.input.locationPermissionMsg'),
+          buttonNeutral: t('common.later', '稍后'),
+          buttonNegative: t('common.cancel', '取消'),
+          buttonPositive: t('common.confirm', '确定'),
+        },
+      );
+
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        Alert.alert(
+          t('actr.input.locationPermissionTitle'),
+          t('actr.input.locationPermissionMsg'),
+          [
+            {
+              text: t('common.cancel'),
+              style: 'cancel',
+              onPress: () => onClose(),
+            },
+            {
+              text: t('actr.voice.goToSettings'),
+              onPress: () => {
+                Linking.openSettings();
+                onClose();
+              },
+            },
+          ],
+        );
+        return;
+      }
+
+      geolocation.getCurrentPosition(
+        (position) => {
+          onSelect({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            snapshot: '',
+          });
+        },
+        (error) => {
+          console.warn('[Geolocation] Android Error:', error);
+          Alert.alert(
+            t('common.error', '错误'),
+            t('actr.input.locationFailed', '无法获取当前位置'),
+          );
+          onClose();
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: 5000,
+        },
+      );
+    } catch (err) {
+      console.warn('[Geolocation] Android permission error:', err);
+      onClose();
+    }
+  };
+
   const handleInitialLocation = async () => {
-    const status = await Geolocation.requestAuthorization('whenInUse');
+    const geolocation = getGeolocation();
+    if (!geolocation) {
+      Alert.alert(
+        t('common.error', '错误'),
+        t('actr.input.locationFailed', '无法获取当前位置'),
+      );
+      onClose();
+      return;
+    }
+
+    const status = await new Promise<'granted' | 'denied'>((resolve) => {
+      geolocation.requestAuthorization(
+        () => resolve('granted'),
+        () => resolve('denied'),
+      );
+    });
     if (status !== 'granted') {
       Alert.alert(
         t('actr.input.locationPermissionTitle'),
@@ -65,7 +168,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       return;
     }
 
-    Geolocation.getCurrentPosition(
+    geolocation.getCurrentPosition(
       (position) => {
         const region = {
           latitude: position.coords.latitude,
@@ -127,6 +230,12 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
     }
   };
 
+  // Android 不渲染地图弹窗
+  if (Platform.OS === 'android') {
+    return null;
+  }
+
+  // iOS: 原有地图选点 UI
   return (
     <Modal
       visible={visible}
