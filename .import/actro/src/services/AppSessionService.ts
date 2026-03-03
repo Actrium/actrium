@@ -81,7 +81,7 @@ export class AppSessionService {
       // 🆕 2. 解析 guest_url (.actr 文件)
       const guestUrl = appRes.data.actr_url;
       const guestHashCode = appRes.data.actr_hash_code;
-      if (false && guestUrl?.endsWith('.actr') && guestHashCode) {
+      if (guestUrl?.endsWith('.actr') && guestHashCode) {
         try {
           console.log(
             `[AppSessionService] Fetching binary for hash: ${guestUrl}`,
