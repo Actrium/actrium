@@ -21,7 +21,6 @@ import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import { submitFeedback, FeedbackContext } from '../../api/feedback';
 import { useMessageStore } from '../store/useMessageStore';
-import { IMessage } from '../../repository/MessageRepository';
 import dayjs from 'dayjs';
 
 interface Category {
@@ -61,8 +60,10 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
     'idle' | 'submitting' | 'success' | 'error'
   >('idle');
 
-  const messages =
-    useMessageStore((state) => (appId ? state.messages[appId] : [])) || [];
+  const targetMsg = useMessageStore(
+    (state) =>
+      appId && messageId ? state.messageById[appId]?.[messageId] : undefined,
+  );
 
   const animValue = React.useRef(new Animated.Value(0)).current;
 
@@ -106,7 +107,6 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
       );
 
       const contextPayload: FeedbackContext[] = [];
-      const targetMsg = messages.find((m) => m.message_id === messageId);
 
       if (targetMsg) {
         if (targetMsg.question_content) {
