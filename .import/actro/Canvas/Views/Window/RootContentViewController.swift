@@ -283,9 +283,14 @@ struct SelfDrawnToolbarView: View {
             )
             let contentWidth = max(0, totalWidth - contentLeading)
 
-            // Buttons positioned to align centers with traffic lights:
+            // Layer 1: Background – direct child of GeometryReader so
+            // .ignoresSafeArea reliably extends it to the hosting-view top.
+            toolbarBackground(metrics: metrics)
+                .ignoresSafeArea(.container, edges: .top)
+
+            // Layer 2: Buttons – aligned with traffic-light centers.
             // trafficLightTopInset=17, ~14px tall → center ≈ 24px
-            // iconButtonSize=30 → need top at 9px from hosting view top
+            // iconButtonSize=30 → need top at 9px from hosting-view top
             // Compensate for titlebar safe area offset dynamically.
             ZStack(alignment: .topLeading) {
                 sidebarToolbarSection(metrics: metrics)
@@ -297,11 +302,6 @@ struct SelfDrawnToolbarView: View {
             }
             .padding(.top, 9 - topInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(alignment: .topLeading) {
-                // Background extends into safe area to fill from the very top
-                toolbarBackground(metrics: metrics)
-                    .ignoresSafeArea(.container, edges: .top)
-            }
         }
         .ignoresSafeArea(.container, edges: .top)
         .overlay {
