@@ -32,9 +32,29 @@ const languageDetector = () => {
 
   // 1. 特殊处理中文变体
   if (languageCode === 'zh') {
-    if (scriptCode === 'Hant' || ['TW', 'HK', 'MO'].includes(countryCode || '')) {
+    // 优先看 script（Hans/Hant），避免 zh-Hans-HK 被误判为繁体
+    const normalizedScript = (scriptCode || '').toLowerCase();
+    const normalizedTag = (languageTag || '').toLowerCase();
+
+    if (
+      normalizedScript === 'hans' ||
+      normalizedTag.includes('hans')
+    ) {
+      return 'zh-Hans';
+    }
+
+    if (
+      normalizedScript === 'hant' ||
+      normalizedTag.includes('hant')
+    ) {
       return 'zh-Hant';
     }
+
+    // script 缺失时，再按区域兜底
+    if (['TW', 'HK', 'MO'].includes(countryCode || '')) {
+      return 'zh-Hant';
+    }
+
     return 'zh-Hans';
   }
 
