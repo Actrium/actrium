@@ -163,6 +163,24 @@ final class RootContentViewController: NSViewController {
         toolbarHostingView.layer?.borderColor = NSColor.systemGreen.cgColor  // DEBUG
         toolbarHostingView.layer?.borderWidth = 1  // DEBUG
         roundedContainer.addSubview(toolbarHostingView)
+
+        // Double-click toolbar to zoom/minimize (respects system preference)
+        let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(toolbarDoubleClicked(_:)))
+        doubleClick.numberOfClicksRequired = 2
+        toolbarHostingView.addGestureRecognizer(doubleClick)
+    }
+
+    @objc private func toolbarDoubleClicked(_ sender: NSClickGestureRecognizer) {
+        guard let window = view.window else { return }
+        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+        switch action {
+        case "Minimize":
+            window.miniaturize(nil)
+        case "None":
+            break
+        default:  // "Maximize"
+            window.zoom(nil)
+        }
     }
 
     private func setupSplitView() {
