@@ -11,7 +11,7 @@ final class SidebarLayoutState: ObservableObject {
 
     let collapsedToolbarWidth: CGFloat = 78
 
-    private let changeEpsilon: CGFloat = 0.5
+    private let changeEpsilon: CGFloat = 0.1
 
     func update(sidebarWidth: CGFloat, splitBoundaryX: CGFloat, isSidebarCollapsed: Bool, windowWidth: CGFloat) {
         let normalizedSidebarWidth = max(0, sidebarWidth)
