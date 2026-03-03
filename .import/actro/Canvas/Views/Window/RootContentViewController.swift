@@ -53,8 +53,8 @@ final class RootContentViewController: NSViewController {
     /// Corner radius for content area
     private let cornerRadius: CGFloat = 12
 
-    /// Toolbar height
-    private let toolbarHeight: CGFloat = 52
+    /// Toolbar height (further reduced by 1pt for optical centering)
+    private let toolbarHeight: CGFloat = 45
 
     /// Window background color (TODO: make configurable via settings)
     private let windowBackgroundColor = NSColor(red: 0.1, green: 0.2, blue: 0.4, alpha: 1.0)
