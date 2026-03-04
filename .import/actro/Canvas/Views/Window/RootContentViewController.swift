@@ -323,6 +323,11 @@ struct SelfDrawnToolbarView: View {
     @ObservedObject var layoutState: SidebarLayoutState
     var onToggleSidebar: () -> Void
 
+    // Address bar editing state
+    @State private var isAddressFocused: Bool = false
+    @State private var addressText: String = ""
+    @State private var hasInputActivity: Bool = false
+
     // Layout constants
     private let iconButtonSize: CGFloat = 30
     private let iconPointSize: CGFloat = 16
@@ -362,6 +367,19 @@ struct SelfDrawnToolbarView: View {
             // DEBUG: border for SwiftUI toolbar content bounds
             Rectangle()
                 .stroke(Color.blue.opacity(0.8), lineWidth: 1)
+        }
+        .onAppear { updateDisplayText() }
+        .onChange(of: viewModel.currentTab?.url) { _, _ in updateDisplayText() }
+        .onChange(of: viewModel.currentTab?.title) { _, _ in updateDisplayText() }
+        .onChange(of: viewModel.currentTabId) { _, _ in updateDisplayText() }
+        .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, shouldFocus in
+            if shouldFocus {
+                enterEditingMode()
+                viewModel.shouldAutoFocusAddressBar = false
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.canvas.dismissAddressBarFocus"))) { _ in
+            exitEditingMode()
         }
     }
 
@@ -427,35 +445,109 @@ struct SelfDrawnToolbarView: View {
     // MARK: - Address Bar
 
     private var addressBar: some View {
-        HStack(spacing: 8) {
-            // Page icon
+        HStack(spacing: 0) {
+            // Left icon
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
+                .frame(width: 28, height: 28)
 
-            // Address text
-            Text(currentDisplayURL)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            // Address text / input field
+            if isAddressFocused {
+                ZStack(alignment: .leading) {
+                    if addressText.isEmpty && !hasInputActivity {
+                        Text("Search or enter website name")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .allowsHitTesting(false)
+                    }
+                    SelfDrawnAddressInputField(
+                        text: $addressText,
+                        onSubmit: submitAddress,
+                        onBlur: exitEditingMode,
+                        onInputActivity: { hasInputActivity = true }
+                    )
+                }
+                .frame(maxWidth: .infinity, maxHeight: 22)
+            } else {
+                Group {
+                    if addressText.isEmpty {
+                        Text("Search or enter website name")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(addressText)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: 22, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { enterEditingMode() }
+            }
 
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(Color(white: 0.15))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.blue.opacity(0.75), lineWidth: 2)
+                .opacity(isAddressFocused ? 1 : 0)
+                .animation(.easeOut(duration: 0.12), value: isAddressFocused)
+        }
     }
 
-    private var currentDisplayURL: String {
-        if let tab = viewModel.currentTab {
-            if tab.systemTabType != nil {
-                return "about:blank"
-            }
-            return tab.url?.host ?? tab.url?.absoluteString ?? "about:blank"
+    // MARK: - Address Bar Helpers
+
+    private func displayText(for tab: Tab?) -> String {
+        guard let tab = tab else { return "" }
+        if let systemType = tab.systemTabType {
+            return systemType.aboutURL.absoluteString
         }
-        return "about:blank"
+        if case .web = tab.contentType, let url = tab.url {
+            let host = url.host ?? url.absoluteString
+            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        }
+        return tab.title
+    }
+
+    private func editingText(for tab: Tab?) -> String {
+        guard let tab = tab else { return "" }
+        if let systemType = tab.systemTabType {
+            return systemType.aboutURL.absoluteString
+        }
+        if let url = tab.url {
+            return url.absoluteString
+        }
+        return displayText(for: tab)
+    }
+
+    private func enterEditingMode() {
+        addressText = editingText(for: viewModel.currentTab)
+        isAddressFocused = true
+    }
+
+    private func exitEditingMode() {
+        isAddressFocused = false
+        hasInputActivity = false
+        updateDisplayText()
+    }
+
+    private func submitAddress() {
+        let input = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else { return }
+        viewModel.navigateCurrentTab(to: input)
+        exitEditingMode()
+    }
+
+    private func updateDisplayText() {
+        guard !isAddressFocused else { return }
+        addressText = displayText(for: viewModel.currentTab)
     }
 
     // MARK: - Right Actions
@@ -623,5 +715,116 @@ struct SelfDrawnToolbarView: View {
         }
 
         private static let toolbarButtonSize: CGFloat = 30
+    }
+}
+
+// MARK: - Address Input Field (NSViewRepresentable)
+
+private struct SelfDrawnAddressInputField: NSViewRepresentable {
+    @Binding var text: String
+    var onSubmit: () -> Void
+    var onBlur: () -> Void
+    var onInputActivity: (() -> Void)?
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField()
+        textField.font = .systemFont(ofSize: 13)
+        textField.isBordered = false
+        textField.drawsBackground = false
+        textField.focusRingType = .none
+        textField.delegate = context.coordinator
+        textField.alignment = .left
+        textField.lineBreakMode = .byTruncatingTail
+        textField.maximumNumberOfLines = 1
+        textField.cell?.isScrollable = true
+        textField.cell?.wraps = false
+        textField.usesSingleLineMode = true
+        textField.isAutomaticTextCompletionEnabled = false
+        textField.stringValue = text
+        context.coordinator.textField = textField
+
+        DispatchQueue.main.async {
+            textField.window?.makeFirstResponder(textField)
+            textField.currentEditor()?.selectAll(nil)
+            context.coordinator.startObservingFirstResponder()
+        }
+
+        return textField
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: SelfDrawnAddressInputField
+        weak var textField: NSTextField?
+        private var firstResponderObservation: NSKeyValueObservation?
+
+        init(_ parent: SelfDrawnAddressInputField) {
+            self.parent = parent
+            super.init()
+        }
+
+        deinit {
+            stopObservingFirstResponder()
+        }
+
+        func startObservingFirstResponder() {
+            guard let window = textField?.window else { return }
+            firstResponderObservation = window.observe(\.firstResponder, options: [.new]) { [weak self] _, _ in
+                self?.checkFirstResponder()
+            }
+        }
+
+        func stopObservingFirstResponder() {
+            firstResponderObservation?.invalidate()
+            firstResponderObservation = nil
+        }
+
+        private func checkFirstResponder() {
+            guard let textField = textField, let window = textField.window else { return }
+
+            let firstResponder = window.firstResponder
+            let isOurTextField = (firstResponder === textField)
+            let isFieldEditor = (firstResponder as? NSTextView)?.delegate === textField
+
+            if !isOurTextField && !isFieldEditor {
+                DispatchQueue.main.async {
+                    self.parent.onBlur()
+                }
+            }
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            stopObservingFirstResponder()
+            parent.onBlur()
+        }
+
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            startObservingFirstResponder()
+            parent.onInputActivity?()
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let tf = obj.object as? NSTextField else { return }
+            parent.text = tf.stringValue
+            parent.onInputActivity?()
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.onSubmit()
+                textField?.window?.makeFirstResponder(nil)
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                textField?.window?.makeFirstResponder(nil)
+                return true
+            }
+            return false
+        }
     }
 }
