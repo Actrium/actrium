@@ -78,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         // Initialize vault manager
         _ = VaultManager.shared
+
+        // Restore sync folder and start monitoring if enabled
+        SyncManager.shared.restoreOnLaunch()
     }
 
     private func setupNotifications() {
