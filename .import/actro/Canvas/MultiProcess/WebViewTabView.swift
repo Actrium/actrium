@@ -518,10 +518,18 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                 }
             }
         }
+
+        // Observe estimated progress for loading bar
+        progressObservation = webView.observe(\.estimatedProgress) { [weak self] webView, _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.onProgressChanged?(webView.estimatedProgress)
+            }
+        }
     }
 
     deinit {
         urlObservation?.invalidate()
+        progressObservation?.invalidate()
         dismissAutofillPopover()
     }
 
@@ -1635,6 +1643,8 @@ struct FocusedWebOverlay: View {
     var onOpenNewWindow: ((URL) -> Void)?
     /// Callback when theme color changes
     var onThemeColorChanged: ((String) -> Void)?
+    /// Callback when estimated progress changes
+    var onProgressChanged: ((Double) -> Void)?
 
     /// 从全局 Manager 获取持久化的 WebViewHolder
     private let holder: WebViewHolder
@@ -1644,7 +1654,8 @@ struct FocusedWebOverlay: View {
          onURLChanged: ((URL?) -> Void)? = nil,
          onLoadingStateChanged: ((Bool) -> Void)? = nil,
          onOpenNewWindow: ((URL) -> Void)? = nil,
-         onThemeColorChanged: ((String) -> Void)? = nil) {
+         onThemeColorChanged: ((String) -> Void)? = nil,
+         onProgressChanged: ((Double) -> Void)? = nil) {
         self.tab = tab
         self.url = url
         self.viewportSize = viewportSize
@@ -1653,6 +1664,7 @@ struct FocusedWebOverlay: View {
         self.onLoadingStateChanged = onLoadingStateChanged
         self.onOpenNewWindow = onOpenNewWindow
         self.onThemeColorChanged = onThemeColorChanged
+        self.onProgressChanged = onProgressChanged
         self.holder = WebViewHolderManager.shared.holder(for: tab.id)
 
         // Set callbacks immediately in init (SwiftUI View init can be called multiple times)
@@ -1661,6 +1673,7 @@ struct FocusedWebOverlay: View {
         holder.onLoadingStateChanged = onLoadingStateChanged
         holder.onOpenNewWindow = onOpenNewWindow
         holder.onThemeColorChanged = onThemeColorChanged
+        holder.onProgressChanged = onProgressChanged
     }
 
     var body: some View {
