@@ -8,6 +8,8 @@ struct PhoneMainView: View {
     @State private var selectedTab: PhoneTab = .tabs
     @State private var fullscreenTab: Tab?
     
+    @Namespace private var animation
+    
     enum PhoneTab {
         case bookmarks
         case tabs
@@ -80,6 +82,7 @@ struct PhoneMainView: View {
         .sheet(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                 .interactiveDismissDisabled(true)
+                .asNavigationTransition(id: tab.id, in: animation)
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
             // RN 请求退出全屏 - 先截图再关闭
