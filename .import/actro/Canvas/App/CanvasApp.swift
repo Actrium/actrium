@@ -409,9 +409,7 @@ struct CanvasApp: App {
                 Divider()
 
                 Button("聚焦地址栏") {
-                    if case .focus = focusedViewModel?.canvasMode {
-                        focusedViewModel?.shouldAutoFocusAddressBar = true
-                    }
+                    focusedViewModel?.shouldAutoFocusAddressBar = true
                 }
                 .keyboardShortcut("l", modifiers: .command)
 
