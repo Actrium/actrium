@@ -11,6 +11,7 @@ interface ChatHeaderProps {
   leftActive?: boolean;
   showLeftButton?: boolean;
   appName?: string;
+  appId?: string;
 }
 
 export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
@@ -21,7 +22,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     leftActive = false,
     showLeftButton = true,
     appName,
+    appId,
   }) => {
+    const hasAppId = Boolean(appId);
+
     return (
       <View style={styles.header}>
         <LinearGradient
@@ -38,7 +42,11 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             onPress={onLeftPress}
             disabled={leftDisabled}
           >
-            <Icon type="extension_menu" size={20} color={leftActive ? '#FFFFFF' : '#0a0a0a'} />
+            <Icon
+              type='extension_menu'
+              size={20}
+              color={leftActive ? '#FFFFFF' : '#0a0a0a'}
+            />
           </TouchableOpacity>
         ) : (
           <View style={styles.headerButtonPlaceholder} />
@@ -50,9 +58,13 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
         )}
         <TouchableOpacity
           style={styles.headerButton}
-          onPress={onRightPress}
+          onPress={hasAppId ? () => {} : onRightPress}
         >
-          <Icon type="close" size={16} color="#0a0a0a" />
+          <Icon
+            type={hasAppId ? 'history' : 'close'}
+            size={hasAppId ? 22 : 16}
+            color='#0a0a0a'
+          />
         </TouchableOpacity>
       </View>
     );

@@ -470,6 +470,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         <ChatHeader
           onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
           onRightPress={() => exitFullscreen()}
+          appId={appId}
           leftDisabled={!appId}
           leftActive={localLeftPanelVisible}
           showLeftButton={Boolean(appId)}
