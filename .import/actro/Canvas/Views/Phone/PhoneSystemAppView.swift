@@ -14,13 +14,17 @@ struct PhoneSystemAppView: View {
     var body: some View {
         GeometryReader { geometry in
             if let tab = systemTab {
-                SingleTabRootView(
-                    tab: tab,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
-                    containerSize: geometry.size
-                )
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    
+                    SingleTabRootView(
+                        tab: tab,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM,
+                        containerSize: geometry.size
+                    )
+                }
             } else {
                 // 占位视图
                 VStack {
@@ -34,10 +38,10 @@ struct PhoneSystemAppView: View {
                 .background(Color.black)
             }
         }
+        .ignoresSafeArea(.container)
         .onAppear {
             loadSystemTab()
         }
-        .ignoresSafeArea(.container)
         .onChange(of: systemType) { _, _ in
             loadSystemTab()
         }
