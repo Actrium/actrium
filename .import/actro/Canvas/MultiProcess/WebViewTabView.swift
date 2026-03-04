@@ -196,6 +196,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// KVO observation for URL changes
     private var urlObservation: NSKeyValueObservation?
 
+    /// Autofill popover for credential suggestions
+    private var autofillPopover: NSPopover?
+
     /// Canvas User-Agent string
     /// Format follows standard browser convention: Mozilla/5.0 (Platform) Engine/Version (Compatibility) Browser/Version Engine/Version
     private static let userAgent: String = {
@@ -223,7 +226,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         userContentController.add(self, name: "canvasThemeColor")
         userContentController.add(self, name: "canvasLog")
         userContentController.add(self, name: "canvasPasswordCapture")
-        userContentController.add(self, name: "canvasAutofillRequest")
+        userContentController.add(self, name: "canvasAutofillSuggestion")
+        userContentController.add(self, name: "canvasAutofillDismiss")
         
         // Inject script to observe theme color
         let script = """
@@ -320,11 +324,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Password autofill & capture script
         let autofillScript = """
         (function() {
-            var __autofillDone = false;
-
             // --- Autofill injection point ---
             window.__canvasAutofill = function(username, password) {
-                __autofillDone = true;
                 var nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
                 var pwFields = document.querySelectorAll('input[type="password"]');
                 if (pwFields.length === 0) return;
@@ -343,10 +344,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             };
 
             function findUsernameField(container) {
-                // Priority 1: type=email
                 var email = container.querySelector('input[type="email"]');
                 if (email) return email;
-                // Priority 2: name/id matching common patterns
                 var inputs = container.querySelectorAll('input[type="text"], input[type="email"], input:not([type])');
                 for (var i = 0; i < inputs.length; i++) {
                     var inp = inputs[i];
@@ -356,7 +355,6 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                     if (auto === 'username' || auto === 'email') return inp;
                     if (/user|email|login|account|nick/.test(id + ' ' + name)) return inp;
                 }
-                // Priority 3: text input right before password field
                 var pw = container.querySelector('input[type="password"]');
                 if (pw) {
                     var prev = pw.previousElementSibling;
@@ -402,36 +400,64 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                 }
             }, true);
 
-            // --- Autofill request ---
-            function requestAutofill() {
-                if (__autofillDone) return;
-                var pw = document.querySelector('input[type="password"]');
+            // --- Autofill suggestion (Chrome-style) ---
+            function isLoginField(field) {
+                if (field.type === 'password') return true;
+                var form = field.form || document;
+                if (!form.querySelector('input[type="password"]')) return false;
+                var type = (field.type || '').toLowerCase();
+                if (type === 'email') return true;
+                if (type !== 'text' && type !== '') return false;
+                var id = (field.id || '').toLowerCase();
+                var name = (field.name || '').toLowerCase();
+                var auto = (field.autocomplete || '').toLowerCase();
+                if (auto === 'username' || auto === 'email') return true;
+                if (/user|email|login|account|nick/.test(id + ' ' + name)) return true;
+                var pw = form.querySelector('input[type="password"]');
                 if (pw) {
-                    __autofillDone = true;
-                    window.webkit.messageHandlers.canvasAutofillRequest.postMessage(location.hostname);
-                }
-            }
-
-            // Initial check
-            requestAutofill();
-
-            // MutationObserver for SPA-added password fields
-            var mo = new MutationObserver(function(mutations) {
-                if (__autofillDone) return;
-                for (var i = 0; i < mutations.length; i++) {
-                    var added = mutations[i].addedNodes;
-                    for (var j = 0; j < added.length; j++) {
-                        var node = added[j];
-                        if (node.nodeType !== 1) continue;
-                        if ((node.matches && node.matches('input[type="password"]')) ||
-                            (node.querySelector && node.querySelector('input[type="password"]'))) {
-                            requestAutofill();
-                            return;
-                        }
+                    var prev = pw.previousElementSibling;
+                    while (prev) {
+                        if (prev === field) return true;
+                        if (prev.tagName === 'INPUT' && prev.type !== 'hidden') break;
+                        prev = prev.previousElementSibling;
                     }
                 }
+                return false;
+            }
+
+            var __dismissTimer = null;
+
+            document.addEventListener('focusin', function(e) {
+                var field = e.target;
+                if (field.tagName !== 'INPUT') return;
+                if (!isLoginField(field)) return;
+                if (__dismissTimer) { clearTimeout(__dismissTimer); __dismissTimer = null; }
+                var rect = field.getBoundingClientRect();
+                window.webkit.messageHandlers.canvasAutofillSuggestion.postMessage({
+                    domain: location.hostname,
+                    fieldRect: {
+                        x: rect.left,
+                        y: rect.top,
+                        width: rect.width,
+                        height: rect.height
+                    }
+                });
+            }, true);
+
+            document.addEventListener('focusout', function(e) {
+                if (__dismissTimer) { clearTimeout(__dismissTimer); __dismissTimer = null; }
+                __dismissTimer = setTimeout(function() {
+                    window.webkit.messageHandlers.canvasAutofillDismiss.postMessage(null);
+                }, 150);
+            }, true);
+
+            window.addEventListener('scroll', function() {
+                window.webkit.messageHandlers.canvasAutofillDismiss.postMessage(null);
+            }, true);
+
+            window.addEventListener('resize', function() {
+                window.webkit.messageHandlers.canvasAutofillDismiss.postMessage(null);
             });
-            mo.observe(document.body || document.documentElement, {childList: true, subtree: true});
         })();
         """
         let autofillUserScript = WKUserScript(source: autofillScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
@@ -461,6 +487,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                         NSLog("🔗 WebViewHolder: URL changed to: %@", urlString)
                         self.lastKnownURL = newURL
                         self.onURLChanged?(newURL)
+                        self.dismissAutofillPopover()
                     }
                 }
             }
@@ -469,6 +496,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     deinit {
         urlObservation?.invalidate()
+        autofillPopover?.close()
+        autofillPopover = nil
     }
 
     func loadIfNeeded(_ url: URL) {
@@ -574,11 +603,65 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
     }
 
+    // MARK: - Autofill Popover
+
+    func showAutofillPopover(credentials: [(VaultItem, String, String)], fieldRect: CGRect) {
+        dismissAutofillPopover()
+
+        let items = credentials.map { (item, username, password) in
+            AutofillSuggestionItem(
+                username: username,
+                domain: item.title,
+                password: password
+            )
+        }
+        guard !items.isEmpty else { return }
+
+        let popover = NSPopover()
+        popover.behavior = .semitransient
+        popover.contentViewController = NSHostingController(
+            rootView: AutofillSuggestionView(items: items) { [weak self] selected in
+                self?.fillCredential(username: selected.username, password: selected.password)
+                self?.dismissAutofillPopover()
+            }
+        )
+
+        // Convert JS rect (top-left origin) to NSView rect (bottom-left origin)
+        let zoom = webView.pageZoom
+        let viewBounds = webView.bounds
+        let nsRect = NSRect(
+            x: fieldRect.origin.x * zoom,
+            y: viewBounds.height - (fieldRect.origin.y + fieldRect.height) * zoom,
+            width: fieldRect.width * zoom,
+            height: fieldRect.height * zoom
+        )
+
+        popover.show(relativeTo: nsRect, of: webView, preferredEdge: .minY)
+        self.autofillPopover = popover
+    }
+
+    func dismissAutofillPopover() {
+        autofillPopover?.performClose(nil)
+        autofillPopover = nil
+    }
+
+    private func fillCredential(username: String, password: String) {
+        let safeUser = username
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        let safePass = password
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        let js = "window.__canvasAutofill('\(safeUser)', '\(safePass)')"
+        webView.evaluateJavaScript(js)
+    }
+
     // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
         onLoadingStateChanged?(true)
+        dismissAutofillPopover()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1438,16 +1521,24 @@ extension WebViewHolder: WKScriptMessageHandler {
             Task { @MainActor in
                 AutofillManager.shared.handleCapturedCredentials(url: url, username: username, password: password)
             }
-        } else if message.name == "canvasAutofillRequest", let domain = message.body as? String {
+        } else if message.name == "canvasAutofillSuggestion", let dict = message.body as? [String: Any] {
+            let domain = dict["domain"] as? String ?? ""
+            let rectDict = dict["fieldRect"] as? [String: Any] ?? [:]
+            let x = (rectDict["x"] as? Double) ?? 0
+            let y = (rectDict["y"] as? Double) ?? 0
+            let w = (rectDict["width"] as? Double) ?? 0
+            let h = (rectDict["height"] as? Double) ?? 0
+            let fieldRect = CGRect(x: x, y: y, width: w, height: h)
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
+                guard VaultManager.shared.state == .unlocked else { return }
                 let credentials = AutofillManager.shared.findCredentials(forDomain: domain)
-                guard let (_, username, password) = credentials.first else { return }
-                // Escape for JS string injection safety
-                let safeUser = username.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
-                let safePass = password.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
-                let js = "window.__canvasAutofill('\(safeUser)', '\(safePass)')"
-                self.webView.evaluateJavaScript(js)
+                guard !credentials.isEmpty else { return }
+                self.showAutofillPopover(credentials: credentials, fieldRect: fieldRect)
+            }
+        } else if message.name == "canvasAutofillDismiss" {
+            Task { @MainActor [weak self] in
+                self?.dismissAutofillPopover()
             }
         }
     }
