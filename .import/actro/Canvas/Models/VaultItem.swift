@@ -18,6 +18,30 @@ struct VaultItem: Identifiable, Codable {
     var primarySensitiveValue: String? {
         fields.first(where: { $0.isSensitive && !$0.value.isEmpty })?.value
     }
+
+    // MARK: - Login Convenience Properties
+
+    /// Domain extracted from the URL field (login items only)
+    var loginDomain: String? {
+        guard category == .login,
+              let urlString = fields.first(where: { $0.label == "URL" })?.value,
+              !urlString.isEmpty else { return nil }
+        // Try parsing as URL, add scheme if missing
+        let normalized = urlString.hasPrefix("http") ? urlString : "https://\(urlString)"
+        return URL(string: normalized)?.host
+    }
+
+    /// Username field value (login items only)
+    var loginUsername: String? {
+        guard category == .login else { return nil }
+        return fields.first(where: { $0.label == "Username" })?.value
+    }
+
+    /// Password field value (login items only)
+    var loginPassword: String? {
+        guard category == .login else { return nil }
+        return fields.first(where: { $0.label == "Password" })?.value
+    }
 }
 
 enum VaultItemCategory: String, Codable, CaseIterable {
