@@ -273,8 +273,8 @@ struct TabOutlineView: NSViewRepresentable {
             }
 
             if let outlineItem = item as? TabOutlineItem, case .group(let group) = outlineItem {
-                let groupTabs = viewModel.tabs.filter { $0.groupId == group.id }
-                return TabOutlineItem.tab(groupTabs[index])
+                let groupTabs = viewModel.tabs.filter { $0.groupId == group.id }.reversed()
+                return TabOutlineItem.tab(Array(groupTabs)[index])
             }
 
             return TabOutlineItem.tab(viewModel.tabs[0])
@@ -291,7 +291,8 @@ struct TabOutlineView: NSViewRepresentable {
             var items: [TabOutlineItem] = []
             var processedGroupIds: Set<UUID> = []
 
-            for tab in viewModel.tabs {
+            // Reverse order: newest tabs at top
+            for tab in viewModel.tabs.reversed() {
                 if let groupId = tab.groupId {
                     if !processedGroupIds.contains(groupId) {
                         processedGroupIds.insert(groupId)
