@@ -206,6 +206,10 @@ struct CanvasApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: .openNewWindowWithGroup)) { _ in
                     openWindow(id: "browser")
                 }
+                .onOpenURL { url in
+                    // SwiftUI App lifecycle may deliver URL callbacks here instead of AppDelegate.
+                    _ = WeChatManager.shared.handleOpenURL(url)
+                }
         }
         .commands {
             // New Window command
