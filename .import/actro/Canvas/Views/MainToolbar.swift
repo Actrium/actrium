@@ -401,12 +401,7 @@ struct TitlebarToolbarView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
                     .frame(width: addressBarWidth, height: 26)
-                    .background(Color.white.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
-                    )
                     .onTapGesture { onAddressBarTap() }
                 }
             }
@@ -520,12 +515,7 @@ struct FullWidthToolbarView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
                     .frame(width: geometry.size.width * 0.5, height: 28)
-                    .background(Color.white.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
-                    )
                     .onTapGesture {
                         onAddressBarTap()
                     }
@@ -659,12 +649,7 @@ struct AddressBarToolbarView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity, minHeight: 28)
-        .background(Color.white.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
-        )
         .onTapGesture {
             if !isOverviewMode {
                 onTap()

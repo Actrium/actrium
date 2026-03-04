@@ -516,7 +516,6 @@ struct SelfDrawnToolbarView: View {
         }
         .padding(.horizontal, 8)
         .frame(height: iconButtonSize)
-        .background(Color(white: 0.15))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
