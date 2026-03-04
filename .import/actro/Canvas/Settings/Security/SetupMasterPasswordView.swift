@@ -13,7 +13,7 @@ struct SetupMasterPasswordView: View {
     }
 
     private var isValid: Bool {
-        password.count >= 8 && password == confirmPassword
+        password.count >= 5 && password == confirmPassword
     }
 
     var body: some View {
@@ -51,8 +51,8 @@ struct SetupMasterPasswordView: View {
                             .foregroundColor(.red)
                     }
 
-                    if password.count > 0 && password.count < 8 {
-                        Text("Minimum 8 characters required")
+                    if password.count > 0 && password.count < 5 {
+                        Text("Minimum 5 characters required")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
