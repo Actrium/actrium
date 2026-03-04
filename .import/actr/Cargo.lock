@@ -66,25 +66,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "actr-mailbox"
-version = "0.1.5"
-dependencies = [
- "actr-protocol",
- "anyhow",
- "async-trait",
- "chrono",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tokio-test",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "actr-protocol"
 version = "0.1.7"
 dependencies = [
@@ -110,9 +91,9 @@ version = "0.1.8"
 dependencies = [
  "actr-config",
  "actr-framework",
- "actr-mailbox",
  "actr-protocol",
  "actr-runtime",
+ "actr-runtime-mailbox",
  "actr-version",
  "anyhow",
  "async-trait",
@@ -152,6 +133,25 @@ dependencies = [
  "webrtc",
  "webrtc-ice",
  "webrtc-util",
+]
+
+[[package]]
+name = "actr-runtime-mailbox"
+version = "0.1.5"
+dependencies = [
+ "actr-protocol",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
