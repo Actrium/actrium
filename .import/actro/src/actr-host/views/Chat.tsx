@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
-  Alert,
   TouchableWithoutFeedback,
   useWindowDimensions,
   NativeSyntheticEvent,
@@ -36,6 +35,7 @@ import { getHostLayoutTokens } from '../../utils/layout';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { useUnreadStore } from '../store/useUnreadStore';
 import { setTabUnreadStatus } from '../../../src/native-bridge/tab/TabModule';
+import { GlobalAlert } from '../../../src/components';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
@@ -390,7 +390,7 @@ export default function Chat() {
 
   // 处理删除按钮点击
   const handleDeletePress = useCallback(() => {
-    Alert.alert(t('actr.chat.deleteConfirmTitle'), t('actr.chat.deleteConfirmMsg'), [
+    GlobalAlert.alert(t('actr.chat.deleteConfirmTitle'), t('actr.chat.deleteConfirmMsg'), [
       {
         text: t('common.cancel'),
         style: 'cancel',

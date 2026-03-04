@@ -2,7 +2,7 @@
  * Settings System App - Built-in settings page
  */
 import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, useWindowDimensions, Alert } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { SettingsMain } from './settings/SettingsMain';
 import { AccountDetail } from './settings/AccountDetail';
@@ -11,6 +11,7 @@ import { LoginModal } from './auth/LoginModal';
 import { useUserStore } from '../actr-host/store/useUserStore';
 import { AuthRepository } from '../repository/AuthRepository';
 import { CURRENT_ENV } from '../api/auth';
+import { GlobalAlert } from '../../src/components';
 
 const SETTINGS_CLIENT_ID = '02094310-3454-4929-80b5-8ee85d09f34b';
 type SettingsPage = 'main' | 'accountDetail' | 'aboutAskAway';
@@ -34,7 +35,7 @@ export default function SettingsApp() {
   }, [clearUser]);
 
   const handleLogout = useCallback(() => {
-    Alert.alert(
+    GlobalAlert.alert(
       t('actr.settings.logout'),
       '',
       [

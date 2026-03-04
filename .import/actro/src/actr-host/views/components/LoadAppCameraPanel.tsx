@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Easing,
   Platform,
@@ -17,6 +16,7 @@ import {
   useCodeScanner,
 } from 'react-native-vision-camera';
 import { TabEvents } from '../../../native-bridge/tab/TabEvents';
+import { GlobalAlert } from '../../../../src/components';
 
 type LoadAppCameraPanelProps = {
   tabId: string;
@@ -97,7 +97,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
     onBeforeOpenCamera?.();
 
     if (!isSupported) {
-      Alert.alert('当前平台不支持扫码', '请手动输入 URL 加载应用');
+      GlobalAlert.alert('当前平台不支持扫码', '请手动输入 URL 加载应用');
       return;
     }
 
@@ -116,11 +116,11 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
         onCameraActiveChange(true);
       } else {
         console.error('[LoadAppCameraPanel] Camera permission denied:', status);
-        Alert.alert('相机初始化失败', '请稍后重试');
+        GlobalAlert.alert('相机初始化失败', '请稍后重试');
       }
     } catch (e) {
       console.error('[LoadAppCameraPanel] Camera init failed:', e);
-      Alert.alert('相机初始化失败', '请稍后重试');
+      GlobalAlert.alert('相机初始化失败', '请稍后重试');
     } finally {
       setRequesting(false);
     }

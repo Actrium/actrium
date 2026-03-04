@@ -13,10 +13,9 @@ import {
   TLocation,
 } from '../native-bridge/actr/ActrConnection.type';
 import { Utils } from '../utils/utils';
-import { useAppStore } from '../actr-host/store/useAppStore';
-import { Alert } from 'react-native';
 import { useMessageStore } from '../actr-host/store/useMessageStore';
 import { Progress } from '../repository/MessageRepository';
+import { GlobalAlert } from '../../src/components';
 
 /**
  * useActrConnection Hook
@@ -179,7 +178,7 @@ export function useActrConnection({
         },
         true,
       );
-      Alert.alert('Failed to send message', e.message || e);
+      GlobalAlert.alert('Failed to send message', e.message || e);
       return null;
     }
   };

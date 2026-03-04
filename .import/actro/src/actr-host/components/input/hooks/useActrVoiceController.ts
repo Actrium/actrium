@@ -3,6 +3,7 @@ import { Camera } from 'react-native-vision-camera';
 import React, { useCallback, useRef, useState } from 'react';
 import { useAudioStream } from '../../../hooks/useAudioStream';
 import { useTranslation } from 'react-i18next';
+import { GlobalAlert } from '../../../../../src/components';
 
 interface UseActrVoiceControllerParams {
   processVoiceMessageSend: (
@@ -117,7 +118,7 @@ export function useActrVoiceController(
       setVoiceRecording(false);
       stopRecording();
       chunkQueueRef.current = [];
-      Alert.alert(t('actr.voice.recordingFailed'), t('actr.voice.voiceSessionFailed'));
+      GlobalAlert.alert(t('actr.voice.recordingFailed'), t('actr.voice.voiceSessionFailed'));
     }
   }, [
     drainQueue,
@@ -132,7 +133,7 @@ export function useActrVoiceController(
     const status = Camera.getMicrophonePermissionStatus();
 
     if (status === 'denied') {
-      Alert.alert(t('actr.voice.micPermissionTitle'), t('actr.voice.micPermissionMsg'), [
+      GlobalAlert.alert(t('actr.voice.micPermissionTitle'), t('actr.voice.micPermissionMsg'), [
         { text: t('common.cancel'), style: 'cancel' },
         { text: t('actr.voice.goToSettings'), onPress: () => Linking.openSettings() },
       ]);
@@ -187,7 +188,7 @@ export function useActrVoiceController(
         clearTimeout(thresholdTimerRef.current);
         thresholdTimerRef.current = null;
       }
-      Alert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingStartFailed'));
+      GlobalAlert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingStartFailed'));
     }
   }, [onThresholdReached, setVoiceRecording, startRecording, stopRecording]);
 
@@ -271,7 +272,7 @@ export function useActrVoiceController(
         console.error('[Voice] handleVoiceEnd failed:', e);
         chunkQueueRef.current = [];
         isSendingRef.current = false;
-        Alert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingError'));
+        GlobalAlert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingError'));
       }
     },
     [drainQueue, duration, endVoice, hookIsRecording, setVoiceRecording, stopRecording],

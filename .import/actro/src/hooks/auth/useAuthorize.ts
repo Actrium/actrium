@@ -5,6 +5,7 @@ import { useUserStore } from '../../actr-host/store/useUserStore';
 import { useAuthTaskStore } from '../../actr-host/store/useAuthTaskStore';
 import { useTabIdMapStore } from '../../actr-host/store/useTabIdMapStore';
 import { useTranslation } from 'react-i18next';
+import { GlobalAlert } from '../../../src/components';
 
 export type AuthorizeStep = 'idle' | 'authorizing' | 'authorized' | 'failed';
 
@@ -69,7 +70,7 @@ export const useAuthorize = ({
             sessionToken!,
           );
           if (!tokenRes.success) {
-            Alert.alert(t('actr.auth.activationFailed'), tokenRes.message);
+            GlobalAlert.alert(t('actr.auth.activationFailed'), tokenRes.message);
             return false;
           }
         }
@@ -99,7 +100,7 @@ export const useAuthorize = ({
         }
         return true;
       } catch (e) {
-        Alert.alert(t('common.error'), t('actr.auth.activationFailed'));
+        GlobalAlert.alert(t('common.error'), t('actr.auth.activationFailed'));
         return false;
       }
     },
@@ -129,12 +130,12 @@ export const useAuthorize = ({
           return true;
         }
       } else {
-        Alert.alert(t('actr.auth.authorizationFailed'), res.message);
+        GlobalAlert.alert(t('actr.auth.authorizationFailed'), res.message);
       }
       setStep('failed');
       return false;
     } catch {
-      Alert.alert(t('common.error'), t('actr.auth.authorizationError'));
+      GlobalAlert.alert(t('common.error'), t('actr.auth.authorizationError'));
       setStep('failed');
       return false;
     } finally {

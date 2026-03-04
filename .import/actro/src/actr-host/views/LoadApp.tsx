@@ -12,7 +12,6 @@ import {
   ViewStyle,
   ScrollView,
   useWindowDimensions,
-  Alert,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useTabIdMapStore } from '../store/useTabIdMapStore';
@@ -26,6 +25,7 @@ import { setTabBookmarkStatus } from '../../../src/native-bridge/tab/TabModule';
 import SafeBottomView from '../components/SafeBottomView';
 import { Icon } from '../components/Icon';
 import { LoadAppCameraPanel } from './components/LoadAppCameraPanel';
+import { GlobalAlert } from '../../../src/components';
 
 const LoadApp = () => {
   const { t } = useTranslation();
@@ -91,9 +91,9 @@ const LoadApp = () => {
         );
         if (!initResult.ok) {
           if (initResult.reason === 'APP_NOT_FOUND') {
-            Alert.alert(t('actr.app.notExist'));
+            GlobalAlert.alert(t('actr.app.notExist'));
           } else {
-            Alert.alert(t('actr.app.loadFailed'), t('actr.app.networkRetry'));
+            GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.networkRetry'));
           }
           return;
         }
@@ -103,7 +103,7 @@ const LoadApp = () => {
         void BookmarkRepository.updateTabId(appId, tabCtx.tab.id);
       } catch (error) {
         console.error('[LoadApp] Failed to resolve app from url:', error);
-        Alert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));
+        GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));
       } finally {
         isResolvingRef.current = false;
         setIsResolving(false);

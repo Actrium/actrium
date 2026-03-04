@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TouchableWithoutFeedback,
   Modal,
-  Alert,
   Linking,
   Platform,
   PermissionsAndroid,
@@ -15,6 +14,7 @@ import MapView, { Region } from 'react-native-maps';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import type Geolocation from '@react-native-community/geolocation';
+import { GlobalAlert } from '../../../src/components';
 
 interface LocationPickerProps {
   visible: boolean;
@@ -60,7 +60,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
     try {
       const geolocation = getGeolocation();
       if (!geolocation) {
-        Alert.alert(
+        GlobalAlert.alert(
           t('common.error', '错误'),
           t('actr.input.locationFailed', '无法获取当前位置'),
         );
@@ -80,7 +80,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       );
 
       if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-        Alert.alert(
+        GlobalAlert.alert(
           t('actr.input.locationPermissionTitle'),
           t('actr.input.locationPermissionMsg'),
           [
@@ -111,7 +111,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
         },
         (error) => {
           console.warn('[Geolocation] Android Error:', error);
-          Alert.alert(
+          GlobalAlert.alert(
             t('common.error', '错误'),
             t('actr.input.locationFailed', '无法获取当前位置'),
           );
@@ -132,7 +132,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   const handleInitialLocation = async () => {
     const geolocation = getGeolocation();
     if (!geolocation) {
-      Alert.alert(
+      GlobalAlert.alert(
         t('common.error', '错误'),
         t('actr.input.locationFailed', '无法获取当前位置'),
       );
@@ -147,7 +147,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       );
     });
     if (status !== 'granted') {
-      Alert.alert(
+      GlobalAlert.alert(
         t('actr.input.locationPermissionTitle'),
         t('actr.input.locationPermissionMsg'),
         [
@@ -226,7 +226,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       });
     } catch (error) {
       console.error('Failed to take snapshot:', error);
-      Alert.alert(t('common.error'), t('actr.chat.snapshotFailed') || '无法生成地图快照');
+      GlobalAlert.alert(t('common.error'), t('actr.chat.snapshotFailed') || '无法生成地图快照');
     }
   };
 

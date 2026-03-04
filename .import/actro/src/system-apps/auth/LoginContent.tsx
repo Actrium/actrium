@@ -5,8 +5,8 @@ import {
   Image,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   Platform,
+  Alert as NativeAlert
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { LoginBridge, LoginType } from '../../native-bridge';
@@ -76,7 +76,7 @@ export const LoginContent = ({
   const onLoginPress = useCallback(
     (type: LoginType) => {
       if (!agreePolicy) {
-        Alert.alert(
+        NativeAlert.alert(
           t('actr.auth.agreePolicyTitle'),
           t('actr.auth.agreePolicyDetail'),
           [

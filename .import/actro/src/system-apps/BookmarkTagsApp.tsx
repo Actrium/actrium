@@ -8,11 +8,11 @@ import {
   TextInput,
   ScrollView,
   StyleSheet,
-  Alert,
   useWindowDimensions,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { MyTouchableOpacity } from 'askit';
+import { GlobalAlert } from '../../src/components';
 
 interface Tag {
   id: string;
@@ -57,7 +57,7 @@ export default function BookmarkTagsApp() {
   };
 
   const handleDeleteTag = (id: string) => {
-    Alert.alert(
+    GlobalAlert.alert(
       t('actr.bookmarkTags.deleteTitle'),
       t('actr.bookmarkTags.deleteMessage'),
       [
