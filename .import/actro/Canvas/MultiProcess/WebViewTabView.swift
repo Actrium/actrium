@@ -443,19 +443,21 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         webView.isInspectable = true  // Enable Web Inspector
 
         // Observe URL changes (including History.pushState/replaceState)
-        // NOTE: Do NOT use .old option — WebKit can fire KVO during PageLoadState::Transaction
-        // destruction, at which point the old URL's backing memory may already be freed,
-        // causing EXC_BAD_ACCESS in _platform_strlen when accessing change.oldValue.
-        urlObservation = webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
-            guard let newURL = webView.url else { return }
-            guard let self = self else { return }
-            // Keep loadedURL in sync so loadIfNeeded won't redundantly reload after redirects
-            self.loadedURL = newURL
-            // Only notify if URL actually changed (tracked internally)
-            if self.lastKnownURL != newURL {
-                NSLog("🔗 WebViewHolder: URL changed from \(self.lastKnownURL?.absoluteString ?? "nil") to: \(newURL.absoluteString)")
-                self.lastKnownURL = newURL
-                self.onURLChanged?(newURL)
+        // IMPORTANT: WebKit fires KVO synchronously during PageLoadState::Transaction destruction.
+        // At that point, webView.url's backing NSURL string buffer may already be freed, causing
+        // EXC_BAD_ACCESS in _platform_strlen. We must NOT access webView.url (or any WebKit state)
+        // synchronously inside the KVO handler. Dispatch async so the transaction fully completes first.
+        urlObservation = webView.observe(\.url) { [weak self] _, _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                guard let newURL = self.webView.url else { return }
+                // Keep loadedURL in sync so loadIfNeeded won't redundantly reload after redirects
+                self.loadedURL = newURL
+                if self.lastKnownURL != newURL {
+                    NSLog("🔗 WebViewHolder: URL changed to: \(newURL.absoluteString)")
+                    self.lastKnownURL = newURL
+                    self.onURLChanged?(newURL)
+                }
             }
         }
     }
