@@ -27,9 +27,17 @@ struct UnlockVaultView: View {
                     .foregroundColor(.secondary)
 
                 VStack(spacing: 12) {
-                    SecureField("Master password", text: $password)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { unlock() }
+                    PasswordField(
+                        password: $password,
+                        placeholder: "Master password",
+                        onSubmit: { unlock() }
+                    )
+
+                    if let hint = vault.passwordHint, !hint.isEmpty {
+                        Text("Hint: \(hint)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
 
                     if let error = errorMessage {
                         Text(error)

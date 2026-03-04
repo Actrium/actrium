@@ -57,6 +57,10 @@ final class VaultManager: ObservableObject {
         KeychainHelper.isBiometricsAvailable()
     }
 
+    var passwordHint: String? {
+        VaultDatabase.getVaultMeta(key: "password_hint")
+    }
+
     private var derivedKey: SymmetricKey?
     private var autoLockTimer: Timer?
 
@@ -74,7 +78,7 @@ final class VaultManager: ObservableObject {
 
     // MARK: - Setup
 
-    func setupMasterPassword(_ password: String, enableTouchID: Bool) async throws {
+    func setupMasterPassword(_ password: String, hint: String? = nil) async throws {
         guard state == .notSetup else { throw VaultError.alreadySetup }
 
         isProcessing = true
@@ -98,12 +102,9 @@ final class VaultManager: ObservableObject {
         let verificationToken = try encrypt("vault-verification-token")
         VaultDatabase.setVaultMeta(key: "verification_hash", value: verificationToken)
 
-        // Enable Touch ID if requested and available
-        if enableTouchID && isBiometricsAvailable {
-            isTouchIDEnabled = true
-            try KeychainHelper.saveMasterPassword(password)
-        } else {
-            isTouchIDEnabled = false
+        // Store password hint if provided
+        if let hint = hint, !hint.isEmpty {
+            VaultDatabase.setVaultMeta(key: "password_hint", value: hint)
         }
 
         state = .unlocked
@@ -212,7 +213,7 @@ final class VaultManager: ObservableObject {
 
     // MARK: - Change Password
 
-    func changeMasterPassword(current: String, new newPassword: String) async throws {
+    func changeMasterPassword(current: String, new newPassword: String, hint: String? = nil) async throws {
         guard state == .unlocked else { throw VaultError.locked }
 
         isProcessing = true
@@ -279,12 +280,29 @@ final class VaultManager: ObservableObject {
             )
         }
 
+        // Update password hint
+        if let hint = hint, !hint.isEmpty {
+            VaultDatabase.setVaultMeta(key: "password_hint", value: hint)
+        } else {
+            VaultDatabase.setVaultMeta(key: "password_hint", value: "")
+        }
+
         // Update keychain if Touch ID enabled
         if isTouchIDEnabled {
             try? KeychainHelper.saveMasterPassword(newPassword)
         }
 
         credentials = decryptedCreds
+    }
+
+    // MARK: - Password Hint
+
+    func setPasswordHint(_ hint: String) {
+        if hint.isEmpty {
+            VaultDatabase.setVaultMeta(key: "password_hint", value: "")
+        } else {
+            VaultDatabase.setVaultMeta(key: "password_hint", value: hint)
+        }
     }
 
     // MARK: - Credential Management
