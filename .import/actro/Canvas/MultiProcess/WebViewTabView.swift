@@ -154,13 +154,58 @@ struct WebViewMultiProcessTabView: View {
     }
 }
 
-// MARK: - Autofill Panel (borderless NSPanel, no arrow, Chrome-style)
+// MARK: - Autofill Panel (borderless NSPanel, Chrome-style with arrow)
 
 private class AutofillPanel: NSPanel {
     var onDismiss: (() -> Void)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { onDismiss?() }
+}
+
+/// Arrow-topped rounded rectangle shape (Chrome-style dropdown)
+private struct DropdownArrowShape: Shape {
+    let cornerRadius: CGFloat
+    let arrowWidth: CGFloat
+    let arrowHeight: CGFloat
+    let arrowOffset: CGFloat  // center of arrow from leading edge
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let bodyTop = rect.minY + arrowHeight
+
+        let arrowLeft = arrowOffset - arrowWidth / 2
+        let arrowRight = arrowOffset + arrowWidth / 2
+
+        // Start at top-left of body
+        path.move(to: CGPoint(x: rect.minX + cornerRadius, y: bodyTop))
+        // → arrow
+        path.addLine(to: CGPoint(x: arrowLeft, y: bodyTop))
+        path.addLine(to: CGPoint(x: arrowOffset, y: rect.minY))
+        path.addLine(to: CGPoint(x: arrowRight, y: bodyTop))
+        // → top-right corner
+        path.addLine(to: CGPoint(x: rect.maxX - cornerRadius, y: bodyTop))
+        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: bodyTop),
+                     tangent2End: CGPoint(x: rect.maxX, y: bodyTop + cornerRadius),
+                     radius: cornerRadius)
+        // → bottom-right corner
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - cornerRadius))
+        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
+                     tangent2End: CGPoint(x: rect.maxX - cornerRadius, y: rect.maxY),
+                     radius: cornerRadius)
+        // → bottom-left corner
+        path.addLine(to: CGPoint(x: rect.minX + cornerRadius, y: rect.maxY))
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
+                     tangent2End: CGPoint(x: rect.minX, y: rect.maxY - cornerRadius),
+                     radius: cornerRadius)
+        // → top-left corner
+        path.addLine(to: CGPoint(x: rect.minX, y: bodyTop + cornerRadius))
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: bodyTop),
+                     tangent2End: CGPoint(x: rect.minX + cornerRadius, y: bodyTop),
+                     radius: cornerRadius)
+        path.closeSubpath()
+        return path
+    }
 }
 
 /// NSVisualEffectView wrapper for SwiftUI
@@ -660,19 +705,33 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         let windowRect = webView.convert(nsRect, to: nil)
         let screenRect = window.convertToScreen(windowRect)
 
-        // Build the SwiftUI content wrapped in a visual effect background
+        // Arrow geometry
+        let arrowHeight: CGFloat = 10
+        let arrowWidth: CGFloat = 16
+        let arrowOffset: CGFloat = 40  // center of arrow from panel left edge
+
+        let shape = DropdownArrowShape(
+            cornerRadius: 8,
+            arrowWidth: arrowWidth,
+            arrowHeight: arrowHeight,
+            arrowOffset: arrowOffset
+        )
+
+        // Build the SwiftUI content with arrow-shaped background
         let swiftUIView = content()
+            .padding(.top, arrowHeight)
             .background(
                 VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(shape)
             )
 
         let hostingView = NSHostingView(rootView: swiftUIView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Measure the ideal size
+        // Measure the ideal size (includes arrow height from padding)
         let fittingSize = hostingView.fittingSize
 
+        // Position: panel top (arrow tip) at the field's bottom edge
         let panel = AutofillPanel(
             contentRect: NSRect(
                 x: screenRect.origin.x,
@@ -698,12 +757,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Click-outside monitor
         autofillClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self = self, let panel = self.autofillPanel else { return event }
-            let loc = event.locationInWindow
             if event.window == panel {
-                // Click inside panel — pass through
                 return event
             }
-            // Click outside — dismiss
             self.dismissAutofillPopover()
             return event
         }
