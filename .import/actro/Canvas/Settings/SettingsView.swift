@@ -3,13 +3,17 @@ import SwiftUI
 // MARK: - Settings Tab
 
 enum SettingsTab: String, CaseIterable {
+    case general = "General"
     case password = "Password"
+    case privacy = "Privacy"
     case sync = "Sync"
     case shortcuts = "Shortcuts"
 
     var icon: String {
         switch self {
+        case .general: return "gearshape"
         case .password: return "lock.fill"
+        case .privacy: return "hand.raised.fill"
         case .sync: return "arrow.triangle.2.circlepath"
         case .shortcuts: return "keyboard"
         }
@@ -68,8 +72,12 @@ struct SettingsView: View {
     @ViewBuilder
     private var tabContent: some View {
         switch selectedTab {
+        case .general:
+            GeneralSettingsView()
         case .password:
             PasswordSettingsView()
+        case .privacy:
+            PrivacySettingsView()
         case .sync:
             SyncSettingsView()
         case .shortcuts:
