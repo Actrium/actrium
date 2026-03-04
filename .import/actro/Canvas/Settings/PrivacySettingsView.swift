@@ -20,6 +20,7 @@ enum ClearDataTimeRange: String, CaseIterable {
 // MARK: - Privacy Settings View
 
 struct PrivacySettingsView: View {
+    @State private var adBlockingEnabled = ContentBlockerManager.shared.isEnabled
     @State private var clearCookies = true
     @State private var clearCache = true
     @State private var clearLocalStorage = false
@@ -31,6 +32,21 @@ struct PrivacySettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            // Ad Blocking
+            Text("Content Blocking")
+                .font(.headline)
+
+            Toggle("Block Ads and Trackers", isOn: $adBlockingEnabled)
+                .onChange(of: adBlockingEnabled) { _, newValue in
+                    ContentBlockerManager.shared.isEnabled = newValue
+                }
+
+            Text("Takes effect for newly opened tabs.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Divider()
+
             Text("Clear Browsing Data")
                 .font(.headline)
 

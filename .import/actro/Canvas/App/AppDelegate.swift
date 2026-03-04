@@ -79,6 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Initialize vault manager
         _ = VaultManager.shared
 
+        // Pre-compile ad-blocking rules so they're ready when tabs open
+        ContentBlockerManager.shared.loadRules { _ in }
+
         // Restore sync folder and start monitoring if enabled
         SyncManager.shared.restoreOnLaunch()
     }
