@@ -8,6 +8,7 @@ import {
   TouchableWithoutFeedback,
   ActivityIndicator,
   Image,
+  ImageBackground,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { LoginContent } from './LoginContent';
@@ -114,6 +115,12 @@ export const LoginModal = ({
         <View style={styles.overlay}>
           <TouchableWithoutFeedback>
             <View style={styles.modalContainer}>
+              <ImageBackground
+                source={require('../../assets/login/login_bg.png')}
+                style={styles.modalBg}
+                imageStyle={styles.modalBgImage}
+                resizeMode="cover"
+              />
               <View style={styles.modalContentWrapper}>
                 <View style={styles.header}>
                   <Text style={styles.title}>{t('actr.auth.login') + ' AskAway'}</Text>
@@ -161,6 +168,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(203, 214, 253, 1)',
     borderRadius: 33,
     overflow: 'hidden',
+    position: 'relative',
+  },
+  modalBg: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalBgImage: {
+    borderRadius: 33,
   },
   modalContentWrapper: {
     paddingTop: 16,

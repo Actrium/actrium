@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useUserStore } from '../../actr-host/store/useUserStore';
+import { Icon } from '../../actr-host/components/Icon';
 
 type ThemeVariant = 'light' | 'dark';
 
@@ -44,7 +46,7 @@ interface AuthorizeContentProps {
   appName?: string;
   loading?: boolean;
   onAuthorize: () => void;
-  onReject?: () => void;
+  onReject: () => void;
   fontSize?: {
     title?: number;
     appName?: number;
@@ -70,6 +72,7 @@ export const AuthorizeContent = ({
 }: AuthorizeContentProps) => {
   const { t } = useTranslation();
   const colors = themeColors[variant];
+  const userInfo = useUserStore((state) => state.userInfo);
 
   const {
     title: titleFontSize = 17,
@@ -108,20 +111,32 @@ export const AuthorizeContent = ({
       <Text style={[styles.title, { fontSize: titleFontSize, color: colors.tip, fontWeight: '600' }]}>
         {t('actr.auth.authTip')}
       </Text>
+      <Text style={styles.authDetailText}>
+        用户标识、昵称、头像、邮箱。若所选登录方式支持邮箱（如 Apple、Google），也将获取邮箱地址。
+      </Text>
 
-      {/* Authorize Button */}
-      <TouchableOpacity
-        style={[styles.authorizeButton, { backgroundColor: colors.authButtonBg }]}
-        onPress={onAuthorize}
-        activeOpacity={0.8}
-      >
-        <Text style={[styles.authorizeButtonText, { fontSize: buttonFontSize, color: colors.authButtonText }]}>
-          {t('actr.auth.agreeAuth')}
-        </Text>
-      </TouchableOpacity>
+      {userInfo?.profiles?.length ? (
+        <View style={styles.profileList}>
+          {userInfo.profiles.map((profile, index) => (
+            <View
+              key={profile.id || profile.cn}
+              style={[styles.profileItem, index < userInfo.profiles.length - 1 ? styles.profileItemSpacing : null]}
+            >
+              <View style={styles.profileLeft}>
+                <View style={styles.profileLeftIconBg}>
+                  <Icon type='user_item' size={14} disableTint />
+                </View>
+                <Text style={styles.profileName} numberOfLines={1} ellipsizeMode='tail'>
+                  {profile.display_name || (profile as any).email || profile.mail}
+                </Text>
+              </View>
+              <Icon type='user_select' size={18} disableTint />
+            </View>
+          ))}
+        </View>
+      ) : null}
 
-      {/* Reject Button */}
-      {onReject && (
+      <View style={styles.buttonRow}>
         <TouchableOpacity
           style={[
             styles.rejectButton,
@@ -131,10 +146,19 @@ export const AuthorizeContent = ({
           activeOpacity={0.7}
         >
           <Text style={[styles.rejectButtonText, { fontSize: buttonFontSize, color: colors.rejectButtonText }]}>
-            {t('common.cancel')}
+            拒绝
           </Text>
         </TouchableOpacity>
-      )}
+        <TouchableOpacity
+          style={[styles.authorizeButton, { backgroundColor: colors.authButtonBg }]}
+          onPress={onAuthorize}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.authorizeButtonText, { fontSize: buttonFontSize, color: colors.authButtonText }]}>
+            允许
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -172,28 +196,76 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   title: {
-    marginBottom: 24,
+    marginBottom: 0,
     alignSelf: 'flex-start',
   },
-  authorizeButton: {
+  authDetailText: {
+    marginTop: 10,
+    marginBottom: 34,
+    fontSize: 17,
+    color: '#000000',
+    alignSelf: 'flex-start',
+  },
+  profileList: {
     width: '100%',
+    marginBottom: 24,
+  },
+  profileItem: {
+    width: '100%',
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#78788029',
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  profileItemSpacing: {
+    marginBottom: 8,
+  },
+  profileLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  profileLeftIconBg: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#597EF70D',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  profileName: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000000',
+  },
+  buttonRow: {
+    width: '100%',
+    flexDirection: 'row',
+  },
+  authorizeButton: {
+    flex: 1,
     height: 48,
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
   },
   authorizeButtonText: {
     fontWeight: '500',
   },
   rejectButton: {
-    width: '100%',
+    flex: 1,
     height: 48,
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 0,
+    marginRight: 10,
   },
   rejectButtonText: {
     fontWeight: '500',
