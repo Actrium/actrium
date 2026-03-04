@@ -899,7 +899,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
     /// 解析 URL 字符串
     /// - 如果是 about:/http/https/askw/askaway，直接解析
     /// - 如果看起来像域名（包含 . 且不包含空格），添加 https:// 前缀
-    private func parseURL(_ input: String) -> URL? {
+    func parseURL(_ input: String) -> URL? {
         // 已经是完整 URL (http/https/about/askw/askaway)
         if input.hasPrefix("http://") || input.hasPrefix("https://") ||
            input.hasPrefix("about:") ||

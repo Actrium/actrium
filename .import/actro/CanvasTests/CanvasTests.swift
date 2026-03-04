@@ -5,6 +5,7 @@
 //  Created by Leo General on 2025/11/14.
 //
 
+import Foundation
 import Testing
 @testable import Canvas
 

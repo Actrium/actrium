@@ -29,6 +29,11 @@ target 'Canvas' do
   use_canvas_react_native
 end
 
+target 'CanvasTests' do
+  platform :macos, '14.0'
+  use_canvas_react_native
+end
+
 # ViewBridge XPC service with React Native
 target 'CanvasViewService' do
   platform :macos, '14.0'
