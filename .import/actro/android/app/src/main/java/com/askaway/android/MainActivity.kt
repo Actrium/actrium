@@ -1,7 +1,6 @@
 package com.askaway.android
 
 import android.animation.ObjectAnimator
-import android.app.Activity
 import android.content.Intent
 import android.graphics.Outline
 import android.graphics.Path
@@ -16,26 +15,21 @@ import android.view.animation.DecelerateInterpolator
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.view.forEach
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.databinding.ActivityMainBinding
 import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
-import com.askaway.android.view.HeadTabView
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.facebook.react.uimanager.PixelUtil.pxToDp
 import kotlinx.coroutines.launch
-import com.askaway.android.global.Constants
-import kotlinx.coroutines.delay
-import com.askaway.android.core.ReactNativeBundle
 import java.util.UUID
-import com.rill.sandbox.RillSandbox
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
     private lateinit var binding: ActivityMainBinding
@@ -47,17 +41,11 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private var isLayoutComplete = false
     private var permissionListener: PermissionListener? = null
     private lateinit var activeRecyclerAdapter: com.askaway.android.adapter.ActiveRecyclerAdapter
-    private lateinit var activeAdapter: ActiveAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-//        val reactContext = reactNativeHost.reactInstanceManager.currentReactContext
-//        if (reactContext != null) {
-//            val runtimePtr = reactContext.javaScriptContextHolder.get()
-//            RillSandbox.install(runtimePtr)
-//        }
 
         // 处理状态栏 insets，确保内容不会延伸到状态栏下方
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -86,46 +74,44 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                     binding.flReactNative.viewTreeObserver.removeOnGlobalLayoutListener(this)
 
                     // 设置自定义 OutlineProvider 以支持圆角裁剪（仅上方圆角）
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        // 38dp 转换为 px
-                        val cornerRadiusDp = 38f
-                        val cornerRadiusPx = cornerRadiusDp * resources.displayMetrics.density
+                    // 38dp 转换为 px
+                    val cornerRadiusDp = 38f
+                    val cornerRadiusPx = cornerRadiusDp * resources.displayMetrics.density
 
-                        binding.flRNContent.outlineProvider = object : ViewOutlineProvider() {
-                            override fun getOutline(view: View, outline: Outline) {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                    // Android 11+ 使用 setPath
-                                    val path = Path()
-                                    val width = view.width.toFloat()
-                                    val height = view.height.toFloat()
-                                    val radius = cornerRadiusPx
+                    binding.flRNContent.outlineProvider = object : ViewOutlineProvider() {
+                        override fun getOutline(view: View, outline: Outline) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                // Android 11+ 使用 setPath
+                                val path = Path()
+                                val width = view.width.toFloat()
+                                val height = view.height.toFloat()
+                                val radius = cornerRadiusPx
 
-                                    // 从左上角开始
-                                    path.moveTo(radius, 0f)
-                                    // 顶部直线到右上角
-                                    path.lineTo(width - radius, 0f)
-                                    // 右上角圆角 (90度圆弧)
-                                    path.arcTo(width - radius * 2, 0f, width, radius * 2, 270f, 90f, false)
-                                    // 右侧直线到右下角
-                                    path.lineTo(width, height)
-                                    // 底部直线到左下角
-                                    path.lineTo(0f, height)
-                                    // 左侧直线到左上角
-                                    path.lineTo(0f, radius)
-                                    // 左上角圆角 (90度圆弧)
-                                    path.arcTo(0f, 0f, radius * 2, radius * 2, 180f, 90f, false)
-                                    path.close()
+                                // 从左上角开始
+                                path.moveTo(radius, 0f)
+                                // 顶部直线到右上角
+                                path.lineTo(width - radius, 0f)
+                                // 右上角圆角 (90度圆弧)
+                                path.arcTo(width - radius * 2, 0f, width, radius * 2, 270f, 90f, false)
+                                // 右侧直线到右下角
+                                path.lineTo(width, height)
+                                // 底部直线到左下角
+                                path.lineTo(0f, height)
+                                // 左侧直线到左上角
+                                path.lineTo(0f, radius)
+                                // 左上角圆角 (90度圆弧)
+                                path.arcTo(0f, 0f, radius * 2, radius * 2, 180f, 90f, false)
+                                path.close()
 
-                                    outline.setPath(path)
-                                } else {
-                                    // Android 5.0-10 使用 setRoundRect，所有角都会有圆角
-                                    outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx)
-                                }
+                                outline.setPath(path)
+                            } else {
+                                // Android 5.0-10 使用 setRoundRect，所有角都会有圆角
+                                outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx)
                             }
                         }
-                        binding.flRNContent.elevation = 0.0f
-                        binding.flRNContent.clipToOutline = true
                     }
+                    binding.flRNContent.elevation = 0.0f
+                    binding.flRNContent.clipToOutline = true
 
                     Log.d("MainActivity", "flReactNative initial height: ${binding.flReactNative.height}")
                 }
@@ -136,6 +122,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             viewModel.containerWidth = binding.flContent.width.pxToDp().toInt()
             viewModel.containerHeight = binding.flContent.height.pxToDp().toInt()
         }
+
+        handleKeyboard(binding.flReactNative)
 
         binding.ivAdd.setOnClickListener {
             viewModel.addApp()
@@ -203,7 +191,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         }
 
         binding.ivAdd.post {
-//            binding.ivAdd.performClick()
+            binding.ivAdd.performClick()
         }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -224,7 +212,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 }
                 launch {
                     viewModel.activeList.collect { activeModels ->
-                        Log.d("MainActivity", "activeList changed: "+activeModels.size)
+                        Log.d("MainActivity", "activeList changed: " + activeModels.size)
                         activeRecyclerAdapter.updateData(activeModels)
                         if (activeModels.isEmpty()) {
                             finish()
@@ -291,6 +279,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 binding.llActive.visibility = View.VISIBLE
                 binding.flSet.visibility = View.GONE
             }
+
             R.id.navSettings -> showSet()
         }
     }
@@ -379,38 +368,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         // 初始位置在屏幕右侧
         binding.flSearch.translationX = binding.flSearch.width.toFloat()
         binding.flSearch.visibility = View.VISIBLE
-
         // 为 flSearch 添加 WindowInsets 监听，处理键盘问题
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            binding.flSearch.setOnApplyWindowInsetsListener { v, insets ->
-                val imeHeight = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
-
-                // 当键盘弹出时，为 flSearch 的子视图添加下方 padding
-                if (imeHeight > 0) {
-                    binding.flSearch.setPadding(0, 0, 0, imeHeight)
-                } else {
-                    binding.flSearch.setPadding(0, 0, 0, 0)
-                }
-
-                // 消费 insets 以防止默认处理
-                WindowInsets.CONSUMED
-            }
-        } else {
-            // Android 5.0-10 的兼容性处理
-            binding.flSearch.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-                override fun onGlobalLayout() {
-                    val rect = android.graphics.Rect()
-                    binding.root.getWindowVisibleDisplayFrame(rect)
-                    val heightDiff = binding.root.rootView.height - rect.bottom
-                    if (heightDiff > 100) { // 键盘高度大于 100px
-                        binding.flSearch.setPadding(0, 0, 0, heightDiff)
-                    } else {
-                        binding.flSearch.setPadding(0, 0, 0, 0)
-                    }
-                }
-            })
-        }
-
+        handleKeyboard(binding.flSearch)
         // 请求应用 window insets
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             binding.flSearch.requestApplyInsets()
@@ -568,5 +527,36 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         }
         return result
     }
-}
 
+    private fun handleKeyboard(view: View) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            view.setOnApplyWindowInsetsListener { v, insets ->
+                val imeHeight = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+
+                // 当键盘弹出时，为 flSearch 的子视图添加下方 padding
+                if (imeHeight > 0) {
+                    view.setPadding(0, 0, 0, imeHeight)
+                } else {
+                    view.setPadding(0, 0, 0, 0)
+                }
+
+                // 消费 insets 以防止默认处理
+                WindowInsets.CONSUMED
+            }
+        } else {
+            // Android 5.0-10 的兼容性处理
+            view.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    val rect = android.graphics.Rect()
+                    binding.root.getWindowVisibleDisplayFrame(rect)
+                    val heightDiff = binding.root.rootView.height - rect.bottom
+                    if (heightDiff > 100) { // 键盘高度大于 100px
+                        view.setPadding(0, 0, 0, heightDiff)
+                    } else {
+                        view.setPadding(0, 0, 0, 0)
+                    }
+                }
+            })
+        }
+    }
+}
