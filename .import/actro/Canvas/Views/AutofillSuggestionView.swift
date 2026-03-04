@@ -28,32 +28,102 @@ struct AutofillSuggestionView: View {
     }
 }
 
-// MARK: - Vault Locked Prompt
+// MARK: - Vault Locked Prompt (inline unlock)
 
 struct VaultLockedPromptView: View {
-    let onUnlock: () -> Void
+    @ObservedObject private var vault = VaultManager.shared
+    let onUnlocked: () -> Void
+
+    @State private var password = ""
+    @State private var errorMessage: String?
+
+    private var hasTouchID: Bool {
+        vault.isTouchIDEnabled && vault.isBiometricsAvailable
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .frame(width: 20)
-
-            Text("Vault is locked")
-                .font(.system(size: 13))
-                .foregroundColor(.primary)
-
-            Spacer()
-
-            Button("Unlock") {
-                onUnlock()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .frame(width: 20)
+                Text("Vault is locked")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.primary)
             }
-            .controlSize(.small)
+
+            HStack(spacing: 6) {
+                SecureField("Master password", text: $password)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+                    .onSubmit { unlock() }
+
+                Button {
+                    unlock()
+                } label: {
+                    if vault.isProcessing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("Unlock")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(password.isEmpty || vault.isProcessing)
+
+                if hasTouchID {
+                    Button {
+                        unlockWithBiometrics()
+                    } label: {
+                        Image(systemName: "touchid")
+                            .font(.system(size: 14))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(vault.isProcessing)
+                }
+            }
+
+            if let error = errorMessage {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .frame(width: 260)
+        .frame(width: 280)
+        .onAppear {
+            if hasTouchID {
+                unlockWithBiometrics()
+            }
+        }
+    }
+
+    private func unlock() {
+        errorMessage = nil
+        Task {
+            do {
+                try await vault.unlock(password: password)
+                onUnlocked()
+            } catch {
+                errorMessage = "Incorrect password"
+            }
+        }
+    }
+
+    private func unlockWithBiometrics() {
+        errorMessage = nil
+        Task {
+            do {
+                try await vault.unlockWithBiometrics()
+                onUnlocked()
+            } catch {
+                // Silent — user can enter password manually
+            }
+        }
     }
 }
 
