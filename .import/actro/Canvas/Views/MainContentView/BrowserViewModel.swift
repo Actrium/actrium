@@ -49,6 +49,9 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
     /// Current tab loading state (for web content)
     @Published var isCurrentTabLoading: Bool = false
 
+    /// Current tab loading progress (0.0 to 1.0)
+    @Published var loadingProgress: Double = 0
+
     // MARK: - Grid Slot Position Management
 
     /// Tab ID → grid slot index mapping

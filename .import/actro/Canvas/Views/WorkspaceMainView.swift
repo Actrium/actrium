@@ -260,9 +260,25 @@ struct WorkspaceMainView: View {
                             },
                             onThemeColorChanged: { color in
                                 viewModel.updateTabBackgroundColor(for: focusedTabId, color: color)
+                            },
+                            onProgressChanged: { progress in
+                                viewModel.loadingProgress = progress
                             }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                        // Safari-style loading progress bar
+                        if viewModel.isCurrentTabLoading {
+                            GeometryReader { geo in
+                                Rectangle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: geo.size.width * viewModel.loadingProgress, height: 2)
+                                    .animation(.linear(duration: 0.2), value: viewModel.loadingProgress)
+                            }
+                            .frame(height: 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .transition(.opacity)
+                        }
 
                         SavePasswordBannerView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
