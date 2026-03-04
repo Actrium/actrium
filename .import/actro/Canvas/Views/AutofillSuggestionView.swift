@@ -50,21 +50,32 @@ struct VaultLockedPromptView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                    .frame(width: 20)
-                Text("Vault is locked")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.primary)
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Vault is locked")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text("Enter master password to autofill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
             }
 
-            HStack(spacing: 6) {
+            // Password input row
+            HStack(spacing: 8) {
                 SecureField("Master password", text: $password)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .onSubmit { unlock() }
 
                 Button {
@@ -78,7 +89,7 @@ struct VaultLockedPromptView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .controlSize(.regular)
                 .disabled(password.isEmpty || vault.isProcessing)
 
                 if hasTouchID {
@@ -86,10 +97,10 @@ struct VaultLockedPromptView: View {
                         unlockWithBiometrics()
                     } label: {
                         Image(systemName: "touchid")
-                            .font(.system(size: 14))
+                            .font(.system(size: 18))
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .controlSize(.regular)
                     .disabled(vault.isProcessing)
                 }
             }
@@ -100,9 +111,8 @@ struct VaultLockedPromptView: View {
                     .foregroundColor(.red)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(width: 280)
+        .padding(16)
+        .frame(width: 320)
         .onAppear {
             if hasTouchID {
                 unlockWithBiometrics()
