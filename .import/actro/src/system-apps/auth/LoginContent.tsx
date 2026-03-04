@@ -6,11 +6,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
-  NativeModules,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-
-const UserInfoModule = NativeModules.UserInfoModule;
+import { LoginBridge, LoginType } from '../../native-bridge';
 
 type ThemeVariant = 'light' | 'dark';
 
@@ -75,7 +73,7 @@ export const LoginContent = ({
   } = spacing;
 
   const onLoginPress = useCallback(
-    (type: 'wechat' | 'apple') => {
+    (type: LoginType) => {
       if (!agreePolicy) {
         Alert.alert(
           t('actr.auth.agreePolicyTitle'),
@@ -87,14 +85,14 @@ export const LoginContent = ({
               style: 'destructive',
               onPress: () => {
                 setAgreePolicy(true);
-                UserInfoModule?.loginWithType?.(type);
+                LoginBridge.loginWithType(type);
               },
             },
           ],
         );
         return;
       }
-      UserInfoModule?.loginWithType?.(type);
+      LoginBridge.loginWithType(type);
     },
     [agreePolicy, t],
   );

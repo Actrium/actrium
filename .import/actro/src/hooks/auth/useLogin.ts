@@ -1,13 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { NativeModules, NativeEventEmitter, Alert } from 'react-native';
+import { Alert } from 'react-native';
 import { authApi, CURRENT_ENV } from '../../api/auth';
 import { AuthRepository } from '../../repository/AuthRepository';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { AccountUserInfo } from '../../api/types';
 import { useTranslation } from 'react-i18next';
-
-const UserInfoModule = NativeModules.UserInfoModule;
-const UserInfoEvents = new NativeEventEmitter(UserInfoModule);
+import { LoginBridge } from '../../native-bridge';
 
 export type LoginStep =
   | 'idle'
@@ -129,7 +127,7 @@ export const useLogin = (): UseLoginResult => {
       }
     };
 
-    const sub = UserInfoEvents.addListener('onLoginResult', async (res) => {
+    const unsubscribe = LoginBridge.onLoginResult(async (res) => {
       if (res.error) {
         setLoading(false);
         setStep('login_options');
@@ -144,7 +142,7 @@ export const useLogin = (): UseLoginResult => {
       }
     });
 
-    return () => sub.remove();
+    return () => unsubscribe();
   }, [checkSession]);
 
   return {

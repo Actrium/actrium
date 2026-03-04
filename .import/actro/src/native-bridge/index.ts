@@ -23,3 +23,7 @@ export {
 export { TabEvents } from './tab/TabEvents';
 export type { TabFullscreenEvent } from './tab/TabEvents';
 export { openTab, exitFullscreen } from './tab/TabModule';
+
+// Login
+export { LoginBridge } from './login';
+export type { LoginType, LoginResultEvent } from './login';
