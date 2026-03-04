@@ -444,6 +444,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         urlObservation = webView.observe(\.url, options: [.new, .old]) { [weak self] webView, change in
             // change.newValue is URL?? (double optional), need to flatten
             guard let newURL = webView.url else { return }
+            // Keep loadedURL in sync so loadIfNeeded won't redundantly reload after redirects
+            self?.loadedURL = newURL
             let oldURL = change.oldValue ?? nil
             // Only notify if URL actually changed
             if oldURL != newURL {
