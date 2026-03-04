@@ -401,8 +401,13 @@ struct CanvasApp: App {
                 .keyboardShortcut("t", modifiers: .command)
 
                 Button("关闭当前标签页") {
-                    withAnimation {
-                        focusedViewModel?.closeCurrentTab()
+                    // If a utility/panel window (e.g. Settings) is key, close it via standard ⌘W
+                    if let keyWindow = NSApp.keyWindow, keyWindow != NSApp.mainWindow {
+                        keyWindow.performClose(nil)
+                    } else {
+                        withAnimation {
+                            focusedViewModel?.closeCurrentTab()
+                        }
                     }
                 }
                 .keyboardShortcut("w", modifiers: .command)

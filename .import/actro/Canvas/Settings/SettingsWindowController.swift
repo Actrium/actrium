@@ -26,7 +26,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 550, height: 420),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -38,9 +38,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
 
-        // Fixed size
         window.contentMinSize = NSSize(width: 550, height: 420)
-        window.contentMaxSize = NSSize(width: 550, height: 420)
 
         self.window = window
         window.makeKeyAndOrderFront(nil)
