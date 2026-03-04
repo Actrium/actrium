@@ -34,7 +34,7 @@ const useAuth = (appId: string) => {
       .getState()
       .alreadyAuthorizedAppIds.has(appId);
 
-    if (!isAuthorized) {
+    if (true || !isAuthorized) {
       return { status: 'not_authorized', clientId, appId };
     }
 
