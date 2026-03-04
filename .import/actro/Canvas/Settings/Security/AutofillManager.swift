@@ -15,6 +15,8 @@ final class AutofillManager: ObservableObject {
     static let shared = AutofillManager()
 
     @Published var pendingSaveAction: SavePasswordAction?
+    /// Hidden save action (dismissed by user but restorable via key icon)
+    private(set) var hiddenSaveAction: SavePasswordAction?
 
     var neverSaveDomains: Set<String> {
         didSet {
@@ -39,6 +41,12 @@ final class AutofillManager: ObservableObject {
     /// Returns tuples of (VaultItem, username, password) for matching items.
     func findCredentials(forDomain domain: String) -> [(VaultItem, String, String)] {
         let vaultItems = VaultManager.shared.items.filter { $0.category == .login }
+        NSLog("🔑 findCredentials: looking for domain=%@, vault has %d login items", domain, vaultItems.count)
+        for item in vaultItems {
+            let url = item.fields.first(where: { $0.label == "URL" })?.value ?? "(none)"
+            let user = item.fields.first(where: { $0.label == "Username" })?.value ?? "(none)"
+            NSLog("🔑 findCredentials:   item='%@' url='%@' user='%@'", item.title, url, user)
+        }
 
         return vaultItems.compactMap { item in
             guard let urlFieldValue = item.fields.first(where: { $0.label == "URL" })?.value,
@@ -130,6 +138,7 @@ final class AutofillManager: ObservableObject {
 
         try? VaultManager.shared.addItem(item)
         pendingSaveAction = nil
+        hiddenSaveAction = nil
     }
 
     func updateCredentials() {
@@ -146,15 +155,28 @@ final class AutofillManager: ObservableObject {
 
         try? VaultManager.shared.updateItem(updatedItem)
         pendingSaveAction = nil
+        hiddenSaveAction = nil
     }
 
     func neverSaveForDomain() {
         guard let action = pendingSaveAction else { return }
         neverSaveDomains.insert(action.domain)
         pendingSaveAction = nil
+        hiddenSaveAction = nil
     }
 
     func dismissBanner() {
+        hiddenSaveAction = pendingSaveAction
         pendingSaveAction = nil
+    }
+
+    /// Toggle the save dialog visibility (for key icon tap)
+    func toggleSaveDialog() {
+        if pendingSaveAction != nil {
+            dismissBanner()
+        } else if let hidden = hiddenSaveAction {
+            pendingSaveAction = hidden
+            hiddenSaveAction = nil
+        }
     }
 }

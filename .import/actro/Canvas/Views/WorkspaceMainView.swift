@@ -265,6 +265,8 @@ struct WorkspaceMainView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                         SavePasswordBannerView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(12)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
