@@ -21,12 +21,12 @@ target 'Canvas' do
   # 自动链接原生模块 (暂时手动添加以解决项目结构导致的路径问题)
   # use_native_modules!
   pod 'RNLocalize', :path => 'Subsystem/node_modules/react-native-localize'
+  pod 'react-native-safe-area-context', :path => 'Subsystem/node_modules/react-native-safe-area-context'
   pod 'react-native-sqlite-storage', :path => 'Subsystem/node_modules/react-native-sqlite-storage'
   pod 'VisionCamera', :path => 'Subsystem/node_modules/react-native-vision-camera'
   pod 'react-native-image-picker', :path => 'Subsystem/node_modules/react-native-image-picker'
-  pod 'react-native-document-picker', :path => 'Subsystem/node_modules/react-native-document-picker'
+  pod 'react-native-document-picker', :path => 'Subsystem/node_modules/@react-native-documents/picker'
   pod 'react-native-maps', :path => 'Subsystem/node_modules/react-native-maps'
-  pod 'react-native-geolocation-service', :path => 'Subsystem/node_modules/react-native-geolocation-service'
   pod 'react-native-image-resizer', :path => 'Subsystem/node_modules/@bam.tech/react-native-image-resizer'
   pod 'BVLinearGradient', :path => 'Subsystem/node_modules/react-native-linear-gradient'
   pod 'NitroSound', :path => 'Subsystem/node_modules/react-native-nitro-sound'
