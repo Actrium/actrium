@@ -5,10 +5,9 @@ struct UnlockVaultView: View {
 
     @State private var password = ""
     @State private var errorMessage: String?
-    @State private var isUnlocking = false
 
     private var hasTouchID: Bool {
-        vault.isTouchIDEnabled && KeychainHelper.isBiometricsAvailable()
+        vault.isTouchIDEnabled && vault.isBiometricsAvailable
     }
 
     var body: some View {
@@ -39,11 +38,21 @@ struct UnlockVaultView: View {
                     }
 
                     HStack(spacing: 12) {
-                        Button("Unlock") {
+                        Button {
                             unlock()
+                        } label: {
+                            if vault.isProcessing {
+                                HStack(spacing: 6) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Unlocking...")
+                                }
+                            } else {
+                                Text("Unlock")
+                            }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(password.isEmpty || isUnlocking)
+                        .disabled(password.isEmpty || vault.isProcessing)
 
                         if hasTouchID {
                             Button {
@@ -53,7 +62,7 @@ struct UnlockVaultView: View {
                                     .font(.system(size: 18))
                             }
                             .buttonStyle(.bordered)
-                            .disabled(isUnlocking)
+                            .disabled(vault.isProcessing)
                         }
                     }
                 }
@@ -72,25 +81,23 @@ struct UnlockVaultView: View {
 
     private func unlock() {
         errorMessage = nil
-        isUnlocking = true
-        do {
-            try vault.unlock(password: password)
-        } catch {
-            errorMessage = "Incorrect password"
+        Task {
+            do {
+                try await vault.unlock(password: password)
+            } catch {
+                errorMessage = "Incorrect password"
+            }
         }
-        isUnlocking = false
     }
 
     private func unlockWithBiometrics() {
         errorMessage = nil
-        isUnlocking = true
         Task {
             do {
                 try await vault.unlockWithBiometrics()
             } catch {
-                errorMessage = "Biometric authentication failed"
+                // Silent failure for auto-unlock — user can enter password manually
             }
-            isUnlocking = false
         }
     }
 }
