@@ -62,6 +62,7 @@ struct PasswordField: View {
     var showConfirm: Bool = false
     var confirmPlaceholder: String = "Confirm password"
 
+    var hintTooltip: String?
     var onSubmit: (() -> Void)?
 
     private var passwordStrength: PasswordStrength {
@@ -73,6 +74,14 @@ struct PasswordField: View {
             SecureField(placeholder, text: $password)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { onSubmit?() }
+                .overlay(alignment: .trailing) {
+                    if let tip = hintTooltip, !tip.isEmpty {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.secondary)
+                            .help("Hint: \(tip)")
+                            .padding(.trailing, 6)
+                    }
+                }
 
             if showStrength && !password.isEmpty {
                 strengthIndicator
@@ -119,6 +128,7 @@ extension PasswordField {
         password: Binding<String>,
         placeholder: String = "Master password",
         showStrength: Bool = false,
+        hintTooltip: String? = nil,
         onSubmit: (() -> Void)? = nil
     ) {
         self._password = password
@@ -126,6 +136,7 @@ extension PasswordField {
         self.showStrength = showStrength
         self._confirmPassword = .constant("")
         self.showConfirm = false
+        self.hintTooltip = hintTooltip
         self.onSubmit = onSubmit
     }
 }
