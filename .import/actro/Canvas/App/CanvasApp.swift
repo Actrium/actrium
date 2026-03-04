@@ -268,8 +268,7 @@ struct CanvasApp: App {
                     focusedViewModel?.openSystemTab(.history)
                 }
                 .keyboardShortcut("y", modifiers: .command)
-                .disabled(focusedViewModel == nil)
-
+                
                 Divider()
 
                 if historyVM.recentItems.isEmpty {
@@ -297,14 +296,12 @@ struct CanvasApp: App {
                     // TODO: Show bookmark sheet for current tab
                 }
                 .keyboardShortcut("d", modifiers: .command)
-                .disabled(focusedViewModel == nil)
-
+                
                 Button("Show All Bookmarks") {
                     focusedViewModel?.openSystemTab(.bookmarks)
                 }
                 .keyboardShortcut("b", modifiers: [.command, .option])
-                .disabled(focusedViewModel == nil)
-
+                
                 Divider()
 
                 if bookmarkVM.bookmarks.isEmpty {
@@ -394,7 +391,6 @@ struct CanvasApp: App {
                     }
                 }
                 .keyboardShortcut("t", modifiers: .command)
-                .disabled(focusedViewModel == nil)
 
                 Button("关闭当前标签页") {
                     withAnimation {
@@ -402,7 +398,6 @@ struct CanvasApp: App {
                     }
                 }
                 .keyboardShortcut("w", modifiers: .command)
-                .disabled(focusedViewModel == nil)
 
                 Divider()
 
@@ -410,18 +405,15 @@ struct CanvasApp: App {
                     focusedViewModel?.reloadCurrentTab()
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(focusedViewModel == nil)
 
                 Divider()
 
                 Button("聚焦地址栏") {
-                    // Only works in Focus mode (when address bar is visible)
                     if case .focus = focusedViewModel?.canvasMode {
                         focusedViewModel?.shouldAutoFocusAddressBar = true
                     }
                 }
                 .keyboardShortcut("l", modifiers: .command)
-                .disabled(focusedViewModel == nil)
 
                 Divider()
 
@@ -429,7 +421,6 @@ struct CanvasApp: App {
                     printCurrentPage()
                 }
                 .keyboardShortcut("p", modifiers: .command)
-                .disabled(focusedViewModel == nil)
             }
 
             // View menu - keep zoom shortcuts and route fullscreen toggle to active browser window.
@@ -438,28 +429,24 @@ struct CanvasApp: App {
                     zoomIn()
                 }
                 .keyboardShortcut("+", modifiers: .command)
-                .disabled(focusedViewModel == nil)
-
+                
                 Button("缩小") {
                     zoomOut()
                 }
                 .keyboardShortcut("-", modifiers: .command)
-                .disabled(focusedViewModel == nil)
-
+                
                 Button("实际大小") {
                     resetZoom()
                 }
                 .keyboardShortcut("0", modifiers: .command)
-                .disabled(focusedViewModel == nil)
-
+                
                 Divider()
 
                 Button("切换全屏") {
                     toggleFullScreen()
                 }
                 .keyboardShortcut("f", modifiers: [.command, .control])
-                .disabled(NSApp.keyWindow == nil)
-            }
+                            }
 
             // Tab switching shortcuts
             CommandGroup(after: .sidebar) {
@@ -471,15 +458,13 @@ struct CanvasApp: App {
                         KeyEquivalent(Character("\(index)")),
                         modifiers: .command
                     )
-                    .disabled(focusedViewModel == nil)
-                }
+                                    }
 
                 Button("切换到最后一个标签") {
                     switchToLastTab()
                 }
                 .keyboardShortcut("9", modifiers: .command)
-                .disabled(focusedViewModel == nil)
-            }
+                            }
         }
 
         // Detached DevTools window
