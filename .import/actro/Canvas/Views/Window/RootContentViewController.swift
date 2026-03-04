@@ -445,12 +445,11 @@ struct SelfDrawnToolbarView: View {
     // MARK: - Address Bar
 
     private var addressBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             // Left icon
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
-                .frame(width: 28, height: 28)
 
             // Address text / input field
             if isAddressFocused {
@@ -468,7 +467,7 @@ struct SelfDrawnToolbarView: View {
                         onInputActivity: { hasInputActivity = true }
                     )
                 }
-                .frame(maxWidth: .infinity, maxHeight: 22)
+                .frame(maxWidth: .infinity)
             } else {
                 Group {
                     if addressText.isEmpty {
@@ -483,7 +482,7 @@ struct SelfDrawnToolbarView: View {
                             .truncationMode(.middle)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: 22, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { enterEditingMode() }
             }
@@ -491,7 +490,7 @@ struct SelfDrawnToolbarView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .frame(height: iconButtonSize)
         .background(Color(white: 0.15))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
