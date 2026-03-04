@@ -118,6 +118,28 @@ final class DatabaseManager {
         """)
         execute("CREATE INDEX IF NOT EXISTS idx_apps_bundle_id ON apps(bundle_id)")
         execute("CREATE INDEX IF NOT EXISTS idx_apps_source_type ON apps(source_type)")
+
+        // Vault metadata
+        execute("""
+            CREATE TABLE IF NOT EXISTS vault_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+
+        // Encrypted credentials
+        execute("""
+            CREATE TABLE IF NOT EXISTS credentials (
+                id TEXT PRIMARY KEY,
+                domain TEXT NOT NULL,
+                username_encrypted TEXT,
+                password_encrypted TEXT NOT NULL,
+                notes TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+        """)
+        execute("CREATE INDEX IF NOT EXISTS idx_credentials_domain ON credentials(domain)")
     }
 
     private func insertDefaultTags() {

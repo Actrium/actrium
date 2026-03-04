@@ -47,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         return false  // Keep app running even when all windows are closed
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        VaultManager.shared.lock()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
             createNewWindow()
@@ -71,6 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             _ = XPCServicePool.shared.verifyServiceBundles()
             await XPCServicePool.shared.prewarmInitialServicesAsync()
         }
+
+        // Initialize vault manager
+        _ = VaultManager.shared
     }
 
     private func setupNotifications() {
