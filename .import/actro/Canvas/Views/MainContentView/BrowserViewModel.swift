@@ -68,6 +68,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         return tabs.first(where: { $0.id == currentTabId })
     }
 
+    private var sshObservers: [NSObjectProtocol] = []
+
     init() {
         // Initialize slot positions first
         initializeSlotPositions()
@@ -82,6 +84,53 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         currentTabId = startTab.id
         tabSlotPositions[startTab.id] = 0
         canvasMode = .focus(tabId: startTab.id)
+
+        setupSSHObservers()
+    }
+
+    private func setupSSHObservers() {
+        sshObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: .sshCloseTab,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self,
+                      let sessionId = notification.userInfo?["sessionId"] as? String,
+                      let tab = self.tabs.first(where: { $0.sshSessionId == sessionId }) else { return }
+                self.closeTab(id: tab.id)
+            }
+        )
+
+        sshObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: .sshTitleChanged,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self,
+                      let sessionId = notification.userInfo?["sessionId"] as? String,
+                      let title = notification.userInfo?["title"] as? String,
+                      let tabIndex = self.tabs.firstIndex(where: { $0.sshSessionId == sessionId }) else { return }
+                self.tabs[tabIndex].title = title
+            }
+        )
+
+        sshObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: .sshReconnect,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self,
+                      let sessionId = notification.userInfo?["sessionId"] as? String,
+                      let urlString = notification.userInfo?["url"] as? String,
+                      let tabIndex = self.tabs.firstIndex(where: { $0.sshSessionId == sessionId }) else { return }
+                let newSessionId = SSHSessionBridge.shared.createSession(url: urlString, rows: 24, cols: 80)
+                self.tabs[tabIndex].sshSessionId = newSessionId
+                self.objectWillChange.send()
+            }
+        )
     }
     
     @discardableResult
@@ -154,6 +203,10 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
         // 如果这是最后一个标签页，关闭后退出应用
         if tabs.count == 1 {
+            // Disconnect SSH session before exiting
+            if let tab = tabs.first, let sessionId = tab.sshSessionId {
+                SSHSessionBridge.shared.disconnectSession(sessionId: sessionId)
+            }
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
             NSApplication.shared.terminate(nil)
             return
@@ -177,6 +230,11 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                     }
                 }
             }
+        }
+
+        // Disconnect SSH session if this tab has one
+        if let tab = tabs.first(where: { $0.id == id }), let sessionId = tab.sshSessionId {
+            SSHSessionBridge.shared.disconnectSession(sessionId: sessionId)
         }
 
         // 删除标签页
