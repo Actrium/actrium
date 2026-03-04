@@ -486,7 +486,7 @@ struct WorkspaceMainView: View {
                             switch tab.contentType {
                             case .reactNative: return .menu
                             case .web: return isWebLoading ? .loading : .none
-                            case .native, .empty: return .none
+                            case .native, .empty, .ssh: return .none
                             }
                         }()
 
@@ -591,8 +591,8 @@ struct WorkspaceMainView: View {
                     case .reactNative:
                         // ViewBridge tab: 同步截图
                         ViewBridgeHostViewManager.shared.takeSnapshot(for: focusedTabId)
-                    case .native, .empty:
-                        // Native SwiftUI and empty tabs don't need snapshots
+                    case .native, .empty, .ssh:
+                        // Native SwiftUI, empty, and SSH tabs don't need snapshots
                         break
                     }
                 }
@@ -2343,6 +2343,15 @@ private struct TabPanel: View {
                         )
                         .frame(width: nativeSize.width, height: nativeSize.height)
                     }
+                }
+
+            case .ssh(let sessionId):
+                // SSH terminal - rendered at card size in overview, full size in focus
+                if isFocused {
+                    Color.clear // Focus mode handled by focus overlay
+                } else {
+                    SSHTerminalView(sessionId: sessionId, viewportSize: renderSize)
+                        .frame(width: renderSize.width, height: renderSize.height)
                 }
 
             case .empty:
