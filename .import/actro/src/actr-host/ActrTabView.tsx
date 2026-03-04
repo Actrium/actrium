@@ -472,7 +472,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           onRightPress={() => exitFullscreen()}
           leftDisabled={!appId}
           leftActive={localLeftPanelVisible}
-          appName={appName}
+          showLeftButton={Boolean(appId)}
+          appName={appId ? appName : '添加应用'}
         />
 
         {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}

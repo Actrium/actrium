@@ -9,28 +9,40 @@ interface ChatHeaderProps {
   onRightPress: () => void;
   leftDisabled?: boolean;
   leftActive?: boolean;
+  showLeftButton?: boolean;
   appName?: string;
 }
 
 export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
-  ({ onLeftPress, onRightPress, leftDisabled = false, leftActive = false, appName }) => {
+  ({
+    onLeftPress,
+    onRightPress,
+    leftDisabled = false,
+    leftActive = false,
+    showLeftButton = true,
+    appName,
+  }) => {
     return (
       <View style={styles.header}>
         <LinearGradient
           colors={['#F2F2F6', 'rgba(242, 242, 246, 0)']}
           style={StyleSheet.absoluteFill}
         />
-        <TouchableOpacity
-          style={[
-            styles.headerButton,
-            leftActive && styles.headerButtonActive,
-            leftDisabled && styles.headerButtonDisabled,
-          ]}
-          onPress={onLeftPress}
-          disabled={leftDisabled}
-        >
-          <Icon type="extension_menu" size={20} color={leftActive ? '#FFFFFF' : '#0a0a0a'} />
-        </TouchableOpacity>
+        {showLeftButton ? (
+          <TouchableOpacity
+            style={[
+              styles.headerButton,
+              leftActive && styles.headerButtonActive,
+              leftDisabled && styles.headerButtonDisabled,
+            ]}
+            onPress={onLeftPress}
+            disabled={leftDisabled}
+          >
+            <Icon type="extension_menu" size={20} color={leftActive ? '#FFFFFF' : '#0a0a0a'} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerButtonPlaceholder} />
+        )}
         {appName && (
           <Text style={styles.appName} numberOfLines={1}>
             {appName}
@@ -74,6 +86,10 @@ const styles = StyleSheet.create({
   },
   headerButtonActive: {
     backgroundColor: '#0088FF',
+  },
+  headerButtonPlaceholder: {
+    width: 44,
+    height: 44,
   },
   appName: {
     flex: 1,
