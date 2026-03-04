@@ -1,8 +1,12 @@
 package com.askaway.android.core
 
+import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableMap
+import org.greenrobot.eventbus.EventBus
+import com.askaway.android.event.ReactModuleEvent
 
 class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     override fun getName(): String {
@@ -10,8 +14,9 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
-    fun exitFullscreen(){
-        if(reactApplicationContext.hasCurrentActivity()){
+    fun exitFullscreen() {
+        EventBus.getDefault().post(ReactModuleEvent(ReactModuleEvent.EVENT_EXIT_FULLSCREEN))
+        if (reactApplicationContext.hasCurrentActivity()) {
             reactApplicationContext.currentActivity?.runOnUiThread {
                 reactApplicationContext.currentActivity?.onBackPressed()
             }
@@ -19,11 +24,22 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
-    fun exitSearch(){
-        if(reactApplicationContext.hasCurrentActivity()){
+    fun exitSearch() {
+        EventBus.getDefault().post(ReactModuleEvent(ReactModuleEvent.EVENT_EXIT_SEARCH))
+        if (reactApplicationContext.hasCurrentActivity()) {
             reactApplicationContext.currentActivity?.runOnUiThread {
                 reactApplicationContext.currentActivity?.onBackPressed()
             }
         }
+    }
+
+    @ReactMethod
+    fun setTabUnreadStatus(tabId: String, unread: Boolean) {
+        EventBus.getDefault().post(
+            ReactModuleEvent(
+                ReactModuleEvent.EVENT_SET_TAB_UNREAD_STATUS,
+                mapOf("tabId" to tabId, "unread" to unread)
+            )
+        )
     }
 }
