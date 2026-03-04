@@ -909,7 +909,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             return URL(string: "https://\(input)")
         }
 
-        return nil
+        // Fallback: treat as search query using configured search engine
+        return SearchEngine.current.searchURL(for: input)
     }
 
     func closeCurrentTab() {
@@ -1047,6 +1048,12 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         } catch {
             logger.error(" [reloadCurrentTab] 刷新失败：\(error.localizedDescription)")
         }
+    }
+
+    /// Stop loading the current tab
+    func stopCurrentTab() {
+        guard let tabId = currentTabId else { return }
+        WebViewHolderManager.shared.existingHolder(for: tabId)?.stopLoading()
     }
 
     // MARK: - Per-Tab Left Panel Visibility

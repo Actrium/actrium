@@ -535,6 +535,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
     func reload() { webView.reload() }
+    func stopLoading() { webView.stopLoading() }
 
     // MARK: - Web Inspector
 
