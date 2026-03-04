@@ -154,74 +154,7 @@ struct WebViewMultiProcessTabView: View {
     }
 }
 
-// MARK: - Autofill Panel (borderless NSPanel, Chrome-style with arrow)
-
-private class AutofillPanel: NSPanel {
-    var onDismiss: (() -> Void)?
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-    override func cancelOperation(_ sender: Any?) { onDismiss?() }
-}
-
-/// Arrow-topped rounded rectangle shape (Chrome-style dropdown)
-private struct DropdownArrowShape: Shape {
-    let cornerRadius: CGFloat
-    let arrowWidth: CGFloat
-    let arrowHeight: CGFloat
-    let arrowOffset: CGFloat  // center of arrow from leading edge
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let bodyTop = rect.minY + arrowHeight
-
-        let arrowLeft = arrowOffset - arrowWidth / 2
-        let arrowRight = arrowOffset + arrowWidth / 2
-
-        // Start at top-left of body
-        path.move(to: CGPoint(x: rect.minX + cornerRadius, y: bodyTop))
-        // → arrow
-        path.addLine(to: CGPoint(x: arrowLeft, y: bodyTop))
-        path.addLine(to: CGPoint(x: arrowOffset, y: rect.minY))
-        path.addLine(to: CGPoint(x: arrowRight, y: bodyTop))
-        // → top-right corner
-        path.addLine(to: CGPoint(x: rect.maxX - cornerRadius, y: bodyTop))
-        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: bodyTop),
-                     tangent2End: CGPoint(x: rect.maxX, y: bodyTop + cornerRadius),
-                     radius: cornerRadius)
-        // → bottom-right corner
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - cornerRadius))
-        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
-                     tangent2End: CGPoint(x: rect.maxX - cornerRadius, y: rect.maxY),
-                     radius: cornerRadius)
-        // → bottom-left corner
-        path.addLine(to: CGPoint(x: rect.minX + cornerRadius, y: rect.maxY))
-        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
-                     tangent2End: CGPoint(x: rect.minX, y: rect.maxY - cornerRadius),
-                     radius: cornerRadius)
-        // → top-left corner
-        path.addLine(to: CGPoint(x: rect.minX, y: bodyTop + cornerRadius))
-        path.addArc(tangent1End: CGPoint(x: rect.minX, y: bodyTop),
-                     tangent2End: CGPoint(x: rect.minX + cornerRadius, y: bodyTop),
-                     radius: cornerRadius)
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// NSVisualEffectView wrapper for SwiftUI
-private struct VisualEffectBackground: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .active
-        return view
-    }
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
+// MARK: - Autofill Popover Helpers (none needed — uses NSPopover directly)
 
 // MARK: - Shared Process Pool
 
@@ -265,9 +198,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// KVO observation for URL changes
     private var urlObservation: NSKeyValueObservation?
 
-    /// Autofill panel for credential suggestions (Chrome-style, no arrow)
-    private var autofillPanel: AutofillPanel?
-    private var autofillClickMonitor: Any?
+    /// Autofill popover for credential suggestions
+    private var autofillPopover: NSPopover?
 
     /// Canvas User-Agent string
     /// Format follows standard browser convention: Mozilla/5.0 (Platform) Engine/Version (Compatibility) Browser/Version Engine/Version
@@ -687,13 +619,13 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
     }
 
-    // MARK: - Autofill Panel (Chrome-style dropdown)
+    // MARK: - Autofill Popover
 
-    private func showAutofillPanel<Content: View>(fieldRect: CGRect, @ViewBuilder content: () -> Content) {
+    /// Convert JS field rect to NSView rect and show an NSPopover below it
+    private func showPopover(fieldRect: CGRect, contentVC: NSViewController) {
         dismissAutofillPopover()
-        guard let window = webView.window else { return }
+        guard webView.window != nil else { return }
 
-        // Convert JS rect (top-left origin) → NSView → window → screen
         let zoom = webView.pageZoom
         let viewBounds = webView.bounds
         let nsRect = NSRect(
@@ -702,67 +634,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             width: fieldRect.width * zoom,
             height: fieldRect.height * zoom
         )
-        let windowRect = webView.convert(nsRect, to: nil)
-        let screenRect = window.convertToScreen(windowRect)
 
-        // Arrow geometry
-        let arrowHeight: CGFloat = 10
-        let arrowWidth: CGFloat = 16
-        let arrowOffset: CGFloat = 40  // center of arrow from panel left edge
-
-        let shape = DropdownArrowShape(
-            cornerRadius: 8,
-            arrowWidth: arrowWidth,
-            arrowHeight: arrowHeight,
-            arrowOffset: arrowOffset
-        )
-
-        // Build the SwiftUI content with arrow-shaped background
-        let swiftUIView = content()
-            .padding(.top, arrowHeight)
-            .background(
-                VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-                    .clipShape(shape)
-            )
-
-        let hostingView = NSHostingView(rootView: swiftUIView)
-        hostingView.translatesAutoresizingMaskIntoConstraints = false
-
-        // Measure the ideal size (includes arrow height from padding)
-        let fittingSize = hostingView.fittingSize
-
-        // Position: panel top (arrow tip) at the field's bottom edge
-        let panel = AutofillPanel(
-            contentRect: NSRect(
-                x: screenRect.origin.x,
-                y: screenRect.origin.y - fittingSize.height,
-                width: fittingSize.width,
-                height: fittingSize.height
-            ),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.hasShadow = true
-        panel.level = .floating
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.contentView = hostingView
-        panel.onDismiss = { [weak self] in self?.dismissAutofillPopover() }
-
-        window.addChildWindow(panel, ordered: .above)
-        panel.orderFront(nil)
-        self.autofillPanel = panel
-
-        // Click-outside monitor
-        autofillClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self = self, let panel = self.autofillPanel else { return event }
-            if event.window == panel {
-                return event
-            }
-            self.dismissAutofillPopover()
-            return event
-        }
+        let popover = NSPopover()
+        popover.behavior = .semitransient
+        popover.contentViewController = contentVC
+        popover.show(relativeTo: nsRect, of: webView, preferredEdge: .minY)
+        self.autofillPopover = popover
     }
 
     func showAutofillPopover(credentials: [(VaultItem, String, String)], fieldRect: CGRect) {
@@ -775,20 +652,21 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
         guard !items.isEmpty else { return }
 
-        showAutofillPanel(fieldRect: fieldRect) { [weak self] in
-            AutofillSuggestionView(items: items) { selected in
+        let vc = NSHostingController(
+            rootView: AutofillSuggestionView(items: items) { [weak self] selected in
                 self?.fillCredential(username: selected.username, password: selected.password)
                 self?.dismissAutofillPopover()
-            } onManagePasswords: {
+            } onManagePasswords: { [weak self] in
                 self?.dismissAutofillPopover()
                 SettingsWindowController.shared.showWindow()
             }
-        }
+        )
+        showPopover(fieldRect: fieldRect, contentVC: vc)
     }
 
     func showVaultLockedPopover(fieldRect: CGRect, domain: String) {
-        showAutofillPanel(fieldRect: fieldRect) { [weak self] in
-            VaultLockedPromptView { [weak self] in
+        let vc = NSHostingController(
+            rootView: VaultLockedPromptView { [weak self] in
                 NSLog("🔑 onUnlocked: self=%@, domain=%@", self == nil ? "nil" : "alive", domain)
                 guard let self = self else { return }
                 let credentials = AutofillManager.shared.findCredentials(forDomain: domain)
@@ -805,19 +683,13 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                     self.dismissAutofillPopover()
                 }
             }
-        }
+        )
+        showPopover(fieldRect: fieldRect, contentVC: vc)
     }
 
     func dismissAutofillPopover() {
-        if let monitor = autofillClickMonitor {
-            NSEvent.removeMonitor(monitor)
-            autofillClickMonitor = nil
-        }
-        if let panel = autofillPanel {
-            panel.parent?.removeChildWindow(panel)
-            panel.orderOut(nil)
-            autofillPanel = nil
-        }
+        autofillPopover?.performClose(nil)
+        autofillPopover = nil
     }
 
     private func fillCredential(username: String, password: String) {
