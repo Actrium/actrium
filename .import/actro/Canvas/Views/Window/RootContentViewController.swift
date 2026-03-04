@@ -154,7 +154,7 @@ final class RootContentViewController: NSViewController {
             }
         )
 
-        toolbarHostingView = NSHostingView(rootView: AnyView(toolbarView))
+        toolbarHostingView = DraggableToolbarHostingView(rootView: AnyView(toolbarView))
         toolbarHostingView.translatesAutoresizingMaskIntoConstraints = false
         toolbarHostingView.wantsLayer = true
         // Disable titlebar safe area — we manage our own toolbar layout;
@@ -315,6 +315,30 @@ final class RootContentViewController: NSViewController {
     }
 }
 
+// MARK: - Draggable Toolbar Hosting View
+
+/// NSHostingView subclass that initiates window drag on `mouseDown` when the
+/// click lands on a non-interactive area (background, empty space).
+/// SwiftUI buttons / text fields handle their own hits normally; everything
+/// else becomes a window-drag handle — matching standard titlebar behaviour.
+private final class DraggableToolbarHostingView: NSHostingView<AnyView> {
+    override func mouseDown(with event: NSEvent) {
+        // If the deepest hit-tested view is ourself (no SwiftUI control claimed it),
+        // start a window drag instead of consuming the event.
+        guard let window else { return super.mouseDown(with: event) }
+
+        let locationInSelf = convert(event.locationInWindow, from: nil)
+        let hitView = super.hitTest(locationInSelf)
+
+        // hitView being self or nil means no interactive SwiftUI element is there.
+        if hitView === self || hitView == nil {
+            window.performDrag(with: event)
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
+}
+
 // MARK: - Self-Drawn Toolbar View
 
 struct SelfDrawnToolbarView: View {
@@ -367,6 +391,7 @@ struct SelfDrawnToolbarView: View {
             // DEBUG: border for SwiftUI toolbar content bounds
             Rectangle()
                 .stroke(Color.blue.opacity(0.8), lineWidth: 1)
+                .allowsHitTesting(false)
         }
         .onAppear { updateDisplayText() }
         .onChange(of: viewModel.currentTab?.url) { _, _ in updateDisplayText() }
@@ -595,6 +620,7 @@ struct SelfDrawnToolbarView: View {
         )
         .fill(Color(white: 0.10))
         .padding(.leading, metrics.backgroundLeadingX)
+        .allowsHitTesting(false)
     }
 
     // MARK: - Actions
