@@ -158,9 +158,10 @@ private enum PasswordStrength {
 
     static func evaluate(_ password: String) -> PasswordStrength {
         var score = 0
-        if password.count >= 8 { score += 1 }
-        if password.count >= 12 { score += 1 }
-        if password.rangeOfCharacter(from: .uppercaseLetters) != nil { score += 1 }
+        if password.count >= 5 { score += 1 }
+        if password.count >= 10 { score += 1 }
+        if password.rangeOfCharacter(from: .uppercaseLetters) != nil &&
+           password.rangeOfCharacter(from: .lowercaseLetters) != nil { score += 1 }
         if password.rangeOfCharacter(from: .decimalDigits) != nil { score += 1 }
         if password.rangeOfCharacter(from: .punctuationCharacters) != nil ||
            password.rangeOfCharacter(from: .symbols) != nil { score += 1 }
