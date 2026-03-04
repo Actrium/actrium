@@ -484,7 +484,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     var canGoBack: Bool { webView.canGoBack }
     var canGoForward: Bool { webView.canGoForward }
-    var currentURL: URL? { webView.url }
+    var currentURL: URL? { lastKnownURL }
     var currentTitle: String? { webView.title }
 
     func goBack() { webView.goBack() }
@@ -561,7 +561,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     @MainActor
     func takeSnapshot() async {
         // Only take snapshot if webView has content
-        guard webView.url != nil else { return }
+        guard lastKnownURL != nil else { return }
 
         do {
             let config = WKSnapshotConfiguration()
@@ -585,7 +585,20 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         isLoading = false
         onLoadingStateChanged?(false)
         // Notify with title and URL when navigation completes
-        onNavigationFinished?(webView.title, webView.url)
+        // Avoid accessing webView.url directly — it can return a corrupted NSURL on macOS 26.
+        // Use evaluateJavaScript to safely retrieve the URL string.
+        let title = webView.title
+        webView.evaluateJavaScript("location.href") { [weak self] result, _ in
+            guard let self = self else { return }
+            let url: URL?
+            if let urlString = result as? String, let parsed = URL(string: urlString) {
+                self.lastKnownURL = parsed
+                url = parsed
+            } else {
+                url = self.lastKnownURL
+            }
+            self.onNavigationFinished?(title, url)
+        }
 
         // Safari-style: Take snapshot immediately after page load for Overview mode
         // Use a short delay to allow page rendering to complete
