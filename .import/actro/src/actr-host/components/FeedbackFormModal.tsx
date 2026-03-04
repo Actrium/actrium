@@ -15,13 +15,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import { submitFeedback, FeedbackContext } from '../../api/feedback';
 import { useMessageStore } from '../store/useMessageStore';
 import dayjs from 'dayjs';
+import { GlobalAlert } from '../../../src/components';
 
 interface Category {
   id: string;
@@ -96,7 +96,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
 
   const handleSubmit = async () => {
     if (selectedIds.size === 0) {
-      Alert.alert(t('common.hint'), t('actr.chat.selectCategoryTip') || '请至少选择一个举报分类');
+      GlobalAlert.alert(t('common.hint'), t('actr.chat.selectCategoryTip') || '请至少选择一个举报分类');
       return;
     }
 

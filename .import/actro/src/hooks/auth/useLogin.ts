@@ -6,6 +6,7 @@ import { useUserStore } from '../../actr-host/store/useUserStore';
 import { AccountUserInfo } from '../../api/types';
 import { useTranslation } from 'react-i18next';
 import { LoginBridge } from '../../native-bridge';
+import { GlobalAlert } from '../../../src/components';
 
 export type LoginStep =
   | 'idle'
@@ -118,12 +119,12 @@ export const useLogin = (): UseLoginResult => {
           await checkSession(loginRes.data);
         } else {
           setStep('login_options');
-          Alert.alert(t('actr.auth.loginFailed'), loginRes.message || t('common.unknownError'));
+          GlobalAlert.alert(t('actr.auth.loginFailed'), loginRes.message || t('common.unknownError'));
         }
       } catch {
         setLoading(false);
         setStep('login_options');
-        Alert.alert(t('common.error'), t('actr.auth.loginFailed'));
+        GlobalAlert.alert(t('common.error'), t('actr.auth.loginFailed'));
       }
     };
 
@@ -131,7 +132,7 @@ export const useLogin = (): UseLoginResult => {
       if (res.error) {
         setLoading(false);
         setStep('login_options');
-        Alert.alert(t('actr.auth.loginError'), res.message || t('common.unknownError'));
+        GlobalAlert.alert(t('actr.auth.loginError'), res.message || t('common.unknownError'));
         return;
       }
 

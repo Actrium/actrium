@@ -11,6 +11,7 @@ import {
   createAudioStream,
 } from '../utils/AudioStreamManager';
 import { useIntervalTimer } from '../../hooks';
+import { GlobalAlert } from '../../../src/components';
 
 export interface UseAudioStreamOptions {
   onAudioChunk: (chunk: Uint8Array) => void | Promise<void>;
@@ -50,7 +51,7 @@ async function requestMicrophonePermission(): Promise<boolean> {
       return granted === PermissionsAndroid.RESULTS.GRANTED;
     } catch (error) {
       console.error('请求麦克风权限失败:', error);
-      Alert.alert('需要麦克风权限', '需要麦克风权限才能使用语音输入', [
+      GlobalAlert.alert('需要麦克风权限', '需要麦克风权限才能使用语音输入', [
         { text: '取消', style: 'cancel' },
         { text: '去设置', onPress: () => Linking.openSettings() },
       ]);

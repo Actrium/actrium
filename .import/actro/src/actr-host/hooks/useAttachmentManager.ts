@@ -5,6 +5,7 @@ import { AttachmentService } from '../../services/AttachmentService';
 import { useInputStore, EMPTY_ATTACHMENTS } from '../store/useInputStore';
 import RNFS from 'react-native-fs';
 import { Utils } from '../../utils/utils';
+import { GlobalAlert } from '../../../src/components';
 
 export const useAttachmentManager = (appId: string) => {
   const { t } = useTranslation();
@@ -64,7 +65,7 @@ export const useAttachmentManager = (appId: string) => {
 
     if (hasConflict) {
       const confirmed = await new Promise<boolean>((resolve) => {
-        Alert.alert(t('common.tip'), t('actr.attachment.overwriteConfirm'), [
+        GlobalAlert.alert(t('common.tip'), t('actr.attachment.overwriteConfirm'), [
           { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
           {
             text: t('common.confirm'),
@@ -74,7 +75,7 @@ export const useAttachmentManager = (appId: string) => {
       });
       if (!confirmed) return;
     } else if (attachments.length >= 6) {
-      Alert.alert(t('common.tip'), t('actr.attachment.limitReached'));
+      GlobalAlert.alert(t('common.tip'), t('actr.attachment.limitReached'));
       return;
     }
 
@@ -98,7 +99,7 @@ export const useAttachmentManager = (appId: string) => {
     });
 
     if (validResults.length < results.length) {
-      Alert.alert(t('actr.attachment.fileTooLarge'), t('actr.attachment.fileSizeLimit'));
+      GlobalAlert.alert(t('actr.attachment.fileTooLarge'), t('actr.attachment.fileSizeLimit'));
     }
 
     // Check for unsupported file types (e.g., no type found)
@@ -109,7 +110,7 @@ export const useAttachmentManager = (appId: string) => {
     });
 
     if (supportedResults.length < validResults.length) {
-      Alert.alert(t('common.tip'), t('actr.attachment.unsupportedType'));
+      GlobalAlert.alert(t('common.tip'), t('actr.attachment.unsupportedType'));
     }
 
     if (supportedResults.length === 0) return;
@@ -145,7 +146,7 @@ export const useAttachmentManager = (appId: string) => {
     );
 
     if (supportedResults.length > remainingSlots) {
-      Alert.alert(
+      GlobalAlert.alert(
         t('common.tip'),
         t('actr.attachment.limitPartial', { count: remainingSlots }),
       );
@@ -163,7 +164,7 @@ export const useAttachmentManager = (appId: string) => {
       attachments.length > 0 && attachments[0].attachment_type !== 'location';
     if (hasConflict) {
       const confirmed = await new Promise<boolean>((resolve) => {
-        Alert.alert(t('common.tip'), t('actr.attachment.overwriteConfirm'), [
+        GlobalAlert.alert(t('common.tip'), t('actr.attachment.overwriteConfirm'), [
           { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
           { text: t('common.confirm'), onPress: () => resolve(true) },
         ]);

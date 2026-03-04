@@ -3,9 +3,9 @@ import {
   View,
   StyleSheet,
   NativeModules,
-  Alert,
   useWindowDimensions,
 } from 'react-native';
+import { GlobalAlert } from '../../../../src/components';
 import { useTranslation } from 'react-i18next';
 import { useMessageStore } from '../../store/useMessageStore';
 import { useAppStore } from '../../store/useAppStore';
@@ -246,13 +246,13 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     const { isVoice, skipAuthCheck } = options || {};
 
     if (connection?.reason) {
-      Alert.alert(t('actr.auth.serviceInitFailed'), connection.reason);
+      GlobalAlert.alert(t('actr.auth.serviceInitFailed'), connection.reason);
       return;
     }
 
     const trimmedContent = content.trim();
     if (!trimmedContent && !isVoice) {
-      Alert.alert(t('common.hint'), t('actr.input.emptyTextAlert'));
+      GlobalAlert.alert(t('common.hint'), t('actr.input.emptyTextAlert'));
       return;
     }
 

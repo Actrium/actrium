@@ -2,6 +2,7 @@ import { launchCamera, launchImageLibrary, Asset } from 'react-native-image-pick
 import i18n from '../i18n';
 import type { DocumentPickerResponse } from '@react-native-documents/picker';
 import { Alert, Platform } from 'react-native';
+import { GlobalAlert } from '../../src/components';
 
 export class AttachmentService {
   private static loadDocumentPicker() {
@@ -29,14 +30,14 @@ export class AttachmentService {
       }
       if (result.errorCode) {
         console.error('[AttachmentService] Camera errorCode:', result.errorCode, result.errorMessage);
-        Alert.alert('错误', result.errorMessage || '打开相机失败');
+        GlobalAlert.alert('错误', result.errorMessage || '打开相机失败');
         return [];
       }
 
       return result.assets || [];
     } catch (error) {
       console.error('[AttachmentService] Camera error:', error);
-      Alert.alert(i18n.t('common.error'), i18n.t('actr.attachment.cameraError'));
+      GlobalAlert.alert(i18n.t('common.error'), i18n.t('actr.attachment.cameraError'));
       return [];
     }
   }
@@ -58,14 +59,14 @@ export class AttachmentService {
       }
       if (result.errorCode) {
         console.error('[AttachmentService] Gallery errorCode:', result.errorCode, result.errorMessage);
-        Alert.alert('错误', result.errorMessage || '打开相册失败');
+        GlobalAlert.alert('错误', result.errorMessage || '打开相册失败');
         return [];
       }
 
       return result.assets || [];
     } catch (error) {
       console.error('[AttachmentService] Gallery error:', error);
-      Alert.alert(i18n.t('common.error'), i18n.t('actr.attachment.galleryError'));
+      GlobalAlert.alert(i18n.t('common.error'), i18n.t('actr.attachment.galleryError'));
       return [];
     }
   }
@@ -77,7 +78,7 @@ export class AttachmentService {
     try {
       const documentPicker = AttachmentService.loadDocumentPicker();
       if (!documentPicker) {
-        Alert.alert('错误', '文档选择模块不可用');
+        GlobalAlert.alert('错误', '文档选择模块不可用');
         return [];
       }
 
@@ -136,7 +137,7 @@ export class AttachmentService {
         console.log('[AttachmentService] Document selection cancelled');
       } else {
         console.error('[AttachmentService] Document picker error:', err);
-        Alert.alert(i18n.t('common.error'), i18n.t('actr.attachment.fileError'));
+        GlobalAlert.alert(i18n.t('common.error'), i18n.t('actr.attachment.fileError'));
       }
       return [];
     }
