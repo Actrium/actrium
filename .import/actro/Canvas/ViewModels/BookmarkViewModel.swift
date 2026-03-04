@@ -15,6 +15,9 @@ final class BookmarkViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
+        // One-time cleanup of duplicate bookmarks (same app_url)
+        bookmarkRepo.deduplicateByURL()
+
         setupSearch()
         loadAll()
     }
