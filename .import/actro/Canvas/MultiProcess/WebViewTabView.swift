@@ -166,6 +166,8 @@ private let sharedProcessPool = WKProcessPool()
 final class WebViewHolder: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     private var loadedURL: URL?
+    /// Tracks the last URL seen by KVO (avoids using change.oldValue which can dangle)
+    private var lastKnownURL: URL?
 
     /// Callback when navigation finishes with title and URL
     var onNavigationFinished: ((String?, URL?) -> Void)?
@@ -441,16 +443,19 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         webView.isInspectable = true  // Enable Web Inspector
 
         // Observe URL changes (including History.pushState/replaceState)
-        urlObservation = webView.observe(\.url, options: [.new, .old]) { [weak self] webView, change in
-            // change.newValue is URL?? (double optional), need to flatten
+        // NOTE: Do NOT use .old option — WebKit can fire KVO during PageLoadState::Transaction
+        // destruction, at which point the old URL's backing memory may already be freed,
+        // causing EXC_BAD_ACCESS in _platform_strlen when accessing change.oldValue.
+        urlObservation = webView.observe(\.url, options: [.new]) { [weak self] webView, _ in
             guard let newURL = webView.url else { return }
+            guard let self = self else { return }
             // Keep loadedURL in sync so loadIfNeeded won't redundantly reload after redirects
-            self?.loadedURL = newURL
-            let oldURL = change.oldValue ?? nil
-            // Only notify if URL actually changed
-            if oldURL != newURL {
-                NSLog("🔗 WebViewHolder: URL changed via KVO from \(oldURL?.absoluteString ?? "nil") to: \(newURL.absoluteString)")
-                self?.onURLChanged?(newURL)
+            self.loadedURL = newURL
+            // Only notify if URL actually changed (tracked internally)
+            if self.lastKnownURL != newURL {
+                NSLog("🔗 WebViewHolder: URL changed from \(self.lastKnownURL?.absoluteString ?? "nil") to: \(newURL.absoluteString)")
+                self.lastKnownURL = newURL
+                self.onURLChanged?(newURL)
             }
         }
     }
