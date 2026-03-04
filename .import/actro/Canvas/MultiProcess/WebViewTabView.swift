@@ -622,6 +622,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     func showAutofillPopover(credentials: [(VaultItem, String, String)], fieldRect: CGRect) {
         dismissAutofillPopover()
+        guard webView.window != nil else { return }
 
         let items = credentials.map { (item, username, password) in
             AutofillSuggestionItem(
@@ -657,6 +658,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     func showVaultLockedPopover(fieldRect: CGRect) {
         dismissAutofillPopover()
+        guard webView.window != nil else { return }
 
         let popover = NSPopover()
         popover.behavior = .semitransient
