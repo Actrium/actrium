@@ -13,6 +13,7 @@ private final class InvisibleDividerSplitView: NSSplitView {
     override func drawDivider(in rect: NSRect) {
         // Intentionally no-op to keep divider visually hidden.
     }
+
 }
 
 /// Split view controller managing sidebar and content areas
@@ -39,6 +40,9 @@ final class MainSplitViewController: NSSplitViewController {
     private var dividerMonitorStartMouseX: CGFloat = 0
     private var dividerMonitorStartDividerX: CGFloat = 0
     private var dividerMonitorHasDragged = false
+
+    /// The sidebar width set by user drag. Window resize restores this value.
+    private var pinnedSidebarWidth: CGFloat = 250
 
     /// Divider hit zone extensions (points). Keeps visual divider thin,
     /// but expands the draggable area for better usability.
@@ -155,6 +159,15 @@ final class MainSplitViewController: NSSplitViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
+
+        // After NSSplitViewController's proportional resize, restore the pinned sidebar width.
+        if !dividerMonitorDragActive,
+           !sidebarItem.isCollapsed,
+           let sidebarView = sidebarViewController?.view,
+           abs(sidebarView.frame.width - pinnedSidebarWidth) > 1 {
+            splitView.setPosition(pinnedSidebarWidth, ofDividerAt: 0)
+        }
+
         syncSidebarLayoutState()
     }
 
@@ -214,6 +227,13 @@ final class MainSplitViewController: NSSplitViewController {
         }
 
         return .zero
+    }
+
+    private func savePinnedSidebarWidth() {
+        guard !sidebarItem.isCollapsed,
+              let sidebarView = sidebarViewController?.view else { return }
+        let w = sidebarView.frame.width
+        if w > 1 { pinnedSidebarWidth = w }
     }
 
     private func syncSidebarLayoutState() {
@@ -366,6 +386,7 @@ final class MainSplitViewController: NSSplitViewController {
                 debugLog("monitor=monitor_up_local action=no_drag split=\(formatPoint(eventPointInSplit))")
             }
             dividerMonitorDragActive = false
+            savePinnedSidebarWidth()
             return true
         default:
             return false
@@ -389,6 +410,7 @@ final class MainSplitViewController: NSSplitViewController {
                     self.debugLog("monitor=monitor_up_global action=no_drag split=\(self.formatPoint(pointInSplit))")
                 }
                 self.dividerMonitorDragActive = false
+                self.savePinnedSidebarWidth()
             default:
                 break
             }
