@@ -443,18 +443,20 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         webView.isInspectable = true  // Enable Web Inspector
 
         // Observe URL changes (including History.pushState/replaceState)
-        // IMPORTANT: WebKit fires KVO synchronously during PageLoadState::Transaction destruction.
-        // At that point, webView.url's backing NSURL string buffer may already be freed, causing
-        // EXC_BAD_ACCESS in _platform_strlen. We must NOT access webView.url (or any WebKit state)
-        // synchronously inside the KVO handler. Dispatch async so the transaction fully completes first.
+        // WORKAROUND: On macOS 26 (Tahoe), webView.url can return an NSURL whose internal
+        // string buffer points to freed WebKit memory (GPU Carveout reserved region), causing
+        // EXC_BAD_ACCESS in _platform_strlen when accessing .absoluteString.
+        // We avoid webView.url entirely and use evaluateJavaScript("location.href") instead,
+        // which returns a fresh JS string with no NSURL bridging issues.
         urlObservation = webView.observe(\.url) { [weak self] _, _ in
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                guard let newURL = self.webView.url else { return }
-                // Keep loadedURL in sync so loadIfNeeded won't redundantly reload after redirects
+            guard let self = self else { return }
+            self.webView.evaluateJavaScript("location.href") { [weak self] result, _ in
+                guard let self = self,
+                      let urlString = result as? String,
+                      let newURL = URL(string: urlString) else { return }
                 self.loadedURL = newURL
                 if self.lastKnownURL != newURL {
-                    NSLog("🔗 WebViewHolder: URL changed to: \(newURL.absoluteString)")
+                    NSLog("🔗 WebViewHolder: URL changed to: %@", urlString)
                     self.lastKnownURL = newURL
                     self.onURLChanged?(newURL)
                 }
