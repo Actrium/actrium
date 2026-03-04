@@ -198,7 +198,7 @@ private struct UnlockedVaultView: View {
                         .font(.subheadline)
                         .buttonStyle(.borderless)
                     } else {
-                        Text(vault.passwordHint?.isEmpty == false ? vault.passwordHint! : "None")
+                        Text(vault.passwordHint?.isEmpty == false ? "Set" : "Not set")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                         Button("Edit") {
