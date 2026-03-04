@@ -66,7 +66,10 @@ final class AutofillManager: ObservableObject {
     // MARK: - Handle Captured Credentials
 
     func handleCapturedCredentials(url: String, username: String, password: String) {
-        guard VaultManager.shared.state == .unlocked else { return }
+        // Allow capture regardless of vault state — the save banner should still
+        // appear so the user knows credentials were detected. Saving will require
+        // vault unlock, but the prompt itself should not be gated.
+        guard VaultManager.shared.state != .notSetup else { return }
 
         guard let parsedURL = URL(string: url),
               let domain = extractDomain(from: parsedURL) else { return }
