@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { LoginBridge, LoginType } from '../../native-bridge';
@@ -116,22 +117,24 @@ export const LoginContent = ({
       </Text>
 
       <View style={[styles.buttonContainer, { maxWidth: buttonMaxWidth, marginBottom: buttonBottom }]}>
-        <TouchableOpacity
-          style={[
-            styles.loginButton,
-            { backgroundColor: colors.buttonBg, borderColor: colors.buttonBorder },
-          ]}
-          onPress={() => onLoginPress('apple')}
-          activeOpacity={0.7}
-        >
-          <Image
-            source={require('../../assets/login/apple_logo.png')}
-            style={[styles.btnIcon, { tintColor: colors.iconTint }]}
-          />
-          <Text style={[styles.btnText, { fontSize: buttonFontSize, color: colors.buttonText }]}>
-            {t('actr.auth.appleLogin')}
-          </Text>
-        </TouchableOpacity>
+        {Platform.OS !== 'android' && (
+          <TouchableOpacity
+            style={[
+              styles.loginButton,
+              { backgroundColor: colors.buttonBg, borderColor: colors.buttonBorder },
+            ]}
+            onPress={() => onLoginPress('apple')}
+            activeOpacity={0.7}
+          >
+            <Image
+              source={require('../../assets/login/apple_logo.png')}
+              style={[styles.btnIcon, { tintColor: colors.iconTint }]}
+            />
+            <Text style={[styles.btnText, { fontSize: buttonFontSize, color: colors.buttonText }]}>
+              {t('actr.auth.appleLogin')}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={[
