@@ -85,6 +85,7 @@ struct SetupMasterPasswordView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!isValid || vault.isProcessing)
+                .opacity(isValid && !vault.isProcessing ? 1 : 0.5)
             }
 
             Spacer()
