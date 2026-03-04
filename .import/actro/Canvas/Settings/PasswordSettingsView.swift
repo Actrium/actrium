@@ -24,11 +24,17 @@ private struct UnlockedVaultView: View {
     @State private var showingAddSheet = false
     @State private var editingCredential: Credential?
     @State private var showingChangePassword = false
-    @State private var touchIDEnabled = false
+    @State private var touchIDEnabled: Bool
     @State private var showingTouchIDPasswordSheet = false
     @State private var editingHint = false
-    @State private var hintText = ""
+    @State private var hintText: String
     @State private var showingResetConfirmation = false
+
+    init(vault: VaultManager) {
+        self.vault = vault
+        _touchIDEnabled = State(initialValue: vault.isTouchIDEnabled)
+        _hintText = State(initialValue: vault.passwordHint ?? "")
+    }
 
     private var filteredCredentials: [Credential] {
         if searchText.isEmpty { return vault.credentials }
@@ -95,10 +101,6 @@ private struct UnlockedVaultView: View {
 
             // Security section
             securitySection
-        }
-        .onAppear {
-            touchIDEnabled = vault.isTouchIDEnabled
-            hintText = vault.passwordHint ?? ""
         }
         .sheet(isPresented: $showingAddSheet) {
             CredentialFormSheet(vault: vault)
