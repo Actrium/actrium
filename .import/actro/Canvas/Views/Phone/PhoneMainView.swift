@@ -20,7 +20,7 @@ struct PhoneMainView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             // 书签页：使用 RN 渲染
-            SwiftUI.Tab("书签", systemImage: "bookmark.fill", value: PhoneTab.bookmarks) {
+            SwiftUI.Tab("书签", systemImage: "book.fill", value: PhoneTab.bookmarks) {
                 PhoneSystemAppView(
                     systemType: .bookmarks,
                     viewModel: viewModel,
@@ -32,7 +32,7 @@ struct PhoneMainView: View {
                 )
             }
             
-            SwiftUI.Tab("页签", systemImage: "square.grid.2x2.fill", value: PhoneTab.tabs) {
+            SwiftUI.Tab("页签", systemImage: "rectangle.grid.1x2.fill", value: PhoneTab.tabs) {
                 PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, onSelect: { tab in
                     fullscreenTab = tab
                 })
