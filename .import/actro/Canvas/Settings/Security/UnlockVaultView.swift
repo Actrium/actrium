@@ -53,6 +53,7 @@ struct UnlockVaultView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(password.isEmpty || vault.isProcessing)
+                        .opacity(!password.isEmpty && !vault.isProcessing ? 1 : 0.5)
 
                         if hasTouchID {
                             Button {

@@ -212,6 +212,7 @@ private struct TouchIDPasswordSheet: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(password.isEmpty || vault.isProcessing)
+                .opacity(!password.isEmpty && !vault.isProcessing ? 1 : 0.5)
             }
         }
         .padding(20)
@@ -436,6 +437,7 @@ private struct ChangePasswordSheet: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!isValid || vault.isProcessing)
+                .opacity(isValid && !vault.isProcessing ? 1 : 0.5)
             }
         }
         .padding(20)
