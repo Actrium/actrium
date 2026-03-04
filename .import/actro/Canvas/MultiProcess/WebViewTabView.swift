@@ -655,6 +655,31 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         self.autofillPopover = popover
     }
 
+    func showVaultLockedPopover(fieldRect: CGRect) {
+        dismissAutofillPopover()
+
+        let popover = NSPopover()
+        popover.behavior = .semitransient
+        popover.contentViewController = NSHostingController(
+            rootView: VaultLockedPromptView { [weak self] in
+                self?.dismissAutofillPopover()
+                SettingsWindowController.shared.showWindow()
+            }
+        )
+
+        let zoom = webView.pageZoom
+        let viewBounds = webView.bounds
+        let nsRect = NSRect(
+            x: fieldRect.origin.x * zoom,
+            y: viewBounds.height - (fieldRect.origin.y + fieldRect.height) * zoom,
+            width: fieldRect.width * zoom,
+            height: fieldRect.height * zoom
+        )
+
+        popover.show(relativeTo: nsRect, of: webView, preferredEdge: .minY)
+        self.autofillPopover = popover
+    }
+
     func dismissAutofillPopover() {
         autofillPopover?.performClose(nil)
         autofillPopover = nil
@@ -1551,10 +1576,12 @@ extension WebViewHolder: WKScriptMessageHandler {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 let vaultState = VaultManager.shared.state
-                guard vaultState == .unlocked else {
-                    NSLog("🔑 autofill blocked: vault state = %@", "\(vaultState)")
+                if vaultState == .locked {
+                    NSLog("🔑 autofill: vault locked, showing unlock prompt")
+                    self.showVaultLockedPopover(fieldRect: fieldRect)
                     return
                 }
+                guard vaultState == .unlocked else { return }
                 let credentials = AutofillManager.shared.findCredentials(forDomain: domain)
                 NSLog("🔑 autofill: found %d credentials for %@", credentials.count, domain)
                 guard !credentials.isEmpty else { return }

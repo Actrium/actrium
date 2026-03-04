@@ -28,6 +28,37 @@ struct AutofillSuggestionView: View {
     }
 }
 
+// MARK: - Vault Locked Prompt
+
+struct VaultLockedPromptView: View {
+    let onUnlock: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+                .frame(width: 20)
+
+            Text("Vault is locked")
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+
+            Spacer()
+
+            Button("Unlock") {
+                onUnlock()
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(width: 260)
+    }
+}
+
+// MARK: - Suggestion Row
+
 private struct AutofillSuggestionRow: View {
     let item: AutofillSuggestionItem
     let action: () -> Void
