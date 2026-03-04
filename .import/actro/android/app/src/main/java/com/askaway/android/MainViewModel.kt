@@ -60,16 +60,24 @@ class MainViewModel : ViewModel() {
                 val tabId = event.params["tabId"] as? String
                 val unread = event.params["unread"] as? Boolean
                 Log.e("MainViewModel", "${_activeModelList[0].id}")
-                if (tabId != null && unread != null) {
+                updateUnread(tabId, unread)
+            }
+
+            ReactModuleEvent.EVENT_UPDATE_TAB_INFO -> {
+                val tabId = event.params["tabId"] as? String
+                val title = event.params["title"] as? String
+                val icon = event.params["icon"] as? String
+                val url = event.params["url"] as? String
+                if (tabId != null) {
                     val index = _activeModelList.indexOfFirst { it.id == tabId }
                     if (index != -1) {
                         val oldItem = _activeModelList[index]
-                        if (oldItem.hasUnread != unread) {
-                            _activeModelList[index] = oldItem.copy(
-                                hasUnread = unread
-                            )
-                            _activeList.tryEmit(_activeModelList.toList())
-                        }
+                        _activeModelList[index] = oldItem.copy(
+                            name = title ?: oldItem.name,
+                            icon = icon ?: oldItem.icon,
+                            url = url ?: oldItem.url
+                        )
+                        _activeList.tryEmit(_activeModelList.toList())
                     }
                 }
             }
@@ -85,7 +93,7 @@ class MainViewModel : ViewModel() {
         Params.appList.value += tabModel
         val activeModel = ActiveModel(
             id = tabModel.id,
-            name = "Active App ${System.currentTimeMillis()}",
+            name = "",
             icon = "",
             screenshot = ""
         )
@@ -98,6 +106,7 @@ class MainViewModel : ViewModel() {
             )
         )
     }
+
 
     fun genReactNativeTabModel(): AppModel {
         return AppModel(id = UUID.randomUUID().toString())
@@ -133,5 +142,21 @@ class MainViewModel : ViewModel() {
     fun removeActiveModel(id: String) {
         _activeModelList.removeAll { it.id == id }
         _activeList.tryEmit(_activeModelList.toList())
+    }
+
+
+    private fun updateUnread(tabId: String?, unread: Boolean?) {
+        if (tabId != null && unread != null) {
+            val index = _activeModelList.indexOfFirst { it.id == tabId }
+            if (index != -1) {
+                val oldItem = _activeModelList[index]
+                if (oldItem.hasUnread != unread) {
+                    _activeModelList[index] = oldItem.copy(
+                        hasUnread = unread
+                    )
+                    _activeList.tryEmit(_activeModelList.toList())
+                }
+            }
+        }
     }
 }
