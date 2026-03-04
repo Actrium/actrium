@@ -549,9 +549,6 @@ private struct ChangePasswordSheet: View {
         }
         .padding(20)
         .frame(width: 400)
-        .onAppear {
-            hint = vault.passwordHint ?? ""
-        }
     }
 
     private func changePassword() {
