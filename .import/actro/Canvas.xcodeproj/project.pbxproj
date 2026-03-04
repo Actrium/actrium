@@ -14,6 +14,7 @@
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
 		F2DA039040BAE7C3F6B2D28C /* libPods-CanvasViewService.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 58C5049ADC7AD124D63CC153 /* libPods-CanvasViewService.a */; };
+		CC00110022003300AA00BB02 /* CanvasTerminal.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -115,6 +116,7 @@
 		C6A7E7F65DC0D2FA1F7D3C5F /* Pods-CanvasTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTests.release.xcconfig"; path = "Target Support Files/Pods-CanvasTests/Pods-CanvasTests.release.xcconfig"; sourceTree = "<group>"; };
 		DACA28DED8E4818311DAAB4D /* libPods-CanvasTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
+		CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasTerminal.xcframework; path = "canvas-terminal/CanvasTerminal.xcframework"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -166,6 +168,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC00110022003300AA00BB02 /* CanvasTerminal.xcframework in Frameworks */,
 				1A2B3C4D5E6F7890ABCD0001 /* CanvasIPC in Frameworks */,
 				B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */,
 				457EEA1F5D65241F37B32E2D /* libPods-Canvas.a in Frameworks */,
@@ -193,6 +196,7 @@
 		349156444B47045588D99DFC /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */,
 				68501CEF0142AD9A599B85C8 /* libPods-Canvas.a */,
 				58C5049ADC7AD124D63CC153 /* libPods-CanvasViewService.a */,
 				DACA28DED8E4818311DAAB4D /* libPods-CanvasTests.a */,
