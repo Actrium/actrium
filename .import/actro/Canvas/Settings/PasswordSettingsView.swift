@@ -24,6 +24,8 @@ private struct UnlockedVaultView: View {
     @State private var showingAddSheet = false
     @State private var editingCredential: Credential?
     @State private var showingChangePassword = false
+    @State private var touchIDEnabled = false
+    @State private var showingTouchIDPasswordSheet = false
     @State private var errorMessage: String?
 
     private var filteredCredentials: [Credential] {
@@ -34,7 +36,7 @@ private struct UnlockedVaultView: View {
         }
     }
 
-    private let timeoutOptions = [1, 5, 10, 15]
+    private let timeoutOptions = [0, 1, 5, 10, 15]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -93,15 +95,21 @@ private struct UnlockedVaultView: View {
             HStack(spacing: 16) {
                 Picker("Auto-lock:", selection: $vault.autoLockTimeout) {
                     ForEach(timeoutOptions, id: \.self) { minutes in
-                        Text("\(minutes) min").tag(minutes)
+                        if minutes == 0 {
+                            Text("Never").tag(0)
+                        } else {
+                            Text("\(minutes) min").tag(minutes)
+                        }
                     }
                 }
-                .frame(width: 160)
+                .frame(width: 170)
 
-                Toggle("Touch ID", isOn: $vault.isTouchIDEnabled)
-                    .onChange(of: vault.isTouchIDEnabled) { enabled in
-                        handleTouchIDToggle(enabled)
-                    }
+                if vault.isBiometricsAvailable {
+                    Toggle("Touch ID", isOn: $touchIDEnabled)
+                        .onChange(of: touchIDEnabled) { newValue in
+                            handleTouchIDToggle(newValue)
+                        }
+                }
 
                 Spacer()
 
@@ -113,6 +121,9 @@ private struct UnlockedVaultView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
+        .onAppear {
+            touchIDEnabled = vault.isTouchIDEnabled
+        }
         .sheet(isPresented: $showingAddSheet) {
             CredentialFormSheet(vault: vault)
         }
@@ -122,6 +133,13 @@ private struct UnlockedVaultView: View {
         .sheet(isPresented: $showingChangePassword) {
             ChangePasswordSheet(vault: vault)
         }
+        .sheet(isPresented: $showingTouchIDPasswordSheet) {
+            TouchIDPasswordSheet(vault: vault) { success in
+                if !success {
+                    touchIDEnabled = false
+                }
+            }
+        }
     }
 
     private func deleteCredential(_ credential: Credential) {
@@ -129,8 +147,87 @@ private struct UnlockedVaultView: View {
     }
 
     private func handleTouchIDToggle(_ enabled: Bool) {
-        if !enabled {
-            KeychainHelper.deleteMasterPassword()
+        if enabled {
+            // Enabling Touch ID requires password verification
+            showingTouchIDPasswordSheet = true
+        } else {
+            // Disabling Touch ID can be done directly
+            vault.disableTouchID()
+        }
+    }
+}
+
+// MARK: - Touch ID Password Confirmation Sheet
+
+private struct TouchIDPasswordSheet: View {
+    @ObservedObject var vault: VaultManager
+    @Environment(\.dismiss) private var dismiss
+
+    let onComplete: (Bool) -> Void
+
+    @State private var password = ""
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Enable Touch ID")
+                .font(.headline)
+
+            Text("Enter your master password to enable Touch ID unlock.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+
+            SecureField("Master password", text: $password)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 280)
+                .onSubmit { confirm() }
+
+            if let error = errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+
+            HStack {
+                Button("Cancel") {
+                    onComplete(false)
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button {
+                    confirm()
+                } label: {
+                    if vault.isProcessing {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Verifying...")
+                        }
+                    } else {
+                        Text("Enable")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(password.isEmpty || vault.isProcessing)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    private func confirm() {
+        errorMessage = nil
+        Task {
+            do {
+                try await vault.enableTouchID(password: password)
+                onComplete(true)
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
@@ -323,10 +420,22 @@ private struct ChangePasswordSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
 
-                Button("Change Password") { changePassword() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!isValid)
+                Button {
+                    changePassword()
+                } label: {
+                    if vault.isProcessing {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Changing...")
+                        }
+                    } else {
+                        Text("Change Password")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!isValid || vault.isProcessing)
             }
         }
         .padding(20)
@@ -335,11 +444,13 @@ private struct ChangePasswordSheet: View {
 
     private func changePassword() {
         errorMessage = nil
-        do {
-            try vault.changeMasterPassword(current: currentPassword, new: newPassword)
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
+        Task {
+            do {
+                try await vault.changeMasterPassword(current: currentPassword, new: newPassword)
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }

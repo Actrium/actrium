@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import CommonCrypto
 import Combine
+import LocalAuthentication
 
 enum VaultState {
     case notSetup, locked, unlocked
@@ -15,6 +16,7 @@ enum VaultError: LocalizedError {
     case encryptionFailed
     case decryptionFailed
     case keyDerivationFailed
+    case biometricsSaveFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +27,7 @@ enum VaultError: LocalizedError {
         case .encryptionFailed: return "Encryption failed"
         case .decryptionFailed: return "Decryption failed"
         case .keyDerivationFailed: return "Key derivation failed"
+        case .biometricsSaveFailed(let msg): return "Failed to save to Keychain: \(msg)"
         }
     }
 }
@@ -35,6 +38,7 @@ final class VaultManager: ObservableObject {
 
     @Published var state: VaultState = .notSetup
     @Published var credentials: [Credential] = []
+    @Published var isProcessing: Bool = false
 
     @Published var autoLockTimeout: Int {
         didSet {
@@ -47,6 +51,10 @@ final class VaultManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(isTouchIDEnabled, forKey: "vault.isTouchIDEnabled")
         }
+    }
+
+    var isBiometricsAvailable: Bool {
+        KeychainHelper.isBiometricsAvailable()
     }
 
     private var derivedKey: SymmetricKey?
@@ -66,15 +74,21 @@ final class VaultManager: ObservableObject {
 
     // MARK: - Setup
 
-    func setupMasterPassword(_ password: String, enableTouchID: Bool) throws {
+    func setupMasterPassword(_ password: String, enableTouchID: Bool) async throws {
         guard state == .notSetup else { throw VaultError.alreadySetup }
+
+        isProcessing = true
+        defer { isProcessing = false }
 
         // Generate random salt
         var saltBytes = [UInt8](repeating: 0, count: 32)
         _ = SecRandomCopyBytes(kSecRandomDefault, saltBytes.count, &saltBytes)
         let salt = Data(saltBytes)
 
-        let key = try deriveKey(password: password, salt: salt)
+        // Derive key on background thread (PBKDF2 is CPU-intensive)
+        let key = try await Task.detached(priority: .userInitiated) {
+            try Self.deriveKeyStatic(password: password, salt: salt)
+        }.value
         derivedKey = key
 
         // Store salt
@@ -84,10 +98,12 @@ final class VaultManager: ObservableObject {
         let verificationToken = try encrypt("vault-verification-token")
         VaultDatabase.setVaultMeta(key: "verification_hash", value: verificationToken)
 
-        // Enable Touch ID if requested
-        isTouchIDEnabled = enableTouchID
-        if enableTouchID {
-            try? KeychainHelper.saveMasterPassword(password)
+        // Enable Touch ID if requested and available
+        if enableTouchID && isBiometricsAvailable {
+            isTouchIDEnabled = true
+            try KeychainHelper.saveMasterPassword(password)
+        } else {
+            isTouchIDEnabled = false
         }
 
         state = .unlocked
@@ -96,18 +112,23 @@ final class VaultManager: ObservableObject {
 
     // MARK: - Unlock / Lock
 
-    func unlock(password: String) throws {
+    func unlock(password: String) async throws {
         guard state == .locked else {
             if state == .notSetup { throw VaultError.notSetup }
             return
         }
+
+        isProcessing = true
+        defer { isProcessing = false }
 
         guard let saltString = VaultDatabase.getVaultMeta(key: "salt"),
               let salt = Data(base64Encoded: saltString) else {
             throw VaultError.notSetup
         }
 
-        let key = try deriveKey(password: password, salt: salt)
+        let key = try await Task.detached(priority: .userInitiated) {
+            try Self.deriveKeyStatic(password: password, salt: salt)
+        }.value
 
         // Verify password by decrypting verification token
         guard let storedToken = VaultDatabase.getVaultMeta(key: "verification_hash") else {
@@ -133,7 +154,7 @@ final class VaultManager: ObservableObject {
 
     func unlockWithBiometrics() async throws {
         let password = try await KeychainHelper.loadMasterPasswordWithBiometrics()
-        try unlock(password: password)
+        try await unlock(password: password)
     }
 
     func lock() {
@@ -146,22 +167,71 @@ final class VaultManager: ObservableObject {
         autoLockTimer = nil
     }
 
-    // MARK: - Change Password
+    // MARK: - Touch ID Management
 
-    func changeMasterPassword(current: String, new newPassword: String) throws {
-        // Verify current password first
+    /// Enable Touch ID — requires the current master password to save to Keychain
+    func enableTouchID(password: String) async throws {
+        // Verify the password first
         guard let saltString = VaultDatabase.getVaultMeta(key: "salt"),
               let salt = Data(base64Encoded: saltString) else {
             throw VaultError.notSetup
         }
 
-        let currentKey = try deriveKey(password: current, salt: salt)
+        let key = try await Task.detached(priority: .userInitiated) {
+            try Self.deriveKeyStatic(password: password, salt: salt)
+        }.value
 
         guard let storedToken = VaultDatabase.getVaultMeta(key: "verification_hash") else {
             throw VaultError.notSetup
         }
 
-        // Temporarily set key to verify
+        let previousKey = derivedKey
+        derivedKey = key
+        do {
+            let decrypted = try decrypt(storedToken)
+            guard decrypted == "vault-verification-token" else {
+                derivedKey = previousKey
+                throw VaultError.wrongPassword
+            }
+        } catch {
+            derivedKey = previousKey
+            throw VaultError.wrongPassword
+        }
+        derivedKey = previousKey
+
+        // Password verified, save to keychain (will trigger Touch ID prompt)
+        try KeychainHelper.saveMasterPassword(password)
+        isTouchIDEnabled = true
+    }
+
+    /// Disable Touch ID
+    func disableTouchID() {
+        KeychainHelper.deleteMasterPassword()
+        isTouchIDEnabled = false
+    }
+
+    // MARK: - Change Password
+
+    func changeMasterPassword(current: String, new newPassword: String) async throws {
+        guard state == .unlocked else { throw VaultError.locked }
+
+        isProcessing = true
+        defer { isProcessing = false }
+
+        // Verify current password
+        guard let saltString = VaultDatabase.getVaultMeta(key: "salt"),
+              let salt = Data(base64Encoded: saltString) else {
+            throw VaultError.notSetup
+        }
+
+        let currentKey = try await Task.detached(priority: .userInitiated) {
+            try Self.deriveKeyStatic(password: current, salt: salt)
+        }.value
+
+        guard let storedToken = VaultDatabase.getVaultMeta(key: "verification_hash") else {
+            throw VaultError.notSetup
+        }
+
         let previousKey = derivedKey
         derivedKey = currentKey
         do {
@@ -176,15 +246,16 @@ final class VaultManager: ObservableObject {
         }
 
         // Decrypt all credentials with old key
-        let oldKey = currentKey
-        derivedKey = oldKey
         let decryptedCreds = try credentials.isEmpty ? loadAndReturnCredentials() : credentials
 
         // Generate new salt and key
         var newSaltBytes = [UInt8](repeating: 0, count: 32)
         _ = SecRandomCopyBytes(kSecRandomDefault, newSaltBytes.count, &newSaltBytes)
         let newSalt = Data(newSaltBytes)
-        let newKey = try deriveKey(password: newPassword, salt: newSalt)
+
+        let newKey = try await Task.detached(priority: .userInitiated) {
+            try Self.deriveKeyStatic(password: newPassword, salt: newSalt)
+        }.value
         derivedKey = newKey
 
         // Update salt
@@ -246,6 +317,7 @@ final class VaultManager: ObservableObject {
             updatedAt: now
         )
         credentials.append(credential)
+        setupAutoLockTimer()
     }
 
     func updateCredential(_ credential: Credential) throws {
@@ -269,6 +341,7 @@ final class VaultManager: ObservableObject {
             updated.updatedAt = now
             credentials[index] = updated
         }
+        setupAutoLockTimer()
     }
 
     func deleteCredential(id: String) throws {
@@ -276,11 +349,13 @@ final class VaultManager: ObservableObject {
 
         VaultDatabase.deleteCredential(id: id)
         credentials.removeAll { $0.id == id }
+        setupAutoLockTimer()
     }
 
     // MARK: - Crypto
 
-    private func deriveKey(password: String, salt: Data) throws -> SymmetricKey {
+    /// Static version for use in detached tasks (no actor isolation needed)
+    private nonisolated static func deriveKeyStatic(password: String, salt: Data) throws -> SymmetricKey {
         guard let passwordData = password.data(using: .utf8) else {
             throw VaultError.keyDerivationFailed
         }

@@ -5,7 +5,7 @@ struct SetupMasterPasswordView: View {
 
     @State private var password = ""
     @State private var confirmPassword = ""
-    @State private var enableTouchID = true
+    @State private var enableTouchID = false
     @State private var errorMessage: String?
 
     private var passwordStrength: PasswordStrength {
@@ -59,8 +59,10 @@ struct SetupMasterPasswordView: View {
                 }
                 .frame(width: 280)
 
-                Toggle("Enable Touch ID", isOn: $enableTouchID)
-                    .frame(width: 280)
+                if vault.isBiometricsAvailable {
+                    Toggle("Enable Touch ID", isOn: $enableTouchID)
+                        .frame(width: 280)
+                }
 
                 if let error = errorMessage {
                     Text(error)
@@ -68,16 +70,29 @@ struct SetupMasterPasswordView: View {
                         .foregroundColor(.red)
                 }
 
-                Button("Set Password") {
+                Button {
                     setup()
+                } label: {
+                    if vault.isProcessing {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Setting up...")
+                        }
+                    } else {
+                        Text("Set Password")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!isValid)
+                .disabled(!isValid || vault.isProcessing)
             }
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            enableTouchID = vault.isBiometricsAvailable
+        }
     }
 
     // MARK: - Strength Indicator
@@ -98,10 +113,12 @@ struct SetupMasterPasswordView: View {
 
     private func setup() {
         errorMessage = nil
-        do {
-            try vault.setupMasterPassword(password, enableTouchID: enableTouchID)
-        } catch {
-            errorMessage = error.localizedDescription
+        Task {
+            do {
+                try await vault.setupMasterPassword(password, enableTouchID: enableTouchID)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
