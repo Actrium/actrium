@@ -287,6 +287,15 @@ struct WorkspaceMainView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
 
+                // Focus 模式下的 SSH 终端内容层（canvas 变换之外）
+                if case .focus(let focusedTabId) = viewModel.canvasMode,
+                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
+                   case .ssh(let sessionId) = focusedTab.contentType {
+                    SSHTerminalView(sessionId: sessionId, viewportSize: safeViewportSize)
+                        .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+
                 // 🔑 Live 层：统一的 ViewBridge 内容层（canvas 变换之外）
                 // 始终渲染，不论 Focus/Overview 模式，避免模式切换时连接断开
                 // 注意：Live 层在 canvas 外部，需要将 canvas 坐标转换为视口坐标

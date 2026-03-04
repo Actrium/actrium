@@ -732,6 +732,27 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 return
             }
 
+            // Handle ssh:// URL
+            if url.scheme == "ssh" {
+                logger.notice("[navigateCurrentTab] SSH connection: \(url.absoluteString)")
+                let sessionId = SSHSessionBridge.shared.createSession(
+                    url: url.absoluteString,
+                    rows: 24,
+                    cols: 80
+                )
+                tabs[index].url = url
+                tabs[index].sshSessionId = sessionId
+                tabs[index].title = url.host ?? "SSH"
+                tabs[index].unifiedScript = nil
+                tabs[index].leftPanelScript = nil
+                tabs[index].rightPanelScript = nil
+                tabs[index].guestScript = nil
+                tabs[index].systemTabType = nil
+                tabs[index].contractName = nil
+                objectWillChange.send()
+                return
+            }
+
             logger.notice("🌐 [navigateCurrentTab] 导航到 URL: \(url.absoluteString)")
             // 更新 Tab 为 Web 内容
             tabs[index].url = url
@@ -900,10 +921,11 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
     /// - 如果是 about:/http/https/askw/askaway，直接解析
     /// - 如果看起来像域名（包含 . 且不包含空格），添加 https:// 前缀
     func parseURL(_ input: String) -> URL? {
-        // 已经是完整 URL (http/https/about/askw/askaway)
+        // 已经是完整 URL (http/https/about/askw/askaway/ssh)
         if input.hasPrefix("http://") || input.hasPrefix("https://") ||
            input.hasPrefix("about:") ||
-           input.hasPrefix("askw://") || input.hasPrefix("askaway://") {
+           input.hasPrefix("askw://") || input.hasPrefix("askaway://") ||
+           input.hasPrefix("ssh://") {
             return URL(string: input)
         }
 
