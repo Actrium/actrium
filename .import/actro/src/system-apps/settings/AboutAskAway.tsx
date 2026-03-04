@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { WebView } from 'react-native-webview';
 import { Icon } from '../../actr-host/components/Icon';
 import { SettingsBackHeader } from './SettingsBackHeader';
 
@@ -14,7 +16,48 @@ interface AboutAskAwayProps {
   isTablet: boolean;
 }
 
+type AboutPageKey = 'aboutApp' | 'userAgreement' | 'privacyPolicy' | 'icp';
+
+const ABOUT_PAGE_CONFIG: Record<AboutPageKey, { label: string; path: string }> = {
+  aboutApp: { label: '关于 AskAway', path: 'AskAway.html' },
+  userAgreement: { label: '用户协议', path: 'user.html' },
+  privacyPolicy: { label: '隐私政策', path: 'privacy.html' },
+  icp: { label: 'ICP 备案', path: 'icp.html' },
+};
+
+const getLanguageSegment = (language: string): 'zh-Hans' | 'en' => {
+  return language.toLowerCase().startsWith('zh') ? 'zh-Hans' : 'en';
+};
+
+const getAboutPageUrl = (page: AboutPageKey, language: string): string => {
+  const languageSegment = getLanguageSegment(language);
+  return `https://www.askaway.chat/corp/${languageSegment}/${ABOUT_PAGE_CONFIG[page].path}`;
+};
+
 export const AboutAskAway = ({ onBack, isTablet }: AboutAskAwayProps) => {
+  const { i18n } = useTranslation();
+  const [currentPage, setCurrentPage] = useState<AboutPageKey | null>(null);
+
+  const pageUrl = useMemo(() => {
+    if (!currentPage) return '';
+    return getAboutPageUrl(currentPage, i18n.language || 'zh-Hans');
+  }, [currentPage, i18n.language]);
+
+  if (currentPage && pageUrl) {
+    return (
+      <View style={styles.webviewContainer}>
+        <WebView source={{ uri: pageUrl }} style={styles.webview} />
+        <TouchableOpacity
+          style={styles.floatingBackButton}
+          onPress={() => setCurrentPage(null)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.floatingBackButtonText}>‹</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       style={styles.content}
@@ -29,13 +72,25 @@ export const AboutAskAway = ({ onBack, isTablet }: AboutAskAwayProps) => {
       <SettingsBackHeader onBack={onBack} title='关于 AskAway' marginBottom={24} />
 
       <View style={styles.groupCard}>
-        <AboutItem label='关于 AskAway' />
+        <AboutItem
+          label={ABOUT_PAGE_CONFIG.aboutApp.label}
+          onPress={() => setCurrentPage('aboutApp')}
+        />
         <View style={styles.divider} />
-        <AboutItem label='用户协议' />
+        <AboutItem
+          label={ABOUT_PAGE_CONFIG.userAgreement.label}
+          onPress={() => setCurrentPage('userAgreement')}
+        />
         <View style={styles.divider} />
-        <AboutItem label='隐私政策' />
+        <AboutItem
+          label={ABOUT_PAGE_CONFIG.privacyPolicy.label}
+          onPress={() => setCurrentPage('privacyPolicy')}
+        />
         <View style={styles.divider} />
-        <AboutItem label='ICP 备案' />
+        <AboutItem
+          label={ABOUT_PAGE_CONFIG.icp.label}
+          onPress={() => setCurrentPage('icp')}
+        />
       </View>
     </ScrollView>
   );
@@ -43,11 +98,12 @@ export const AboutAskAway = ({ onBack, isTablet }: AboutAskAwayProps) => {
 
 interface AboutItemProps {
   label: string;
+  onPress: () => void;
 }
 
-const AboutItem = ({ label }: AboutItemProps) => {
+const AboutItem = ({ label, onPress }: AboutItemProps) => {
   return (
-    <TouchableOpacity style={styles.itemContainer} activeOpacity={0.7}>
+    <TouchableOpacity style={styles.itemContainer} activeOpacity={0.7} onPress={onPress}>
       <Text style={styles.itemLabel}>{label}</Text>
       <Icon type='next' size={16} color='#fff' />
     </TouchableOpacity>
@@ -61,6 +117,31 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: 60,
     paddingBottom: 40,
+  },
+  webviewContainer: {
+    flex: 1,
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  floatingBackButton: {
+    position: 'absolute',
+    top: 56,
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(58, 58, 60, 0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  floatingBackButtonText: {
+    fontSize: 30,
+    color: '#fff',
+    fontWeight: '300',
+    marginTop: -4,
   },
   groupCard: {
     backgroundColor: '#1C1C1E',
