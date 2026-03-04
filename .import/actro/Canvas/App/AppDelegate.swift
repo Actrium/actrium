@@ -31,11 +31,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Initialize services
         initializeServices()
 
+        // Setup notification listeners before creating windows
+        setupNotifications()
+
         // Create initial window
         createNewWindow()
 
-        // Setup notification listeners
-        setupNotifications()
+        // Ensure focusedViewModel is set after the run loop settles
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshFocusedViewModel()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
