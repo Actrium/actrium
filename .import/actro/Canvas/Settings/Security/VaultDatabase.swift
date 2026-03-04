@@ -65,4 +65,9 @@ struct VaultDatabase {
     static func fetchCredentials(domain: String) -> [[String: Any]] {
         return db.query("SELECT * FROM credentials WHERE domain = ?", params: [domain])
     }
+
+    static func deleteAllVaultData() {
+        db.execute("DELETE FROM vault_meta")
+        db.execute("DELETE FROM credentials")
+    }
 }

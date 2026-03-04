@@ -28,6 +28,7 @@ private struct UnlockedVaultView: View {
     @State private var showingTouchIDPasswordSheet = false
     @State private var editingHint = false
     @State private var hintText = ""
+    @State private var showingResetConfirmation = false
 
     private var filteredCredentials: [Credential] {
         if searchText.isEmpty { return vault.credentials }
@@ -203,10 +204,34 @@ private struct UnlockedVaultView: View {
                     .buttonStyle(.link)
                     Spacer()
                 }
+
+                Divider()
+
+                // Reset vault
+                HStack {
+                    Button("Reset Vault...") {
+                        showingResetConfirmation = true
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+                    .buttonStyle(.borderless)
+                    Text("All saved credentials will be permanently deleted.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .alert("Reset Vault?", isPresented: $showingResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                vault.resetVault()
+            }
+        } message: {
+            Text("This will permanently delete your master password and all saved credentials. This action cannot be undone.")
+        }
     }
 
     private func deleteCredential(_ credential: Credential) {
