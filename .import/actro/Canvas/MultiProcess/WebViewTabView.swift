@@ -656,7 +656,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         self.autofillPopover = popover
     }
 
-    func showVaultLockedPopover(fieldRect: CGRect) {
+    func showVaultLockedPopover(fieldRect: CGRect, domain: String) {
         dismissAutofillPopover()
         guard webView.window != nil else { return }
 
@@ -664,8 +664,18 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         popover.behavior = .semitransient
         popover.contentViewController = NSHostingController(
             rootView: VaultLockedPromptView { [weak self] in
-                self?.dismissAutofillPopover()
-                SettingsWindowController.shared.showWindow()
+                guard let self = self else { return }
+                // Vault just unlocked — look up credentials
+                let credentials = AutofillManager.shared.findCredentials(forDomain: domain)
+                if credentials.count == 1 {
+                    // Single match — fill directly
+                    self.fillCredential(username: credentials[0].1, password: credentials[0].2)
+                    self.dismissAutofillPopover()
+                } else if !credentials.isEmpty {
+                    self.showAutofillPopover(credentials: credentials, fieldRect: fieldRect)
+                } else {
+                    self.dismissAutofillPopover()
+                }
             }
         )
 
@@ -1580,7 +1590,7 @@ extension WebViewHolder: WKScriptMessageHandler {
                 let vaultState = VaultManager.shared.state
                 if vaultState == .locked {
                     NSLog("🔑 autofill: vault locked, showing unlock prompt")
-                    self.showVaultLockedPopover(fieldRect: fieldRect)
+                    self.showVaultLockedPopover(fieldRect: fieldRect, domain: domain)
                     return
                 }
                 guard vaultState == .unlocked else { return }
