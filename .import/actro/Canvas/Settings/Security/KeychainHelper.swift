@@ -2,12 +2,22 @@ import Foundation
 import Security
 import LocalAuthentication
 
-enum KeychainError: Error {
+enum KeychainError: LocalizedError {
     case saveFailed(OSStatus)
     case loadFailed(OSStatus)
     case biometricsUnavailable
     case dataConversionFailed
     case accessControlCreationFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .saveFailed(let status): return "Keychain save failed (OSStatus \(status))"
+        case .loadFailed(let status): return "Keychain load failed (OSStatus \(status))"
+        case .biometricsUnavailable: return "Biometrics unavailable"
+        case .dataConversionFailed: return "Data conversion failed"
+        case .accessControlCreationFailed: return "Access control creation failed"
+        }
+    }
 }
 
 struct KeychainHelper {
@@ -37,7 +47,8 @@ struct KeychainHelper {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: data,
-            kSecAttrAccessControl as String: accessControl
+            kSecAttrAccessControl as String: accessControl,
+            kSecUseDataProtectionKeychain as String: true
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -55,7 +66,8 @@ struct KeychainHelper {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
-            kSecUseAuthenticationContext as String: context
+            kSecUseAuthenticationContext as String: context,
+            kSecUseDataProtectionKeychain as String: true
         ]
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -78,7 +90,8 @@ struct KeychainHelper {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account,
+            kSecUseDataProtectionKeychain as String: true
         ]
         SecItemDelete(query as CFDictionary)
     }
