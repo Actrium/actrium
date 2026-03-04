@@ -318,8 +318,11 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Password autofill & capture script
         let autofillScript = """
         (function() {
+            var __autofillDone = false;
+
             // --- Autofill injection point ---
             window.__canvasAutofill = function(username, password) {
+                __autofillDone = true;
                 var nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
                 var pwFields = document.querySelectorAll('input[type="password"]');
                 if (pwFields.length === 0) return;
@@ -371,14 +374,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                     var container = pw.form || document;
                     var userField = findUsernameField(container);
                     var username = userField ? userField.value : '';
-                    if (pw.value) {
-                        window.webkit.messageHandlers.canvasPasswordCapture.postMessage({
-                            url: location.href,
-                            username: username,
-                            password: pw.value
-                        });
-                        return;
-                    }
+                    window.webkit.messageHandlers.canvasPasswordCapture.postMessage({
+                        url: location.href,
+                        username: username,
+                        password: pw.value
+                    });
+                    return;
                 }
             }
 
@@ -401,8 +402,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
             // --- Autofill request ---
             function requestAutofill() {
+                if (__autofillDone) return;
                 var pw = document.querySelector('input[type="password"]');
                 if (pw) {
+                    __autofillDone = true;
                     window.webkit.messageHandlers.canvasAutofillRequest.postMessage(location.hostname);
                 }
             }
@@ -412,16 +415,14 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
             // MutationObserver for SPA-added password fields
             var mo = new MutationObserver(function(mutations) {
+                if (__autofillDone) return;
                 for (var i = 0; i < mutations.length; i++) {
                     var added = mutations[i].addedNodes;
                     for (var j = 0; j < added.length; j++) {
                         var node = added[j];
                         if (node.nodeType !== 1) continue;
-                        if (node.matches && node.matches('input[type="password"]')) {
-                            requestAutofill();
-                            return;
-                        }
-                        if (node.querySelector && node.querySelector('input[type="password"]')) {
+                        if ((node.matches && node.matches('input[type="password"]')) ||
+                            (node.querySelector && node.querySelector('input[type="password"]'))) {
                             requestAutofill();
                             return;
                         }
