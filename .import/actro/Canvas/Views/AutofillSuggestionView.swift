@@ -91,18 +91,12 @@ struct VaultLockedPromptView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
                 .disabled(password.isEmpty || vault.isProcessing)
+            }
 
-                if hasTouchID {
-                    Button {
-                        unlockWithBiometrics()
-                    } label: {
-                        Image(systemName: "touchid")
-                            .font(.system(size: 18))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .disabled(vault.isProcessing)
-                }
+            if hasTouchID {
+                Text("Or use Touch ID when prompted")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
             }
 
             if let error = errorMessage {
