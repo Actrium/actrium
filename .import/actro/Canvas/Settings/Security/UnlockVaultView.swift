@@ -5,6 +5,7 @@ struct UnlockVaultView: View {
 
     @State private var password = ""
     @State private var errorMessage: String?
+    @State private var showingResetConfirmation = false
 
     private var hasTouchID: Bool {
         vault.isTouchIDEnabled && vault.isBiometricsAvailable
@@ -76,11 +77,31 @@ struct UnlockVaultView: View {
                     }
                 }
                 .frame(width: 280)
+
+                Button("Reset Vault...") {
+                    showingResetConfirmation = true
+                }
+                .font(.caption)
+                .foregroundColor(.red)
+                .buttonStyle(.borderless)
+                .padding(.top, 8)
+
+                Text("All saved credentials will be permanently deleted.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .alert("Reset Vault?", isPresented: $showingResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                vault.resetVault()
+            }
+        } message: {
+            Text("This will permanently delete your master password and all saved credentials. This action cannot be undone.")
+        }
         .onAppear {
             if hasTouchID {
                 unlockWithBiometrics()

@@ -295,6 +295,20 @@ final class VaultManager: ObservableObject {
         credentials = decryptedCreds
     }
 
+    // MARK: - Reset Vault
+
+    /// Completely reset the vault — deletes all credentials, keys, and settings
+    func resetVault() {
+        autoLockTimer?.invalidate()
+        autoLockTimer = nil
+        derivedKey = nil
+        credentials = []
+        KeychainHelper.deleteMasterPassword()
+        isTouchIDEnabled = false
+        VaultDatabase.deleteAllVaultData()
+        state = .notSetup
+    }
+
     // MARK: - Password Hint
 
     func setPasswordHint(_ hint: String) {
