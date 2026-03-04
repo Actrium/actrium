@@ -390,7 +390,7 @@ private struct ChangePasswordSheet: View {
     @State private var errorMessage: String?
 
     private var isValid: Bool {
-        !currentPassword.isEmpty && newPassword.count >= 8 && newPassword == confirmPassword
+        !currentPassword.isEmpty && newPassword.count >= 5 && newPassword == confirmPassword
     }
 
     var body: some View {
