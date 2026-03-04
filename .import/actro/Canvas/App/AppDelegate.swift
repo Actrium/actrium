@@ -3,7 +3,7 @@ import SwiftUI
 import Combine
 
 /// Application delegate - manages AppKit windows
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     // MARK: - Properties
 
@@ -15,9 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowControllers: [MainWindowController] = []
 
     /// Currently focused browser view model
-    var focusedViewModel: BrowserViewModel? {
-        return windowControllers.first { $0.window?.isKeyWindow == true }?.viewModel
-    }
+    @Published var focusedViewModel: BrowserViewModel?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -78,6 +76,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.createNewWindow()
             }
             .store(in: &cancellables)
+
+        // Track key window changes so SwiftUI menus re-evaluate
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.publisher(for: name)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in
+                    self?.refreshFocusedViewModel()
+                }
+                .store(in: &cancellables)
+        }
+    }
+
+    private func refreshFocusedViewModel() {
+        focusedViewModel = windowControllers.first { $0.window?.isKeyWindow == true }?.viewModel
     }
 
     // MARK: - Window Management
@@ -94,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         windowControllers.append(windowController)
         windowController.showWindow()
+        refreshFocusedViewModel()
 
         // Register with DevTools
         DevToolsManager.shared.activeBrowserViewModel = viewModel
@@ -101,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func removeWindowController(_ controller: MainWindowController) {
         windowControllers.removeAll { $0 === controller }
+        refreshFocusedViewModel()
     }
 
     func toggleNativeFullScreenForKeyWindow() {
