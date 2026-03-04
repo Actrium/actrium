@@ -220,6 +220,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         let userContentController = WKUserContentController()
         config.userContentController = userContentController
 
+        // Apply ad-blocking content rules if enabled and pre-compiled
+        ContentBlockerManager.shared.apply(to: config)
+
         // Use custom DownloadableWebView for context menu download support
         self.webView = DownloadableWebView(frame: .zero, configuration: config)
         super.init()
@@ -992,6 +995,102 @@ struct PersistentWebView: NSViewRepresentable {
                 }
             }
             return nil
+        }
+
+        // MARK: - Media Capture Permission
+
+        func webView(
+            _ webView: WKWebView,
+            requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+            initiatedByFrame frame: WKFrameInfo,
+            type: WKMediaCaptureType,
+            decisionHandler: @escaping (WKPermissionDecision) -> Void
+        ) {
+            let domain = origin.host
+            let permissionLabel: String
+            switch type {
+            case .camera:
+                permissionLabel = "camera"
+            case .microphone:
+                permissionLabel = "microphone"
+            case .cameraAndMicrophone:
+                permissionLabel = "camera and microphone"
+            @unknown default:
+                permissionLabel = "media device"
+            }
+
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "\"\(domain)\" Would Like to Access Your \(permissionLabel.capitalized)"
+                alert.informativeText = "This website is requesting permission to use your \(permissionLabel)."
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "Allow")
+                alert.addButton(withTitle: "Deny")
+
+                let response = alert.runModal()
+                decisionHandler(response == .alertFirstButtonReturn ? .grant : .deny)
+            }
+        }
+
+        // MARK: - JavaScript Alert / Confirm / Prompt
+
+        func webView(
+            _ webView: WKWebView,
+            runJavaScriptAlertPanelWithMessage message: String,
+            initiatedByFrame frame: WKFrameInfo,
+            completionHandler: @escaping () -> Void
+        ) {
+            let domain = frame.securityOrigin.host
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = domain
+                alert.informativeText = message
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                completionHandler()
+            }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            runJavaScriptConfirmPanelWithMessage message: String,
+            initiatedByFrame frame: WKFrameInfo,
+            completionHandler: @escaping (Bool) -> Void
+        ) {
+            let domain = frame.securityOrigin.host
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = domain
+                alert.informativeText = message
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Cancel")
+                let response = alert.runModal()
+                completionHandler(response == .alertFirstButtonReturn)
+            }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            runJavaScriptTextInputPanelWithPrompt prompt: String,
+            defaultText: String?,
+            initiatedByFrame frame: WKFrameInfo,
+            completionHandler: @escaping (String?) -> Void
+        ) {
+            let domain = frame.securityOrigin.host
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = domain
+                alert.informativeText = prompt
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Cancel")
+
+                let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+                textField.stringValue = defaultText ?? ""
+                alert.accessoryView = textField
+
+                let response = alert.runModal()
+                completionHandler(response == .alertFirstButtonReturn ? textField.stringValue : nil)
+            }
         }
 
         // MARK: - WKDownloadDelegate (for context menu downloads)
