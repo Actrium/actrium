@@ -220,6 +220,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Register self as message handler
         userContentController.add(self, name: "canvasThemeColor")
         userContentController.add(self, name: "canvasLog")
+        userContentController.add(self, name: "canvasPasswordCapture")
+        userContentController.add(self, name: "canvasAutofillRequest")
         
         // Inject script to observe theme color
         let script = """
@@ -312,6 +314,125 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         """
         let userScript = WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         userContentController.addUserScript(userScript)
+
+        // Password autofill & capture script
+        let autofillScript = """
+        (function() {
+            // --- Autofill injection point ---
+            window.__canvasAutofill = function(username, password) {
+                var nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                var pwFields = document.querySelectorAll('input[type="password"]');
+                if (pwFields.length === 0) return;
+                var pwField = pwFields[0];
+                if (username) {
+                    var userField = findUsernameField(pwField.form || document);
+                    if (userField) {
+                        nativeSetter.call(userField, username);
+                        userField.dispatchEvent(new Event('input', {bubbles: true}));
+                        userField.dispatchEvent(new Event('change', {bubbles: true}));
+                    }
+                }
+                nativeSetter.call(pwField, password);
+                pwField.dispatchEvent(new Event('input', {bubbles: true}));
+                pwField.dispatchEvent(new Event('change', {bubbles: true}));
+            };
+
+            function findUsernameField(container) {
+                // Priority 1: type=email
+                var email = container.querySelector('input[type="email"]');
+                if (email) return email;
+                // Priority 2: name/id matching common patterns
+                var inputs = container.querySelectorAll('input[type="text"], input[type="email"], input:not([type])');
+                for (var i = 0; i < inputs.length; i++) {
+                    var inp = inputs[i];
+                    var id = (inp.id || '').toLowerCase();
+                    var name = (inp.name || '').toLowerCase();
+                    var auto = (inp.autocomplete || '').toLowerCase();
+                    if (auto === 'username' || auto === 'email') return inp;
+                    if (/user|email|login|account|nick/.test(id + ' ' + name)) return inp;
+                }
+                // Priority 3: text input right before password field
+                var pw = container.querySelector('input[type="password"]');
+                if (pw) {
+                    var prev = pw.previousElementSibling;
+                    while (prev) {
+                        if (prev.tagName === 'INPUT' && prev.type !== 'hidden') return prev;
+                        prev = prev.previousElementSibling;
+                    }
+                }
+                return null;
+            }
+
+            function captureCredentials() {
+                var pwFields = document.querySelectorAll('input[type="password"]');
+                for (var i = 0; i < pwFields.length; i++) {
+                    var pw = pwFields[i];
+                    if (!pw.value) continue;
+                    var container = pw.form || document;
+                    var userField = findUsernameField(container);
+                    var username = userField ? userField.value : '';
+                    if (pw.value) {
+                        window.webkit.messageHandlers.canvasPasswordCapture.postMessage({
+                            url: location.href,
+                            username: username,
+                            password: pw.value
+                        });
+                        return;
+                    }
+                }
+            }
+
+            // Listen for form submit
+            document.addEventListener('submit', function(e) {
+                if (e.target.querySelector && e.target.querySelector('input[type="password"]')) {
+                    captureCredentials();
+                }
+            }, true);
+
+            // Listen for click on submit buttons (SPA compat)
+            document.addEventListener('click', function(e) {
+                var btn = e.target.closest('button[type="submit"], input[type="submit"], button:not([type])');
+                if (!btn) return;
+                var form = btn.closest('form');
+                if (form && form.querySelector('input[type="password"]')) {
+                    setTimeout(captureCredentials, 0);
+                }
+            }, true);
+
+            // --- Autofill request ---
+            function requestAutofill() {
+                var pw = document.querySelector('input[type="password"]');
+                if (pw) {
+                    window.webkit.messageHandlers.canvasAutofillRequest.postMessage(location.hostname);
+                }
+            }
+
+            // Initial check
+            requestAutofill();
+
+            // MutationObserver for SPA-added password fields
+            var mo = new MutationObserver(function(mutations) {
+                for (var i = 0; i < mutations.length; i++) {
+                    var added = mutations[i].addedNodes;
+                    for (var j = 0; j < added.length; j++) {
+                        var node = added[j];
+                        if (node.nodeType !== 1) continue;
+                        if (node.matches && node.matches('input[type="password"]')) {
+                            requestAutofill();
+                            return;
+                        }
+                        if (node.querySelector && node.querySelector('input[type="password"]')) {
+                            requestAutofill();
+                            return;
+                        }
+                    }
+                }
+            });
+            mo.observe(document.body || document.documentElement, {childList: true, subtree: true});
+        })();
+        """
+        let autofillUserScript = WKUserScript(source: autofillScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        userContentController.addUserScript(autofillUserScript)
 
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
@@ -1281,6 +1402,25 @@ extension WebViewHolder: WKScriptMessageHandler {
             }
         } else if message.name == "canvasLog", let logMsg = message.body as? String {
             NSLog("🎨 [JS Color Log] %@", logMsg)
+        } else if message.name == "canvasPasswordCapture", let dict = message.body as? [String: String] {
+            let url = dict["url"] ?? ""
+            let username = dict["username"] ?? ""
+            let password = dict["password"] ?? ""
+            guard !password.isEmpty else { return }
+            Task { @MainActor in
+                AutofillManager.shared.handleCapturedCredentials(url: url, username: username, password: password)
+            }
+        } else if message.name == "canvasAutofillRequest", let domain = message.body as? String {
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let credentials = AutofillManager.shared.findCredentials(forDomain: domain)
+                guard let (_, username, password) = credentials.first else { return }
+                // Escape for JS string injection safety
+                let safeUser = username.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+                let safePass = password.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+                let js = "window.__canvasAutofill('\(safeUser)', '\(safePass)')"
+                self.webView.evaluateJavaScript(js)
+            }
         }
     }
 }

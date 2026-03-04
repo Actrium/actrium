@@ -217,50 +217,55 @@ struct WorkspaceMainView: View {
                 if case .focus(let focusedTabId) = viewModel.canvasMode,
                    let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
                    case .web(let url) = focusedTab.contentType {
-                    FocusedWebOverlay(
-                        tab: focusedTab,
-                        url: url,
-                        viewportSize: safeViewportSize,
-                        onNavigationFinished: { title, newURL in
-                            // Update tab title and record history
-                            if let title = title, !title.isEmpty {
-                                viewModel.updateTabTitle(for: focusedTabId, title: title)
-                            }
-                            if let newURL = newURL {
-                                viewModel.updateTabURL(for: focusedTabId, url: newURL)
-                                // Record to history
-                                if let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }) {
-                                    historyVM.recordVisit(tab: tab)
+                    ZStack(alignment: .top) {
+                        FocusedWebOverlay(
+                            tab: focusedTab,
+                            url: url,
+                            viewportSize: safeViewportSize,
+                            onNavigationFinished: { title, newURL in
+                                // Update tab title and record history
+                                if let title = title, !title.isEmpty {
+                                    viewModel.updateTabTitle(for: focusedTabId, title: title)
                                 }
+                                if let newURL = newURL {
+                                    viewModel.updateTabURL(for: focusedTabId, url: newURL)
+                                    // Record to history
+                                    if let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }) {
+                                        historyVM.recordVisit(tab: tab)
+                                    }
+                                }
+                                // Update snapshot for Overview mode (delayed to allow rendering)
+                                Task {
+                                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay
+                                    await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
+                                }
+                            },
+                            onURLChanged: { newURL in
+                                // Update tab URL when page uses History.pushState/replaceState
+                                if let newURL = newURL {
+                                    NSLog("🔗 WorkspaceMainView: Updating tab \(focusedTabId) URL to: \(newURL.absoluteString)")
+                                    viewModel.updateTabURL(for: focusedTabId, url: newURL)
+                                }
+                            },
+                            onLoadingStateChanged: { loading in
+                                isWebLoading = loading
+                                viewModel.isCurrentTabLoading = loading
+                            },
+                            onOpenNewWindow: { newURL in
+                                // Open target="_blank" links in a new tab (don't focus address bar)
+                                let newTab = viewModel.addNewTab(focusAddressBar: false)
+                                viewModel.navigateCurrentTab(to: newURL.absoluteString)
+                                // Enter focus mode for the new tab
+                                enterFocus(tabId: newTab.id)
+                            },
+                            onThemeColorChanged: { color in
+                                viewModel.updateTabBackgroundColor(for: focusedTabId, color: color)
                             }
-                            // Update snapshot for Overview mode (delayed to allow rendering)
-                            Task {
-                                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay
-                                await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
-                            }
-                        },
-                        onURLChanged: { newURL in
-                            // Update tab URL when page uses History.pushState/replaceState
-                            if let newURL = newURL {
-                                NSLog("🔗 WorkspaceMainView: Updating tab \(focusedTabId) URL to: \(newURL.absoluteString)")
-                                viewModel.updateTabURL(for: focusedTabId, url: newURL)
-                            }
-                        },
-                        onLoadingStateChanged: { loading in
-                            isWebLoading = loading
-                            viewModel.isCurrentTabLoading = loading
-                        },
-                        onOpenNewWindow: { newURL in
-                            // Open target="_blank" links in a new tab (don't focus address bar)
-                            let newTab = viewModel.addNewTab(focusAddressBar: false)
-                            viewModel.navigateCurrentTab(to: newURL.absoluteString)
-                            // Enter focus mode for the new tab
-                            enterFocus(tabId: newTab.id)
-                        },
-                        onThemeColorChanged: { color in
-                            viewModel.updateTabBackgroundColor(for: focusedTabId, color: color)
-                        }
-                    )
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                        SavePasswordBannerView()
+                    }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
 
