@@ -26,6 +26,9 @@ final class SyncManager: ObservableObject {
     @Published var syncSettings: Bool {
         didSet { UserDefaults.standard.set(syncSettings, forKey: "syncSettingsEnabled") }
     }
+    @Published var syncVault: Bool {
+        didSet { UserDefaults.standard.set(syncVault, forKey: "syncVaultEnabled") }
+    }
 
     // MARK: - Private
 
@@ -48,6 +51,7 @@ final class SyncManager: ObservableObject {
         self.syncBookmarks = UserDefaults.standard.object(forKey: "syncBookmarksEnabled") as? Bool ?? true
         self.syncTags = UserDefaults.standard.object(forKey: "syncTagsEnabled") as? Bool ?? true
         self.syncSettings = UserDefaults.standard.object(forKey: "syncSettingsEnabled") as? Bool ?? true
+        self.syncVault = UserDefaults.standard.object(forKey: "syncVaultEnabled") as? Bool ?? true
 
         if let dateInterval = UserDefaults.standard.object(forKey: "syncLastSyncDate") as? Double {
             self.lastSyncDate = Date(timeIntervalSince1970: dateInterval)
@@ -116,6 +120,8 @@ final class SyncManager: ObservableObject {
         let bookmarks = syncBookmarks ? gatherBookmarks() : []
         let tags = syncTags ? gatherTags() : []
         let settings = syncSettings ? gatherSettings() : SyncSettings()
+        let vaultMeta = syncVault ? gatherVaultMeta() : nil
+        let vaultItems = syncVault ? gatherVaultItems() : nil
 
         let bundle = SyncBundle(
             version: 1,
@@ -123,7 +129,9 @@ final class SyncManager: ObservableObject {
             exportedAt: Date(),
             bookmarks: bookmarks,
             tags: tags,
-            settings: settings
+            settings: settings,
+            vaultMeta: vaultMeta,
+            vaultItems: vaultItems
         )
 
         do {
@@ -308,6 +316,34 @@ final class SyncManager: ObservableObject {
         )
     }
 
+    private func gatherVaultMeta() -> [SyncVaultMeta] {
+        VaultDatabase.fetchAllVaultMeta().compactMap { row in
+            guard let key = row["key"] as? String,
+                  let value = row["value"] as? String else { return nil }
+            return SyncVaultMeta(key: key, value: value)
+        }
+    }
+
+    private func gatherVaultItems() -> [SyncVaultItem] {
+        VaultDatabase.fetchAllVaultItems().compactMap { row in
+            guard let id = row["id"] as? String,
+                  let title = row["title"] as? String,
+                  let category = row["category"] as? String,
+                  let fieldsEnc = row["fields_encrypted"] as? String,
+                  let createdAt = row["created_at"] as? Int64,
+                  let updatedAt = row["updated_at"] as? Int64 else { return nil }
+            return SyncVaultItem(
+                id: id,
+                title: title,
+                category: category,
+                fieldsEncrypted: fieldsEnc,
+                notes: row["notes"] as? String,
+                createdAt: Date(timeIntervalSince1970: TimeInterval(createdAt)),
+                updatedAt: Date(timeIntervalSince1970: TimeInterval(updatedAt))
+            )
+        }
+    }
+
     // MARK: - Private: Merge
 
     private func mergeImportedData(_ bundle: SyncBundle) {
@@ -397,6 +433,48 @@ final class SyncManager: ObservableObject {
                     let tagUUIDs = syncBookmark.tagIds.compactMap { UUID(uuidString: $0) }
                     if let bookmarkUUID = UUID(uuidString: syncBookmark.id) {
                         tagRepo.setTagsForBookmark(bookmarkId: bookmarkUUID, tagIds: tagUUIDs)
+                    }
+                }
+            }
+        }
+
+        // Merge vault data (encrypted as-is, same master password required)
+        if syncVault {
+            if let metaEntries = bundle.vaultMeta {
+                for entry in metaEntries {
+                    VaultDatabase.setVaultMeta(key: entry.key, value: entry.value)
+                }
+            }
+            if let items = bundle.vaultItems {
+                let existingRows = VaultDatabase.fetchAllVaultItems()
+                let existingById = Dictionary(uniqueKeysWithValues: existingRows.compactMap { row -> (String, Int64)? in
+                    guard let id = row["id"] as? String, let updatedAt = row["updated_at"] as? Int64 else { return nil }
+                    return (id, updatedAt)
+                })
+
+                for item in items {
+                    let incomingUpdated = Int64(item.updatedAt.timeIntervalSince1970)
+                    if let existingUpdated = existingById[item.id] {
+                        if incomingUpdated > existingUpdated {
+                            VaultDatabase.updateVaultItem(
+                                id: item.id,
+                                title: item.title,
+                                category: item.category,
+                                fieldsEncrypted: item.fieldsEncrypted,
+                                notes: item.notes,
+                                updatedAt: incomingUpdated
+                            )
+                        }
+                    } else {
+                        VaultDatabase.insertVaultItem(
+                            id: item.id,
+                            title: item.title,
+                            category: item.category,
+                            fieldsEncrypted: item.fieldsEncrypted,
+                            notes: item.notes,
+                            createdAt: Int64(item.createdAt.timeIntervalSince1970),
+                            updatedAt: incomingUpdated
+                        )
                     }
                 }
             }
