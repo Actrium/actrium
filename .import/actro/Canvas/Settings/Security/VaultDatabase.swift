@@ -17,57 +17,53 @@ struct VaultDatabase {
         )
     }
 
-    // MARK: - Credentials CRUD
+    // MARK: - Vault Items CRUD
 
-    static func insertCredential(
+    static func insertVaultItem(
         id: String,
-        domain: String,
-        usernameEncrypted: String,
-        passwordEncrypted: String,
+        title: String,
+        category: String,
+        fieldsEncrypted: String,
         notes: String?,
         createdAt: Int64,
         updatedAt: Int64
     ) {
         db.execute(
             """
-            INSERT INTO credentials (id, domain, username_encrypted, password_encrypted, notes, created_at, updated_at)
+            INSERT INTO vault_items (id, title, category, fields_encrypted, notes, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            params: [id, domain, usernameEncrypted, passwordEncrypted, notes, createdAt, updatedAt]
+            params: [id, title, category, fieldsEncrypted, notes, createdAt, updatedAt]
         )
     }
 
-    static func updateCredential(
+    static func updateVaultItem(
         id: String,
-        domain: String,
-        usernameEncrypted: String,
-        passwordEncrypted: String,
+        title: String,
+        category: String,
+        fieldsEncrypted: String,
         notes: String?,
         updatedAt: Int64
     ) {
         db.execute(
             """
-            UPDATE credentials SET domain = ?, username_encrypted = ?, password_encrypted = ?, notes = ?, updated_at = ?
+            UPDATE vault_items SET title = ?, category = ?, fields_encrypted = ?, notes = ?, updated_at = ?
             WHERE id = ?
             """,
-            params: [domain, usernameEncrypted, passwordEncrypted, notes, updatedAt, id]
+            params: [title, category, fieldsEncrypted, notes, updatedAt, id]
         )
     }
 
-    static func deleteCredential(id: String) {
-        db.execute("DELETE FROM credentials WHERE id = ?", params: [id])
+    static func deleteVaultItem(id: String) {
+        db.execute("DELETE FROM vault_items WHERE id = ?", params: [id])
     }
 
-    static func fetchAllCredentials() -> [[String: Any]] {
-        return db.query("SELECT * FROM credentials ORDER BY domain ASC")
-    }
-
-    static func fetchCredentials(domain: String) -> [[String: Any]] {
-        return db.query("SELECT * FROM credentials WHERE domain = ?", params: [domain])
+    static func fetchAllVaultItems() -> [[String: Any]] {
+        return db.query("SELECT * FROM vault_items ORDER BY updated_at DESC")
     }
 
     static func deleteAllVaultData() {
         db.execute("DELETE FROM vault_meta")
-        db.execute("DELETE FROM credentials")
+        db.execute("DELETE FROM vault_items")
     }
 }

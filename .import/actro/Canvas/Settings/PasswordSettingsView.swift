@@ -22,13 +22,14 @@ private struct UnlockedVaultView: View {
 
     @State private var searchText = ""
     @State private var showingAddSheet = false
-    @State private var editingCredential: Credential?
+    @State private var editingItem: VaultItem?
     @State private var showingChangePassword = false
     @State private var touchIDEnabled: Bool
     @State private var showingTouchIDPasswordSheet = false
     @State private var editingHint = false
     @State private var hintText: String
     @State private var showingResetConfirmation = false
+    @State private var selectedCategory: VaultItemCategory?
 
     init(vault: VaultManager) {
         self.vault = vault
@@ -36,12 +37,17 @@ private struct UnlockedVaultView: View {
         _hintText = State(initialValue: vault.passwordHint ?? "")
     }
 
-    private var filteredCredentials: [Credential] {
-        if searchText.isEmpty { return vault.credentials }
-        return vault.credentials.filter {
-            $0.domain.localizedCaseInsensitiveContains(searchText) ||
-            $0.username.localizedCaseInsensitiveContains(searchText)
+    private var filteredItems: [VaultItem] {
+        var result = vault.items
+        if let category = selectedCategory {
+            result = result.filter { $0.category == category }
         }
+        if !searchText.isEmpty {
+            result = result.filter {
+                $0.title.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+        return result
     }
 
     private let timeoutOptions = [0, 1, 5, 10, 15]
@@ -50,9 +56,18 @@ private struct UnlockedVaultView: View {
         VStack(spacing: 0) {
             // Toolbar
             HStack {
-                TextField("Search credentials...", text: $searchText)
+                TextField("Search vault...", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 200)
+
+                // Category filter
+                Picker("Category", selection: $selectedCategory) {
+                    Text("All").tag(VaultItemCategory?.none)
+                    ForEach(VaultItemCategory.allCases, id: \.self) { cat in
+                        Label(cat.label, systemImage: cat.icon).tag(VaultItemCategory?.some(cat))
+                    }
+                }
+                .frame(width: 120)
 
                 Spacer()
 
@@ -73,24 +88,24 @@ private struct UnlockedVaultView: View {
 
             Divider()
 
-            if filteredCredentials.isEmpty {
+            if filteredItems.isEmpty {
                 VStack(spacing: 8) {
                     Spacer()
                     Image(systemName: "key")
                         .font(.system(size: 28))
                         .foregroundColor(.secondary)
-                    Text(searchText.isEmpty ? "No saved credentials" : "No matches found")
+                    Text(searchText.isEmpty && selectedCategory == nil ? "No saved items" : "No matches found")
                         .foregroundColor(.secondary)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(filteredCredentials) { credential in
-                        CredentialRow(
-                            credential: credential,
-                            onEdit: { editingCredential = credential },
-                            onDelete: { deleteCredential(credential) }
+                    ForEach(filteredItems) { item in
+                        VaultItemRow(
+                            item: item,
+                            onEdit: { editingItem = item },
+                            onDelete: { deleteItem(item) }
                         )
                     }
                 }
@@ -103,10 +118,10 @@ private struct UnlockedVaultView: View {
             securitySection
         }
         .sheet(isPresented: $showingAddSheet) {
-            CredentialFormSheet(vault: vault)
+            VaultItemFormSheet(vault: vault)
         }
-        .sheet(item: $editingCredential) { credential in
-            CredentialFormSheet(vault: vault, editing: credential)
+        .sheet(item: $editingItem) { item in
+            VaultItemFormSheet(vault: vault, editing: item)
         }
         .sheet(isPresented: $showingChangePassword) {
             ChangePasswordSheet(vault: vault)
@@ -217,7 +232,7 @@ private struct UnlockedVaultView: View {
                     .font(.subheadline)
                     .foregroundColor(.red)
                     .buttonStyle(.borderless)
-                    Text("All saved credentials will be permanently deleted.")
+                    Text("All saved items will be permanently deleted.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     Spacer()
@@ -232,12 +247,12 @@ private struct UnlockedVaultView: View {
                 vault.resetVault()
             }
         } message: {
-            Text("This will permanently delete your master password and all saved credentials. This action cannot be undone.")
+            Text("This will permanently delete your master password and all saved items. This action cannot be undone.")
         }
     }
 
-    private func deleteCredential(_ credential: Credential) {
-        try? vault.deleteCredential(id: credential.id)
+    private func deleteItem(_ item: VaultItem) {
+        try? vault.deleteItem(id: item.id)
     }
 
     private func handleTouchIDToggle(_ enabled: Bool) {
@@ -332,48 +347,60 @@ private struct TouchIDPasswordSheet: View {
     }
 }
 
-// MARK: - Credential Row
+// MARK: - Vault Item Row
 
-private struct CredentialRow: View {
-    let credential: Credential
+private struct VaultItemRow: View {
+    let item: VaultItem
     let onEdit: () -> Void
     let onDelete: () -> Void
 
-    @State private var showPassword = false
+    @State private var showSensitive = false
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
+            Image(systemName: item.category.icon)
+                .foregroundColor(.accentColor)
+                .frame(width: 20)
+
             VStack(alignment: .leading, spacing: 2) {
-                Text(credential.domain)
+                Text(item.title)
                     .font(.system(.body, design: .default, weight: .medium))
-                Text(credential.username)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if let subtitle = item.subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Spacer()
 
-            Text(showPassword ? credential.password : String(repeating: "\u{2022}", count: 8))
-                .font(.system(.caption, design: .monospaced))
-                .foregroundColor(.secondary)
+            // Show/hide sensitive values
+            if item.primarySensitiveValue != nil {
+                Text(showSensitive ? (item.primarySensitiveValue ?? "") : String(repeating: "\u{2022}", count: 8))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
 
-            Button {
-                showPassword.toggle()
-            } label: {
-                Image(systemName: showPassword ? "eye.slash" : "eye")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
+                Button {
+                    showSensitive.toggle()
+                } label: {
+                    Image(systemName: showSensitive ? "eye.slash" : "eye")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
 
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(credential.password, forType: .string)
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.caption)
+                Button {
+                    if let value = item.primarySensitiveValue {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(value, forType: .string)
+                    }
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy")
             }
-            .buttonStyle(.borderless)
-            .help("Copy password")
 
             Button { onEdit() } label: {
                 Image(systemName: "pencil")
@@ -392,43 +419,69 @@ private struct CredentialRow: View {
     }
 }
 
-// MARK: - Credential Form Sheet
+// MARK: - Vault Item Form Sheet
 
-private struct CredentialFormSheet: View {
+private struct VaultItemFormSheet: View {
     @ObservedObject var vault: VaultManager
     @Environment(\.dismiss) private var dismiss
 
-    let editing: Credential?
+    let editing: VaultItem?
 
-    @State private var domain: String
-    @State private var username: String
-    @State private var password: String
+    @State private var title: String
+    @State private var category: VaultItemCategory
+    @State private var fields: [VaultField]
     @State private var notes: String
     @State private var errorMessage: String?
 
-    init(vault: VaultManager, editing: Credential? = nil) {
+    init(vault: VaultManager, editing: VaultItem? = nil) {
         self.vault = vault
         self.editing = editing
-        _domain = State(initialValue: editing?.domain ?? "")
-        _username = State(initialValue: editing?.username ?? "")
-        _password = State(initialValue: editing?.password ?? "")
+        _title = State(initialValue: editing?.title ?? "")
+        _category = State(initialValue: editing?.category ?? .login)
+        _fields = State(initialValue: editing?.fields ?? VaultItemCategory.login.template)
         _notes = State(initialValue: editing?.notes ?? "")
     }
 
     private var isValid: Bool {
-        !domain.isEmpty && !password.isEmpty
+        !title.isEmpty
     }
 
     var body: some View {
         VStack(spacing: 16) {
-            Text(editing == nil ? "Add Credential" : "Edit Credential")
+            Text(editing == nil ? "Add Item" : "Edit Item")
                 .font(.headline)
 
             Form {
-                TextField("Domain:", text: $domain)
-                TextField("Username:", text: $username)
-                SecureField("Password:", text: $password)
-                TextField("Notes:", text: $notes)
+                TextField("Title:", text: $title)
+
+                if editing == nil {
+                    Picker("Category:", selection: $category) {
+                        ForEach(VaultItemCategory.allCases, id: \.self) { cat in
+                            Label(cat.label, systemImage: cat.icon).tag(cat)
+                        }
+                    }
+                    .onChange(of: category) { newCategory in
+                        fields = newCategory.template
+                    }
+                } else {
+                    HStack {
+                        Text("Category:")
+                        Spacer()
+                        Label(category.label, systemImage: category.icon)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                ForEach($fields) { $field in
+                    if field.isSensitive {
+                        SensitiveFieldEditor(field: $field)
+                    } else {
+                        TextField("\(field.label):", text: $field.value)
+                    }
+                }
+
+                TextField("Notes:", text: $notes, axis: .vertical)
+                    .lineLimit(3...6)
             }
             .frame(width: 340)
 
@@ -457,22 +510,58 @@ private struct CredentialFormSheet: View {
         do {
             if let existing = editing {
                 var updated = existing
-                updated.domain = domain
-                updated.username = username
-                updated.password = password
+                updated.title = title
+                updated.fields = fields
                 updated.notes = notes.isEmpty ? nil : notes
-                try vault.updateCredential(updated)
+                try vault.updateItem(updated)
             } else {
-                try vault.addCredential(
-                    domain: domain,
-                    username: username,
-                    password: password,
-                    notes: notes.isEmpty ? nil : notes
+                let item = VaultItem(
+                    id: UUID().uuidString,
+                    title: title,
+                    category: category,
+                    fields: fields,
+                    notes: notes.isEmpty ? nil : notes,
+                    createdAt: Date(),
+                    updatedAt: Date()
                 )
+                try vault.addItem(item)
             }
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Sensitive Field Editor
+
+private struct SensitiveFieldEditor: View {
+    @Binding var field: VaultField
+    @State private var showValue = false
+
+    var body: some View {
+        HStack {
+            if showValue {
+                if field.label == "Private Key" || field.label == "Content" {
+                    VStack(alignment: .leading) {
+                        Text("\(field.label):")
+                        TextEditor(text: $field.value)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(height: 80)
+                    }
+                } else {
+                    TextField("\(field.label):", text: $field.value)
+                }
+            } else {
+                SecureField("\(field.label):", text: $field.value)
+            }
+            Button {
+                showValue.toggle()
+            } label: {
+                Image(systemName: showValue ? "eye.slash" : "eye")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
         }
     }
 }
