@@ -213,8 +213,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let osVersion = ProcessInfo.processInfo.operatingSystemVersion
         let osVersionString = "\(osVersion.majorVersion)_\(osVersion.minorVersion)_\(osVersion.patchVersion)"
-        // WebKit version from macOS (605.1.15 is standard for Safari/WebKit on macOS)
-        return "Mozilla/5.0 (Macintosh; Intel Mac OS X \(osVersionString)) AppleWebKit/605.1.15 (KHTML, like Gecko) Canvas/\(appVersion) Safari/605.1.15"
+        // Match Safari's UA to avoid "unsupported browser" warnings from sites like Google
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X \(osVersionString)) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15"
     }()
 
     override init() {
