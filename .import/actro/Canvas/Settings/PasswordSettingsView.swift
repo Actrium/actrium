@@ -499,10 +499,17 @@ private struct ChangePasswordSheet: View {
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 12) {
-                PasswordField(
-                    password: $currentPassword,
-                    placeholder: "Current password"
-                )
+                HStack(spacing: 6) {
+                    PasswordField(
+                        password: $currentPassword,
+                        placeholder: "Current password"
+                    )
+                    if let existingHint = vault.passwordHint, !existingHint.isEmpty {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.secondary)
+                            .help("Hint: \(existingHint)")
+                    }
+                }
 
                 PasswordField(
                     password: $newPassword,
