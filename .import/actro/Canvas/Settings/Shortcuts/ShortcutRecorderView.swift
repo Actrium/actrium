@@ -49,6 +49,14 @@ class ShortcutRecorderNSView: NSView {
         needsDisplay = true
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard isRecording else {
+            return super.performKeyEquivalent(with: event)
+        }
+        keyDown(with: event)
+        return true
+    }
+
     override func keyDown(with event: NSEvent) {
         guard isRecording else {
             super.keyDown(with: event)
