@@ -561,7 +561,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                   style={styles.mobileReservedButton}
                   onPress={handleExitTab}
                 >
-                  <Icon type='tab_preview' size={20} color='#666' />
+                  <Icon type='tab_preview' size={20} color='#404040' />
                   {/* 未读消息角标 */}
                   {totalUnread > 0 && (
                     <View style={styles.unreadBadge}>
