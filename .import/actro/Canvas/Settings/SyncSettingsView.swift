@@ -59,6 +59,7 @@ struct SyncSettingsView: View {
             Section("Content") {
                 Toggle("Bookmarks", isOn: $syncManager.syncBookmarks)
                 Toggle("Tags", isOn: $syncManager.syncTags)
+                Toggle("Vault", isOn: $syncManager.syncVault)
                 Toggle("Settings", isOn: $syncManager.syncSettings)
             }
 

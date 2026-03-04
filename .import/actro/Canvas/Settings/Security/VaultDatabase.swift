@@ -62,6 +62,10 @@ struct VaultDatabase {
         return db.query("SELECT * FROM vault_items ORDER BY updated_at DESC")
     }
 
+    static func fetchAllVaultMeta() -> [[String: Any]] {
+        return db.query("SELECT key, value FROM vault_meta")
+    }
+
     static func deleteAllVaultData() {
         db.execute("DELETE FROM vault_meta")
         db.execute("DELETE FROM vault_items")
