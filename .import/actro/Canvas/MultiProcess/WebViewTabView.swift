@@ -154,6 +154,30 @@ struct WebViewMultiProcessTabView: View {
     }
 }
 
+// MARK: - Autofill Panel (borderless NSPanel, no arrow, Chrome-style)
+
+private class AutofillPanel: NSPanel {
+    var onDismiss: (() -> Void)?
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+    override func cancelOperation(_ sender: Any?) { onDismiss?() }
+}
+
+/// NSVisualEffectView wrapper for SwiftUI
+private struct VisualEffectBackground: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
 // MARK: - Shared Process Pool
 
 /// 共享的 WKProcessPool，确保所有 WebView 使用相同的 WebContent 进程
@@ -196,8 +220,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// KVO observation for URL changes
     private var urlObservation: NSKeyValueObservation?
 
-    /// Autofill popover for credential suggestions
-    private var autofillPopover: NSPopover?
+    /// Autofill panel for credential suggestions (Chrome-style, no arrow)
+    private var autofillPanel: AutofillPanel?
+    private var autofillClickMonitor: Any?
 
     /// Canvas User-Agent string
     /// Format follows standard browser convention: Mozilla/5.0 (Platform) Engine/Version (Compatibility) Browser/Version Engine/Version
@@ -511,8 +536,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     deinit {
         urlObservation?.invalidate()
-        autofillPopover?.close()
-        autofillPopover = nil
+        dismissAutofillPopover()
     }
 
     func loadIfNeeded(_ url: URL) {
@@ -618,12 +642,74 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
     }
 
-    // MARK: - Autofill Popover
+    // MARK: - Autofill Panel (Chrome-style dropdown)
+
+    private func showAutofillPanel<Content: View>(fieldRect: CGRect, @ViewBuilder content: () -> Content) {
+        dismissAutofillPopover()
+        guard let window = webView.window else { return }
+
+        // Convert JS rect (top-left origin) → NSView → window → screen
+        let zoom = webView.pageZoom
+        let viewBounds = webView.bounds
+        let nsRect = NSRect(
+            x: fieldRect.origin.x * zoom,
+            y: viewBounds.height - (fieldRect.origin.y + fieldRect.height) * zoom,
+            width: fieldRect.width * zoom,
+            height: fieldRect.height * zoom
+        )
+        let windowRect = webView.convert(nsRect, to: nil)
+        let screenRect = window.convertToScreen(windowRect)
+
+        // Build the SwiftUI content wrapped in a visual effect background
+        let swiftUIView = content()
+            .background(
+                VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            )
+
+        let hostingView = NSHostingView(rootView: swiftUIView)
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+
+        // Measure the ideal size
+        let fittingSize = hostingView.fittingSize
+
+        let panel = AutofillPanel(
+            contentRect: NSRect(
+                x: screenRect.origin.x,
+                y: screenRect.origin.y - fittingSize.height,
+                width: fittingSize.width,
+                height: fittingSize.height
+            ),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.hasShadow = true
+        panel.level = .floating
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.contentView = hostingView
+        panel.onDismiss = { [weak self] in self?.dismissAutofillPopover() }
+
+        window.addChildWindow(panel, ordered: .above)
+        panel.orderFront(nil)
+        self.autofillPanel = panel
+
+        // Click-outside monitor
+        autofillClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self = self, let panel = self.autofillPanel else { return event }
+            let loc = event.locationInWindow
+            if event.window == panel {
+                // Click inside panel — pass through
+                return event
+            }
+            // Click outside — dismiss
+            self.dismissAutofillPopover()
+            return event
+        }
+    }
 
     func showAutofillPopover(credentials: [(VaultItem, String, String)], fieldRect: CGRect) {
-        dismissAutofillPopover()
-        guard webView.window != nil else { return }
-
         let items = credentials.map { (item, username, password) in
             AutofillSuggestionItem(
                 username: username,
@@ -633,68 +719,46 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
         guard !items.isEmpty else { return }
 
-        let popover = NSPopover()
-        popover.behavior = .semitransient
-        popover.contentViewController = NSHostingController(
-            rootView: AutofillSuggestionView(items: items) { [weak self] selected in
+        showAutofillPanel(fieldRect: fieldRect) { [weak self] in
+            AutofillSuggestionView(items: items) { selected in
                 self?.fillCredential(username: selected.username, password: selected.password)
                 self?.dismissAutofillPopover()
             }
-        )
-
-        // Convert JS rect (top-left origin) to NSView rect (bottom-left origin)
-        let zoom = webView.pageZoom
-        let viewBounds = webView.bounds
-        let nsRect = NSRect(
-            x: fieldRect.origin.x * zoom,
-            y: viewBounds.height - (fieldRect.origin.y + fieldRect.height) * zoom,
-            width: fieldRect.width * zoom,
-            height: fieldRect.height * zoom
-        )
-
-        popover.show(relativeTo: nsRect, of: webView, preferredEdge: .minY)
-        self.autofillPopover = popover
+        }
     }
 
     func showVaultLockedPopover(fieldRect: CGRect, domain: String) {
-        dismissAutofillPopover()
-        guard webView.window != nil else { return }
-
-        let popover = NSPopover()
-        popover.behavior = .semitransient
-        popover.contentViewController = NSHostingController(
-            rootView: VaultLockedPromptView { [weak self] in
+        showAutofillPanel(fieldRect: fieldRect) { [weak self] in
+            VaultLockedPromptView { [weak self] in
+                NSLog("🔑 onUnlocked: self=%@, domain=%@", self == nil ? "nil" : "alive", domain)
                 guard let self = self else { return }
-                // Vault just unlocked — look up credentials
                 let credentials = AutofillManager.shared.findCredentials(forDomain: domain)
+                NSLog("🔑 onUnlocked: found %d credentials for %@", credentials.count, domain)
                 if credentials.count == 1 {
-                    // Single match — fill directly
+                    NSLog("🔑 onUnlocked: single match, filling directly")
                     self.fillCredential(username: credentials[0].1, password: credentials[0].2)
                     self.dismissAutofillPopover()
                 } else if !credentials.isEmpty {
+                    NSLog("🔑 onUnlocked: multiple matches, showing picker")
                     self.showAutofillPopover(credentials: credentials, fieldRect: fieldRect)
                 } else {
+                    NSLog("🔑 onUnlocked: no credentials, dismissing")
                     self.dismissAutofillPopover()
                 }
             }
-        )
-
-        let zoom = webView.pageZoom
-        let viewBounds = webView.bounds
-        let nsRect = NSRect(
-            x: fieldRect.origin.x * zoom,
-            y: viewBounds.height - (fieldRect.origin.y + fieldRect.height) * zoom,
-            width: fieldRect.width * zoom,
-            height: fieldRect.height * zoom
-        )
-
-        popover.show(relativeTo: nsRect, of: webView, preferredEdge: .minY)
-        self.autofillPopover = popover
+        }
     }
 
     func dismissAutofillPopover() {
-        autofillPopover?.performClose(nil)
-        autofillPopover = nil
+        if let monitor = autofillClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            autofillClickMonitor = nil
+        }
+        if let panel = autofillPanel {
+            panel.parent?.removeChildWindow(panel)
+            panel.orderOut(nil)
+            autofillPanel = nil
+        }
     }
 
     private func fillCredential(username: String, password: String) {
@@ -705,7 +769,14 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "'", with: "\\'")
         let js = "window.__canvasAutofill('\(safeUser)', '\(safePass)')"
-        webView.evaluateJavaScript(js)
+        NSLog("🔑 fillCredential: evaluating JS for user=%@", safeUser)
+        webView.evaluateJavaScript(js) { result, error in
+            if let error = error {
+                NSLog("🔑 fillCredential: JS error - %@", error.localizedDescription)
+            } else {
+                NSLog("🔑 fillCredential: JS succeeded, result=%@", "\(result ?? "nil")")
+            }
+        }
     }
 
     // MARK: - WKNavigationDelegate

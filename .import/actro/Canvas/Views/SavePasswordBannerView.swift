@@ -1,55 +1,81 @@
 import SwiftUI
 
-/// Chrome-style banner for saving/updating passwords
+/// Chrome-style floating card dialog for saving/updating passwords
 struct SavePasswordBannerView: View {
     @ObservedObject private var autofillManager = AutofillManager.shared
 
     var body: some View {
         if let action = autofillManager.pendingSaveAction {
-            HStack(spacing: 12) {
-                Image(systemName: "key.fill")
-                    .font(.system(size: 16))
+            VStack(alignment: .leading, spacing: 10) {
+                // Header row: title + close button
+                HStack {
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                    Text(action.isUpdate ? "Update password?" : "Save password?")
+                        .font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Button {
+                        autofillManager.dismissBanner()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // Domain
+                Text("for \(action.domain)")
+                    .font(.system(size: 12))
                     .foregroundColor(.secondary)
 
-                Text(action.isUpdate
-                     ? "Update password for \(action.domain)?"
-                     : "Save password for \(action.domain)?")
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-
-                Spacer()
-
-                Button(action.isUpdate ? "Update" : "Save") {
-                    if action.isUpdate {
-                        autofillManager.updateCredentials()
-                    } else {
-                        autofillManager.saveCredentials()
+                // Credential preview
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .frame(width: 14)
+                        Text(action.username.isEmpty ? "(no username)" : action.username)
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                    }
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .frame(width: 14)
+                        Text(String(repeating: "•", count: 8))
+                            .font(.system(size: 12))
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
 
-                Button("Never") {
-                    autofillManager.neverSaveForDomain()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                // Action buttons
+                HStack {
+                    Spacer()
+                    Button("Never") {
+                        autofillManager.neverSaveForDomain()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
 
-                Button {
-                    autofillManager.dismissBanner()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
+                    Button(action.isUpdate ? "Update" : "Save") {
+                        if action.isUpdate {
+                            autofillManager.updateCredentials()
+                        } else {
+                            autofillManager.saveCredentials()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial)
-            .overlay(alignment: .bottom) {
-                Divider()
-            }
+            .padding(16)
+            .frame(width: 320)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 4)
             .transition(.move(edge: .top).combined(with: .opacity))
         }
     }

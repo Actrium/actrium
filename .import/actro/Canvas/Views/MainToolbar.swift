@@ -24,6 +24,7 @@ final class ToolbarManager: ObservableObject {
     private var displayTitle: String = "New Tab"
     private var isOverviewMode: Bool = false
     private var isBookmarked: Bool = false
+    private var hasPendingSave: Bool = false
 
     // Callbacks
     var onGoBack: (() -> Void)?
@@ -32,6 +33,7 @@ final class ToolbarManager: ObservableObject {
     var onReload: (() -> Void)?
     var onToggleFocusOverview: (() -> Void)?
     var onToggleBookmark: (() -> Void)?
+    var onPasswordIconTap: (() -> Void)?
 
     private init() {}
 
@@ -47,6 +49,7 @@ final class ToolbarManager: ObservableObject {
         onGoForward = { [weak viewModel] in viewModel?.goForward() }
         onAddNewTab = { [weak viewModel] in _ = viewModel?.addNewTab() }
         onReload = { [weak viewModel] in viewModel?.reloadCurrentTab() }
+        onPasswordIconTap = { AutofillManager.shared.toggleSaveDialog() }
 
         // 创建 titlebar accessory view controller
         let accessoryVC = NSTitlebarAccessoryViewController()
@@ -60,10 +63,12 @@ final class ToolbarManager: ObservableObject {
             displayTitle: displayTitle,
             isOverviewMode: isOverviewMode,
             isBookmarked: isBookmarked,
+            hasPendingSave: hasPendingSave,
             onBack: { [weak self] in self?.onGoBack?() },
             onForward: { [weak self] in self?.onGoForward?() },
             onAddressBarTap: { },
             onBookmarkTap: { [weak self] in self?.onToggleBookmark?() },
+            onPasswordIconTap: { [weak self] in self?.onPasswordIconTap?() },
             onReloadTap: { [weak self] in self?.onReload?() },
             onNewTab: { [weak self] in self?.onAddNewTab?() },
             onOverview: { [weak self] in self?.onToggleFocusOverview?() }
@@ -91,6 +96,15 @@ final class ToolbarManager: ObservableObject {
                 self?.updateToolbarState(viewModel: viewModel, bookmarkVM: bookmarkVM)
             }
             .store(in: &cancellables)
+
+        // Observe AutofillManager changes for key icon
+        AutofillManager.shared.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self, weak viewModel, weak bookmarkVM] _ in
+                guard let viewModel = viewModel, let bookmarkVM = bookmarkVM else { return }
+                self?.updateToolbarState(viewModel: viewModel, bookmarkVM: bookmarkVM)
+            }
+            .store(in: &cancellables)
     }
 
     func updateToolbarState(viewModel: BrowserViewModel, bookmarkVM: BookmarkViewModel) {
@@ -111,6 +125,7 @@ final class ToolbarManager: ObservableObject {
         }()
 
         isBookmarked = viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false
+        hasPendingSave = AutofillManager.shared.pendingSaveAction != nil || AutofillManager.shared.hiddenSaveAction != nil
 
         // 更新 SwiftUI 视图
         let toolbarView = TitlebarToolbarView(
@@ -119,10 +134,12 @@ final class ToolbarManager: ObservableObject {
             displayTitle: displayTitle,
             isOverviewMode: isOverviewMode,
             isBookmarked: isBookmarked,
+            hasPendingSave: hasPendingSave,
             onBack: { [weak self] in self?.onGoBack?() },
             onForward: { [weak self] in self?.onGoForward?() },
             onAddressBarTap: { },
             onBookmarkTap: { [weak self] in self?.onToggleBookmark?() },
+            onPasswordIconTap: { [weak self] in self?.onPasswordIconTap?() },
             onReloadTap: { [weak self] in self?.onReload?() },
             onNewTab: { [weak self] in self?.onAddNewTab?() },
             onOverview: { [weak self] in self?.onToggleFocusOverview?() }
@@ -297,10 +314,12 @@ struct TitlebarToolbarView: View {
     let displayTitle: String
     let isOverviewMode: Bool
     let isBookmarked: Bool
+    let hasPendingSave: Bool
     let onBack: () -> Void
     let onForward: () -> Void
     let onAddressBarTap: () -> Void
     let onBookmarkTap: () -> Void
+    let onPasswordIconTap: () -> Void
     let onReloadTap: () -> Void
     let onNewTab: () -> Void
     let onOverview: () -> Void
@@ -343,6 +362,15 @@ struct TitlebarToolbarView: View {
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity)
+
+                        if hasPendingSave {
+                            Button(action: onPasswordIconTap) {
+                                Image(systemName: "key.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.yellow)
+                            }
+                            .buttonStyle(.borderless)
+                        }
 
                         Button(action: onBookmarkTap) {
                             Image(systemName: isBookmarked ? "star.fill" : "star")
@@ -407,10 +435,12 @@ struct FullWidthToolbarView: View {
     let displayTitle: String
     let isOverviewMode: Bool
     let isBookmarked: Bool
+    var hasPendingSave: Bool = false
     let onBack: () -> Void
     let onForward: () -> Void
     let onAddressBarTap: () -> Void
     let onBookmarkTap: () -> Void
+    var onPasswordIconTap: (() -> Void)? = nil
     let onReloadTap: () -> Void
     let onNewTab: () -> Void
     let onOverview: () -> Void
@@ -451,6 +481,15 @@ struct FullWidthToolbarView: View {
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity)
+
+                        if hasPendingSave {
+                            Button { onPasswordIconTap?() } label: {
+                                Image(systemName: "key.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.yellow)
+                            }
+                            .buttonStyle(.borderless)
+                        }
 
                         Button(action: onBookmarkTap) {
                             Image(systemName: isBookmarked ? "star.fill" : "star")

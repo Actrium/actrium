@@ -107,8 +107,10 @@ struct VaultLockedPromptView: View {
         Task {
             do {
                 try await vault.unlock(password: password)
+                NSLog("🔑 VaultLockedPrompt: unlock succeeded, calling onUnlocked")
                 onUnlocked()
             } catch {
+                NSLog("🔑 VaultLockedPrompt: unlock failed - %@", "\(error)")
                 errorMessage = "Incorrect password"
             }
         }
