@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   Alert,
   TouchableWithoutFeedback,
   useWindowDimensions,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -27,6 +29,7 @@ import { useTab } from '../contexts/TabContext';
 import { useInputStore } from '../store/useInputStore';
 import { IAttachmentItem } from '../types/attachment';
 import { DeleteButton } from '../components/DeleteButton';
+import { ScrollToBottomButton } from '../components/ScrollToBottomButton';
 import { Checkbox } from '../components/Checkbox';
 import { AppSessionService } from '../../services/AppSessionService';
 import { getHostLayoutTokens } from '../../utils/layout';
@@ -206,8 +209,25 @@ export default function Chat() {
 
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const toastRef = React.useRef<ToastRef>(null);
+  const flatListRef = useRef<FlatList>(null);
+
+  // 滚动到底部（inverted 列表中 scrollToOffset 0 就是底部）
+  const scrollToBottom = useCallback(() => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
+
+  // 监听滚动位置，判断是否显示回到底部按钮
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const offsetY = event.nativeEvent.contentOffset.y;
+      // 当滚动超过 200 像素时显示按钮
+      setShowScrollToBottom(offsetY > 200);
+    },
+    [],
+  );
 
   const handleCopy = useCallback((text: string) => {
     if (!text) return;
@@ -413,12 +433,15 @@ export default function Chat() {
           </TouchableWithoutFeedback>
         ) : (
           <FlatList
+            ref={flatListRef}
             data={messageIds}
             renderItem={renderItem}
             keyExtractor={(item) => item}
             inverted={true}
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.1}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
             style={styles.chatScrollView}
             contentContainerStyle={[
               styles.chatContent,
@@ -432,6 +455,16 @@ export default function Chat() {
           />
         )}
       </View>
+
+      {/* 回到底部按钮 */}
+      {!selectionMode && (
+        <View style={styles.scrollToBottomContainer}>
+          <ScrollToBottomButton
+            visible={showScrollToBottom}
+            onPress={scrollToBottom}
+          />
+        </View>
+      )}
 
       {/* 输入框 */}
       <View
@@ -483,6 +516,15 @@ const styles = StyleSheet.create({
   },
   inputInner: {
     width: '100%', // 移除 maxWidth，让 ActrInput 容器占满全宽
+  },
+  scrollToBottomContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 90, // 在输入框上方
+    alignItems: 'center',
+    zIndex: 99,
+    pointerEvents: 'box-none',
   },
   chatScrollView: {
     flex: 1,
