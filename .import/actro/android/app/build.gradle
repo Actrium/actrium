@@ -93,7 +93,7 @@ android {
 
     namespace "com.askaway.android"
     defaultConfig {
-        applicationId "com.askaway.android"
+        applicationId "chat.askaway.android"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -108,10 +108,10 @@ android {
     }
     signingConfigs {
         debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+            storeFile file('../AskAway.jks')
+            storePassword 'AskAway2025'
+            keyAlias 'askaway'
+            keyPassword 'AskAway2025'
         }
     }
     buildTypes {
@@ -168,4 +168,5 @@ dependencies {
     implementation("com.google.protobuf:protobuf-javalite:3.25.1")
     implementation("org.greenrobot:eventbus:3.3.1")
     implementation("io.coil-kt:coil:2.6.0")
+    implementation("com.tencent.mm.opensdk:wechat-sdk-android:+")
 }
