@@ -449,16 +449,19 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // We avoid webView.url entirely and use evaluateJavaScript("location.href") instead,
         // which returns a fresh JS string with no NSURL bridging issues.
         urlObservation = webView.observe(\.url) { [weak self] _, _ in
-            guard let self = self else { return }
-            self.webView.evaluateJavaScript("location.href") { [weak self] result, _ in
-                guard let self = self,
-                      let urlString = result as? String,
-                      let newURL = URL(string: urlString) else { return }
-                self.loadedURL = newURL
-                if self.lastKnownURL != newURL {
-                    NSLog("🔗 WebViewHolder: URL changed to: %@", urlString)
-                    self.lastKnownURL = newURL
-                    self.onURLChanged?(newURL)
+            // Defer everything — don't touch WebKit state during KVO notification
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.webView.evaluateJavaScript("location.href") { [weak self] result, _ in
+                    guard let self = self,
+                          let urlString = result as? String,
+                          let newURL = URL(string: urlString) else { return }
+                    self.loadedURL = newURL
+                    if self.lastKnownURL != newURL {
+                        NSLog("🔗 WebViewHolder: URL changed to: %@", urlString)
+                        self.lastKnownURL = newURL
+                        self.onURLChanged?(newURL)
+                    }
                 }
             }
         }
