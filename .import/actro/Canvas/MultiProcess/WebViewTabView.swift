@@ -627,18 +627,35 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         guard webView.window != nil else { return }
 
         let zoom = webView.pageZoom
-        let viewBounds = webView.bounds
-        let nsRect = NSRect(
-            x: fieldRect.origin.x * zoom,
-            y: viewBounds.height - (fieldRect.origin.y + fieldRect.height) * zoom,
-            width: fieldRect.width * zoom,
-            height: fieldRect.height * zoom
-        )
+
+        // JS getBoundingClientRect() uses top-left origin (y downward).
+        // WKWebView.isFlipped == true → same coordinate system, direct mapping.
+        // WKWebView.isFlipped == false → need to flip y.
+        let nsRect: NSRect
+        let edge: NSRectEdge
+        if webView.isFlipped {
+            nsRect = NSRect(
+                x: fieldRect.origin.x * zoom,
+                y: fieldRect.origin.y * zoom,
+                width: fieldRect.width * zoom,
+                height: fieldRect.height * zoom
+            )
+            edge = .maxY  // maxY = bottom edge in flipped coords → popover below
+        } else {
+            let viewBounds = webView.bounds
+            nsRect = NSRect(
+                x: fieldRect.origin.x * zoom,
+                y: viewBounds.height - (fieldRect.origin.y + fieldRect.height) * zoom,
+                width: fieldRect.width * zoom,
+                height: fieldRect.height * zoom
+            )
+            edge = .minY  // minY = bottom edge in non-flipped coords → popover below
+        }
 
         let popover = NSPopover()
         popover.behavior = .semitransient
         popover.contentViewController = contentVC
-        popover.show(relativeTo: nsRect, of: webView, preferredEdge: .minY)
+        popover.show(relativeTo: nsRect, of: webView, preferredEdge: edge)
         self.autofillPopover = popover
     }
 
