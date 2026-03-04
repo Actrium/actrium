@@ -42,4 +42,15 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
             )
         )
     }
+
+    @ReactMethod
+    fun updateTabInfo(dict: ReadableMap) {
+        Log.e("TabModule", "updateTabInfo called with: $dict")
+        EventBus.getDefault().post(
+            ReactModuleEvent(
+                ReactModuleEvent.EVENT_UPDATE_TAB_INFO,
+                dict.toHashMap()
+            )
+        )
+    }
 }

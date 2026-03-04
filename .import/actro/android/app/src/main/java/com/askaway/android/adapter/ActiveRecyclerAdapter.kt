@@ -4,6 +4,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
+import coil.load
 import com.askaway.android.databinding.ItemActiveBinding
 import com.askaway.android.model.ActiveModel
 
@@ -31,8 +32,8 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
 
     class ActiveViewHolder(private val binding: ItemActiveBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: ActiveModel, onItemClick: ((ActiveModel) -> Unit)?, onDeleteClick: ((ActiveModel) -> Unit)?) {
-            val flActive = binding.root.findViewById<android.widget.FrameLayout>(com.askaway.android.R.id.fl_active)
-            // ... 其他绑定逻辑 ...
+            binding.tvAppName.text = item.name
+            binding.ivAppIcon.load(item.icon)
             binding.root.setOnClickListener { onItemClick?.invoke(item) }
             binding.ivDelete.setOnClickListener { onDeleteClick?.invoke(item) }
             binding.vUnreadBadge.visibility = if (item.hasUnread) View.VISIBLE else View.GONE
