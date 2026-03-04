@@ -128,14 +128,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.ivAdd.setOnClickListener {
             viewModel.addApp()
             showReactNativeView()
-            // 每次点击 ivAdd 时添加一条 ActiveModel 数据到列表
-            val activeModel = ActiveModel(
-                id = UUID.randomUUID().toString(),
-                name = "Active App ${System.currentTimeMillis()}",
-                icon = "",
-                screenshot = ""
-            )
-            viewModel.addActiveModel(activeModel)
         }
 
         binding.ivSearch.setOnClickListener {

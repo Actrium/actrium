@@ -1,15 +1,20 @@
 package com.askaway.android
 
 import android.os.Bundle
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
+import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.global.Params
-import com.askaway.android.model.AppModel
 import com.askaway.android.model.ActiveModel
-import java.util.UUID
+import com.askaway.android.model.AppModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import org.greenrobot.eventbus.EventBus
+import org.greenrobot.eventbus.Subscribe
+import org.greenrobot.eventbus.ThreadMode
+import java.util.UUID
 
 class MainViewModel : ViewModel() {
     private val _tabIndex = MutableLiveData(0)
@@ -25,14 +30,66 @@ class MainViewModel : ViewModel() {
 
     private val _activeModelList = mutableListOf<ActiveModel>()
 
+    init {
+        // 注册 EventBus
+        if (!EventBus.getDefault().isRegistered(this)) {
+            EventBus.getDefault().register(this)
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        // 反注册 EventBus
+        if (EventBus.getDefault().isRegistered(this)) {
+            EventBus.getDefault().unregister(this)
+        }
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onReactModuleEvent(event: ReactModuleEvent) {
+        when (event.methodName) {
+            ReactModuleEvent.EVENT_EXIT_FULLSCREEN -> {
+                // Handle exit fullscreen
+            }
+
+            ReactModuleEvent.EVENT_EXIT_SEARCH -> {
+                // Handle exit search
+            }
+
+            ReactModuleEvent.EVENT_SET_TAB_UNREAD_STATUS -> {
+                val tabId = event.params["tabId"] as? String
+                val unread = event.params["unread"] as? Boolean
+                Log.e("MainViewModel", "${_activeModelList[0].id}")
+                if (tabId != null && unread != null) {
+                    val index = _activeModelList.indexOfFirst { it.id == tabId }
+                    if (index != -1) {
+                        val oldItem = _activeModelList[index]
+                        if (oldItem.hasUnread != unread) {
+                            _activeModelList[index] = oldItem.copy(
+                                hasUnread = unread
+                            )
+                            _activeList.tryEmit(_activeModelList.toList())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun setTabIndex(index: Int) {
         _tabIndex.value = index
     }
 
     fun addApp() {
-//        val tabModel = AppModel(id = UUID.randomUUID().toString())
-        val tabModel = AppModel(id = "e6c6fefa-51c1-4ac0-baea-4f4ad00fff72")
+        val tabModel = AppModel(id = UUID.randomUUID().toString())
         Params.appList.value += tabModel
+        val activeModel = ActiveModel(
+            id = tabModel.id,
+            name = "Active App ${System.currentTimeMillis()}",
+            icon = "",
+            screenshot = ""
+        )
+        addActiveModel(activeModel)
         _currentReactNativeStatus.tryEmit(
             tabModel.genReactNativeBundle(
                 Params.appList.value,
@@ -78,4 +135,3 @@ class MainViewModel : ViewModel() {
         _activeList.tryEmit(_activeModelList.toList())
     }
 }
-

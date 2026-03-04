@@ -1,6 +1,7 @@
 package com.askaway.android.adapter
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.askaway.android.databinding.ItemActiveBinding
@@ -34,6 +35,7 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
             // ... 其他绑定逻辑 ...
             binding.root.setOnClickListener { onItemClick?.invoke(item) }
             binding.ivDelete.setOnClickListener { onDeleteClick?.invoke(item) }
+            binding.vUnreadBadge.visibility = if (item.hasUnread) View.VISIBLE else View.GONE
         }
     }
 }

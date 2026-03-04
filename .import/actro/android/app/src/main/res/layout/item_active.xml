@@ -41,7 +41,7 @@
                     android:layout_width="8dp"
                     android:layout_height="8dp"
                     android:layout_gravity="top|end"
-                    android:background="@color/ask_msg_bg"
+                    android:background="@drawable/unread_dot"
                     android:visibility="gone" />
             </FrameLayout>
 
