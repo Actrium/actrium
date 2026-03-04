@@ -86,7 +86,7 @@ final class ContentViewController: NSViewController {
         super.viewDidLoad()
 
         // Set background color
-        view.layer?.backgroundColor = NSColor(white: 0.10, alpha: 1.0).cgColor
+        view.layer?.backgroundColor = AppColors.contentBackground.cgColor
     }
 
     // MARK: - Divider Hit Passthrough

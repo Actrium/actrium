@@ -241,7 +241,7 @@ private class ToolbarContainerView: NSView {
         layer?.masksToBounds = false
 
         let bgLayer = CAShapeLayer()
-        bgLayer.fillColor = NSColor(white: 0.10, alpha: 1.0).cgColor
+        bgLayer.fillColor = AppColors.contentBackground.cgColor
         layer?.insertSublayer(bgLayer, at: 0)
         self.backgroundLayer = bgLayer
     }

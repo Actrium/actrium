@@ -618,7 +618,7 @@ struct SelfDrawnToolbarView: View {
             bottomTrailingRadius: 0,
             topTrailingRadius: 0  // roundedContainer mask handles right corner
         )
-        .fill(Color(white: 0.10))
+        .fill(AppColors.contentBackgroundColor)
         .padding(.leading, metrics.backgroundLeadingX)
         .allowsHitTesting(false)
     }
