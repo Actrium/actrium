@@ -10,21 +10,29 @@ struct AutofillSuggestionItem: Identifiable {
 struct AutofillSuggestionView: View {
     let items: [AutofillSuggestionItem]
     let onSelect: (AutofillSuggestionItem) -> Void
+    var onManagePasswords: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                if index > 0 {
-                    Divider()
-                        .padding(.horizontal, 8)
-                }
+            // Credential rows
+            ForEach(items) { item in
                 AutofillSuggestionRow(item: item) {
                     onSelect(item)
                 }
             }
+
+            // Separator + Manage Passwords
+            Rectangle()
+                .fill(Color.primary.opacity(0.12))
+                .frame(height: 1)
+                .padding(.vertical, 2)
+
+            ManagePasswordsRow {
+                onManagePasswords?()
+            }
         }
         .padding(.vertical, 4)
-        .frame(width: 260)
+        .frame(width: 280)
     }
 }
 
@@ -129,7 +137,7 @@ struct VaultLockedPromptView: View {
     }
 }
 
-// MARK: - Suggestion Row
+// MARK: - Credential Row (Chrome style)
 
 private struct AutofillSuggestionRow: View {
     let item: AutofillSuggestionItem
@@ -138,18 +146,24 @@ private struct AutofillSuggestionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: "key.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                    .frame(width: 20)
+            HStack(spacing: 10) {
+                // Circular key icon (Chrome-style)
+                ZStack {
+                    Circle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(-45))
+                }
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(item.username.isEmpty ? "(no username)" : item.username)
                         .font(.system(size: 13))
                         .foregroundColor(.primary)
                         .lineLimit(1)
-                    Text(item.domain)
+                    Text("••••••••")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -158,13 +172,58 @@ private struct AutofillSuggestionRow: View {
                 Spacer()
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(isHovered ? Color.accentColor.opacity(0.1) : Color.clear)
-        .cornerRadius(4)
-        .padding(.horizontal, 4)
+        .background(isHovered ? Color.primary.opacity(0.08) : Color.clear)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+}
+
+// MARK: - Manage Passwords Row
+
+private struct ManagePasswordsRow: View {
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+
+                Text("Manage Passwords…")
+                    .font(.system(size: 13))
+                    .foregroundColor(.primary)
+
+                Spacer()
+
+                // Colored key icon (brand accent, like Chrome's)
+                Image(systemName: "key.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.green, .blue, .yellow],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(isHovered ? Color.primary.opacity(0.08) : Color.clear)
         .onHover { hovering in
             isHovered = hovering
         }

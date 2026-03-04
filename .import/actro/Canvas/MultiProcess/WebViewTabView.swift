@@ -723,6 +723,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             AutofillSuggestionView(items: items) { selected in
                 self?.fillCredential(username: selected.username, password: selected.password)
                 self?.dismissAutofillPopover()
+            } onManagePasswords: {
+                self?.dismissAutofillPopover()
+                SettingsWindowController.shared.showWindow()
             }
         }
     }
