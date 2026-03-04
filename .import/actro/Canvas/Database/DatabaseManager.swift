@@ -127,19 +127,22 @@ final class DatabaseManager {
             )
         """)
 
-        // Encrypted credentials
+        // Vault items
         execute("""
-            CREATE TABLE IF NOT EXISTS credentials (
+            CREATE TABLE IF NOT EXISTS vault_items (
                 id TEXT PRIMARY KEY,
-                domain TEXT NOT NULL,
-                username_encrypted TEXT,
-                password_encrypted TEXT NOT NULL,
+                title TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'login',
+                fields_encrypted TEXT NOT NULL,
                 notes TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
         """)
-        execute("CREATE INDEX IF NOT EXISTS idx_credentials_domain ON credentials(domain)")
+        execute("CREATE INDEX IF NOT EXISTS idx_vault_items_category ON vault_items(category)")
+
+        // Migrate old credentials table if it exists
+        migrateCredentialsTable()
     }
 
     private func insertDefaultTags() {
@@ -273,5 +276,43 @@ final class DatabaseManager {
     func queryScalar(_ sql: String, params: [Any?] = []) -> Any? {
         let results = query(sql, params: params)
         return results.first?.values.first
+    }
+
+    // MARK: - Migration
+
+    /// Migrate old credentials table to vault_items (fields stay encrypted as-is, re-encrypted by VaultManager on unlock)
+    private func migrateCredentialsTable() {
+        // Check if old table exists
+        let tables = query("SELECT name FROM sqlite_master WHERE type='table' AND name='credentials'")
+        guard !tables.isEmpty else { return }
+
+        // Move raw rows: domain → title, encrypted fields → fields_encrypted as a placeholder
+        // The actual field re-encryption happens in VaultManager.migrateOldCredentials() after unlock
+        let rows = query("SELECT * FROM credentials")
+        for row in rows {
+            guard let id = row["id"] as? String,
+                  let domain = row["domain"] as? String,
+                  let passwordEnc = row["password_encrypted"] as? String,
+                  let createdAt = row["created_at"] as? Int64,
+                  let updatedAt = row["updated_at"] as? Int64 else { continue }
+
+            let usernameEnc = row["username_encrypted"] as? String ?? ""
+            let notes = row["notes"] as? String
+
+            // Store a migration marker — VaultManager will decrypt and re-encrypt properly
+            let migrationPayload = "\(usernameEnc)\n\(passwordEnc)"
+
+            execute(
+                """
+                INSERT OR IGNORE INTO vault_items (id, title, category, fields_encrypted, notes, created_at, updated_at)
+                VALUES (?, ?, 'login', ?, ?, ?, ?)
+                """,
+                params: [id, domain, migrationPayload, notes, createdAt, updatedAt]
+            )
+        }
+
+        // Drop old table
+        execute("DROP TABLE IF EXISTS credentials")
+        logger.notice("Migrated credentials table to vault_items")
     }
 }

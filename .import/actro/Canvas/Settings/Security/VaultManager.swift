@@ -37,7 +37,7 @@ final class VaultManager: ObservableObject {
     static let shared = VaultManager()
 
     @Published var state: VaultState = .notSetup
-    @Published var credentials: [Credential] = []
+    @Published var items: [VaultItem] = []
     @Published var isProcessing: Bool = false
 
     @Published var autoLockTimeout: Int {
@@ -149,7 +149,8 @@ final class VaultManager: ObservableObject {
         }
 
         state = .unlocked
-        try loadCredentials()
+        try migrateOldCredentials()
+        try loadItems()
         setupAutoLockTimer()
     }
 
@@ -160,7 +161,7 @@ final class VaultManager: ObservableObject {
 
     func lock() {
         derivedKey = nil
-        credentials = []
+        items = []
         if state == .unlocked {
             state = .locked
         }
@@ -170,9 +171,7 @@ final class VaultManager: ObservableObject {
 
     // MARK: - Touch ID Management
 
-    /// Enable Touch ID — requires the current master password to save to Keychain
     func enableTouchID(password: String) async throws {
-        // Verify the password first
         guard let saltString = VaultDatabase.getVaultMeta(key: "salt"),
               let salt = Data(base64Encoded: saltString) else {
             throw VaultError.notSetup
@@ -200,12 +199,10 @@ final class VaultManager: ObservableObject {
         }
         derivedKey = previousKey
 
-        // Password verified, save to keychain (will trigger Touch ID prompt)
         try KeychainHelper.saveMasterPassword(password)
         isTouchIDEnabled = true
     }
 
-    /// Disable Touch ID
     func disableTouchID() {
         KeychainHelper.deleteMasterPassword()
         isTouchIDEnabled = false
@@ -246,8 +243,8 @@ final class VaultManager: ObservableObject {
             throw VaultError.wrongPassword
         }
 
-        // Decrypt all credentials with old key
-        let decryptedCreds = try credentials.isEmpty ? loadAndReturnCredentials() : credentials
+        // Decrypt all items with old key
+        let decryptedItems = try items.isEmpty ? loadAndReturnItems() : items
 
         // Generate new salt and key
         var newSaltBytes = [UInt8](repeating: 0, count: 32)
@@ -266,17 +263,16 @@ final class VaultManager: ObservableObject {
         let newVerification = try encrypt("vault-verification-token")
         VaultDatabase.setVaultMeta(key: "verification_hash", value: newVerification)
 
-        // Re-encrypt all credentials
-        for cred in decryptedCreds {
-            let encUsername = try encrypt(cred.username)
-            let encPassword = try encrypt(cred.password)
-            VaultDatabase.updateCredential(
-                id: cred.id,
-                domain: cred.domain,
-                usernameEncrypted: encUsername,
-                passwordEncrypted: encPassword,
-                notes: cred.notes,
-                updatedAt: Int64(cred.updatedAt.timeIntervalSince1970)
+        // Re-encrypt all items
+        for item in decryptedItems {
+            let encFields = try encryptFields(item.fields)
+            VaultDatabase.updateVaultItem(
+                id: item.id,
+                title: item.title,
+                category: item.category.rawValue,
+                fieldsEncrypted: encFields,
+                notes: item.notes,
+                updatedAt: Int64(item.updatedAt.timeIntervalSince1970)
             )
         }
 
@@ -292,17 +288,16 @@ final class VaultManager: ObservableObject {
             try? KeychainHelper.saveMasterPassword(newPassword)
         }
 
-        credentials = decryptedCreds
+        items = decryptedItems
     }
 
     // MARK: - Reset Vault
 
-    /// Completely reset the vault — deletes all credentials, keys, and settings
     func resetVault() {
         autoLockTimer?.invalidate()
         autoLockTimer = nil
         derivedKey = nil
-        credentials = []
+        items = []
         KeychainHelper.deleteMasterPassword()
         isTouchIDEnabled = false
         VaultDatabase.deleteAllVaultData()
@@ -319,74 +314,127 @@ final class VaultManager: ObservableObject {
         }
     }
 
-    // MARK: - Credential Management
+    // MARK: - Item Management
 
-    func addCredential(domain: String, username: String, password: String, notes: String?) throws {
+    func addItem(_ item: VaultItem) throws {
         guard state == .unlocked, derivedKey != nil else { throw VaultError.locked }
 
-        let id = UUID().uuidString
         let now = Date()
-        let encUsername = try encrypt(username)
-        let encPassword = try encrypt(password)
+        let encFields = try encryptFields(item.fields)
 
-        VaultDatabase.insertCredential(
-            id: id,
-            domain: domain,
-            usernameEncrypted: encUsername,
-            passwordEncrypted: encPassword,
-            notes: notes,
+        VaultDatabase.insertVaultItem(
+            id: item.id,
+            title: item.title,
+            category: item.category.rawValue,
+            fieldsEncrypted: encFields,
+            notes: item.notes,
             createdAt: Int64(now.timeIntervalSince1970),
             updatedAt: Int64(now.timeIntervalSince1970)
         )
 
-        let credential = Credential(
-            id: id,
-            domain: domain,
-            username: username,
-            password: password,
-            notes: notes,
-            createdAt: now,
-            updatedAt: now
-        )
-        credentials.append(credential)
+        var saved = item
+        saved.createdAt = now
+        saved.updatedAt = now
+        items.append(saved)
         setupAutoLockTimer()
     }
 
-    func updateCredential(_ credential: Credential) throws {
+    func updateItem(_ item: VaultItem) throws {
         guard state == .unlocked, derivedKey != nil else { throw VaultError.locked }
 
         let now = Date()
-        let encUsername = try encrypt(credential.username)
-        let encPassword = try encrypt(credential.password)
+        let encFields = try encryptFields(item.fields)
 
-        VaultDatabase.updateCredential(
-            id: credential.id,
-            domain: credential.domain,
-            usernameEncrypted: encUsername,
-            passwordEncrypted: encPassword,
-            notes: credential.notes,
+        VaultDatabase.updateVaultItem(
+            id: item.id,
+            title: item.title,
+            category: item.category.rawValue,
+            fieldsEncrypted: encFields,
+            notes: item.notes,
             updatedAt: Int64(now.timeIntervalSince1970)
         )
 
-        if let index = credentials.firstIndex(where: { $0.id == credential.id }) {
-            var updated = credential
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            var updated = item
             updated.updatedAt = now
-            credentials[index] = updated
+            items[index] = updated
         }
         setupAutoLockTimer()
     }
 
-    func deleteCredential(id: String) throws {
+    func deleteItem(id: String) throws {
         guard state == .unlocked else { throw VaultError.locked }
 
-        VaultDatabase.deleteCredential(id: id)
-        credentials.removeAll { $0.id == id }
+        VaultDatabase.deleteVaultItem(id: id)
+        items.removeAll { $0.id == id }
         setupAutoLockTimer()
+    }
+
+    // MARK: - Fields Encryption
+
+    private func encryptFields(_ fields: [VaultField]) throws -> String {
+        let data = try JSONEncoder().encode(fields)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw VaultError.encryptionFailed
+        }
+        return try encrypt(json)
+    }
+
+    private func decryptFields(_ ciphertext: String) throws -> [VaultField] {
+        let json = try decrypt(ciphertext)
+        guard let data = json.data(using: .utf8) else {
+            throw VaultError.decryptionFailed
+        }
+        return try JSONDecoder().decode([VaultField].self, from: data)
+    }
+
+    // MARK: - Migration from old credentials
+
+    /// Migrate rows that were copied from the old credentials table by DatabaseManager.
+    /// Those rows have fields_encrypted = "usernameEnc\npasswordEnc" (raw encrypted values from old schema).
+    /// We decrypt them with the current key, rebuild as VaultField array, and re-encrypt.
+    private func migrateOldCredentials() throws {
+        let rows = VaultDatabase.fetchAllVaultItems()
+        for row in rows {
+            guard let id = row["id"] as? String,
+                  let fieldsEnc = row["fields_encrypted"] as? String else { continue }
+
+            // Migration marker: old rows contain a newline separator between username_encrypted and password_encrypted
+            // Normal vault_items have base64 AES-GCM data which never contains newlines
+            let parts = fieldsEnc.split(separator: "\n", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+
+            let usernameEnc = String(parts[0])
+            let passwordEnc = String(parts[1])
+
+            let username = usernameEnc.isEmpty ? "" : (try? decrypt(usernameEnc)) ?? ""
+            let password = (try? decrypt(passwordEnc)) ?? ""
+
+            let title = row["title"] as? String ?? ""
+            let notes = row["notes"] as? String
+            let createdAt = row["created_at"] as? Int64 ?? Int64(Date().timeIntervalSince1970)
+            let updatedAt = row["updated_at"] as? Int64 ?? Int64(Date().timeIntervalSince1970)
+
+            let fields: [VaultField] = [
+                VaultField(label: "URL", value: title, isSensitive: false),
+                VaultField(label: "Username", value: username, isSensitive: false),
+                VaultField(label: "Password", value: password, isSensitive: true),
+            ]
+
+            let newEncFields = try encryptFields(fields)
+            VaultDatabase.updateVaultItem(
+                id: id,
+                title: title,
+                category: VaultItemCategory.login.rawValue,
+                fieldsEncrypted: newEncFields,
+                notes: notes,
+                updatedAt: updatedAt
+            )
+        }
     }
 
     // MARK: - Crypto
 
-    /// Static version for use in detached tasks (no actor isolation needed)
     private nonisolated static func deriveKeyStatic(password: String, salt: Data) throws -> SymmetricKey {
         guard let passwordData = password.data(using: .utf8) else {
             throw VaultError.keyDerivationFailed
@@ -445,31 +493,31 @@ final class VaultManager: ObservableObject {
         }
     }
 
-    private func loadCredentials() throws {
-        credentials = try loadAndReturnCredentials()
+    private func loadItems() throws {
+        items = try loadAndReturnItems()
     }
 
-    private func loadAndReturnCredentials() throws -> [Credential] {
-        let rows = VaultDatabase.fetchAllCredentials()
-        return try rows.compactMap { row -> Credential? in
+    private func loadAndReturnItems() throws -> [VaultItem] {
+        let rows = VaultDatabase.fetchAllVaultItems()
+        return try rows.compactMap { row -> VaultItem? in
             guard let id = row["id"] as? String,
-                  let domain = row["domain"] as? String,
-                  let encPassword = row["password_encrypted"] as? String,
+                  let title = row["title"] as? String,
+                  let categoryRaw = row["category"] as? String,
+                  let fieldsEnc = row["fields_encrypted"] as? String,
                   let createdAt = row["created_at"] as? Int64,
                   let updatedAt = row["updated_at"] as? Int64 else {
                 return nil
             }
 
-            let encUsername = row["username_encrypted"] as? String ?? ""
-            let username = encUsername.isEmpty ? "" : try decrypt(encUsername)
-            let password = try decrypt(encPassword)
+            let category = VaultItemCategory(rawValue: categoryRaw) ?? .login
+            let fields = try decryptFields(fieldsEnc)
             let notes = row["notes"] as? String
 
-            return Credential(
+            return VaultItem(
                 id: id,
-                domain: domain,
-                username: username,
-                password: password,
+                title: title,
+                category: category,
+                fields: fields,
                 notes: notes,
                 createdAt: Date(timeIntervalSince1970: TimeInterval(createdAt)),
                 updatedAt: Date(timeIntervalSince1970: TimeInterval(updatedAt))
