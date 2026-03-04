@@ -26,7 +26,8 @@ private struct UnlockedVaultView: View {
     @State private var showingChangePassword = false
     @State private var touchIDEnabled = false
     @State private var showingTouchIDPasswordSheet = false
-    @State private var errorMessage: String?
+    @State private var editingHint = false
+    @State private var hintText = ""
 
     private var filteredCredentials: [Credential] {
         if searchText.isEmpty { return vault.credentials }
@@ -91,38 +92,12 @@ private struct UnlockedVaultView: View {
 
             Divider()
 
-            // Settings footer
-            HStack(spacing: 16) {
-                Picker("Auto-lock:", selection: $vault.autoLockTimeout) {
-                    ForEach(timeoutOptions, id: \.self) { minutes in
-                        if minutes == 0 {
-                            Text("Never").tag(0)
-                        } else {
-                            Text("\(minutes) min").tag(minutes)
-                        }
-                    }
-                }
-                .frame(width: 170)
-
-                if vault.isBiometricsAvailable {
-                    Toggle("Touch ID", isOn: $touchIDEnabled)
-                        .onChange(of: touchIDEnabled) { newValue in
-                            handleTouchIDToggle(newValue)
-                        }
-                }
-
-                Spacer()
-
-                Button("Change Password...") {
-                    showingChangePassword = true
-                }
-                .buttonStyle(.link)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            // Security section
+            securitySection
         }
         .onAppear {
             touchIDEnabled = vault.isTouchIDEnabled
+            hintText = vault.passwordHint ?? ""
         }
         .sheet(isPresented: $showingAddSheet) {
             CredentialFormSheet(vault: vault)
@@ -142,18 +117,113 @@ private struct UnlockedVaultView: View {
         }
     }
 
+    private var securitySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Security")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+
+            VStack(spacing: 6) {
+                // Auto-lock
+                HStack {
+                    Text("Auto-lock")
+                        .font(.subheadline)
+                    Spacer()
+                    Picker("", selection: $vault.autoLockTimeout) {
+                        ForEach(timeoutOptions, id: \.self) { minutes in
+                            if minutes == 0 {
+                                Text("Never").tag(0)
+                            } else {
+                                Text("\(minutes) min").tag(minutes)
+                            }
+                        }
+                    }
+                    .frame(width: 100)
+                }
+
+                Divider()
+
+                // Touch ID
+                if vault.isBiometricsAvailable {
+                    HStack {
+                        Text("Touch ID")
+                            .font(.subheadline)
+                        Spacer()
+                        Toggle("", isOn: $touchIDEnabled)
+                            .labelsHidden()
+                            .onChange(of: touchIDEnabled) { newValue in
+                                handleTouchIDToggle(newValue)
+                            }
+                    }
+
+                    Divider()
+                }
+
+                // Password hint
+                HStack {
+                    Text("Password hint")
+                        .font(.subheadline)
+                    Spacer()
+                    if editingHint {
+                        TextField("Hint", text: $hintText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 150)
+                            .onSubmit { saveHint() }
+                        Button("Save") { saveHint() }
+                            .font(.subheadline)
+                            .buttonStyle(.borderless)
+                        Button("Cancel") {
+                            hintText = vault.passwordHint ?? ""
+                            editingHint = false
+                        }
+                        .font(.subheadline)
+                        .buttonStyle(.borderless)
+                    } else {
+                        Text(vault.passwordHint?.isEmpty == false ? vault.passwordHint! : "None")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Button("Edit") {
+                            hintText = vault.passwordHint ?? ""
+                            editingHint = true
+                        }
+                        .font(.subheadline)
+                        .buttonStyle(.borderless)
+                    }
+                }
+
+                Divider()
+
+                // Change password
+                HStack {
+                    Button("Change Password...") {
+                        showingChangePassword = true
+                    }
+                    .font(.subheadline)
+                    .buttonStyle(.link)
+                    Spacer()
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
     private func deleteCredential(_ credential: Credential) {
         try? vault.deleteCredential(id: credential.id)
     }
 
     private func handleTouchIDToggle(_ enabled: Bool) {
         if enabled {
-            // Enabling Touch ID requires password verification
             showingTouchIDPasswordSheet = true
         } else {
-            // Disabling Touch ID can be done directly
             vault.disableTouchID()
         }
+    }
+
+    private func saveHint() {
+        vault.setPasswordHint(hintText)
+        editingHint = false
     }
 }
 
@@ -178,10 +248,12 @@ private struct TouchIDPasswordSheet: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
-            SecureField("Master password", text: $password)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 280)
-                .onSubmit { confirm() }
+            PasswordField(
+                password: $password,
+                placeholder: "Master password",
+                onSubmit: { confirm() }
+            )
+            .frame(width: 280)
 
             if let error = errorMessage {
                 Text(error)
@@ -387,6 +459,7 @@ private struct ChangePasswordSheet: View {
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var confirmPassword = ""
+    @State private var hint = ""
     @State private var errorMessage: String?
 
     private var isValid: Bool {
@@ -398,18 +471,25 @@ private struct ChangePasswordSheet: View {
             Text("Change Master Password")
                 .font(.headline)
 
-            Form {
-                SecureField("Current password:", text: $currentPassword)
-                SecureField("New password:", text: $newPassword)
-                SecureField("Confirm new password:", text: $confirmPassword)
-            }
-            .frame(width: 340)
+            VStack(alignment: .leading, spacing: 12) {
+                PasswordField(
+                    password: $currentPassword,
+                    placeholder: "Current password"
+                )
 
-            if !confirmPassword.isEmpty && newPassword != confirmPassword {
-                Text("Passwords do not match")
-                    .font(.caption)
-                    .foregroundColor(.red)
+                PasswordField(
+                    password: $newPassword,
+                    placeholder: "New password",
+                    showStrength: true,
+                    confirmPassword: $confirmPassword,
+                    showConfirm: true,
+                    confirmPlaceholder: "Confirm new password"
+                )
+
+                TextField("Password hint (optional)", text: $hint)
+                    .textFieldStyle(.roundedBorder)
             }
+            .frame(width: 300)
 
             if let error = errorMessage {
                 Text(error)
@@ -442,13 +522,20 @@ private struct ChangePasswordSheet: View {
         }
         .padding(20)
         .frame(width: 400)
+        .onAppear {
+            hint = vault.passwordHint ?? ""
+        }
     }
 
     private func changePassword() {
         errorMessage = nil
         Task {
             do {
-                try await vault.changeMasterPassword(current: currentPassword, new: newPassword)
+                try await vault.changeMasterPassword(
+                    current: currentPassword,
+                    new: newPassword,
+                    hint: hint.isEmpty ? nil : hint
+                )
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription

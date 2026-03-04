@@ -3,10 +3,11 @@
 Password Vault 模块的完整逻辑流程文档。
 
 涉及文件：
-- `Canvas/Settings/Security/VaultManager.swift` — 核心状态机、加密、Keychain、auto-lock
+- `Canvas/Settings/Security/VaultManager.swift` — 核心状态机、加密、Keychain、auto-lock、hint 存储
 - `Canvas/Settings/Security/SetupMasterPasswordView.swift` — 首次设置密码 UI
-- `Canvas/Settings/Security/UnlockVaultView.swift` — 解锁 UI
-- `Canvas/Settings/PasswordSettingsView.swift` — 已解锁管理页（凭据列表、Touch ID、改密码）
+- `Canvas/Settings/Security/UnlockVaultView.swift` — 解锁 UI（显示 hint）
+- `Canvas/Settings/Security/PasswordField.swift` — 可复用密码输入组件 + PasswordStrength enum
+- `Canvas/Settings/PasswordSettingsView.swift` — 已解锁管理页（凭据列表、Security section、改密码）
 
 ---
 
@@ -34,11 +35,13 @@ stateDiagram-v2
 
 ## 2. Setup Master Password
 
-首次设置主密码。创建 salt、派生加密 key、存储验证令牌、可选启用 Touch ID。
+首次设置主密码。创建 salt、派生加密 key、存储验证令牌、可选填写密码提示。
+
+**注意：** 生物识别（Touch ID）不在 Setup 阶段设置，需解锁后在 Security section 中独立管理。
 
 ```mermaid
 flowchart TD
-    A[用户输入密码 + 确认密码] --> B{password >= 5 且<br/>两次一致?}
+    A[用户输入密码 + 确认密码 + 可选 hint] --> B{password >= 5 且<br/>两次一致?}
     B -- No --> A
     B -- Yes --> C[按钮可点击]
     C --> D[isProcessing = true]
@@ -46,31 +49,30 @@ flowchart TD
     E --> F["🔄 后台线程<br/>PBKDF2 派生 key (100k 轮)"]
     F --> G[存 salt → DB]
     G --> H[加密 verification token → DB]
-    H --> I{用户勾选 Touch ID<br/>且硬件可用?}
-    I -- Yes --> J[保存密码到 Keychain]
-    J --> K[isTouchIDEnabled = true]
-    I -- No --> L[isTouchIDEnabled = false]
-    K --> M[state = unlocked]
-    L --> M
-    M --> N[启动 auto-lock timer]
-    N --> O[isProcessing = false]
+    H --> I{hint 非空?}
+    I -- Yes --> J[存 hint → DB vault_meta]
+    I -- No --> K[跳过]
+    J --> L[state = unlocked]
+    K --> L
+    L --> M[启动 auto-lock timer]
+    M --> N[isProcessing = false]
 
-    J -. 失败 .-> ERR[抛出 biometricsSaveFailed]
-    F -. 失败 .-> ERR2[抛出 keyDerivationFailed]
-    ERR --> O
-    ERR2 --> O
+    F -. 失败 .-> ERR[抛出 keyDerivationFailed]
+    ERR --> N
 ```
 
-**关键实现细节：**
+**关键设计决策：**
 - PBKDF2 通过 `Task.detached` 在后台线程执行，避免阻塞 UI
-- Touch ID toggle 仅在 `isBiometricsAvailable` 时显示，默认跟随硬件可用性
-- 按钮在 `isProcessing` 期间显示 loading spinner 并禁用
+- Touch ID 不再在 setup 阶段设置，改为解锁后 Security section 独立管理
+- 密码提示（hint）可选填写，存储在 DB `vault_meta` 表
 
 ---
 
 ## 3. Unlock with Password
 
 密码解锁流程。从 DB 读取 salt，派生 key，验证是否能正确解密 verification token。
+
+如果设置了 password hint，解锁页面会显示提示帮助用户回忆密码。
 
 ```mermaid
 flowchart TD
@@ -91,6 +93,9 @@ flowchart TD
     N --> O[启动 auto-lock timer]
     O --> P[isProcessing = false]
     L --> P
+
+    style A fill:#e8f4fd
+    note right of A: 页面显示 hint 提示（如有）
 ```
 
 ---
@@ -117,11 +122,11 @@ flowchart TD
 
 ## 5. Change Master Password
 
-修改主密码需要：验证旧密码 → 解密所有凭据 → 生成新 salt/key → 重新加密所有凭据。
+修改主密码需要：验证旧密码 → 解密所有凭据 → 生成新 salt/key → 重新加密所有凭据。同时可修改密码提示。
 
 ```mermaid
 flowchart TD
-    A[输入: 旧密码 + 新密码 + 确认] --> B{旧密码非空<br/>新密码 >= 5<br/>两次一致?}
+    A[输入: 旧密码 + 新密码 + 确认 + hint] --> B{旧密码非空<br/>新密码 >= 5<br/>两次一致?}
     B -- No --> A
     B -- Yes --> C[isProcessing = true]
     C --> D["🔄 用旧密码 + 旧 salt 派生 oldKey"]
@@ -134,7 +139,8 @@ flowchart TD
     J --> K[存新 salt → DB]
     K --> L[用 newKey 加密新 verification token → DB]
     L --> M[用 newKey 逐条重新加密凭据 → DB]
-    M --> N{isTouchIDEnabled?}
+    M --> M2[更新 hint → DB]
+    M2 --> N{isTouchIDEnabled?}
     N -- Yes --> O[更新 Keychain 中的密码]
     N -- No --> P[跳过]
     O --> Q["derivedKey = newKey"]
@@ -147,7 +153,27 @@ flowchart TD
 
 ---
 
-## 6. Enable Touch ID (Post-Setup)
+## 6. Security Section (Unlocked View)
+
+解锁后的 footer 区域改为结构化的 Security section：
+
+```
+┌─ Security ────────────────────────────┐
+│  Auto-lock:      [Never ▾]            │
+│  Touch ID:       [Toggle] (需硬件可用)  │
+│  Password hint:  xxxxxxx  [Edit]      │
+│  [Change Password...]                 │
+└───────────────────────────────────────┘
+```
+
+- **Auto-lock**: 选择自动锁定时间（Never / 1 / 5 / 10 / 15 min）
+- **Touch ID**: 开启需密码确认（TouchIDPasswordSheet），关闭直接删除 Keychain
+- **Password hint**: 已解锁状态可直接编辑（内联 TextField），无需密码确认
+- **Change Password**: 打开修改密码 Sheet，可同时修改 hint
+
+---
+
+## 7. Enable Touch ID (Post-Setup)
 
 已解锁状态下开启 Touch ID，必须验证主密码后才能将密码存入 Keychain。
 
@@ -171,7 +197,7 @@ flowchart TD
 
 ---
 
-## 7. Disable Touch ID
+## 8. Disable Touch ID
 
 关闭 Touch ID 不需要密码验证，直接删除 Keychain 条目。
 
@@ -183,7 +209,7 @@ flowchart TD
 
 ---
 
-## 8. Auto-Lock Timer
+## 9. Auto-Lock Timer
 
 自动锁定计时器，在多个操作后重置。`timeout = 0` 表示 Never。
 
@@ -209,7 +235,7 @@ flowchart TD
 
 ---
 
-## 9. Password Strength Evaluation
+## 10. Password Strength Evaluation
 
 密码强度实时评估，用于 Setup 和 Change Password 页面的强度指示条。
 
@@ -239,6 +265,20 @@ flowchart LR
 | 2 | Fair | 橙色 | 2/4 |
 | 3 | Good | 黄色 | 3/4 |
 | 4-5 | Strong | 绿色 | 4/4 |
+
+---
+
+## 11. Reusable PasswordField Component
+
+`PasswordField.swift` 提供可复用的密码输入区域，各场景使用方式：
+
+| 场景 | showStrength | showConfirm | placeholder |
+|------|-------------|-------------|-------------|
+| Setup | true | true | "Master password" |
+| Unlock | false | false | "Master password" |
+| Change (current) | false | false | "Current password" |
+| Change (new) | true | true | "New password" |
+| Touch ID confirm | false | false | "Master password" |
 
 ---
 
