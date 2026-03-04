@@ -24,12 +24,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let hostingView = NSHostingView(rootView: contentView)
         self.hostingView = hostingView
 
-        let window = NSWindow(
+        let window = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 550, height: 420),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
+        window.isFloatingPanel = false
 
         window.title = "Settings"
         window.contentView = hostingView
