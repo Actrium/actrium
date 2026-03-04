@@ -233,6 +233,10 @@ struct TabOutlineView: NSViewRepresentable {
                         }
                     }
                 }
+
+                // Sync column width with the visible area so rows are
+                // not clipped before the user resizes the sidebar.
+                outlineView.sizeLastColumnToFit()
             }
 
             isReloading = false
