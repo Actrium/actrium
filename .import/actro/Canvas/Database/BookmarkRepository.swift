@@ -7,12 +7,10 @@ final class BookmarkRepository {
 
     // MARK: - CRUD Operations
 
-    /// Add a new bookmark (skips if same app_url already exists)
+    /// Add a new bookmark (skips if URL is nil or already bookmarked)
     func add(_ bookmark: Bookmark) {
-        // Prevent duplicates by URL
-        if let url = bookmark.appURL, isBookmarked(appURL: url) {
-            return
-        }
+        guard let url = bookmark.appURL else { return }
+        if isBookmarked(appURL: url) { return }
 
         db.execute(
             """
@@ -145,8 +143,9 @@ final class BookmarkRepository {
         )
     }
 
-    /// Remove duplicate bookmarks (keep the oldest per app_url)
+    /// Remove duplicate bookmarks (keep the oldest per app_url) and drop NULL-URL entries
     func deduplicateByURL() {
+        db.execute("DELETE FROM bookmarks WHERE app_url IS NULL")
         db.execute(
             """
             DELETE FROM bookmarks WHERE id NOT IN (
