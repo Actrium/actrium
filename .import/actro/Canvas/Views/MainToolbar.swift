@@ -25,6 +25,7 @@ final class ToolbarManager: ObservableObject {
     private var isOverviewMode: Bool = false
     private var isBookmarked: Bool = false
     private var hasPendingSave: Bool = false
+    private var isLoading: Bool = false
 
     // Callbacks
     var onGoBack: (() -> Void)?
@@ -48,7 +49,14 @@ final class ToolbarManager: ObservableObject {
         onGoBack = { [weak viewModel] in viewModel?.goBack() }
         onGoForward = { [weak viewModel] in viewModel?.goForward() }
         onAddNewTab = { [weak viewModel] in _ = viewModel?.addNewTab() }
-        onReload = { [weak viewModel] in viewModel?.reloadCurrentTab() }
+        onReload = { [weak self, weak viewModel] in
+            guard let viewModel = viewModel else { return }
+            if self?.isLoading == true {
+                viewModel.stopCurrentTab()
+            } else {
+                viewModel.reloadCurrentTab()
+            }
+        }
         onPasswordIconTap = { AutofillManager.shared.toggleSaveDialog() }
 
         // 创建 titlebar accessory view controller
@@ -64,6 +72,7 @@ final class ToolbarManager: ObservableObject {
             isOverviewMode: isOverviewMode,
             isBookmarked: isBookmarked,
             hasPendingSave: hasPendingSave,
+            isLoading: isLoading,
             onBack: { [weak self] in self?.onGoBack?() },
             onForward: { [weak self] in self?.onGoForward?() },
             onAddressBarTap: { },
@@ -126,6 +135,7 @@ final class ToolbarManager: ObservableObject {
 
         isBookmarked = viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false
         hasPendingSave = AutofillManager.shared.pendingSaveAction != nil || AutofillManager.shared.hiddenSaveAction != nil
+        isLoading = viewModel.isCurrentTabLoading
 
         // 更新 SwiftUI 视图
         let toolbarView = TitlebarToolbarView(
@@ -135,6 +145,7 @@ final class ToolbarManager: ObservableObject {
             isOverviewMode: isOverviewMode,
             isBookmarked: isBookmarked,
             hasPendingSave: hasPendingSave,
+            isLoading: isLoading,
             onBack: { [weak self] in self?.onGoBack?() },
             onForward: { [weak self] in self?.onGoForward?() },
             onAddressBarTap: { },
@@ -315,6 +326,7 @@ struct TitlebarToolbarView: View {
     let isOverviewMode: Bool
     let isBookmarked: Bool
     let hasPendingSave: Bool
+    let isLoading: Bool
     let onBack: () -> Void
     let onForward: () -> Void
     let onAddressBarTap: () -> Void
@@ -380,7 +392,7 @@ struct TitlebarToolbarView: View {
                         .buttonStyle(.borderless)
 
                         Button(action: onReloadTap) {
-                            Image(systemName: "arrow.clockwise")
+                            Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
                                 .font(.system(size: 12))
                                 .foregroundColor(.white.opacity(0.6))
                         }
