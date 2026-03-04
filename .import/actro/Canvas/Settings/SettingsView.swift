@@ -32,7 +32,7 @@ struct SettingsView: View {
             tabContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 550, height: 420)
+        .frame(minWidth: 550, minHeight: 420)
     }
 
     // MARK: - Tab Bar
