@@ -324,6 +324,11 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Password autofill & capture script
         let autofillScript = """
         (function() {
+            function log(msg) {
+                window.webkit.messageHandlers.canvasLog.postMessage('[Autofill] ' + msg);
+            }
+            log('script loaded on ' + location.hostname);
+
             // --- Autofill injection point ---
             window.__canvasAutofill = function(username, password) {
                 var nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -341,6 +346,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                 nativeSetter.call(pwField, password);
                 pwField.dispatchEvent(new Event('input', {bubbles: true}));
                 pwField.dispatchEvent(new Event('change', {bubbles: true}));
+                log('credentials filled');
             };
 
             function findUsernameField(container) {
@@ -374,6 +380,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                     var container = pw.form || document;
                     var userField = findUsernameField(container);
                     var username = userField ? userField.value : '';
+                    log('capturing credentials for ' + location.hostname + ' user=' + username);
                     window.webkit.messageHandlers.canvasPasswordCapture.postMessage({
                         url: location.href,
                         username: username,
@@ -381,10 +388,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                     });
                     return;
                 }
+                log('captureCredentials: no filled password field found');
             }
 
             // Listen for form submit
             document.addEventListener('submit', function(e) {
+                log('form submit event');
                 if (e.target.querySelector && e.target.querySelector('input[type="password"]')) {
                     captureCredentials();
                 }
@@ -392,10 +401,29 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
             // Listen for click on submit buttons (SPA compat)
             document.addEventListener('click', function(e) {
-                var btn = e.target.closest('button[type="submit"], input[type="submit"], button:not([type])');
+                var btn = e.target.closest(
+                    'button[type="submit"], input[type="submit"], button:not([type]), ' +
+                    '[role="button"], a.btn, a.button, div[role="button"]'
+                );
                 if (!btn) return;
+                // Check if there's a password field in the same form or nearby
                 var form = btn.closest('form');
-                if (form && form.querySelector('input[type="password"]')) {
+                var hasPw = form
+                    ? form.querySelector('input[type="password"]')
+                    : document.querySelector('input[type="password"]');
+                if (hasPw) {
+                    log('submit-like click detected');
+                    setTimeout(captureCredentials, 0);
+                }
+            }, true);
+
+            // Listen for Enter key on password fields
+            document.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter') return;
+                var field = e.target;
+                if (!field || field.tagName !== 'INPUT') return;
+                if (field.type === 'password' || isLoginField(field)) {
+                    log('Enter key on login field');
                     setTimeout(captureCredentials, 0);
                 }
             }, true);
@@ -403,26 +431,11 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             // --- Autofill suggestion (Chrome-style) ---
             function isLoginField(field) {
                 if (field.type === 'password') return true;
+                // Check if there's a password field in the same form or document
                 var form = field.form || document;
                 if (!form.querySelector('input[type="password"]')) return false;
-                var type = (field.type || '').toLowerCase();
-                if (type === 'email') return true;
-                if (type !== 'text' && type !== '') return false;
-                var id = (field.id || '').toLowerCase();
-                var name = (field.name || '').toLowerCase();
-                var auto = (field.autocomplete || '').toLowerCase();
-                if (auto === 'username' || auto === 'email') return true;
-                if (/user|email|login|account|nick/.test(id + ' ' + name)) return true;
-                var pw = form.querySelector('input[type="password"]');
-                if (pw) {
-                    var prev = pw.previousElementSibling;
-                    while (prev) {
-                        if (prev === field) return true;
-                        if (prev.tagName === 'INPUT' && prev.type !== 'hidden') break;
-                        prev = prev.previousElementSibling;
-                    }
-                }
-                return false;
+                // Reuse findUsernameField: if this field IS the username field, it's a login field
+                return findUsernameField(form) === field;
             }
 
             var __dismissTimer = null;
@@ -430,7 +443,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             document.addEventListener('focusin', function(e) {
                 var field = e.target;
                 if (field.tagName !== 'INPUT') return;
-                if (!isLoginField(field)) return;
+                var login = isLoginField(field);
+                log('focusin: type=' + field.type + ' id=' + field.id + ' isLogin=' + login);
+                if (!login) return;
                 if (__dismissTimer) { clearTimeout(__dismissTimer); __dismissTimer = null; }
                 var rect = field.getBoundingClientRect();
                 window.webkit.messageHandlers.canvasAutofillSuggestion.postMessage({
@@ -1518,6 +1533,8 @@ extension WebViewHolder: WKScriptMessageHandler {
             let username = dict["username"] ?? ""
             let password = dict["password"] ?? ""
             guard !password.isEmpty else { return }
+            NSLog("🔑 canvasPasswordCapture: url=%@, user=%@, vaultState=%@",
+                  url, username, "\(VaultManager.shared.state)")
             Task { @MainActor in
                 AutofillManager.shared.handleCapturedCredentials(url: url, username: username, password: password)
             }
@@ -1529,10 +1546,17 @@ extension WebViewHolder: WKScriptMessageHandler {
             let w = (rectDict["width"] as? Double) ?? 0
             let h = (rectDict["height"] as? Double) ?? 0
             let fieldRect = CGRect(x: x, y: y, width: w, height: h)
+            NSLog("🔑 canvasAutofillSuggestion: domain=%@, rect=(%.0f,%.0f,%.0f,%.0f), vaultState=%@",
+                  domain, x, y, w, h, "\(VaultManager.shared.state)")
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                guard VaultManager.shared.state == .unlocked else { return }
+                let vaultState = VaultManager.shared.state
+                guard vaultState == .unlocked else {
+                    NSLog("🔑 autofill blocked: vault state = %@", "\(vaultState)")
+                    return
+                }
                 let credentials = AutofillManager.shared.findCredentials(forDomain: domain)
+                NSLog("🔑 autofill: found %d credentials for %@", credentials.count, domain)
                 guard !credentials.isEmpty else { return }
                 self.showAutofillPopover(credentials: credentials, fieldRect: fieldRect)
             }
