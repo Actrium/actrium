@@ -164,6 +164,8 @@
         android:id="@+id/flReactNative"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:fitsSystemWindows="false"
+        android:focusableInTouchMode="true"
         android:background="@drawable/react_native_bg">
 
         <FrameLayout
