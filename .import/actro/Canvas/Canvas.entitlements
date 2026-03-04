@@ -8,12 +8,6 @@
 		<string>group.chat.askaway.canvas</string>
 	</array>
 
-	<!-- Keychain Access (required for Touch ID protected items) -->
-	<key>keychain-access-groups</key>
-	<array>
-		<string>$(AppIdentifierPrefix)chat.askaway.canvas</string>
-	</array>
-
 	<!-- App Sandbox (disabled for development) -->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
