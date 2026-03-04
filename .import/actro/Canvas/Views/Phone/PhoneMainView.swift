@@ -146,20 +146,19 @@ struct PhoneMainView: View {
                     window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
                 }
                 
-                // 根据 PhoneTabCardView 的宽高比计算截图区域
+                // 截取页面中部区域：宽度 = 页面宽度，高度 = 宽度 * 0.54
                 let screenWidth = window.bounds.width
-                let cardWidth = screenWidth - 32  // 减去左右 padding (16 + 16)
-                let cardHeight = cardWidth * 0.54  // 卡片宽高比
+                let screenHeight = window.bounds.height
+                let cropHeight = screenWidth * 0.54
                 
-                // 从底部开始截取，去掉底部 tab bar 高度（约 49 + safeArea）
-                let bottomOffset = window.safeAreaInsets.bottom + 49  // tab bar 高度
-                let cropY = window.bounds.height - bottomOffset - cardHeight
+                // 垂直居中
+                let cropY = (screenHeight - cropHeight) / 2
                 
                 let cropRect = CGRect(
                     x: 0,
-                    y: max(0, cropY),  // 确保不超出顶部
+                    y: cropY,
                     width: screenWidth,
-                    height: cardHeight
+                    height: cropHeight
                 )
                 
                 if let croppedImage = fullImage.cropped(to: cropRect) {
