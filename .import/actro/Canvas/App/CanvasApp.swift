@@ -375,6 +375,14 @@ struct CanvasApp: App {
                 .keyboardShortcut("k", modifiers: [.command, .option])
             }
 
+            // Settings (Cmd+,)
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    SettingsWindowController.shared.showWindow()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+
             // Help menu
             CommandGroup(replacing: .help) {
                 Button("About App Status") {
