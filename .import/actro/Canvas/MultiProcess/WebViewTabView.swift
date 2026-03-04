@@ -186,6 +186,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Callback when theme color changes
     var onThemeColorChanged: ((String) -> Void)?
 
+    /// Callback when estimated progress changes
+    var onProgressChanged: ((Double) -> Void)?
+
     /// Current loading state
     private(set) var isLoading: Bool = false
 
@@ -197,6 +200,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// KVO observation for URL changes
     private var urlObservation: NSKeyValueObservation?
+
+    /// KVO observation for loading progress
+    private var progressObservation: NSKeyValueObservation?
 
     /// Autofill popover for credential suggestions
     private var autofillPopover: NSPopover?
