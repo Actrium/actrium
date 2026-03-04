@@ -7,8 +7,13 @@ final class BookmarkRepository {
 
     // MARK: - CRUD Operations
 
-    /// Add a new bookmark
+    /// Add a new bookmark (skips if same app_url already exists)
     func add(_ bookmark: Bookmark) {
+        // Prevent duplicates by URL
+        if let url = bookmark.appURL, isBookmarked(appURL: url) {
+            return
+        }
+
         db.execute(
             """
             INSERT INTO bookmarks (id, title, app_url, app_id, created_at, last_used_at, manufacturer, notes, favicon)
@@ -137,6 +142,17 @@ final class BookmarkRepository {
         db.execute(
             "UPDATE bookmarks SET last_used_at = ? WHERE id = ?",
             params: [Int64(Date().timeIntervalSince1970), id.uuidString]
+        )
+    }
+
+    /// Remove duplicate bookmarks (keep the oldest per app_url)
+    func deduplicateByURL() {
+        db.execute(
+            """
+            DELETE FROM bookmarks WHERE id NOT IN (
+                SELECT MIN(id) FROM bookmarks GROUP BY app_url
+            )
+            """
         )
     }
 
