@@ -9,14 +9,19 @@ package io.actr.datastreamapp
 import android.util.Log
 import ask.Ask
 import data_stream_app.Local
-import io.actr.datastreamapp.generated.UnifiedHandler
-import io.actor_rtc.actr.ContextBridge
-import data_stream_app.Local.*
+import data_stream_app.Local.StartVoiceMessage
+import data_stream_app.Local.StartVoiceMessageResponse
+import data_stream_app.Local.TextMessage
+import data_stream_app.Local.TextMessageResponse
+import data_stream_app.Local.VoiceChunkMessage
+import data_stream_app.Local.VoiceChunkMessageResponse
 import io.actor_rtc.actr.ActrException
 import io.actor_rtc.actr.ActrId
-import io.actor_rtc.actr.DataStream
-import io.actor_rtc.actr.DataStreamCallback
+import io.actor_rtc.actr.ContextBridge
 import io.actor_rtc.actr.PayloadType
+import io.actor_rtc.actr.DataStream
+import io.actor_rtc.actr.MetadataEntry
+import io.actr.datastreamapp.generated.UnifiedHandler
 
 
 /**
@@ -78,40 +83,15 @@ class MyUnifiedHandler : UnifiedHandler {
             if (request.textResponseStreamId.isNotEmpty()) {
                 val streamId = request.textResponseStreamId
                 Log.i(TAG, "Registering text response stream: $streamId")
-                ctx.registerStream(
-                    streamId,
-                    object : DataStreamCallback {
-                        override suspend fun onStream(chunk: DataStream, sender: ActrId) {
-                            val msg = try {
-                                String(chunk.payload, Charsets.UTF_8)
-                            } catch (e: Exception) {
-                                ""
-                            }
-                            Log.i(
-                                TAG,
-                                "[text-stream:$streamId] seq=${chunk.sequence} sender=${sender.serialNumber} bytes=${chunk.payload.size} text=${msg.take(200)}"
-                            )
-                            // NOTE: iOS emits this to RN as an event. Android RN emitter (if needed)
-                            // should live in ActrBridge.kt, not in this workload handler.
-                        }
-                    }
-                )
+                val callback = AskAwayDataStreamCallback(streamId, StreamType.TEXT)
+                ctx.registerStream(streamId, callback)
             }
 
             if (request.voiceResponseStreamId.isNotEmpty()) {
                 val streamId = request.voiceResponseStreamId
                 Log.i(TAG, "Registering voice response stream: $streamId")
-                ctx.registerStream(
-                    streamId,
-                    object : DataStreamCallback {
-                        override suspend fun onStream(chunk: DataStream, sender: ActrId) {
-                            Log.i(
-                                TAG,
-                                "[voice-stream:$streamId] seq=${chunk.sequence} sender=${sender.serialNumber} bytes=${chunk.payload.size}"
-                            )
-                        }
-                    }
-                )
+                val callback = AskAwayDataStreamCallback(streamId, StreamType.VOICE)
+                ctx.registerStream(streamId, callback)
             }
 
             Local.TextMessageResponse.newBuilder().apply {
@@ -148,7 +128,73 @@ class MyUnifiedHandler : UnifiedHandler {
      * @return StartVoiceMessageResponse response message
      */
     override suspend fun start_send_voice(request: StartVoiceMessage, ctx: ContextBridge): StartVoiceMessageResponse {
-        TODO("Not yet implemented")
+        Log.i(TAG, "Received StartSendVoice request: ${request.streamId}")
+        val target = serverActId
+            ?: throw ActrException.StateException("Server Act ID is not set. Cannot forward request.")
+
+        return try {
+            val usrPromptRequest = Ask.UsrPromptRequest.newBuilder().apply {
+                voiceStreamId = request.streamId
+                sessionId = request.sessionId
+                questionId = request.messageId
+                addAllAttachmentIds(request.attachmentIdsList)
+                textResponseStreamId = request.textResponseStreamId
+                voiceResponseStreamId = request.voiceResponseStreamId
+                if (request.hasLocation()) {
+                    location = request.location
+                }
+            }.build()
+
+            val responseBytes = ctx.callRaw(
+                target,
+                PROMPT_ROUTE_KEY,
+                PayloadType.RPC_RELIABLE,
+                usrPromptRequest.toByteArray(),
+                PROMPT_TIMEOUT_MS
+            )
+
+            val reply = Ask.AssistantReply.parseFrom(responseBytes)
+
+            // Register streams AFTER the prompt is accepted
+            if (request.textResponseStreamId.isNotEmpty()) {
+                val streamId = request.textResponseStreamId
+                Log.i(TAG, "Registering text response stream: $streamId")
+                val callback = AskAwayDataStreamCallback(streamId, StreamType.TEXT)
+                ctx.registerStream(streamId, callback)
+            }
+
+            if (request.voiceResponseStreamId.isNotEmpty()) {
+                val streamId = request.voiceResponseStreamId
+                Log.i(TAG, "Registering voice response stream: $streamId")
+                val callback = AskAwayDataStreamCallback(streamId, StreamType.VOICE)
+                ctx.registerStream(streamId, callback)
+            }
+
+            StartVoiceMessageResponse.newBuilder().apply {
+                questionId = reply.questionId
+                sessionId = reply.sessionId
+                text = reply.text
+                statusCode = reply.statusCode
+                errorMessage = reply.errorMessage
+            }.build()
+
+        } catch (e: ActrException) {
+            Log.e(TAG, "start_send_voice ActrException: ${e.message}", e)
+            StartVoiceMessageResponse.newBuilder().apply {
+                questionId = request.messageId
+                sessionId = request.sessionId
+                statusCode = -1
+                errorMessage = e.message ?: "ActrException"
+            }.build()
+        } catch (e: Exception) {
+            Log.e(TAG, "start_send_voice Exception: ${e.message}", e)
+            StartVoiceMessageResponse.newBuilder().apply {
+                questionId = request.messageId
+                sessionId = request.sessionId
+                statusCode = -1
+                errorMessage = e.message ?: "Unknown error"
+            }.build()
+        }
     }
 
     /**
@@ -159,9 +205,36 @@ class MyUnifiedHandler : UnifiedHandler {
      * @return VoiceChunkMessageResponse response message
      */
     override suspend fun send_voice_chunk(request: VoiceChunkMessage, ctx: ContextBridge): VoiceChunkMessageResponse {
-        TODO("Not yet implemented")
+        Log.i(TAG, "Received sendVoiceChunk: streamId=${request.streamId}, chunkId=${request.chunkId}")
+        val target = serverActId
+            ?: throw ActrException.StateException("Server Act ID is not set. Cannot forward request.")
+
+        return try {
+            val seq = request.chunkId.toULongOrNull() ?: 0UL
+            val metadataEntries = request.metadataMap.map { MetadataEntry(it.key, it.value) }
+
+            val chunk = DataStream(
+                streamId = request.streamId,
+                sequence = seq,
+                payload = request.chunkData.toByteArray(),
+                metadata = metadataEntries,
+                timestampMs = System.currentTimeMillis()
+            )
+
+            ctx.sendDataStream(target, chunk)
+
+            VoiceChunkMessageResponse.newBuilder().apply {
+                streamId = request.streamId
+                status = 0
+            }.build()
+        } catch (e: Exception) {
+            Log.e(TAG, "send_voice_chunk Exception: ${e.message}", e)
+            VoiceChunkMessageResponse.newBuilder().apply {
+                streamId = request.streamId
+                status = -1
+            }.build()
+        }
     }
 
     // ===== End of AskLocalService methods =====
-
 }

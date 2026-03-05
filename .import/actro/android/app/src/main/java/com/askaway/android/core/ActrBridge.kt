@@ -1,5 +1,6 @@
 package com.askaway.android.core
 
+import android.util.Base64
 import android.util.Log
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -9,6 +10,7 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.soloader.LogUtil
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import io.actor_rtc.actr.ContextBridge
 import io.actor_rtc.actr.RpcEnvelopeBridge
 import io.actor_rtc.actr.WorkloadBridge
@@ -22,13 +24,55 @@ import io.actor_rtc.actr.PayloadType
 import ask.Ask.UsrPromptRequest
 import data_stream_app.Local.TextMessage
 import io.actor_rtc.actr.ActrType
+import java.util.UUID
+import com.google.protobuf.ByteString
+import ask.Ask.AttachRequest
+import ask.Ask.AttachResponse
+import ask.Ask.AttachmentType
 
 class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
+    companion object {
+        private var instance: ActrBridge? = null
+
+        fun getInstance(): ActrBridge? {
+            return instance
+        }
+    }
+
     private val clients = mutableMapOf<String, ActrRefWrapper>() // Map of tabId to Actr client instances
+
+    init {
+        instance = this
+    }
+
+    fun sendStreamEventToRN(body: WritableMap?) {
+        if (reactApplicationContext.hasActiveReactInstance()) {
+            reactApplicationContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .emit("ActrStreamMessage", body)
+        }
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Required for RN built-in Event Emitter Calls.
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Required for RN built-in Event Emitter Calls.
+    }
 
     override fun getName(): String {
         return "ActrBridge"
+    }
+
+    override fun invalidate() {
+        super.invalidate()
+        if (instance == this) {
+            instance = null
+        }
     }
 
     @ReactMethod
@@ -89,6 +133,66 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
             }
         } catch (e: Exception) {
             promise.reject("USR_PROMPT_REQUEST_ERROR", e.localizedMessage, e)
+        }
+    }
+
+    @ReactMethod
+    fun uploadAttachment(dict: ReadableMap, promise: Promise) {
+        val tabId = dict.getString("tabId")
+        if (tabId == null || !clients.containsKey(tabId)) {
+            promise.reject("NOT_CONNECTED", "ActrBridge not initialized for tabId/Client instance lost")
+            return
+        }
+
+        GlobalScope.launch {
+            try {
+                val tmpData = dict.getString("fileData")
+                if (tmpData == null) {
+                    promise.reject("INVALID_INPUT", "Invalid fileData (null or missing)")
+                    return@launch
+                }
+
+                val binaryData = try {
+                    Base64.decode(tmpData, Base64.DEFAULT)
+                } catch (e: IllegalArgumentException) {
+                    promise.reject("INVALID_INPUT", "Invalid fileData (Base64 decode failed)", e)
+                    return@launch
+                }
+
+                val builder = AttachRequest.newBuilder()
+                builder.id = if (dict.hasKey("id")) dict.getString("id") ?: UUID.randomUUID().toString() else UUID.randomUUID().toString()
+                builder.filename = if (dict.hasKey("filename")) dict.getString("filename") ?: "file" else "file"
+
+                val typeInt = if (dict.hasKey("type")) dict.getInt("type") else 0
+                builder.setTypeValue(typeInt)
+                builder.data = ByteString.copyFrom(binaryData)
+
+                val request = builder.build()
+
+                val client = clients[tabId]
+                if (client == null) {
+                    promise.reject("NOT_CONNECTED", "Client instance not found")
+                    return@launch
+                }
+
+                // Assuming "ask.AskService.Attach" is the correct route key consistent with "ask.AskService.Prompt"
+                val responseBytes = client.call(
+                    "ask.AskService.Attach",
+                    PayloadType.RPC_RELIABLE,
+                    request.toByteArray(),
+                    90000L
+                )
+
+                val response = AttachResponse.parseFrom(responseBytes)
+
+                val result = Arguments.createMap()
+                result.putString("id", response.id)
+                result.putInt("statusCode", response.statusCode)
+                result.putString("errorMessage", response.errorMessage)
+                promise.resolve(result)
+            } catch (e: Exception) {
+                promise.reject("ACTR_ERROR", e.localizedMessage, e)
+            }
         }
     }
 
