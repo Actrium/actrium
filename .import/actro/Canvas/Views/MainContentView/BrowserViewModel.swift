@@ -126,7 +126,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                       let sessionId = notification.userInfo?["sessionId"] as? String,
                       let tabIndex = self.tabs.firstIndex(where: { $0.sshSessionId == sessionId }) else { return }
                 // Disconnect old session, assign new sessionId — XPC service will create actual SSH session
-                SSHSessionBridge.shared.disconnectSession(sessionId: sessionId)
+                TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
                 let newSessionId = UUID().uuidString
                 self.tabs[tabIndex].sshSessionId = newSessionId
                 self.objectWillChange.send()
@@ -206,7 +206,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         if tabs.count == 1 {
             // Disconnect SSH session before exiting
             if let tab = tabs.first, let sessionId = tab.sshSessionId {
-                SSHSessionBridge.shared.disconnectSession(sessionId: sessionId)
+                TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
             }
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
             NSApplication.shared.terminate(nil)
@@ -235,7 +235,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
         // Disconnect SSH session if this tab has one
         if let tab = tabs.first(where: { $0.id == id }), let sessionId = tab.sshSessionId {
-            SSHSessionBridge.shared.disconnectSession(sessionId: sessionId)
+            TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
         }
 
         // 删除标签页
