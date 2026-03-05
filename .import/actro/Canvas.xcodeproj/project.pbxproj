@@ -119,13 +119,13 @@
 		A37D707140194D1539118712 /* Pods-CanvasTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTests.debug.xcconfig"; path = "Target Support Files/Pods-CanvasTests/Pods-CanvasTests.debug.xcconfig"; sourceTree = "<group>"; };
 		A807C4A936C422853EAA4882 /* Pods-Canvas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.release.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.release.xcconfig"; sourceTree = "<group>"; };
 		B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasViewService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
-		CC11220033004400AA00BB10 /* CanvasTerminalService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasTerminalService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		B38A7F072ECA222600B4185F /* Gemfile */ = {isa = PBXFileReference; lastKnownFileType = text; path = Gemfile; sourceTree = "<group>"; };
 		B3E458A02EC731A30014D74C /* Canvas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Canvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B3E458AF2EC731A40014D74C /* CanvasTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B3E458B92EC731A40014D74C /* CanvasUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C6A7E7F65DC0D2FA1F7D3C5F /* Pods-CanvasTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTests.release.xcconfig"; path = "Target Support Files/Pods-CanvasTests/Pods-CanvasTests.release.xcconfig"; sourceTree = "<group>"; };
 		CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasTerminal.xcframework; path = "canvas-terminal/CanvasTerminal.xcframework"; sourceTree = "<group>"; };
+		CC11220033004400AA00BB10 /* CanvasTerminalService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasTerminalService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		DACA28DED8E4818311DAAB4D /* libPods-CanvasTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -182,14 +182,6 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		CC11220033004400AA00BB22 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				CC11220033004400AA00BB01 /* CanvasTerminal.xcframework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		B3312B182F066DB70018A0B4 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -221,6 +213,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CC11220033004400AA00BB22 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CC11220033004400AA00BB01 /* CanvasTerminal.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -305,26 +305,6 @@
 			productReference = B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */;
 			productType = "com.apple.product-type.xpc-service";
 		};
-		CC11220033004400AA00BB20 /* CanvasTerminalService */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = CC11220033004400AA00BB30 /* Build configuration list for PBXNativeTarget "CanvasTerminalService" */;
-			buildPhases = (
-				CC11220033004400AA00BB21 /* Sources */,
-				CC11220033004400AA00BB22 /* Frameworks */,
-				CC11220033004400AA00BB23 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				CC11220033004400AA00BB12 /* CanvasTerminalService */,
-			);
-			name = CanvasTerminalService;
-			productName = CanvasTerminalService;
-			productReference = CC11220033004400AA00BB10 /* CanvasTerminalService.xpc */;
-			productType = "com.apple.product-type.xpc-service";
-		};
 		B3E4589F2EC731A30014D74C /* Canvas */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B3E458C32EC731A40014D74C /* Build configuration list for PBXNativeTarget "Canvas" */;
@@ -404,6 +384,26 @@
 			productReference = B3E458B92EC731A40014D74C /* CanvasUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		CC11220033004400AA00BB20 /* CanvasTerminalService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CC11220033004400AA00BB30 /* Build configuration list for PBXNativeTarget "CanvasTerminalService" */;
+			buildPhases = (
+				CC11220033004400AA00BB21 /* Sources */,
+				CC11220033004400AA00BB22 /* Frameworks */,
+				CC11220033004400AA00BB23 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CC11220033004400AA00BB12 /* CanvasTerminalService */,
+			);
+			name = CanvasTerminalService;
+			productName = CanvasTerminalService;
+			productReference = CC11220033004400AA00BB10 /* CanvasTerminalService.xpc */;
+			productType = "com.apple.product-type.xpc-service";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -417,9 +417,6 @@
 					B3312B1A2F066DB70018A0B4 = {
 						CreatedOnToolsVersion = 26.2;
 					};
-					CC11220033004400AA00BB20 = {
-						CreatedOnToolsVersion = 26.2;
-					};
 					B3E4589F2EC731A30014D74C = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
@@ -430,6 +427,9 @@
 					B3E458B82EC731A40014D74C = {
 						CreatedOnToolsVersion = 26.1.1;
 						TestTargetID = B3E4589F2EC731A30014D74C;
+					};
+					CC11220033004400AA00BB20 = {
+						CreatedOnToolsVersion = 26.2;
 					};
 				};
 			};
@@ -461,13 +461,6 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		CC11220033004400AA00BB23 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		B3312B192F066DB70018A0B4 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -491,6 +484,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B3E458B72EC731A40014D74C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CC11220033004400AA00BB23 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -730,13 +730,6 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		CC11220033004400AA00BB21 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		B3312B172F066DB70018A0B4 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -759,6 +752,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B3E458B52EC731A40014D74C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CC11220033004400AA00BB21 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -1167,6 +1167,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = CanvasTerminalService/CanvasTerminalService.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -1187,7 +1188,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Canvas.CanvasTerminalService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
@@ -1202,6 +1203,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = CanvasTerminalService/CanvasTerminalService.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -1222,7 +1224,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Canvas.CanvasTerminalService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
