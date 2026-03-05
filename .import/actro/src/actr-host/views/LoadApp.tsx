@@ -1,6 +1,8 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import {
+  NativeModules,
   NativeSyntheticEvent,
+  Platform,
   StyleSheet,
   StyleProp,
   TextInput,
@@ -62,6 +64,40 @@ const LoadApp = () => {
   const scanBorderRadius = isPhone ? 20 : 34;
   const inputBorderRadius = 24;
   const scanTopMargin = CHAT_HEADER_HEIGHT + 10;
+
+  const requestNetworkPermissionOnMount = useCallback(async () => {
+    try {
+      if (Platform.OS === 'android') {
+        // Android 常规网络访问权限（如 INTERNET）是安装时权限，无运行时申请弹窗。
+        return;
+      }
+
+      if (Platform.OS === 'ios') {
+        const networkPermissionModule =
+          (NativeModules as any).NetworkPermissionModule ??
+          (NativeModules as any).LocalNetworkPermissionModule ??
+          (NativeModules as any).LocalNetworkModule;
+
+        if (networkPermissionModule?.requestPermission) {
+          await Promise.resolve(networkPermissionModule.requestPermission());
+        } else if (networkPermissionModule?.requestLocalNetworkPermission) {
+          await Promise.resolve(
+            networkPermissionModule.requestLocalNetworkPermission(),
+          );
+        } else {
+          console.log(
+            '[LoadApp] Local network permission module is unavailable, skip active request.',
+          );
+        }
+      }
+    } catch (error) {
+      console.warn('[LoadApp] Failed to request network permission:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void requestNetworkPermissionOnMount();
+  }, [requestNetworkPermissionOnMount]);
 
   // 若 tab 预设了 appUrl，视为从收藏加载，mount 时自动触发加载，无需用户手动输入
   useEffect(() => {
