@@ -82,6 +82,8 @@ struct PhoneMainView: View {
         .sheet(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                 .interactiveDismissDisabled(true)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
                 .asNavigationTransition(id: tab.id, in: animation)
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
