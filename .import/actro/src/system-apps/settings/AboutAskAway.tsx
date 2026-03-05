@@ -69,7 +69,7 @@ export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProp
       contentContainerStyle={[
         styles.scrollContent,
         {
-          paddingHorizontal: isTablet ? 40 : 24,
+          paddingHorizontal: isTablet ? 40 : 16,
         },
       ]}
       showsVerticalScrollIndicator={false}
