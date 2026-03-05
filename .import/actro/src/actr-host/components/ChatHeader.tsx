@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#78788029',
     justifyContent: 'center',
     alignItems: 'center',
-    ...HOST_SHADOWS.headerButton,
+    // ...HOST_SHADOWS.headerButton,
   },
   headerButtonDisabled: {
     opacity: 0.5,
