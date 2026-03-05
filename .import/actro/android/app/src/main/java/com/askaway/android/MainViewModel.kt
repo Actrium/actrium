@@ -6,6 +6,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import com.askaway.android.event.ReactModuleEvent
+import com.askaway.android.event.NativeModuleEvent
 import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
@@ -78,6 +79,19 @@ class MainViewModel : ViewModel() {
                             icon = icon ?: oldItem.icon,
                             url = url ?: oldItem.url
                         )
+                        _activeList.tryEmit(_activeModelList.toList())
+                    }
+                }
+            }
+
+            ReactModuleEvent.EVENT_TOGGLE_MARK_STATUS -> {
+                val tabId = event.params["tabId"] as? String
+                val marked = event.params["marked"] as? Boolean
+                if (tabId != null && marked != null) {
+                    val index = _activeModelList.indexOfFirst { it.id == tabId }
+                    if (index != -1) {
+                        val oldItem = _activeModelList[index]
+                        _activeModelList[index] = oldItem.copy(isMarked = marked)
                         _activeList.tryEmit(_activeModelList.toList())
                     }
                 }
@@ -162,6 +176,11 @@ class MainViewModel : ViewModel() {
     }
 
     fun toggleMarkStatus(activeModel: ActiveModel){
-
+        EventBus.getDefault().post(
+            NativeModuleEvent(
+                NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED,
+                mapOf("tabId" to activeModel.id, "isBookmarked" to !activeModel.isMarked)
+            )
+        )
     }
 }
