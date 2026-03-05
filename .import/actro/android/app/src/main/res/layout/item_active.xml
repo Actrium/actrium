@@ -12,6 +12,14 @@
         android:layout_height="200dp"
         android:background="@drawable/item_active_bg">
 
+        <ImageView
+            android:id="@+id/ivScreenshot"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/item_active_bg"
+            android:clipToOutline="true"
+            android:scaleType="centerCrop" />
+
         <!-- 底部操作栏：56dp高，灰色背景 -->
         <LinearLayout
             android:layout_width="match_parent"

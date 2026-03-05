@@ -43,6 +43,13 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
         ) {
             binding.tvAppName.text = item.name
             binding.ivAppIcon.load(item.icon)
+            // Load screenshot from local path if available
+            if (item.screenshot.isNotEmpty()) {
+                binding.ivScreenshot.load(java.io.File(item.screenshot))
+            } else {
+                binding.ivScreenshot.setImageDrawable(null) // Clear if no screenshot
+            }
+
             binding.root.setOnClickListener { onItemClick?.invoke(item) }
             binding.ivDelete.setOnClickListener { onDeleteClick?.invoke(item) }
             binding.vUnreadBadge.visibility = if (item.hasUnread) View.VISIBLE else View.GONE

@@ -1,6 +1,8 @@
 package com.askaway.android
 
 import android.animation.ObjectAnimator
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.content.Intent
 import android.graphics.Outline
 import android.graphics.Path
@@ -28,8 +30,10 @@ import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.facebook.react.uimanager.PixelUtil.pxToDp
-import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
     private lateinit var binding: ActivityMainBinding
@@ -407,6 +411,14 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private fun hideReactNativeView() {
         if (!isReactNativeVisible) return
 
+        val tabId = Params.currentTabId
+        if (!tabId.isNullOrEmpty()) {
+            val screenshotPath = screenshotView(binding.flRNContent, tabId)
+            if (screenshotPath != null) {
+                 viewModel.updateScreenshot(tabId, screenshotPath)
+            }
+        }
+
         // 创建滑出到底部的动画
         ObjectAnimator.ofFloat(binding.flReactNative, "translationY", 0f, binding.flReactNative.height.toFloat()).apply {
             duration = 300
@@ -418,6 +430,27 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                     isReactNativeVisible = false
                 }
             }
+        }
+    }
+
+    private fun screenshotView(view: View, tabId: String): String? {
+        try {
+            if (view.width <= 0 || view.height <= 0) return null
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            view.draw(canvas)
+
+            val fileName = "$tabId.jpg"
+            val cacheDir = cacheDir
+            val file = File(cacheDir, fileName)
+
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            }
+            return file.absolutePath
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
         }
     }
 
