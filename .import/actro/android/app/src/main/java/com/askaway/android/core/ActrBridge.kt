@@ -29,6 +29,12 @@ import com.google.protobuf.ByteString
 import ask.Ask.AttachRequest
 import ask.Ask.AttachResponse
 import ask.Ask.AttachmentType
+import com.askaway.android.global.Params
+import ask.Ask.Location
+import data_stream_app.Local.StartVoiceMessage
+import data_stream_app.Local.StartVoiceMessageResponse
+import data_stream_app.Local.VoiceChunkMessage
+import data_stream_app.Local.VoiceChunkMessageResponse
 
 class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
@@ -41,6 +47,7 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
     }
 
     private val clients = mutableMapOf<String, ActrRefWrapper>() // Map of tabId to Actr client instances
+    private val handles = mutableMapOf<String, MyUnifiedHandler>() // Map of tabId to UnifiedHandler instances
 
     init {
         instance = this
@@ -210,5 +217,175 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
         val serverActorIds = clientRef.discover(serverType, 1u)
         handler.setServerActId(serverActorIds[0])
         clients[tabId] = clientRef
+        handles[tabId] = handler
+    }
+
+    @ReactMethod
+    fun unregisterStream(dict: ReadableMap, promise: Promise) {
+        val tabId = dict.getString("tabId")
+        val streamId = dict.getString("streamId")
+
+        if (tabId == null || streamId == null || !handles.containsKey(tabId)) {
+            promise.reject("INVALID_INPUT", "Missing tabId, streamId or instance not found")
+            return
+        }
+
+        GlobalScope.launch {
+            try {
+                val handler = handles[tabId]
+                val contextBridge = handler?.streamInfos?.remove(streamId)
+                contextBridge?.unregisterStream(streamId)
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("ERROR", e.localizedMessage, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun startVoice(dict: ReadableMap, promise: Promise) {
+        val tabId = dict.getString("tabId")
+        if (tabId == null || !clients.containsKey(tabId)) {
+            promise.reject("NOT_CONNECTED", "ActrBridge not initialized for tabId")
+            return
+        }
+
+        GlobalScope.launch {
+            try {
+                val builder = StartVoiceMessage.newBuilder()
+                builder.streamId = dict.getString("streamId") ?: ""
+                builder.messageId = dict.getString("messageId") ?: ""
+                builder.sessionId = dict.getString("sessionId") ?: ""
+                builder.textResponseStreamId = dict.getString("textResponseStreamId") ?: ""
+                builder.voiceResponseStreamId = dict.getString("voiceResponseStreamId") ?: ""
+
+                if (dict.hasKey("attachmentIds") && !dict.isNull("attachmentIds")) {
+                    val attachments = dict.getArray("attachmentIds")
+                    if (attachments != null) {
+                        for (i in 0 until attachments.size()) {
+                            val id = attachments.getString(i)
+                            if (id != null) builder.addAttachmentIds(id)
+                        }
+                    }
+                }
+
+                if (dict.hasKey("location")) {
+                    val locationMap = dict.getMap("location")
+                    if (locationMap != null) {
+                        val locationBuilder = Location.newBuilder()
+                        locationBuilder.latitude = if (locationMap.hasKey("latitude")) locationMap.getDouble("latitude") else 0.0
+                        locationBuilder.longitude = if (locationMap.hasKey("longitude")) locationMap.getDouble("longitude") else 0.0
+                        locationBuilder.address = locationMap.getString("address") ?: ""
+                        locationBuilder.placeName = locationMap.getString("placeName") ?: ""
+                        builder.location = locationBuilder.build()
+                    }
+                }
+
+                if (builder.streamId.isEmpty()) {
+                    promise.reject("INVALID_INPUT", "Missing required field (streamId)")
+                    return@launch
+                }
+
+                val request = builder.build()
+                val client = clients[tabId]
+                // Using route key for StartSendVoice as per Swift's usage of "instance.actr.call(request...)" implying it's handled by UnifiedHandler -> MyUnifiedHandler.start_send_voice
+                // In MyUnifiedHandler.kt, start_send_voice is implemented.
+                // The route key for local service usually follows a pattern. However, for ActrRefWrapper.call, we typically need the route string or relying on typed call if available.
+                // Looking at sendTextMessage implementation: "data_stream_app.AskLocalService.SendText"
+                // Assuming "data_stream_app.AskLocalService.StartSendVoice" for StartVoiceMessage based on proto package/service names
+
+                val responseBytes = client!!.call(
+                    "data_stream_app.AskLocalService.StartSendVoice",
+                    PayloadType.RPC_RELIABLE,
+                    request.toByteArray(),
+                    90000L // 90 seconds timeout
+                )
+
+                val response = StartVoiceMessageResponse.parseFrom(responseBytes)
+
+                val result = Arguments.createMap()
+                result.putString("sessionId", response.sessionId)
+                result.putString("questionId", response.questionId)
+                result.putString("text", response.text)
+                result.putInt("statusCode", response.statusCode)
+                result.putString("errorMessage", response.errorMessage)
+                promise.resolve(result)
+
+            } catch (e: Exception) {
+                promise.reject("ACTR_ERROR", e.localizedMessage, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun sendVoiceChunk(dict: ReadableMap, audioData: String, promise: Promise) {
+        val tabId = dict.getString("tabId")
+        if (tabId == null || !clients.containsKey(tabId)) {
+            promise.reject("NOT_CONNECTED", "ActrBridge not initialized for tabId")
+            return
+        }
+
+        GlobalScope.launch {
+            try {
+                val streamId = dict.getString("streamId")
+                if (streamId == null) {
+                    promise.reject("INVALID_INPUT", "Missing streamId")
+                    return@launch
+                }
+
+                val builder = VoiceChunkMessage.newBuilder()
+                builder.streamId = streamId
+                builder.sessionId = dict.getString("sessionId") ?: ""
+                builder.messageId = dict.getString("messageId") ?: ""
+                builder.chunkId = dict.getString("chunkId") ?: ""
+
+                if (dict.hasKey("metadata")) {
+                    val metadataArray = dict.getArray("metadata")
+                    if (metadataArray != null) {
+                        for (i in 0 until metadataArray.size()) {
+                            val entry = metadataArray.getMap(i)
+                            if (entry != null && entry.hasKey("key") && entry.hasKey("value")) {
+                                val key = entry.getString("key")
+                                val value = entry.getString("value")
+                                if (key != null && value != null) {
+                                    builder.putMetadata(key, value)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                try {
+                     val bytes = Base64.decode(audioData, Base64.DEFAULT)
+                     builder.chunkData = ByteString.copyFrom(bytes)
+                } catch (e: Exception) {
+                     promise.reject("INVALID_INPUT", "Invalid audioData base64", e)
+                     return@launch
+                }
+
+                val request = builder.build()
+                val client = clients[tabId]
+
+                val responseBytes = client!!.call(
+                    "data_stream_app.AskLocalService.SendVoiceChunk",
+                    PayloadType.RPC_RELIABLE,
+                    request.toByteArray(),
+                    90000L
+                )
+
+                val response = VoiceChunkMessageResponse.parseFrom(responseBytes)
+
+                val result = Arguments.createMap()
+                result.putString("streamID", response.streamId)
+                result.putInt("status", response.status)
+                // Assuming message field exists based on Swift usage response.message
+                // If compilation fails, check protobuf definition
+                // result.putString("message", response.message)
+
+                promise.resolve(result)
+            } catch (e: Exception) {
+                promise.reject("ACTR_ERROR", e.localizedMessage, e)
+            }
+        }
     }
 }

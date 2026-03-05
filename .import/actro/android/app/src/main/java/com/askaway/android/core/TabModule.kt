@@ -7,6 +7,8 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import org.greenrobot.eventbus.EventBus
 import com.askaway.android.event.ReactModuleEvent
+import com.askaway.android.global.Params
+import com.facebook.react.bridge.Promise
 
 class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     override fun getName(): String {
@@ -52,5 +54,16 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
                 dict.toHashMap()
             )
         )
+    }
+
+    @ReactMethod
+    fun getCurrentFullscreenTab(promise: Promise) {
+        Log.e("TabModule", "getCurrentFullscreenTab called, currentTabId: ${Params.currentTabId}")
+        promise.resolve(Params.currentTabId)
+    }
+
+    @ReactMethod
+    fun openTab(dict: ReadableMap){
+        Log.e("TabModule", "updateTabInfo called with: $dict")
     }
 }
