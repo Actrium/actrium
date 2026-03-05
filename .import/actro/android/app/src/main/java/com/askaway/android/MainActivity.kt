@@ -197,18 +197,25 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     viewModel.currentReactNativeStatus.collect {
-//                        reactRootView?.unmountReactApplication()
-//                        binding.flContent.removeAllViews()
-                        val targetView = createReactRootView("canvas-kotlin", it)
-                        Log.e("MainActivity", "Received new React Native status: ${it.getString("currentTabId")}")
-                        targetView.tag = it.getString("currentTabId")
-                        Params.currentTabId = it.getString("currentTabId")
-                        binding.flRNContent.addView(targetView)
-                    }
-                }
-                launch {
-                    Params.appList.collect {
-                        Log.e("MainActivity", "appList changed: ${it.size}")
+                        val currentTabId = it.getString("currentTabId")
+                        var found = false
+                        for (i in 0 until binding.flRNContent.childCount) {
+                            val child = binding.flRNContent.getChildAt(i)
+                            if (child.tag == currentTabId) {
+                                child.bringToFront()
+                                found = true
+                                break
+                            }
+                        }
+
+                        if (!found) {
+                            val targetView = createReactRootView("canvas-kotlin", it)
+                            Log.e("MainActivity", "Received new React Native status: $currentTabId")
+                            targetView.tag = currentTabId
+                            binding.flRNContent.addView(targetView)
+                        }
+                        Params.currentTabId = currentTabId
+                        showReactNativeView()
                     }
                 }
                 launch {

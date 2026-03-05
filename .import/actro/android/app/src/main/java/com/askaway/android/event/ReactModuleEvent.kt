@@ -10,5 +10,6 @@ data class ReactModuleEvent(
         const val EVENT_SET_TAB_UNREAD_STATUS = "setTabUnreadStatus"
         const val EVENT_UPDATE_TAB_INFO = "updateTabInfo"
         const val EVENT_TOGGLE_MARK_STATUS = "toggleMarkStatus"
+        const val EVENT_OPEN_TAB = "openTab"
     }
 }
