@@ -204,10 +204,11 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
         // 如果这是最后一个标签页，关闭后退出应用
         if tabs.count == 1 {
-            // Disconnect SSH session before exiting
+            // Disconnect SSH/SFTP session before exiting
             if let tab = tabs.first, let sessionId = tab.sshSessionId {
                 TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
             }
+            // TODO: Disconnect SFTP session via SFTPXPCBridge when available
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
             NSApplication.shared.terminate(nil)
             return
@@ -797,7 +798,26 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 let sessionId = UUID().uuidString
                 tabs[index].url = url
                 tabs[index].sshSessionId = sessionId
+                tabs[index].sftpSessionId = nil
                 tabs[index].title = url.host ?? "SSH"
+                tabs[index].unifiedScript = nil
+                tabs[index].leftPanelScript = nil
+                tabs[index].rightPanelScript = nil
+                tabs[index].guestScript = nil
+                tabs[index].systemTabType = nil
+                tabs[index].contractName = nil
+                objectWillChange.send()
+                return
+            }
+
+            // Handle sftp:// URL
+            if url.scheme == "sftp" {
+                logger.notice("[navigateCurrentTab] SFTP connection: \(url.absoluteString)")
+                let sessionId = UUID().uuidString
+                tabs[index].url = url
+                tabs[index].sftpSessionId = sessionId
+                tabs[index].sshSessionId = nil
+                tabs[index].title = "SFTP: \(url.host ?? "")"
                 tabs[index].unifiedScript = nil
                 tabs[index].leftPanelScript = nil
                 tabs[index].rightPanelScript = nil
@@ -980,7 +1000,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         if input.hasPrefix("http://") || input.hasPrefix("https://") ||
            input.hasPrefix("about:") ||
            input.hasPrefix("askw://") || input.hasPrefix("askaway://") ||
-           input.hasPrefix("ssh://") {
+           input.hasPrefix("ssh://") ||
+           input.hasPrefix("sftp://") {
             return URL(string: input)
         }
 
