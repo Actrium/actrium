@@ -42,5 +42,10 @@ Subsystem/bun.lock
 Subsystem/package-lock.json
 Packages/CanvasIPC/.build/
 
+# Rust build artifacts
+canvas-terminal/target/
+canvas-terminal/libcanvas_terminal.a
+canvas-terminal/CanvasTerminal.xcframework/macos-arm64_x86_64/libcanvas_terminal.a
+
 # Code coverage
 *.profraw
