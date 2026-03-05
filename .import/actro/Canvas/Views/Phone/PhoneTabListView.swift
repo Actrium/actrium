@@ -62,6 +62,7 @@ struct PhoneTabListView: View {
                                     }
                                 )
                             }
+                            Color.clear.frame(height: 80)
                         }
                         .padding(.horizontal, 16)
                     }
