@@ -92,9 +92,14 @@ struct BrowserWindowView: View {
                 guard let userInfo = notification.userInfo,
                       let systemAppTypeStr = userInfo["systemAppType"] as? String,
                       let systemTabType = SystemTabType(rawValue: systemAppTypeStr) else { return }
+                let additionalProps = userInfo["additionalProps"] as? [String: Any]
                 
                 withAnimation {
-                    let _ = viewModel.openSystemTab(systemTabType)
+                    let _ = viewModel.openSystemTab(
+                        systemTabType,
+                        additionalProps: additionalProps,
+                        replaceAdditionalProps: additionalProps != nil
+                    )
                 }
             }
             // Handle select tab from RN

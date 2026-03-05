@@ -7,6 +7,7 @@ struct PhoneMainView: View {
     
     @State private var selectedTab: PhoneTab = .tabs
     @State private var fullscreenTab: Tab?
+    @State private var skipManualSettingsResetOnce = false
     
     @Namespace private var animation
     
@@ -72,18 +73,26 @@ struct PhoneMainView: View {
             case .bookmarks:
                 viewModel.reloadSystemTab(.bookmarks)
             case .settings:
-                viewModel.reloadSystemTab(.settings)
+                if skipManualSettingsResetOnce {
+                    skipManualSettingsResetOnce = false
+                } else {
+                    let _ = viewModel.openSystemTab(
+                        .settings,
+                        additionalProps: nil,
+                        replaceAdditionalProps: true
+                    )
+                }
             case .search:
                 viewModel.reloadSystemTab(.globalSearch)
             case .tabs:
                 break // 页签列表不需要刷新
             }
         }
-        .sheet(item: $fullscreenTab) { tab in
+        .fullScreenCover(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                 .interactiveDismissDisabled(true)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
+//                .presentationDetents([.large])
+//                .presentationDragIndicator(.hidden)
                 .asNavigationTransition(id: tab.id, in: animation)
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
@@ -97,6 +106,24 @@ struct PhoneMainView: View {
             // RN 请求退出搜索页 - 切换回页签列表
             withAnimation {
                 selectedTab = .tabs
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .switchPhoneTabFromRN)) { notification in
+            guard let systemAppType = notification.userInfo?["systemAppType"] as? String else {
+                return
+            }
+            withAnimation {
+                switch systemAppType {
+                case SystemTabType.bookmarks.rawValue:
+                    selectedTab = .bookmarks
+                case SystemTabType.settings.rawValue:
+                    skipManualSettingsResetOnce = true
+                    selectedTab = .settings
+                case SystemTabType.globalSearch.rawValue:
+                    selectedTab = .search
+                default:
+                    selectedTab = .tabs
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openTabFullscreenFromRN)) { notification in
