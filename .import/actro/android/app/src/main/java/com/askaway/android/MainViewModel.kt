@@ -30,6 +30,12 @@ class MainViewModel : ViewModel() {
     private val _activeList = MutableSharedFlow<List<ActiveModel>>(replay = 1, extraBufferCapacity = 1)
     val activeList: SharedFlow<List<ActiveModel>> = _activeList
 
+    private val _showPageType = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val showPageType: SharedFlow<String> = _showPageType
+
+    val pageBundle = Bundle()
+
+
     private val _activeModelList = mutableListOf<ActiveModel>()
 
     init {
@@ -59,23 +65,36 @@ class MainViewModel : ViewModel() {
             }
 
             ReactModuleEvent.EVENT_OPEN_TAB -> {
-                val tabId = event.params["tabId"] as? String
-                Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId")
-                val hasActive = tabId != null && _activeModelList.any { it.id == tabId }
-                if (hasActive) {
-                    val appModel = Params.appList.find { it.id == tabId }
-                    appModel?.let {
-                        _currentReactNativeStatus.tryEmit(
-                            it.genReactNativeBundle(
-                                Params.appList,
-                                containerHeight,
-                                containerWidth
+                val systemAppType = event.params["systemAppType"] as? String
+                if (systemAppType == null) { // 打开应用
+                    val tabId = event.params["tabId"] as? String
+                    Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId")
+                    val hasActive = tabId != null && _activeModelList.any { it.id == tabId }
+                    if (hasActive) {
+                        val appModel = Params.appList.find { it.id == tabId }
+                        appModel?.let {
+                            _currentReactNativeStatus.tryEmit(
+                                it.genReactNativeBundle(
+                                    Params.appList,
+                                    containerHeight,
+                                    containerWidth
+                                )
                             )
-                        )
+                        }
+                    } else {
+                        val filteredParams = event.params.filterKeys { it != "tabId" }
+                        addApp(filteredParams)
                     }
-                } else {
-                    val filteredParams = event.params.filterKeys { it != "tabId" }
-                    addApp(filteredParams)
+                } else {  // 打开其他页面
+                    Log.e("MainViewModel", "Received EVENT_OPEN_TAB for systemAppType: $systemAppType with params: ${event.params}")
+                    pageBundle.clear()
+                    val bundle = Bundle()
+                    bundle.addMap(event.params)
+                    val filteredParams = event.params.filterKeys { it != "systemAppType" }
+                    pageBundle.putBundle("tab", bundle)
+                    pageBundle.putBoolean("singleTabMode", true)
+                    pageBundle.addMap(filteredParams)
+                    _showPageType.tryEmit(systemAppType)
                 }
             }
 
