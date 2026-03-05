@@ -160,4 +160,8 @@ class MainViewModel : ViewModel() {
             }
         }
     }
+
+    fun toggleMarkStatus(activeModel: ActiveModel){
+
+    }
 }
