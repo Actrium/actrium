@@ -90,7 +90,7 @@ struct PhoneMainView: View {
         }
         .fullScreenCover(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
-//                .interactiveDismissDisabled(true)
+                .interactiveDismissDisabled(true)
 //                .presentationDetents([.large])
 //                .presentationDragIndicator(.hidden)
                 .asNavigationTransition(id: tab.id, in: animation)
