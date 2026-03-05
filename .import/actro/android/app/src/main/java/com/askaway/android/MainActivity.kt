@@ -227,6 +227,28 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                     }
                 }
                 launch {
+                    viewModel.showPageType.collect { pageType ->
+                        Log.e("MainActivity", "Received showPageType: $pageType with bundle: ${viewModel.pageBundle}")
+                        when (pageType) {
+                            ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_BOOKMARK -> {
+                                hideSearch()
+                                binding.navTag.isChecked = true
+                                showBookmark(viewModel.pageBundle)
+                            }
+
+                            ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS -> {
+                                hideSearch()
+                                binding.navSettings.isChecked = true
+                                showSet(viewModel.pageBundle)
+                            }
+
+                            ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SEARCH -> {
+                                showSearch(viewModel.pageBundle)
+                            }
+                        }
+                    }
+                }
+                launch {
                     viewModel.activeList.collect { activeModels ->
                         Log.d("MainActivity", "activeList changed: " + activeModels.size)
                         activeRecyclerAdapter.updateData(activeModels)
@@ -286,9 +308,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     /**
      * 更新内容组件的显隐状态
      */
-    private fun updateContentVisibility(checkedId: Int) {
+    private fun updateContentVisibility(checkedId: Int, showPage:Boolean= true) {
         when (checkedId) {
-            R.id.navTag -> showBookmark()
+            R.id.navTag -> if(showPage) showBookmark()
             R.id.navActivity -> {
                 // 显示活动页
                 binding.flBookmark.visibility = View.GONE
@@ -296,29 +318,30 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 binding.flSet.visibility = View.GONE
             }
 
-            R.id.navSettings -> showSet()
+            R.id.navSettings -> if(showPage) showSet()
         }
     }
 
-    private fun showBookmark() {
+    private fun showBookmark(sourceBundle: Bundle? = null) {
         binding.flBookmark.visibility = View.VISIBLE
         binding.llActive.visibility = View.GONE
         binding.flSet.visibility = View.GONE
         binding.flBookmark.removeAllViews()
         if (binding.flBookmark.childCount == 0) {
-            val bundle = ReactNativeBundle.getBookmarkBundle()
+            val bundle = sourceBundle?:ReactNativeBundle.getBookmarkBundle()
             val targetView = createReactRootView("canvas-kotlin", bundle)
             binding.flBookmark.addView(targetView)
         }
         Log.d("MainActivity", "Show Bookmark")
     }
 
-    private fun showSet() {
+    private fun showSet(sourceBundle: Bundle? = null) {
         binding.flBookmark.visibility = View.GONE
         binding.llActive.visibility = View.GONE
         binding.flSet.visibility = View.VISIBLE
+        binding.flSet.removeAllViews()
         if (binding.flSet.childCount == 0) {
-            val bundle = ReactNativeBundle.getSetBundle()
+            val bundle = sourceBundle?:ReactNativeBundle.getSetBundle()
             val targetView = createReactRootView("canvas-kotlin", bundle)
             binding.flSet.addView(targetView)
         }
@@ -369,7 +392,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     /**
      * 从右侧显示搜索视图
      */
-    private fun showSearch() {
+    private fun showSearch(sourceBundle: Bundle? = null) {
         if (isSearchVisible) return
 
         isSearchVisible = true
@@ -378,7 +401,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flSearch.removeAllViews()
 
         // 加载搜索 React Native 视图
-        val bundle = ReactNativeBundle.getSearchBundle()
+        val bundle = sourceBundle?:ReactNativeBundle.getSearchBundle()
         val targetView = createReactRootView("canvas-kotlin", bundle)
         binding.flSearch.addView(targetView)
 

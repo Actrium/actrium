@@ -121,7 +121,7 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
 
     @ReactMethod
     fun openTab(dict: ReadableMap) {
-        Log.e("TabModule", "updateTabInfo called with: $dict")
+        Log.e("TabModule", "openTab called with: $dict")
         EventBus.getDefault().post(
             ReactModuleEvent(ReactModuleEvent.EVENT_OPEN_TAB, dict.toHashMap())
         )

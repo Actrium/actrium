@@ -13,6 +13,12 @@ fun Bundle.addMap(params: Map<String, Any?>?) {
             is Float -> putFloat(key, value)
             is Long -> putLong(key, value)
             is Bundle -> putBundle(key, value)
+            is Map<*, *> -> {
+                val bundle = Bundle()
+                @Suppress("UNCHECKED_CAST")
+                bundle.addMap(value as Map<String, Any?>)
+                putBundle(key, bundle)
+            }
         }
     }
 }
