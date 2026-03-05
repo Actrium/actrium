@@ -17,7 +17,6 @@ import {
   Image,
   TouchableWithoutFeedback,
   useWindowDimensions,
-  Linking,
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +26,7 @@ import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../actr-host/styles/shadows';
 import { useAppStore } from '../actr-host/store/useAppStore';
 import { useTabIdMapStore } from '../actr-host/store/useTabIdMapStore';
+import { useUserStore } from '../actr-host/store/useUserStore';
 import {
   BookmarkRepository,
   TBookmarkItem,
@@ -35,11 +35,15 @@ import { openTab, exitSearch } from '../native-bridge/tab/TabModule';
 
 // 搜索结果类型
 type SearchResultType = 'active' | 'bookmark' | 'setting';
+type SettingsPage = 'main' | 'accountDetail' | 'aboutAskAway';
+type SettingsAboutPage = 'aboutApp' | 'userAgreement' | 'privacyPolicy' | 'icp';
+type SettingsAction = 'feedback' | 'logout';
 
 interface SearchResultItem {
   id: string;
   type: SearchResultType;
   name: string;
+  searchKeywords?: string[];
   // 应用类型
   logo?: string;
   appId?: string;
@@ -66,6 +70,8 @@ export default function GlobalSearchApp() {
   const { width: screenWidth } = useWindowDimensions();
   const apps = useAppStore((s) => s.apps);
   const tabIdMap = useTabIdMapStore((s) => s.tabIdMap);
+  const userInfo = useUserStore((s) => s.userInfo);
+  const isLoggedIn = !!userInfo;
 
   const isPhone = screenWidth < 600;
   const inputWidth = isPhone ? screenWidth * 0.85 : 500;
@@ -90,29 +96,125 @@ export default function GlobalSearchApp() {
   }, []);
 
   // 可搜索的设置项
-  const searchableSettings: SearchResultItem[] = useMemo(() => {
-    const handleFeedback = () => {
-      const subject = encodeURIComponent('#吐个槽关于');
-      const mailto = `mailto:support@askaway.chat?subject=${subject}`;
-      Linking.openURL(mailto);
-    };
+  const openSettingsWithDeepLink = useCallback(
+    (
+      page: SettingsPage,
+      aboutPage?: SettingsAboutPage,
+      settingsAction?: SettingsAction,
+    ) => {
+      openTab({
+        systemAppType: 'settings',
+        systemAppPayload: {
+          page,
+          aboutPage,
+          action: settingsAction,
+          token: `${Date.now()}-${Math.random()}`,
+        },
+      });
+    },
+    [],
+  );
+  const handleOpenSettings = useCallback(() => {
+    openSettingsWithDeepLink('main');
+  }, [openSettingsWithDeepLink]);
+  const handleOpenSettingsAccount = useCallback(() => {
+    openSettingsWithDeepLink('accountDetail');
+  }, [openSettingsWithDeepLink]);
+  const handleOpenAbout = useCallback(
+    (aboutPage: SettingsAboutPage = 'aboutApp') => {
+      openSettingsWithDeepLink('aboutAskAway', aboutPage);
+    },
+    [openSettingsWithDeepLink],
+  );
 
-    return [
+  const searchableSettings: SearchResultItem[] = useMemo(() => {
+    const items: SearchResultItem[] = [
+      {
+        id: 'setting-main',
+        type: 'setting',
+        name: t('actr.search.settings'),
+        searchKeywords: ['setting', 'settings', '设置', '偏好设置'],
+        icon: 'askaway_gery',
+        action: handleOpenSettings,
+      },
+      {
+        id: 'setting-account',
+        type: 'setting',
+        name: t('actr.auth.login'),
+        searchKeywords: ['账号', '账户', 'account', 'profile', 'login', '登录'],
+        icon: 'askaway_gery',
+        action: handleOpenSettingsAccount,
+      },
       {
         id: 'setting-feedback',
         type: 'setting',
         name: t('actr.settings.feedback'),
+        searchKeywords: ['feedback', '吐槽', '意见', 'support', 'mail'],
         icon: 'feedback',
-        action: handleFeedback,
+        action: () => openSettingsWithDeepLink('main', undefined, 'feedback'),
       },
       {
+        id: 'setting-about',
+        type: 'setting',
+        name: 'AskAway',
+        searchKeywords: ['about', 'askaway', '关于'],
+        icon: 'askaway_gery',
+        action: () => openSettingsWithDeepLink('aboutAskAway'),
+      },
+      {
+        id: 'setting-about-app',
+        type: 'setting',
+        name: '关于 AskAway',
+        searchKeywords: ['about askaway', 'askaway', '关于 askaway'],
+        icon: 'askaway_gery',
+        action: () => handleOpenAbout('aboutApp'),
+      },
+      {
+        id: 'setting-user-agreement',
+        type: 'setting',
+        name: '用户协议',
+        searchKeywords: ['user agreement', 'agreement', '用户协议', '条款'],
+        icon: 'askaway_gery',
+        action: () => handleOpenAbout('userAgreement'),
+      },
+      {
+        id: 'setting-privacy-policy',
+        type: 'setting',
+        name: '隐私政策',
+        searchKeywords: ['privacy', 'privacy policy', '隐私', '隐私政策'],
+        icon: 'askaway_gery',
+        action: () => handleOpenAbout('privacyPolicy'),
+      },
+      {
+        id: 'setting-icp',
+        type: 'setting',
+        name: 'ICP 备案',
+        searchKeywords: ['icp', '备案', 'license'],
+        icon: 'askaway_gery',
+        action: () => handleOpenAbout('icp'),
+      },
+    ];
+
+    if (isLoggedIn) {
+      items.push({
         id: 'setting-logout',
         type: 'setting',
         name: t('actr.settings.logout'),
+        searchKeywords: ['logout', 'sign out', '退出'],
         icon: 'logout',
-      },
-    ];
-  }, [t]);
+        action: () => openSettingsWithDeepLink('main', undefined, 'logout'),
+      });
+    }
+
+    return items;
+  }, [
+    t,
+    handleOpenSettings,
+    handleOpenSettingsAccount,
+    handleOpenAbout,
+    openSettingsWithDeepLink,
+    isLoggedIn,
+  ]);
 
   // 搜索结果
   const searchResults: SearchResultGroup[] = useMemo(() => {
@@ -150,9 +252,12 @@ export default function GlobalSearchApp() {
       }));
 
     // 3. 搜索设置
-    const settingResults = searchableSettings.filter((s) =>
-      s.name.toLowerCase().includes(q),
-    );
+    const settingResults = searchableSettings.filter((s) => {
+      if (s.name.toLowerCase().includes(q)) return true;
+      return (s.searchKeywords || []).some((keyword) =>
+        keyword.toLowerCase().includes(q),
+      );
+    });
 
     const groups: SearchResultGroup[] = [];
     if (activeResults.length > 0) {
@@ -202,7 +307,7 @@ export default function GlobalSearchApp() {
         appUrl: item.url || item.appId || '',
       });
     }
-    exitSearch();
+    // exitSearch();
   }, []);
 
   // 渲染搜索结果项

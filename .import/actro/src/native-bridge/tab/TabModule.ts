@@ -6,7 +6,8 @@ const { TabModule } = NativeModules;
 export const openTab = async (data: {
   tabId?: string;
   appUrl?: string;
-  systemAppType?: string
+  systemAppType?: string;
+  systemAppPayload?: Record<string, unknown>;
 }): Promise<string> => {
   try {
     return TabModule.openTab(data);

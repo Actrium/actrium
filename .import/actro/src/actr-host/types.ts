@@ -83,4 +83,6 @@ export type TabRouterProps = ActrProps & {
 
   // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
   appUrl?: string;
+  // Native-transparent payload for system app deep-links/actions
+  systemAppPayload?: Record<string, unknown>;
 };

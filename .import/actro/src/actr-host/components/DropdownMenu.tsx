@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,6 +9,8 @@ import {
   StyleProp,
   Modal,
   Dimensions,
+  Keyboard,
+  Platform,
 } from 'react-native';
 
 interface DropdownMenuProps {
@@ -20,6 +22,7 @@ interface DropdownMenuProps {
   style?: StyleProp<ViewStyle>;
   triggerStyle?: StyleProp<ViewStyle>;
   disabled?: boolean;
+  onBeforeOpen?: () => void;
 }
 
 export const DropdownMenu: React.FC<DropdownMenuProps> = ({
@@ -31,6 +34,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   style,
   triggerStyle,
   disabled = false,
+  onBeforeOpen,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [triggerRect, setTriggerRect] = useState<{
@@ -44,13 +48,26 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     height: 120,
   });
   const triggerRef = useRef<View>(null);
+  const rafRef = useRef<number | null>(null);
 
-  const calculatePosition = useCallback(() => {
+  const calculatePosition = useCallback((openWhenMeasured = true) => {
     triggerRef.current?.measureInWindow((x, y, width, height) => {
+      if (width <= 0 || height <= 0) return;
       setTriggerRect({ x, y, width, height });
-      setIsOpen(true);
+      if (openWhenMeasured) {
+        setIsOpen(true);
+      }
     });
   }, []);
+
+  const scheduleRecalculatePosition = useCallback(() => {
+    if (!isOpen) return;
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      calculatePosition(false);
+    });
+  }, [calculatePosition, isOpen]);
 
   const menuPosition = React.useMemo(() => {
     if (!triggerRect) return null;
@@ -84,6 +101,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     if (isOpen) {
       setIsOpen(false);
     } else {
+      onBeforeOpen?.();
       calculatePosition();
     }
   };
@@ -92,6 +110,30 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     setIsOpen(false);
     setTriggerRect(null);
   };
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const keyboardShowEvent =
+      Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow';
+    const keyboardHideEvent =
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onLayoutChanged = () => scheduleRecalculatePosition();
+
+    const showSub = Keyboard.addListener(keyboardShowEvent, onLayoutChanged);
+    const hideSub = Keyboard.addListener(keyboardHideEvent, onLayoutChanged);
+    const dimensionSub = Dimensions.addEventListener('change', onLayoutChanged);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+      dimensionSub.remove();
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [isOpen, scheduleRecalculatePosition]);
 
   return (
     <View ref={triggerRef} collapsable={false} style={style}>
