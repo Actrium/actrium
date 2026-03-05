@@ -2,6 +2,7 @@ import Testing
 import WebKit
 @testable import Canvas
 
+@Suite(.serialized)
 struct ContentBlockerManagerTests {
 
     // MARK: - Enable/Disable Toggle
