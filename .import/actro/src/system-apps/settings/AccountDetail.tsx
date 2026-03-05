@@ -33,7 +33,7 @@ export const AccountDetail = ({
       contentContainerStyle={[
         styles.scrollContent,
         {
-          paddingHorizontal: isTablet ? 40 : 24,
+          paddingHorizontal: isTablet ? 40 : 16,
         },
       ]}
       showsVerticalScrollIndicator={false}
