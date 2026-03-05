@@ -291,7 +291,7 @@ struct WorkspaceMainView: View {
                 if case .focus(let focusedTabId) = viewModel.canvasMode,
                    let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
                    case .ssh(let sessionId) = focusedTab.contentType {
-                    SSHTerminalView(sessionId: sessionId, viewportSize: safeViewportSize)
+                    SSHTerminalView(sessionId: sessionId, sshURL: focusedTab.url?.absoluteString ?? "", viewportSize: safeViewportSize)
                         .frame(width: safeViewportSize.width, height: safeViewportSize.height)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
@@ -2350,7 +2350,7 @@ private struct TabPanel: View {
                 if isFocused {
                     Color.clear // Focus mode handled by focus overlay
                 } else {
-                    SSHTerminalView(sessionId: sessionId, viewportSize: renderSize)
+                    SSHTerminalView(sessionId: sessionId, sshURL: tab.url?.absoluteString ?? "", viewportSize: renderSize)
                         .frame(width: renderSize.width, height: renderSize.height)
                 }
 

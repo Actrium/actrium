@@ -124,9 +124,10 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             ) { [weak self] notification in
                 guard let self,
                       let sessionId = notification.userInfo?["sessionId"] as? String,
-                      let urlString = notification.userInfo?["url"] as? String,
                       let tabIndex = self.tabs.firstIndex(where: { $0.sshSessionId == sessionId }) else { return }
-                let newSessionId = SSHSessionBridge.shared.createSession(url: urlString, rows: 24, cols: 80)
+                // Disconnect old session, assign new sessionId — XPC service will create actual SSH session
+                TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
+                let newSessionId = UUID().uuidString
                 self.tabs[tabIndex].sshSessionId = newSessionId
                 self.objectWillChange.send()
             }
@@ -205,7 +206,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         if tabs.count == 1 {
             // Disconnect SSH session before exiting
             if let tab = tabs.first, let sessionId = tab.sshSessionId {
-                SSHSessionBridge.shared.disconnectSession(sessionId: sessionId)
+                TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
             }
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
             NSApplication.shared.terminate(nil)
@@ -234,7 +235,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
         // Disconnect SSH session if this tab has one
         if let tab = tabs.first(where: { $0.id == id }), let sessionId = tab.sshSessionId {
-            SSHSessionBridge.shared.disconnectSession(sessionId: sessionId)
+            TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
         }
 
         // 删除标签页
@@ -243,8 +244,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         // 删除该标签的位置映射
         tabSlotPositions.removeValue(forKey: id)
 
-        // 关闭标签时同步终止对应的渲染进程（多进程架构）
-        TabProcessManager.shared.terminateProcess(for: id)
+        // 关闭标签时走统一渲染生命周期门面
+        RendererLifecycleManager.shared.tabDidClose(id)
 
         // 重新整理位置：将所有大于被删除位置的位置减1
         for tabId in tabs.map({ $0.id }) {
@@ -790,14 +791,10 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 return
             }
 
-            // Handle ssh:// URL
+            // Handle ssh:// URL — session created in XPC service, not here
             if url.scheme == "ssh" {
                 logger.notice("[navigateCurrentTab] SSH connection: \(url.absoluteString)")
-                let sessionId = SSHSessionBridge.shared.createSession(
-                    url: url.absoluteString,
-                    rows: 24,
-                    cols: 80
-                )
+                let sessionId = UUID().uuidString
                 tabs[index].url = url
                 tabs[index].sshSessionId = sessionId
                 tabs[index].title = url.host ?? "SSH"
