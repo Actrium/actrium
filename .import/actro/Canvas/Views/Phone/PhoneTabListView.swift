@@ -246,8 +246,8 @@ struct PhoneBrowserView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                Color.black.ignoresSafeArea(.all, edges: .top)
+            ZStack(alignment: .top) {
+                Color.black.ignoresSafeArea(.all, edges: .top).frame(height: 200)
                 SingleTabRootView(
                     tab: tab,
                     viewModel: viewModel,
