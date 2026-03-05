@@ -182,6 +182,14 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 val child = binding.flRNContent.getChildAt(i)
                 if (child.tag == activeModel.id) {
                     binding.flRNContent.removeViewAt(i)
+                    // 必须手动卸载 React 应用以释放 JS 资源并停止执行
+                    if (child is ReactRootView) {
+                        try {
+                            child.unmountReactApplication()
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error unmounting React application", e)
+                        }
+                    }
                     break
                 }
             }
