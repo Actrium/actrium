@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             window.setDecorFitsSystemWindows(false)
             binding.root.setOnApplyWindowInsetsListener { v, insets ->
                 val statusBarHeight = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top
-                binding.root.setPadding(0, statusBarHeight, 0, 0)
+                binding.root.setPadding(0, 0, 0, 0)
                 insets
             }
         } else {
