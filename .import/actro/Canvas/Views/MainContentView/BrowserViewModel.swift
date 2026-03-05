@@ -205,10 +205,14 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
         // 如果这是最后一个标签页，关闭后退出应用
         if tabs.count == 1 {
             // Disconnect SSH/SFTP session before exiting
-            if let tab = tabs.first, let sessionId = tab.sshSessionId {
-                TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
+            if let tab = tabs.first {
+                if let sessionId = tab.sshSessionId {
+                    TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
+                }
+                if let sessionId = tab.sftpSessionId {
+                    SFTPSessionBridge.shared.disconnectSession(sessionId: sessionId)
+                }
             }
-            // TODO: Disconnect SFTP session via SFTPXPCBridge when available
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
             NSApplication.shared.terminate(nil)
             return
