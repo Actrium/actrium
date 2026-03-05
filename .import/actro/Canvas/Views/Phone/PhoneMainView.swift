@@ -135,10 +135,12 @@ struct PhoneMainView: View {
             }
         }
         .onAppear {
-            // 初始进入时，如果有选中的 tab，直接进入全屏模式
-            if let currentId = viewModel.currentTabId,
-               let tab = viewModel.tabs.first(where: { $0.id == currentId }) {
-                fullscreenTab = tab
+            // 初始进入时，如果有选中的 tab，延迟进入全屏模式，确保应用完全启动及布局完成
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let currentId = viewModel.currentTabId,
+                   let tab = viewModel.tabs.first(where: { $0.id == currentId }) {
+                    fullscreenTab = tab
+                }
             }
         }
         .onChange(of: viewModel.currentTabId) { oldValue, newValue in
