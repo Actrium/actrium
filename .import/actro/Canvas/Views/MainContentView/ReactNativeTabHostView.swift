@@ -238,6 +238,12 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
                 logger.debug("[props] guestScript length: \(guestScript.count)")
             }
 
+            if let additionalProps = tab.additionalProps {
+                for (key, value) in additionalProps {
+                    dict[key] = value
+                }
+            }
+
             return dict
         }
 
