@@ -115,9 +115,8 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     if (!isOpen) return;
 
     const keyboardShowEvent =
-      Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow';
-    const keyboardHideEvent =
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+      Platform.OS === 'ios' ? 'keyboardDidChangeFrame' : 'keyboardDidShow';
+    const keyboardHideEvent = 'keyboardDidHide';
     const onLayoutChanged = () => scheduleRecalculatePosition();
 
     const showSub = Keyboard.addListener(keyboardShowEvent, onLayoutChanged);

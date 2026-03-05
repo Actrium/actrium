@@ -128,11 +128,6 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     }, 0);
   }, []);
 
-  const handleBlurBeforeMenuOpen = React.useCallback(() => {
-    setIsInputFocused(false);
-    mobileTextInputRef.current?.blur();
-  }, []);
-
   const handleExitTab = React.useCallback(async () => {
     try {
       await exitFullscreen();
@@ -327,7 +322,6 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                 <View style={styles.mobileInputInnerRow}>
                   <DropdownMenu
                     verticalGap={24}
-                    onBeforeOpen={handleBlurBeforeMenuOpen}
                     trigger={
                       <View style={styles.mobilePlusButton}>
                         <Icon type='link' size={20} color='#404040' />
