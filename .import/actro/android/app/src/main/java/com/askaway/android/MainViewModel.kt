@@ -10,6 +10,7 @@ import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
+import com.askaway.android.utils.addMap
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import org.greenrobot.eventbus.EventBus
@@ -59,11 +60,9 @@ class MainViewModel : ViewModel() {
 
             ReactModuleEvent.EVENT_OPEN_TAB -> {
                 val tabId = event.params["tabId"] as? String
-                val url = event.params["appUrl"] as? String
-                Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId with url: $url")
-                if (tabId == null) {
-                    addApp()
-                } else {
+                Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId")
+                val hasActive = tabId != null && _activeModelList.any { it.id == tabId }
+                if (hasActive) {
                     val appModel = Params.appList.find { it.id == tabId }
                     appModel?.let {
                         _currentReactNativeStatus.tryEmit(
@@ -74,14 +73,15 @@ class MainViewModel : ViewModel() {
                             )
                         )
                     }
+                } else {
+                    val filteredParams = event.params.filterKeys { it != "tabId" }
+                    addApp(filteredParams)
                 }
             }
 
             ReactModuleEvent.EVENT_SET_TAB_UNREAD_STATUS -> {
                 val tabId = event.params["tabId"] as? String
                 val unread = event.params["unread"] as? Boolean
-                Log.e("MainViewModel", "Received EVENT_SET_TAB_UNREAD_STATUS for tabId: $tabId with unread: $unread")
-                Log.e("MainViewModel", "${_activeModelList[0].id}")
                 updateUnread(tabId, unread)
             }
 
@@ -123,7 +123,7 @@ class MainViewModel : ViewModel() {
         _tabIndex.value = index
     }
 
-    fun addApp(url: String? = null) {
+    fun addApp(params: Map<String, Any?>? = null) {
         val tabModel = AppModel(id = UUID.randomUUID().toString())
         Params.appList.add(tabModel)
         val activeModel = ActiveModel(
@@ -134,9 +134,7 @@ class MainViewModel : ViewModel() {
         )
         addActiveModel(activeModel)
         val bundle = tabModel.genReactNativeBundle(Params.appList, containerHeight, containerWidth)
-        if (url != null) {
-            bundle.putString("appUrl", url)
-        }
+        bundle.addMap(params)
         _currentReactNativeStatus.tryEmit(bundle)
     }
 
@@ -175,6 +173,7 @@ class MainViewModel : ViewModel() {
     fun removeActiveModel(id: String) {
         _activeModelList.removeAll { it.id == id }
         _activeList.tryEmit(_activeModelList.toList())
+        Params.appList.removeAll { it.id == id }
     }
 
 
