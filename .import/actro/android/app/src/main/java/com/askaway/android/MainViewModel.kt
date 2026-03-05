@@ -5,8 +5,8 @@ import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.event.NativeModuleEvent
+import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
@@ -57,6 +57,26 @@ class MainViewModel : ViewModel() {
                 // Handle exit search
             }
 
+            ReactModuleEvent.EVENT_OPEN_TAB -> {
+                val tabId = event.params["tabId"] as? String
+                val url = event.params["appUrl"] as? String
+                Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId with url: $url")
+                if (tabId == null) {
+                    addApp()
+                } else {
+                    val appModel = Params.appList.find { it.id == tabId }
+                    appModel?.let {
+                        _currentReactNativeStatus.tryEmit(
+                            it.genReactNativeBundle(
+                                Params.appList,
+                                containerHeight,
+                                containerWidth
+                            )
+                        )
+                    }
+                }
+            }
+
             ReactModuleEvent.EVENT_SET_TAB_UNREAD_STATUS -> {
                 val tabId = event.params["tabId"] as? String
                 val unread = event.params["unread"] as? Boolean
@@ -103,9 +123,9 @@ class MainViewModel : ViewModel() {
         _tabIndex.value = index
     }
 
-    fun addApp() {
+    fun addApp(url: String? = null) {
         val tabModel = AppModel(id = UUID.randomUUID().toString())
-        Params.appList.value += tabModel
+        Params.appList.add(tabModel)
         val activeModel = ActiveModel(
             id = tabModel.id,
             name = "",
@@ -113,13 +133,11 @@ class MainViewModel : ViewModel() {
             screenshot = ""
         )
         addActiveModel(activeModel)
-        _currentReactNativeStatus.tryEmit(
-            tabModel.genReactNativeBundle(
-                Params.appList.value,
-                containerHeight,
-                containerWidth
-            )
-        )
+        val bundle = tabModel.genReactNativeBundle(Params.appList, containerHeight, containerWidth)
+        if (url != null) {
+            bundle.putString("appUrl", url)
+        }
+        _currentReactNativeStatus.tryEmit(bundle)
     }
 
 
@@ -175,7 +193,7 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun toggleMarkStatus(activeModel: ActiveModel){
+    fun toggleMarkStatus(activeModel: ActiveModel) {
         EventBus.getDefault().post(
             NativeModuleEvent(
                 NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED,
