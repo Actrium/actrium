@@ -42,9 +42,19 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
     scanContainerHeight - scanAnimationHeight,
   );
   const device = useCameraDevice('back');
+  // 一次打开相机只允许一次有效扫码，
+  // 避免同一二维码帧触发多次 onCodeScanned 回调。
+  const scanLockedRef = useRef(false);
   const scanLineAnim = useRef(new Animated.Value(0)).current;
   const scanLineLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const isSupported = Platform.OS === 'ios' || Platform.OS === 'android';
+
+  useEffect(() => {
+    // 相机关闭后解锁，确保下一次用户主动扫码仍可正常触发。
+    if (!cameraActive) {
+      scanLockedRef.current = false;
+    }
+  }, [cameraActive]);
 
   useEffect(() => {
     const unsubscribe = TabEvents.onTabExitedFullscreen((event) => {
@@ -134,8 +144,13 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
     onCodeScanned: (codes) => {
-      if (!codes.length || !codes[0].value) return;
-      onScanUrl(codes[0].value);
+      const scannedValue = codes[0]?.value?.trim();
+      if (!scannedValue || scanLockedRef.current) return;
+
+      // 先上锁，再立即关闭相机，尽量切断后续重复帧回调。
+      scanLockedRef.current = true;
+      onCameraActiveChange(false);
+      onScanUrl(scannedValue);
     },
   });
 

@@ -29,6 +29,12 @@ import { LoadAppCameraPanel } from './components/LoadAppCameraPanel';
 import { GlobalAlert } from '../../../src/components';
 import { CHAT_HEADER_HEIGHT } from '../constants';
 
+// 在短时间窗口内抑制同一 URL 的重复加载，
+// 典型场景是权限弹窗前后扫码回调抖动导致重复触发。
+const RESOLVE_DEDUP_MS = 3000;
+// 上游重复触发时，避免“应用不存在”弹窗连续轰炸用户。
+const ALERT_DEDUP_MS = 2000;
+
 const LoadApp = () => {
   const { t } = useTranslation();
   const [cameraActive, setCameraActive] = useState(false);
@@ -37,6 +43,12 @@ const LoadApp = () => {
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const insets = useSafeAreaInsets();
   const isResolvingRef = useRef(false);
+  // 当前正在加载的 URL，用于去重与定位竞态问题。
+  const inFlightUrlRef = useRef<string | null>(null);
+  // 最近一次完成加载的 URL 信息，用于过滤短时间内的重复回调。
+  const lastResolvedUrlRef = useRef<string | null>(null);
+  const lastResolvedAtRef = useRef(0);
+  const lastNotFoundAlertAtRef = useRef(0);
   const inputRef = useRef<TextInput>(null);
   const tabCtx = useTab();
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
@@ -77,7 +89,16 @@ const LoadApp = () => {
     async (rawUrl: string) => {
       const url = rawUrl.trim();
       if (!url) return;
+      const now = Date.now();
+
+      // 保持 single-flight 语义：已有加载进行中时，不再发起新的加载。
       if (isResolvingRef.current) return;
+      if (
+        lastResolvedUrlRef.current === url &&
+        now - lastResolvedAtRef.current < RESOLVE_DEDUP_MS
+      ) {
+        return;
+      }
 
       const appId = extractAppIdFromUrl(url);
       if (!appId) {
@@ -86,6 +107,7 @@ const LoadApp = () => {
       }
 
       isResolvingRef.current = true;
+      inFlightUrlRef.current = url;
       setIsResolving(true);
       try {
         const initResult = await AppSessionService.initSession(
@@ -95,7 +117,11 @@ const LoadApp = () => {
         );
         if (!initResult.ok) {
           if (initResult.reason === 'APP_NOT_FOUND') {
-            GlobalAlert.alert(t('actr.app.notExist'));
+            const nowForAlert = Date.now();
+            if (nowForAlert - lastNotFoundAlertAtRef.current >= ALERT_DEDUP_MS) {
+              GlobalAlert.alert(t('actr.app.notExist'));
+              lastNotFoundAlertAtRef.current = nowForAlert;
+            }
           } else {
             GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.networkRetry'));
           }
@@ -109,7 +135,10 @@ const LoadApp = () => {
         console.error('[LoadApp] Failed to resolve app from url:', error);
         GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));
       } finally {
+        lastResolvedUrlRef.current = url;
+        lastResolvedAtRef.current = Date.now();
         isResolvingRef.current = false;
+        inFlightUrlRef.current = null;
         setIsResolving(false);
       }
     },
