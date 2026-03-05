@@ -51,7 +51,7 @@ export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProp
   if (currentPage && pageUrl) {
     return (
       <View style={styles.webviewContainer}>
-        <WebView source={{ uri: pageUrl }} style={styles.webview} />
+        <WebView source={{ uri: pageUrl }} style={styles.webview} forceDarkOn={false} />
         <TouchableOpacity
           style={styles.floatingBackButton}
           onPress={() => setCurrentPage(null)}
@@ -125,10 +125,11 @@ const styles = StyleSheet.create({
   },
   webviewContainer: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
   },
   webview: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#FFFFFF',
   },
   floatingBackButton: {
     position: 'absolute',
