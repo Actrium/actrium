@@ -152,6 +152,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             adapter = activeRecyclerAdapter
         }
 
+        activeRecyclerAdapter.onMarkClick = { activeModel ->
+            viewModel.toggleMarkStatus(activeModel)
+        }
         // 设置 item 点击事件
         activeRecyclerAdapter.onItemClick = { activeModel ->
             // 显示 flRNContent
