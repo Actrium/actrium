@@ -152,9 +152,23 @@ class BrowserViewModel: ObservableObject {
     /// System tabs are managed separately from regular tabs
     /// Returns the system tab (creates if doesn't exist)
     @discardableResult
-    func openSystemTab(_ type: SystemTabType) -> Tab {
+    func openSystemTab(
+        _ type: SystemTabType,
+        additionalProps: [String: Any]? = nil,
+        replaceAdditionalProps: Bool = false
+    ) -> Tab {
         // Check if system tab already exists
-        if let existingTab = systemTabs[type] {
+        if var existingTab = systemTabs[type] {
+            if replaceAdditionalProps {
+                existingTab.additionalProps = additionalProps
+                existingTab.reloadNonce &+= 1
+                systemTabs[type] = existingTab
+            } else if let additionalProps = additionalProps {
+                existingTab.additionalProps = additionalProps
+                // 通过 reloadNonce 驱动 RN remount，确保深链参数生效
+                existingTab.reloadNonce &+= 1
+                systemTabs[type] = existingTab
+            }
             logger.debug("🔄 返回已有系统标签: \(type.title)")
             return existingTab
         }
@@ -164,7 +178,8 @@ class BrowserViewModel: ObservableObject {
             id: UUID(),
             title: type.title,
             systemTabType: type,
-            backgroundColor: "#1e1e1e"  // Dark background for system tabs
+            backgroundColor: "#1e1e1e",  // Dark background for system tabs
+            additionalProps: additionalProps
         )
         systemTabs[type] = newTab
         logger.notice(" 已创建系统标签: \(type.title)")
