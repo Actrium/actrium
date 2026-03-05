@@ -37,6 +37,9 @@ enum TabContentType: Equatable {
     /// SSH terminal session
     case ssh(sessionId: String)
 
+    /// SFTP file browser session
+    case sftp(sessionId: String)
+
     /// 空白 Tab（无内容）
     case empty
 }
@@ -146,6 +149,9 @@ struct Tab: Identifiable {
     /// SSH session ID (set when navigating to ssh:// URL)
     var sshSessionId: String?
 
+    /// SFTP session ID (set when navigating to sftp:// URL)
+    var sftpSessionId: String?
+
     init(
         title: String,
         url: URL? = nil,
@@ -164,7 +170,8 @@ struct Tab: Identifiable {
         rightPanelDefaultVisible: Bool = false,
         backgroundColor: String? = nil,
         appIcon: String? = nil,
-        sshSessionId: String? = nil
+        sshSessionId: String? = nil,
+        sftpSessionId: String? = nil
     ) {
         self.title = title
         self.url = url
@@ -184,6 +191,7 @@ struct Tab: Identifiable {
         self.backgroundColor = backgroundColor ?? "#1e1e1e"
         self.appIcon = appIcon
         self.sshSessionId = sshSessionId
+        self.sftpSessionId = sftpSessionId
     }
 
     // MARK: - Content Type Detection
@@ -196,6 +204,10 @@ struct Tab: Identifiable {
         // 1. 检查是否为 SSH session
         if let url = url, url.scheme == "ssh", let sessionId = sshSessionId {
             result = .ssh(sessionId: sessionId)
+        }
+        // 1b. 检查是否为 SFTP session
+        else if let url = url, url.scheme == "sftp", let sessionId = sftpSessionId {
+            result = .sftp(sessionId: sessionId)
         }
         // 2. 检查是否为 Web URL (http/https)
         else if let url = url, url.scheme == "http" || url.scheme == "https" {

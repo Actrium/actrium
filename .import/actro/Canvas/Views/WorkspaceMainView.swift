@@ -296,6 +296,16 @@ struct WorkspaceMainView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
 
+                // Focus 模式下的 SFTP 文件浏览器内容层（canvas 变换之外）
+                if case .focus(let focusedTabId) = viewModel.canvasMode,
+                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
+                   case .sftp(let sessionId) = focusedTab.contentType,
+                   let sftpURL = focusedTab.url {
+                    SFTPBrowserView(viewModel: SFTPBrowserViewModel(sessionId: sessionId, url: sftpURL))
+                        .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+
                 // 🔑 Live 层：统一的 ViewBridge 内容层（canvas 变换之外）
                 // 始终渲染，不论 Focus/Overview 模式，避免模式切换时连接断开
                 // 注意：Live 层在 canvas 外部，需要将 canvas 坐标转换为视口坐标
@@ -486,7 +496,7 @@ struct WorkspaceMainView: View {
                             switch tab.contentType {
                             case .reactNative: return .menu
                             case .web: return isWebLoading ? .loading : .none
-                            case .native, .empty, .ssh: return .none
+                            case .native, .empty, .ssh, .sftp: return .none
                             }
                         }()
 
@@ -591,8 +601,8 @@ struct WorkspaceMainView: View {
                     case .reactNative:
                         // ViewBridge tab: 同步截图
                         ViewBridgeHostViewManager.shared.takeSnapshot(for: focusedTabId)
-                    case .native, .empty, .ssh:
-                        // Native SwiftUI, empty, and SSH tabs don't need snapshots
+                    case .native, .empty, .ssh, .sftp:
+                        // Native SwiftUI, empty, SSH, and SFTP tabs don't need snapshots
                         break
                     }
                 }
@@ -2351,6 +2361,15 @@ private struct TabPanel: View {
                     Color.clear // Focus mode handled by focus overlay
                 } else {
                     SSHTerminalView(sessionId: sessionId, sshURL: tab.url?.absoluteString ?? "", viewportSize: renderSize)
+                        .frame(width: renderSize.width, height: renderSize.height)
+                }
+
+            case .sftp(let sessionId):
+                // SFTP browser - rendered at card size in overview, full size in focus
+                if isFocused {
+                    Color.clear // Focus mode handled by focus overlay
+                } else if let sftpURL = tab.url {
+                    SFTPBrowserView(viewModel: SFTPBrowserViewModel(sessionId: sessionId, url: sftpURL))
                         .frame(width: renderSize.width, height: renderSize.height)
                 }
 
