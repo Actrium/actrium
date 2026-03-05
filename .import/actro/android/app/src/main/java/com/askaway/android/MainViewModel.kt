@@ -183,4 +183,13 @@ class MainViewModel : ViewModel() {
             )
         )
     }
+
+    fun updateScreenshot(tabId: String, screenshotPath: String) {
+        val index = _activeModelList.indexOfFirst { it.id == tabId }
+        if (index != -1) {
+            val oldItem = _activeModelList[index]
+            _activeModelList[index] = oldItem.copy(screenshot = screenshotPath)
+            _activeList.tryEmit(_activeModelList.toList())
+        }
+    }
 }
