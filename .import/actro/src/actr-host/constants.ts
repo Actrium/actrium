@@ -7,6 +7,8 @@ export const LAYOUT = {
   BORDER_COLOR: '#333',
 } as const;
 
+export const CHAT_HEADER_HEIGHT = 70;
+
 export const SUPPORTED_CONTRACT = { name: 'ask', version: 1 } as const;
 
 export const PERMISSION_MODE: 'allow' | 'warn' | 'deny' = 'warn';
