@@ -67,8 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Initialize XPC notification bridge
         _ = XPCNotificationBridge.shared
 
-        // Initialize TabProcessManager
-        _ = TabProcessManager.shared
+        // Activate in-process SSH event bridge (NC → TerminalXPCEventBus)
+        SSHInProcessEventBridge.shared.activate()
 
         // Prewarm XPC services
         Task { @MainActor in
