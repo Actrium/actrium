@@ -285,6 +285,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flBookmark.visibility = View.VISIBLE
         binding.llActive.visibility = View.GONE
         binding.flSet.visibility = View.GONE
+        binding.flBookmark.removeAllViews()
         if (binding.flBookmark.childCount == 0) {
             val bundle = ReactNativeBundle.getBookmarkBundle()
             val targetView = createReactRootView("canvas-kotlin", bundle)
