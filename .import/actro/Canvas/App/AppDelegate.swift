@@ -76,6 +76,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             await XPCServicePool.shared.prewarmInitialServicesAsync()
         }
 
+        // Initialize SFTP callback handler
+        SFTPCallbackHandler.shared.activate()
+
         // Initialize vault manager
         _ = VaultManager.shared
 
