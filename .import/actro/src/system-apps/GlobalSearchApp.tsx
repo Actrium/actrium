@@ -306,8 +306,8 @@ export default function GlobalSearchApp() {
         tabId: item.tabId ?? '',
         appUrl: item.url || item.appId || '',
       });
+      exitSearch();
     }
-    // exitSearch();
   }, []);
 
   // 渲染搜索结果项
