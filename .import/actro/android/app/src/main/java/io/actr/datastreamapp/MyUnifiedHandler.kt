@@ -33,6 +33,7 @@ import io.actr.datastreamapp.generated.UnifiedHandler
 class MyUnifiedHandler : UnifiedHandler {
 
     private var serverActId: ActrId? = null
+    val streamInfos = mutableMapOf<String, ContextBridge>() // Map of streamId to StreamInfo
 
     companion object {
         private const val TAG = "MyUnifiedHandler"
@@ -82,6 +83,7 @@ class MyUnifiedHandler : UnifiedHandler {
             // Register streams AFTER the prompt is accepted (mirrors iOS handler behavior).
             if (request.textResponseStreamId.isNotEmpty()) {
                 val streamId = request.textResponseStreamId
+                streamInfos[streamId] = ctx
                 Log.i(TAG, "Registering text response stream: $streamId")
                 val callback = AskAwayDataStreamCallback(streamId, StreamType.TEXT)
                 ctx.registerStream(streamId, callback)
@@ -89,6 +91,7 @@ class MyUnifiedHandler : UnifiedHandler {
 
             if (request.voiceResponseStreamId.isNotEmpty()) {
                 val streamId = request.voiceResponseStreamId
+                streamInfos[streamId] = ctx
                 Log.i(TAG, "Registering voice response stream: $streamId")
                 val callback = AskAwayDataStreamCallback(streamId, StreamType.VOICE)
                 ctx.registerStream(streamId, callback)

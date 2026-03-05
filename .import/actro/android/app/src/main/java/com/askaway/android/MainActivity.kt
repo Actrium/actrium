@@ -160,6 +160,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             for (i in 0 until binding.flRNContent.childCount) {
                 val child = binding.flRNContent.getChildAt(i)
                 if (child.tag == activeModel.id) {
+                    Params.currentTabId = activeModel.id
                     child.bringToFront()
                     binding.flRNContent.invalidate()
                     break
@@ -194,6 +195,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                         val targetView = createReactRootView("canvas-kotlin", it)
                         Log.e("MainActivity", "Received new React Native status: ${it.getString("currentTabId")}")
                         targetView.tag = it.getString("currentTabId")
+                        Params.currentTabId = it.getString("currentTabId")
                         binding.flRNContent.addView(targetView)
                     }
                 }

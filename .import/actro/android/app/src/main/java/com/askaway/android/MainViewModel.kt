@@ -59,6 +59,7 @@ class MainViewModel : ViewModel() {
             ReactModuleEvent.EVENT_SET_TAB_UNREAD_STATUS -> {
                 val tabId = event.params["tabId"] as? String
                 val unread = event.params["unread"] as? Boolean
+                Log.e("MainViewModel", "Received EVENT_SET_TAB_UNREAD_STATUS for tabId: $tabId with unread: $unread")
                 Log.e("MainViewModel", "${_activeModelList[0].id}")
                 updateUnread(tabId, unread)
             }
