@@ -10,6 +10,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
 import ActrInput from '../components/ActrInput';
@@ -182,6 +183,7 @@ export default function Chat() {
   const { t } = useTranslation();
   const { tab } = useTab();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
 
@@ -445,7 +447,10 @@ export default function Chat() {
             style={styles.chatScrollView}
             contentContainerStyle={[
               styles.chatContent,
-              { paddingBottom: layoutTokens.chatListBottomPadding },
+              {
+                paddingTop: 24 + insets.top,
+                paddingBottom: layoutTokens.chatListBottomPadding,
+              },
             ]}
             ListFooterComponent={ListHeaderComponent}
             showsHorizontalScrollIndicator={false}

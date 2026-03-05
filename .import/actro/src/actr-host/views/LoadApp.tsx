@@ -13,6 +13,7 @@ import {
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { useTab } from '../contexts/TabContext';
@@ -26,6 +27,7 @@ import SafeBottomView from '../components/SafeBottomView';
 import { Icon } from '../components/Icon';
 import { LoadAppCameraPanel } from './components/LoadAppCameraPanel';
 import { GlobalAlert } from '../../../src/components';
+import { CHAT_HEADER_HEIGHT } from '../constants';
 
 const LoadApp = () => {
   const { t } = useTranslation();
@@ -33,6 +35,7 @@ const LoadApp = () => {
   const [inputExpanded, setInputExpanded] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
+  const insets = useSafeAreaInsets();
   const isResolvingRef = useRef(false);
   const inputRef = useRef<TextInput>(null);
   const tabCtx = useTab();
@@ -46,6 +49,7 @@ const LoadApp = () => {
   const containerGap = isPhone ? 24 : 36;
   const scanBorderRadius = isPhone ? 20 : 34;
   const inputBorderRadius = 24;
+  const scanTopMargin = CHAT_HEADER_HEIGHT + 10;
 
   // 若 tab 预设了 appUrl，视为从收藏加载，mount 时自动触发加载，无需用户手动输入
   useEffect(() => {
@@ -173,7 +177,7 @@ const LoadApp = () => {
       <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
         <View style={styles.phoneContainer}>
           <View style={styles.phoneScanSection}>
-            <View style={styles.phoneScanArea}>
+            <View style={[styles.phoneScanArea, { marginTop: scanTopMargin }]}>
               <LoadAppCameraPanel
                 tabId={tabCtx.tab.id}
                 cameraActive={cameraActive}
@@ -219,6 +223,7 @@ const LoadApp = () => {
                 width: scanSize,
                 height: scanSize,
                 borderRadius: scanBorderRadius,
+                marginTop: scanTopMargin,
               },
             ]}
           >
@@ -271,7 +276,6 @@ const styles = StyleSheet.create({
     width: '100%',
     overflow: 'hidden',
     backgroundColor: '#fff',
-    marginTop: 80,
   },
   phoneInputDock: {
     width: '100%',
@@ -301,7 +305,6 @@ const styles = StyleSheet.create({
     // width / height / borderRadius 由动态样式控制
     overflow: 'hidden',
     backgroundColor: '#fff',
-    marginTop: 80,
 
     shadowColor: '#000000',
     shadowOpacity: 0.1,

@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet, Text } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
 import { HOST_SHADOWS } from '../styles/shadows';
+import { CHAT_HEADER_HEIGHT } from '../constants';
 
 interface ChatHeaderProps {
   onLeftPress: () => void;
@@ -12,6 +14,7 @@ interface ChatHeaderProps {
   showLeftButton?: boolean;
   appName?: string;
   appId?: string;
+  includeSafeTopInset?: boolean;
 }
 
 export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
@@ -23,11 +26,22 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     showLeftButton = true,
     appName,
     appId,
+    includeSafeTopInset = true,
   }) => {
+    const { top: topInsetRaw } = useSafeAreaInsets();
+    const topInset = includeSafeTopInset ? topInsetRaw : 0;
     const hasAppId = Boolean(appId);
 
     return (
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          {
+            height: CHAT_HEADER_HEIGHT + topInset,
+            paddingTop: topInset,
+          },
+        ]}
+      >
         <LinearGradient
           colors={['#F2F2F6', 'rgba(242, 242, 246, 0)']}
           style={StyleSheet.absoluteFill}
@@ -77,7 +91,6 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 70,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -88,7 +101,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#78788029',
     justifyContent: 'center',
     alignItems: 'center',
     ...HOST_SHADOWS.headerButton,

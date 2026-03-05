@@ -15,6 +15,7 @@ import {
   StyleSheet,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { logger } from '../logger';
 import { installConsoleInterceptor } from '../devtools-console';
@@ -67,6 +68,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   onContractViolation,
   onEngineChange,
 }) => {
+  const insets = useSafeAreaInsets();
   const gate = evaluateTabGate(tab);
 
   // 🆕 通过 tab.id 获取 appId
@@ -363,6 +365,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // 渲染三栏布局 - 使用纯 flex 布局，让 Yoga 自动适应
   // 不依赖 propsContainerWidth，避免 re-render
   const threeColumnStyle = styles.threeColumn;
+  const sheetTopOffset = insets.top;
 
   const main = React.useMemo(() => <Main />, []);
 
@@ -451,51 +454,54 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   return (
     <TabProvider tab={tab}>
-      <View style={threeColumnStyle}>
-        {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
-        {/* {isLeftPanelVisible && (
-          <View
+      <View style={styles.screen}>
+        <View style={[threeColumnStyle, { marginTop: sheetTopOffset }]}>
+          {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
+          {/* {isLeftPanelVisible && (
+            <View
+              style={[
+                styles.leftPanel,
+                {
+                  width: leftWidth,
+                },
+              ]}
+            >
+              {leftPanel}
+            </View>
+          )} */}
+
+          {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
+          <ChatHeader
+            onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
+            onRightPress={() => exitFullscreen()}
+            appId={appId}
+            leftDisabled={!appId}
+            leftActive={localLeftPanelVisible}
+            showLeftButton={Boolean(appId)}
+            appName={appId ? appName : '添加应用'}
+            includeSafeTopInset={false}
+          />
+
+          {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
+          <Animated.View
             style={[
-              styles.leftPanel,
+              styles.centerColumn,
               {
-                width: leftWidth,
+                transform: [{ translateX: centerAnimValue }],
               },
             ]}
           >
-            {leftPanel}
-          </View>
-        )} */}
+            {main}
+          </Animated.View>
 
-        {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
-        <ChatHeader
-          onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
-          onRightPress={() => exitFullscreen()}
-          appId={appId}
-          leftDisabled={!appId}
-          leftActive={localLeftPanelVisible}
-          showLeftButton={Boolean(appId)}
-          appName={appId ? appName : '添加应用'}
-        />
-
-        {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
-        <Animated.View
-          style={[
-            styles.centerColumn,
-            {
-              transform: [{ translateX: centerAnimValue }],
-            },
-          ]}
-        >
-          {main}
-        </Animated.View>
-
-        {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入 */}
-        <ExtensionPanel
-          visible={localLeftPanelVisible}
-          content={rightPanel}
-          width={rightWidth}
-          centerAnimValue={centerAnimValue}
-        />
+          {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入 */}
+          <ExtensionPanel
+            visible={localLeftPanelVisible}
+            content={rightPanel}
+            width={rightWidth}
+            centerAnimValue={centerAnimValue}
+          />
+        </View>
       </View>
     </TabProvider>
   );
@@ -507,9 +513,15 @@ const styles = StyleSheet.create({
   threeColumn: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#ffffff',
     minWidth: 0, // 允许内部列在窗口缩小时收缩
     overflow: 'hidden', // 防止横向滚动条
+    borderTopLeftRadius: 38,
+    borderTopRightRadius: 38,
+  },
+  screen: {
+    flex: 1,
+    backgroundColor: '#000000',
   },
   leftPanel: {
     borderRightWidth: 1,
