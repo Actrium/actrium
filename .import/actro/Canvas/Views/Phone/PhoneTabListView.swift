@@ -102,6 +102,7 @@ struct PhoneTabCardView: View {
                             // 如果是当前选中的，但没快照，显示 Live View
                             GeometryReader { cardContentGeo in
                                 let cardWidth = cardContentGeo.size.width
+                                let screenSize = UIScreen.main.bounds.size
                                 let scale = cardWidth / max(screenSize.width, 0.1)
                                 
                                 SingleTabRootView(
@@ -245,27 +246,30 @@ struct PhoneBrowserView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            SingleTabRootView(
-                tab: tab,
-                viewModel: viewModel,
-                historyVM: historyVM,
-                bookmarkVM: bookmarkVM,
-                containerSize: geometry.size
-            )
-            .id(tab.id)
+            ZStack {
+                Color.black.ignoresSafeArea(.all, edges: .top)
+                SingleTabRootView(
+                    tab: tab,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    containerSize: geometry.size
+                )
+                .id(tab.id)
+                .onAppear {
+                    // Tab 进入全屏视图
+                    NotificationCenter.default.post(
+                        name: .tabEnteredFullscreenFromNative,
+                        object: nil,
+                        userInfo: [
+                            "tabId": tab.id.uuidString,
+                            "title": tab.title
+                        ]
+                    )
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea(.container)
-        .onAppear {
-            // Tab 进入全屏视图
-            NotificationCenter.default.post(
-                name: .tabEnteredFullscreenFromNative,
-                object: nil,
-                userInfo: [
-                    "tabId": tab.id.uuidString,
-                    "title": tab.title
-                ]
-            )
-        }
+        .ignoresSafeArea(.container, edges: .bottom)
     }
 }
