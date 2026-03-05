@@ -42,11 +42,33 @@ export const useAttachmentManager = (appId: string) => {
         const base64Data = await RNFS.readFile(uri, 'base64');
         await RNFS.writeFile(destPath, base64Data, 'base64');
       } else {
-        // iOS or file:// URI: direct copy
-        const cleanUri = uri.startsWith('file://')
+        // iOS often returns percent-encoded file:// paths for non-ASCII names.
+        // RNFS needs a real filesystem path.
+        const rawPath = uri.startsWith('file://')
           ? uri.replace('file://', '')
           : uri;
-        await RNFS.copyFile(cleanUri, destPath);
+        let decodedPath = rawPath;
+        if (Platform.OS === 'ios') {
+          try {
+            decodedPath = decodeURI(rawPath);
+          } catch (decodeError) {
+            console.warn(
+              '[useAttachmentManager] decodeURI failed, fallback to raw path:',
+              decodeError,
+            );
+          }
+        }
+
+        try {
+          await RNFS.copyFile(decodedPath, destPath);
+        } catch (copyError) {
+          // Fallback to raw path in case URI is already decoded upstream.
+          if (decodedPath !== rawPath) {
+            await RNFS.copyFile(rawPath, destPath);
+          } else {
+            throw copyError;
+          }
+        }
       }
 
       return `file://${destPath}`;

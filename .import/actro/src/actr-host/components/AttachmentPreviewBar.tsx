@@ -25,6 +25,34 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
 }) => {
   if (attachments.length === 0) return null;
 
+  const getDisplayFileName = (item: IAttachmentItem): string => {
+    const legacyName = (item as any).name as string | undefined;
+    const fileName = item.file_name || legacyName;
+    if (fileName) return fileName;
+
+    const rawName = item.local_url.split('/').pop() || '';
+    try {
+      return decodeURIComponent(rawName);
+    } catch {
+      return rawName;
+    }
+  };
+
+  const getDisplayFileType = (item: IAttachmentItem): string => {
+    const name = getDisplayFileName(item);
+    const parts = name.split('.');
+    if (parts.length > 1 && parts[parts.length - 1]) {
+      return parts[parts.length - 1].toUpperCase();
+    }
+
+    const legacyType = (item as any).type as string | undefined;
+    const fileType = item.file_type || legacyType || '';
+    if (fileType.includes('/')) {
+      return fileType.split('/').pop()!.toUpperCase();
+    }
+    return fileType.toUpperCase();
+  };
+
   return (
     <>
       <RNScrollView
@@ -89,12 +117,14 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
               </TouchableOpacity>
             ) : (
               <View style={styles.fileBlock}>
-                <Icon type='file' size={24} color='#34A8FB' />
                 <View style={styles.fileInfo}>
                   <Text style={styles.fileName} numberOfLines={1}>
-                    {item.name}
+                    {getDisplayFileName(item)}
                   </Text>
-                  <Text style={styles.fileType}>{item.type}</Text>
+                  <View style={styles.fileMetaRow}>
+                    <Icon type='file' size={12} color='#34A8FB' />
+                    <Text style={styles.fileType}>{getDisplayFileType(item)}</Text>
+                  </View>
                 </View>
               </View>
             )}
@@ -118,10 +148,10 @@ const styles = StyleSheet.create({
   },
   attachmentList: {
     paddingRight: 16,
-    height: 100,
+    height: 67,
   },
   attachmentItem: {
-    height: 100,
+    height: 67,
     marginRight: 16,
     position: 'relative',
     borderRadius: 10,
@@ -132,14 +162,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   fileBlock: {
-    width: 300,
+    width: 156,
     height: '100%',
     backgroundColor: '#F7F7F7',
     borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: '#E8E8E8',
   },
@@ -173,16 +201,23 @@ const styles = StyleSheet.create({
   },
   fileInfo: {
     flex: 1,
+    justifyContent: 'space-between',
   },
   fileName: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#333',
     fontWeight: '500',
-    marginBottom: 4,
+    textAlign: 'left',
+  },
+  fileMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   fileType: {
     fontSize: 12,
     color: '#999',
+    textAlign: 'left',
   },
   removeButton: {
     position: 'absolute',
