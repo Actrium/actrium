@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
-  Linking,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../actr-host/components/Icon';
@@ -16,6 +15,7 @@ import { SettingsItem } from './SettingsItem';
 interface SettingsMainProps {
   onAccountPress: () => void;
   onAboutPress: () => void;
+  onFeedbackPress: () => void;
   onLoginPress: () => void;
   onLogout: () => void;
   isTablet: boolean;
@@ -24,6 +24,7 @@ interface SettingsMainProps {
 export const SettingsMain = ({
   onAccountPress,
   onAboutPress,
+  onFeedbackPress,
   onLoginPress,
   onLogout,
   isTablet,
@@ -31,12 +32,6 @@ export const SettingsMain = ({
   const { t } = useTranslation();
   const userInfo = useUserStore((state) => state.userInfo);
   const isLoggedIn = !!userInfo;
-
-  const handleFeedback = () => {
-    const subject = encodeURIComponent('#吐个槽关于');
-    const mailto = `mailto:support@actrium.example?subject=${subject}`;
-    Linking.openURL(mailto);
-  };
 
   return (
     <ScrollView
@@ -50,7 +45,7 @@ export const SettingsMain = ({
       showsVerticalScrollIndicator={false}
     >
       {/* Page Title */}
-      <Text style={styles.pageTitle}>{t('actr.settings.title')}</Text>
+      <Text style={styles.pageTitle}>AskAway</Text>
 
       {/* Account Section */}
       <TouchableOpacity
@@ -79,7 +74,7 @@ export const SettingsMain = ({
         <SettingsItem
           icon='feedback'
           label={t('actr.settings.feedback')}
-          onPress={handleFeedback}
+          onPress={onFeedbackPress}
         />
         <View style={styles.itemDivider} />
         <SettingsItem
@@ -116,10 +111,9 @@ const styles = StyleSheet.create({
   },
   pageTitle: {
     fontSize: 34,
-    fontWeight: '600',
     color: '#FFFFFF',
     marginBottom: 24,
-    marginLeft: 4,
+    marginTop: 8
   },
   accountCard: {
     flexDirection: 'row',

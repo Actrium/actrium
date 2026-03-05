@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -14,9 +14,10 @@ import { SettingsBackHeader } from './SettingsBackHeader';
 interface AboutAskAwayProps {
   onBack: () => void;
   isTablet: boolean;
+  initialPage?: AboutPageKey;
 }
 
-type AboutPageKey = 'aboutApp' | 'userAgreement' | 'privacyPolicy' | 'icp';
+export type AboutPageKey = 'aboutApp' | 'userAgreement' | 'privacyPolicy' | 'icp';
 
 const ABOUT_PAGE_CONFIG: Record<AboutPageKey, { label: string; path: string }> = {
   aboutApp: { label: '关于 AskAway', path: 'AskAway.html' },
@@ -34,9 +35,13 @@ const getAboutPageUrl = (page: AboutPageKey, language: string): string => {
   return `https://www.actrium.example/corp/${languageSegment}/${ABOUT_PAGE_CONFIG[page].path}`;
 };
 
-export const AboutAskAway = ({ onBack, isTablet }: AboutAskAwayProps) => {
+export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProps) => {
   const { i18n } = useTranslation();
   const [currentPage, setCurrentPage] = useState<AboutPageKey | null>(null);
+
+  useEffect(() => {
+    setCurrentPage(initialPage || null);
+  }, [initialPage]);
 
   const pageUrl = useMemo(() => {
     if (!currentPage) return '';
