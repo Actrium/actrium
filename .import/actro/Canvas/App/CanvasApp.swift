@@ -551,8 +551,8 @@ struct CanvasApp: App {
             if let holder = WebViewHolderManager.shared.existingHolder(for: tab.id) {
                 holder.showInspector()
             }
-        case .reactNative, .empty, .native, .ssh:
-            // ACTR/RN tab, native, empty, or SSH: use built-in DevTools
+        case .reactNative, .empty, .native, .ssh, .sftp:
+            // ACTR/RN tab, native, empty, SSH, or SFTP: use built-in DevTools
             devTools.toggle()
         }
     }
