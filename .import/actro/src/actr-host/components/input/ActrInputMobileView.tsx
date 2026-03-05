@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Platform,
   PanResponder,
   StyleSheet,
   Text,
@@ -95,6 +96,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   );
   const [isInputFocused, setIsInputFocused] = React.useState(false);
   const mobileTextInputRef = React.useRef<TextInput | null>(null);
+  const attachmentActionLockRef = React.useRef(false);
 
   const hasInputText = inputText.length > 0;
   // mobile 状态机：
@@ -127,6 +129,33 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
       mobileTextInputRef.current?.focus();
     }, 0);
   }, []);
+
+  const runAfterMenuClose = React.useCallback(
+    (close: () => void, action: () => void | Promise<void>) => {
+      if (attachmentActionLockRef.current) {
+        return;
+      }
+      attachmentActionLockRef.current = true;
+
+      close();
+      const run = () => {
+        Promise.resolve(action())
+          .catch((error) => {
+            console.error('[ActrInputMobileView] attachment action failed:', error);
+          })
+          .finally(() => {
+            attachmentActionLockRef.current = false;
+          });
+      };
+
+      if (Platform.OS === 'ios') {
+        setTimeout(run, 120);
+      } else {
+        run();
+      }
+    },
+    [],
+  );
 
   const handleExitTab = React.useCallback(async () => {
     try {
@@ -430,8 +459,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                           <TouchableOpacity
                             style={styles.mobileQuickAction}
                             onPress={() => {
-                              takePhoto();
-                              close();
+                              runAfterMenuClose(close, takePhoto);
                             }}
                           >
                              <Icon type='camera' size={20} />
@@ -440,8 +468,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                           <TouchableOpacity
                             style={styles.mobileQuickAction}
                             onPress={() => {
-                              pickImage();
-                              close();
+                              runAfterMenuClose(close, pickImage);
                             }}
                           >
                              <Icon type='image' size={20} />
@@ -450,8 +477,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                           <TouchableOpacity
                             style={styles.mobileQuickAction}
                             onPress={() => {
-                              pickDocument();
-                              close();
+                              runAfterMenuClose(close, pickDocument);
                             }}
                           >
                              <Icon type='file' size={20} />
