@@ -402,7 +402,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                           <TouchableOpacity
                             style={[
                               styles.mobileMenuItem,
-                              isSendOnEnter && styles.mobileMenuItemActive,
+                              !isSendOnEnter && styles.mobileMenuItemActive,
                             ]}
                             onPress={() => {
                               setIsSendOnEnter(!isSendOnEnter);
@@ -411,9 +411,9 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                           >
                             <Icon
                               type='enter'
-                              active={isSendOnEnter}
+                              active={!isSendOnEnter}
                               size={18}
-                              color={isSendOnEnter ? '#34A8FB' : '#2C2C2C'}
+                              color={!isSendOnEnter ? '#34A8FB' : '#2C2C2C'}
                             />
                              <View style={styles.mobileMenuTextBlock}>
                               <Text style={styles.mobileMenuTitle}>{t('actr.input.enterToNewLine')}</Text>
@@ -573,8 +573,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                 </TouchableOpacity>
               )}
 
-              {/* send 按钮 - 聚焦 + isSendOnEnter 时显示 */}
-              {isInputFocused && isSendOnEnter && (
+              {/* send 按钮 - 聚焦 + 开启回车换行时显示 */}
+              {isInputFocused && !isSendOnEnter && (
                 <TouchableOpacity
                   style={styles.mobileReservedButton}
                   onPress={() => {

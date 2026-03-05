@@ -26,6 +26,7 @@ import SafeBottomView from '../actr-host/components/SafeBottomView';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../actr-host/styles/shadows';
 import { useAppStore } from '../actr-host/store/useAppStore';
+import { useTabIdMapStore } from '../actr-host/store/useTabIdMapStore';
 import {
   BookmarkRepository,
   TBookmarkItem,
@@ -64,6 +65,7 @@ export default function GlobalSearchApp() {
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const { width: screenWidth } = useWindowDimensions();
   const apps = useAppStore((s) => s.apps);
+  const tabIdMap = useTabIdMapStore((s) => s.tabIdMap);
 
   const isPhone = screenWidth < 600;
   const inputWidth = isPhone ? screenWidth * 0.85 : 500;
@@ -120,13 +122,19 @@ export default function GlobalSearchApp() {
     // 1. 搜索活跃应用
     const activeResults: SearchResultItem[] = Object.values(apps)
       .filter((app) => app.app_name?.toLowerCase().includes(q))
-      .map((app) => ({
-        id: `active-${app.app_id}`,
-        type: 'active' as const,
-        name: app.app_name,
-        logo: app.info?.logo,
-        appId: app.app_id,
-      }));
+      .map((app) => {
+        const tabId = Object.keys(tabIdMap).find(
+          (key) => tabIdMap[key] === app.app_id,
+        );
+        return {
+          id: `active-${app.app_id}`,
+          type: 'active' as const,
+          name: app.app_name,
+          logo: app.info?.logo,
+          appId: app.app_id,
+          tabId,
+        };
+      });
 
     // 2. 搜索收藏
     const bookmarkResults: SearchResultItem[] = bookmarks
@@ -170,7 +178,7 @@ export default function GlobalSearchApp() {
     }
 
     return groups;
-  }, [searchQuery, apps, bookmarks, searchableSettings, t]);
+  }, [searchQuery, apps, bookmarks, searchableSettings, t, tabIdMap]);
 
   // 回车触发搜索
   const handleSubmit = useCallback(() => {

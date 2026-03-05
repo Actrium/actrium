@@ -166,6 +166,7 @@ export const StableTextInput = React.memo(function StableTextInput({
         defaultValue={initialText}
         onChangeText={handleChangeText}
         onContentSizeChange={handleContentSizeChange}
+        // send_on_enter=true 时，Enter 提交发送；false 时，Enter 插入换行。
         blurOnSubmit={isSendOnEnter}
         onSubmitEditing={() => {
           if (isSendOnEnter) {
