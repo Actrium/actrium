@@ -13,15 +13,35 @@ class TabModule: NSObject {
         // 如果提供了 systemAppType，打开系统 tab
         if let systemAppType = options["systemAppType"] as? String {
             let newTabId = UUID()
+            var additionalProps = [String: Any]()
+            for (key, value) in options {
+                if let keyString = key as? String, keyString != "tabId" && keyString != "systemAppType" {
+                    additionalProps[keyString] = value
+                }
+            }
             DispatchQueue.main.async {
+                var userInfo: [String: Any] = [
+                    "tabId": newTabId,
+                    "systemAppType": systemAppType
+                ]
+                if !additionalProps.isEmpty {
+                    userInfo["additionalProps"] = additionalProps
+                }
                 NotificationCenter.default.post(
                     name: .openTabFromRN,
                     object: nil,
-                    userInfo: [
-                        "tabId": newTabId,
-                        "systemAppType": systemAppType
-                    ]
+                    userInfo: userInfo
                 )
+                
+                #if os(iOS)
+                if UIDevice.current.userInterfaceIdiom == .phone {
+                    NotificationCenter.default.post(
+                        name: .switchPhoneTabFromRN,
+                        object: nil,
+                        userInfo: ["systemAppType": systemAppType]
+                    )
+                }
+                #endif
                 resolve(newTabId.uuidString)
             }
             return
@@ -306,4 +326,5 @@ extension Notification.Name {
     static let exitFullscreenFromRN = Notification.Name("exitFullscreenFromRN")
     static let openTabFullscreenFromRN = Notification.Name("openTabFullscreenFromRN")
     static let exitSearchFromRN = Notification.Name("exitSearchFromRN")
+    static let switchPhoneTabFromRN = Notification.Name("switchPhoneTabFromRN")
 }
