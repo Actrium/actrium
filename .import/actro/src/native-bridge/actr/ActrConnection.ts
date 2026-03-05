@@ -579,7 +579,7 @@ export class ActrConnection {
 
     if (res.status_code !== 0) {
       console.error(
-        `[ActrConnection:${this.appId}] Upload attachment failed: ${res.status_code}`,
+        `[ActrConnection:${this.appId}] Upload attachment failed: ${res.status_code}, ${JSON.stringify(res)}`,
       );
     }
 

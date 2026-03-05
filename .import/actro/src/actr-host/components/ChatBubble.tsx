@@ -254,6 +254,37 @@ export default function ChatBubble({
     }
   }, [attachments]);
 
+  const getDisplayFileName = React.useCallback((item: IAttachmentItem): string => {
+    const legacyName = (item as any).name as string | undefined;
+    const fileName = item.file_name || legacyName;
+    if (fileName) return fileName;
+
+    const rawName = item.local_url.split('/').pop() || '';
+    try {
+      return decodeURIComponent(rawName);
+    } catch {
+      return rawName;
+    }
+  }, []);
+
+  const getDisplayFileType = React.useCallback(
+    (item: IAttachmentItem): string => {
+      const name = getDisplayFileName(item);
+      const parts = name.split('.');
+      if (parts.length > 1 && parts[parts.length - 1]) {
+        return parts[parts.length - 1].toUpperCase();
+      }
+
+      const legacyType = (item as any).type as string | undefined;
+      const fileType = item.file_type || legacyType || '';
+      if (fileType.includes('/')) {
+        return fileType.split('/').pop()!.toUpperCase();
+      }
+      return fileType.toUpperCase();
+    },
+    [getDisplayFileName],
+  );
+
   const bubbleContent = (
     <View
       style={[
@@ -301,10 +332,17 @@ export default function ChatBubble({
                       !isLast && { marginRight: 8 },
                     ]}
                   >
-                    <Text style={styles.attachmentFileName} numberOfLines={1}>
-                      {item.local_url.split('/').pop()}
-                    </Text>
-                    <Text style={styles.attachmentFileType}>{item.file_type}</Text>
+                    <View style={styles.attachmentFileInfo}>
+                      <Text style={styles.attachmentFileName} numberOfLines={1}>
+                        {getDisplayFileName(item)}
+                      </Text>
+                      <View style={styles.attachmentFileMetaRow}>
+                        <Icon type='file' size={12} color='#34A8FB' />
+                        <Text style={styles.attachmentFileType}>
+                          {getDisplayFileType(item)}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
                 );
               } else if (item.attachment_type === 'location') {
@@ -633,20 +671,30 @@ const styles = StyleSheet.create({
     height: 60,
     backgroundColor: '#fff',
     borderRadius: 10,
-    padding: 8,
-    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderWidth: 1,
     borderColor: '#eee',
+  },
+  attachmentFileInfo: {
+    flex: 1,
+    justifyContent: 'space-between',
   },
   attachmentFileName: {
     fontSize: 12,
     color: '#333',
     fontWeight: 'bold',
+    textAlign: 'left',
+  },
+  attachmentFileMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   attachmentFileType: {
-    fontSize: 10,
+    fontSize: 12,
     color: '#999',
-    marginTop: 2,
+    textAlign: 'left',
   },
   locationTag: {
     position: 'absolute',
