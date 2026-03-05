@@ -13,8 +13,8 @@
 		B3312B262F066DB70018A0B4 /* CanvasViewService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B3312B1B2F066DB70018A0B4 /* CanvasViewService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
-		F2DA039040BAE7C3F6B2D28C /* libPods-CanvasViewService.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 58C5049ADC7AD124D63CC153 /* libPods-CanvasViewService.a */; };
 		CC00110022003300AA00BB02 /* CanvasTerminal.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */; };
+		F2DA039040BAE7C3F6B2D28C /* libPods-CanvasViewService.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 58C5049ADC7AD124D63CC153 /* libPods-CanvasViewService.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -114,9 +114,9 @@
 		B3E458AF2EC731A40014D74C /* CanvasTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B3E458B92EC731A40014D74C /* CanvasUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C6A7E7F65DC0D2FA1F7D3C5F /* Pods-CanvasTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTests.release.xcconfig"; path = "Target Support Files/Pods-CanvasTests/Pods-CanvasTests.release.xcconfig"; sourceTree = "<group>"; };
+		CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasTerminal.xcframework; path = "canvas-terminal/CanvasTerminal.xcframework"; sourceTree = "<group>"; };
 		DACA28DED8E4818311DAAB4D /* libPods-CanvasTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
-		CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasTerminal.xcframework; path = "canvas-terminal/CanvasTerminal.xcframework"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
