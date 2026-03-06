@@ -46,6 +46,10 @@ Packages/CanvasIPC/.build/
 canvas-terminal/target/
 canvas-terminal/libcanvas_terminal.a
 canvas-terminal/CanvasTerminal.xcframework/macos-arm64_x86_64/libcanvas_terminal.a
+canvas-remote/target/
+canvas-remote/libcanvas_remote.a
+canvas-remote/xcframework-staging/
+canvas-remote/CanvasRemote.xcframework/macos-arm64/libcanvas_remote.a
 
 # Code coverage
 *.profraw
