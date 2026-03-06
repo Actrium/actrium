@@ -149,6 +149,13 @@ export class BookmarkRepository {
   }
 
   /**
+   * 按书签主键删除，避免 tab_id 为空时无法删除
+   */
+  static async removeBookmarkById(id: number) {
+    return await db.executeSql('DELETE FROM bookmark_items WHERE id = ?', [id]);
+  }
+
+  /**
    * 更新收藏项的 tab_id（按 app_id 匹配）
    * 用于应用加载成功后，将当前 tab 与收藏记录关联
    */

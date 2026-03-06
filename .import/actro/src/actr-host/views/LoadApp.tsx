@@ -252,6 +252,9 @@ const LoadApp = () => {
                   inputRef.current?.blur();
                   dismissKeyboard();
                 }}
+                onAfterCameraPermissionGranted={() => {
+                  void requestNetworkPermissionOnMount();
+                }}
                 onScanUrl={(url) => {
                   void handleResolveUrl(url);
                 }}
@@ -300,6 +303,9 @@ const LoadApp = () => {
                 setInputExpanded(false);
                 inputRef.current?.blur();
                 dismissKeyboard();
+              }}
+              onAfterCameraPermissionGranted={() => {
+                void requestNetworkPermissionOnMount();
               }}
               onScanUrl={(url) => {
                 void handleResolveUrl(url);

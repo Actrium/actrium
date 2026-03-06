@@ -23,6 +23,7 @@ type LoadAppCameraPanelProps = {
   cameraActive: boolean;
   onCameraActiveChange: (active: boolean) => void;
   onBeforeOpenCamera?: () => void;
+  onAfterCameraPermissionGranted?: () => void | Promise<void>;
   onScanUrl: (url: string) => void;
 };
 
@@ -31,6 +32,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   cameraActive,
   onCameraActiveChange,
   onBeforeOpenCamera,
+  onAfterCameraPermissionGranted,
   onScanUrl,
 }) => {
   const { t } = useTranslation();
@@ -123,6 +125,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
         status = await Camera.requestCameraPermission();
       }
       if (status === 'granted') {
+        void onAfterCameraPermissionGranted?.();
         onCameraActiveChange(true);
       } else {
         console.error('[LoadAppCameraPanel] Camera permission denied:', status);
@@ -137,6 +140,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   }, [
     device,
     isSupported,
+    onAfterCameraPermissionGranted,
     onBeforeOpenCamera,
     onCameraActiveChange,
   ]);
