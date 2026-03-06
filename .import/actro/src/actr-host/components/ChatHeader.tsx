@@ -1,9 +1,8 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Text } from 'react-native';
+import { View, StyleSheet, Text } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Icon } from './Icon';
-import { HOST_SHADOWS } from '../styles/shadows';
+import { HostIconButton } from './HostIconButton';
 import { CHAT_HEADER_HEIGHT } from '../constants';
 
 interface ChatHeaderProps {
@@ -48,21 +47,14 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
           style={StyleSheet.absoluteFill}
         />
         {showLeftButton ? (
-          <TouchableOpacity
-            style={[
-              styles.headerButton,
-              leftActive && styles.headerButtonActive,
-              leftDisabled && styles.headerButtonDisabled,
-            ]}
+          <HostIconButton
+            iconType='extension_menu'
+            iconSize={20}
             onPress={onLeftPress}
             disabled={leftDisabled}
-          >
-            <Icon
-              type='extension_menu'
-              size={20}
-              color={leftActive ? '#FFFFFF' : '#0a0a0a'}
-            />
-          </TouchableOpacity>
+            active={leftActive}
+            style={styles.headerButton}
+          />
         ) : (
           <View style={styles.headerButtonPlaceholder} />
         )}
@@ -71,16 +63,12 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             {appName}
           </Text>
         )}
-        <TouchableOpacity
-          style={styles.headerButton}
+        <HostIconButton
+          iconType={hasAppId ? 'history' : 'close'}
+          iconSize={hasAppId ? 22 : 16}
           onPress={hasAppId ? () => {} : onRightPress}
-        >
-          <Icon
-            type={hasAppId ? 'history' : 'close'}
-            size={hasAppId ? 22 : 16}
-            color='#0a0a0a'
-          />
-        </TouchableOpacity>
+          style={styles.headerButton}
+        />
       </View>
     );
   },
@@ -99,19 +87,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#DFDFE1',
-    justifyContent: 'center',
-    alignItems: 'center',
     // ...HOST_SHADOWS.headerButton,
-  },
-  headerButtonDisabled: {
-    opacity: 0.5,
-  },
-  headerButtonActive: {
-    backgroundColor: '#0088FF',
   },
   headerButtonPlaceholder: {
     width: 44,

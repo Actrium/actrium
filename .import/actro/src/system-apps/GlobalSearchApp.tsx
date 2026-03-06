@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../actr-host/components/Icon';
+import { HostIconButton } from '../actr-host/components/HostIconButton';
 import SafeBottomView from '../actr-host/components/SafeBottomView';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../actr-host/styles/shadows';
@@ -410,22 +411,28 @@ export default function GlobalSearchApp() {
           keyboardAppearance='dark'
         />
         {inputText.length > 0 && (
-          <TouchableOpacity
+          <HostIconButton
+            iconType='input_clear'
+            size={32}
+            iconSize={19}
+            iconColor='#666'
+            backgroundColor='transparent'
             style={styles.clearButton}
             onPress={handleClearSearch}
-          >
-            <Icon type='input_clear' size={19} color='#666' />
-          </TouchableOpacity>
+          />
         )}
       </View>
-      <TouchableOpacity
+      <HostIconButton
+        iconType='close'
+        size={48}
+        iconSize={16}
+        iconColor='#404040'
+        backgroundColor='#FFF'
         style={styles.standaloneCloseButton}
         onPress={() => {
           exitSearch();
         }}
-      >
-        <Icon type='close' size={16} color='#404040' />
-      </TouchableOpacity>
+      />
     </View>
   );
 
