@@ -1066,7 +1066,8 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
            input.hasPrefix("about:") ||
            input.hasPrefix("askw://") || input.hasPrefix("askaway://") ||
            input.hasPrefix("ssh://") ||
-           input.hasPrefix("sftp://") {
+           input.hasPrefix("sftp://") ||
+           input.hasPrefix("ardp://") {
             return URL(string: input)
         }
 
