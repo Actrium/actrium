@@ -211,6 +211,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 }
                 if let sessionId = tab.sftpSessionId {
                     SFTPSessionBridge.shared.disconnectSession(sessionId: sessionId)
+                    SFTPBrowserViewModel.removeViewModel(for: sessionId)
                 }
             }
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
@@ -238,9 +239,15 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             }
         }
 
-        // Disconnect SSH session if this tab has one
-        if let tab = tabs.first(where: { $0.id == id }), let sessionId = tab.sshSessionId {
-            TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
+        // Disconnect SSH/SFTP session if this tab has one
+        if let tab = tabs.first(where: { $0.id == id }) {
+            if let sessionId = tab.sshSessionId {
+                TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
+            }
+            if let sessionId = tab.sftpSessionId {
+                SFTPSessionBridge.shared.disconnectSession(sessionId: sessionId)
+                SFTPBrowserViewModel.removeViewModel(for: sessionId)
+            }
         }
 
         // 删除标签页

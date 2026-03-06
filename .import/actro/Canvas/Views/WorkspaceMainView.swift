@@ -301,7 +301,8 @@ struct WorkspaceMainView: View {
                    let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
                    case .sftp(let sessionId) = focusedTab.contentType,
                    let sftpURL = focusedTab.url {
-                    SFTPBrowserView(viewModel: SFTPBrowserViewModel(sessionId: sessionId, url: sftpURL))
+                    SFTPBrowserView(viewModel: SFTPBrowserViewModel.viewModel(for: sessionId, url: sftpURL))
+                        .id(focusedTab.id)
                         .frame(width: safeViewportSize.width, height: safeViewportSize.height)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
@@ -2369,7 +2370,7 @@ private struct TabPanel: View {
                 if isFocused {
                     Color.clear // Focus mode handled by focus overlay
                 } else if let sftpURL = tab.url {
-                    SFTPBrowserView(viewModel: SFTPBrowserViewModel(sessionId: sessionId, url: sftpURL))
+                    SFTPBrowserView(viewModel: SFTPBrowserViewModel.viewModel(for: sessionId, url: sftpURL))
                         .frame(width: renderSize.width, height: renderSize.height)
                 }
 
