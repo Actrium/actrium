@@ -33,6 +33,7 @@ async fn main() -> Result<()> {
     let target_type = ActrType {
         manufacturer: "acme".to_string(),
         name: "EchoService".to_string(),
+        version: None,
     };
 
     let node = system.attach(workload.clone());
