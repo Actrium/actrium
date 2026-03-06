@@ -16,6 +16,7 @@ struct ContentView: View {
         Group {
             if UIDevice.current.userInterfaceIdiom == .phone {
                 PhoneMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                    .preferredColorScheme(.dark)
             } else {
                 ZStack {
                     // 浏览器风格的布局
