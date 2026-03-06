@@ -46,7 +46,6 @@ struct PhoneTabListView: View {
                                     bookmarkVM: bookmarkVM,
                                     screenSize: geometry.size,
                                     animation: animation,
-                                    isSelected: viewModel.currentTabId == tab.id,
                                     onSelect: {
                                         // 立即切换 ID，确保 UI 响应（蓝色边框）
                                         withAnimation(.easeInOut(duration: 0.2)) {
@@ -84,7 +83,6 @@ struct PhoneTabCardView: View {
     var bookmarkVM: BookmarkViewModel
     let screenSize: CGSize
     var animation: Namespace.ID
-    let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
     
@@ -96,30 +94,12 @@ struct PhoneTabCardView: View {
             Rectangle()
                 .fill(Color(hslString: tab.backgroundColor).opacity(0.1))
                 .overlay(alignment: .topLeading) {
-                    Group {
-                        if let snapshot = viewModel.tabSnapshots[tab.id] {
-                            Image(uiImage: snapshot)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } else {
-                            // 默认占位图标
-                            VStack(spacing: 8) {
-                                Circle()
-                                    .fill(Color(hslString: tab.backgroundColor))
-                                    .frame(width: 60, height: 60)
-                                    .overlay {
-                                        Image(systemName: "safari")
-                                            .font(.system(size: 24))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
-                                if let host = tab.url?.host() {
-                                    Text(host)
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
+                    if let snapshot = viewModel.tabSnapshots[tab.id] {
+                        Image(uiImage: snapshot)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Color.white
                     }
                 }
                 .clipped()
@@ -137,7 +117,7 @@ struct PhoneTabCardView: View {
                         .fill(Color(hslString: tab.backgroundColor))
                         .frame(width: iconWidth, height: iconWidth)
                         .overlay {
-                            Image(systemName: "safari")
+                            Image(systemName: "plus.viewfinder")
                                 .font(.system(size: 14))
                                 .foregroundColor(.white.opacity(0.9))
                         }
@@ -158,7 +138,7 @@ struct PhoneTabCardView: View {
                 
                 // 标题
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(tab.title.isEmpty ? "新标签页" : tab.title)
+                    Text(tab.title)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.primary)
                         .lineLimit(1)
@@ -173,52 +153,49 @@ struct PhoneTabCardView: View {
                 
                 Spacer()
                 
-                // 收藏星
-                Button(action: {
-                    // 切换收藏状态并发送通知给 RN
-                    let newBookmarkStatus = !tab.isBookmarked
-                    
-                    // 立即更新本地状态（UI 响应）
-                    if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
-                        viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                // 收藏星（标题为空时隐藏）
+                if !tab.title.isEmpty {
+                    Button(action: {
+                        // 切换收藏状态并发送通知给 RN
+                        let newBookmarkStatus = !tab.isBookmarked
+                        
+                        // 立即更新本地状态（UI 响应）
+                        if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+                            viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                        }
+                        
+                        // 发送通知给 RN 侧处理实际的收藏逻辑
+                        NotificationCenter.default.post(
+                            name: .tabBookmarkChangedFromNative,
+                            object: nil,
+                            userInfo: [
+                                "tabId": tab.id.uuidString,
+                                "isBookmarked": newBookmarkStatus
+                            ]
+                        )
+                    }) {
+                        Image(systemName: "star.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(tab.isBookmarked ? Color(hex: "#EAC15B") : Color(hex: "#404040"))
+                            .frame(width: 36, height: 36)
+                            .background(Circle().fill(Color.clear))
                     }
-                    
-                    // 发送通知给 RN 侧处理实际的收藏逻辑
-                    NotificationCenter.default.post(
-                        name: .tabBookmarkChangedFromNative,
-                        object: nil,
-                        userInfo: [
-                            "tabId": tab.id.uuidString,
-                            "isBookmarked": newBookmarkStatus
-                        ]
-                    )
-                }) {
-                    Image(systemName: "star.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(tab.isBookmarked ? Color(hex: "#EAC15B") : Color(hex: "#404040"))
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(Color.clear))
                 }
                 
                 // 关闭按钮
                 Button(action: onClose) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundColor(.primary)
+                        .foregroundColor(Color(hex: "#404040"))
                         .frame(width: 36, height: 36)
                 }
             }
             .frame(height: 56)
             .padding(.horizontal, 14)
-            .background(Color(.secondarySystemGroupedBackground).opacity(0.95))
+            .background(Color(hex: "#E5E5EA"))
         }
         .frame(height: (UIScreen.main.bounds.width - 32) * 0.54)
-        .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 22))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: isSelected ? 3 : 0)
-        )
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         .asMatchedTransitionSource(id: tab.id, in: animation)
     }

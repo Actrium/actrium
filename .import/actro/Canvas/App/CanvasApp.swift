@@ -18,12 +18,14 @@ extension FocusedValues {
 // MARK: - Browser Window View (wraps ContentView with its own ViewModel)
 
 struct BrowserWindowView: View {
+    @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var viewModel = BrowserViewModel()
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
 
     var body: some View {
         ContentView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+            .environmentObject(themeManager)
             .focusedSceneValue(\.browserViewModel, viewModel)
             .onAppear {
                 // Check for pending group transfer
