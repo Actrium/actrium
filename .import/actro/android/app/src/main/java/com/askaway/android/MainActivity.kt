@@ -451,9 +451,11 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
         val tabId = Params.currentTabId
         if (!tabId.isNullOrEmpty()) {
-            val screenshotPath = screenshotView(binding.flRNContent, tabId)
-            if (screenshotPath != null) {
-                 viewModel.updateScreenshot(tabId, screenshotPath)
+            if (viewModel.canCaptureScreenshot(tabId)) {
+                val screenshotPath = screenshotView(binding.flRNContent, tabId)
+                if (screenshotPath != null) {
+                    viewModel.updateScreenshot(tabId, screenshotPath)
+                }
             }
         }
 
