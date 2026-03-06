@@ -40,6 +40,9 @@ enum TabContentType: Equatable {
     /// SFTP file browser session
     case sftp(sessionId: String)
 
+    /// Remote desktop session
+    case remoteDesktop(sessionId: String)
+
     /// 空白 Tab（无内容）
     case empty
 }
@@ -152,6 +155,9 @@ struct Tab: Identifiable {
     /// SFTP session ID (set when navigating to sftp:// URL)
     var sftpSessionId: String?
 
+    /// Remote desktop session ID (set when navigating to ardp:// URL)
+    var remoteDesktopSessionId: String?
+
     init(
         title: String,
         url: URL? = nil,
@@ -171,7 +177,8 @@ struct Tab: Identifiable {
         backgroundColor: String? = nil,
         appIcon: String? = nil,
         sshSessionId: String? = nil,
-        sftpSessionId: String? = nil
+        sftpSessionId: String? = nil,
+        remoteDesktopSessionId: String? = nil
     ) {
         self.title = title
         self.url = url
@@ -192,6 +199,7 @@ struct Tab: Identifiable {
         self.appIcon = appIcon
         self.sshSessionId = sshSessionId
         self.sftpSessionId = sftpSessionId
+        self.remoteDesktopSessionId = remoteDesktopSessionId
     }
 
     // MARK: - Content Type Detection
@@ -208,6 +216,10 @@ struct Tab: Identifiable {
         // 1b. 检查是否为 SFTP session
         else if let url = url, url.scheme == "sftp", let sessionId = sftpSessionId {
             result = .sftp(sessionId: sessionId)
+        }
+        // 1c. Check for remote desktop session
+        else if let url = url, url.scheme == "ardp", let sessionId = remoteDesktopSessionId {
+            result = .remoteDesktop(sessionId: sessionId)
         }
         // 2. 检查是否为 Web URL (http/https)
         else if let url = url, url.scheme == "http" || url.scheme == "https" {

@@ -307,6 +307,20 @@ struct WorkspaceMainView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
 
+                // Focus mode remote desktop content layer
+                if case .focus(let focusedTabId) = viewModel.canvasMode,
+                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
+                   case .remoteDesktop(let sessionId) = focusedTab.contentType {
+                    RemoteDesktopView(
+                        sessionId: sessionId,
+                        hostId: parseARDPHostId(from: focusedTab.url) ?? "",
+                        signalServer: parseARDPSignalServer(from: focusedTab.url) ?? "",
+                        viewportSize: safeViewportSize
+                    )
+                    .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+
                 // 🔑 Live 层：统一的 ViewBridge 内容层（canvas 变换之外）
                 // 始终渲染，不论 Focus/Overview 模式，避免模式切换时连接断开
                 // 注意：Live 层在 canvas 外部，需要将 canvas 坐标转换为视口坐标
@@ -497,7 +511,7 @@ struct WorkspaceMainView: View {
                             switch tab.contentType {
                             case .reactNative: return .menu
                             case .web: return isWebLoading ? .loading : .none
-                            case .native, .empty, .ssh, .sftp: return .none
+                            case .native, .empty, .ssh, .sftp, .remoteDesktop: return .none
                             }
                         }()
 
@@ -602,8 +616,8 @@ struct WorkspaceMainView: View {
                     case .reactNative:
                         // ViewBridge tab: 同步截图
                         ViewBridgeHostViewManager.shared.takeSnapshot(for: focusedTabId)
-                    case .native, .empty, .ssh, .sftp:
-                        // Native SwiftUI, empty, SSH, and SFTP tabs don't need snapshots
+                    case .native, .empty, .ssh, .sftp, .remoteDesktop:
+                        // Native SwiftUI, empty, SSH, SFTP, and remote desktop tabs don't need snapshots
                         break
                     }
                 }
@@ -2374,6 +2388,19 @@ private struct TabPanel: View {
                         .frame(width: renderSize.width, height: renderSize.height)
                 }
 
+            case .remoteDesktop(let sessionId):
+                // Remote desktop - rendered at card size in overview, full size in focus
+                if isFocused {
+                    Color.clear // Focus mode handled by focus overlay
+                } else {
+                    ZStack {
+                        Color(nsColor: NSColor(red: 20/255, green: 20/255, blue: 20/255, alpha: 1))
+                        Image(systemName: "desktopcomputer")
+                            .font(.system(size: 32))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
             case .empty:
                 // Empty placeholder - new tabs now use system startPage
                 EmptyView()
@@ -2688,6 +2715,20 @@ private struct OverviewViewBridgeContainer: View {
             NSLog("⚠️ OverviewViewBridgeContainer: Failed to allocate service: \(error)")
         }
     }
+}
+
+// MARK: - ARDP URL Parsing Helpers
+
+private func parseARDPHostId(from url: URL?) -> String? {
+    // ardp://host-id@signal-server → host-id is the user part
+    guard let url = url, url.scheme == "ardp" else { return nil }
+    return url.user
+}
+
+private func parseARDPSignalServer(from url: URL?) -> String? {
+    // ardp://host-id@signal-server → signal-server is the host part
+    guard let url = url, url.scheme == "ardp" else { return nil }
+    return url.host
 }
 
 #Preview {

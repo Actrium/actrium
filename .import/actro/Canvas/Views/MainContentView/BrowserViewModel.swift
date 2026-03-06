@@ -132,6 +132,35 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 self.objectWillChange.send()
             }
         )
+
+        // Remote desktop observers
+        sshObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: .remoteDesktopCloseTab,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self,
+                      let sessionId = notification.userInfo?["sessionId"] as? String,
+                      let tab = self.tabs.first(where: { $0.remoteDesktopSessionId == sessionId }) else { return }
+                self.closeTab(id: tab.id)
+            }
+        )
+        sshObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: .remoteDesktopReconnect,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self,
+                      let sessionId = notification.userInfo?["sessionId"] as? String,
+                      let tabIndex = self.tabs.firstIndex(where: { $0.remoteDesktopSessionId == sessionId }) else { return }
+                RemoteDesktopXPCBridge.shared.disconnectSession(sessionId: sessionId)
+                let newSessionId = UUID().uuidString
+                self.tabs[tabIndex].remoteDesktopSessionId = newSessionId
+                self.objectWillChange.send()
+            }
+        )
     }
     
     @discardableResult
@@ -204,7 +233,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
 
         // 如果这是最后一个标签页，关闭后退出应用
         if tabs.count == 1 {
-            // Disconnect SSH/SFTP session before exiting
+            // Disconnect SSH/SFTP/RemoteDesktop session before exiting
             if let tab = tabs.first {
                 if let sessionId = tab.sshSessionId {
                     TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
@@ -212,6 +241,9 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 if let sessionId = tab.sftpSessionId {
                     SFTPSessionBridge.shared.disconnectSession(sessionId: sessionId)
                     SFTPBrowserViewModel.removeViewModel(for: sessionId)
+                }
+                if let sessionId = tab.remoteDesktopSessionId {
+                    RemoteDesktopXPCBridge.shared.disconnectSession(sessionId: sessionId)
                 }
             }
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
@@ -239,7 +271,7 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             }
         }
 
-        // Disconnect SSH/SFTP session if this tab has one
+        // Disconnect SSH/SFTP/RemoteDesktop session if this tab has one
         if let tab = tabs.first(where: { $0.id == id }) {
             if let sessionId = tab.sshSessionId {
                 TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
@@ -247,6 +279,9 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
             if let sessionId = tab.sftpSessionId {
                 SFTPSessionBridge.shared.disconnectSession(sessionId: sessionId)
                 SFTPBrowserViewModel.removeViewModel(for: sessionId)
+            }
+            if let sessionId = tab.remoteDesktopSessionId {
+                RemoteDesktopXPCBridge.shared.disconnectSession(sessionId: sessionId)
             }
         }
 
@@ -829,6 +864,25 @@ class BrowserViewModel: ObservableObject, CanvasModePublisher {
                 tabs[index].sftpSessionId = sessionId
                 tabs[index].sshSessionId = nil
                 tabs[index].title = "SFTP: \(url.host ?? "")"
+                tabs[index].unifiedScript = nil
+                tabs[index].leftPanelScript = nil
+                tabs[index].rightPanelScript = nil
+                tabs[index].guestScript = nil
+                tabs[index].systemTabType = nil
+                tabs[index].contractName = nil
+                objectWillChange.send()
+                return
+            }
+
+            // Handle ardp:// URL — remote desktop connection
+            if url.scheme == "ardp" {
+                logger.notice("[navigateCurrentTab] Remote desktop connection: \(url.absoluteString)")
+                let sessionId = UUID().uuidString
+                tabs[index].url = url
+                tabs[index].remoteDesktopSessionId = sessionId
+                tabs[index].sshSessionId = nil
+                tabs[index].sftpSessionId = nil
+                tabs[index].title = "Remote: \(url.host ?? url.absoluteString)"
                 tabs[index].unifiedScript = nil
                 tabs[index].leftPanelScript = nil
                 tabs[index].rightPanelScript = nil
