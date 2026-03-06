@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   Modal,
-  TouchableOpacity,
   TouchableWithoutFeedback,
   ActivityIndicator,
   Image,
@@ -13,7 +12,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { LoginContent } from './LoginContent';
 import { useLoginFlow, LoginFlowMode } from '../../hooks/auth';
-import { Icon } from '../../actr-host/components/Icon';
+import { HostIconButton } from '../../actr-host/components/HostIconButton';
 
 interface LoginModalProps {
   visible: boolean;
@@ -124,13 +123,16 @@ export const LoginModal = ({
               <View style={styles.modalContentWrapper}>
                 <View style={styles.header}>
                   <Text style={styles.title}>{t('actr.auth.login') + ' AskAway'}</Text>
-                  <TouchableOpacity
-                    style={styles.closeButton}
+                  <HostIconButton
+                    iconType='close'
+                    size={44}
+                    iconSize={20}
+                    iconColor='#666'
+                    backgroundColor='#F0F0F0'
+                    wrapperStyle={styles.closeButton}
                     onPress={onClose}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Icon type="close" size={20} color="#666" />
-                  </TouchableOpacity>
+                  />
                 </View>
 
                 {showLogo && (

@@ -9,7 +9,6 @@ import {
   TextInputSubmitEditingEventData,
   TextStyle,
   TouchableWithoutFeedback,
-  TouchableOpacity,
   View,
   ViewStyle,
   ScrollView,
@@ -25,6 +24,7 @@ import { BookmarkRepository } from '../../repository/BookmarkRepository';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../styles/shadows';
 import { setTabBookmarkStatus } from '../../../src/native-bridge/tab/TabModule';
+import { HostIconButton } from '../components/HostIconButton';
 import SafeBottomView from '../components/SafeBottomView';
 import { Icon } from '../components/Icon';
 import { LoadAppCameraPanel } from './components/LoadAppCameraPanel';
@@ -196,16 +196,18 @@ const LoadApp = () => {
   ) => {
     if (!showInputField) {
       return (
-        <TouchableOpacity
+        <HostIconButton
+          iconType='keyboard'
+          size={48}
+          iconSize={24}
+          disableTint
           style={styles.inputToggleBtn}
           activeOpacity={0.8}
           onPress={() => {
             setCameraActive(false);
             setInputExpanded(true);
           }}
-        >
-          <Icon type='keyboard' size={24} disableTint />
-        </TouchableOpacity>
+        />
       );
     }
 

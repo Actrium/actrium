@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { HostIconButton } from '../../actr-host/components/HostIconButton';
 
 interface SettingsBackHeaderProps {
   onBack: () => void;
@@ -14,13 +15,16 @@ export const SettingsBackHeader = ({
 }: SettingsBackHeaderProps) => {
   return (
     <View style={[styles.container, { marginBottom }]}>
-      <TouchableOpacity
+      <HostIconButton
+        size={44}
+        backgroundColor='#3a3a3c'
+        enablePressScale={false}
         style={styles.backButton}
         onPress={onBack}
         activeOpacity={0.7}
       >
         <Text style={styles.backButtonText}>‹</Text>
-      </TouchableOpacity>
+      </HostIconButton>
       {title ? (
         <View pointerEvents='none' style={styles.titleWrapper}>
           <Text style={styles.title} numberOfLines={1}>
@@ -38,12 +42,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
     backgroundColor: '#3a3a3c',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   backButtonText: {
     fontSize: 32,

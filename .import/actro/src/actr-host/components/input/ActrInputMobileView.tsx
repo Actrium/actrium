@@ -11,6 +11,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { AttachmentPreviewBar } from '../AttachmentPreviewBar';
 import { DropdownMenu } from '../DropdownMenu';
+import { HostIconButton } from '../HostIconButton';
 import { Icon } from '../Icon';
 import type { ActrInputStyles } from './ActrInput.shared';
 import type { PanResponderInstance } from 'react-native';
@@ -322,12 +323,14 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
         <View style={styles.mobileInputRow}>
           {/* 左侧取消编辑按钮 - 编辑状态时显示 */}
           {isEditing && (
-            <TouchableOpacity
-              style={styles.mobileReservedButton}
+            <HostIconButton
+              iconType='close'
+              size={48}
+              iconSize={16}
+              iconColor='#666'
               onPress={handleCancelEdit}
-            >
-              <Icon type='close' size={16} color='#666' />
-            </TouchableOpacity>
+              style={styles.mobileReservedButton}
+            />
           )}
 
           <View style={styles.mobilePrimaryArea}>
@@ -583,11 +586,14 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
             <>
               {/* 收藏按钮 - 未聚焦时显示 */}
               {!isInputFocused && (
-                <TouchableOpacity
-                  style={styles.mobileReservedButton}
+                <HostIconButton
+                  iconType='tab_preview'
+                  size={48}
+                  iconSize={20}
+                  iconColor='#404040'
                   onPress={handleExitTab}
+                  style={styles.mobileReservedButton}
                 >
-                  <Icon type='tab_preview' size={20} color='#404040' />
                   {/* 未读消息角标 */}
                   {totalUnread > 0 && (
                     <View style={styles.unreadBadge}>
@@ -596,26 +602,24 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                       </Text>
                     </View>
                   )}
-                </TouchableOpacity>
+                </HostIconButton>
               )}
 
               {/* send 按钮 - 聚焦 + 开启回车换行时显示 */}
               {isInputFocused && !isSendOnEnter && (
-                <TouchableOpacity
-                  style={styles.mobileReservedButton}
+                <HostIconButton
+                  iconType='send'
+                  size={48}
+                  iconSize={20}
+                  iconColor={hasInputText ? '#000000' : '#666'}
                   onPress={() => {
                     if (hasInputText) {
                       handleSendRef.current();
                     }
                   }}
                   disabled={!hasInputText}
-                >
-                  <Icon
-                    type='send'
-                    size={20}
-                    color={hasInputText ? '#000000' : '#666'}
-                  />
-                </TouchableOpacity>
+                  style={styles.mobileReservedButton}
+                />
               )}
             </>
           )}
@@ -718,14 +722,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   mobileReservedButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
     borderWidth: 1,
     borderColor: '#ECECEF',
     backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
     ...HOST_SHADOWS.inputPill,
   },
   mobileVoiceModeSpacer: {

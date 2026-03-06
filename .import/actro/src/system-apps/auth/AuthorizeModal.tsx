@@ -5,14 +5,13 @@ import {
   Image,
   StyleSheet,
   Modal,
-  TouchableOpacity,
   TouchableWithoutFeedback,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { AuthorizeContent } from './AuthorizeContent';
 import { useAppStore } from '../../actr-host/store/useAppStore';
 import { useAuthorize } from '../../hooks/auth';
-import { Icon } from '../../actr-host/components/Icon';
+import { HostIconButton } from '../../actr-host/components/HostIconButton';
 
 interface AuthorizeModalProps {
   visible: boolean;
@@ -92,13 +91,16 @@ export const AuthorizeModal = ({
                       {appInfo?.app_name || t('actr.app.officialService')}
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    style={styles.closeButton}
+                  <HostIconButton
+                    iconType='close'
+                    size={44}
+                    iconSize={20}
+                    iconColor='#666'
+                    backgroundColor='#78788029'
+                    wrapperStyle={styles.closeButton}
                     onPress={onClose}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Icon type='close' size={20} color='#666' />
-                  </TouchableOpacity>
+                  />
                 </View>
 
                 {/* 授权内容（不显示 appInfoRow，因为 header 已经展示） */}
