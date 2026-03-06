@@ -76,6 +76,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             await XPCServicePool.shared.prewarmInitialServicesAsync()
         }
 
+        // Prewarm terminal XPC services (establish ViewBridge connections early)
+        TerminalServicePool.shared.prewarmServices()
+
         // Initialize SFTP callback handler
         SFTPCallbackHandler.shared.activate()
 
