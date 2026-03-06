@@ -220,6 +220,10 @@ class MainViewModel : ViewModel() {
         )
     }
 
+    fun canCaptureScreenshot(tabId: String): Boolean {
+        return _activeModelList.find { it.id == tabId }?.name?.isNotEmpty() == true
+    }
+
     fun updateScreenshot(tabId: String, screenshotPath: String) {
         val index = _activeModelList.indexOfFirst { it.id == tabId }
         if (index != -1) {
