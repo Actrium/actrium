@@ -43,7 +43,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
         ]}
       >
         <LinearGradient
-          colors={['#F2F2F6', 'rgba(242, 242, 246, 0)']}
+          colors={['#F2F2F6', '#F2F2F6', 'rgba(242, 242, 246, 0)']}
+          locations={[0, 0.7, 1]}
           style={StyleSheet.absoluteFill}
         />
         {showLeftButton ? (
@@ -101,7 +102,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#78788029',
+    backgroundColor: '#DFDFE1',
     justifyContent: 'center',
     alignItems: 'center',
     // ...HOST_SHADOWS.headerButton,
