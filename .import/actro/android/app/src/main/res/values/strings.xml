@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">askaway_android</string>
+    <string name="app_name">Askaway</string>
     <string name="tab_active">活跃</string>
     <string name="tab_bookmark">书签</string>
     <string name="tab_set">偏好设置</string>
