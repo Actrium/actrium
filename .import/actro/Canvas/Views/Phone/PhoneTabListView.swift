@@ -5,6 +5,7 @@ struct PhoneTabListView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
+    var animation: Namespace.ID
     var onSelect: (Tab) -> Void
     
     var body: some View {
@@ -44,6 +45,7 @@ struct PhoneTabListView: View {
                                     historyVM: historyVM,
                                     bookmarkVM: bookmarkVM,
                                     screenSize: geometry.size,
+                                    animation: animation,
                                     isSelected: viewModel.currentTabId == tab.id,
                                     onSelect: {
                                         // 立即切换 ID，确保 UI 响应（蓝色边框）
@@ -81,6 +83,7 @@ struct PhoneTabCardView: View {
     var historyVM: HistoryViewModel
     var bookmarkVM: BookmarkViewModel
     let screenSize: CGSize
+    var animation: Namespace.ID
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
@@ -98,23 +101,6 @@ struct PhoneTabCardView: View {
                             Image(uiImage: snapshot)
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
-                        } else if isSelected {
-                            // 如果是当前选中的，但没快照，显示 Live View
-                            GeometryReader { cardContentGeo in
-                                let cardWidth = cardContentGeo.size.width
-                                let screenSize = UIScreen.main.bounds.size
-                                let scale = cardWidth / max(screenSize.width, 0.1)
-                                
-                                SingleTabRootView(
-                                    tab: tab,
-                                    viewModel: viewModel,
-                                    historyVM: historyVM,
-                                    bookmarkVM: bookmarkVM,
-                                    containerSize: screenSize
-                                )
-                                .frame(width: screenSize.width, height: screenSize.height)
-                                .scaleEffect(scale, anchor: .topLeading)
-                            }
                         } else {
                             // 默认占位图标
                             VStack(spacing: 8) {
@@ -234,6 +220,7 @@ struct PhoneTabCardView: View {
                 .stroke(isSelected ? Color.blue : Color.clear, lineWidth: isSelected ? 3 : 0)
         )
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
+        .asMatchedTransitionSource(id: tab.id, in: animation)
     }
 }
 
