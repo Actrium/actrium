@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { authApi, CURRENT_ENV } from '../../api/auth';
 import { AuthRepository } from '../../repository/AuthRepository';
 import { useUserStore } from '../../actr-host/store/useUserStore';
+import { useAuthTaskStore } from '../../actr-host/store/useAuthTaskStore';
 import { AccountUserInfo } from '../../api/types';
 import { useTranslation } from 'react-i18next';
 import { LoginBridge } from '../../native-bridge';
@@ -34,12 +35,16 @@ export const useLogin = (): UseLoginResult => {
 
   const { userInfo, sessionToken, setUserInfo, setSessionToken, clearUser } =
     useUserStore();
+  const clearAuthorizationCache = useAuthTaskStore(
+    (state) => state.clearAuthorizationCache,
+  );
 
   const logout = useCallback(() => {
     clearUser();
+    clearAuthorizationCache();
     AuthRepository.clearToken(CURRENT_ENV);
     setStep('login_options');
-  }, [clearUser]);
+  }, [clearAuthorizationCache, clearUser]);
 
   const fetchUserInfo = useCallback(
     async (token: string): Promise<boolean> => {
@@ -47,6 +52,12 @@ export const useLogin = (): UseLoginResult => {
         const res = await authApi.getUserInfo(token);
         if (res.success && res.data) {
           const accountData = res.data as AccountUserInfo;
+          const prevUserId = userInfo?.user?.cn || '';
+          const nextUserId = accountData.user?.cn || '';
+          if (prevUserId && nextUserId && prevUserId !== nextUserId) {
+            // 用户切换时清理授权缓存，避免复用旧账号授权状态
+            clearAuthorizationCache();
+          }
           setUserInfo(accountData);
           setSessionToken(token);
           setStep('logged_in');
@@ -63,7 +74,7 @@ export const useLogin = (): UseLoginResult => {
         return false;
       }
     },
-    [logout, setUserInfo, setSessionToken],
+    [clearAuthorizationCache, logout, setUserInfo, setSessionToken, userInfo],
   );
 
   const checkSession = useCallback(

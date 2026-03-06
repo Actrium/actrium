@@ -9,6 +9,7 @@ import { AccountDetail } from './settings/AccountDetail';
 import { AboutAskAway } from './settings/AboutAskAway';
 import { LoginModal } from './auth/LoginModal';
 import { useUserStore } from '../actr-host/store/useUserStore';
+import { useAuthTaskStore } from '../actr-host/store/useAuthTaskStore';
 import { createFeedbackAction, createLogoutAction } from './settings/actions';
 import type { AboutPageKey } from './settings/AboutAskAway';
 
@@ -72,6 +73,9 @@ export default function SettingsApp({
   );
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   const clearUser = useUserStore((state) => state.clearUser);
+  const clearAuthorizationCache = useAuthTaskStore(
+    (state) => state.clearAuthorizationCache,
+  );
   const consumedPageTokensRef = useRef<Set<string>>(new Set());
   const consumedActionTokensRef = useRef<Set<string>>(new Set());
 
@@ -82,9 +86,10 @@ export default function SettingsApp({
       createLogoutAction({
         t,
         clearUser,
+        clearAuthorizationCache,
         onAfterLogout: () => setCurrentPage('main'),
       }),
-    [t, clearUser],
+    [t, clearAuthorizationCache, clearUser],
   );
 
   const deepLink = useMemo(
