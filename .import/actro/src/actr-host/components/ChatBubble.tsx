@@ -253,6 +253,8 @@ export default function ChatBubble({
       return [];
     }
   }, [attachments]);
+  const isAttachmentOnly = parsedAttachments.length > 0 && !content;
+  const hasAttachments = parsedAttachments.length > 0;
 
   const getDisplayFileName = React.useCallback((item: IAttachmentItem): string => {
     const legacyName = (item as any).name as string | undefined;
@@ -288,8 +290,13 @@ export default function ChatBubble({
   const bubbleContent = (
     <View
       style={[
-        isQuestion ? styles.questionBubble : styles.answerBubble,
-        isSmall &&
+        isAttachmentOnly
+          ? styles.attachmentBareBubble
+          : isQuestion
+            ? styles.questionBubble
+            : styles.answerBubble,
+        !isAttachmentOnly &&
+          isSmall &&
           (isQuestion ? styles.smallQuestionBubble : styles.smallAnswerBubble),
       ]}
     >
@@ -302,8 +309,9 @@ export default function ChatBubble({
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            style={styles.attachmentsScrollView}
             contentContainerStyle={styles.attachmentsScrollContent}
-            scrollEnabled={parsedAttachments.length > 3}
+            scrollEnabled
             scrollEventThrottle={16}
           >
             {parsedAttachments.map((item: IAttachmentItem, idx: number) => {
@@ -333,7 +341,11 @@ export default function ChatBubble({
                     ]}
                   >
                     <View style={styles.attachmentFileInfo}>
-                      <Text style={styles.attachmentFileName} numberOfLines={1}>
+                      <Text
+                        style={styles.attachmentFileName}
+                        numberOfLines={2}
+                        ellipsizeMode='tail'
+                      >
                         {getDisplayFileName(item)}
                       </Text>
                       <View style={styles.attachmentFileMetaRow}>
@@ -539,7 +551,8 @@ export default function ChatBubble({
     >
       <View
         style={{
-          maxWidth: '80%',
+          width: hasAttachments ? '100%' : undefined,
+          maxWidth: hasAttachments ? '100%' : '80%',
           alignSelf: isQuestion ? 'flex-end' : 'flex-start',
         }}
       >
@@ -554,7 +567,8 @@ export default function ChatBubble({
             const shouldShowMenu =
               !selectionMode &&
               menuOptions.length > 0 &&
-              (!isLatest || isQuestion);
+              (!isLatest || isQuestion) &&
+              !hasAttachments;
             if (shouldShowMenu) {
               return (
                 <LongPressMenu options={menuOptions}>
@@ -650,6 +664,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     maxWidth: '85%',
   },
+  attachmentBareBubble: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    backgroundColor: 'transparent',
+    minWidth: 0,
+  },
   smallText: {
     fontSize: 11,
     lineHeight: 15,
@@ -657,38 +677,47 @@ const styles = StyleSheet.create({
   attachmentsContainer: {
     marginBottom: 8,
     flexDirection: 'row',
+    width: '100%',
+  },
+  attachmentsScrollView: {
+    width: '100%',
   },
   attachmentsScrollContent: {
+    flexGrow: 1,
     paddingRight: 0,
+    justifyContent: 'flex-end',
   },
   attachmentImage: {
-    height: 100,
+    height: 82,
+    maxHeight: 82,
     borderRadius: 10,
-    backgroundColor: '#eee',
+    borderWidth: 1,
+    borderColor: '#ACACAC',
+    backgroundColor: '#E5E5EA',
   },
   attachmentFileBlock: {
-    width: 120,
-    height: 60,
-    backgroundColor: '#fff',
+    width: 156,
+    maxHeight: 82,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ACACAC',
+    backgroundColor: '#E5E5EA',
     paddingHorizontal: 10,
     paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#eee',
   },
   attachmentFileInfo: {
-    flex: 1,
-    justifyContent: 'space-between',
+    flexShrink: 1,
   },
   attachmentFileName: {
-    fontSize: 12,
-    color: '#333',
+    fontSize: 15,
+    color: '#000000',
     fontWeight: 'bold',
     textAlign: 'left',
   },
   attachmentFileMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 16,
     gap: 6,
   },
   attachmentFileType: {
