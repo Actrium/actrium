@@ -165,6 +165,8 @@ export class AppSessionService {
             });
             if (authRes.success && authRes.code === 0) {
               useAuthTaskStore.getState().addAuthorizedAppId(appId);
+            } else if (authRes.success) {
+              useAuthTaskStore.getState().addUnauthorizedAppId(appId);
             }
           } catch (e) {
             console.error(

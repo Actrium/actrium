@@ -15,14 +15,17 @@ export const createFeedbackAction = () => {
 export const createLogoutAction = ({
   t,
   clearUser,
+  clearAuthorizationCache,
   onAfterLogout,
 }: {
   t: TFunction;
   clearUser: () => void;
+  clearAuthorizationCache: () => void;
   onAfterLogout?: () => void;
 }) => {
   const doLogout = () => {
     clearUser();
+    clearAuthorizationCache();
     AuthRepository.clearToken(CURRENT_ENV);
     onAfterLogout?.();
   };

@@ -258,7 +258,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
 
     // 1. 权限校验（登录/授权成功后的回调可跳过）
     if (!skipAuthCheck) {
-      const { status, clientId } = checkAuth();
+      const { status, clientId } = await checkAuth();
       if (!handleAuthStatus(status, clientId)) {
         return;
       }
