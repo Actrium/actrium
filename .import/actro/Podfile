@@ -38,6 +38,8 @@ target 'Canvas' do
   pod 'RNLiveAudioStream', :path => 'Subsystem/node_modules/react-native-live-audio-stream'
   pod 'react-native-get-random-values', :path => 'Subsystem/node_modules/react-native-get-random-values'
   pod 'react-native-webview', :path => 'Subsystem/node_modules/react-native-webview'
+  pod 'RNGestureHandler', :path => 'Subsystem/node_modules/react-native-gesture-handler'
+  pod 'RNReanimated', :path => 'Subsystem/node_modules/react-native-reanimated'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 微信 SDK
