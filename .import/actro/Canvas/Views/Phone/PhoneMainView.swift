@@ -96,8 +96,8 @@ struct PhoneMainView: View {
                 .asNavigationTransition(id: tab.id, in: animation)
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
-            // RN 请求退出全屏 - 先截图再关闭
-            if let tab = fullscreenTab {
+            // RN 请求退出全屏 - 先截图再关闭（标题为空时不截图）
+            if let tab = fullscreenTab, !tab.title.isEmpty {
                 takeSnapshot(for: tab)
             }
             fullscreenTab = nil
