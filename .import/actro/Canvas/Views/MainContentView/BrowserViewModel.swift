@@ -246,10 +246,19 @@ class BrowserViewModel: ObservableObject {
             return
         }
 
-        // 如果这是最后一个标签页，关闭后退出应用
+        // 如果这是最后一个标签页
         if tabs.count == 1 {
-            logger.debug("🚪 关闭最后一个标签页，应用即将退出")
-            exit(0)
+            // iPad 端退出应用，Phone 端保持空列表
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                logger.debug("📱 关闭最后一个标签页")
+                tabs.removeAll(where: { $0.id == id })
+                tabSlotPositions.removeValue(forKey: id)
+                currentTabId = nil
+                return
+            } else {
+                logger.debug("🚪 关闭最后一个标签页，应用即将退出")
+                exit(0)
+            }
         }
 
         // 如果关闭的是当前标签，切换到相邻标签
