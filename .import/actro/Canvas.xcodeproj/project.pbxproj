@@ -149,9 +149,9 @@
 		CC11220033004400AA00BB10 /* CanvasTerminalService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasTerminalService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		DACA28DED8E4818311DAAB4D /* libPods-CanvasTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD11220033004400AA00BB10 /* CanvasSFTPService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasSFTPService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
+		E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
 		EE00110022003300AA00BB01 /* CanvasRemote.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasRemote.xcframework; path = "canvas-remote/CanvasRemote.xcframework"; sourceTree = "<group>"; };
 		EE11220033004400AA00BB10 /* CanvasRemoteService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasRemoteService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
-		E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -196,16 +196,22 @@
 		};
 		B3E458A22EC731A30014D74C /* Canvas */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = Canvas;
 			sourceTree = "<group>";
 		};
 		B3E458B22EC731A40014D74C /* CanvasTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasTests;
 			sourceTree = "<group>";
 		};
 		B3E458BC2EC731A40014D74C /* CanvasUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = CanvasUITests;
 			sourceTree = "<group>";
 		};
@@ -567,7 +573,7 @@
 			mainGroup = B3E458972EC731A30014D74C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "Packages/CanvasIPC" */,
+				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "CanvasIPC" */,
 				B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -648,13 +654,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-CanvasTests/Pods-CanvasTests-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-CanvasTests/Pods-CanvasTests-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -669,13 +671,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -690,13 +688,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -733,13 +727,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-CanvasViewService/Pods-CanvasViewService-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -754,13 +744,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-CanvasTests/Pods-CanvasTests-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-CanvasTests/Pods-CanvasTests-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1109,7 +1095,10 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = "$(inherited)  ";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					" ",
+				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../RCTNApps/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
@@ -1169,7 +1158,10 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_LDFLAGS = "$(inherited)  ";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					" ",
+				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../RCTNApps/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -1644,7 +1636,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "Packages/CanvasIPC" */ = {
+		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "CanvasIPC" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/CanvasIPC;
 		};
