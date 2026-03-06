@@ -172,12 +172,14 @@ export default function SettingsApp({
         />
       )}
 
-      <LoginModal
-        visible={loginModalVisible}
-        onClose={() => setLoginModalVisible(false)}
-        clientId={SETTINGS_CLIENT_ID}
-        mode="login_only"
-      />
+      {loginModalVisible && (
+        <LoginModal
+          visible
+          onClose={() => setLoginModalVisible(false)}
+          clientId={SETTINGS_CLIENT_ID}
+          mode="login_only"
+        />
+      )}
     </View>
   );
 }

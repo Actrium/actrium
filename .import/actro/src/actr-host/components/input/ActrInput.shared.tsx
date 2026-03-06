@@ -57,6 +57,12 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
 
   // 授权弹窗状态（已登录未授权时使用）
   const [showAuthorizeModal, setShowAuthorizeModal] = useState(false);
+  // 记录“这次弹登录/授权是由什么动作触发的”：
+  // - text_send: 登录成功后可自动续发文本
+  // - voice_start: 仅完成鉴权，不自动发送文本（等待用户再次长按）
+  const [pendingAuthAction, setPendingAuthAction] = useState<
+    'text_send' | 'voice_start' | null
+  >(null);
 
   const inputText = useInputStore((state) => state.inputs[appId]?.text || '');
   const editingMessageId = useInputStore(
@@ -242,7 +248,10 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     },
   });
 
-  const processMessageSend = async (content: string, options?: { isVoice?: boolean; skipAuthCheck?: boolean }) => {
+  const processMessageSend = async (
+    content: string,
+    options?: { isVoice?: boolean; skipAuthCheck?: boolean },
+  ) => {
     const { isVoice, skipAuthCheck } = options || {};
 
     if (connection?.reason) {
@@ -260,8 +269,11 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     if (!skipAuthCheck) {
       const { status, clientId } = await checkAuth();
       if (!handleAuthStatus(status, clientId)) {
+        // 记录触发鉴权的来源，供登录/授权成功后的回调决定是否续发文本。
+        setPendingAuthAction(isVoice ? 'voice_start' : 'text_send');
         return;
       }
+      setPendingAuthAction(null);
     }
 
     // 2. 处理编辑模式：若是在修改旧消息，发送前先从库中移除旧版本
@@ -329,6 +341,23 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     return reqMsg;
   };
 
+  const handleVoiceAuthPrecheck = useCallback(async (): Promise<boolean> => {
+    if (connection?.reason) {
+      GlobalAlert.alert(t('actr.auth.serviceInitFailed'), connection.reason);
+      return false;
+    }
+
+    const { status, clientId } = await checkAuth();
+    if (!handleAuthStatus(status, clientId)) {
+      // 语音在“开始录音前”被鉴权拦截时，仅标记为 voice_start，不做自动文本续发。
+      setPendingAuthAction('voice_start');
+      return false;
+    }
+
+    setPendingAuthAction(null);
+    return true;
+  }, [checkAuth, connection?.reason, handleAuthStatus, t]);
+
   const handleSend = () => {
     processMessageSend(inputText);
   };
@@ -356,6 +385,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     sendVoiceChunk,
     startVoice,
     endVoice,
+    beforeVoiceStart: handleVoiceAuthPrecheck,
   });
 
   return (
@@ -449,15 +479,23 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       />
 
       {/* Mobile 登录弹窗 */}
-      {isMobileVariant && authParams && (
+      {isMobileVariant && showLoginModal && authParams && (
         <LoginModal
-          visible={showLoginModal}
-          onClose={() => setShowLoginModal(false)}
+          visible
+          onClose={() => {
+            setShowLoginModal(false);
+            setAuthParams(null);
+            setPendingAuthAction(null);
+          }}
           clientId={authParams.clientId}
           appId={authParams.appId}
           onSuccess={() => {
-            // 登录+授权成功后直接发送消息，跳过权限检查
-            processMessageSend(inputText, { skipAuthCheck: true });
+            // 仅文本发送流程在登录后自动续发；语音长按流程只完成鉴权，不自动发送文本。
+            if (pendingAuthAction === 'text_send') {
+              processMessageSend(inputText, { skipAuthCheck: true });
+            }
+            setPendingAuthAction(null);
+            setAuthParams(null);
           }}
         />
       )}
@@ -468,8 +506,11 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
         onClose={() => setShowAuthorizeModal(false)}
         appId={appId}
         onSuccess={() => {
-          // 授权成功后直接发送消息，跳过权限检查
-          processMessageSend(inputText, { skipAuthCheck: true });
+          // 仅文本发送流程在授权后自动续发；语音长按流程只完成鉴权，不自动发送文本。
+          if (pendingAuthAction === 'text_send') {
+            processMessageSend(inputText, { skipAuthCheck: true });
+          }
+          setPendingAuthAction(null);
         }}
       />
     </View>

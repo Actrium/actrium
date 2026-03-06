@@ -130,12 +130,14 @@ export const useLogin = (): UseLoginResult => {
           await checkSession(loginRes.data);
         } else {
           setStep('login_options');
-          GlobalAlert.alert(t('actr.auth.loginFailed'), loginRes.message || t('common.unknownError'));
+          // 注意此处用原生弹窗
+          Alert.alert(t('actr.auth.loginFailed'), loginRes.message || t('common.unknownError'));
         }
       } catch {
         setLoading(false);
-        setStep('login_options');
-        GlobalAlert.alert(t('common.error'), t('actr.auth.loginFailed'));
+        setStep('login_options'); 
+        // 注意此处用原生弹窗
+        Alert.alert(t('common.error'), t('actr.auth.loginFailed'));
       }
     };
 
@@ -143,7 +145,8 @@ export const useLogin = (): UseLoginResult => {
       if (res.error) {
         setLoading(false);
         setStep('login_options');
-        GlobalAlert.alert(t('actr.auth.loginError'), res.message || t('common.unknownError'));
+        // 注意此处用原生弹窗
+        Alert.alert(t('actr.auth.loginError'), res.message || t('common.unknownError'));
         return;
       }
 
