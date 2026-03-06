@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { Icon } from '../../actr-host/components/Icon';
 import { SettingsBackHeader } from './SettingsBackHeader';
@@ -37,6 +38,7 @@ const getAboutPageUrl = (page: AboutPageKey, language: string): string => {
 
 export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProps) => {
   const { i18n } = useTranslation();
+  const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
   const [currentPage, setCurrentPage] = useState<AboutPageKey | null>(null);
 
   useEffect(() => {
@@ -50,15 +52,24 @@ export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProp
 
   if (currentPage && pageUrl) {
     return (
-      <View style={styles.webviewContainer}>
-        <WebView source={{ uri: pageUrl }} style={styles.webview} forceDarkOn={false} />
-        <TouchableOpacity
-          style={styles.floatingBackButton}
-          onPress={() => setCurrentPage(null)}
-          activeOpacity={0.7}
+      <View style={[styles.webviewContainer, { paddingBottom: bottomInset }]}>
+        <View
+          style={[
+            styles.webviewHeader,
+            {
+              height: topInset + 44,
+              paddingTop: topInset,
+            },
+          ]}
         >
-          <Text style={styles.floatingBackButtonText}>‹</Text>
-        </TouchableOpacity>
+          <SettingsBackHeader onBack={() => setCurrentPage(null)} marginBottom={0} />
+        </View>
+        <WebView
+          source={{ uri: pageUrl }}
+          style={styles.webview}
+          forceDarkOn={false}
+          contentInsetAdjustmentBehavior='never'
+        />
       </View>
     );
   }
@@ -127,27 +138,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
+  webviewHeader: {
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
   webview: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-  },
-  floatingBackButton: {
-    position: 'absolute',
-    top: 56,
-    left: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(58, 58, 60, 0.88)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
-  floatingBackButtonText: {
-    fontSize: 30,
-    color: '#fff',
-    fontWeight: '300',
-    marginTop: -4,
   },
   groupCard: {
     backgroundColor: '#1C1C1E',
