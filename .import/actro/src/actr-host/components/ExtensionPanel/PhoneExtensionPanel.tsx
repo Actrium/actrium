@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Animated, StyleSheet, Easing } from 'react-native';
-import { LAYOUT } from '../../constants';
+import { LAYOUT, CHAT_HEADER_HEIGHT } from '../../constants';
 import type { ExtensionPanelProps } from './types';
 
 /**
@@ -87,6 +87,7 @@ const PhoneExtensionPanel: React.FC<ExtensionPanelProps> = ({
         styles.panel,
         {
           width: width * 0.8,
+          paddingTop: CHAT_HEADER_HEIGHT,
           transform: [
             {
               translateX: slideAnim.interpolate({

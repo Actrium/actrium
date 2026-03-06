@@ -68,7 +68,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   onContractViolation,
   onEngineChange,
 }) => {
-  const insets = useSafeAreaInsets();
+  const { top: topInsetRaw } = useSafeAreaInsets();
   const gate = evaluateTabGate(tab);
 
   // 🆕 通过 tab.id 获取 appId
@@ -365,7 +365,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // 渲染三栏布局 - 使用纯 flex 布局，让 Yoga 自动适应
   // 不依赖 propsContainerWidth，避免 re-render
   const threeColumnStyle = styles.threeColumn;
-  const sheetTopOffset = insets.top;
+  const sheetTopOffset = topInsetRaw;
 
   const main = React.useMemo(() => <Main />, []);
 

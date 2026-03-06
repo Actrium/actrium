@@ -10,6 +10,7 @@ interface UseActrVoiceControllerParams {
     content: string,
     options?: { isVoice?: boolean; skipAuthCheck?: boolean },
   ) => Promise<any>;
+  beforeVoiceStart: () => Promise<boolean>;
   sendVoiceChunk: (chunk: Uint8Array) => Promise<unknown>;
   startVoice: (payload: any) => void;
   endVoice: () => Promise<unknown>;
@@ -28,7 +29,13 @@ export function useActrVoiceController(
   params: UseActrVoiceControllerParams,
 ): UseActrVoiceControllerResult {
   const { t } = useTranslation();
-  const { processVoiceMessageSend, sendVoiceChunk, startVoice, endVoice } = params;
+  const {
+    processVoiceMessageSend,
+    beforeVoiceStart,
+    sendVoiceChunk,
+    startVoice,
+    endVoice,
+  } = params;
 
   // 语音流本地缓冲：<1s 先入队，达到阈值后再按序发送。
   const chunkQueueRef = useRef<Uint8Array[]>([]);
@@ -87,6 +94,16 @@ export function useActrVoiceController(
 
     try {
       const reqMsg = await processVoiceMessageSend(t('actr.input.sendVoicePlaceholder'), { isVoice: true });
+      if (!reqMsg) {
+        console.warn('[Voice] threshold reached but request message is empty, aborting voice start');
+        isStartingRef.current = false;
+        isCommittedRef.current = false;
+        isSendingRef.current = false;
+        chunkQueueRef.current = [];
+        setVoiceRecording(false);
+        stopRecording();
+        return;
+      }
 
       if (stopRequestedRef.current) {
         console.log('[Voice] Stop requested during threshold commit, aborting');
@@ -130,6 +147,13 @@ export function useActrVoiceController(
   ]);
 
   const handleVoiceStart = useCallback(async () => {
+    const canStartVoice = await beforeVoiceStart();
+    if (!canStartVoice) {
+      setVoiceRecording(false);
+      setIsCancellingVoice(false);
+      return;
+    }
+
     const status = Camera.getMicrophonePermissionStatus();
 
     if (status === 'denied') {
@@ -190,7 +214,13 @@ export function useActrVoiceController(
       }
       GlobalAlert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingStartFailed'));
     }
-  }, [onThresholdReached, setVoiceRecording, startRecording, stopRecording]);
+  }, [
+    beforeVoiceStart,
+    onThresholdReached,
+    setVoiceRecording,
+    startRecording,
+    stopRecording,
+  ]);
 
   const handleVoiceEnd = useCallback(
     async (isCancelled: boolean) => {
