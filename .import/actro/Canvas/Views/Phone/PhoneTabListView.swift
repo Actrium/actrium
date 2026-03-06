@@ -117,9 +117,17 @@ struct PhoneTabCardView: View {
                         .fill(Color(hslString: tab.backgroundColor))
                         .frame(width: iconWidth, height: iconWidth)
                         .overlay {
-                            Image(systemName: "plus.viewfinder")
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.9))
+                            if let icon = tab.icon, let url = URL(string: icon) {
+                                KFImage(url)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: iconWidth, height: iconWidth)
+                                    .cornerRadius(iconWidth/2)
+                            } else {
+                                Image(systemName: "plus.viewfinder")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.white.opacity(0.9))
+                            }
                         }
                     
                     // 未读消息小红点
@@ -137,19 +145,10 @@ struct PhoneTabCardView: View {
                 .frame(width: iconWidth, height: iconWidth)
                 
                 // 标题
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tab.title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                    
-                    if let host = tab.url?.host() {
-                        Text(host)
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                }
+                Text(tab.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Color(hex: "#404040"))
+                    .lineLimit(1)
                 
                 Spacer()
                 
