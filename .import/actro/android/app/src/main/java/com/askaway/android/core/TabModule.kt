@@ -1,5 +1,7 @@
 package com.askaway.android.core
 
+import android.content.Context
+import android.view.inputmethod.InputMethodManager
 import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -85,9 +87,17 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     @ReactMethod
     fun exitSearch() {
         EventBus.getDefault().post(ReactModuleEvent(ReactModuleEvent.EVENT_EXIT_SEARCH))
-        if (reactApplicationContext.hasCurrentActivity()) {
-            reactApplicationContext.currentActivity?.runOnUiThread {
-                reactApplicationContext.currentActivity?.onBackPressed()
+        val activity = currentActivity
+        if (activity != null) {
+            activity.runOnUiThread {
+                try {
+                    val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    val view = activity.currentFocus ?: activity.window.decorView
+                    imm.hideSoftInputFromWindow(view.windowToken, 0)
+                } catch (e: Exception) {
+                    Log.e("TabModule", "Failed to hide keyboard", e)
+                }
+                activity.onBackPressed()
             }
         }
     }
