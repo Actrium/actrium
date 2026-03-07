@@ -1134,7 +1134,6 @@ async fn handle_actr_relay(
         return Ok(());
     }
 
-    // 验证 credential
     // Validate credential and retain claims for identity verification below.
     let claims = match AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await
     {
