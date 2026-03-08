@@ -1468,15 +1468,16 @@ async fn handle_route_candidates_request(
         }
     });
 
-    // Extract ws_address before consuming acl_filtered_candidates
-    let ws_address_by_id: std::collections::HashMap<ActrId, Option<String>> =
-        acl_filtered_candidates
-            .iter()
-            .map(|c| (c.actor_id.clone(), c.ws_address.clone()))
-            .collect();
+    // 提取 ws_address（rank_candidates 会 move candidates，需提前收集）
+    let ws_address_map: Vec<(ActrId, Option<String>)> = acl_filtered_candidates
+        .iter()
+        .map(|c| (c.actor_id.clone(), c.ws_address.clone()))
+        .collect();
 
+    // 排序：ACL 已过滤，相同 ActrType 即协议兼容，按 ranking_factors 顺序依次应用
+    // is_exact_match 标记在 LB 内部按 client_fingerprint 完成
     let ranked_actor_ids = LoadBalancer::rank_candidates(
-        acl_filtered_candidates,
+        &acl_filtered_candidates,
         req.criteria.as_ref(),
         req.client_fingerprint.trim(),
         Some(client_id),
@@ -1492,10 +1493,13 @@ async fn handle_route_candidates_request(
     let ws_address_map: Vec<actr_protocol::WsAddressEntry> = ranked_actor_ids
         .iter()
         .filter_map(|id| {
-            ws_address_by_id.get(id).map(|ws| actr_protocol::WsAddressEntry {
-                candidate_id: id.clone(),
-                ws_address: ws.clone(),
-            })
+            ws_address_map
+                .iter()
+                .find(|(a, _)| a == id)
+                .map(|(_, ws)| actr_protocol::WsAddressEntry {
+                    candidate_id: id.clone(),
+                    ws_address: ws.clone(),
+                })
         })
         .collect();
 
