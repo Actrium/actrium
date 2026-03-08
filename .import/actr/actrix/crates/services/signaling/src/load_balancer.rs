@@ -42,11 +42,15 @@ pub struct LoadBalancer;
 impl LoadBalancer {
     /// 根据选择标准对候选服务进行排序
     ///
+    /// 调用前提：候选已经过 ACL 过滤（realm 访问控制），且均与请求方 ActrType 匹配。
+    ///
     /// # 参数
-    /// - `candidates`: 候选服务列表
-    /// - `criteria`: 节点选择标准（包含排序因子、最小健康要求等）
-    /// - `client_id`: 可选的客户端 ID（用于 CLIENT_AFFINITY）
-    /// - `client_location`: 可选的客户端地理坐标 (latitude, longitude)（用于 NEAREST）
+    /// - `candidates`: 候选服务列表（已通过 ACL 过滤）
+    /// - `criteria`: 节点选择标准（排序因子、健康/依赖要求）
+    /// - `client_fingerprint`: 客户端 fingerprint（用于 EXACT_MATCH_FIRST 因子标记）
+    /// - `client_id`: 客户端 ID（用于 CLIENT_AFFINITY）
+    /// - `client_location`: 客户端地理坐标（用于 NEAREST）
+    ///
     /// # 返回
     /// 排序后的 ActrId 列表（最多返回 candidate_count 个）
     ///
@@ -55,7 +59,7 @@ impl LoadBalancer {
     /// 2. 按排序因子依次排序
     /// 3. 返回前 N 个候选
     pub fn rank_candidates(
-        mut candidates: Vec<ServiceInfo>,
+        candidates: &[ServiceInfo],
         criteria: Option<&NodeSelectionCriteria>,
         client_fingerprint: &str,
         client_id: Option<&str>,
@@ -70,9 +74,20 @@ impl LoadBalancer {
             Some(c) => c,
             None => {
                 platform::recording::info!("未指定选择标准，返回所有候选");
-                return candidates.into_iter().map(|s| s.actor_id).collect();
+                return candidates.iter().map(|s| s.actor_id.clone()).collect();
             }
         };
+
+        let mut candidates: Vec<ServiceInfo> = candidates.to_vec();
+
+        // 标记 is_exact_match：fingerprint 对比在 LB 内完成
+        if !client_fingerprint.is_empty() {
+            for c in &mut candidates {
+                let fp = c.service_spec.as_ref().map(|s| s.fingerprint.as_str()).unwrap_or("");
+                c.is_exact_match = fp == client_fingerprint;
+            }
+        }
+
 
         platform::recording::info!(
             "负载均衡排序: 候选数量={}, 排序因子数量={}",
@@ -97,15 +112,15 @@ impl LoadBalancer {
             return Vec::new();
         }
 
-        // 标记精确匹配（fingerprint 对比在 LB 内完成，供 ExactMatchFirst 因子使用）
-        if !client_fingerprint.is_empty() {
-            for c in &mut candidates {
-                let fp = c.service_spec.as_ref().map(|s| s.fingerprint.as_str()).unwrap_or("");
-                c.is_exact_match = fp == client_fingerprint;
-            }
+        // 3. 若启用 ExactMatchFirst 且存在非精确匹配候选，记录日志
+        if !client_fingerprint.is_empty() && candidates.iter().any(|c| !c.is_exact_match) {
+            platform::recording::warn!(
+                "路由结果中包含非精确匹配候选（fingerprint 不同但 ActrType 兼容）"
+            );
         }
 
-        // 3. 单次多键排序：按 ranking_factors 优先级依次作为主键/次键
+        // 4. 多键排序：按因子列表顺序依次比较，第一个不相等的因子决定结果
+        //    后续因子只在前面所有因子均相等时才生效（真正的优先级排序）
         let factors: Vec<NodeRankingFactor> = criteria
             .ranking_factors
             .iter()
@@ -124,15 +139,7 @@ impl LoadBalancer {
             });
         }
 
-        // 若存在非精确匹配候选且有 fingerprint，记录日志
-        if !client_fingerprint.is_empty() && candidates.iter().any(|c| !c.is_exact_match) {
-            platform::recording::warn!(
-                "⚠️  非精确 fingerprint 匹配候选被选入结果（client_fp={}）",
-                client_fingerprint
-            );
-        }
-
-        // 4. 返回前 N 个候选
+        // 5. 返回前 N 个候选
         let limit = criteria.candidate_count as usize;
         candidates
             .into_iter()
@@ -382,7 +389,7 @@ mod tests {
             create_test_service(2, "service-2"),
         ];
 
-        let ranked = LoadBalancer::rank_candidates(candidates, None, "", None, None);
+        let ranked = LoadBalancer::rank_candidates(&candidates, None, "", None, None);
         assert_eq!(ranked.len(), 2);
     }
 
@@ -401,15 +408,14 @@ mod tests {
             minimal_health_requirement: None,
         };
 
-        let ranked =
-            LoadBalancer::rank_candidates(candidates, Some(&criteria), "", None, None);
+        let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, None);
         assert_eq!(ranked.len(), 2);
     }
 
     #[test]
     fn test_empty_candidates() {
         let candidates = vec![];
-        let ranked = LoadBalancer::rank_candidates(candidates, None, "", None, None);
+        let ranked = LoadBalancer::rank_candidates(&candidates, None, "", None, None);
         assert_eq!(ranked.len(), 0);
     }
 
@@ -570,8 +576,7 @@ mod tests {
             minimal_dependency_requirement: None,
         };
 
-        let ranked =
-            LoadBalancer::rank_candidates(candidates, Some(&criteria), "", None, None);
+        let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, None);
 
         // 多键排序：power_reserve 为主键，mailbox_backlog 为次键
         // s1 和 s2 的 power 相同(0.8)，此时 backlog 决定顺序：s2(0.1) < s1(0.3)
@@ -603,8 +608,7 @@ mod tests {
             minimal_dependency_requirement: None,
         };
 
-        let ranked =
-            LoadBalancer::rank_candidates(candidates, Some(&criteria), "", None, None);
+        let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, None);
         assert_eq!(ranked.len(), 3); // 全部保留，顺序不变
     }
 
@@ -641,8 +645,7 @@ mod tests {
             minimal_dependency_requirement: None,
         };
 
-        let ranked =
-            LoadBalancer::rank_candidates(candidates, Some(&criteria), "", None, None);
+        let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, None);
         assert_eq!(ranked.len(), 0); // 全部被过滤
     }
 
@@ -685,13 +688,8 @@ mod tests {
             minimal_dependency_requirement: None,
         };
 
-        let ranked = LoadBalancer::rank_candidates(
-            candidates,
-            Some(&criteria),
-            "",
-            None,
-            client_location,
-        );
+        let ranked =
+            LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, client_location);
 
         // 排序结果应该是：北京(0km) < 上海(~1067km) < 深圳(~1943km)，无坐标的在最后
         assert_eq!(ranked.len(), 4);
@@ -701,4 +699,75 @@ mod tests {
         assert_eq!(ranked[3].serial_number, 4); // 无坐标
     }
 
+    // ========================================================================
+    // EXACT_MATCH_FIRST 因子排序测试
+    // ========================================================================
+
+    fn with_fingerprint(mut s: ServiceInfo, fp: &str) -> ServiceInfo {
+        use actr_protocol::ServiceSpec;
+        s.service_spec = Some(ServiceSpec {
+            name: s.service_name.clone(),
+            fingerprint: fp.to_string(),
+            description: None,
+            protobufs: vec![],
+            published_at: None,
+            tags: vec![],
+        });
+        s
+    }
+
+    #[test]
+    fn test_exact_match_first_factor() {
+        // s2 的 fingerprint 与 client_fingerprint 一致 → 精确匹配
+        let s1 = create_test_service(1, "api");
+        let s2 = with_fingerprint(create_test_service(2, "api"), "fp-v1");
+        let s3 = create_test_service(3, "api");
+
+        let candidates = vec![s1, s2, s3];
+        let criteria = NodeSelectionCriteria {
+            candidate_count: 10,
+            ranking_factors: vec![NodeRankingFactor::ExactMatchFirst as i32],
+            minimal_health_requirement: None,
+            minimal_dependency_requirement: None,
+        };
+
+        let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "fp-v1", None, None);
+
+        // 精确匹配的 s2 应该排第一
+        assert_eq!(ranked[0].serial_number, 2);
+        assert_eq!(ranked[1].serial_number, 1);
+        assert_eq!(ranked[2].serial_number, 3);
+    }
+
+    #[test]
+    fn test_exact_match_with_power_reserve() {
+        // s1、s3 的 fingerprint 与 client_fingerprint 一致 → 精确匹配
+        let mut s1 = with_fingerprint(create_test_service(1, "api"), "fp-v1");
+        s1.power_reserve = Some(0.3);
+
+        let mut s2 = create_test_service(2, "api"); // 无 fingerprint → 非精确
+        s2.power_reserve = Some(0.9);
+
+        let mut s3 = with_fingerprint(create_test_service(3, "api"), "fp-v1");
+        s3.power_reserve = Some(0.8);
+
+        let candidates = vec![s1, s2, s3];
+        let criteria = NodeSelectionCriteria {
+            candidate_count: 10,
+            ranking_factors: vec![
+                NodeRankingFactor::ExactMatchFirst as i32,
+                NodeRankingFactor::MaximumPowerReserve as i32,
+            ],
+            minimal_health_requirement: None,
+            minimal_dependency_requirement: None,
+        };
+
+        let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "fp-v1", None, None);
+
+        // ExactMatchFirst 优先：exact 组(s1,s3)排在 compat 组(s2)前面
+        // exact 组内再按 power 降序：s3(0.8) > s1(0.3)
+        assert_eq!(ranked[0].serial_number, 3); // exact, power=0.8
+        assert_eq!(ranked[1].serial_number, 1); // exact, power=0.3
+        assert_eq!(ranked[2].serial_number, 2); // compat, power=0.9（exact 优先，power 不能覆盖）
+    }
 }
