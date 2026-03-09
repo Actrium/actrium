@@ -5,7 +5,7 @@ import { HowItWorks } from "../../components/ui/HowItWorks";
 import { ServiceMetrics } from "./shared";
 import { CollapsibleCard } from "../../components/ui/CollapsibleCard";
 
-function KsLifecycleDiagram({ config }: { config: Record<string, unknown> }) {
+function SignerLifecycleDiagram({ config }: { config: Record<string, unknown> }) {
   const ttl = Number(config.key_ttl_seconds ?? 3600);
   const tolerance = Number(config.tolerance_seconds ?? 300);
 
@@ -22,7 +22,7 @@ function KsLifecycleDiagram({ config }: { config: Record<string, unknown> }) {
   const toleranceW = barW - activeW;
 
   // Flow section layout
-  const ksX = 300;  // KS center
+  const sgX = 300;  // Signer center
 
   return (
     <svg
@@ -31,65 +31,70 @@ function KsLifecycleDiagram({ config }: { config: Record<string, unknown> }) {
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
-        <marker id="ks-ab" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+        <marker id="sgn-ab" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
           <path d="M0,0 L7,2.5 L0,5" fill="#3b82f6" />
         </marker>
-        <marker id="ks-ag" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+        <marker id="sgn-ag" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
           <path d="M0,0 L7,2.5 L0,5" fill="#10b981" />
         </marker>
-        <marker id="ks-ao" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+        <marker id="sgn-ao" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
           <path d="M0,0 L7,2.5 L0,5" fill="#d97706" />
         </marker>
-        <marker id="ks-ap" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+        <marker id="sgn-ap" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
           <path d="M0,0 L7,2.5 L0,5" fill="#8b5cf6" />
         </marker>
-        <marker id="ks-ar" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+        <marker id="sgn-ar" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
           <path d="M0,0 L7,2.5 L0,5" fill="#9ca3af" />
         </marker>
       </defs>
 
       {/* ═══ Two API flows ═══ */}
 
-      {/* KS center box */}
-      <rect x={ksX - 56} y="26" width="112" height="48" rx="8" fill="#fef3c7" stroke="#d97706" strokeWidth="1.5" />
-      <text x={ksX} y="44" textAnchor="middle" fontSize="11" fontWeight="600" fill="#92400e">KS</text>
-      <text x={ksX} y="57" textAnchor="middle" fontSize="8" fill="#d97706">Cluster Key Store</text>
-      <text x={ksX} y="68" textAnchor="middle" fontSize="6.5" fontWeight="500" fill="#b45309" fontStyle="italic">cluster-private</text>
+      {/* Signer center box */}
+      <rect x={sgX - 56} y="26" width="112" height="48" rx="8" fill="#fef3c7" stroke="#d97706" strokeWidth="1.5" />
+      <text x={sgX} y="44" textAnchor="middle" fontSize="11" fontWeight="600" fill="#92400e">Signer</text>
+      <text x={sgX} y="57" textAnchor="middle" fontSize="8" fill="#d97706">Signing Oracle</text>
+      <text x={sgX} y="68" textAnchor="middle" fontSize="6.5" fontWeight="500" fill="#b45309" fontStyle="italic">cluster-private</text>
 
-      {/* SQLite box below KS */}
-      <rect x={ksX - 36} y="90" width="72" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1" />
-      <text x={ksX} y="106" textAnchor="middle" fontSize="8" fontWeight="600" fill="#475569">SQLite</text>
-      <line x1={ksX} y1="74" x2={ksX} y2="90" stroke="#94a3b8" strokeWidth="1" markerEnd="url(#ks-ar)" />
+      {/* SQLite box below Signer */}
+      <rect x={sgX - 36} y="90" width="72" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1" />
+      <text x={sgX} y="106" textAnchor="middle" fontSize="8" fontWeight="600" fill="#475569">SQLite</text>
+      <line x1={sgX} y1="74" x2={sgX} y2="90" stroke="#94a3b8" strokeWidth="1" markerEnd="url(#sgn-ar)" />
 
-      {/* ── Left: GenerateKey (AIS → KS) ── */}
-      <rect x="16" y="34" width="100" height="32" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.2" />
-      <text x="66" y="48" textAnchor="middle" fontSize="10" fontWeight="600" fill="#3730a3">AIS</text>
-      <text x="66" y="59" textAnchor="middle" fontSize="7" fill="#6366f1">Issuer</text>
+      {/* ── Left: AIS → Signer (key gen + sign) ── */}
+      <rect x="16" y="28" width="100" height="44" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.2" />
+      <text x="66" y="44" textAnchor="middle" fontSize="10" fontWeight="600" fill="#3730a3">AIS</text>
+      <text x="66" y="55" textAnchor="middle" fontSize="7" fill="#6366f1">Issuer</text>
+      <text x="66" y="65" textAnchor="middle" fontSize="6" fill="#818cf8">GenerateSigningKey</text>
 
-      {/* AIS → KS */}
-      <line x1="116" y1="44" x2={ksX - 58} y2="44" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ks-ab)" />
-      <text x="178" y="38" textAnchor="middle" fontSize="8" fontWeight="600" fill="#3b82f6">GenerateKey</text>
+      {/* AIS → Signer: GenerateSigningKey */}
+      <line x1="116" y1="40" x2={sgX - 58} y2="40" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#sgn-ab)" />
+      <text x="178" y="36" textAnchor="middle" fontSize="8" fontWeight="600" fill="#3b82f6">GenerateSigningKey</text>
 
-      {/* KS → AIS (response) */}
-      <line x1={ksX - 58} y1="58" x2="116" y2="58" stroke="#10b981" strokeWidth="1.5" markerEnd="url(#ks-ag)" />
-      <text x="178" y="56" textAnchor="middle" fontSize="7" fill="#10b981">public_key + key_id</text>
+      {/* Signer → AIS: key_id + verifying_key */}
+      <line x1={sgX - 58} y1="52" x2="116" y2="52" stroke="#10b981" strokeWidth="1.5" markerEnd="url(#sgn-ag)" />
+      <text x="178" y="62" textAnchor="middle" fontSize="7" fill="#10b981">key_id + verifying_key</text>
 
-      {/* ── Right: GetSecretKey (Verifier logic → KS) ── */}
-      <rect x="476" y="28" width="116" height="42" rx="6" fill="#f5f3ff" stroke="#8b5cf6" strokeWidth="1.2" strokeDasharray="4 2" />
-      <text x="534" y="44" textAnchor="middle" fontSize="9" fontWeight="600" fill="#5b21b6">Verifier logic</text>
-      <text x="534" y="56" textAnchor="middle" fontSize="7" fill="#8b5cf6">in Signaling + TURN</text>
-      <text x="534" y="65" textAnchor="middle" fontSize="6" fill="#a78bfa">AIdCredentialValidator</text>
+      {/* AIS → Signer: Sign(key_id, msg) */}
+      <line x1="116" y1="72" x2={sgX - 58} y2="72" stroke="#6366f1" strokeWidth="1.2" strokeDasharray="3 2" markerEnd="url(#sgn-ap)" />
+      <text x="178" y="82" textAnchor="middle" fontSize="7" fill="#6366f1">Sign(key_id, msg) → 64-byte sig</text>
 
-      {/* Verifier → KS */}
-      <line x1="476" y1="44" x2={ksX + 58} y2="44" stroke="#8b5cf6" strokeWidth="1.5" markerEnd="url(#ks-ap)" />
-      <text x="422" y="38" textAnchor="middle" fontSize="8" fontWeight="600" fill="#8b5cf6">GetSecretKey</text>
+      {/* ── Right: Verifier → Signer ── */}
+      <rect x="476" y="28" width="116" height="44" rx="6" fill="#f5f3ff" stroke="#8b5cf6" strokeWidth="1.2" strokeDasharray="4 2" />
+      <text x="534" y="44" textAnchor="middle" fontSize="9" fontWeight="600" fill="#5b21b6">Verifier</text>
+      <text x="534" y="55" textAnchor="middle" fontSize="7" fill="#8b5cf6">Signaling / TURN</text>
+      <text x="534" y="65" textAnchor="middle" fontSize="6" fill="#a78bfa">GetVerifyingKey</text>
 
-      {/* KS → Verifier (response) */}
-      <line x1={ksX + 58} y1="58" x2="476" y2="58" stroke="#8b5cf6" strokeWidth="1.5" markerEnd="url(#ks-ap)" />
-      <text x="422" y="56" textAnchor="middle" fontSize="7" fill="#8b5cf6">secret_key (for decrypt)</text>
+      {/* Verifier → Signer: GetVerifyingKey */}
+      <line x1="476" y1="40" x2={sgX + 58} y2="40" stroke="#8b5cf6" strokeWidth="1.5" markerEnd="url(#sgn-ap)" />
+      <text x="422" y="36" textAnchor="middle" fontSize="8" fontWeight="600" fill="#8b5cf6">GetVerifyingKey</text>
+
+      {/* Signer → Verifier: verifying_key */}
+      <line x1={sgX + 58} y1="52" x2="476" y2="52" stroke="#8b5cf6" strokeWidth="1.5" markerEnd="url(#sgn-ap)" />
+      <text x="422" y="62" textAnchor="middle" fontSize="7" fill="#8b5cf6">Ed25519 verifying key</text>
 
       {/* Auth note */}
-      <text x={ksX} y="124" textAnchor="middle" fontSize="7" fill="#94a3b8">
+      <text x={sgX} y="124" textAnchor="middle" fontSize="7" fill="#94a3b8">
         All requests authenticated via nonce-auth (HMAC-SHA256 + replay protection)
       </text>
 
@@ -111,7 +116,7 @@ function KsLifecycleDiagram({ config }: { config: Record<string, unknown> }) {
       </text>
       <text x={padL + activeW / 2} y={barY + 23} textAnchor="middle"
         fontSize="7" fill="#16a34a">
-        encrypt + decrypt
+        sign + verify
       </text>
 
       {/* Timeline bar — Tolerance */}
@@ -123,7 +128,7 @@ function KsLifecycleDiagram({ config }: { config: Record<string, unknown> }) {
       </text>
       <text x={padL + activeW + toleranceW / 2} y={barY + 23} textAnchor="middle"
         fontSize="7" fill="#b45309">
-        decrypt only
+        verify only
       </text>
 
       {/* Time markers */}
@@ -148,12 +153,12 @@ function KsLifecycleDiagram({ config }: { config: Record<string, unknown> }) {
       {/* Legend */}
       <rect x={padL} y="268" width="12" height="12" rx="2" fill="#dcfce7" stroke="#22c55e" strokeWidth="0.8" />
       <text x={padL + 18} y="278" fontSize="8" fill="#475569">
-        GenerateKey returns public key; GetSecretKey returns private key
+        GenerateSigningKey returns key_id + Ed25519 verifying key; Sign returns 64-byte signature
       </text>
 
       <rect x={padL} y="286" width="12" height="12" rx="2" fill="#fef3c7" stroke="#f59e0b" strokeWidth="0.8" />
       <text x={padL + 18} y="296" fontSize="8" fill="#475569">
-        GetSecretKey still works (verify old credentials); GenerateKey uses new key
+        GetVerifyingKey still works (verify old credentials); GenerateSigningKey uses new key
       </text>
 
       <rect x={padL} y="304" width="12" height="12" rx="2" fill="#fee2e2" stroke="#f87171" strokeWidth="0.8" />
@@ -164,7 +169,7 @@ function KsLifecycleDiagram({ config }: { config: Record<string, unknown> }) {
   );
 }
 
-export function KsService() {
+export function SignerService() {
   const [data, setData] = useState<ServiceDetail | null>(null);
   const [keys, setKeys] = useState<KeyEntry[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -175,8 +180,8 @@ export function KsService() {
   const fetchData = useCallback(async () => {
     try {
       const [d, k] = await Promise.all([
-        api.getServiceDetail("ks"),
-        api.getKsKeys().catch(() => ({ keys: [], total_count: 0 })),
+        api.getServiceDetail("signer"),
+        api.getSignerKeys().catch(() => ({ keys: [], total_count: 0 })),
       ]);
       setData(d);
       setKeys(k.keys);
@@ -207,58 +212,63 @@ export function KsService() {
 
   return (
     <ServicePageLayout
-      title="KS Service"
-      description="Cluster Key Store — generates and manages EC key pairs for credential encryption, shared across the Actrix cluster and not exposed to clients"
+      title="Signer Service"
+      description="Signing Oracle — generates Ed25519 key pairs and signs on behalf of AIS; private keys never leave the process"
     >
       <StatusSection
         enabled={data.enabled}
         healthy={data.status?.is_healthy}
-        disabledHint={<>This service is not enabled. Set the KS bit (bit 4) in the <code>enable</code> bitmask to activate it.</>}
+        disabledHint={<>This service is not enabled. Set the Signer bit (bit 4) in the <code>enable</code> bitmask to activate it.</>}
       />
 
-      {data.enabled && <ServiceMetrics status={data.status} storageKey="ks" />}
+      {data.enabled && <ServiceMetrics status={data.status} storageKey="signer" />}
 
       {data.config && (
-        <HowItWorks storageKey="ks">
+        <HowItWorks storageKey="signer">
           <p className="text-xs text-gray-500 mb-4">
-            KS exposes two core APIs: <strong>GenerateKey</strong> creates an EC key pair, stores it
-            in SQLite, and returns the public key to AIS for encrypting credentials.
-            <strong> GetSecretKey</strong> returns the private key to the verifier process
-            so it can ECIES-decrypt and verify client credentials. Currently Signaling and TURN
-            both act as verifiers via the shared <code className="text-[11px] bg-gray-100 px-1 rounded">AIdCredentialValidator</code>.
-            Both APIs require nonce-auth (HMAC-SHA256 + one-time nonce).
-            Keys follow a lifecycle: active for issuing + verifying, then a tolerance window
-            for verification only, after which they are lazily cleaned up.
+            Signer exposes three core APIs: <strong>GenerateSigningKey</strong> creates an Ed25519 key pair,
+            stores the private key in SQLite, and returns the <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> and
+            verifying key (public key) to AIS. <strong>Sign</strong> takes a <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> and
+            message, signs with the stored private key, and returns a 64-byte Ed25519 signature — the private
+            key never leaves the Signer process. <strong>GetVerifyingKey</strong> allows verifiers (Signaling,
+            TURN) to fetch the Ed25519 public key by <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> for
+            credential verification. All APIs require nonce-auth (HMAC-SHA256 + one-time nonce).
+            Keys follow a lifecycle: active for signing + verifying, then a tolerance window for
+            verification only, after which they are lazily cleaned up.
           </p>
-          <KsLifecycleDiagram config={data.config} />
+          <SignerLifecycleDiagram config={data.config} />
 
           <div className="mt-5 space-y-2 text-xs text-gray-500 border-t border-gray-100 pt-4">
             <p className="font-semibold text-gray-600">Key concepts</p>
             <ul className="list-disc pl-4 space-y-1.5">
               <li>
-                <strong className="text-gray-600">Cluster-private</strong> — KS is an internal service
+                <strong className="text-gray-600">Cluster-private</strong> — Signer is an internal service
                 shared across the Actrix cluster. It is never exposed to external clients; only
                 other cluster services (AIS, Signaling, TURN) communicate with it via authenticated gRPC.
               </li>
               <li>
-                <strong className="text-gray-600">GenerateKey</strong> — AIS calls this to get a fresh
-                public key for ECIES encryption. The private key stays in KS's SQLite.
+                <strong className="text-gray-600">GenerateSigningKey</strong> — AIS calls this to get a fresh
+                Ed25519 key pair. Only the verifying key (public) is returned; the signing key stays in Signer's SQLite.
               </li>
               <li>
-                <strong className="text-gray-600">GetSecretKey</strong> — the verifier process calls
+                <strong className="text-gray-600">Sign</strong> — AIS calls this with a
+                <code className="text-[11px] bg-gray-100 px-1 rounded mx-1">key_id</code> and message bytes to
+                produce a 64-byte Ed25519 signature. The private key is never exposed over gRPC.
+              </li>
+              <li>
+                <strong className="text-gray-600">GetVerifyingKey</strong> — verifier processes call
                 this with a <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> to
-                retrieve the private key and ECIES-decrypt a client's credential. Currently
-                both Signaling (WebSocket auth) and TURN (relay auth) use this path via
-                the shared <code className="text-[11px] bg-gray-100 px-1 rounded">AIdCredentialValidator</code>.
+                retrieve the Ed25519 public key and verify client credentials. Currently
+                both Signaling (WebSocket auth) and TURN (relay auth) use this path.
               </li>
               <li>
                 <strong className="text-gray-600">key_ttl_seconds</strong> — how long a key pair is
-                active. During this window both GenerateKey (for new credentials) and GetSecretKey
+                active. During this window both Sign (for new credentials) and GetVerifyingKey
                 (for verification) work. AIS refreshes before expiry.
               </li>
               <li>
                 <strong className="text-gray-600">tolerance_seconds</strong> — grace period after
-                expiry. Only GetSecretKey still works (verify old credentials); GenerateKey
+                expiry. Only GetVerifyingKey still works (verify old credentials); Sign
                 will use a newer key.
               </li>
             </ul>
@@ -267,10 +277,10 @@ export function KsService() {
       )}
 
       {data.config_fields && (
-        <ConfigSection storageKey="ks" fields={data.config_fields} onRefresh={fetchData} />
+        <ConfigSection storageKey="signer" fields={data.config_fields} onRefresh={fetchData} />
       )}
 
-      <CollapsibleCard storageKey="ks_keys" title="Keys">
+      <CollapsibleCard storageKey="signer_keys" title="Keys">
         <div className="flex items-center justify-between mb-3">
           <span className="text-xs text-gray-500">
             {keys.length} of {totalCount} total
@@ -284,7 +294,7 @@ export function KsService() {
                 setCleaning(true);
                 setCleanupMsg("");
                 try {
-                  const r = await api.cleanupKsKeys();
+                  const r = await api.cleanupSignerKeys();
                   setCleanupMsg(`Deleted ${r.deleted}, ${r.remaining} remaining`);
                   fetchData();
                 } catch {

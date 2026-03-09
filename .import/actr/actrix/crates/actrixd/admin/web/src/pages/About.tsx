@@ -3,7 +3,7 @@ export function AboutPage() {
     <div className="mx-auto max-w-4xl space-y-4 p-6">
       <h1 className="text-2xl font-bold text-gray-900">About Actrix</h1>
       <p className="text-sm text-gray-600 leading-6">
-        Actrix is an open-source, multi-tenant real-time communication stack with KS, AIS, Signaling, STUN/TURN, and control-plane tooling.
+        Actrix is an open-source, multi-tenant real-time communication stack with Signer, AIS, Signaling, STUN/TURN, and control-plane tooling.
       </p>
       <div className="space-y-3 text-sm text-gray-700 leading-6">
         <p>License: Apache 2.0</p>

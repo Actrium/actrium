@@ -26,7 +26,7 @@ const nodeSections = [
   },
   {
     title: "HTTP Binding",
-    desc: "Foundation for Signaling, AIS, KS, and Control",
+    desc: "Foundation for Signaling, AIS, Signer, and Control",
     keys: ["bind.http"],
   },
   {
@@ -81,18 +81,18 @@ export function Overview2Page() {
         }
 
         const ENABLE_BITS: Record<string, number> = {
-          Signaling: 1, STUN: 2, TURN: 4, AIS: 8, KS: 16,
+          Signaling: 1, STUN: 2, TURN: 4, AIS: 8, Signer: 16,
         };
         const serviceOn = (name: string) =>
           (enableMask & (ENABLE_BITS[name] ?? 0)) !== 0 || name === "Control";
 
         const pillRoutes: Record<string, string> = {
-          Admin: "/admin", Control: "/admin/services/control", KS: "/admin/services/ks",
+          Admin: "/admin", Control: "/admin/services/control", Signer: "/admin/services/signer",
           AIS: "/admin/services/ais", Signaling: "/admin/services/signaling",
           STUN: "/admin/services/stun", TURN: "/admin/services/turn",
         };
         const pillHoverStrokes: Record<string, string> = {
-          Admin: "#6366f1", Control: "#d97706", KS: "#d97706",
+          Admin: "#6366f1", Control: "#d97706", Signer: "#d97706",
           AIS: "#16a34a", Signaling: "#16a34a", STUN: "#16a34a", TURN: "#16a34a",
         };
         const pill = (x: number, y: number, label: string, on: boolean, w = 84, colors?: { fill: string; stroke: string; text: string }) => {
@@ -111,7 +111,7 @@ export function Overview2Page() {
           );
         };
         const controlColors = { fill: "#eef2ff", stroke: "#6366f1", text: "#3730a3" };
-        const ksColors = { fill: "#fef3c7", stroke: "#d97706", text: "#92400e" };
+        const signerColors = { fill: "#fef3c7", stroke: "#d97706", text: "#92400e" };
 
         return (
           <ServicePageLayout
@@ -199,8 +199,8 @@ export function Overview2Page() {
 
                   {/* 7 pills: w=130, gap=12 */}
                   {pill(16, 41, "Admin", true, 130, controlColors)}
-                  {pill(158, 41, "Control", true, 130, ksColors)}
-                  {pill(300, 41, "KS", serviceOn("KS"), 130, ksColors)}
+                  {pill(158, 41, "Control", true, 130, signerColors)}
+                  {pill(300, 41, "Signer", serviceOn("Signer"), 130, signerColors)}
                   {pill(442, 41, "AIS", serviceOn("AIS"), 130)}
                   {pill(584, 41, "Signaling", serviceOn("Signaling"), 130)}
                   {pill(726, 41, "STUN", serviceOn("STUN"), 130)}
@@ -214,7 +214,7 @@ export function Overview2Page() {
                   <text x={791} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}</text>
                   <text x={933} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}, 49152-65535</text>
 
-                  {/* Cluster internal label under Control + KS */}
+                  {/* Cluster internal label under Control + Signer */}
                   <line x1={158} y1={93} x2={430} y2={93} stroke="#d97706" strokeWidth={0.6} opacity={0.5} />
                   <text x={294} y={101} textAnchor="middle" fontSize={7} fill="#92400e" opacity={0.6}>cluster internal service</text>
                 </g>

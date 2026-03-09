@@ -10,7 +10,7 @@ import { StunService } from "./pages/services/StunService";
 import { TurnService } from "./pages/services/TurnService";
 import { SignalingService } from "./pages/services/SignalingService";
 import { AisService } from "./pages/services/AisService";
-import { KsService } from "./pages/services/KsService";
+import { SignerService } from "./pages/services/SignerService";
 import { MfrService } from "./pages/services/MfrService";
 import { Overview2Page } from "./pages/general/Overview2Page";
 import { RecordingSection } from "./pages/platform/RecordingSection";
@@ -53,7 +53,7 @@ export function App() {
             <Route path="services/turn" element={<TurnService />} />
             <Route path="services/signaling" element={<SignalingService />} />
             <Route path="services/ais" element={<AisService />} />
-            <Route path="services/ks" element={<KsService />} />
+            <Route path="services/signer" element={<SignerService />} />
             <Route path="mfr" element={<MfrService />} />
           </Route>
           <Route path="*" element={<Navigate to="/admin" replace />} />
