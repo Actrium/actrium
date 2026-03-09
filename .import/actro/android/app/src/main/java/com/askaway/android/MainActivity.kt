@@ -160,9 +160,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             viewModel.toggleMarkStatus(activeModel)
         }
         // 设置 item 点击事件
-        activeRecyclerAdapter.onItemClick = { activeModel ->
+        activeRecyclerAdapter.onItemClick = { activeModel, view ->
             // 显示 flRNContent
-            showReactNativeView()
+            showReactNativeView(view)
             // 遍历 flRNContent 的子 view，将 tag == activeModel.id 的 view bringToFront
             for (i in 0 until binding.flRNContent.childCount) {
                 val child = binding.flRNContent.getChildAt(i)
@@ -369,23 +369,103 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     /**
      * 从底部显示 ReactNative 视图
      */
-    private fun showReactNativeView() {
+    private fun showReactNativeView(sourceView: View? = null) {
         if (isReactNativeVisible) return
-
         isReactNativeVisible = true
-        val startY = binding.flReactNative.height.toFloat()
 
-        Log.d("MainActivity", "showReactNativeView - height: ${binding.flReactNative.height}, startY: $startY")
+        if (sourceView != null) {
+            // Reset all transformation properties to default to ensure accurate measurements
+            binding.flReactNative.translationX = 0f
+            binding.flReactNative.translationY = 0f
+            binding.flReactNative.scaleX = 1f
+            binding.flReactNative.scaleY = 1f
+            binding.flReactNative.pivotX = 0f
+            binding.flReactNative.pivotY = 0f
+            binding.flReactNative.clipBounds = null
 
-        // 确保起始位置在底部
-        binding.flReactNative.translationY = startY
-        binding.flReactNative.visibility = View.VISIBLE
+            // Ensure visibility is INVISIBLE (not GONE) so getLocationInWindow works correctly
+            if (binding.flReactNative.visibility == View.GONE) {
+                binding.flReactNative.visibility = View.INVISIBLE
+            }
 
-        // 创建从底部滑入的动画
-        ObjectAnimator.ofFloat(binding.flReactNative, "translationY", startY, 0f).apply {
-            duration = 300
-            interpolator = DecelerateInterpolator()
-            start()
+            // Ensure view has valid dimensions, otherwise fallback to slide up after layout
+            if ((binding.flReactNative.width == 0 || binding.flReactNative.height == 0)) {
+                 isReactNativeVisible = false
+                 binding.flReactNative.post { showReactNativeView(sourceView) }
+                 return
+            }
+
+            // Top-Aligned Expand Animation (Container Transform)
+
+            val sourceLoc = IntArray(2)
+            sourceView.getLocationInWindow(sourceLoc)
+
+            val targetLoc = IntArray(2)
+            binding.flReactNative.getLocationInWindow(targetLoc)
+
+            // 1. Calculate Uniform Scale based on Width
+            val scale = sourceView.width.toFloat() / binding.flReactNative.width
+
+            // 2. Calculate translations to align Top-Left corners
+            // Since we reset translation to 0 given targetLoc is based on current state (0 translation),
+            // targetLoc represents the "neutral" position.
+            val startX = sourceLoc[0] - targetLoc[0].toFloat()
+            val startY = sourceLoc[1] - targetLoc[1].toFloat()
+
+            // 3. Setup initial properties (Pivot Top-Left)
+            binding.flReactNative.pivotX = 0f
+            binding.flReactNative.pivotY = 0f
+            binding.flReactNative.translationX = startX
+            binding.flReactNative.translationY = startY
+            binding.flReactNative.scaleX = scale
+            binding.flReactNative.scaleY = scale
+
+            // 4. Setup Clipping (Reveal Bottom)
+            // Visual height needs to match source height relative to the scaled view
+            val startVisibleHeight = sourceView.height.toFloat() / scale
+            val startRect = android.graphics.Rect(0, 0, binding.flReactNative.width, startVisibleHeight.toInt())
+            binding.flReactNative.clipBounds = startRect
+
+            binding.flReactNative.visibility = View.VISIBLE
+
+            val set = android.animation.AnimatorSet()
+
+            // Animate Clip Bounds
+            val clipAnimator = android.animation.ValueAnimator.ofInt(startRect.bottom, binding.flReactNative.height)
+            clipAnimator.addUpdateListener { animation ->
+                val valHeight = animation.animatedValue as Int
+                if (valHeight >= binding.flReactNative.height - 1) {
+                    binding.flReactNative.clipBounds = null
+                } else {
+                    binding.flReactNative.clipBounds = android.graphics.Rect(0, 0, binding.flReactNative.width, valHeight)
+                }
+            }
+
+            set.playTogether(
+                ObjectAnimator.ofFloat(binding.flReactNative, "translationX", startX, 0f),
+                ObjectAnimator.ofFloat(binding.flReactNative, "translationY", startY, 0f),
+                ObjectAnimator.ofFloat(binding.flReactNative, "scaleX", scale, 1f),
+                ObjectAnimator.ofFloat(binding.flReactNative, "scaleY", scale, 1f),
+                clipAnimator
+            )
+            set.duration = 350
+            set.interpolator = DecelerateInterpolator()
+            set.start()
+        } else {
+            val startY = binding.flReactNative.height.toFloat()
+
+            Log.d("MainActivity", "showReactNativeView - height: ${binding.flReactNative.height}, startY: $startY")
+
+            // 确保起始位置在底部
+            binding.flReactNative.translationY = startY
+            binding.flReactNative.visibility = View.VISIBLE
+
+            // 创建从底部滑入的动画
+            ObjectAnimator.ofFloat(binding.flReactNative, "translationY", startY, 0f).apply {
+                duration = 300
+                interpolator = DecelerateInterpolator()
+                start()
+            }
         }
     }
 
