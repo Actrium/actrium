@@ -1,7 +1,7 @@
+use crate::MfrError;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use crate::MfrError;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -98,10 +98,12 @@ impl ActrPackage {
     }
 
     pub async fn get_by_id(pool: &SqlitePool, id: i64) -> Result<Option<Self>, MfrError> {
-        Ok(sqlx::query_as::<_, ActrPackage>("SELECT * FROM mfr_package WHERE id = ?")
-            .bind(id)
-            .fetch_optional(pool)
-            .await?)
+        Ok(
+            sqlx::query_as::<_, ActrPackage>("SELECT * FROM mfr_package WHERE id = ?")
+                .bind(id)
+                .fetch_optional(pool)
+                .await?,
+        )
     }
 
     pub async fn get_by_type(pool: &SqlitePool, type_str: &str) -> Result<Option<Self>, MfrError> {

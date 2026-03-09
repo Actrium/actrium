@@ -1,4 +1,8 @@
-use axum::{http::StatusCode, response::{IntoResponse, Response}, Json};
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
@@ -48,7 +52,10 @@ impl IntoResponse for MfrError {
             MfrError::VerificationFailed(_) | MfrError::ChallengeNotFound => {
                 (StatusCode::BAD_REQUEST, self.to_string())
             }
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal error".to_string()),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal error".to_string(),
+            ),
         };
         (status, Json(json!({"error": message}))).into_response()
     }

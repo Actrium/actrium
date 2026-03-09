@@ -996,7 +996,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "test".to_string(),
                 name: "test".to_string(),
-            version: "v1".to_string(),
+                version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         }
@@ -1008,7 +1008,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: manufacturer.to_string(),
                 name: name.to_string(),
-            version: "v1".to_string(),
+                version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id },
         }
@@ -1460,7 +1460,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "acme".to_string(),
                 name: "worker".to_string(),
-            version: "v1".to_string(),
+                version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1470,7 +1470,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "acme".to_string(),
                 name: "worker".to_string(),
-            version: "v1".to_string(),
+                version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1480,7 +1480,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "other".to_string(),
                 name: "service".to_string(),
-            version: "v1".to_string(),
+                version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1534,7 +1534,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "acme".to_string(),
                 name: "service1".to_string(),
-            version: "v1".to_string(),
+                version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1544,7 +1544,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "vendor".to_string(),
                 name: "service2".to_string(),
-            version: "v1".to_string(),
+                version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };

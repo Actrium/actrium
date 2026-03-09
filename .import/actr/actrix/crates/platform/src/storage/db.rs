@@ -120,11 +120,9 @@ impl Database {
         .await?;
 
         // Migrate: add ws_address column if it doesn't exist (for existing databases)
-        let _ = sqlx::query(
-            "ALTER TABLE pending_registration ADD COLUMN ws_address TEXT",
-        )
-        .execute(&self.pool)
-        .await; // intentionally ignore error (column may already exist)
+        let _ = sqlx::query("ALTER TABLE pending_registration ADD COLUMN ws_address TEXT")
+            .execute(&self.pool)
+            .await; // intentionally ignore error (column may already exist)
 
         // MFR (Manufacturer Registry) tables
         sqlx::query(
@@ -178,11 +176,9 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_mfr_package_type ON mfr_package(type_str)",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_mfr_package_type ON mfr_package(type_str)")
+            .execute(&self.pool)
+            .await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_mfr_package_mfr ON mfr_package(mfr_id, status)",

@@ -1,8 +1,8 @@
+use crate::MfrError;
 use base64::Engine as _;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use crate::MfrError;
 
 const CHALLENGE_TTL_SECS: i64 = 24 * 3600; // 24 hours
 

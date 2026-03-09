@@ -1,13 +1,13 @@
 //! MFR (Manufacturer Registry) HTTP handlers
 
-use std::sync::Arc;
+use crate::{MfrError, MfrManager, manager::PublishRequest, model::MfrStatus};
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, post},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use crate::{MfrError, MfrManager, model::MfrStatus, manager::PublishRequest};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct MfrState {

@@ -83,7 +83,11 @@ impl LoadBalancer {
         // 标记 is_exact_match：fingerprint 对比在 LB 内完成
         if !client_fingerprint.is_empty() {
             for c in &mut candidates {
-                let fp = c.service_spec.as_ref().map(|s| s.fingerprint.as_str()).unwrap_or("");
+                let fp = c
+                    .service_spec
+                    .as_ref()
+                    .map(|s| s.fingerprint.as_str())
+                    .unwrap_or("");
                 c.is_exact_match = fp == client_fingerprint;
             }
         }
@@ -285,32 +289,31 @@ impl LoadBalancer {
         b: &ServiceInfo,
         client_location: Option<(f64, f64)>,
     ) -> std::cmp::Ordering {
-        // 距离近者排前面，复用 haversine 逻辑
-        if let (
-            Some((clat, clon)),
-            Some(a_loc),
-            Some(b_loc),
-            Some(a_lat),
-            Some(a_lon),
-            Some(b_lat),
-            Some(b_lon),
-        ) = (
-            client_location,
-            &a.geo_location,
-            &b.geo_location,
-            a.geo_location.as_ref().and_then(|l| l.latitude),
-            a.geo_location.as_ref().and_then(|l| l.longitude),
-            b.geo_location.as_ref().and_then(|l| l.latitude),
-            b.geo_location.as_ref().and_then(|l| l.longitude),
-        ) {
-            let _ = (a_loc, b_loc); // used for presence check above
-            let dist_a = crate::geo::haversine_distance(clat, clon, a_lat, a_lon);
-            let dist_b = crate::geo::haversine_distance(clat, clon, b_lat, b_lon);
-            return dist_a
-                .partial_cmp(&dist_b)
-                .unwrap_or(std::cmp::Ordering::Equal);
+        use crate::geo::haversine_distance;
+        if let Some((lat, lon)) = client_location {
+            let da = a.geo_location.as_ref().and_then(|l| {
+                l.latitude
+                    .zip(l.longitude)
+                    .map(|(la, lo)| haversine_distance(lat, lon, la, lo))
+            });
+            let db = b.geo_location.as_ref().and_then(|l| {
+                l.latitude
+                    .zip(l.longitude)
+                    .map(|(la, lo)| haversine_distance(lat, lon, la, lo))
+            });
+            match (da, db) {
+                (Some(da), Some(db)) => da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        } else {
+            match (&a.geo_location, &b.geo_location) {
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            }
         }
-        std::cmp::Ordering::Equal
     }
 
     fn cmp_affinity(
@@ -331,19 +334,33 @@ impl LoadBalancer {
         }
     }
 
-}
-
-#[cfg(test)]
-impl LoadBalancer {
-    pub fn sort_by_power_reserve(candidates: &mut [ServiceInfo]) {
+    /// 按剩余处理能力排序（供测试直接调用）
+    #[cfg(test)]
+    fn sort_by_power_reserve(candidates: &mut [ServiceInfo]) {
         candidates.sort_by(Self::cmp_power_reserve);
     }
 
-    pub fn sort_by_mailbox_backlog(candidates: &mut [ServiceInfo]) {
+    /// 按消息积压排序（供测试直接调用）
+    #[cfg(test)]
+    fn sort_by_mailbox_backlog(candidates: &mut [ServiceInfo]) {
         candidates.sort_by(Self::cmp_mailbox_backlog);
     }
 
-    pub fn sort_by_affinity(candidates: &mut [ServiceInfo], client_id: Option<&str>) {
+    /// 按精确匹配优先排序（供测试直接调用）
+    #[cfg(test)]
+    fn sort_by_exact_match(candidates: &mut [ServiceInfo]) {
+        candidates.sort_by(Self::cmp_exact_match);
+    }
+
+    /// 按地理距离排序（供测试直接调用）
+    #[cfg(test)]
+    fn sort_by_distance(candidates: &mut [ServiceInfo], client_location: Option<(f64, f64)>) {
+        candidates.sort_by(|a, b| Self::cmp_distance(a, b, client_location));
+    }
+
+    /// 按客户端会话粘滞排序（供测试直接调用）
+    #[cfg(test)]
+    fn sort_by_affinity(candidates: &mut [ServiceInfo], client_id: Option<&str>) {
         candidates.sort_by(|a, b| Self::cmp_affinity(a, b, client_id));
     }
 }
@@ -732,7 +749,8 @@ mod tests {
             minimal_dependency_requirement: None,
         };
 
-        let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "fp-v1", None, None);
+        let ranked =
+            LoadBalancer::rank_candidates(&candidates, Some(&criteria), "fp-v1", None, None);
 
         // 精确匹配的 s2 应该排第一
         assert_eq!(ranked[0].serial_number, 2);
@@ -763,7 +781,8 @@ mod tests {
             minimal_dependency_requirement: None,
         };
 
-        let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "fp-v1", None, None);
+        let ranked =
+            LoadBalancer::rank_candidates(&candidates, Some(&criteria), "fp-v1", None, None);
 
         // ExactMatchFirst 优先：exact 组(s1,s3)排在 compat 组(s2)前面
         // exact 组内再按 power 降序：s3(0.8) > s1(0.3)

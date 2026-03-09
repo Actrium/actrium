@@ -3,7 +3,10 @@
 //! 提供厂商注册、域名验证、Actor 包发布与查询的 HTTP API 服务
 
 use crate::service::HttpRouterService;
-use actrix_mfr::{MfrManager, handlers::{MfrState, create_router}};
+use actrix_mfr::{
+    MfrManager,
+    handlers::{MfrState, create_router},
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use axum::Router;

@@ -129,6 +129,11 @@ impl ServiceRegistryStorage {
         .await
         .with_context(|| "Failed to create service_registry table")?;
 
+        // 迁移：为旧版 service_registry 表添加 ws_address 列
+        let _ = sqlx::query("ALTER TABLE service_registry ADD COLUMN ws_address TEXT")
+            .execute(&self.pool)
+            .await; // 若列已存在则忽略错误
+
         platform::recording::info!("Database schema initialized");
         Ok(())
     }
@@ -528,7 +533,6 @@ impl ServiceRegistryStorage {
             valid_services: (total - expired) as u64,
         })
     }
-
 }
 
 /// 缓存统计信息

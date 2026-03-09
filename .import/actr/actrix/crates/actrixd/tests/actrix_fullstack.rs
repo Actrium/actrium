@@ -5,6 +5,7 @@ use actr_protocol::{
     route_candidates_response, signaling_envelope, signaling_to_actr,
 };
 use base64::Engine as _;
+use ed25519_dalek::VerifyingKey;
 use futures::{SinkExt, StreamExt};
 use ks::{GrpcClient, GrpcClientConfig};
 use platform::aid::credential::validator::AIdCredentialValidator;
@@ -485,10 +486,8 @@ async fn connect_ws_authenticated(
     ok: &register_response::RegisterOk,
 ) -> (WsWrite, WsRead) {
     let actor_id_str = ok.actr_id.to_string_repr();
-    let signature_b64 =
-        base64::engine::general_purpose::STANDARD.encode(&ok.credential.signature);
-    let claims_b64 =
-        base64::engine::general_purpose::STANDARD.encode(&ok.credential.claims);
+    let claims_b64 = base64::engine::general_purpose::STANDARD.encode(&ok.credential.claims);
+    let signature_b64 = base64::engine::general_purpose::STANDARD.encode(&ok.credential.signature);
     let key_id = ok.credential.key_id;
     let ws_url = format!(
         "ws://127.0.0.1:{}/signaling/ws?actor_id={}&key_id={}&claims={}&signature={}",
@@ -1885,7 +1884,8 @@ async fn signaling_discovery_cross_realm_acl_allow() {
 
     let (_service_write, _service_read, _service_ok) = ws_register_in_realm(
         harness.port,
-        "acme", "svc-cross-realm",
+        "acme",
+        "svc-cross-realm",
         2002,
         Some(service_acl),
     )
@@ -1954,7 +1954,8 @@ async fn signaling_route_candidates_cross_realm_isolated() {
         &mut client_write,
         &mut client_read,
         &client_ok,
-        "acme", "svc-cross-route",
+        "acme",
+        "svc-cross-route",
     )
     .await;
     assert!(
@@ -1986,7 +1987,8 @@ async fn signaling_route_candidates_cross_realm_acl_allow() {
 
     let (_service_write, _service_read, service_ok) = ws_register_in_realm(
         harness.port,
-        "acme", "svc-cross-route",
+        "acme",
+        "svc-cross-route",
         2002,
         Some(service_acl),
     )
@@ -1999,7 +2001,8 @@ async fn signaling_route_candidates_cross_realm_acl_allow() {
         &mut client_write,
         &mut client_read,
         &client_ok,
-        "acme", "svc-cross-route",
+        "acme",
+        "svc-cross-route",
     )
     .await;
     assert!(
@@ -2505,7 +2508,8 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
     // Register two service instances with different fingerprints
     let (_svc_exact_w, _svc_exact_r, svc_exact_ok) = ws_register_with_spec(
         port,
-        "acme", "svc-fp-exact",
+        "acme",
+        "svc-fp-exact",
         Some(acl.clone()),
         Some(spec_exact.clone()),
     )
@@ -2513,7 +2517,8 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
 
     let (_svc_bw_w, _svc_bw_r, _svc_bw_ok) = ws_register_with_spec(
         port,
-        "acme", "svc-fp-bw",
+        "acme",
+        "svc-fp-bw",
         Some(acl.clone()),
         Some(spec_backward.clone()),
     )
@@ -3400,7 +3405,8 @@ async fn signaling_relay_cross_realm_is_denied() {
     ensure_realm(&harness.data_dir, 1002).await;
 
     let (mut src_w, mut src_r, src_ok) = ws_register(port, "acme", "relay-src", None).await;
-    let (_dst_w, _dst_r, dst_ok) = ws_register_in_realm(port, "acme", "relay-dst", 1002, None).await;
+    let (_dst_w, _dst_r, dst_ok) =
+        ws_register_in_realm(port, "acme", "relay-dst", 1002, None).await;
 
     let relay = ActrRelay {
         source: src_ok.actr_id.clone(),
@@ -3514,7 +3520,8 @@ async fn signaling_relay_acl_denied_in_same_realm() {
         }],
     };
 
-    let (_dst_w, _dst_r, dst_ok) = ws_register(port, "acme", "relay-dst-deny", Some(deny_acl)).await;
+    let (_dst_w, _dst_r, dst_ok) =
+        ws_register(port, "acme", "relay-dst-deny", Some(deny_acl)).await;
     let (mut src_w, mut src_r, src_ok) = ws_register(port, "acme", "relay-src-deny", None).await;
 
     let relay = ActrRelay {
@@ -3899,21 +3906,20 @@ async fn service_registry_persists_across_restart() {
     .await;
     let resp = recv_envelope(&mut cli_r).await;
     match resp.flow {
-        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => {
-            match server_msg.payload {
-                Some(signaling_to_actr::Payload::DiscoveryResponse(rsp)) => match rsp.result {
-                    Some(actr_protocol::discovery_response::Result::Success(ok)) => {
-                        assert!(
-                            ok.entries.iter().any(|e| e.actr_type.name == "svc"
-                                && e.actr_type.manufacturer == "acme"),
-                            "expected restored service entry"
-                        );
-                    }
-                    other => panic!("unexpected discovery result {other:?}"),
-                },
-                other => panic!("unexpected payload {other:?}"),
-            }
-        }
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::DiscoveryResponse(rsp)) => match rsp.result {
+                Some(actr_protocol::discovery_response::Result::Success(ok)) => {
+                    assert!(
+                        ok.entries.iter().any(
+                            |e| e.actr_type.name == "svc" && e.actr_type.manufacturer == "acme"
+                        ),
+                        "expected restored service entry"
+                    );
+                }
+                other => panic!("unexpected discovery result {other:?}"),
+            },
+            other => panic!("unexpected payload {other:?}"),
+        },
         other => panic!("unexpected flow {other:?}"),
     }
 

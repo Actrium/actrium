@@ -74,8 +74,8 @@ use base64::prelude::*;
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use hmac::{Hmac, Mac};
 use platform::aid::AidError;
-use prost::bytes::Bytes;
 use prost::Message as ProstMessage;
+use prost::bytes::Bytes;
 use prost_types::Timestamp;
 use sha1::Sha1;
 use std::sync::Arc;
@@ -603,7 +603,10 @@ impl AIdIssuer {
         let type_str = if actr_type.version.is_empty() {
             format!("{}:{}", actr_type.manufacturer, actr_type.name)
         } else {
-            format!("{}:{}:{}", actr_type.manufacturer, actr_type.name, actr_type.version)
+            format!(
+                "{}:{}:{}",
+                actr_type.manufacturer, actr_type.name, actr_type.version
+            )
         };
 
         // 保留名（self / acme / actrix）无需查库，直接放行
@@ -616,14 +619,10 @@ impl AIdIssuer {
 
         let valid = actrix_mfr::manager::lookup_package(&pool, &type_str)
             .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("MFR lookup failed: {e}"))
-            })?;
+            .map_err(|e| AidError::GenerationFailed(format!("MFR lookup failed: {e}")))?;
 
         if !valid {
-            platform::recording::warn!(
-                "MFR 验证失败：包未注册或已被吊销，type_str={}", type_str
-            );
+            platform::recording::warn!("MFR 验证失败：包未注册或已被吊销，type_str={}", type_str);
             return Err(AidError::ManufacturerNotVerified);
         }
 
