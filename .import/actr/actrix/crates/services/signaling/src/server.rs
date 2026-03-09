@@ -187,7 +187,7 @@ pub async fn handle_websocket_connection(
     {
         let mut clients_guard = server.clients.write().await;
 
-        // 移除已有相同 actor 的连接（避免 stale 映射）。
+        // 移除已有相同 actor 的连接（避免 stale 映射），并发送 WS Close 帧让旧连接干净退出。
         if let Some(ref aid) = actor_id {
             let mut to_remove = Vec::new();
             for (cid, conn) in clients_guard.iter() {
@@ -196,8 +196,20 @@ pub async fn handle_websocket_connection(
                 }
             }
             for cid in to_remove {
-                clients_guard.remove(&cid);
-                platform::recording::info!("🧹 Removed stale client {} for actor {:?}", cid, aid);
+                if let Some(old_conn) = clients_guard.remove(&cid) {
+                    let close_frame = axum::extract::ws::CloseFrame {
+                        code: axum::extract::ws::close_code::POLICY,
+                        reason: "displaced by new connection".into(),
+                    };
+                    let _ = old_conn
+                        .direct_sender
+                        .send(WsMessage::Close(Some(close_frame)));
+                    platform::recording::info!(
+                        "🧹 Displaced stale client {} for actor {:?}, sent WS Close",
+                        cid,
+                        aid
+                    );
+                }
             }
         }
 
