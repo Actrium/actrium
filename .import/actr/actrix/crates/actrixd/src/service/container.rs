@@ -3,7 +3,7 @@
 //\! 管理各种服务的容器和生命周期
 //! 服务容器模块 - 封装不同类型的服务
 
-use super::{AisService, SignalingService, StunService, TurnService};
+use super::{AisService, MfrService, SignalingService, StunService, TurnService};
 use super::{HttpRouterService, IceService};
 use axum::Router;
 use platform::ServiceInfo;
@@ -15,6 +15,7 @@ use url::Url;
 pub enum ServiceContainer {
     Signaling(SignalingService),
     Ais(AisService),
+    Mfr(MfrService),
     Stun(StunService),
     Turn(TurnService),
 }
@@ -28,6 +29,11 @@ impl ServiceContainer {
     /// 创建AIS服务容器
     pub fn ais(service: AisService) -> Self {
         Self::Ais(service)
+    }
+
+    /// 创建MFR服务容器
+    pub fn mfr(service: MfrService) -> Self {
+        Self::Mfr(service)
     }
 
     /// 创建STUN服务容器
@@ -45,6 +51,7 @@ impl ServiceContainer {
         match self {
             ServiceContainer::Signaling(_) => "Signaling",
             ServiceContainer::Ais(_) => "AIS",
+            ServiceContainer::Mfr(_) => "MFR",
             ServiceContainer::Stun(_) => "STUN",
             ServiceContainer::Turn(_) => "TURN",
         }
@@ -54,6 +61,7 @@ impl ServiceContainer {
         match self {
             ServiceContainer::Signaling(service) => service.info(),
             ServiceContainer::Ais(service) => service.info(),
+            ServiceContainer::Mfr(service) => service.info(),
             ServiceContainer::Stun(service) => service.info(),
             ServiceContainer::Turn(service) => service.info(),
         }
@@ -62,7 +70,7 @@ impl ServiceContainer {
     pub fn is_http_router(&self) -> bool {
         matches!(
             self,
-            ServiceContainer::Signaling(_) | ServiceContainer::Ais(_)
+            ServiceContainer::Signaling(_) | ServiceContainer::Ais(_) | ServiceContainer::Mfr(_)
         )
     }
 
@@ -76,6 +84,7 @@ impl ServiceContainer {
         match self {
             ServiceContainer::Signaling(service) => Some(service.route_prefix()),
             ServiceContainer::Ais(service) => Some(service.route_prefix()),
+            ServiceContainer::Mfr(service) => Some(service.route_prefix()),
             _ => None,
         }
     }
@@ -86,6 +95,7 @@ impl ServiceContainer {
         match self {
             ServiceContainer::Signaling(service) => Some(service.build_router().await),
             ServiceContainer::Ais(service) => Some(service.build_router().await),
+            ServiceContainer::Mfr(service) => Some(service.build_router().await),
             _ => None,
         }
     }
@@ -95,6 +105,7 @@ impl ServiceContainer {
         match self {
             ServiceContainer::Signaling(service) => Some(service.on_start(base_url).await),
             ServiceContainer::Ais(service) => Some(service.on_start(base_url).await),
+            ServiceContainer::Mfr(service) => Some(service.on_start(base_url).await),
             _ => None,
         }
     }

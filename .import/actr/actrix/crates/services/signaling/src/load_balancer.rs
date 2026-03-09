@@ -360,7 +360,7 @@ mod tests {
                 r#type: ActrType {
                     manufacturer: "test".to_string(),
                     name: name.to_string(),
-                    version: String::new(),
+                    version: "v1".to_string(),
                 },
                 realm: Realm { realm_id: 0 },
             },
@@ -379,6 +379,7 @@ mod tests {
             is_exact_match: false,
             sticky_client_ids: Vec::new(),
             ws_address: None,
+            is_restored_from_storage: false,
         }
     }
 

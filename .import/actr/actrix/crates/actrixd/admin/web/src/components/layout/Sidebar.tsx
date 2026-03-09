@@ -19,6 +19,7 @@ import {
   BookOpen,
   LifeBuoy,
   Info,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -47,6 +48,7 @@ const serviceItems: NavItem[] = [
   { to: "/admin/services/signaling", icon: Radio, label: "Signaling" },
   { to: "/admin/services/ks", icon: Key, label: "KS" },
   { to: "/admin/services/ais", icon: Fingerprint, label: "AIS" },
+  { to: "/admin/mfr", icon: Building2, label: "MFR" },
 ];
 
 const hostItems: NavItem[] = [

@@ -318,3 +318,112 @@ export const api = {
   getMetricsTimeseries: (serviceType: number, tier: number) =>
     request<TimeseriesResponse>(`/metrics/timeseries?service_type=${serviceType}&tier=${tier}`),
 };
+
+// MFR types
+export interface Manufacturer {
+  id: number;
+  name: string;
+  domain: string;
+  public_key: string;
+  contact?: string;
+  status: 'pending' | 'active' | 'suspended' | 'revoked';
+  created_at: number;
+  updated_at?: number;
+  verified_at?: number;
+  suspended_at?: number;
+  revoked_at?: number;
+}
+
+export interface ActrPackage {
+  id: number;
+  mfr_id: number;
+  manufacturer: string;
+  name: string;
+  version: string;
+  type_str: string;
+  manifest: string;
+  signature: string;
+  status: 'active' | 'revoked';
+  published_at: number;
+  revoked_at?: number;
+}
+
+export interface MfrCertificate {
+  mfr_id: number;
+  mfr_name: string;
+  mfr_domain: string;
+  mfr_pubkey: string;
+  issued_at: number;
+  expires_at: number;
+}
+
+export interface MfrKeychain {
+  private_key: string;
+  certificate: MfrCertificate;
+}
+
+export interface ApplyRequest {
+  domain: string;
+  contact?: string;
+}
+
+export interface ApplyResponse {
+  mfr_id: number;
+  challenge_token: string;
+  dns_host: string;
+  expires_at: number;
+  instructions: string;
+}
+
+// MFR API functions
+export const mfrApi = {
+  async list(status?: string): Promise<Manufacturer[]> {
+    const params = status ? `?status=${status}` : '';
+    const res = await fetch(`/admin/api/mfr/admin/list${params}`);
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async apply(req: ApplyRequest): Promise<ApplyResponse> {
+    const res = await fetch('/admin/api/mfr/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async approve(id: number): Promise<MfrKeychain> {
+    const res = await fetch(`/admin/api/mfr/admin/${id}/approve`, { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async suspend(id: number): Promise<void> {
+    const res = await fetch(`/admin/api/mfr/admin/${id}/suspend`, { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+  },
+
+  async reinstate(id: number): Promise<void> {
+    const res = await fetch(`/admin/api/mfr/admin/${id}/reinstate`, { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+  },
+
+  async delete(id: number): Promise<void> {
+    const res = await fetch(`/admin/api/mfr/admin/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+  },
+
+  async listPackages(mfr?: string): Promise<ActrPackage[]> {
+    const params = mfr ? `?mfr=${mfr}` : '';
+    const res = await fetch(`/admin/api/mfr/pkg${params}`);
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async revokePackage(id: number): Promise<void> {
+    const res = await fetch(`/admin/api/mfr/pkg/${id}/revoke`, { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+  },
+};

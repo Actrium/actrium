@@ -1,0 +1,40 @@
+use base64::Engine as _;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey, SigningKey};
+use rand::rngs::OsRng;
+use crate::MfrError;
+
+/// Verify an Ed25519 signature over `message` using a base64-encoded public key.
+pub fn verify_signature(
+    message: &[u8],
+    signature_b64: &str,
+    public_key_b64: &str,
+) -> Result<bool, MfrError> {
+    let pubkey_bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key_b64)
+        .map_err(|e| MfrError::Crypto(format!("invalid public key encoding: {e}")))?;
+    let pubkey_arr: [u8; 32] = pubkey_bytes
+        .try_into()
+        .map_err(|_| MfrError::Crypto("public key must be 32 bytes".to_string()))?;
+    let verifying_key = VerifyingKey::from_bytes(&pubkey_arr)
+        .map_err(|e| MfrError::Crypto(format!("invalid public key: {e}")))?;
+
+    let sig_bytes = base64::engine::general_purpose::STANDARD
+        .decode(signature_b64)
+        .map_err(|e| MfrError::Crypto(format!("invalid signature encoding: {e}")))?;
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|_| MfrError::Crypto("signature must be 64 bytes".to_string()))?;
+    let signature = Signature::from_bytes(&sig_arr);
+
+    Ok(verifying_key.verify(message, &signature).is_ok())
+}
+
+/// Generate a new Ed25519 keypair.
+/// Returns (private_key_b64, public_key_b64).
+pub fn generate_keypair() -> (String, String) {
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let verifying_key = signing_key.verifying_key();
+    let private_b64 = base64::engine::general_purpose::STANDARD.encode(signing_key.to_bytes());
+    let public_b64 = base64::engine::general_purpose::STANDARD.encode(verifying_key.to_bytes());
+    (private_b64, public_b64)
+}

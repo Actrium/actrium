@@ -504,6 +504,7 @@ impl ServiceRegistryStorage {
             is_exact_match: false,
             sticky_client_ids,
             ws_address: row.get::<Option<String>, _>("ws_address"),
+            is_restored_from_storage: false, // 由 restore_from_storage 调用方设置
         })
     }
 
@@ -579,7 +580,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "test-mfg".to_string(),
                 name: "test-device".to_string(),
-                version: String::new(),
+                version: "v1".to_string(),
             },
         }
     }
@@ -602,6 +603,7 @@ mod tests {
             is_exact_match: false,
             sticky_client_ids: vec![],
             ws_address: None,
+            is_restored_from_storage: false,
         }
     }
 

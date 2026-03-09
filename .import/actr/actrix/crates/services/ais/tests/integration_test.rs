@@ -3,6 +3,7 @@
 //! 在测试进程内启动临时 KS gRPC 服务，验证 AIS 的签发与校验链路。
 
 use actr_protocol::{ActrType, Realm, RegisterRequest, register_response};
+use serial_test::serial;
 use ais::issuer::{AIdIssuer, IssuerConfig};
 use ais::ks_client_wrapper::create_ks_client;
 use ks::{GrpcClient, GrpcClientConfig, KeyStorage, KsServiceConfig, create_grpc_service};
@@ -146,7 +147,7 @@ fn default_issuer_config(temp_dir: &TempDir) -> IssuerConfig {
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
         turn_secret: "test-turn-secret".to_string(),
-        sqlite_path: temp_dir.path().to_path_buf(),
+        sqlite_path: temp_dir.path().join("signaling_key_cache.db"),
     }
 }
 

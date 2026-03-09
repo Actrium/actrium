@@ -146,40 +146,40 @@ async fn register_actr(State(state): State<AISState>, headers: HeaderMap, body: 
 
                 // Persist ACL rules to database
                 if let Some(ref acl) = request.acl {
+                    use actr_protocol::acl_rule::SourceRealm;
+
                     let realm_id = register_ok.actr_id.realm.realm_id;
-                    let my_type = format!(
-                        "{}:{}",
-                        register_ok.actr_id.r#type.manufacturer, register_ok.actr_id.r#type.name
-                    );
+                    let t = &register_ok.actr_id.r#type;
+                    let my_type = format!("{}:{}:{}", t.manufacturer, t.name, t.version);
+
+                    // Clear stale rules before re-registering (replace, not accumulate)
+                    if let Err(e) = ActorAcl::delete_by_target(realm_id, &my_type).await {
+                        platform::recording::warn!(
+                            "Failed to clear old ACL rules for {}: {}",
+                            my_type,
+                            e
+                        );
+                    }
 
                     for rule in &acl.rules {
-                        let permission =
+                        let allow =
                             rule.permission == actr_protocol::acl_rule::Permission::Allow as i32;
-
-                        let from_type =
-                            format!("{}:{}", rule.from_type.manufacturer, rule.from_type.name);
-
+                        let ft = &rule.from_type;
+                        let from_type = format!("{}:{}:{}", ft.manufacturer, ft.name, ft.version);
                         let source_realm_id = match &rule.source_realm {
-                            Some(actr_protocol::acl_rule::SourceRealm::RealmId(id)) => Some(*id),
-                            _ => None, // AnyRealm or unset: no specific source realm
+                            Some(SourceRealm::AnyRealm(_)) => None,
+                            Some(SourceRealm::RealmId(id)) => Some(*id),
+                            None => Some(realm_id), // fallback: treat missing as self-realm
                         };
 
-                        let mut actor_acl = if let Some(src) = source_realm_id {
-                            ActorAcl::new_with_source_realm(
-                                realm_id,
-                                Some(src),
-                                from_type.clone(),
-                                my_type.clone(),
-                                permission,
-                            )
-                        } else {
-                            ActorAcl::new(
-                                realm_id,
-                                from_type.clone(),
-                                my_type.clone(),
-                                permission,
-                            )
-                        };
+                        let mut actor_acl = ActorAcl::new_with_source_realm(
+                            realm_id,
+                            source_realm_id,
+                            from_type.clone(),
+                            my_type.clone(),
+                            allow,
+                        );
+
 
                         if let Err(e) = actor_acl.save().await {
                             platform::recording::warn!(
@@ -392,6 +392,8 @@ fn aid_error_to_error_response(err: AidError) -> ErrorResponse {
         AidError::HexDecodeError(_) => 400,
         AidError::Expired => 401,
         AidError::RealmError(_) => 403, // Forbidden
+        AidError::ManufacturerNotVerified => 403,
+        AidError::PackageRevoked => 403,
 
         // 服务端错误 (5xx)
         AidError::GenerationFailed(msg) => {
@@ -424,7 +426,7 @@ mod tests {
         let actr_type = ActrType {
             manufacturer: "apple".to_string(),
             name: "iPhone15".to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
         };
 
         let realm = Realm { realm_id: 12345 };
@@ -456,7 +458,7 @@ mod tests {
             actr_type: ActrType {
                 manufacturer: "test".to_string(),
                 name: "actor".to_string(),
-                version: String::new(),
+                version: "v1".to_string(),
             },
             realm: Realm { realm_id: 456 },
             service: None,
@@ -488,7 +490,7 @@ mod tests {
                 r#type: ActrType {
                     manufacturer: "test".to_string(),
                     name: "actor".to_string(),
-                    version: String::new(),
+                    version: "v1".to_string(),
                 },
             },
             credential: AIdCredential {

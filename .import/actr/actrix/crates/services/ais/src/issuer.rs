@@ -539,6 +539,9 @@ impl AIdIssuer {
         // 确保有可用的密钥
         self.ensure_key_loaded().await?;
 
+        // 验证 MFR 包注册状态（保留名称自动跳过）
+        self.verify_actr_type(&request.actr_type).await?;
+
         // 生成 ActrId
         let actr_id = self.generate_actr_id(&request.actr_type, &request.realm)?;
 
@@ -590,6 +593,42 @@ impl AIdIssuer {
             signing_pubkey: Bytes::from(verifying_key.as_bytes().to_vec()),
             signing_key_id: key_id,
         })
+    }
+
+    /// 验证 ActrType 是否已在 MFR 注册且处于激活状态
+    ///
+    /// 保留名称（self / acme / actrix）无需注册，直接放行。
+    /// 其他 manufacturer 必须在 MFR 中存在且对应包处于激活状态。
+    async fn verify_actr_type(&self, actr_type: &ActrType) -> Result<(), AidError> {
+        let type_str = if actr_type.version.is_empty() {
+            format!("{}:{}", actr_type.manufacturer, actr_type.name)
+        } else {
+            format!("{}:{}:{}", actr_type.manufacturer, actr_type.name, actr_type.version)
+        };
+
+        // 保留名（self / acme / actrix）无需查库，直接放行
+        if actrix_mfr::reserved::is_reserved(&actr_type.manufacturer) {
+            platform::recording::debug!("MFR 保留名，跳过验证，type_str={}", type_str);
+            return Ok(());
+        }
+
+        let pool = platform::storage::db::get_database().get_pool().clone();
+
+        let valid = actrix_mfr::manager::lookup_package(&pool, &type_str)
+            .await
+            .map_err(|e| {
+                AidError::GenerationFailed(format!("MFR lookup failed: {e}"))
+            })?;
+
+        if !valid {
+            platform::recording::warn!(
+                "MFR 验证失败：包未注册或已被吊销，type_str={}", type_str
+            );
+            return Err(AidError::ManufacturerNotVerified);
+        }
+
+        platform::recording::debug!("MFR 验证通过，type_str={}", type_str);
+        Ok(())
     }
 
     /// 生成 ActrId

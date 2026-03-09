@@ -95,6 +95,14 @@ pub struct ServiceInfo {
     /// `None` 表示该服务不支持 WebSocket 直连。
     #[serde(default)]
     pub ws_address: Option<String>,
+
+    /// 是否来自 SQLite 持久化恢复（actrix 重启时 restore_from_storage 加载）。
+    ///
+    /// 标记为 true 时，该条目为"预备候选"：等待服务进程重新建立 WebSocket 连接并调用
+    /// `register_service_full()` 完成确认。若同 service_name 下有新的活跃注册到来，
+    /// 预备候选将被清除，以避免幽灵候选影响路由决策。
+    #[serde(default)]
+    pub is_restored_from_storage: bool,
 }
 
 /// 服务地理位置信息
@@ -169,8 +177,9 @@ impl ServiceRegistry {
                 let count = services.len();
                 platform::recording::info!("从缓存恢复 {} 个服务", count);
 
-                // 将服务加载到内存
-                for service in services {
+                // 将服务加载到内存，标记为 storage-restored（等待 WebSocket 重连确认）
+                for mut service in services {
+                    service.is_restored_from_storage = true;
                     let actor_id = service.actor_id.clone();
                     let service_name = service.service_name.clone();
                     let message_types = service.message_types.clone();
@@ -243,6 +252,7 @@ impl ServiceRegistry {
             is_exact_match: false,
             sticky_client_ids: Vec::new(),
             ws_address,
+            is_restored_from_storage: false,
         };
 
         // 异步写入 SQLite 缓存（后台任务，不阻塞）
@@ -255,11 +265,28 @@ impl ServiceRegistry {
             });
         }
 
-        // 添加到服务映射表
-        self.services
-            .entry(service_name.clone())
-            .or_default()
-            .push(service_info);
+        // 添加到服务映射表。
+        // 清理同 service_name 下的 storage-restored 幽灵候选（actrix 重启后遗留的旧条目）。
+        // 来自活跃 WebSocket 连接的并发注册（is_restored_from_storage=false）不做去重，
+        // 以支持同类型多实例水平扩展场景。
+        let entry = self.services.entry(service_name.clone()).or_default();
+        let ghost_actor_ids: Vec<ActrId> = entry
+            .iter()
+            .filter(|s| s.is_restored_from_storage)
+            .map(|s| s.actor_id.clone())
+            .collect();
+        if !ghost_actor_ids.is_empty() {
+            entry.retain(|s| !s.is_restored_from_storage);
+            for ghost_id in &ghost_actor_ids {
+                self.actor_index.remove(ghost_id);
+                platform::recording::info!(
+                    "清除 storage-restored 幽灵候选: service={}, actor serial={}",
+                    service_name,
+                    ghost_id.serial_number
+                );
+            }
+        }
+        entry.push(service_info);
 
         // 更新消息类型索引
         for message_type in &message_types {
@@ -919,14 +946,28 @@ impl ServiceRegistry {
         let from_realm = from_actor.realm.realm_id;
         let to_realm = to_actor.realm.realm_id;
 
-        // 使用完整的 manufacturer:type 格式，避免 name-only 冲突
         let from_type = format!(
-            "{}:{}",
-            from_actor.r#type.manufacturer, from_actor.r#type.name
+            "{}:{}:{}",
+            from_actor.r#type.manufacturer, from_actor.r#type.name, from_actor.r#type.version
         );
-        let to_type = format!("{}:{}", to_actor.r#type.manufacturer, to_actor.r#type.name);
+        let to_type = format!(
+            "{}:{}:{}",
+            to_actor.r#type.manufacturer, to_actor.r#type.name, to_actor.r#type.version
+        );
 
         ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
+    }
+
+    /// 模拟 restore_from_storage 场景：将指定 service_name 下所有条目标记为 storage-restored。
+    ///
+    /// 仅用于测试，验证幽灵候选清除逻辑。
+    #[cfg(test)]
+    pub fn mark_all_as_restored(&mut self, service_name: &str) {
+        if let Some(entries) = self.services.get_mut(service_name) {
+            for entry in entries.iter_mut() {
+                entry.is_restored_from_storage = true;
+            }
+        }
     }
 }
 
@@ -955,7 +996,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "test".to_string(),
                 name: "test".to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         }
@@ -967,7 +1008,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: manufacturer.to_string(),
                 name: name.to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id },
         }
@@ -1419,7 +1460,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "acme".to_string(),
                 name: "worker".to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1429,7 +1470,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "acme".to_string(),
                 name: "worker".to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1439,7 +1480,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "other".to_string(),
                 name: "service".to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1474,7 +1515,7 @@ mod tests {
         let target_type = ActrType {
             manufacturer: "acme".to_string(),
             name: "worker".to_string(),
-        version: String::new(),
+            version: "v1".to_string(),
         };
 
         let results = registry.find_by_actr_type(&target_type);
@@ -1493,7 +1534,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "acme".to_string(),
                 name: "service1".to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1503,7 +1544,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "vendor".to_string(),
                 name: "service2".to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
             },
             realm: actr_protocol::Realm { realm_id: 0 },
         };
@@ -1554,13 +1595,13 @@ mod tests {
         let _ = target_realm_entity.save().await;
         let _ = other_realm_entity.save().await;
 
-        let _ = ActorAcl::delete_by_target(target_realm, "acme:worker").await?;
+        let _ = ActorAcl::delete_by_target(target_realm, "acme:worker:v1").await?;
 
         let mut acl = ActorAcl::new_with_source_realm(
             target_realm,
             Some(source_realm),
-            "acme:edge".to_string(),
-            "acme:worker".to_string(),
+            "acme:edge:v1".to_string(),
+            "acme:worker:v1".to_string(),
             true,
         );
         let _ = acl.save().await?;
@@ -1581,5 +1622,87 @@ mod tests {
         assert!(!denied_wrong_manufacturer);
 
         Ok(())
+    }
+
+    /// 复现 Ghost Candidates Bug：
+    ///
+    /// 真实场景：actrix 重启后 restore_from_storage() 把 ActorId A（serial=xxx1）放进内存，
+    /// 随后新服务进程启动，AIS 分配新 ActorId B（serial=xxx2），调用 register_service_full()，
+    /// 由于没有去重检查，内存里同时存在 A（幽灵）和 B（真实），service_name 相同。
+    ///
+    /// 期望 (Bug 存在时)：find_by_actr_type 返回 2 个候选（A + B）。
+    /// 期望 (Bug 修复后)：find_by_actr_type 返回 1 个候选（只有 B）。
+    #[test]
+    fn test_ghost_candidates_double_register_same_actor_id() {
+        let mut registry = ServiceRegistry::new();
+
+        let actr_type = ActrType {
+            manufacturer: "acme".to_string(),
+            name: "EchoService".to_string(),
+            version: "0.0.1".to_string(),
+        };
+
+        // ActorId A：来自 SQLite 恢复（actrix 重启时 restore_from_storage 加载）
+        let actor_id_a = ActrId {
+            serial_number: 11111, // 旧 serial
+            realm: actr_protocol::Realm { realm_id: 1 },
+            r#type: actr_type.clone(),
+        };
+
+        // ActorId B：新服务进程注册，AIS 分配的新 serial
+        let actor_id_b = ActrId {
+            serial_number: 22222, // 新 serial，与 A 不同
+            realm: actr_protocol::Realm { realm_id: 1 },
+            r#type: actr_type.clone(),
+        };
+
+        // 第一次注册：模拟 actrix 重启后 restore_from_storage() 加载 ActorId A
+        // 注册后立即标记为 storage-restored（restore_from_storage 真实流程中的行为）
+        registry
+            .register_service_full(
+                actor_id_a.clone(),
+                "EchoService".to_string(),
+                vec!["echo.EchoRequest".to_string()],
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        registry.mark_all_as_restored("EchoService");
+
+        let candidates = registry.find_by_actr_type(&actr_type);
+        assert_eq!(
+            candidates.len(),
+            1,
+            "第一次注册（ActorId A）后应只有 1 个候选"
+        );
+
+        // 第二次注册：模拟新服务进程启动，AIS 分配新 ActorId B，调用 register_service_full
+        // 内存里已有 A（幽灵），B 直接 push → 产生 2 条
+        registry
+            .register_service_full(
+                actor_id_b.clone(),
+                "EchoService".to_string(),
+                vec!["echo.EchoRequest".to_string()],
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let candidates_after = registry.find_by_actr_type(&actr_type);
+
+        // Bug 存在时：内存 [ActorId A（幽灵）, ActorId B（真实）] → 返回 2 个候选 → FAIL
+        // Bug 修复后：注册 B 时清除旧条目 → 只保留 B → 返回 1 个候选 → PASS
+        assert_eq!(
+            candidates_after.len(),
+            1,
+            "[BUG DETECTED] 注册 ActorId B（serial=22222）后内存同时存在 ActorId A（serial=11111，幽灵）和 B，\
+             find_by_actr_type 返回 {} 个候选，应为 1。\
+             \n原因：register_service_full() 没有清除同 service_name 下的旧条目（不同 actor_id）。",
+            candidates_after.len()
+        );
     }
 }
