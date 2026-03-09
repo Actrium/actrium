@@ -40,16 +40,18 @@
 
 ## 剩余待办
 
-1. “全 realm 通配”语义设计
-   - 目前未提供明确的“所有 realm”表达，避免误开放。
-   - 需在协议层明确约定（例如新增字段或保留值语义）。
+1. DB 查询语义修复（`platform/src/realm/acl.rs`）
+   - `get_by_types` 使用 `ORDER BY rowid DESC LIMIT 1`，语义是”最新行优先”，与 deny-first 评估不符
+   - `AND source_realm_id = ?` 无法匹配 NULL 行（wildcard `*` 存为 NULL），需改为
+     `AND (source_realm_id IS NULL OR source_realm_id = ?)`
+   - 建议：整个 ACL 查询下沉到 DB 层做 JOIN，消除当前 N+1 逐候选查询的性能问题
 
 2. 消费端依赖意图检查（`ServiceSpec.dependencies`）
-   - 当前仍未将“消费者声明依赖目标类型”作为第二道 gate。
-   - 需补齐并与 ACL 判定组合。
+   - 当前仍未将”消费者声明依赖目标类型”作为第二道 gate
+   - 需补齐并与 ACL 判定组合
 
 3. Admin 可视化配置
-   - Realm / ACL 管理页尚未支持跨 realm 关系编辑与审计展示。
+   - Realm / ACL 管理页尚未支持跨 realm 关系编辑与审计展示
 
 ## 测试状态
 

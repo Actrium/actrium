@@ -40,4 +40,10 @@ pub enum AidError {
 
     #[error("Realm error: {0}")]
     RealmError(#[from] RealmError),
+
+    #[error("manufacturer not verified or not registered")]
+    ManufacturerNotVerified,
+
+    #[error("actor package has been revoked")]
+    PackageRevoked,
 }

@@ -14,6 +14,7 @@ pub enum ServiceType {
     Signaling,
     Ais,
     Ks,
+    Mfr,
 }
 
 /// Convert ServiceType to ResourceType
@@ -25,6 +26,7 @@ impl From<ServiceType> for ResourceType {
             ServiceType::Signaling => ResourceType::Signaling,
             ServiceType::Ais => ResourceType::Ais,
             ServiceType::Ks => ResourceType::Ks,
+            ServiceType::Mfr => ResourceType::Mfr,
         }
     }
 }

@@ -6,7 +6,7 @@
 use super::{HttpRouterService, IceService, http::build_control_router};
 use crate::service::container::ServiceContainer;
 use crate::service::grpc::build_ks_grpc_router;
-use crate::service::http::{AisService, SignalingService};
+use crate::service::http::{AisService, MfrService, SignalingService};
 use crate::service::ice::{StunService, TurnService};
 use anyhow::Result;
 use axum::Router;
@@ -24,6 +24,7 @@ mod resource_type {
     pub const SIGNALING: i32 = 3;
     pub const AIS: i32 = 4;
     pub const KS: i32 = 5;
+    pub const MFR: i32 = 6;
 
     /// Map a ServiceType to its proto ResourceType integer.
     pub fn from_service_type(st: &super::ServiceType) -> i32 {
@@ -33,6 +34,7 @@ mod resource_type {
             super::ServiceType::Signaling => SIGNALING,
             super::ServiceType::Ais => AIS,
             super::ServiceType::Ks => KS,
+            super::ServiceType::Mfr => MFR,
         }
     }
 }
@@ -350,6 +352,29 @@ impl ServiceManager {
                         "Failed to build gRPC router for service 'KS Service': {:?}",
                         e,
                     ));
+                }
+            }
+        }
+
+        // MFR service - always mounted (no config gate yet)
+        {
+            let mut svc = MfrService::new(self.config.clone());
+            match svc.build_router().await {
+                Ok(router) => {
+                    let prefix = svc.route_prefix();
+                    platform::recording::info!(
+                        "Adding route '{}' for service '{}'",
+                        prefix,
+                        svc.info().name
+                    );
+                    app = app.nest(prefix, router);
+                }
+                Err(e) => {
+                    platform::recording::error!(
+                        "Failed to build router for service '{}': {:?}",
+                        svc.info().name,
+                        e
+                    );
                 }
             }
         }
@@ -891,6 +916,7 @@ impl ServiceManager {
             match service {
                 ServiceContainer::Signaling(s) => s.on_stop().await.unwrap(),
                 ServiceContainer::Ais(s) => s.on_stop().await.unwrap(),
+                ServiceContainer::Mfr(s) => s.on_stop().await.unwrap(),
                 ServiceContainer::Stun(s) => s.stop().await.unwrap(),
                 ServiceContainer::Turn(s) => s.stop().await.unwrap(),
             }

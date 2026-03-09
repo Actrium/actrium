@@ -520,7 +520,7 @@ async fn send_register_error(
         r#type: ActrType {
             manufacturer: "temp".to_string(),
             name: "temp".to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
         },
     };
 
@@ -1770,7 +1770,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "test".to_string(),
                 name: "device".to_string(),
-                version: String::new(),
+                version: "v1".to_string(),
             },
         }
     }

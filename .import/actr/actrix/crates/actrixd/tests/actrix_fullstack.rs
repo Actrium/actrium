@@ -1,4 +1,4 @@
-use actr_protocol::acl_rule::Permission;
+use actr_protocol::acl_rule::{Permission, SourceRealm};
 use actr_protocol::{
     Acl, AclRule, ActrIdExt, ActrRelay, ActrType, Realm, RegisterRequest, RegisterResponse,
     RoleNegotiation, acl_rule, actr_relay, peer_to_signaling, register_response,
@@ -785,7 +785,7 @@ async fn actrix_end_to_end_register_and_health() {
     // Register an actor via AIS HTTP (protobuf body)
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "test-mfg".to_string(),
+            manufacturer: "acme".to_string(),
             name: "device".to_string(),
             version: "v1".to_string(),
         },
@@ -1045,7 +1045,7 @@ async fn ais_register_rejects_non_preprovisioned_realm() {
 
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "realm-mfg".to_string(),
+            manufacturer: "acme".to_string(),
             name: "realm-device".to_string(),
             version: "v1".to_string(),
         },
@@ -1172,7 +1172,7 @@ async fn ais_register_enforces_realm_secret_when_configured() {
 
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "mfg".to_string(),
+            manufacturer: "acme".to_string(),
             name: "secret-check".to_string(),
             version: "v1".to_string(),
         },
@@ -1301,7 +1301,7 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
 
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "mfg".to_string(),
+            manufacturer: "acme".to_string(),
             name: "svc".to_string(),
             version: "v1".to_string(),
         },
@@ -1351,7 +1351,7 @@ async fn signaling_url_identity_reconnect_replaces_stale_connection() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
 
     let (mut old_write, mut old_read, register_ok) =
-        ws_register(harness.port, "mfg", "url-id", None).await;
+        ws_register(harness.port, "acme", "url-id", None).await;
 
     let actor_id = register_ok.actr_id.to_string_repr();
     let signature_b64 =
@@ -1444,7 +1444,7 @@ async fn signaling_url_identity_reconnect_replaces_stale_connection() {
 #[serial]
 async fn signaling_peer_payload_none_is_ignored_and_connection_remains_usable() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    let (mut write, mut read, ok) = ws_register(harness.port, "mfg", "peer-none", None).await;
+    let (mut write, mut read, ok) = ws_register(harness.port, "acme", "peer-none", None).await;
 
     // 发送空 peer payload
     send_envelope(
@@ -1497,7 +1497,7 @@ async fn signaling_peer_payload_none_is_ignored_and_connection_remains_usable() 
 #[serial]
 async fn signaling_actr_payload_none_and_invalid_realm_are_rejected_safely() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    let (mut write, mut read, ok) = ws_register(harness.port, "mfg", "actr-none", None).await;
+    let (mut write, mut read, ok) = ws_register(harness.port, "acme", "actr-none", None).await;
 
     let no_payload_msg = actr_protocol::ActrToSignaling {
         source: ok.actr_id.clone(),
@@ -1595,8 +1595,8 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
 
     // 注册两个不同的 actor 用于测试连接速率限制
     let base_url = format!("http://127.0.0.1:{port}");
-    let ok1 = ais_register_http(&base_url, 1001, "mfg", "rate1", None, None).await;
-    let ok2 = ais_register_http(&base_url, 1001, "mfg", "rate2", None, None).await;
+    let ok1 = ais_register_http(&base_url, 1001, "acme", "rate1", None, None).await;
+    let ok2 = ais_register_http(&base_url, 1001, "acme", "rate2", None, None).await;
 
     let (_first_write, _first_read) = connect_ws_authenticated(port, &ok1).await;
 
@@ -1645,7 +1645,7 @@ async fn signaling_message_rate_limit_returns_envelope_error() {
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
 
-    let (mut write, mut read, register_ok) = ws_register(port, "mfg", "rate-limited", None).await;
+    let (mut write, mut read, register_ok) = ws_register(port, "acme", "rate-limited", None).await;
     let ping_payload = actr_protocol::ActrToSignaling {
         source: register_ok.actr_id.clone(),
         credential: register_ok.credential.clone(),
@@ -1709,21 +1709,21 @@ async fn signaling_register_and_discovery_acl_allow() {
     // Service registers with ACL allowing client:* to discover
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
     let (_ws_service_write, _ws_service_read, _service_ok) =
-        ws_register(port, "mfg", "svc", Some(acl)).await;
+        ws_register(port, "acme", "svc", Some(acl)).await;
 
     // Client registers (no ACL needed)
     let (mut client_write, mut client_read, client_ok) =
-        ws_register(port, "mfg", "client", None).await;
+        ws_register(port, "acme", "client", None).await;
 
     // Discovery should return the service type because ACL allows it
     let discover = actr_protocol::ActrToSignaling {
@@ -1731,7 +1731,7 @@ async fn signaling_register_and_discovery_acl_allow() {
         credential: client_ok.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: Some("mfg".into()),
+                manufacturer: Some("acme".into()),
                 limit: Some(10),
             },
         )),
@@ -1748,7 +1748,7 @@ async fn signaling_register_and_discovery_acl_allow() {
                         "expected at least one service entry"
                     );
                     assert_eq!(ok.entries[0].actr_type.name, "svc");
-                    assert_eq!(ok.entries[0].actr_type.manufacturer, "mfg");
+                    assert_eq!(ok.entries[0].actr_type.manufacturer, "acme");
                 }
                 other => panic!("unexpected discovery result {other:?}"),
             },
@@ -1778,18 +1778,18 @@ async fn signaling_discovery_acl_denied() {
 
     // Service registers without ACL (default deny)
     let (_ws_service_write, _ws_service_read, _service_ok) =
-        ws_register(port, "mfg", "svc-deny", None).await;
+        ws_register(port, "acme", "svc-deny", None).await;
 
     // Client registers
     let (mut client_write, mut client_read, client_ok) =
-        ws_register(port, "mfg", "client", None).await;
+        ws_register(port, "acme", "client", None).await;
 
     let discover = actr_protocol::ActrToSignaling {
         source: client_ok.actr_id.clone(),
         credential: client_ok.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: Some("mfg".into()),
+                manufacturer: Some("acme".into()),
                 limit: Some(10),
             },
         )),
@@ -1823,16 +1823,16 @@ async fn signaling_discovery_cross_realm_isolated() {
     ensure_realm(&harness.data_dir, 2002).await;
 
     let (_service_write, _service_read, _service_ok) =
-        ws_register_in_realm(harness.port, "mfg", "svc-cross-realm", 2002, None).await;
+        ws_register_in_realm(harness.port, "acme", "svc-cross-realm", 2002, None).await;
     let (mut client_write, mut client_read, client_ok) =
-        ws_register_in_realm(harness.port, "mfg", "client", 1001, None).await;
+        ws_register_in_realm(harness.port, "acme", "client", 1001, None).await;
 
     let discover = actr_protocol::ActrToSignaling {
         source: client_ok.actr_id.clone(),
         credential: client_ok.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: Some("mfg".into()),
+                manufacturer: Some("acme".into()),
                 limit: Some(10),
             },
         )),
@@ -1873,33 +1873,32 @@ async fn signaling_discovery_cross_realm_acl_allow() {
 
     let service_acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
     let (_service_write, _service_read, _service_ok) = ws_register_in_realm(
         harness.port,
-        "mfg",
-        "svc-cross-realm",
+        "acme", "svc-cross-realm",
         2002,
         Some(service_acl),
     )
     .await;
     let (mut client_write, mut client_read, client_ok) =
-        ws_register_in_realm(harness.port, "mfg", "client", 1001, None).await;
+        ws_register_in_realm(harness.port, "acme", "client", 1001, None).await;
 
     let discover = actr_protocol::ActrToSignaling {
         source: client_ok.actr_id.clone(),
         credential: client_ok.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: Some("mfg".into()),
+                manufacturer: Some("acme".into()),
                 limit: Some(10),
             },
         )),
@@ -1922,7 +1921,7 @@ async fn signaling_discovery_cross_realm_acl_allow() {
                     );
                     assert!(
                         ok.entries.iter().any(|entry| {
-                            entry.actr_type.manufacturer == "mfg"
+                            entry.actr_type.manufacturer == "acme"
                                 && entry.actr_type.name == "svc-cross-realm"
                         }),
                         "expected cross-realm service entry"
@@ -1946,17 +1945,16 @@ async fn signaling_route_candidates_cross_realm_isolated() {
     ensure_realm(&harness.data_dir, 2002).await;
 
     let (_service_write, _service_read, _service_ok) =
-        ws_register_in_realm(harness.port, "mfg", "svc-cross-route", 2002, None).await;
+        ws_register_in_realm(harness.port, "acme", "svc-cross-route", 2002, None).await;
 
     let (mut client_write, mut client_read, client_ok) =
-        ws_register_in_realm(harness.port, "mfg", "client", 1001, None).await;
+        ws_register_in_realm(harness.port, "acme", "client", 1001, None).await;
 
     let candidates = query_route_candidates(
         &mut client_write,
         &mut client_read,
         &client_ok,
-        "mfg",
-        "svc-cross-route",
+        "acme", "svc-cross-route",
     )
     .await;
     assert!(
@@ -1976,34 +1974,32 @@ async fn signaling_route_candidates_cross_realm_acl_allow() {
 
     let service_acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
     let (_service_write, _service_read, service_ok) = ws_register_in_realm(
         harness.port,
-        "mfg",
-        "svc-cross-route",
+        "acme", "svc-cross-route",
         2002,
         Some(service_acl),
     )
     .await;
 
     let (mut client_write, mut client_read, client_ok) =
-        ws_register_in_realm(harness.port, "mfg", "client", 1001, None).await;
+        ws_register_in_realm(harness.port, "acme", "client", 1001, None).await;
 
     let candidates = query_route_candidates(
         &mut client_write,
         &mut client_read,
         &client_ok,
-        "mfg",
-        "svc-cross-route",
+        "acme", "svc-cross-route",
     )
     .await;
     assert!(
@@ -2034,7 +2030,7 @@ async fn signaling_rejects_expired_credential() {
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
     // Register actor
-    let (mut write, mut read, ok) = ws_register(port, "mfg", "shortlived", None).await;
+    let (mut write, mut read, ok) = ws_register(port, "acme", "shortlived", None).await;
 
     // Wait for credential to expire
     sleep(Duration::from_secs(2)).await;
@@ -2074,7 +2070,7 @@ async fn signaling_credential_update_via_ws_returns_410() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
-    let (mut write, mut read, ok) = ws_register(port, "mfg", "cred-update-client", None).await;
+    let (mut write, mut read, ok) = ws_register(port, "acme", "cred-update-client", None).await;
     let update_req = actr_protocol::ActrToSignaling {
         source: ok.actr_id.clone(),
         credential: ok.credential.clone(),
@@ -2122,7 +2118,7 @@ async fn signaling_credential_update_returns_410_and_connection_stays_healthy() 
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
-    let (mut write, mut read, ok) = ws_register(port, "mfg", "cred-mismatch-client", None).await;
+    let (mut write, mut read, ok) = ws_register(port, "acme", "cred-mismatch-client", None).await;
 
     // CredentialUpdateRequest 已迁移到 AIS HTTP，应返回 410
     let update_req = actr_protocol::ActrToSignaling {
@@ -2205,19 +2201,19 @@ async fn signaling_route_candidates_with_acl() {
     // Service registers with ACL allowing client:sdp to discover/route
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client-sdp".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
-    let (_svc_w, _svc_r, svc_ok) = ws_register(port, "mfg", "svc-rtp", Some(acl)).await;
+    let (_svc_w, _svc_r, svc_ok) = ws_register(port, "acme", "svc-rtp", Some(acl)).await;
 
     // Client registers
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-sdp", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-sdp", None).await;
 
     // RouteCandidates should return the service because ACL allows
     let route_req = actr_protocol::ActrToSignaling {
@@ -2227,7 +2223,7 @@ async fn signaling_route_candidates_with_acl() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "mfg".into(),
+                        manufacturer: "acme".into(),
                         name: "svc-rtp".into(),
                         version: "v1".to_string(),
                     },
@@ -2289,10 +2285,10 @@ async fn signaling_route_candidates_acl_denied() {
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
     // Service registers without ACL (default deny)
-    let (_svc_w, _svc_r, _svc_ok) = ws_register(port, "mfg", "svc-deny-route", None).await;
+    let (_svc_w, _svc_r, _svc_ok) = ws_register(port, "acme", "svc-deny-route", None).await;
 
     // Client registers
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-sdp", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-sdp", None).await;
 
     let route_req = actr_protocol::ActrToSignaling {
         source: cli_ok.actr_id.clone(),
@@ -2301,7 +2297,7 @@ async fn signaling_route_candidates_acl_denied() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "mfg".into(),
+                        manufacturer: "acme".into(),
                         name: "svc-deny-route".into(),
                         version: "v1".to_string(),
                     },
@@ -2353,21 +2349,21 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
     // ACL: allow client-route to reach the services
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client-route".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
     // Register two service instances with different load indicators
     let (mut svc1_w, svc1_r, svc1_ok) =
-        ws_register(port, "mfg", "svc-route", Some(acl.clone())).await;
+        ws_register(port, "acme", "svc-route", Some(acl.clone())).await;
     let (mut svc2_w, svc2_r, svc2_ok) =
-        ws_register(port, "mfg", "svc-route", Some(acl.clone())).await;
+        ws_register(port, "acme", "svc-route", Some(acl.clone())).await;
 
     // Update runtime metrics via ping (own data per call to avoid lifetimes)
     let send_ping =
@@ -2399,7 +2395,7 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
     sleep(Duration::from_millis(200)).await;
 
     // Client registers
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-route", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-route", None).await;
 
     // Request route candidates with sorting and limit=1
     let route_req = actr_protocol::ActrToSignaling {
@@ -2409,7 +2405,7 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "mfg".into(),
+                        manufacturer: "acme".into(),
                         name: "svc-route".into(),
                         version: "v1".to_string(),
                     },
@@ -2479,13 +2475,13 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
     // ACL allow client-fp
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client-fp".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
@@ -2509,8 +2505,7 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
     // Register two service instances with different fingerprints
     let (_svc_exact_w, _svc_exact_r, svc_exact_ok) = ws_register_with_spec(
         port,
-        "mfg",
-        "svc-fp-exact",
+        "acme", "svc-fp-exact",
         Some(acl.clone()),
         Some(spec_exact.clone()),
     )
@@ -2518,15 +2513,14 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
 
     let (_svc_bw_w, _svc_bw_r, _svc_bw_ok) = ws_register_with_spec(
         port,
-        "mfg",
-        "svc-fp-bw",
+        "acme", "svc-fp-bw",
         Some(acl.clone()),
         Some(spec_backward.clone()),
     )
     .await;
 
     // Client registers
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-fp", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-fp", None).await;
 
     // Request route candidates with client_fingerprint matching spec_exact
     let route_req = actr_protocol::ActrToSignaling {
@@ -2536,7 +2530,7 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "mfg".into(),
+                        manufacturer: "acme".into(),
                         name: "svc-fp-exact".into(),
                         version: "v1".to_string(),
                     },
@@ -2612,10 +2606,10 @@ async fn signaling_get_service_spec_returns_spec() {
     );
 
     let (_svc_w, _svc_r, _svc_ok) =
-        ws_register_with_spec(port, "mfg", "svc-spec", None, Some(spec.clone())).await;
+        ws_register_with_spec(port, "acme", "svc-spec", None, Some(spec.clone())).await;
     sleep(Duration::from_millis(200)).await;
 
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-spec", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-spec", None).await;
 
     let get_spec = actr_protocol::ActrToSignaling {
         source: cli_ok.actr_id.clone(),
@@ -2657,7 +2651,7 @@ async fn signaling_get_service_spec_not_found() {
     let port = harness.port;
 
     // Client without any services, just to issue request
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-nospec", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-nospec", None).await;
 
     let get_spec = actr_protocol::ActrToSignaling {
         source: cli_ok.actr_id.clone(),
@@ -2699,7 +2693,7 @@ async fn signaling_subscribe_and_unsubscribe_actr_up() {
     let port = harness.port;
 
     // Subscriber
-    let (mut sub_w, mut sub_r, sub_ok) = ws_register(port, "mfg", "subscriber", None).await;
+    let (mut sub_w, mut sub_r, sub_ok) = ws_register(port, "acme", "subscriber", None).await;
 
     // Subscribe to target type
     let subscribe = actr_protocol::ActrToSignaling {
@@ -2709,7 +2703,7 @@ async fn signaling_subscribe_and_unsubscribe_actr_up() {
             actr_protocol::actr_to_signaling::Payload::SubscribeActrUpRequest(
                 actr_protocol::SubscribeActrUpRequest {
                     target_type: ActrType {
-                        manufacturer: "mfg".into(),
+                        manufacturer: "acme".into(),
                         name: "svc-subject".into(),
                         version: "v1".to_string(),
                     },
@@ -2742,7 +2736,7 @@ async fn signaling_subscribe_and_unsubscribe_actr_up() {
             actr_protocol::actr_to_signaling::Payload::UnsubscribeActrUpRequest(
                 actr_protocol::UnsubscribeActrUpRequest {
                     target_type: ActrType {
-                        manufacturer: "mfg".into(),
+                        manufacturer: "acme".into(),
                         name: "svc-subject".into(),
                         version: "v1".to_string(),
                     },
@@ -2777,11 +2771,11 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
     let port = harness.port;
 
     // Subscriber registers
-    let (mut sub_w, mut sub_r, sub_ok) = ws_register(port, "mfg", "subscriber", None).await;
+    let (mut sub_w, mut sub_r, sub_ok) = ws_register(port, "acme", "subscriber", None).await;
 
     // Subscribe to service type
     let target_type = ActrType {
-        manufacturer: "mfg".into(),
+        manufacturer: "acme".into(),
         name: "svc-presence".into(),
         version: "v1".to_string(),
     };
@@ -2810,17 +2804,17 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
     // New service registers -> should trigger ActrUp notification
     let presence_acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "subscriber".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
     let (_svc_w, _svc_r, _svc_ok) =
-        ws_register(port, "mfg", "svc-presence", Some(presence_acl.clone())).await;
+        ws_register(port, "acme", "svc-presence", Some(presence_acl.clone())).await;
     sleep(Duration::from_millis(200)).await;
 
     // Expect ActrUp notification (poll with timeout)
@@ -2865,7 +2859,7 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
 
     // Register another service; notification should not arrive after unsubscribe
     let (_svc2_w, _svc2_r, _svc2_ok) =
-        ws_register(port, "mfg", "svc-presence-2", Some(presence_acl)).await;
+        ws_register(port, "acme", "svc-presence-2", Some(presence_acl)).await;
 
     // Drain with timeout; expect None
     use tokio::time::timeout;
@@ -3040,13 +3034,13 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
 
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client-concurrent".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
@@ -3055,7 +3049,7 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
     for _ in 0..service_count {
         let acl_clone = acl.clone();
         service_tasks.push(tokio::spawn(async move {
-            ws_register(port, "mfg", "svc-concurrent", Some(acl_clone)).await
+            ws_register(port, "acme", "svc-concurrent", Some(acl_clone)).await
         }));
     }
 
@@ -3072,7 +3066,7 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
         "each concurrent service registration should get a unique serial"
     );
 
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-concurrent", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-concurrent", None).await;
     let route_req = actr_protocol::ActrToSignaling {
         source: cli_ok.actr_id.clone(),
         credential: cli_ok.credential.clone(),
@@ -3080,7 +3074,7 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "mfg".into(),
+                        manufacturer: "acme".into(),
                         name: "svc-concurrent".into(),
                         version: "v1".to_string(),
                     },
@@ -3154,19 +3148,19 @@ async fn signaling_actr_relay_role_assignment() {
     // Service registers with ACL allowing client-offer
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client-offer".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
-    let (mut svc_w, mut svc_r, svc_ok) = ws_register(port, "mfg", "svc-relay", Some(acl)).await;
+    let (mut svc_w, mut svc_r, svc_ok) = ws_register(port, "acme", "svc-relay", Some(acl)).await;
 
     // Client registers
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-offer", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-offer", None).await;
 
     // Send role negotiation relay
     let relay = ActrRelay {
@@ -3219,12 +3213,12 @@ async fn signaling_rejects_register_request_via_ws() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
-    let (mut write, mut read, _ok) = ws_register(port, "mfg", "dup-client", None).await;
+    let (mut write, mut read, _ok) = ws_register(port, "acme", "dup-client", None).await;
 
     // 通过 WS 发送 RegisterRequest 应返回 410（已迁移到 AIS HTTP）
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "mfg".into(),
+            manufacturer: "acme".into(),
             name: "dup-client".into(),
             version: "v1".to_string(),
         },
@@ -3270,18 +3264,18 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
 
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client-unreg".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
-    let (mut svc_w, mut svc_r, svc_ok) = ws_register(port, "mfg", "svc-unreg", Some(acl)).await;
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-unreg", None).await;
+    let (mut svc_w, mut svc_r, svc_ok) = ws_register(port, "acme", "svc-unreg", Some(acl)).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-unreg", None).await;
 
     let make_route_request =
         |source: &register_response::RegisterOk| actr_protocol::ActrToSignaling {
@@ -3291,7 +3285,7 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
                 actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                     actr_protocol::RouteCandidatesRequest {
                         target_type: ActrType {
-                            manufacturer: "mfg".into(),
+                            manufacturer: "acme".into(),
                             name: "svc-unreg".into(),
                             version: "v1".to_string(),
                         },
@@ -3405,8 +3399,8 @@ async fn signaling_relay_cross_realm_is_denied() {
 
     ensure_realm(&harness.data_dir, 1002).await;
 
-    let (mut src_w, mut src_r, src_ok) = ws_register(port, "mfg", "relay-src", None).await;
-    let (_dst_w, _dst_r, dst_ok) = ws_register_in_realm(port, "mfg", "relay-dst", 1002, None).await;
+    let (mut src_w, mut src_r, src_ok) = ws_register(port, "acme", "relay-src", None).await;
+    let (_dst_w, _dst_r, dst_ok) = ws_register_in_realm(port, "acme", "relay-dst", 1002, None).await;
 
     let relay = ActrRelay {
         source: src_ok.actr_id.clone(),
@@ -3452,18 +3446,18 @@ async fn signaling_relay_rejects_invalid_credential() {
 
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "relay-src-auth".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
-    let (_dst_w, _dst_r, dst_ok) = ws_register(port, "mfg", "relay-dst-auth", Some(acl)).await;
-    let (mut src_w, mut src_r, src_ok) = ws_register(port, "mfg", "relay-src-auth", None).await;
+    let (_dst_w, _dst_r, dst_ok) = ws_register(port, "acme", "relay-dst-auth", Some(acl)).await;
+    let (mut src_w, mut src_r, src_ok) = ws_register(port, "acme", "relay-src-auth", None).await;
 
     let mut bad_cred = src_ok.credential.clone();
     if !bad_cred.signature.is_empty() {
@@ -3510,18 +3504,18 @@ async fn signaling_relay_acl_denied_in_same_realm() {
 
     let deny_acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Deny as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "relay-src-deny".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Deny as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
-    let (_dst_w, _dst_r, dst_ok) = ws_register(port, "mfg", "relay-dst-deny", Some(deny_acl)).await;
-    let (mut src_w, mut src_r, src_ok) = ws_register(port, "mfg", "relay-src-deny", None).await;
+    let (_dst_w, _dst_r, dst_ok) = ws_register(port, "acme", "relay-dst-deny", Some(deny_acl)).await;
+    let (mut src_w, mut src_r, src_ok) = ws_register(port, "acme", "relay-src-deny", None).await;
 
     let relay = ActrRelay {
         source: src_ok.actr_id.clone(),
@@ -3562,19 +3556,19 @@ async fn signaling_relay_forwards_ice_candidate_payload() {
 
     let allow_acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "relay-src-forward".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
     let (mut dst_w, mut dst_r, dst_ok) =
-        ws_register(port, "mfg", "relay-dst-forward", Some(allow_acl)).await;
-    let (mut src_w, _src_r, src_ok) = ws_register(port, "mfg", "relay-src-forward", None).await;
+        ws_register(port, "acme", "relay-dst-forward", Some(allow_acl)).await;
+    let (mut src_w, _src_r, src_ok) = ws_register(port, "acme", "relay-src-forward", None).await;
 
     let relay = ActrRelay {
         source: src_ok.actr_id.clone(),
@@ -3628,20 +3622,20 @@ async fn signaling_relay_to_missing_target_is_ignored_and_source_stays_usable() 
 
     let allow_acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "relay-src-missing-target".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
     let (mut dst_w, _dst_r, dst_ok) =
-        ws_register(port, "mfg", "relay-dst-missing-target", Some(allow_acl)).await;
+        ws_register(port, "acme", "relay-dst-missing-target", Some(allow_acl)).await;
     let (mut src_w, mut src_r, src_ok) =
-        ws_register(port, "mfg", "relay-src-missing-target", None).await;
+        ws_register(port, "acme", "relay-src-missing-target", None).await;
 
     let mut missing_target = dst_ok.actr_id.clone();
     missing_target.serial_number = missing_target.serial_number.saturating_add(1_000_000);
@@ -3712,21 +3706,21 @@ async fn signaling_disconnect_removes_actor_from_route_candidates() {
 
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client-disconnect".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
-    let (mut svc_w, _svc_r, svc_ok) = ws_register(port, "mfg", "svc-disconnect", Some(acl)).await;
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-disconnect", None).await;
+    let (mut svc_w, _svc_r, svc_ok) = ws_register(port, "acme", "svc-disconnect", Some(acl)).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-disconnect", None).await;
 
     let before =
-        query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "mfg", "svc-disconnect").await;
+        query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "acme", "svc-disconnect").await;
     assert!(
         before
             .iter()
@@ -3739,7 +3733,7 @@ async fn signaling_disconnect_removes_actor_from_route_candidates() {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let after =
-            query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "mfg", "svc-disconnect").await;
+            query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "acme", "svc-disconnect").await;
         let still_present = after
             .iter()
             .any(|id| id.serial_number == svc_ok.actr_id.serial_number);
@@ -3765,21 +3759,21 @@ async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
 
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                manufacturer: "acme".into(),
                 name: "client-malformed".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
 
-    let (mut svc_w, _svc_r, svc_ok) = ws_register(port, "mfg", "svc-malformed", Some(acl)).await;
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "mfg", "client-malformed", None).await;
+    let (mut svc_w, _svc_r, svc_ok) = ws_register(port, "acme", "svc-malformed", Some(acl)).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client-malformed", None).await;
 
     let before =
-        query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "mfg", "svc-malformed").await;
+        query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "acme", "svc-malformed").await;
     assert!(
         before
             .iter()
@@ -3795,7 +3789,7 @@ async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let after =
-            query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "mfg", "svc-malformed").await;
+            query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "acme", "svc-malformed").await;
         let still_present = after
             .iter()
             .any(|id| id.serial_number == svc_ok.actr_id.serial_number);
@@ -3833,26 +3827,26 @@ async fn service_registry_persists_across_restart() {
 
     let acl = Acl {
         rules: vec![AclRule {
+            permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "persist".into(),
+                manufacturer: "acme".into(),
                 name: "client".into(),
                 version: "v1".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
-            permission: Permission::Allow as i32,
+            source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
-    let (_svc_w, _svc_r, svc_ok) = ws_register(port, "persist", "svc", Some(acl)).await;
+    let (_svc_w, _svc_r, svc_ok) = ws_register(port, "acme", "svc", Some(acl)).await;
     sleep(Duration::from_millis(100)).await;
 
     // Verify discovery before restart
-    let (mut cli_w1, mut cli_r1, cli_ok1) = ws_register(port, "persist", "client", None).await;
+    let (mut cli_w1, mut cli_r1, cli_ok1) = ws_register(port, "acme", "client", None).await;
     let discover1 = actr_protocol::ActrToSignaling {
         source: cli_ok1.actr_id.clone(),
         credential: cli_ok1.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: Some("persist".into()),
+                manufacturer: Some("acme".into()),
                 limit: Some(10),
             },
         )),
@@ -3886,14 +3880,14 @@ async fn service_registry_persists_across_restart() {
     sleep(Duration::from_millis(200)).await;
 
     // register client
-    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "persist", "client", None).await;
+    let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client", None).await;
 
     let discover = actr_protocol::ActrToSignaling {
         source: cli_ok.actr_id.clone(),
         credential: cli_ok.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: Some("persist".into()),
+                manufacturer: Some("acme".into()),
                 limit: Some(10),
             },
         )),
@@ -3911,7 +3905,7 @@ async fn service_registry_persists_across_restart() {
                     Some(actr_protocol::discovery_response::Result::Success(ok)) => {
                         assert!(
                             ok.entries.iter().any(|e| e.actr_type.name == "svc"
-                                && e.actr_type.manufacturer == "persist"),
+                                && e.actr_type.manufacturer == "acme"),
                             "expected restored service entry"
                         );
                     }

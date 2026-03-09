@@ -48,6 +48,7 @@ governor = "0.10"
 # Internal dependencies
 platform = { path = "../../platform" }
 ks = { path = "../ks" }
+actrix-mfr = { path = "../mfr" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

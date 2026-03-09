@@ -126,6 +126,70 @@ impl Database {
         .execute(&self.pool)
         .await; // intentionally ignore error (column may already exist)
 
+        // MFR (Manufacturer Registry) tables
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS mfr (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                name         TEXT    NOT NULL UNIQUE,
+                domain       TEXT    NOT NULL UNIQUE,
+                public_key   TEXT    NOT NULL DEFAULT '',
+                contact      TEXT,
+                status       TEXT    NOT NULL DEFAULT 'pending',
+                created_at   INTEGER NOT NULL,
+                updated_at   INTEGER,
+                verified_at  INTEGER,
+                suspended_at INTEGER,
+                revoked_at   INTEGER
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS mfr_challenge (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                mfr_id      INTEGER NOT NULL REFERENCES mfr(id),
+                token       TEXT    NOT NULL,
+                dns_host    TEXT    NOT NULL,
+                expires_at  INTEGER NOT NULL,
+                verified_at INTEGER,
+                created_at  INTEGER NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS mfr_package (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                mfr_id       INTEGER NOT NULL REFERENCES mfr(id),
+                manufacturer TEXT    NOT NULL,
+                name         TEXT    NOT NULL,
+                version      TEXT    NOT NULL,
+                type_str     TEXT    NOT NULL,
+                manifest     TEXT    NOT NULL,
+                signature    TEXT    NOT NULL,
+                status       TEXT    NOT NULL DEFAULT 'active',
+                published_at INTEGER NOT NULL,
+                revoked_at   INTEGER,
+                UNIQUE(manufacturer, name, version)
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_mfr_package_type ON mfr_package(type_str)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_mfr_package_mfr ON mfr_package(mfr_id, status)",
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 

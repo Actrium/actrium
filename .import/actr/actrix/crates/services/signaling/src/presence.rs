@@ -18,6 +18,7 @@
 //! let user_service_type = ActrType {
 //!     manufacturer: "acme".to_string(),
 //!     name: "user-service".to_string(),
+//!     version: "v1".to_string(),
 //! };
 //!
 //! // Actor A 订阅 user-service 类型的上线事件
@@ -267,12 +268,14 @@ impl PresenceManager {
         let from_realm = from_actor.realm.realm_id;
         let to_realm = to_actor.realm.realm_id;
 
-        // 使用完整的 manufacturer:type 格式
         let from_type = format!(
-            "{}:{}",
-            from_actor.r#type.manufacturer, from_actor.r#type.name
+            "{}:{}:{}",
+            from_actor.r#type.manufacturer, from_actor.r#type.name, from_actor.r#type.version
         );
-        let to_type = format!("{}:{}", to_actor.r#type.manufacturer, to_actor.r#type.name);
+        let to_type = format!(
+            "{}:{}:{}",
+            to_actor.r#type.manufacturer, to_actor.r#type.name, to_actor.r#type.version
+        );
 
         ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
     }
@@ -289,7 +292,7 @@ mod tests {
             r#type: ActrType {
                 manufacturer: "test".to_string(),
                 name: "test-actor".to_string(),
-                version: String::new(),
+                version: "v1".to_string(),
             },
             realm: Realm { realm_id: 0 },
         }
@@ -299,7 +302,7 @@ mod tests {
         ActrType {
             manufacturer: "test".to_string(),
             name: name.to_string(),
-            version: String::new(),
+            version: "v1".to_string(),
         }
     }
 
