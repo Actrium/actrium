@@ -40,6 +40,8 @@
                     android:id="@+id/ivAppIcon"
                     android:layout_width="32dp"
                     android:layout_height="32dp"
+                    android:clipToOutline="true"
+                    android:background="@drawable/app_icon_bg"
                     android:scaleType="centerCrop" />
 
                 <!-- 未读标记圆点 -->
