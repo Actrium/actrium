@@ -146,7 +146,7 @@ fn default_issuer_config(temp_dir: &TempDir) -> IssuerConfig {
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
         turn_secret: "test-turn-secret".to_string(),
-        sqlite_path: temp_dir.path().join("signaling_key_cache.db"),
+        sqlite_path: temp_dir.path().to_path_buf(),
     }
 }
 

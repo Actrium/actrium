@@ -82,6 +82,28 @@ impl AIdCredentialValidator {
         cache.cache_key(key_id, verifying_key, expires_at).await
     }
 
+    /// 将 Ed25519 verifying key 持久化写入 SQLite DB，无需 KeyCache 已初始化。
+    ///
+    /// 供 AIS 签发器在 `init` 调用前写入密钥，确保后续 `init` 能从 DB 读取到该密钥。
+    /// 若全局 KeyCache 已初始化，同时更新内存缓存。
+    pub async fn persist_key(
+        sqlite_path: &std::path::Path,
+        key_id: u32,
+        verifying_key: &VerifyingKey,
+        expires_at: u64,
+    ) -> Result<(), AidError> {
+        let cache_db = sqlite_path.join("signaling_key_cache.db");
+        let cache = KeyCache::new(&cache_db).await?;
+        cache.cache_key(key_id, verifying_key, expires_at).await?;
+
+        // 如果全局缓存已初始化，同步更新内存
+        if let Some(global_cache) = KEY_CACHE.get() {
+            let _ = global_cache.cache_key(key_id, verifying_key, expires_at).await;
+        }
+
+        Ok(())
+    }
+
     /// 同步校验（用于非 async 上下文，如 TURN 认证）
     pub fn check_sync(
         credential: &AIdCredential,
