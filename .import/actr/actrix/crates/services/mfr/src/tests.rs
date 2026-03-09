@@ -1,15 +1,13 @@
 /// MFR 模块集成测试
 ///
 /// 所有需要数据库的测试使用 in-process SQLite 内存库，每个测试独立 pool，互不干扰。
-
 use sqlx::SqlitePool;
 
 use crate::{
-    crypto,
-    manager::{lookup_package, MfrManager, PublishRequest},
+    MfrError, crypto,
+    manager::{MfrManager, PublishRequest, lookup_package},
     model::{ActrPackage, DomainChallenge, Manufacturer, MfrStatus, PkgStatus},
     reserved::{domain_to_name, is_reserved, validate_name},
-    MfrError,
 };
 
 // ─── 测试辅助 ────────────────────────────────────────────────────────────────
@@ -190,7 +188,11 @@ fn test_generate_keypair_roundtrip() {
     let priv_bytes = base64::engine::general_purpose::STANDARD
         .decode(&private_b64)
         .expect("private key should be valid base64");
-    assert_eq!(priv_bytes.len(), 32, "Ed25519 private key should be 32 bytes");
+    assert_eq!(
+        priv_bytes.len(),
+        32,
+        "Ed25519 private key should be 32 bytes"
+    );
 
     let pub_bytes = base64::engine::general_purpose::STANDARD
         .decode(&public_b64)
@@ -217,10 +219,8 @@ fn test_verify_signature_valid() {
     let message = b"hello mfr";
     let sig = signing_key.sign(message);
 
-    let sig_b64 =
-        base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
-    let pub_b64 =
-        base64::engine::general_purpose::STANDARD.encode(verifying_key.to_bytes());
+    let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
+    let pub_b64 = base64::engine::general_purpose::STANDARD.encode(verifying_key.to_bytes());
 
     let result = crypto::verify_signature(message, &sig_b64, &pub_b64)
         .expect("verify_signature should not error on valid inputs");
@@ -231,8 +231,7 @@ fn test_verify_signature_valid() {
 fn test_verify_signature_invalid_zeros() {
     use base64::Engine as _;
     let (_, pub_b64) = crypto::generate_keypair();
-    let bad_sig =
-        base64::engine::general_purpose::STANDARD.encode([0u8; 64]);
+    let bad_sig = base64::engine::general_purpose::STANDARD.encode([0u8; 64]);
     let result = crypto::verify_signature(b"message", &bad_sig, &pub_b64);
     assert!(
         matches!(result, Ok(false) | Err(MfrError::Crypto(_))),
@@ -251,10 +250,9 @@ fn test_verify_signature_wrong_key() {
     let message = b"test message";
     let sig = key1.sign(message);
 
-    let sig_b64 =
-        base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
-    let wrong_pub_b64 = base64::engine::general_purpose::STANDARD
-        .encode(key2.verifying_key().to_bytes());
+    let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
+    let wrong_pub_b64 =
+        base64::engine::general_purpose::STANDARD.encode(key2.verifying_key().to_bytes());
 
     let result = crypto::verify_signature(message, &sig_b64, &wrong_pub_b64)
         .expect("should not return error for valid encoding");
@@ -352,10 +350,9 @@ async fn test_manufacturer_duplicate_domain() {
 #[tokio::test]
 async fn test_manufacturer_activate() {
     let pool = setup_test_pool().await;
-    let mut mfr =
-        Manufacturer::create(&pool, "activeco", "activeco.com", None)
-            .await
-            .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "activeco", "activeco.com", None)
+        .await
+        .unwrap();
 
     mfr.activate(&pool, "pubkey_base64".to_string())
         .await
@@ -374,10 +371,9 @@ async fn test_manufacturer_activate() {
 #[tokio::test]
 async fn test_manufacturer_lifecycle_full() {
     let pool = setup_test_pool().await;
-    let mut mfr =
-        Manufacturer::create(&pool, "lifecycle", "lifecycle.com", None)
-            .await
-            .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "lifecycle", "lifecycle.com", None)
+        .await
+        .unwrap();
 
     mfr.activate(&pool, "pubkey123".to_string()).await.unwrap();
     assert_eq!(mfr.status, MfrStatus::Active);
@@ -397,10 +393,9 @@ async fn test_manufacturer_lifecycle_full() {
 #[tokio::test]
 async fn test_manufacturer_invalid_transitions_from_pending() {
     let pool = setup_test_pool().await;
-    let mut mfr =
-        Manufacturer::create(&pool, "transco", "transco.com", None)
-            .await
-            .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "transco", "transco.com", None)
+        .await
+        .unwrap();
 
     let err = mfr.suspend(&pool).await.unwrap_err();
     assert!(matches!(err, MfrError::InvalidStatus(_)));
@@ -412,10 +407,9 @@ async fn test_manufacturer_invalid_transitions_from_pending() {
 #[tokio::test]
 async fn test_manufacturer_cannot_activate_twice() {
     let pool = setup_test_pool().await;
-    let mut mfr =
-        Manufacturer::create(&pool, "twiceco", "twiceco.com", None)
-            .await
-            .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "twiceco", "twiceco.com", None)
+        .await
+        .unwrap();
 
     mfr.activate(&pool, "key1".to_string()).await.unwrap();
     let err = mfr.activate(&pool, "key2".to_string()).await.unwrap_err();
@@ -442,10 +436,9 @@ async fn test_manufacturer_list_by_status() {
     Manufacturer::create(&pool, "statuslist1", "statuslist1.com", None)
         .await
         .unwrap();
-    let mut mfr2 =
-        Manufacturer::create(&pool, "statuslist2", "statuslist2.com", None)
-            .await
-            .unwrap();
+    let mut mfr2 = Manufacturer::create(&pool, "statuslist2", "statuslist2.com", None)
+        .await
+        .unwrap();
     mfr2.activate(&pool, "pk".to_string()).await.unwrap();
 
     let active = Manufacturer::list(&pool, Some(MfrStatus::Active))
@@ -559,7 +552,10 @@ async fn test_challenge_token_unique() {
         .await
         .unwrap();
 
-    assert_ne!(ch1.token, ch2.token, "each challenge should have a unique token");
+    assert_ne!(
+        ch1.token, ch2.token,
+        "each challenge should have a unique token"
+    );
 }
 
 // ─── model/package.rs 测试（需 DB）──────────────────────────────────────────
@@ -573,7 +569,13 @@ async fn test_package_publish_and_get() {
     mfr.activate(&pool, "pubkey".to_string()).await.unwrap();
 
     let pkg = ActrPackage::publish(
-        &pool, mfr.id, "pkgco", "client", "v1", "manifest content", "sig123",
+        &pool,
+        mfr.id,
+        "pkgco",
+        "client",
+        "v1",
+        "manifest content",
+        "sig123",
     )
     .await
     .unwrap();
@@ -611,8 +613,7 @@ async fn test_package_duplicate_rejected() {
     ActrPackage::publish(&pool, mfr.id, "dupkg", "svc", "v1", "m", "s")
         .await
         .unwrap();
-    let result =
-        ActrPackage::publish(&pool, mfr.id, "dupkg", "svc", "v1", "m2", "s2").await;
+    let result = ActrPackage::publish(&pool, mfr.id, "dupkg", "svc", "v1", "m2", "s2").await;
     assert!(
         matches!(result, Err(MfrError::PackageAlreadyPublished)),
         "duplicate publish should return PackageAlreadyPublished"
@@ -627,17 +628,21 @@ async fn test_package_revoke() {
         .unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
 
-    let mut pkg =
-        ActrPackage::publish(&pool, mfr.id, "revpkg", "svc", "v1", "m", "s")
-            .await
-            .unwrap();
+    let mut pkg = ActrPackage::publish(&pool, mfr.id, "revpkg", "svc", "v1", "m", "s")
+        .await
+        .unwrap();
     pkg.revoke(&pool).await.unwrap();
 
     assert_eq!(pkg.status, PkgStatus::Revoked);
     assert!(pkg.revoked_at.is_some());
 
-    let found = ActrPackage::get_by_type(&pool, "revpkg:svc:v1").await.unwrap();
-    assert!(found.is_none(), "revoked package should not be found by get_by_type");
+    let found = ActrPackage::get_by_type(&pool, "revpkg:svc:v1")
+        .await
+        .unwrap();
+    assert!(
+        found.is_none(),
+        "revoked package should not be found by get_by_type"
+    );
 }
 
 #[tokio::test]
@@ -667,10 +672,9 @@ async fn test_package_get_by_id() {
         .unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
 
-    let pkg =
-        ActrPackage::publish(&pool, mfr.id, "idpkg", "svc", "v1", "m", "s")
-            .await
-            .unwrap();
+    let pkg = ActrPackage::publish(&pool, mfr.id, "idpkg", "svc", "v1", "m", "s")
+        .await
+        .unwrap();
 
     let found = ActrPackage::get_by_id(&pool, pkg.id).await.unwrap();
     assert!(found.is_some());
@@ -712,15 +716,13 @@ async fn test_lookup_package_active() {
 #[tokio::test]
 async fn test_lookup_package_revoked() {
     let pool = setup_test_pool().await;
-    let mut mfr =
-        Manufacturer::create(&pool, "revokedlook", "revokedlook.com", None)
-            .await
-            .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "revokedlook", "revokedlook.com", None)
+        .await
+        .unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
-    let mut pkg =
-        ActrPackage::publish(&pool, mfr.id, "revokedlook", "svc", "v1", "m", "s")
-            .await
-            .unwrap();
+    let mut pkg = ActrPackage::publish(&pool, mfr.id, "revokedlook", "svc", "v1", "m", "s")
+        .await
+        .unwrap();
     pkg.revoke(&pool).await.unwrap();
 
     assert!(
@@ -790,10 +792,7 @@ async fn test_manager_get_status_not_found() {
 async fn test_manager_admin_approve() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager
-        .apply("approveco.com", None)
-        .await
-        .unwrap();
+    let (mfr, _) = manager.apply("approveco.com", None).await.unwrap();
 
     let keychain = manager.admin_approve(mfr.id).await.unwrap();
     assert_eq!(keychain.certificate.mfr_name, "com.approveco");
@@ -822,10 +821,7 @@ async fn test_manager_admin_suspend_reinstate() {
 async fn test_manager_admin_delete() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager
-        .apply("deleteco.com", None)
-        .await
-        .unwrap();
+    let (mfr, _) = manager.apply("deleteco.com", None).await.unwrap();
     let id = mfr.id;
 
     manager.admin_delete(id).await.unwrap();
@@ -853,7 +849,10 @@ async fn test_manager_publish_invalid_signature() {
         })
         .await;
     assert!(
-        matches!(result, Err(MfrError::InvalidSignature) | Err(MfrError::Crypto(_))),
+        matches!(
+            result,
+            Err(MfrError::InvalidSignature) | Err(MfrError::Crypto(_))
+        ),
         "invalid signature should be rejected: {result:?}"
     );
 }
@@ -868,8 +867,8 @@ async fn test_manager_publish_valid_signature() {
 
     // 使用已知密钥对，绕过 DNS 验证直接激活 MFR
     let signing_key = SigningKey::generate(&mut OsRng);
-    let pub_b64 = base64::engine::general_purpose::STANDARD
-        .encode(signing_key.verifying_key().to_bytes());
+    let pub_b64 =
+        base64::engine::general_purpose::STANDARD.encode(signing_key.verifying_key().to_bytes());
 
     let mut mfr = Manufacturer::create(&pool, "validpub", "validpub.com", None)
         .await
@@ -878,8 +877,7 @@ async fn test_manager_publish_valid_signature() {
 
     let manifest = "type = \"validpub:client:v1\"\nbinary_hash = \"sha256:abc\"";
     let sig = signing_key.sign(manifest.as_bytes());
-    let sig_b64 =
-        base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
+    let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
 
     let manager = MfrManager::new(pool);
     let pkg = manager
@@ -924,10 +922,7 @@ async fn test_manager_publish_inactive_mfr() {
 async fn test_manager_resolve_by_name() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager
-        .apply("resolveco.com", None)
-        .await
-        .unwrap();
+    let (mfr, _) = manager.apply("resolveco.com", None).await.unwrap();
     manager.admin_approve(mfr.id).await.unwrap();
 
     let info = manager.resolve_by_name("com.resolveco").await.unwrap();
@@ -940,10 +935,7 @@ async fn test_manager_resolve_by_name() {
 async fn test_manager_resolve_by_name_not_active() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    manager
-        .apply("pendingres.com", None)
-        .await
-        .unwrap();
+    manager.apply("pendingres.com", None).await.unwrap();
 
     let result = manager.resolve_by_name("com.pendingres").await;
     assert!(matches!(result, Err(MfrError::InvalidStatus(_))));
@@ -957,8 +949,7 @@ async fn test_manager_get_and_revoke_package() {
 
     let pool = setup_test_pool().await;
     let key = SigningKey::generate(&mut OsRng);
-    let pub_b64 =
-        base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
+    let pub_b64 = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
 
     let mut mfr = Manufacturer::create(&pool, "revmgr", "revmgr.com", None)
         .await
@@ -967,8 +958,7 @@ async fn test_manager_get_and_revoke_package() {
 
     let manifest = "type = \"revmgr:svc:v1\"";
     let sig = key.sign(manifest.as_bytes());
-    let sig_b64 =
-        base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
+    let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
 
     let manager = MfrManager::new(pool);
     let pkg = manager
@@ -996,14 +986,8 @@ async fn test_manager_admin_list() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
 
-    manager
-        .apply("adminlist1.com", None)
-        .await
-        .unwrap();
-    let (mfr2, _) = manager
-        .apply("adminlist2.com", None)
-        .await
-        .unwrap();
+    manager.apply("adminlist1.com", None).await.unwrap();
+    let (mfr2, _) = manager.apply("adminlist2.com", None).await.unwrap();
     manager.admin_approve(mfr2.id).await.unwrap();
 
     let all = manager.admin_list(None).await.unwrap();
@@ -1022,8 +1006,7 @@ async fn test_manager_list_packages_by_mfr() {
 
     let pool = setup_test_pool().await;
     let key = SigningKey::generate(&mut OsRng);
-    let pub_b64 =
-        base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
+    let pub_b64 = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
 
     let mut mfr = Manufacturer::create(&pool, "listmgr", "listmgr.com", None)
         .await
@@ -1035,8 +1018,7 @@ async fn test_manager_list_packages_by_mfr() {
     for pkg_name in &["alpha", "beta"] {
         let manifest = format!("type = \"listmgr:{pkg_name}:v1\"");
         let sig = key.sign(manifest.as_bytes());
-        let sig_b64 =
-            base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
+        let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
         manager
             .publish_package(PublishRequest {
                 manufacturer: "listmgr".to_string(),

@@ -98,15 +98,14 @@ impl KeyCache {
             .unwrap_or_default()
             .as_secs();
 
-        let result =
-            sqlx::query("SELECT pubkey, expires_at FROM key_cache WHERE key_id = ?1")
-                .bind(key_id as i64)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| {
-                    crate::recording::error!("查询 AIS 公钥缓存失败：key_id={}, error={}", key_id, e);
-                    AidError::DecodeFailure(format!("key cache query error: {e}"))
-                })?;
+        let result = sqlx::query("SELECT pubkey, expires_at FROM key_cache WHERE key_id = ?1")
+            .bind(key_id as i64)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| {
+                crate::recording::error!("查询 AIS 公钥缓存失败：key_id={}, {}", key_id, e);
+                AidError::DecodeFailure(format!("key cache query error: {e}"))
+            })?;
 
         match result {
             Some(row) => {
@@ -119,7 +118,7 @@ impl KeyCache {
 
                 // 缓存条目已过期，删除并返回 None
                 if expires_at > 0 && (expires_at as u64) <= now {
-                    crate::recording::debug!("AIS 公钥缓存已过期，删除 key_id={}", key_id);
+                    crate::recording::debug!("AIS 公钥缓存已过期，删除：key_id={}", key_id);
                     let _ = sqlx::query("DELETE FROM key_cache WHERE key_id = ?1")
                         .bind(key_id as i64)
                         .execute(&self.pool)
@@ -128,11 +127,9 @@ impl KeyCache {
                 }
 
                 // base64 解码 → 32 bytes → VerifyingKey
-                let pubkey_bytes = BASE64_STANDARD
-                    .decode(&pubkey_b64)
-                    .map_err(|e| {
-                        AidError::DecodeFailure(format!("failed to base64 decode pubkey: {e}"))
-                    })?;
+                let pubkey_bytes = BASE64_STANDARD.decode(&pubkey_b64).map_err(|e| {
+                    AidError::DecodeFailure(format!("failed to base64 decode pubkey: {e}"))
+                })?;
 
                 let pubkey_array: [u8; 32] = pubkey_bytes.try_into().map_err(|_| {
                     AidError::DecodeFailure(
@@ -144,11 +141,11 @@ impl KeyCache {
                     AidError::DecodeFailure(format!("invalid Ed25519 verifying key: {e}"))
                 })?;
 
-                crate::recording::debug!("命中 AIS 公钥缓存 key_id={}", key_id);
+                crate::recording::debug!("命中 AIS 公钥缓存：key_id={}", key_id);
                 Ok(Some((verifying_key, expires_at as u64)))
             }
             None => {
-                crate::recording::debug!("AIS 公钥缓存未命中 key_id={}", key_id);
+                crate::recording::debug!("AIS 公钥缓存未命中：key_id={}", key_id);
                 Ok(None)
             }
         }
@@ -181,7 +178,11 @@ impl KeyCache {
         .await
         .map_err(|e| AidError::DecodeFailure(format!("failed to write key cache: {e}")))?;
 
-        crate::recording::debug!("AIS 公钥已写入缓存 key_id={}, expires_at={}", key_id, expires_at);
+        crate::recording::debug!(
+            "AIS 公钥已写入缓存：key_id={}, expires_at={}",
+            key_id,
+            expires_at
+        );
         Ok(())
     }
 
@@ -192,14 +193,11 @@ impl KeyCache {
             .unwrap_or_default()
             .as_secs();
 
-        let result =
-            sqlx::query("DELETE FROM key_cache WHERE expires_at > 0 AND expires_at < ?1")
-                .bind(now as i64)
-                .execute(&self.pool)
-                .await
-                .map_err(|e| {
-                    AidError::DecodeFailure(format!("failed to cleanup expired keys: {e}"))
-                })?;
+        let result = sqlx::query("DELETE FROM key_cache WHERE expires_at > 0 AND expires_at < ?1")
+            .bind(now as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AidError::DecodeFailure(format!("failed to cleanup expired keys: {e}")))?;
 
         let deleted = result.rows_affected() as u32;
         if deleted > 0 {
@@ -213,9 +211,7 @@ impl KeyCache {
         let row = sqlx::query("SELECT COUNT(*) as count FROM key_cache")
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| {
-                AidError::DecodeFailure(format!("failed to count cached keys: {e}"))
-            })?;
+            .map_err(|e| AidError::DecodeFailure(format!("failed to count cached keys: {e}")))?;
 
         let count: i64 = row
             .try_get("count")
@@ -271,7 +267,9 @@ mod tests {
     #[tokio::test]
     async fn test_key_caching_and_retrieval() {
         let temp_dir = tempdir().unwrap();
-        let cache = KeyCache::new(temp_dir.path().join("test.db")).await.unwrap();
+        let cache = KeyCache::new(temp_dir.path().join("test.db"))
+            .await
+            .unwrap();
 
         let verifying_key = generate_test_key();
         let expires_at = SystemTime::now()
@@ -280,7 +278,10 @@ mod tests {
             .as_secs()
             + 3600;
 
-        cache.cache_key(1, &verifying_key, expires_at).await.unwrap();
+        cache
+            .cache_key(1, &verifying_key, expires_at)
+            .await
+            .unwrap();
         assert_eq!(cache.get_cached_key_count().await.unwrap(), 1);
 
         let cached = cache.get_cached_key(1).await.unwrap();
@@ -293,7 +294,9 @@ mod tests {
     #[tokio::test]
     async fn test_cache_expiration() {
         let temp_dir = tempdir().unwrap();
-        let cache = KeyCache::new(temp_dir.path().join("test.db")).await.unwrap();
+        let cache = KeyCache::new(temp_dir.path().join("test.db"))
+            .await
+            .unwrap();
 
         let verifying_key = generate_test_key();
         // 设置已过期的时间戳
@@ -303,7 +306,10 @@ mod tests {
             .as_secs()
             .saturating_sub(1);
 
-        cache.cache_key(1, &verifying_key, expires_at).await.unwrap();
+        cache
+            .cache_key(1, &verifying_key, expires_at)
+            .await
+            .unwrap();
         // 过期条目应返回 None
         let cached = cache.get_cached_key(1).await.unwrap();
         assert!(cached.is_none());
@@ -312,7 +318,9 @@ mod tests {
     #[tokio::test]
     async fn test_cache_cleanup() {
         let temp_dir = tempdir().unwrap();
-        let cache = KeyCache::new(temp_dir.path().join("test.db")).await.unwrap();
+        let cache = KeyCache::new(temp_dir.path().join("test.db"))
+            .await
+            .unwrap();
 
         let verifying_key = generate_test_key();
         let expired_at = SystemTime::now()
@@ -321,7 +329,10 @@ mod tests {
             .as_secs()
             .saturating_sub(1);
 
-        cache.cache_key(1, &verifying_key, expired_at).await.unwrap();
+        cache
+            .cache_key(1, &verifying_key, expired_at)
+            .await
+            .unwrap();
         assert_eq!(cache.get_cached_key_count().await.unwrap(), 1);
 
         let cleaned = cache.cleanup_expired_keys().await.unwrap();

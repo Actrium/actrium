@@ -1,7 +1,7 @@
+use crate::MfrError;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use crate::MfrError;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -103,17 +103,21 @@ impl Manufacturer {
     }
 
     pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<Self>, MfrError> {
-        Ok(sqlx::query_as::<_, Manufacturer>("SELECT * FROM mfr WHERE id = ?")
-            .bind(id)
-            .fetch_optional(pool)
-            .await?)
+        Ok(
+            sqlx::query_as::<_, Manufacturer>("SELECT * FROM mfr WHERE id = ?")
+                .bind(id)
+                .fetch_optional(pool)
+                .await?,
+        )
     }
 
     pub async fn get_by_name(pool: &SqlitePool, name: &str) -> Result<Option<Self>, MfrError> {
-        Ok(sqlx::query_as::<_, Manufacturer>("SELECT * FROM mfr WHERE name = ?")
-            .bind(name)
-            .fetch_optional(pool)
-            .await?)
+        Ok(
+            sqlx::query_as::<_, Manufacturer>("SELECT * FROM mfr WHERE name = ?")
+                .bind(name)
+                .fetch_optional(pool)
+                .await?,
+        )
     }
 
     pub async fn list(pool: &SqlitePool, status: Option<MfrStatus>) -> Result<Vec<Self>, MfrError> {
@@ -125,15 +129,19 @@ impl Manufacturer {
             .fetch_all(pool)
             .await?)
         } else {
-            Ok(sqlx::query_as::<_, Manufacturer>(
-                "SELECT * FROM mfr ORDER BY created_at DESC",
+            Ok(
+                sqlx::query_as::<_, Manufacturer>("SELECT * FROM mfr ORDER BY created_at DESC")
+                    .fetch_all(pool)
+                    .await?,
             )
-            .fetch_all(pool)
-            .await?)
         }
     }
 
-    pub async fn activate(&mut self, pool: &SqlitePool, public_key: String) -> Result<(), MfrError> {
+    pub async fn activate(
+        &mut self,
+        pool: &SqlitePool,
+        public_key: String,
+    ) -> Result<(), MfrError> {
         if self.status != MfrStatus::Pending {
             return Err(MfrError::InvalidStatus(format!(
                 "cannot activate from status: {}",

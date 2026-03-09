@@ -3,7 +3,6 @@
 //! 在测试进程内启动临时 KS gRPC 服务，验证 AIS 的签发与校验链路。
 
 use actr_protocol::{ActrType, Realm, RegisterRequest, register_response};
-use serial_test::serial;
 use ais::issuer::{AIdIssuer, IssuerConfig};
 use ais::ks_client_wrapper::create_ks_client;
 use ks::{GrpcClient, GrpcClientConfig, KeyStorage, KsServiceConfig, create_grpc_service};

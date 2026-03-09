@@ -1,12 +1,10 @@
+use crate::{
+    MfrError, crypto, dns,
+    model::{ActrPackage, DomainChallenge, Manufacturer, MfrStatus, PkgStatus},
+    reserved,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use crate::{
-    MfrError,
-    model::{Manufacturer, MfrStatus, DomainChallenge, ActrPackage, PkgStatus},
-    reserved,
-    dns,
-    crypto,
-};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MfrKeychain {
@@ -65,7 +63,11 @@ impl MfrManager {
         reserved::validate_name(&name)?;
         let mfr = Manufacturer::create(&self.pool, &name, domain, contact).await?;
         let challenge = DomainChallenge::create(&self.pool, mfr.id, domain).await?;
-        tracing::info!(mfr_name = %name, domain = %domain, "MFR application received");
+        platform::recording::info!(
+            "MFR application received: mfr_name={}, domain={}",
+            name,
+            domain
+        );
         Ok((mfr, challenge))
     }
 
@@ -99,7 +101,11 @@ impl MfrManager {
         mfr.activate(&self.pool, public_key.clone()).await?;
 
         let keychain = self.build_keychain(&mfr, private_key);
-        tracing::info!(mfr_id = %mfr_id, name = %mfr.name, "MFR domain verified and keychain issued");
+        platform::recording::info!(
+            "MFR domain verified and keychain issued: mfr_id={}, name={}",
+            mfr_id,
+            mfr.name
+        );
         Ok(keychain)
     }
 
@@ -110,7 +116,11 @@ impl MfrManager {
             .ok_or(MfrError::NotFound)?;
         let (private_key, public_key) = crypto::generate_keypair();
         mfr.activate(&self.pool, public_key).await?;
-        tracing::info!(mfr_id = %mfr_id, name = %mfr.name, "MFR manually approved by admin");
+        platform::recording::info!(
+            "MFR manually approved by admin: mfr_id={}, name={}",
+            mfr_id,
+            mfr.name
+        );
         Ok(self.build_keychain(&mfr, private_key))
     }
 
@@ -132,7 +142,9 @@ impl MfrManager {
     }
 
     pub async fn get_status(&self, mfr_id: i64) -> Result<Manufacturer, MfrError> {
-        Manufacturer::get(&self.pool, mfr_id).await?.ok_or(MfrError::NotFound)
+        Manufacturer::get(&self.pool, mfr_id)
+            .await?
+            .ok_or(MfrError::NotFound)
     }
 
     pub async fn resolve_by_name(&self, name: &str) -> Result<MfrPublicInfo, MfrError> {
@@ -140,7 +152,10 @@ impl MfrManager {
             .await?
             .ok_or(MfrError::NotFound)?;
         if mfr.status != MfrStatus::Active {
-            return Err(MfrError::InvalidStatus(format!("MFR '{}' is not active", name)));
+            return Err(MfrError::InvalidStatus(format!(
+                "MFR '{}' is not active",
+                name
+            )));
         }
         let cert = {
             use chrono::Utc;
@@ -175,11 +190,8 @@ impl MfrManager {
         }
 
         // Verify signature: MFR's Ed25519 private key signed the manifest bytes
-        let valid = crypto::verify_signature(
-            req.manifest.as_bytes(),
-            &req.signature,
-            &mfr.public_key,
-        )?;
+        let valid =
+            crypto::verify_signature(req.manifest.as_bytes(), &req.signature, &mfr.public_key)?;
         if !valid {
             return Err(MfrError::InvalidSignature);
         }
@@ -194,19 +206,24 @@ impl MfrManager {
             &req.signature,
         )
         .await?;
-        tracing::info!(
-            type_str = %pkg.type_str,
-            mfr_id = %mfr.id,
-            "actor package published"
+        platform::recording::info!(
+            "actor package published: type_str={}, mfr_id={}",
+            pkg.type_str,
+            mfr.id
         );
         Ok(pkg)
     }
 
     pub async fn get_package(&self, type_str: &str) -> Result<ActrPackage, MfrError> {
-        ActrPackage::get_by_type(&self.pool, type_str).await?.ok_or(MfrError::NotFound)
+        ActrPackage::get_by_type(&self.pool, type_str)
+            .await?
+            .ok_or(MfrError::NotFound)
     }
 
-    pub async fn list_packages(&self, mfr_name: Option<&str>) -> Result<Vec<ActrPackage>, MfrError> {
+    pub async fn list_packages(
+        &self,
+        mfr_name: Option<&str>,
+    ) -> Result<Vec<ActrPackage>, MfrError> {
         if let Some(name) = mfr_name {
             let mfr = Manufacturer::get_by_name(&self.pool, name)
                 .await?
@@ -226,32 +243,51 @@ impl MfrManager {
             .await?
             .ok_or(MfrError::NotFound)?;
         pkg.revoke(&self.pool).await?;
-        tracing::warn!(pkg_id = %pkg_id, type_str = %pkg.type_str, "actor package revoked");
+        platform::recording::warn!(
+            "actor package revoked: pkg_id={}, type_str={}",
+            pkg_id,
+            pkg.type_str
+        );
         Ok(())
     }
 
     // Admin methods
-    pub async fn admin_list(&self, status: Option<MfrStatus>) -> Result<Vec<Manufacturer>, MfrError> {
+    pub async fn admin_list(
+        &self,
+        status: Option<MfrStatus>,
+    ) -> Result<Vec<Manufacturer>, MfrError> {
         Manufacturer::list(&self.pool, status).await
     }
 
     pub async fn admin_suspend(&self, mfr_id: i64) -> Result<(), MfrError> {
-        let mut mfr = Manufacturer::get(&self.pool, mfr_id).await?.ok_or(MfrError::NotFound)?;
+        let mut mfr = Manufacturer::get(&self.pool, mfr_id)
+            .await?
+            .ok_or(MfrError::NotFound)?;
         mfr.suspend(&self.pool).await?;
-        tracing::warn!(mfr_id = %mfr_id, name = %mfr.name, "MFR suspended by admin");
+        platform::recording::warn!(
+            "MFR suspended by admin: mfr_id={}, name={}",
+            mfr_id,
+            mfr.name
+        );
         Ok(())
     }
 
     pub async fn admin_reinstate(&self, mfr_id: i64) -> Result<(), MfrError> {
-        let mut mfr = Manufacturer::get(&self.pool, mfr_id).await?.ok_or(MfrError::NotFound)?;
+        let mut mfr = Manufacturer::get(&self.pool, mfr_id)
+            .await?
+            .ok_or(MfrError::NotFound)?;
         mfr.reinstate(&self.pool).await?;
-        tracing::info!(mfr_id = %mfr_id, name = %mfr.name, "MFR reinstated by admin");
+        platform::recording::info!(
+            "MFR reinstated by admin: mfr_id={}, name={}",
+            mfr_id,
+            mfr.name
+        );
         Ok(())
     }
 
     pub async fn admin_delete(&self, mfr_id: i64) -> Result<(), MfrError> {
         Manufacturer::delete(&self.pool, mfr_id).await?;
-        tracing::warn!(mfr_id = %mfr_id, "MFR deleted by admin");
+        platform::recording::warn!("MFR deleted by admin: mfr_id={}", mfr_id);
         Ok(())
     }
 }
@@ -260,7 +296,7 @@ impl MfrManager {
 /// Reserved names always return true.
 pub async fn lookup_package(pool: &SqlitePool, type_str: &str) -> Result<bool, MfrError> {
     // Extract manufacturer from "manufacturer:name:version"
-    let manufacturer = type_str.splitn(3, ':').next().unwrap_or("");
+    let manufacturer = type_str.split(':').next().unwrap_or("");
     if reserved::is_reserved(manufacturer) {
         return Ok(true);
     }

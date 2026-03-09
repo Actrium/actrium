@@ -110,7 +110,8 @@ impl AIdCredentialValidator {
         realm_id: u32,
     ) -> Result<IdentityClaims, AidError> {
         tokio::task::block_in_place(|| {
-            let handle = tokio::runtime::Handle::try_current().map_err(|_| AidError::InvalidFormat)?;
+            let handle =
+                tokio::runtime::Handle::try_current().map_err(|_| AidError::InvalidFormat)?;
             let (claims, _) = handle.block_on(Self::check(credential, realm_id))?;
             Ok(claims)
         })

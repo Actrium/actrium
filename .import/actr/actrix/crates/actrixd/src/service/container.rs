@@ -15,6 +15,7 @@ use url::Url;
 pub enum ServiceContainer {
     Signaling(SignalingService),
     Ais(AisService),
+    #[allow(dead_code)]
     Mfr(MfrService),
     Stun(StunService),
     Turn(TurnService),
@@ -32,6 +33,7 @@ impl ServiceContainer {
     }
 
     /// 创建MFR服务容器
+    #[allow(dead_code)]
     pub fn mfr(service: MfrService) -> Self {
         Self::Mfr(service)
     }

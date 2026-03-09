@@ -1,7 +1,7 @@
-use base64::Engine as _;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey, SigningKey};
-use rand::rngs::OsRng;
 use crate::MfrError;
+use base64::Engine as _;
+use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
+use rand::rngs::OsRng;
 
 /// Verify an Ed25519 signature over `message` using a base64-encoded public key.
 pub fn verify_signature(
