@@ -3,13 +3,13 @@ package com.askaway.android.adapter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
+import com.askaway.android.R
 import com.askaway.android.databinding.ItemActiveBinding
 import com.askaway.android.model.ActiveModel
-import android.graphics.Color
-import androidx.core.content.ContextCompat
-import com.askaway.android.R
 
 class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveViewHolder>() {
     private val items = mutableListOf<ActiveModel>()
@@ -42,13 +42,18 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
             onMarkClick: ((ActiveModel) -> Unit)?
         ) {
             binding.tvAppName.text = item.name
-            binding.ivAppIcon.load(item.icon)
+            if (item.icon.isEmpty()) {
+                binding.ivAppIcon.setImageResource(R.drawable.app_default)
+            } else {
+                binding.ivAppIcon.load(item.icon)
+            }
             // Load screenshot from local path if available
             if (item.screenshot.isNotEmpty()) {
                 binding.ivScreenshot.load(java.io.File(item.screenshot))
             } else {
                 binding.ivScreenshot.setImageDrawable(null) // Clear if no screenshot
             }
+            binding.ivMark.isVisible = item.name.isNotEmpty()
 
             binding.root.setOnClickListener { onItemClick?.invoke(item) }
             binding.ivDelete.setOnClickListener { onDeleteClick?.invoke(item) }
