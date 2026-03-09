@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="nav_bg">#6A6A6A</color>
+    <color name="nav_indicator">#7C7C7C</color>
+    <color name="labels_vibrant_controls_primary">#FFFFFF</color>
+</resources>
+

@@ -40,7 +40,6 @@
                     android:id="@+id/ivAppIcon"
                     android:layout_width="32dp"
                     android:layout_height="32dp"
-                    android:contentDescription="@string/app_icon"
                     android:scaleType="centerCrop" />
 
                 <!-- 未读标记圆点 -->
@@ -69,7 +68,6 @@
                 android:id="@+id/ivMark"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
-                android:contentDescription="@string/mark"
                 android:src="@drawable/ic_mark"
                 android:tint="@color/icon_1" />
 
@@ -83,7 +81,6 @@
                 android:id="@+id/ivDelete"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
-                android:contentDescription="@string/delete"
                 android:src="@drawable/ic_delete"
                 android:tint="@color/icon_1" />
         </LinearLayout>
