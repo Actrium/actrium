@@ -97,7 +97,7 @@ struct PhoneMainView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
             // RN 请求退出全屏 - 先截图再关闭（标题为空时不截图）
-            if let tab = fullscreenTab, !tab.title.isEmpty {
+            if let tab = fullscreenTab, !tab.title.isEmpty, tab.title != "counterapp" {
                 takeSnapshot(for: tab)
             }
             fullscreenTab = nil
