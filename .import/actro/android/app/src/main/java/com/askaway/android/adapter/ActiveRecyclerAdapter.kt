@@ -13,7 +13,7 @@ import com.askaway.android.model.ActiveModel
 
 class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveViewHolder>() {
     private val items = mutableListOf<ActiveModel>()
-    var onItemClick: ((ActiveModel) -> Unit)? = null
+    var onItemClick: ((ActiveModel, View) -> Unit)? = null
     var onDeleteClick: ((ActiveModel) -> Unit)? = null
     var onMarkClick: ((ActiveModel) -> Unit)? = null
 
@@ -37,7 +37,7 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
     class ActiveViewHolder(private val binding: ItemActiveBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(
             item: ActiveModel,
-            onItemClick: ((ActiveModel) -> Unit)?,
+            onItemClick: ((ActiveModel, View) -> Unit)?,
             onDeleteClick: ((ActiveModel) -> Unit)?,
             onMarkClick: ((ActiveModel) -> Unit)?
         ) {
@@ -55,7 +55,7 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
             }
             binding.ivMark.isVisible = item.name.isNotEmpty()
 
-            binding.root.setOnClickListener { onItemClick?.invoke(item) }
+            binding.root.setOnClickListener { onItemClick?.invoke(item, binding.root) }
             binding.ivDelete.setOnClickListener { onDeleteClick?.invoke(item) }
             binding.vUnreadBadge.visibility = if (item.hasUnread) View.VISIBLE else View.GONE
 
