@@ -81,10 +81,11 @@ pub struct ServiceInfo {
     pub worst_dependency_health_state: Option<i32>,
 
     // 新增字段：负载均衡排序所需的复杂指标
-    /// 协议兼容性分数（0.0 ~ 1.0，基于 protobuf fingerprint 计算）
-    pub protocol_compatibility_score: Option<f32>,
     /// 地理位置信息（区域 + 经纬度）
     pub geo_location: Option<ServiceLocation>,
+    /// 是否精确匹配客户端 fingerprint（由 LoadBalancer 标记）
+    #[serde(skip)]
+    pub is_exact_match: bool,
     /// 粘滞客户端 ID 列表（会话保持，从 Ping 消息获取）
     pub sticky_client_ids: Vec<String>,
 }
@@ -228,8 +229,8 @@ impl ServiceRegistry {
             power_reserve: None,
             mailbox_backlog: None,
             worst_dependency_health_state: None,
-            protocol_compatibility_score: None,
             geo_location: None,
+            is_exact_match: false,
             sticky_client_ids: Vec::new(),
         };
 

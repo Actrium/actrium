@@ -5,7 +5,7 @@
 //! # 支持的排序因子
 //! - `MAXIMUM_POWER_RESERVE`: 按剩余处理能力降序（优先选择负载轻的）
 //! - `MINIMUM_MAILBOX_BACKLOG`: 按消息积压升序（优先选择积压少的）
-//! - `BEST_COMPATIBILITY`: 按兼容性优先（基于 protobuf fingerprint）
+//! - `BEST_COMPATIBILITY`: 精确匹配 fingerprint 优先（ExactMatchFirst 策略）
 //! - `NEAREST`: 按地理距离最近（基于 Haversine 公式）
 //! - `CLIENT_AFFINITY`: 按客户端亲和性（会话保持）
 //!
@@ -26,7 +26,7 @@
 //!     minimal_dependency_requirement: None,
 //! });
 //!
-//! let ranked = LoadBalancer::rank_candidates(candidates, criteria, None);
+//! let ranked = LoadBalancer::rank_candidates(candidates, criteria, "", None, None);
 //! // 返回排序后的候选 ActrId 列表
 //! ```
 
@@ -57,6 +57,7 @@ impl LoadBalancer {
     pub fn rank_candidates(
         mut candidates: Vec<ServiceInfo>,
         criteria: Option<&NodeSelectionCriteria>,
+        client_fingerprint: &str,
         client_id: Option<&str>,
         client_location: Option<(f64, f64)>,
     ) -> Vec<ActrId> {
@@ -96,28 +97,39 @@ impl LoadBalancer {
             return Vec::new();
         }
 
-        // 3. 按排序因子依次排序
-        for factor in &criteria.ranking_factors {
-            match NodeRankingFactor::try_from(*factor) {
-                Ok(NodeRankingFactor::MaximumPowerReserve) => {
-                    Self::sort_by_power_reserve(&mut candidates);
-                }
-                Ok(NodeRankingFactor::MinimumMailboxBacklog) => {
-                    Self::sort_by_mailbox_backlog(&mut candidates);
-                }
-                Ok(NodeRankingFactor::BestCompatibility) => {
-                    Self::sort_by_compatibility(&mut candidates);
-                }
-                Ok(NodeRankingFactor::Nearest) => {
-                    Self::sort_by_distance(&mut candidates, client_location);
-                }
-                Ok(NodeRankingFactor::ClientAffinity) => {
-                    Self::sort_by_affinity(&mut candidates, client_id);
-                }
-                Err(_) => {
-                    platform::recording::warn!("未知的排序因子: {}", factor);
-                }
+        // 标记精确匹配（fingerprint 对比在 LB 内完成，供 ExactMatchFirst 因子使用）
+        if !client_fingerprint.is_empty() {
+            for c in &mut candidates {
+                let fp = c.service_spec.as_ref().map(|s| s.fingerprint.as_str()).unwrap_or("");
+                c.is_exact_match = fp == client_fingerprint;
             }
+        }
+
+        // 3. 单次多键排序：按 ranking_factors 优先级依次作为主键/次键
+        let factors: Vec<NodeRankingFactor> = criteria
+            .ranking_factors
+            .iter()
+            .filter_map(|&f| NodeRankingFactor::try_from(f).ok())
+            .collect();
+
+        if !factors.is_empty() {
+            candidates.sort_by(|a, b| {
+                for factor in &factors {
+                    let ord = Self::cmp_by_factor(a, b, factor, client_id, client_location);
+                    if ord != std::cmp::Ordering::Equal {
+                        return ord;
+                    }
+                }
+                std::cmp::Ordering::Equal
+            });
+        }
+
+        // 若存在非精确匹配候选且有 fingerprint，记录日志
+        if !client_fingerprint.is_empty() && candidates.iter().any(|c| !c.is_exact_match) {
+            platform::recording::warn!(
+                "⚠️  非精确 fingerprint 匹配候选被选入结果（client_fp={}）",
+                client_fingerprint
+            );
         }
 
         // 4. 返回前 N 个候选
@@ -221,150 +233,115 @@ impl LoadBalancer {
         filtered
     }
 
-    /// 按剩余处理能力排序（降序：power_reserve 越大越好）
-    ///
-    /// 有 power_reserve 的优先，按值降序；None 的放到末尾
-    fn sort_by_power_reserve(candidates: &mut [ServiceInfo]) {
-        platform::recording::debug!("按 power_reserve 排序");
-
-        candidates.sort_by(|a, b| {
-            match (a.power_reserve, b.power_reserve) {
-                (Some(a_power), Some(b_power)) => {
-                    // 都有值：降序（power 越大越好）
-                    b_power
-                        .partial_cmp(&a_power)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                }
-                (Some(_), None) => std::cmp::Ordering::Less, // a 有值，b 没值，a 排前面
-                (None, Some(_)) => std::cmp::Ordering::Greater, // a 没值，b 有值，b 排前面
-                (None, None) => std::cmp::Ordering::Equal,   // 都没值，保持原序
-            }
-        });
-    }
-
-    /// 按消息积压排序（升序：mailbox_backlog 越小越好）
-    ///
-    /// 有 mailbox_backlog 的优先，按值升序；None 的放到末尾
-    fn sort_by_mailbox_backlog(candidates: &mut [ServiceInfo]) {
-        platform::recording::debug!("按 mailbox_backlog 排序");
-
-        candidates.sort_by(|a, b| {
-            match (a.mailbox_backlog, b.mailbox_backlog) {
-                (Some(a_backlog), Some(b_backlog)) => {
-                    // 都有值：升序（backlog 越小越好）
-                    a_backlog
-                        .partial_cmp(&b_backlog)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                }
-                (Some(_), None) => std::cmp::Ordering::Less, // a 有值，b 没值，a 排前面
-                (None, Some(_)) => std::cmp::Ordering::Greater, // a 没值，b 有值，b 排前面
-                (None, None) => std::cmp::Ordering::Equal,   // 都没值，保持原序
-            }
-        });
-    }
-
-    /// 按协议兼容性排序（降序：protocol_compatibility_score 越大越好）
-    ///
-    /// 注意：protocol_compatibility_score 应该在调用此函数前预先计算好
-    /// 计算方式参考 CompatibilityCache 模块（基于 protobuf fingerprint）
-    fn sort_by_compatibility(candidates: &mut [ServiceInfo]) {
-        platform::recording::debug!("按协议兼容性排序");
-
-        candidates.sort_by(|a, b| {
-            match (
-                a.protocol_compatibility_score,
-                b.protocol_compatibility_score,
-            ) {
-                (Some(a_score), Some(b_score)) => {
-                    // 都有值：降序（score 越大越兼容）
-                    b_score
-                        .partial_cmp(&a_score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                }
-                (Some(_), None) => std::cmp::Ordering::Less, // a 有分数，b 没有，a 排前面
-                (None, Some(_)) => std::cmp::Ordering::Greater, // a 没分数，b 有，b 排前面
-                (None, None) => std::cmp::Ordering::Equal,   // 都没分数，保持原序
-            }
-        });
-    }
-
-    /// 按地理位置排序（基于 Haversine 距离）
-    ///
-    /// 如果提供了客户端坐标，计算每个候选到客户端的距离并排序
-    /// 否则，有 geo_location 的优先，None 的排后面
-    ///
-    /// # 参数
-    /// - `client_location`: 可选的客户端坐标 (latitude, longitude)
-    fn sort_by_distance(candidates: &mut [ServiceInfo], client_location: Option<(f64, f64)>) {
-        use crate::geo::haversine_distance;
-
-        if let Some((client_lat, client_lon)) = client_location {
-            platform::recording::debug!(
-                "按地理距离排序（客户端坐标: {}, {}）",
-                client_lat,
-                client_lon
-            );
-
-            // 计算每个候选到客户端的距离
-            candidates.sort_by(|a, b| {
-                let dist_a = a.geo_location.as_ref().and_then(|loc| {
-                    loc.latitude
-                        .zip(loc.longitude)
-                        .map(|(lat, lon)| haversine_distance(client_lat, client_lon, lat, lon))
-                });
-
-                let dist_b = b.geo_location.as_ref().and_then(|loc| {
-                    loc.latitude
-                        .zip(loc.longitude)
-                        .map(|(lat, lon)| haversine_distance(client_lat, client_lon, lat, lon))
-                });
-
-                match (dist_a, dist_b) {
-                    (Some(a), Some(b)) => {
-                        // 都有距离：升序（距离越小越好）
-                        a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
-                    }
-                    (Some(_), None) => std::cmp::Ordering::Less, // a 有坐标，b 没有，a 排前面
-                    (None, Some(_)) => std::cmp::Ordering::Greater, // b 有坐标，a 没有，b 排前面
-                    (None, None) => std::cmp::Ordering::Equal,   // 都没坐标，保持原序
-                }
-            });
-        } else {
-            platform::recording::debug!("按地理位置排序（无客户端坐标，仅优先有位置的候选）");
-
-            // 简单实现：有 geo_location 的排前面，None 的排后面
-            candidates.sort_by(|a, b| {
-                match (&a.geo_location, &b.geo_location) {
-                    (Some(_), Some(_)) => std::cmp::Ordering::Equal, // 都有位置，暂时不区分
-                    (Some(_), None) => std::cmp::Ordering::Less,     // a 有位置，b 没有，a 排前面
-                    (None, Some(_)) => std::cmp::Ordering::Greater,  // a 没位置，b 有，b 排前面
-                    (None, None) => std::cmp::Ordering::Equal,       // 都没位置，保持原序
-                }
-            });
+    /// 按单个因子比较两个候选（用于多键排序）
+    fn cmp_by_factor(
+        a: &ServiceInfo,
+        b: &ServiceInfo,
+        factor: &NodeRankingFactor,
+        client_id: Option<&str>,
+        client_location: Option<(f64, f64)>,
+    ) -> std::cmp::Ordering {
+        match factor {
+            NodeRankingFactor::MaximumPowerReserve => Self::cmp_power_reserve(a, b),
+            NodeRankingFactor::MinimumMailboxBacklog => Self::cmp_mailbox_backlog(a, b),
+            NodeRankingFactor::BestCompatibility => Self::cmp_exact_match(a, b),
+            NodeRankingFactor::Nearest => Self::cmp_distance(a, b, client_location),
+            NodeRankingFactor::ClientAffinity => Self::cmp_affinity(a, b, client_id),
         }
     }
 
-    /// 按客户端会话粘滞排序（布尔模式：有粘滞匹配的排最前面）
-    ///
-    /// 注意：sticky_client_ids 从 Actor 实例的 Ping 消息中获取
-    /// 粘滞匹配的实例优先级最高（会话保持），无粘滞的次之
-    ///
-    /// # 参数
-    /// - `client_id`: 可选的客户端 ID，用于匹配粘滞列表
+    fn cmp_power_reserve(a: &ServiceInfo, b: &ServiceInfo) -> std::cmp::Ordering {
+        b.power_reserve
+            .unwrap_or(0.0)
+            .partial_cmp(&a.power_reserve.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }
+
+    fn cmp_mailbox_backlog(a: &ServiceInfo, b: &ServiceInfo) -> std::cmp::Ordering {
+        a.mailbox_backlog
+            .unwrap_or(1.0)
+            .partial_cmp(&b.mailbox_backlog.unwrap_or(1.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }
+
+    fn cmp_exact_match(a: &ServiceInfo, b: &ServiceInfo) -> std::cmp::Ordering {
+        // 精确匹配者排前面（true > false）
+        match (a.is_exact_match, b.is_exact_match) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        }
+    }
+
+    fn cmp_distance(
+        a: &ServiceInfo,
+        b: &ServiceInfo,
+        client_location: Option<(f64, f64)>,
+    ) -> std::cmp::Ordering {
+        // 距离近者排前面，复用 haversine 逻辑
+        if let (Some((clat, clon)), Some(a_loc), Some(b_loc)) = (
+            client_location,
+            &a.geo_location,
+            &b.geo_location,
+        ) {
+            if let (Some(a_lat), Some(a_lon), Some(b_lat), Some(b_lon)) = (
+                a_loc.latitude,
+                a_loc.longitude,
+                b_loc.latitude,
+                b_loc.longitude,
+            ) {
+                let dist_a = crate::geo::haversine_distance(clat, clon, a_lat, a_lon);
+                let dist_b = crate::geo::haversine_distance(clat, clon, b_lat, b_lon);
+                return dist_a
+                    .partial_cmp(&dist_b)
+                    .unwrap_or(std::cmp::Ordering::Equal);
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
+
+    fn cmp_affinity(
+        a: &ServiceInfo,
+        b: &ServiceInfo,
+        client_id: Option<&str>,
+    ) -> std::cmp::Ordering {
+        if let Some(cid) = client_id {
+            let a_sticky = a.sticky_client_ids.contains(&cid.to_string());
+            let b_sticky = b.sticky_client_ids.contains(&cid.to_string());
+            match (a_sticky, b_sticky) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            }
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    }
+
+    // 单因子排序函数（委托给 cmp_* 函数，供测试直接调用）
+
+    fn sort_by_power_reserve(candidates: &mut [ServiceInfo]) {
+        platform::recording::debug!("按 power_reserve 排序");
+        candidates.sort_by(Self::cmp_power_reserve);
+    }
+
+    fn sort_by_mailbox_backlog(candidates: &mut [ServiceInfo]) {
+        platform::recording::debug!("按 mailbox_backlog 排序");
+        candidates.sort_by(Self::cmp_mailbox_backlog);
+    }
+
+    fn sort_by_exact_match(candidates: &mut [ServiceInfo]) {
+        candidates.sort_by(Self::cmp_exact_match);
+    }
+
+    fn sort_by_distance(candidates: &mut [ServiceInfo], client_location: Option<(f64, f64)>) {
+        platform::recording::debug!("按地理距离排序");
+        candidates.sort_by(|a, b| Self::cmp_distance(a, b, client_location));
+    }
+
     fn sort_by_affinity(candidates: &mut [ServiceInfo], client_id: Option<&str>) {
         platform::recording::debug!("按客户端会话粘滞排序: client_id={:?}", client_id);
-
-        candidates.sort_by_key(|s| {
-            if let Some(cid) = client_id {
-                if s.sticky_client_ids.contains(&cid.to_string()) {
-                    0 // 粘滞匹配 = 最高优先级
-                } else {
-                    1 // 无粘滞 = 次优
-                }
-            } else {
-                1 // 无客户端 ID，所有候选同等优先级
-            }
-        });
+        candidates.sort_by(|a, b| Self::cmp_affinity(a, b, client_id));
     }
 
 }
@@ -381,7 +358,6 @@ mod tests {
                 r#type: ActrType {
                     manufacturer: "test".to_string(),
                     name: name.to_string(),
-                    version: None,
                 },
                 realm: Realm { realm_id: 0 },
             },
@@ -396,10 +372,9 @@ mod tests {
             power_reserve: None,
             mailbox_backlog: None,
             worst_dependency_health_state: None,
-            protocol_compatibility_score: None,
             geo_location: None,
+            is_exact_match: false,
             sticky_client_ids: Vec::new(),
-            ws_address: None,
         }
     }
 
@@ -410,7 +385,7 @@ mod tests {
             create_test_service(2, "service-2"),
         ];
 
-        let ranked = LoadBalancer::rank_candidates(candidates, None, None, None);
+        let ranked = LoadBalancer::rank_candidates(candidates, None, "", None, None);
         assert_eq!(ranked.len(), 2);
     }
 
@@ -430,14 +405,14 @@ mod tests {
         };
 
         let ranked =
-            LoadBalancer::rank_candidates(candidates, Some(&criteria), None, None);
+            LoadBalancer::rank_candidates(candidates, Some(&criteria), "", None, None);
         assert_eq!(ranked.len(), 2);
     }
 
     #[test]
     fn test_empty_candidates() {
         let candidates = vec![];
-        let ranked = LoadBalancer::rank_candidates(candidates, None, None, None);
+        let ranked = LoadBalancer::rank_candidates(candidates, None, "", None, None);
         assert_eq!(ranked.len(), 0);
     }
 
@@ -544,26 +519,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sort_by_compatibility_score() {
-        let mut s1 = create_test_service(1, "s1");
-        s1.protocol_compatibility_score = Some(0.6);
-        let mut s2 = create_test_service(2, "s2");
-        s2.protocol_compatibility_score = Some(1.0);
-        let mut s3 = create_test_service(3, "s3");
-        s3.protocol_compatibility_score = Some(0.8);
-        let s4 = create_test_service(4, "s4"); // None
-
-        let mut candidates = vec![s1, s2, s3, s4];
-        LoadBalancer::sort_by_compatibility(&mut candidates);
-
-        // 应该是降序：1.0 > 0.8 > 0.6，None 在最后
-        assert_eq!(candidates[0].actor_id.serial_number, 2); // 1.0
-        assert_eq!(candidates[1].actor_id.serial_number, 3); // 0.8
-        assert_eq!(candidates[2].actor_id.serial_number, 1); // 0.6
-        assert_eq!(candidates[3].actor_id.serial_number, 4); // None
-    }
-
-    #[test]
     fn test_sort_by_affinity_sticky_clients() {
         let mut s1 = create_test_service(1, "s1");
         s1.sticky_client_ids = vec!["client-A".to_string(), "client-B".to_string()];
@@ -619,14 +574,14 @@ mod tests {
         };
 
         let ranked =
-            LoadBalancer::rank_candidates(candidates, Some(&criteria), None, None);
+            LoadBalancer::rank_candidates(candidates, Some(&criteria), "", None, None);
 
-        // 注意：依次调用排序，最后一个因子起主要作用（稳定排序特性）
-        // 实际执行顺序：先按 power 排序，再按 backlog 排序
-        // 最终结果是按 backlog 为主：s3(0.05) < s2(0.1) < s1(0.3)
-        assert_eq!(ranked[0].serial_number, 3); // backlog=0.05 最小
-        assert_eq!(ranked[1].serial_number, 2); // backlog=0.1
-        assert_eq!(ranked[2].serial_number, 1); // backlog=0.3 最大
+        // 多键排序：power_reserve 为主键，mailbox_backlog 为次键
+        // s1 和 s2 的 power 相同(0.8)，此时 backlog 决定顺序：s2(0.1) < s1(0.3)
+        // s3 的 power(0.5) < s1/s2(0.8)，排最后
+        assert_eq!(ranked[0].serial_number, 2); // power=0.8, backlog=0.1
+        assert_eq!(ranked[1].serial_number, 1); // power=0.8, backlog=0.3
+        assert_eq!(ranked[2].serial_number, 3); // power=0.5
     }
 
     // ========================================================================
@@ -652,7 +607,7 @@ mod tests {
         };
 
         let ranked =
-            LoadBalancer::rank_candidates(candidates, Some(&criteria), None, None);
+            LoadBalancer::rank_candidates(candidates, Some(&criteria), "", None, None);
         assert_eq!(ranked.len(), 3); // 全部保留，顺序不变
     }
 
@@ -690,7 +645,7 @@ mod tests {
         };
 
         let ranked =
-            LoadBalancer::rank_candidates(candidates, Some(&criteria), None, None);
+            LoadBalancer::rank_candidates(candidates, Some(&criteria), "", None, None);
         assert_eq!(ranked.len(), 0); // 全部被过滤
     }
 
@@ -736,6 +691,7 @@ mod tests {
         let ranked = LoadBalancer::rank_candidates(
             candidates,
             Some(&criteria),
+            "",
             None,
             client_location,
         );

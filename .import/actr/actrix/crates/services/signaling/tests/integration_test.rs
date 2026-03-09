@@ -127,11 +127,12 @@ fn create_envelope(flow: signaling_envelope::Flow) -> SignalingEnvelope {
     }
 }
 
-/// 测试辅助：创建测试 credential（占位符）
+/// 测试辅助：创建测试 credential（占位符，不用于实际验证）
 fn create_test_credential() -> AIdCredential {
     AIdCredential {
-        token_key_id: 1,
-        encrypted_token: Bytes::from_static(b"test-credential-placeholder"),
+        key_id: 1,
+        claims: Bytes::from_static(b"test-claims-placeholder"),
+        signature: Bytes::from_static(&[0u8; 64]),
     }
 }
 

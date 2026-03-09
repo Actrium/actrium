@@ -104,7 +104,6 @@ impl ServiceRegistryStorage {
                 power_reserve REAL,
                 mailbox_backlog REAL,
                 worst_dependency_health_state INTEGER,
-                protocol_compatibility_score REAL,
 
                 -- 地理位置
                 geo_region TEXT,
@@ -173,7 +172,7 @@ impl ServiceRegistryStorage {
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
                 service_availability_state, power_reserve, mailbox_backlog,
-                worst_dependency_health_state, protocol_compatibility_score,
+                worst_dependency_health_state,
                 geo_region, geo_longitude, geo_latitude,
                 sticky_client_ids,
                 registered_at, last_heartbeat_at, expires_at
@@ -182,10 +181,10 @@ impl ServiceRegistryStorage {
                 ?5, ?6, ?7, ?8,
                 ?9, ?10,
                 ?11, ?12, ?13,
-                ?14, ?15,
-                ?16, ?17, ?18,
-                ?19,
-                ?20, ?21, ?22
+                ?14,
+                ?15, ?16, ?17,
+                ?18,
+                ?19, ?20, ?21
             )
             ON CONFLICT(actor_serial_number, actor_realm_id, service_name)
             DO UPDATE SET
@@ -198,7 +197,6 @@ impl ServiceRegistryStorage {
                 power_reserve = excluded.power_reserve,
                 mailbox_backlog = excluded.mailbox_backlog,
                 worst_dependency_health_state = excluded.worst_dependency_health_state,
-                protocol_compatibility_score = excluded.protocol_compatibility_score,
                 geo_region = excluded.geo_region,
                 geo_longitude = excluded.geo_longitude,
                 geo_latitude = excluded.geo_latitude,
@@ -221,7 +219,6 @@ impl ServiceRegistryStorage {
         .bind(service.power_reserve.map(|v| v as f64))
         .bind(service.mailbox_backlog.map(|v| v as f64))
         .bind(service.worst_dependency_health_state.map(|v| v as i64))
-        .bind(service.protocol_compatibility_score.map(|v| v as f64))
         .bind(service.geo_location.as_ref().map(|g| g.region.as_str()))
         .bind(service.geo_location.as_ref().and_then(|g| g.longitude))
         .bind(service.geo_location.as_ref().and_then(|g| g.latitude))
@@ -309,7 +306,7 @@ impl ServiceRegistryStorage {
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
                 service_availability_state, power_reserve, mailbox_backlog,
-                worst_dependency_health_state, protocol_compatibility_score,
+                worst_dependency_health_state,
                 geo_region, geo_longitude, geo_latitude,
                 sticky_client_ids,
                 last_heartbeat_at
@@ -362,7 +359,7 @@ impl ServiceRegistryStorage {
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
                 service_availability_state, power_reserve, mailbox_backlog,
-                worst_dependency_health_state, protocol_compatibility_score,
+                worst_dependency_health_state,
                 geo_region, geo_longitude, geo_latitude,
                 sticky_client_ids,
                 last_heartbeat_at
@@ -500,10 +497,8 @@ impl ServiceRegistryStorage {
             worst_dependency_health_state: row
                 .get::<Option<i64>, _>("worst_dependency_health_state")
                 .map(|v| v as i32),
-            protocol_compatibility_score: row
-                .get::<Option<f64>, _>("protocol_compatibility_score")
-                .map(|v| v as f32),
             geo_location,
+            is_exact_match: false,
             sticky_client_ids,
         })
     }
@@ -598,8 +593,8 @@ mod tests {
             power_reserve: Some(0.8),
             mailbox_backlog: Some(0.2),
             worst_dependency_health_state: None,
-            protocol_compatibility_score: None,
             geo_location: None,
+            is_exact_match: false,
             sticky_client_ids: vec![],
         }
     }
