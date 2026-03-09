@@ -1,23 +1,26 @@
 edition = 1
-exports = []
+exports = ["protos/local/echo.proto"]
 
 [package]
 name = "{{PROJECT_NAME}}"
-description = "Actor-RTC TypeScript echo app"
+description = "Actor-RTC Web EchoService provider"
 authors = []
 license = "Apache-2.0"
-tags = ["dev", "service"]
+tags = ["dev", "server"]
 
 [package.actr_type]
 manufacturer = "{{MANUFACTURER}}"
-name = "echo-client-app"
+name = "EchoService"
 
 [dependencies]
-{{#if IS_BOTH}}
-echo-service = {}
-{{else}}
-echo-echo-server = { actr_type = "acme:EchoService" }
-{{/if}}
+
+# Web platform configuration
+[platform.web]
+generate_types = true
+types_output = "./src/generated"
+worker_type = "service-worker"
+service_worker_path = "/actor.sw.js"
+generate_sw_entry = true
 
 [system.signaling]
 url = "{{{SIGNALING_URL}}}/signaling/ws"
@@ -31,19 +34,17 @@ visible = true
 [system.observability]
 filter_level = "info"
 tracing_enabled = false
-tracing_endpoint = "http://127.0.0.1:4317"
-tracing_service_name = "{{PROJECT_NAME}}"
 
 [system.webrtc]
-force_relay = false
 stun_urls = {{{STUN_URLS}}}
 turn_urls = {{{TURN_URLS}}}
 
 [scripts]
 dev = "npm run dev"
+build-wasm = "cd wasm && bash build.sh"
 
 [acl]
 
 [[acl.rules]]
 permission = "allow"
-principals = [{ actr_type = { manufacturer = "{{MANUFACTURER}}", name = "EchoService", version = "v1" } }]
+types = ["{{MANUFACTURER}}:echo-client-app"]

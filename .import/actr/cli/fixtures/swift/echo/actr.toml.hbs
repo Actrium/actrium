@@ -1,17 +1,23 @@
 edition = 1
-exports = ["protos/local/echo.proto"]
+exports = []
 
 [package]
 name = "{{PROJECT_NAME}}"
-description = "Actor-RTC Swift EchoService provider"
+description = "Echo client app"
 authors = ["Actr-Team"]
 license = "Apache-2.0"
-tags = ["dev", "service"]
+tags = ["dev", "client"]
 
 [package.actr_type]
 manufacturer = "{{MANUFACTURER}}"
-name = "EchoService"
-version = "v1"
+name = "echo-client-app"
+
+[dependencies]
+{{#if IS_BOTH}}
+echo-service = {}
+{{else}}
+echo-echo-server = { actr_type = "{{MANUFACTURER}}:EchoService" }
+{{/if}}
 
 [system.signaling]
 url = "{{{SIGNALING_URL}}}/signaling/ws"
@@ -41,4 +47,4 @@ test = "xcodebuild test"
 
 [[acl.rules]]
 permission = "allow"
-principals = [{ actr_type = { manufacturer = "{{MANUFACTURER}}", name = "echo-client-app" } }]
+type = "{{MANUFACTURER}}:EchoService:v1"
