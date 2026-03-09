@@ -1,8 +1,8 @@
-use actr_protocol::acl_rule::{Permission, Principal};
+use actr_protocol::acl_rule::Permission;
 use actr_protocol::{
     Acl, AclRule, ActrIdExt, ActrRelay, ActrType, Realm, RegisterRequest, RegisterResponse,
-    RoleNegotiation, actr_relay, peer_to_signaling, register_response, route_candidates_response,
-    signaling_envelope, signaling_to_actr,
+    RoleNegotiation, acl_rule, actr_relay, peer_to_signaling, register_response,
+    route_candidates_response, signaling_envelope, signaling_to_actr,
 };
 use base64::Engine as _;
 use futures::{SinkExt, StreamExt};
@@ -442,10 +442,13 @@ async fn ais_register_http_with_secret(
         actr_type: ActrType {
             manufacturer: manufacturer.to_string(),
             name: name.to_string(),
+            version: "v1".to_string(),
         },
         realm: Realm { realm_id },
         service_spec,
         acl,
+        service: None,
+        ws_address: None,
     };
     let client = reqwest::Client::new();
     let register_url = format!("{base_url}/ais/register");
@@ -482,15 +485,18 @@ async fn connect_ws_authenticated(
     ok: &register_response::RegisterOk,
 ) -> (WsWrite, WsRead) {
     let actor_id_str = ok.actr_id.to_string_repr();
-    let token_b64 =
-        base64::engine::general_purpose::STANDARD.encode(&ok.credential.encrypted_token);
-    let key_id = ok.credential.token_key_id;
+    let signature_b64 =
+        base64::engine::general_purpose::STANDARD.encode(&ok.credential.signature);
+    let claims_b64 =
+        base64::engine::general_purpose::STANDARD.encode(&ok.credential.claims);
+    let key_id = ok.credential.key_id;
     let ws_url = format!(
-        "ws://127.0.0.1:{}/signaling/ws?actor_id={}&token={}&token_key_id={}",
+        "ws://127.0.0.1:{}/signaling/ws?actor_id={}&key_id={}&claims={}&signature={}",
         port,
         urlencoding::encode(&actor_id_str),
-        urlencoding::encode(&token_b64),
         key_id,
+        urlencoding::encode(&claims_b64),
+        urlencoding::encode(&signature_b64),
     );
     let (ws_stream, _) = connect_async(&ws_url).await.expect("ws connect");
     ws_stream.split()
@@ -600,6 +606,7 @@ async fn query_route_candidates(
                     target_type: ActrType {
                         manufacturer: target_manufacturer.into(),
                         name: target_name.into(),
+                        version: "v1".to_string(),
                     },
                     client_fingerprint: "".into(),
                     criteria: Some(
@@ -780,10 +787,13 @@ async fn actrix_end_to_end_register_and_health() {
         actr_type: ActrType {
             manufacturer: "test-mfg".to_string(),
             name: "device".to_string(),
+            version: "v1".to_string(),
         },
         realm: Realm { realm_id: 1001 },
         service_spec: None,
         acl: None,
+        service: None,
+        ws_address: None,
     };
     let body = register_req.encode_to_vec();
     let register_url = format!("{base}/ais/register");
@@ -807,17 +817,9 @@ async fn actrix_end_to_end_register_and_health() {
     };
     assert_eq!(ok.actr_id.realm.realm_id, 1001);
 
-    // Validate credential through AIdCredentialValidator (fetches key via KS gRPC)
-    let ks_client_cfg = platform::config::ks::KsClientConfig {
-        endpoint: base.clone(),
-        timeout_seconds: 5,
-        enable_tls: false,
-        tls_domain: None,
-        ca_cert: None,
-        client_cert: None,
-        client_key: None,
-    };
-    AIdCredentialValidator::init(&ks_client_cfg, ACTRIX_SHARED_KEY, harness.tmp.path())
+    // Validate credential through AIdCredentialValidator — reads from the same
+    // signaling_key_cache.db that actrix wrote during AIS key loading.
+    AIdCredentialValidator::init(&harness.data_dir)
         .await
         .expect("validator init");
     let (claims, _) = AIdCredentialValidator::check(&ok.credential, 1001)
@@ -937,10 +939,10 @@ async fn actrix_end_to_end_register_and_health() {
 
     // Tamper credential to ensure 401 is returned
     let mut bad_cred = ok.credential.clone();
-    if !bad_cred.encrypted_token.is_empty() {
-        let mut tampered = bad_cred.encrypted_token.to_vec();
+    if !bad_cred.signature.is_empty() {
+        let mut tampered = bad_cred.signature.to_vec();
         tampered[0] ^= 0xFF;
-        bad_cred.encrypted_token = tampered.into();
+        bad_cred.signature = tampered.into();
     }
     let bad_msg = actr_protocol::ActrToSignaling {
         source: ok.actr_id.clone(),
@@ -1045,10 +1047,13 @@ async fn ais_register_rejects_non_preprovisioned_realm() {
         actr_type: ActrType {
             manufacturer: "realm-mfg".to_string(),
             name: "realm-device".to_string(),
+            version: "v1".to_string(),
         },
         realm: Realm { realm_id: 9999 },
         service_spec: None,
         acl: None,
+        service: None,
+        ws_address: None,
     };
 
     let rsp_bytes = client
@@ -1169,10 +1174,13 @@ async fn ais_register_enforces_realm_secret_when_configured() {
         actr_type: ActrType {
             manufacturer: "mfg".to_string(),
             name: "secret-check".to_string(),
+            version: "v1".to_string(),
         },
         realm: Realm { realm_id: 1001 },
         service_spec: None,
         acl: None,
+        service: None,
+        ws_address: None,
     };
 
     // 1) 未携带 realm_secret，AIS HTTP 注册应被拒绝
@@ -1295,10 +1303,13 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
         actr_type: ActrType {
             manufacturer: "mfg".to_string(),
             name: "svc".to_string(),
+            version: "v1".to_string(),
         },
         realm: Realm { realm_id: 1001 },
         service_spec: None,
         acl: None,
+        service: None,
+        ws_address: None,
     };
     let register_resp = client
         .post(format!("{base}/ais/register"))
@@ -1343,14 +1354,17 @@ async fn signaling_url_identity_reconnect_replaces_stale_connection() {
         ws_register(harness.port, "mfg", "url-id", None).await;
 
     let actor_id = register_ok.actr_id.to_string_repr();
-    let token_b64 =
-        base64::engine::general_purpose::STANDARD.encode(&register_ok.credential.encrypted_token);
+    let signature_b64 =
+        base64::engine::general_purpose::STANDARD.encode(&register_ok.credential.signature);
+    let claims_b64 =
+        base64::engine::general_purpose::STANDARD.encode(&register_ok.credential.claims);
     let ws_url = format!(
-        "ws://127.0.0.1:{}/signaling/ws?actor_id={}&token={}&token_key_id={}",
+        "ws://127.0.0.1:{}/signaling/ws?actor_id={}&key_id={}&claims={}&signature={}",
         harness.port,
         urlencoding::encode(&actor_id),
-        urlencoding::encode(&token_b64),
-        register_ok.credential.token_key_id
+        register_ok.credential.key_id,
+        urlencoding::encode(&claims_b64),
+        urlencoding::encode(&signature_b64),
     );
 
     let (reconnect_stream, _) = connect_async(&ws_url)
@@ -1588,13 +1602,16 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
 
     // 第二个连接应被 concurrent limit 拒绝
     let actor_id_str = ok2.actr_id.to_string_repr();
-    let token_b64 =
-        base64::engine::general_purpose::STANDARD.encode(&ok2.credential.encrypted_token);
+    let signature_b64 =
+        base64::engine::general_purpose::STANDARD.encode(&ok2.credential.signature);
+    let claims_b64_2 =
+        base64::engine::general_purpose::STANDARD.encode(&ok2.credential.claims);
     let ws_url2 = format!(
-        "ws://127.0.0.1:{port}/signaling/ws?actor_id={}&token={}&token_key_id={}",
+        "ws://127.0.0.1:{port}/signaling/ws?actor_id={}&key_id={}&claims={}&signature={}",
         urlencoding::encode(&actor_id_str),
-        urlencoding::encode(&token_b64),
-        ok2.credential.token_key_id,
+        ok2.credential.key_id,
+        urlencoding::encode(&claims_b64_2),
+        urlencoding::encode(&signature_b64),
     );
     let second = connect_async(&ws_url2).await;
     match second {
@@ -1692,13 +1709,12 @@ async fn signaling_register_and_discovery_acl_allow() {
     // Service registers with ACL allowing client:* to discover
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -1857,13 +1873,12 @@ async fn signaling_discovery_cross_realm_acl_allow() {
 
     let service_acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -1961,13 +1976,12 @@ async fn signaling_route_candidates_cross_realm_acl_allow() {
 
     let service_acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -2191,13 +2205,12 @@ async fn signaling_route_candidates_with_acl() {
     // Service registers with ACL allowing client:sdp to discover/route
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-sdp".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-sdp".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -2216,6 +2229,7 @@ async fn signaling_route_candidates_with_acl() {
                     target_type: ActrType {
                         manufacturer: "mfg".into(),
                         name: "svc-rtp".into(),
+                        version: "v1".to_string(),
                     },
                     client_fingerprint: "".into(),
                     criteria: Some(
@@ -2289,6 +2303,7 @@ async fn signaling_route_candidates_acl_denied() {
                     target_type: ActrType {
                         manufacturer: "mfg".into(),
                         name: "svc-deny-route".into(),
+                        version: "v1".to_string(),
                     },
                     client_fingerprint: "".into(),
                     criteria: Some(
@@ -2338,13 +2353,12 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
     // ACL: allow client-route to reach the services
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-route".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-route".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -2397,6 +2411,7 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
                     target_type: ActrType {
                         manufacturer: "mfg".into(),
                         name: "svc-route".into(),
+                        version: "v1".to_string(),
                     },
                     client_fingerprint: "".into(),
                     criteria: Some(
@@ -2464,13 +2479,12 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
     // ACL allow client-fp
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-fp".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-fp".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -2524,13 +2538,14 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
                     target_type: ActrType {
                         manufacturer: "mfg".into(),
                         name: "svc-fp-exact".into(),
+                        version: "v1".to_string(),
                     },
                     client_fingerprint: spec_exact.fingerprint.clone(),
                     criteria: Some(
                         actr_protocol::route_candidates_request::NodeSelectionCriteria {
                             candidate_count: 2,
                             ranking_factors: vec![
-                                actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor::BestCompatibility as i32,
+                                actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor::ExactMatchFirst as i32,
                             ],
                             minimal_dependency_requirement: None,
                             minimal_health_requirement: None,
@@ -2553,10 +2568,6 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
         Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
             Some(signaling_to_actr::Payload::RouteCandidatesResponse(rsp)) => match rsp.result {
                 Some(route_candidates_response::Result::Success(ok)) => {
-                    assert!(
-                        ok.has_exact_match.unwrap_or(false),
-                        "should report exact match"
-                    );
                     assert_eq!(
                         ok.candidates.first().map(|c| c.serial_number),
                         Some(svc_exact_ok.actr_id.serial_number),
@@ -2700,6 +2711,7 @@ async fn signaling_subscribe_and_unsubscribe_actr_up() {
                     target_type: ActrType {
                         manufacturer: "mfg".into(),
                         name: "svc-subject".into(),
+                        version: "v1".to_string(),
                     },
                 },
             ),
@@ -2732,6 +2744,7 @@ async fn signaling_subscribe_and_unsubscribe_actr_up() {
                     target_type: ActrType {
                         manufacturer: "mfg".into(),
                         name: "svc-subject".into(),
+                        version: "v1".to_string(),
                     },
                 },
             ),
@@ -2770,6 +2783,7 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
     let target_type = ActrType {
         manufacturer: "mfg".into(),
         name: "svc-presence".into(),
+        version: "v1".to_string(),
     };
     let subscribe = actr_protocol::ActrToSignaling {
         source: sub_ok.actr_id.clone(),
@@ -2796,13 +2810,12 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
     // New service registers -> should trigger ActrUp notification
     let presence_acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "subscriber".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "subscriber".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -2873,13 +2886,12 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
 
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-fp-cache".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-fp-cache".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -2935,12 +2947,13 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
                 target_type: ActrType {
                     manufacturer: "mfg".into(),
                     name: "svc-compat".into(),
+                    version: "v1".to_string(),
                 },
                 client_fingerprint: spec_base.fingerprint.clone(),
                 criteria: Some(
                     actr_protocol::route_candidates_request::NodeSelectionCriteria {
                         candidate_count: 3,
-                        ranking_factors: vec![actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor::BestCompatibility as i32],
+                        ranking_factors: vec![actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor::ExactMatchFirst as i32],
                         minimal_dependency_requirement: None,
                         minimal_health_requirement: None,
                     },
@@ -2955,12 +2968,10 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
     )
     .await;
     let resp1 = recv_envelope(&mut cli_r).await;
-    let (candidates1, info1) = match resp1.flow {
+    let candidates1 = match resp1.flow {
         Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
             Some(signaling_to_actr::Payload::RouteCandidatesResponse(rsp)) => match rsp.result {
-                Some(route_candidates_response::Result::Success(ok)) => {
-                    (ok.candidates, ok.compatibility_info)
-                }
+                Some(route_candidates_response::Result::Success(ok)) => ok.candidates,
                 other => panic!("unexpected route result {other:?}"),
             },
             other => panic!("unexpected payload {other:?}"),
@@ -2970,10 +2981,6 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
     assert!(
         !candidates1.is_empty(),
         "should return at least one candidate"
-    );
-    assert!(
-        !info1.is_empty(),
-        "compatibility analysis info should be returned"
     );
 
     // Second request should reuse cache and still succeed
@@ -2985,12 +2992,13 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
                 target_type: ActrType {
                     manufacturer: "mfg".into(),
                     name: "svc-compat".into(),
+                    version: "v1".to_string(),
                 },
                 client_fingerprint: spec_base.fingerprint.clone(),
                 criteria: Some(
                     actr_protocol::route_candidates_request::NodeSelectionCriteria {
                         candidate_count: 3,
-                        ranking_factors: vec![actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor::BestCompatibility as i32],
+                        ranking_factors: vec![actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor::ExactMatchFirst as i32],
                         minimal_dependency_requirement: None,
                         minimal_health_requirement: None,
                     },
@@ -3005,12 +3013,10 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
     )
     .await;
     let resp2 = recv_envelope(&mut cli_r).await;
-    let (candidates2, info2) = match resp2.flow {
+    let candidates2 = match resp2.flow {
         Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
             Some(signaling_to_actr::Payload::RouteCandidatesResponse(rsp)) => match rsp.result {
-                Some(route_candidates_response::Result::Success(ok)) => {
-                    (ok.candidates, ok.compatibility_info)
-                }
+                Some(route_candidates_response::Result::Success(ok)) => ok.candidates,
                 other => panic!("unexpected route result {other:?}"),
             },
             other => panic!("unexpected payload {other:?}"),
@@ -3020,10 +3026,6 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
     assert!(
         !candidates2.is_empty(),
         "cache hit should keep returning candidates"
-    );
-    assert!(
-        !info2.is_empty(),
-        "compatibility info should still be present on cache hit"
     );
 
     let _ = cli_w.send(WsMessage::Close(None)).await;
@@ -3038,13 +3040,12 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
 
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-concurrent".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-concurrent".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -3081,6 +3082,7 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
                     target_type: ActrType {
                         manufacturer: "mfg".into(),
                         name: "svc-concurrent".into(),
+                        version: "v1".to_string(),
                     },
                     client_fingerprint: "".into(),
                     criteria: Some(
@@ -3152,13 +3154,12 @@ async fn signaling_actr_relay_role_assignment() {
     // Service registers with ACL allowing client-offer
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-offer".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-offer".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -3225,10 +3226,13 @@ async fn signaling_rejects_register_request_via_ws() {
         actr_type: ActrType {
             manufacturer: "mfg".into(),
             name: "dup-client".into(),
+            version: "v1".to_string(),
         },
         realm: Realm { realm_id: 1001 },
         service_spec: None,
         acl: None,
+        service: None,
+        ws_address: None,
     };
     let env = make_envelope(signaling_envelope::Flow::PeerToServer(
         actr_protocol::PeerToSignaling {
@@ -3266,13 +3270,12 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
 
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-unreg".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-unreg".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -3290,6 +3293,7 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
                         target_type: ActrType {
                             manufacturer: "mfg".into(),
                             name: "svc-unreg".into(),
+                            version: "v1".to_string(),
                         },
                         client_fingerprint: "".into(),
                         criteria: Some(
@@ -3448,13 +3452,12 @@ async fn signaling_relay_rejects_invalid_credential() {
 
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "relay-src-auth".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "relay-src-auth".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -3463,10 +3466,10 @@ async fn signaling_relay_rejects_invalid_credential() {
     let (mut src_w, mut src_r, src_ok) = ws_register(port, "mfg", "relay-src-auth", None).await;
 
     let mut bad_cred = src_ok.credential.clone();
-    if !bad_cred.encrypted_token.is_empty() {
-        let mut tampered = bad_cred.encrypted_token.to_vec();
+    if !bad_cred.signature.is_empty() {
+        let mut tampered = bad_cred.signature.to_vec();
         tampered[0] ^= 0xAA;
-        bad_cred.encrypted_token = tampered.into();
+        bad_cred.signature = tampered.into();
     }
 
     let relay = ActrRelay {
@@ -3507,13 +3510,12 @@ async fn signaling_relay_acl_denied_in_same_realm() {
 
     let deny_acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "relay-src-deny".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "relay-src-deny".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Deny as i32,
         }],
     };
@@ -3560,13 +3562,12 @@ async fn signaling_relay_forwards_ice_candidate_payload() {
 
     let allow_acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "relay-src-forward".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "relay-src-forward".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -3627,13 +3628,12 @@ async fn signaling_relay_to_missing_target_is_ignored_and_source_stays_usable() 
 
     let allow_acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "relay-src-missing-target".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "relay-src-missing-target".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -3712,13 +3712,12 @@ async fn signaling_disconnect_removes_actor_from_route_candidates() {
 
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-disconnect".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-disconnect".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -3766,13 +3765,12 @@ async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
 
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "mfg".into(),
-                    name: "client-malformed".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "mfg".into(),
+                name: "client-malformed".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };
@@ -3835,13 +3833,12 @@ async fn service_registry_persists_across_restart() {
 
     let acl = Acl {
         rules: vec![AclRule {
-            principals: vec![Principal {
-                realm: Some(Realm { realm_id: 1001 }),
-                actr_type: Some(ActrType {
-                    manufacturer: "persist".into(),
-                    name: "client".into(),
-                }),
-            }],
+            from_type: ActrType {
+                manufacturer: "persist".into(),
+                name: "client".into(),
+                version: "v1".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
             permission: Permission::Allow as i32,
         }],
     };

@@ -242,9 +242,12 @@ impl AIdIssuer {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 *self.key_cache.write().await = Some(cache);
-                // 将 verifying key 写入 AIdCredentialValidator 的 KeyCache
+                // 将 verifying key 持久化写入 signaling_key_cache.db，
+                // 保证即使 AIdCredentialValidator::init 尚未调用也能落盘，
+                // 后续 init 会从 DB 读取到该密钥。
                 if let Err(e) =
-                    platform::aid::credential::validator::AIdCredentialValidator::populate_key(
+                    platform::aid::credential::validator::AIdCredentialValidator::persist_key(
+                        &self.config.sqlite_path,
                         key_id,
                         &verifying_key,
                         expires_at,
@@ -252,7 +255,7 @@ impl AIdIssuer {
                     .await
                 {
                     platform::recording::warn!(
-                        "写入 verifying key 到 KeyCache 失败（非致命，key_id={}）: {}",
+                        "写入 verifying key 到 key_cache DB 失败（非致命，key_id={}）: {}",
                         key_id,
                         e
                     );
@@ -438,7 +441,7 @@ impl AIdIssuer {
         ks_client: &KsClientWrapper,
         key_storage: &KeyStorage,
         key_cache: &RwLock<Option<KeyCache>>,
-        _config: &IssuerConfig,
+        config: &IssuerConfig,
     ) -> Result<(), AidError> {
         // 从 KS 申请新的密钥 ID（key 材料由 KS 保管）
         let (key_id, _ecies_pubkey, expires_at, tolerance_seconds) = ks_client
@@ -488,10 +491,10 @@ impl AIdIssuer {
             .await
             .map_err(|e| AidError::GenerationFailed(format!("Failed to save key: {e}")))?;
 
-        // 将 verifying key 写入 AIdCredentialValidator 的 KeyCache，
-        // 使 signaling 服务能验证此后签发的凭证。
+        // 将 verifying key 持久化写入 signaling_key_cache.db（同时更新内存缓存）。
         if let Err(e) =
-            platform::aid::credential::validator::AIdCredentialValidator::populate_key(
+            platform::aid::credential::validator::AIdCredentialValidator::persist_key(
+                &config.sqlite_path,
                 key_id,
                 &verifying_key,
                 expires_at,
@@ -499,12 +502,12 @@ impl AIdIssuer {
             .await
         {
             platform::recording::warn!(
-                "写入 verifying key 到 KeyCache 失败（非致命，key_id={}）: {}",
+                "写入 verifying key 到 key_cache DB 失败（非致命，key_id={}）: {}",
                 key_id,
                 e
             );
         } else {
-            platform::recording::info!("✅ verifying key 已写入 KeyCache (key_id={})", key_id);
+            platform::recording::info!("✅ verifying key 已持久化到 key_cache DB (key_id={})", key_id);
         }
 
         Ok(())
