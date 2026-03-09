@@ -3,6 +3,7 @@ import {
   Animated,
   Insets,
   ImageStyle,
+  Platform,
   StyleProp,
   StyleSheet,
   TouchableOpacity,
@@ -80,8 +81,13 @@ export const HostIconButton: React.FC<HostIconButtonProps> = React.memo(
       [enablePressScale, opacity, pressScale, pressedOpacity, scale],
     );
 
+    const containerTransform =
+      Platform.OS === 'android' ? undefined : [{ scale }];
+
     return (
-      <Animated.View style={[wrapperStyle, { opacity, transform: [{ scale }] }]}>
+      <Animated.View
+        style={[wrapperStyle, { opacity, transform: containerTransform }]}
+      >
         <TouchableOpacity
           activeOpacity={activeOpacity}
           style={[
@@ -107,16 +113,18 @@ export const HostIconButton: React.FC<HostIconButtonProps> = React.memo(
           }}
           disabled={disabled}
         >
-          {iconType ? (
-            <Icon
-              type={iconType}
-              size={iconSize}
-              color={active ? activeIconColor : iconColor}
-              style={iconStyle}
-              disableTint={disableTint}
-            />
-          ) : null}
-          {children}
+          <Animated.View>
+            {iconType ? (
+              <Icon
+                type={iconType}
+                size={iconSize}
+                color={active ? activeIconColor : iconColor}
+                style={iconStyle}
+                disableTint={disableTint}
+              />
+            ) : null}
+            {children}
+          </Animated.View>
         </TouchableOpacity>
       </Animated.View>
     );
