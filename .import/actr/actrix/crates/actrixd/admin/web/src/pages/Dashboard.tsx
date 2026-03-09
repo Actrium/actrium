@@ -63,7 +63,7 @@ const SERVICES = [
   { name: "STUN", bit: 2, type: 1, route: "/admin/services/stun" },
   { name: "TURN", bit: 4, type: 2, route: "/admin/services/turn" },
   { name: "AIS", bit: 8, type: 4, route: "/admin/services/ais" },
-  { name: "KS", bit: 16, type: 5, route: "/admin/services/ks" },
+  { name: "Signer", bit: 16, type: 5, route: "/admin/services/signer" },
 ] as const;
 
 /* ── Helpers for timeseries data ────────────────────────── */

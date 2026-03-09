@@ -283,12 +283,12 @@ export const api = {
   getServiceDetail: (name: string) =>
     request<ServiceDetail>(`/services/${name}`),
 
-  getKsKeys: () =>
-    request<{ keys: KeyEntry[]; total_count: number }>("/services/ks/keys"),
+  getSignerKeys: () =>
+    request<{ keys: KeyEntry[]; total_count: number }>("/services/signer/keys"),
 
-  cleanupKsKeys: () =>
+  cleanupSignerKeys: () =>
     request<{ deleted: number; remaining: number; tolerance_seconds: number }>(
-      "/services/ks/keys/cleanup",
+      "/services/signer/keys/cleanup",
       { method: "POST" },
     ),
 

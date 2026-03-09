@@ -10,7 +10,7 @@ const ENABLE_SERVICES = [
   { name: "STUN", bit: 2 },
   { name: "TURN", bit: 4 },
   { name: "AIS", bit: 8 },
-  { name: "KS", bit: 16 },
+  { name: "Signer", bit: 16 },
 ] as const;
 
 function EnableCalculator({

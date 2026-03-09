@@ -9,7 +9,7 @@ function AisDiagram({ config }: { config: Record<string, unknown> }) {
   const ttl = String(config.token_ttl_secs ?? "3600");
   const hb = String(config.signaling_heartbeat_interval_secs ?? "30");
 
-  const kX = 80;   // KS (left — backend dependency)
+  const kX = 80;   // Signer (left — backend dependency)
   const aX = 280;  // AIS (center)
   const cX = 480;  // Client (right — flows toward Signaling)
   const sX = 640;  // Signaling (far right, no lifeline — just destination)
@@ -40,8 +40,8 @@ function AisDiagram({ config }: { config: Record<string, unknown> }) {
 
       {/* Column heads */}
       <rect x={kX - 50} y={headY} width="100" height="40" rx="8" fill="#fef3c7" stroke="#d97706" strokeWidth="1.5" />
-      <text x={kX} y={headY + 18} textAnchor="middle" fontSize="11" fontWeight="600" fill="#92400e">KS</text>
-      <text x={kX} y={headY + 31} textAnchor="middle" fontSize="8" fill="#d97706">Key Server</text>
+      <text x={kX} y={headY + 18} textAnchor="middle" fontSize="11" fontWeight="600" fill="#92400e">Signer</text>
+      <text x={kX} y={headY + 31} textAnchor="middle" fontSize="8" fill="#d97706">Signing Oracle</text>
 
       <rect x={aX - 50} y={headY} width="100" height="40" rx="8" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5" />
       <text x={aX} y={headY + 18} textAnchor="middle" fontSize="11" fontWeight="600" fill="#3730a3">AIS</text>
@@ -62,12 +62,12 @@ function AisDiagram({ config }: { config: Record<string, unknown> }) {
       <line x1={cX} y1={lifeTop} x2={cX} y2={lifeBot} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 3" />
       <line x1={sX} y1={lifeTop} x2={sX} y2={lifeBot} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 3" />
 
-      {/* 1. AIS fetches public key from KS */}
+      {/* 1. AIS generates signing key from Signer */}
       <line x1={aX - 4} y1={74} x2={kX + 4} y2={74} stroke="#d97706" strokeWidth="1.5" markerEnd="url(#ais-ao)" />
-      <text x={(kX + aX) / 2} y={68} textAnchor="middle" fontSize="9" fontWeight="600" fill="#d97706">GetPublicKey</text>
+      <text x={(kX + aX) / 2} y={68} textAnchor="middle" fontSize="9" fontWeight="600" fill="#d97706">GenerateSigningKey</text>
 
       <line x1={kX + 4} y1={94} x2={aX - 4} y2={94} stroke="#d97706" strokeWidth="1.5" markerEnd="url(#ais-ao)" />
-      <text x={(kX + aX) / 2} y={88} textAnchor="middle" fontSize="8" fill="#d97706">EC public key + key_id</text>
+      <text x={(kX + aX) / 2} y={88} textAnchor="middle" fontSize="8" fill="#d97706">key_id + verifying_key</text>
 
       {/* Cache note */}
       <rect x={aX - 86} y={100} width="80" height="18" rx="3" fill="#fef3c7" stroke="#fcd34d" strokeWidth="0.8" />
@@ -80,8 +80,8 @@ function AisDiagram({ config }: { config: Record<string, unknown> }) {
       {/* 3. AIS issues credential */}
       <rect x={aX - 44} y={148} width="88" height="36" rx="4" fill="#f5f3ff" stroke="#8b5cf6" strokeWidth="0.8" />
       <text x={aX} y={160} textAnchor="middle" fontSize="7" fontWeight="600" fill="#6d28d9">Generate ActrId</text>
-      <text x={aX} y={170} textAnchor="middle" fontSize="7" fill="#7c3aed">ECIES encrypt</text>
-      <text x={aX} y={180} textAnchor="middle" fontSize="7" fill="#7c3aed">with KS pubkey</text>
+      <text x={aX} y={170} textAnchor="middle" fontSize="7" fill="#7c3aed">Ed25519 sign</text>
+      <text x={aX} y={180} textAnchor="middle" fontSize="7" fill="#7c3aed">via Signer</text>
 
       {/* 4. Response to client */}
       <line x1={aX + 4} y1={198} x2={cX - 4} y2={198} stroke="#10b981" strokeWidth="1.5" markerEnd="url(#ais-ag)" />
@@ -158,10 +158,11 @@ export function AisService() {
       {data.config && (
         <HowItWorks storageKey="ais">
           <p className="text-xs text-gray-500 mb-4">
-            AIS issues identity credentials for WebRTC peers. On startup it fetches an EC public key
-            from KS and caches it locally. When a client registers, AIS generates a unique ActrId,
-            encrypts it with the KS public key via ECIES, and returns the credential along with a PSK.
-            The client then uses this credential to connect to the Signaling server.
+            AIS issues identity credentials for WebRTC peers. On startup it generates a signing key
+            via Signer and caches the verifying key locally. When a client registers, AIS generates
+            a unique ActrId, calls Signer to Ed25519-sign the credential claims, and returns the
+            signed credential along with a PSK. The client then uses this credential to connect to
+            the Signaling server.
           </p>
           <AisDiagram config={data.config} />
 
@@ -177,8 +178,8 @@ export function AisService() {
                 the client so it knows how often to ping the Signaling server to maintain its WebSocket connection.
               </li>
               <li>
-                AIS caches the KS public key locally and refreshes it in the background.
-                If KS is temporarily unavailable, AIS can continue serving from cache.
+                AIS caches the Signer verifying key locally and refreshes it in the background.
+                If Signer is temporarily unavailable, AIS can continue serving from cache.
               </li>
             </ul>
           </div>
