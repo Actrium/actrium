@@ -34,6 +34,10 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 import kotlinx.coroutines.launch
+import com.askaway.android.utils.adjustKeyboard
+import com.askaway.android.utils.getStatusBarHeight
+import com.askaway.android.utils.screenshot
+import com.askaway.android.utils.ViewAnimationHelper
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
     private lateinit var binding: ActivityMainBinding
@@ -51,20 +55,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        // 处理状态栏 insets，确保内容不会延伸到状态栏下方
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false)
-            binding.root.setOnApplyWindowInsetsListener { v, insets ->
-                val statusBarHeight = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top
-                binding.root.setPadding(0, 0, 0, 0)
-                insets
-            }
-        } else {
-            // 对于 Android R 以下的版本，手动处理状态栏高度
-            val statusBarHeight = getStatusBarHeight()
-            binding.flContent.setPadding(0, statusBarHeight, 0, 0)
-        }
 
         // 初始化 flReactNative 为隐藏状态
         binding.flReactNative.visibility = View.INVISIBLE // 使用 INVISIBLE 而不是 GONE，以便能获取高度
@@ -127,8 +117,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             viewModel.containerWidth = binding.flContent.width.pxToDp().toInt()
             viewModel.containerHeight = binding.flContent.height.pxToDp().toInt()
         }
-
-        handleKeyboard(binding.flReactNative)
+        binding.flReactNative.adjustKeyboard()
 
         binding.ivAdd.setOnClickListener {
             viewModel.addApp()
@@ -376,99 +365,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
         currentSourceView = sourceView
 
-        if (sourceView != null) {
-            // Reset all transformation properties to default to ensure accurate measurements
-            binding.flReactNative.translationX = 0f
-            binding.flReactNative.translationY = 0f
-            binding.flReactNative.scaleX = 1f
-            binding.flReactNative.scaleY = 1f
-            binding.flReactNative.pivotX = 0f
-            binding.flReactNative.pivotY = 0f
-            binding.flReactNative.clipBounds = null
-
-            // Ensure visibility is INVISIBLE (not GONE) so getLocationInWindow works correctly
-            if (binding.flReactNative.visibility == View.GONE) {
-                binding.flReactNative.visibility = View.INVISIBLE
-            }
-
-            // Ensure view has valid dimensions, otherwise fallback to slide up after layout
-            if ((binding.flReactNative.width == 0 || binding.flReactNative.height == 0)) {
-                isReactNativeVisible = false
-                binding.flReactNative.post { showReactNativeView(sourceView) }
-                return
-            }
-
-            // Top-Aligned Expand Animation (Container Transform)
-
-            val sourceLoc = IntArray(2)
-            sourceView.getLocationInWindow(sourceLoc)
-
-            val targetLoc = IntArray(2)
-            binding.flReactNative.getLocationInWindow(targetLoc)
-
-            // 1. Calculate Uniform Scale based on Width
-            val scale = sourceView.width.toFloat() / binding.flReactNative.width
-
-            // 2. Calculate translations to align Top-Left corners
-            // Since we reset translation to 0 given targetLoc is based on current state (0 translation),
-            // targetLoc represents the "neutral" position.
-            val startX = sourceLoc[0] - targetLoc[0].toFloat()
-            val startY = sourceLoc[1] - targetLoc[1].toFloat()
-
-            // 3. Setup initial properties (Pivot Top-Left)
-            binding.flReactNative.pivotX = 0f
-            binding.flReactNative.pivotY = 0f
-            binding.flReactNative.translationX = startX
-            binding.flReactNative.translationY = startY
-            binding.flReactNative.scaleX = scale
-            binding.flReactNative.scaleY = scale
-
-            // 4. Setup Clipping (Reveal Bottom)
-            // Visual height needs to match source height relative to the scaled view
-            val startVisibleHeight = sourceView.height.toFloat() / scale
-            val startRect = android.graphics.Rect(0, 0, binding.flReactNative.width, startVisibleHeight.toInt())
-            binding.flReactNative.clipBounds = startRect
-
-            binding.flReactNative.visibility = View.VISIBLE
-
-            val set = android.animation.AnimatorSet()
-
-            // Animate Clip Bounds
-            val clipAnimator = android.animation.ValueAnimator.ofInt(startRect.bottom, binding.flReactNative.height)
-            clipAnimator.addUpdateListener { animation ->
-                val valHeight = animation.animatedValue as Int
-                if (valHeight >= binding.flReactNative.height - 1) {
-                    binding.flReactNative.clipBounds = null
-                } else {
-                    binding.flReactNative.clipBounds = android.graphics.Rect(0, 0, binding.flReactNative.width, valHeight)
-                }
-            }
-
-            set.playTogether(
-                ObjectAnimator.ofFloat(binding.flReactNative, "translationX", startX, 0f),
-                ObjectAnimator.ofFloat(binding.flReactNative, "translationY", startY, 0f),
-                ObjectAnimator.ofFloat(binding.flReactNative, "scaleX", scale, 1f),
-                ObjectAnimator.ofFloat(binding.flReactNative, "scaleY", scale, 1f),
-                clipAnimator
-            )
-            set.duration = 350
-            set.interpolator = DecelerateInterpolator()
-            set.start()
-        } else {
-            val startY = binding.flReactNative.height.toFloat()
-
-            Log.d("MainActivity", "showReactNativeView - height: ${binding.flReactNative.height}, startY: $startY")
-
-            // 确保起始位置在底部
-            binding.flReactNative.translationY = startY
-            binding.flReactNative.visibility = View.VISIBLE
-
-            // 创建从底部滑入的动画
-            ObjectAnimator.ofFloat(binding.flReactNative, "translationY", startY, 0f).apply {
-                duration = 300
-                interpolator = DecelerateInterpolator()
-                start()
-            }
+        ViewAnimationHelper.animateShow(binding.flReactNative, sourceView) {
+            // 如果 View 需要重试（例如尺寸未就绪），重置状态并稍后重试
+            isReactNativeVisible = false
+            showReactNativeView(sourceView)
         }
     }
 
@@ -492,7 +392,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flSearch.translationX = binding.flSearch.width.toFloat()
         binding.flSearch.visibility = View.VISIBLE
         // 为 flSearch 添加 WindowInsets 监听，处理键盘问题
-        handleKeyboard(binding.flSearch)
+        binding.flSearch.adjustKeyboard()
         // 请求应用 window insets
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             binding.flSearch.requestApplyInsets()
@@ -535,133 +435,18 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         val tabId = Params.currentTabId
         if (!tabId.isNullOrEmpty()) {
             if (viewModel.canCaptureScreenshot(tabId)) {
-                val screenshotPath = screenshotView(binding.flRNContent, tabId)
+                val screenshotPath = binding.flRNContent.screenshot("$tabId.jpg")
                 if (screenshotPath != null) {
                     viewModel.updateScreenshot(tabId, screenshotPath)
                 }
             }
         }
 
-        val sourceView = currentSourceView
-        if (sourceView != null && sourceView.isAttachedToWindow) {
-            val sourceLoc = IntArray(2)
-            sourceView.getLocationInWindow(sourceLoc)
-
-            val targetLoc = IntArray(2)
-            binding.flReactNative.getLocationInWindow(targetLoc)
-
-            val width = binding.flReactNative.width
-            val height = binding.flReactNative.height
-            val scale = sourceView.width.toFloat() / width
-
-            // Calculate End Clip Height (matches source aspect ratio)
-            val endVisibleHeight = sourceView.height.toFloat() / scale
-
-            // Calculate vertical center inset to clip symmetrically from top and bottom
-            val verticalInset = (height - endVisibleHeight) / 2f
-
-            // Adjust translationY so that the visible center ends up at source center
-            // Visual Top = TranslationY + ClipTop * Scale
-            // Target Visual Top = SourceLoc[1] - TargetLoc[1] (relative to current position)
-            // Correction: sourceLoc is absolute. targetLoc is absolute.
-            // We want the view's Visual Top after animation to match Source Top.
-            // Since we animate TranslationY relative to current (0), endY should be relative diff.
-            // Current Abs Top = targetLoc[1].
-            // Target Abs Top = sourceLoc[1].
-            // Target Abs Top = Current Abs Top + EndTranslationY + verticalInset * Scale
-            // EndTranslationY = (sourceLoc[1] - targetLoc[1]) - verticalInset * Scale
-
-            val baseEndY = (sourceLoc[1] - targetLoc[1]).toFloat()
-            val endX = (sourceLoc[0] - targetLoc[0]).toFloat()
-            val endY = baseEndY - verticalInset * scale
-
-            val set = android.animation.AnimatorSet()
-
-            val clipAnimator = android.animation.ValueAnimator.ofFloat(0f, verticalInset)
-            clipAnimator.addUpdateListener { animation ->
-                val inset = animation.animatedValue as Float
-                // Clip from both top and bottom
-                val top = inset.toInt()
-                val bottom = (height - inset).toInt()
-                binding.flReactNative.clipBounds = android.graphics.Rect(0, top, width, bottom)
-            }
-
-            set.playTogether(
-                ObjectAnimator.ofFloat(binding.flReactNative, "translationX", 0f, endX),
-                ObjectAnimator.ofFloat(binding.flReactNative, "translationY", 0f, endY),
-                ObjectAnimator.ofFloat(binding.flReactNative, "scaleX", 1f, scale),
-                ObjectAnimator.ofFloat(binding.flReactNative, "scaleY", 1f, scale),
-                clipAnimator
-            )
-            set.duration = 350
-            set.interpolator = DecelerateInterpolator()
-            set.addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    binding.flReactNative.visibility = View.GONE
-                    isReactNativeVisible = false
-                    // Reset properties
-                    binding.flReactNative.translationX = 0f
-                    binding.flReactNative.translationY = 0f
-                    binding.flReactNative.scaleX = 1f
-                    binding.flReactNative.scaleY = 1f
-                    binding.flReactNative.clipBounds = null
-                    binding.flReactNative.pivotX = 0f
-                    binding.flReactNative.pivotY = 0f
-                }
-            })
-
-            // Ensure pivot is set to 0,0 for Top-Left based transformations
-            binding.flReactNative.pivotX = 0f
-            binding.flReactNative.pivotY = 0f
-            set.start()
-
-        } else {
-            // Fallback: Scale down vertically to center (Adjust both top and bottom)
-            binding.flReactNative.pivotX = binding.flReactNative.width / 2f
-            binding.flReactNative.pivotY = binding.flReactNative.height / 2f
-
-            val set = android.animation.AnimatorSet()
-            set.playTogether(
-                ObjectAnimator.ofFloat(binding.flReactNative, "scaleY", 1f, 0f),
-                ObjectAnimator.ofFloat(binding.flReactNative, "alpha", 1f, 0f)
-            )
-            set.duration = 300
-            set.interpolator = DecelerateInterpolator()
-            set.addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    binding.flReactNative.visibility = View.GONE
-                    isReactNativeVisible = false
-                    // Reset
-                    binding.flReactNative.scaleY = 1f
-                    binding.flReactNative.alpha = 1f
-                    binding.flReactNative.pivotX = 0f
-                    binding.flReactNative.pivotY = 0f
-                }
-            })
-            set.start()
+        ViewAnimationHelper.animateHide(binding.flReactNative, currentSourceView) {
+            binding.flReactNative.visibility = View.GONE
+            isReactNativeVisible = false
         }
         currentSourceView = null
-    }
-
-    private fun screenshotView(view: View, tabId: String): String? {
-        try {
-            if (view.width <= 0 || view.height <= 0) return null
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            view.draw(canvas)
-
-            val fileName = "$tabId.jpg"
-            val cacheDir = cacheDir
-            val file = File(cacheDir, fileName)
-
-            FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-            }
-            return file.absolutePath
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return null
-        }
     }
 
     override fun onPause() {
@@ -731,11 +516,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         super.requestPermissions(permissions, requestCode)
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray,
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         val handled =
             permissionListener?.onRequestPermissionsResult(
                 requestCode,
@@ -755,49 +536,5 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         val application = application as MainApplication
         application.reactNativeHost.reactInstanceManager
             .onActivityResult(this, requestCode, resultCode, data)
-    }
-
-    /**
-     * 获取状态栏高度
-     */
-    private fun getStatusBarHeight(): Int {
-        var result = 0
-        val resourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
-        if (resourceId > 0) {
-            result = resources.getDimensionPixelSize(resourceId)
-        }
-        return result
-    }
-
-    private fun handleKeyboard(view: View) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            view.setOnApplyWindowInsetsListener { v, insets ->
-                val imeHeight = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
-
-                // 当键盘弹出时，为 flSearch 的子视图添加下方 padding
-                if (imeHeight > 0) {
-                    view.setPadding(0, 0, 0, imeHeight)
-                } else {
-                    view.setPadding(0, 0, 0, 0)
-                }
-
-                // 消费 insets 以防止默认处理
-                WindowInsets.CONSUMED
-            }
-        } else {
-            // Android 5.0-10 的兼容性处理
-            view.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-                override fun onGlobalLayout() {
-                    val rect = android.graphics.Rect()
-                    binding.root.getWindowVisibleDisplayFrame(rect)
-                    val heightDiff = binding.root.rootView.height - rect.bottom
-                    if (heightDiff > 100) { // 键盘高度大于 100px
-                        view.setPadding(0, 0, 0, heightDiff)
-                    } else {
-                        view.setPadding(0, 0, 0, 0)
-                    }
-                }
-            })
-        }
     }
 }
