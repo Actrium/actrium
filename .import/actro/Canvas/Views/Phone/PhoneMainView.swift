@@ -9,6 +9,12 @@ struct PhoneMainView: View {
     @State private var fullscreenTab: Tab?
     @State private var skipManualSettingsResetOnce = false
     
+    // 自定义转场动画状态
+    @State private var transitioningTab: Tab?
+    @State private var showBrowser = false
+    @State private var transitionRect: CGRect = .zero
+    @State private var isAnimating = false
+    
     @Namespace private var animation
     
     enum PhoneTab {
@@ -19,54 +25,71 @@ struct PhoneMainView: View {
     }
     
     var body: some View {
-        TabView(selection: $selectedTab) {
-            // 书签页：使用 RN 渲染
-            SwiftUI.Tab("书签", systemImage: "book.fill", value: PhoneTab.bookmarks) {
-                PhoneSystemAppView(
-                    systemType: .bookmarks,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
-                    onSelect: { tab in
-                        fullscreenTab = tab
-                    }
-                )
-            }
-            
-            SwiftUI.Tab("页签", systemImage: "rectangle.grid.1x2.fill", value: PhoneTab.tabs) {
-                PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, animation: animation, onSelect: { tab in
-                    fullscreenTab = tab
-                })
-            }
-            
-            // 设置页：使用 RN 渲染
-            SwiftUI.Tab("偏好设置", systemImage: "gearshape.fill", value: PhoneTab.settings) {
-                PhoneSystemAppView(
-                    systemType: .settings,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
-                    onSelect: { tab in
-                        fullscreenTab = tab
-                    }
-                )
-            }
+        ZStack {
+            TabView(selection: $selectedTab) {
+                // 书签页：使用 RN 渲染
+                SwiftUI.Tab("书签", systemImage: "book.fill", value: PhoneTab.bookmarks) {
+                    PhoneSystemAppView(
+                        systemType: .bookmarks,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM,
+                        onSelect: { tab in
+                            startTransition(to: tab)
+                        }
+                    )
+                }
+                
+                SwiftUI.Tab("页签", systemImage: "rectangle.grid.1x2.fill", value: PhoneTab.tabs) {
+                    PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, animation: animation, onSelect: { tab in
+                        startTransition(to: tab)
+                    })
+                }
+                
+                // 设置页：使用 RN 渲染
+                SwiftUI.Tab("偏好设置", systemImage: "gearshape.fill", value: PhoneTab.settings) {
+                    PhoneSystemAppView(
+                        systemType: .settings,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM,
+                        onSelect: { tab in
+                            startTransition(to: tab)
+                        }
+                    )
+                }
 
-            // 搜索页：独立显示（不占用固定 tab 位置）
-            SwiftUI.Tab("搜索", systemImage: "magnifyingglass", value: PhoneTab.search, role: .search) {
-                PhoneSystemAppView(
-                    systemType: .globalSearch,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
-                    onSelect: { tab in
-                        fullscreenTab = tab
-                    }
-                )
-                .toolbar(.hidden, for: .tabBar)
+                // 搜索页：独立显示（不占用固定 tab 位置）
+                SwiftUI.Tab("搜索", systemImage: "magnifyingglass", value: PhoneTab.search, role: .search) {
+                    PhoneSystemAppView(
+                        systemType: .globalSearch,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM,
+                        onSelect: { tab in
+                            startTransition(to: tab)
+                        }
+                    )
+                    .toolbar(.hidden, for: .tabBar)
+                }
+            }
+            .accentColor(.blue)
+            .opacity(showBrowser ? 0 : 1)
+            
+            transitionReceiver
+            
+            // 自定义浏览器层
+            if let tab = transitioningTab {
+                PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                    .frame(width: showBrowser ? UIScreen.main.bounds.width : transitionRect.width,
+                           height: showBrowser ? UIScreen.main.bounds.height : (transitionRect.width * 0.54))
+                    .cornerRadius(showBrowser ? 0 : 22)
+                    .position(x: showBrowser ? UIScreen.main.bounds.midX : transitionRect.midX,
+                              y: showBrowser ? UIScreen.main.bounds.midY : transitionRect.midY)
+                    .zIndex(100)
+                    .ignoresSafeArea()
             }
         }
-        .accentColor(.blue)
         .onChange(of: selectedTab) { oldValue, newValue in
             // 切换到系统页签时，刷新系统页签
             switch newValue {
@@ -88,19 +111,12 @@ struct PhoneMainView: View {
                 break // 页签列表不需要刷新
             }
         }
-        .fullScreenCover(item: $fullscreenTab) { tab in
-            PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
-                .interactiveDismissDisabled(true)
-//                .presentationDetents([.large])
-//                .presentationDragIndicator(.hidden)
-                .asNavigationTransition(id: tab.id, in: animation)
-        }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
             // RN 请求退出全屏 - 先截图再关闭（标题为空时不截图）
-            if let tab = fullscreenTab, !tab.title.isEmpty {
+            if let tab = transitioningTab, !tab.title.isEmpty {
                 takeSnapshot(for: tab)
             }
-            fullscreenTab = nil
+            dismissBrowser()
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
             // RN 请求退出搜索页 - 切换回页签列表
@@ -131,7 +147,7 @@ struct PhoneMainView: View {
             if let tabIdString = notification.userInfo?["tabId"] as? String,
                let tabId = UUID(uuidString: tabIdString),
                let tab = viewModel.tabs.first(where: { $0.id == tabId }) {
-                fullscreenTab = tab
+                startTransition(to: tab)
             }
         }
         .onAppear {
@@ -139,28 +155,75 @@ struct PhoneMainView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 if let currentId = viewModel.currentTabId,
                    let tab = viewModel.tabs.first(where: { $0.id == currentId }) {
-                    fullscreenTab = tab
+                    startTransition(to: tab)
                 }
             }
         }
         .onChange(of: viewModel.currentTabId) { oldValue, newValue in
             guard let newValue = newValue else {
-                fullscreenTab = nil
+                dismissBrowser()
                 return
             }
             
             // 确保全屏视图显示的标签页与 currentTabId 保持同步
-            if fullscreenTab?.id != newValue {
+            if transitioningTab?.id != newValue {
                 if let tab = viewModel.tabs.first(where: { $0.id == newValue }) {
-                    fullscreenTab = tab
+                    startTransition(to: tab)
                 }
             }
         }
-        .onChange(of: fullscreenTab?.id) { oldValue, newValue in
+        .onChange(of: transitioningTab?.id) { oldValue, newValue in
             viewModel.fullscreenTabId = newValue
         }
     }
     
+    private func startTransition(to tab: Tab) {
+        // 如果当前是 Tabs 页签列表，则尝试从通知获取位置，否则直接中心放大
+        if selectedTab == .tabs {
+            // 发送通知获取卡片位置
+            NotificationCenter.default.post(name: NSNotification.Name("GetTabCardRect"), object: nil, userInfo: ["tabId": tab.id])
+            
+            // 延迟一帧，等待 UpdateTabCardRect 通知更新 transitionRect
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                executeTransition(to: tab)
+            }
+        } else {
+            // 从其他页签（书签/设置等）打开，直接从底部弹出
+            let width = UIScreen.main.bounds.width
+            transitionRect = CGRect(x: 0, y: UIScreen.main.bounds.height, width: width, height: width * 0.54)
+            executeTransition(to: tab)
+        }
+    }
+    
+    private func executeTransition(to tab: Tab) {
+        // 如果没有位置信息，默认使用屏幕中心的一个矩形
+        if transitionRect == .zero {
+            let width = UIScreen.main.bounds.width - 32
+            transitionRect = CGRect(x: 16, y: 300, width: width, height: width * 0.54)
+        }
+        
+        transitioningTab = tab
+        
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            showBrowser = true
+        }
+    }
+    
+    private func dismissBrowser() {
+        // 退出时，如果是从 Tabs 进来的，尝试刷新位置
+        if selectedTab == .tabs, let tab = transitioningTab {
+            NotificationCenter.default.post(name: NSNotification.Name("GetTabCardRect"), object: nil, userInfo: ["tabId": tab.id])
+        }
+        
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+            showBrowser = false
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            transitioningTab = nil
+        }
+    }
+
     /// 截取当前全屏 tab 的快照
     private func takeSnapshot(for tab: Tab) {
         // 延迟一帧，确保捕获正确的内容
@@ -207,5 +270,18 @@ struct PhoneMainView: View {
                 )
             }
         }
+    }
+}
+
+extension PhoneMainView {
+    /// 这里的 View 用于接收来自卡片的位置更新通知
+    var transitionReceiver: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateTabCardRect"))) { notification in
+                if let rect = notification.userInfo?["rect"] as? CGRect {
+                    self.transitionRect = rect
+                }
+            }
     }
 }
