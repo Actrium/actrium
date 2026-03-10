@@ -159,6 +159,7 @@
       "loginTip": "你可以通過以下方式登入",
       "wechatLogin": "微信登入",
       "appleLogin": "通過 Apple 登入",
+      "googleLogin": "透過 Google 登入",
       "readAndAgree": "我已閱讀並同意",
       "userAgreement": "《使用者協議》",
       "privacyPolicy": "《隱私權政策》",

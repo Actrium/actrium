@@ -159,6 +159,7 @@
       "loginTip": "Vous pouvez vous connecter via les méthodes suivantes",
       "wechatLogin": "Connexion WeChat",
       "appleLogin": "Se connecter avec Apple",
+      "googleLogin": "Se connecter avec Google",
       "readAndAgree": "J'ai lu et j'accepte",
       "userAgreement": "les « Conditions d'utilisation »",
       "privacyPolicy": "la « Politique de confidentialité »",

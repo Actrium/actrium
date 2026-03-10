@@ -159,6 +159,7 @@
       "loginTip": "Вы можете войти следующими способами",
       "wechatLogin": "Войти через WeChat",
       "appleLogin": "Войти с помощью Apple",
+      "googleLogin": "Войти через Google",
       "readAndAgree": "Я прочитал(а) и принимаю",
       "userAgreement": "«Пользовательское соглашение»",
       "privacyPolicy": "«Политику конфиденциальности»",

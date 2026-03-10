@@ -136,6 +136,25 @@ export const LoginContent = ({
           </TouchableOpacity>
         )}
 
+        {/* {Platform.OS === 'android' && (
+          <TouchableOpacity
+            style={[
+              styles.loginButton,
+              { backgroundColor: colors.buttonBg, borderColor: colors.buttonBorder },
+            ]}
+            onPress={() => onLoginPress('google')}
+            activeOpacity={0.7}
+          >
+            <Image
+              source={require('../../assets/login/google_logo.png')}
+              style={styles.btnIcon}
+            />
+            <Text style={[styles.btnText, { fontSize: buttonFontSize, color: colors.buttonText }]}>
+              {t('actr.auth.googleLogin')}
+            </Text>
+          </TouchableOpacity>
+        )} */}
+
         <TouchableOpacity
           style={[
             styles.loginButton,

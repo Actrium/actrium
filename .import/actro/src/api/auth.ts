@@ -48,6 +48,14 @@ export const authApi = {
     }),
 
   /**
+   * 通过 Google 的 id_token 获取登录凭证
+   */
+  loginWithGoogle: (idToken: string) =>
+    http.post<string>(`${BASE_URL}/sso/providers/google/session`, {
+      id_token: idToken,
+    }),
+
+  /**
    * 用户点击授权后请求临时授权码
    */
   authorize: (clientId: string, loginHint: string, token: string) =>

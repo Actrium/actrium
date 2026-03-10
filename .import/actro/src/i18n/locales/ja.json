@@ -159,6 +159,7 @@
       "loginTip": "以下の方法でログインできます",
       "wechatLogin": "WeChatでログイン",
       "appleLogin": "Appleでサインイン",
+      "googleLogin": "Googleでサインイン",
       "readAndAgree": "以下を読み、同意します",
       "userAgreement": "「利用規約」",
       "privacyPolicy": "「プライバシーポリシー」",
