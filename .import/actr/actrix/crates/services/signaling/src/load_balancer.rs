@@ -347,12 +347,14 @@ impl LoadBalancer {
 
     /// 按精确匹配优先排序（供测试直接调用）
     #[cfg(test)]
+    #[allow(dead_code)]
     fn sort_by_exact_match(candidates: &mut [ServiceInfo]) {
         candidates.sort_by(Self::cmp_exact_match);
     }
 
     /// 按地理距离排序（供测试直接调用）
     #[cfg(test)]
+    #[allow(dead_code)]
     fn sort_by_distance(candidates: &mut [ServiceInfo], client_location: Option<(f64, f64)>) {
         candidates.sort_by(|a, b| Self::cmp_distance(a, b, client_location));
     }
