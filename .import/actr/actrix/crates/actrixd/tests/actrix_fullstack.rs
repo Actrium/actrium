@@ -5,7 +5,6 @@ use actr_protocol::{
     route_candidates_response, signaling_envelope, signaling_to_actr,
 };
 use base64::Engine as _;
-use ed25519_dalek::VerifyingKey;
 use futures::{SinkExt, StreamExt};
 use platform::aid::credential::validator::AIdCredentialValidator;
 use prost::Message;
@@ -37,6 +36,7 @@ const DEFAULT_TOKEN_TTL: u64 = 3600;
 
 /// Convenience bundle for a running actrix instance
 struct ActrixHarness {
+    #[allow(dead_code)]
     tmp: tempfile::TempDir,
     port: u16,
     log_path: PathBuf,
