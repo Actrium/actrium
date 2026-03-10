@@ -13,21 +13,30 @@ function SignerLifecycleDiagram({ config }: { config: Record<string, unknown> })
   const totalSpan = ttl + tolerance;
   const activeRatio = ttl / totalSpan;
 
-  // Layout
-  const padL = 40;
+  // Layout constants
+  const padL = 30;
   const barW = 520;
-  const barY = 198;
   const barH = 28;
+
+  // Top-section columns
+  const aisX = 80;    // AIS center
+  const sgX = 280;    // Signer center
+  const cacheX = 480; // KeyCache center
+  const verX = 640;   // Signaling/TURN center
+
+  // Lifecycle section y-offsets (shifted down for taller top section)
+  const dividerY = 210;
+  const lcTitleY = dividerY + 20;
+  const barY = dividerY + 58;
+
+  const totalH = barY + barH + 48;
   const activeW = Math.round(barW * activeRatio);
   const toleranceW = barW - activeW;
 
-  // Flow section layout
-  const sgX = 300;  // Signer center
-
   return (
     <svg
-      viewBox="0 0 600 340"
-      className="max-w-2xl mx-auto"
+      viewBox={`0 0 720 ${totalH}`}
+      className="max-w-3xl mx-auto"
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
@@ -48,62 +57,112 @@ function SignerLifecycleDiagram({ config }: { config: Record<string, unknown> })
         </marker>
       </defs>
 
-      {/* ═══ Two API flows ═══ */}
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* Section 1: Issuance — AIS ↔ Signer ↔ SQLite       */}
+      {/* ═══════════════════════════════════════════════════ */}
 
-      {/* Signer center box */}
-      <rect x={sgX - 56} y="26" width="112" height="48" rx="8" fill="#fef3c7" stroke="#d97706" strokeWidth="1.5" />
-      <text x={sgX} y="44" textAnchor="middle" fontSize="11" fontWeight="600" fill="#92400e">Signer</text>
-      <text x={sgX} y="57" textAnchor="middle" fontSize="8" fill="#d97706">Signing Oracle</text>
-      <text x={sgX} y="68" textAnchor="middle" fontSize="6.5" fontWeight="500" fill="#b45309" fontStyle="italic">cluster-private</text>
+      {/* AIS box */}
+      <rect x={aisX - 50} y="10" width="100" height="40" rx="8" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5" />
+      <text x={aisX} y="28" textAnchor="middle" fontSize="11" fontWeight="600" fill="#3730a3">AIS</text>
+      <text x={aisX} y="41" textAnchor="middle" fontSize="8" fill="#6366f1">Identity Issuer</text>
 
-      {/* SQLite box below Signer */}
-      <rect x={sgX - 36} y="90" width="72" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1" />
-      <text x={sgX} y="106" textAnchor="middle" fontSize="8" fontWeight="600" fill="#475569">SQLite</text>
-      <line x1={sgX} y1="74" x2={sgX} y2="90" stroke="#94a3b8" strokeWidth="1" markerEnd="url(#sgn-ar)" />
+      {/* Signer box */}
+      <rect x={sgX - 56} y="10" width="112" height="40" rx="8" fill="#fef3c7" stroke="#d97706" strokeWidth="1.5" />
+      <text x={sgX} y="28" textAnchor="middle" fontSize="11" fontWeight="600" fill="#92400e">Signer</text>
+      <text x={sgX} y="41" textAnchor="middle" fontSize="8" fill="#d97706">Signing Oracle</text>
 
-      {/* ── Left: AIS → Signer (key gen + sign) ── */}
-      <rect x="16" y="28" width="100" height="44" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.2" />
-      <text x="66" y="44" textAnchor="middle" fontSize="10" fontWeight="600" fill="#3730a3">AIS</text>
-      <text x="66" y="55" textAnchor="middle" fontSize="7" fill="#6366f1">Issuer</text>
-      <text x="66" y="65" textAnchor="middle" fontSize="6" fill="#818cf8">GenerateSigningKey</text>
+      {/* SQLite box (below Signer) */}
+      <rect x={sgX - 30} y="64" width="60" height="22" rx="4" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1" />
+      <text x={sgX} y="79" textAnchor="middle" fontSize="8" fontWeight="600" fill="#475569">SQLite</text>
+      <line x1={sgX} y1="50" x2={sgX} y2="64" stroke="#94a3b8" strokeWidth="1" markerEnd="url(#sgn-ar)" />
+      <text x={sgX + 36} y="73" fontSize="6.5" fill="#94a3b8">signing keys</text>
 
-      {/* AIS → Signer: GenerateSigningKey */}
-      <line x1="116" y1="40" x2={sgX - 58} y2="40" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#sgn-ab)" />
-      <text x="178" y="36" textAnchor="middle" fontSize="8" fontWeight="600" fill="#3b82f6">GenerateSigningKey</text>
+      {/* ① AIS → Signer: GenerateSigningKey */}
+      <line x1={aisX + 50} y1="20" x2={sgX - 58} y2="20" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#sgn-ab)" />
+      <text x={(aisX + sgX) / 2} y="16" textAnchor="middle" fontSize="7.5" fontWeight="600" fill="#3b82f6">① GenerateSigningKey</text>
 
       {/* Signer → AIS: key_id + verifying_key */}
-      <line x1={sgX - 58} y1="52" x2="116" y2="52" stroke="#10b981" strokeWidth="1.5" markerEnd="url(#sgn-ag)" />
-      <text x="178" y="62" textAnchor="middle" fontSize="7" fill="#10b981">key_id + verifying_key</text>
+      <line x1={sgX - 58} y1="32" x2={aisX + 50} y2="32" stroke="#10b981" strokeWidth="1.5" markerEnd="url(#sgn-ag)" />
+      <text x={(aisX + sgX) / 2} y="44" textAnchor="middle" fontSize="7" fill="#10b981">key_id + verifying_key</text>
 
-      {/* AIS → Signer: Sign(key_id, msg) */}
-      <line x1="116" y1="72" x2={sgX - 58} y2="72" stroke="#6366f1" strokeWidth="1.2" strokeDasharray="3 2" markerEnd="url(#sgn-ap)" />
-      <text x="178" y="82" textAnchor="middle" fontSize="7" fill="#6366f1">Sign(key_id, msg) → 64-byte sig</text>
+      {/* ② AIS → Signer: Sign(key_id, msg) */}
+      <line x1={aisX + 50} y1="58" x2={sgX - 58} y2="58" stroke="#6366f1" strokeWidth="1.2" strokeDasharray="3 2" markerEnd="url(#sgn-ap)" />
+      <text x={(aisX + sgX) / 2} y="55" textAnchor="middle" fontSize="7.5" fontWeight="600" fill="#6366f1">② Sign(key_id, msg)</text>
 
-      {/* ── Right: Verifier → Signer ── */}
-      <rect x="476" y="28" width="116" height="44" rx="6" fill="#f5f3ff" stroke="#8b5cf6" strokeWidth="1.2" strokeDasharray="4 2" />
-      <text x="534" y="44" textAnchor="middle" fontSize="9" fontWeight="600" fill="#5b21b6">Verifier</text>
-      <text x="534" y="55" textAnchor="middle" fontSize="7" fill="#8b5cf6">Signaling / TURN</text>
-      <text x="534" y="65" textAnchor="middle" fontSize="6" fill="#a78bfa">GetVerifyingKey</text>
+      {/* Signer → AIS: 64-byte signature */}
+      <line x1={sgX - 58} y1="70" x2={aisX + 50} y2="70" stroke="#10b981" strokeWidth="1.2" strokeDasharray="3 2" markerEnd="url(#sgn-ag)" />
+      <text x={(aisX + sgX) / 2} y="81" textAnchor="middle" fontSize="7" fill="#10b981">64-byte Ed25519 signature</text>
 
-      {/* Verifier → Signer: GetVerifyingKey */}
-      <line x1="476" y1="40" x2={sgX + 58} y2="40" stroke="#8b5cf6" strokeWidth="1.5" markerEnd="url(#sgn-ap)" />
-      <text x="422" y="36" textAnchor="middle" fontSize="8" fontWeight="600" fill="#8b5cf6">GetVerifyingKey</text>
-
-      {/* Signer → Verifier: verifying_key */}
-      <line x1={sgX + 58} y1="52" x2="476" y2="52" stroke="#8b5cf6" strokeWidth="1.5" markerEnd="url(#sgn-ap)" />
-      <text x="422" y="62" textAnchor="middle" fontSize="7" fill="#8b5cf6">Ed25519 verifying key</text>
-
-      {/* Auth note */}
-      <text x={sgX} y="124" textAnchor="middle" fontSize="7" fill="#94a3b8">
-        All requests authenticated via nonce-auth (HMAC-SHA256 + replay protection)
+      {/* Cluster-private label */}
+      <text x={(aisX + sgX) / 2} y="96" textAnchor="middle" fontSize="6.5" fill="#94a3b8">
+        gRPC · nonce-auth · cluster-private
       </text>
 
-      {/* ═══ Divider ═══ */}
-      <line x1="16" y1="140" x2="584" y2="140" stroke="#e2e8f0" strokeWidth="1" />
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* Section 2: Key distribution + verification         */}
+      {/* ═══════════════════════════════════════════════════ */}
 
-      {/* ═══ Key Lifecycle ═══ */}
-      <text x={padL} y="160" fontSize="10" fontWeight="600" fill="#475569">Key Lifecycle</text>
-      <text x={padL} y="174" fontSize="8" fill="#94a3b8">
+      {/* KeyCache box */}
+      <rect x={cacheX - 56} y="10" width="112" height="40" rx="8" fill="#ecfdf5" stroke="#22c55e" strokeWidth="1.2" />
+      <text x={cacheX} y="28" textAnchor="middle" fontSize="10" fontWeight="600" fill="#166534">KeyCache</text>
+      <text x={cacheX} y="41" textAnchor="middle" fontSize="7" fill="#16a34a">shared SQLite</text>
+
+      {/* Signaling / TURN box */}
+      <rect x={verX - 48} y="10" width="96" height="40" rx="8" fill="#f5f3ff" stroke="#8b5cf6" strokeWidth="1.2" />
+      <text x={verX} y="24" textAnchor="middle" fontSize="9" fontWeight="600" fill="#5b21b6">Signaling</text>
+      <text x={verX} y="35" textAnchor="middle" fontSize="9" fontWeight="600" fill="#5b21b6">TURN</text>
+      <text x={verX} y="46" textAnchor="middle" fontSize="7" fill="#a78bfa">verifiers</text>
+
+      {/* ③ AIS → KeyCache: persist verifying key */}
+      <line x1={aisX + 50} y1="100" x2={cacheX - 58} y2="100" stroke="#22c55e" strokeWidth="1.2" markerEnd="url(#sgn-ag)" />
+      <text x={(aisX + cacheX) / 2} y="97" textAnchor="middle" fontSize="7.5" fontWeight="600" fill="#22c55e">③ persist_key(key_id, verifying_key)</text>
+
+      {/* AIS lifeline down to step ③ */}
+      <line x1={aisX} y1="50" x2={aisX} y2="100" stroke="#c7d2fe" strokeWidth="1" strokeDasharray="4 3" />
+
+      {/* Actor Peer box (center-bottom) */}
+      <rect x={aisX - 50} y="132" width="100" height="34" rx="6" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.2" />
+      <text x={aisX} y="148" textAnchor="middle" fontSize="9" fontWeight="600" fill="#1e40af">Actor Peer</text>
+      <text x={aisX} y="160" textAnchor="middle" fontSize="7" fill="#60a5fa">client</text>
+
+      {/* ④ AIS → Actor: AIdCredential */}
+      <line x1={aisX} y1="106" x2={aisX} y2="132" stroke="#3b82f6" strokeWidth="1.2" markerEnd="url(#sgn-ab)" />
+      <text x={aisX + 60} y="120" fontSize="7.5" fontWeight="600" fill="#3b82f6">④ AIdCredential</text>
+      <text x={aisX + 60} y="130" fontSize="6.5" fill="#64748b">key_id + claims + signature</text>
+
+      {/* ⑤ Actor → Signaling/TURN: present credential */}
+      <line x1={aisX + 50} y1="149" x2={verX - 50} y2="149" stroke="#8b5cf6" strokeWidth="1.2" markerEnd="url(#sgn-ap)" />
+      <text x={(aisX + verX) / 2} y="143" textAnchor="middle" fontSize="7.5" fontWeight="600" fill="#8b5cf6">⑤ present AIdCredential</text>
+
+      {/* ⑥ Signaling/TURN → KeyCache: lookup verifying key */}
+      <line x1={verX - 48} y1="60" x2={cacheX + 58} y2="60" stroke="#22c55e" strokeWidth="1.2" markerEnd="url(#sgn-ag)" />
+      <text x={(verX + cacheX) / 2} y="57" textAnchor="middle" fontSize="7.5" fontWeight="600" fill="#22c55e">⑥ lookup(key_id)</text>
+
+      {/* KeyCache → Signaling/TURN: verifying key */}
+      <line x1={cacheX + 58} y1="72" x2={verX - 48} y2="72" stroke="#22c55e" strokeWidth="1.2" strokeDasharray="3 2" markerEnd="url(#sgn-ag)" />
+      <text x={(verX + cacheX) / 2} y="84" textAnchor="middle" fontSize="7" fill="#16a34a">Ed25519 verifying key</text>
+
+      {/* Verification lifelines */}
+      <line x1={verX} y1="50" x2={verX} y2="149" stroke="#ddd6fe" strokeWidth="1" strokeDasharray="4 3" />
+
+      {/* GetVerifyingKey (remote/cluster) note */}
+      <rect x={sgX + 62} y="130" width="138" height="28" rx="5" fill="#faf5ff" stroke="#ddd6fe" strokeWidth="0.8" />
+      <text x={sgX + 131} y="143" textAnchor="middle" fontSize="7" fill="#8b5cf6">GetVerifyingKey (gRPC)</text>
+      <text x={sgX + 131} y="153" textAnchor="middle" fontSize="6.5" fill="#a78bfa">for remote/clustered verifiers</text>
+
+      {/* Auth note */}
+      <text x="360" y={dividerY - 8} textAnchor="middle" fontSize="7" fill="#94a3b8">
+        Signer RPCs authenticated via nonce-auth (HMAC-SHA256 + one-time nonce)
+      </text>
+
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* Section 3: Key Lifecycle timeline                  */}
+      {/* ═══════════════════════════════════════════════════ */}
+
+      <line x1="16" y1={dividerY} x2="704" y2={dividerY} stroke="#e2e8f0" strokeWidth="1" />
+
+      <text x={padL} y={lcTitleY} fontSize="10" fontWeight="600" fill="#475569">Key Lifecycle</text>
+      <text x={padL} y={lcTitleY + 14} fontSize="8" fill="#94a3b8">
         total validity = {ttl}s active + {tolerance}s tolerance
       </text>
 
@@ -150,20 +209,9 @@ function SignerLifecycleDiagram({ config }: { config: Record<string, unknown> })
         Cleanup
       </text>
 
-      {/* Legend */}
-      <rect x={padL} y="268" width="12" height="12" rx="2" fill="#dcfce7" stroke="#22c55e" strokeWidth="0.8" />
-      <text x={padL + 18} y="278" fontSize="8" fill="#475569">
-        GenerateSigningKey returns key_id + Ed25519 verifying key; Sign returns 64-byte signature
-      </text>
-
-      <rect x={padL} y="286" width="12" height="12" rx="2" fill="#fef3c7" stroke="#f59e0b" strokeWidth="0.8" />
-      <text x={padL + 18} y="296" fontSize="8" fill="#475569">
-        GetVerifyingKey still works (verify old credentials); GenerateSigningKey uses new key
-      </text>
-
-      <rect x={padL} y="304" width="12" height="12" rx="2" fill="#fee2e2" stroke="#f87171" strokeWidth="0.8" />
-      <text x={padL + 18} y="314" fontSize="8" fill="#475569">
-        Key removed from DB (lazy cleanup every 100 requests, min 10 keys)
+      {/* Cleanup note */}
+      <text x={padL + barW + 12} y={barY + barH + 24} fontSize="7" fill="#94a3b8">
+        lazy, every 100 reqs, min 10 keys
       </text>
     </svg>
   );
@@ -226,15 +274,18 @@ export function SignerService() {
       {data.config && (
         <HowItWorks storageKey="signer">
           <p className="text-xs text-gray-500 mb-4">
-            Signer exposes three core APIs: <strong>GenerateSigningKey</strong> creates an Ed25519 key pair,
-            stores the private key in SQLite, and returns the <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> and
-            verifying key (public key) to AIS. <strong>Sign</strong> takes a <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> and
-            message, signs with the stored private key, and returns a 64-byte Ed25519 signature — the private
-            key never leaves the Signer process. <strong>GetVerifyingKey</strong> allows verifiers (Signaling,
-            TURN) to fetch the Ed25519 public key by <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> for
-            credential verification. All APIs require nonce-auth (HMAC-SHA256 + one-time nonce).
-            Keys follow a lifecycle: active for signing + verifying, then a tolerance window for
-            verification only, after which they are lazily cleaned up.
+            Signer is a cluster-private signing oracle. AIS calls <strong>①&nbsp;GenerateSigningKey</strong> to
+            create an Ed25519 key pair — the signing key (private) stays in Signer's SQLite and is never
+            exposed. When issuing credentials, AIS calls <strong>②&nbsp;Sign</strong> with
+            a <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> and message; Signer returns a
+            64-byte signature. AIS then <strong>③&nbsp;persists the verifying key</strong> (public) into a
+            shared KeyCache (SQLite) so local verifiers can look it up. The issued
+            <strong> ④&nbsp;AIdCredential</strong> (key_id + claims + signature) is sent to the Actor Peer, who
+            later <strong>⑤&nbsp;presents</strong> it to Signaling or TURN.
+            Those verifiers <strong>⑥&nbsp;lookup</strong> the verifying key from the shared KeyCache by key_id
+            and verify the Ed25519 signature locally — no round-trip to Signer needed.
+            A separate <strong>GetVerifyingKey</strong> gRPC exists for remote/clustered verifiers
+            that don't share the local KeyCache.
           </p>
           <SignerLifecycleDiagram config={data.config} />
 
@@ -242,34 +293,32 @@ export function SignerService() {
             <p className="font-semibold text-gray-600">Key concepts</p>
             <ul className="list-disc pl-4 space-y-1.5">
               <li>
-                <strong className="text-gray-600">Cluster-private</strong> — Signer is an internal service
-                shared across the Actrix cluster. It is never exposed to external clients; only
-                other cluster services (AIS, Signaling, TURN) communicate with it via authenticated gRPC.
+                <strong className="text-gray-600">Cluster-private</strong> — Signer is never exposed to
+                external clients. Only AIS communicates with it via authenticated gRPC (nonce-auth).
               </li>
               <li>
-                <strong className="text-gray-600">GenerateSigningKey</strong> — AIS calls this to get a fresh
-                Ed25519 key pair. Only the verifying key (public) is returned; the signing key stays in Signer's SQLite.
+                <strong className="text-gray-600">Private key isolation</strong> — Ed25519 signing keys
+                never leave Signer. AIS receives only the verifying key (public) and signatures;
+                all signing happens inside Signer's process boundary.
               </li>
               <li>
-                <strong className="text-gray-600">Sign</strong> — AIS calls this with a
-                <code className="text-[11px] bg-gray-100 px-1 rounded mx-1">key_id</code> and message bytes to
-                produce a 64-byte Ed25519 signature. The private key is never exposed over gRPC.
+                <strong className="text-gray-600">KeyCache distribution</strong> — AIS persists verifying
+                keys into a shared SQLite KeyCache. Signaling and TURN read from this cache to
+                verify AIdCredentials locally — zero network calls to Signer at verification time.
               </li>
               <li>
-                <strong className="text-gray-600">GetVerifyingKey</strong> — verifier processes call
-                this with a <code className="text-[11px] bg-gray-100 px-1 rounded">key_id</code> to
-                retrieve the Ed25519 public key and verify client credentials. Currently
-                both Signaling (WebSocket auth) and TURN (relay auth) use this path.
+                <strong className="text-gray-600">GetVerifyingKey (gRPC)</strong> — available for
+                remote/clustered verifiers that can't access the local KeyCache. Not used in
+                single-node deployments.
               </li>
               <li>
                 <strong className="text-gray-600">key_ttl_seconds</strong> — how long a key pair is
-                active. During this window both Sign (for new credentials) and GetVerifyingKey
-                (for verification) work. AIS refreshes before expiry.
+                active for signing + verification. AIS refreshes before expiry.
               </li>
               <li>
                 <strong className="text-gray-600">tolerance_seconds</strong> — grace period after
-                expiry. Only GetVerifyingKey still works (verify old credentials); Sign
-                will use a newer key.
+                expiry. Verification still works (old credentials remain valid);
+                new signing uses a fresher key.
               </li>
             </ul>
           </div>

@@ -1,6 +1,6 @@
 mod crypto;
-mod dns;
 pub mod error;
+pub mod github;
 pub mod handlers;
 pub mod manager;
 pub mod model;

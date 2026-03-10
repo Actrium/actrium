@@ -23,7 +23,7 @@ sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-
 
 # Not in workspace
 rand = "0.8"
-hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Internal dependencies
 platform = { path = "../../platform" }

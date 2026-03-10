@@ -1,8 +1,49 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Package, Key, Copy } from 'lucide-react';
-import { mfrApi, type Manufacturer, type ActrPackage, type MfrKeychain } from '../../lib/api';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Package, Key, Copy, Plus, Terminal, Download } from 'lucide-react';
+import { mfrApi, type Manufacturer, type ActrPackage, type MfrKeychain, type ApplyResponse } from '../../lib/api';
 
-// Status badge component
+function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+function fallbackCopy(text: string) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+}
+
+function CopyButton({ text, label = 'Copy', className = '' }: { text: string; label?: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  const onClick = () => {
+    copyText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 transition-all duration-150 ${copied ? 'scale-95 opacity-70' : ''} ${className}`}
+    >
+      <Copy size={12} className={`transition-transform duration-150 ${copied ? 'scale-0' : 'scale-100'}`} />
+      <CheckCircle size={12} className={`absolute transition-transform duration-150 ${copied ? 'scale-100 text-green-600' : 'scale-0'}`} />
+      <span>{copied ? 'Copied' : label}</span>
+    </button>
+  );
+}
+
+const VERIFY_REPO = 'actr-mfr-verify';
+const VERIFY_COOLDOWN_SECS = 15;
+
+// ── Status badge ──────────────────────────────────────────────────
+
 function StatusBadge({ status }: { status: Manufacturer['status'] }) {
   const config = {
     active: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Active' },
@@ -19,14 +60,24 @@ function StatusBadge({ status }: { status: Manufacturer['status'] }) {
   );
 }
 
-// Keychain modal - shows private key once after approval
+// ── Keychain modal ────────────────────────────────────────────────
+
 function KeychainModal({ keychain, onClose }: { keychain: MfrKeychain; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    await navigator.clipboard.writeText(JSON.stringify(keychain, null, 2));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const json = JSON.stringify(keychain, null, 2);
+  const name = keychain.certificate.mfr_name;
+  const filename = `mfr-${name}-keychain.json`;
+  const saveCommand = `mkdir -p ~/.config/actrix && cat > ~/.config/actrix/${filename} << 'KEYCHAIN'\n${json}\nKEYCHAIN`;
+
+  const handleDownload = () => {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4">
@@ -35,18 +86,36 @@ function KeychainModal({ keychain, onClose }: { keychain: MfrKeychain; onClose: 
           <h2 className="text-lg font-semibold">MFR Keychain Issued</h2>
         </div>
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-800">
-          ⚠️ Save this private key immediately. It will never be shown again.
+          Save this private key now. It will NOT be shown again.
         </div>
-        <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-auto max-h-64 font-mono">
-          {JSON.stringify(keychain, null, 2)}
-        </pre>
-        <div className="flex gap-2 mt-4">
+
+        {/* One-liner save command */}
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Terminal size={12} className="text-gray-400" />
+            <label className="text-xs text-gray-500">Save to ~/.config/actrix/</label>
+            <CopyButton text={saveCommand} className="text-xs text-blue-600 hover:text-blue-800 ml-auto relative" />
+          </div>
+          <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap font-mono max-h-40">{saveCommand}</pre>
+        </div>
+
+        {/* Raw JSON (collapsed) */}
+        <details className="mb-4">
+          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Raw JSON</summary>
+          <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-auto max-h-40 font-mono mt-1">{json}</pre>
+        </details>
+
+        <div className="flex gap-2">
+          <CopyButton
+            text={json}
+            label="Copy JSON"
+            className="relative flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-700"
+          />
           <button
-            onClick={copy}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-700"
+            onClick={handleDownload}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
           >
-            <Copy size={14} />
-            {copied ? 'Copied!' : 'Copy JSON'}
+            <Download size={14} /> Download
           </button>
           <button
             onClick={onClose}
@@ -60,6 +129,542 @@ function KeychainModal({ keychain, onClose }: { keychain: MfrKeychain; onClose: 
   );
 }
 
+// ── How it works diagram ──────────────────────────────────────────
+
+function HowItWorks() {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <details>
+        <summary className="px-4 py-3 cursor-pointer hover:bg-gray-50 text-sm font-semibold text-gray-800 select-none">
+          How it Works
+        </summary>
+        <div className="px-4 pb-5 space-y-5">
+          {/* Row 1: Registration & Identity */}
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Registration & Identity Verification</div>
+            <svg viewBox="0 0 760 120" className="w-full" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f8fafc"/><stop offset="100%" stopColor="#e2e8f0"/></linearGradient>
+                <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#fefce8"/><stop offset="100%" stopColor="#fef08a"/></linearGradient>
+                <linearGradient id="g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#eff6ff"/><stop offset="100%" stopColor="#bfdbfe"/></linearGradient>
+                <linearGradient id="g4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f0fdf4"/><stop offset="100%" stopColor="#bbf7d0"/></linearGradient>
+                <filter id="ds"><feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.1"/></filter>
+              </defs>
+
+              {/* Person icon */}
+              <g transform="translate(30,12)" filter="url(#ds)">
+                <rect width="100" height="90" rx="12" fill="url(#g1)" stroke="#cbd5e1" strokeWidth="1"/>
+                <circle cx="50" cy="32" r="14" fill="#94a3b8" />
+                <circle cx="50" cy="28" r="6" fill="#f1f5f9" />
+                <ellipse cx="50" cy="42" rx="10" ry="6" fill="#f1f5f9" />
+                <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#475569">Register</text>
+                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#94a3b8">GitHub name</text>
+              </g>
+
+              {/* Curved arrow 1 */}
+              <path d="M138,57 C158,57 158,57 178,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
+              <polygon points="176,53 184,57 176,61" fill="#cbd5e1"/>
+
+              {/* Token / Challenge */}
+              <g transform="translate(190,12)" filter="url(#ds)">
+                <rect width="100" height="90" rx="12" fill="url(#g2)" stroke="#fbbf24" strokeWidth="1"/>
+                {/* Shield with star */}
+                <path d="M50,22 L62,28 L62,40 C62,48 50,54 50,54 C50,54 38,48 38,40 L38,28 Z" fill="#fbbf24" opacity="0.3"/>
+                <path d="M50,22 L62,28 L62,40 C62,48 50,54 50,54 C50,54 38,48 38,40 L38,28 Z" fill="none" stroke="#f59e0b" strokeWidth="1.2"/>
+                <text x="50" y="41" textAnchor="middle" fontSize="12" fill="#b45309">?</text>
+                <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#92400e">Challenge</text>
+                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#b45309">Unique token</text>
+              </g>
+
+              {/* Curved arrow 2 */}
+              <path d="M298,57 C318,57 318,57 338,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
+              <polygon points="336,53 344,57 336,61" fill="#cbd5e1"/>
+
+              {/* GitHub repo */}
+              <g transform="translate(350,12)" filter="url(#ds)">
+                <rect width="100" height="90" rx="12" fill="url(#g3)" stroke="#60a5fa" strokeWidth="1"/>
+                {/* GitHub-like mark */}
+                <circle cx="50" cy="34" r="14" fill="#1e40af" opacity="0.15"/>
+                {/* Simplified octocat silhouette - a circle with tentacles hint */}
+                <circle cx="50" cy="31" r="8" fill="none" stroke="#3b82f6" strokeWidth="1.5"/>
+                <path d="M44,35 C44,41 56,41 56,35" fill="none" stroke="#3b82f6" strokeWidth="1.2"/>
+                <circle cx="47" cy="30" r="1.5" fill="#3b82f6"/>
+                <circle cx="53" cy="30" r="1.5" fill="#3b82f6"/>
+                <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#1e40af">Prove</text>
+                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#3b82f6">Public repo</text>
+              </g>
+
+              {/* Curved arrow 3 */}
+              <path d="M458,57 C478,57 478,57 498,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
+              <polygon points="496,53 504,57 496,61" fill="#cbd5e1"/>
+
+              {/* Verify + issue */}
+              <g transform="translate(510,12)" filter="url(#ds)">
+                <rect width="100" height="90" rx="12" fill="#f0fdf4" stroke="#4ade80" strokeWidth="1"/>
+                <circle cx="50" cy="33" r="13" fill="#22c55e" opacity="0.15"/>
+                <path d="M42,33 L48,39 L58,27" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#166534">Verified</text>
+                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#16a34a">Server confirms</text>
+              </g>
+
+              {/* Arrow 4 */}
+              <path d="M618,57 C638,57 638,57 658,57" fill="none" stroke="#22c55e" strokeWidth="1.5"/>
+              <polygon points="656,53 664,57 656,61" fill="#22c55e"/>
+
+              {/* Key issued */}
+              <g transform="translate(670,12)" filter="url(#ds)">
+                <rect width="80" height="90" rx="12" fill="url(#g4)" stroke="#22c55e" strokeWidth="1.5"/>
+                {/* Key icon */}
+                <circle cx="40" cy="30" r="8" fill="none" stroke="#f59e0b" strokeWidth="2"/>
+                <circle cx="40" cy="30" r="3" fill="#f59e0b" opacity="0.3"/>
+                <line x1="48" y1="30" x2="58" y2="30" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="54" y1="30" x2="54" y2="35" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="58" y1="30" x2="58" y2="35" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
+                <text x="40" y="58" textAnchor="middle" fontSize="9" fontWeight="700" fill="#166534">Keychain</text>
+                <text x="40" y="70" textAnchor="middle" fontSize="7.5" fill="#16a34a">Ed25519</text>
+                <text x="40" y="80" textAnchor="middle" fontSize="7.5" fill="#16a34a">keypair</text>
+              </g>
+            </svg>
+          </div>
+
+          {/* Row 2: Digital Signature — sign & verify */}
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Package Signing & Verification</div>
+            <svg viewBox="0 0 760 380" className="w-full" xmlns="http://www.w3.org/2000/svg" fontFamily="system-ui, sans-serif">
+              <defs>
+                <marker id="ar" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
+                  <path d="M0,0 L10,3.5 L0,7Z" fill="#3b82f6"/>
+                </marker>
+              </defs>
+
+              {/* ====== TOP HALF: Manufacturer (Signer) ====== */}
+              <text x="28" y="22" fontSize="13" fontWeight="700" fill="#3b82f6">Manufacturer</text>
+
+              {/* Person with laptop */}
+              <g transform="translate(20,34)">
+                <circle cx="22" cy="12" r="10" fill="#bfdbfe"/>
+                <circle cx="22" cy="9" r="5" fill="#eff6ff"/>
+                <ellipse cx="22" cy="18" rx="7" ry="4" fill="#eff6ff"/>
+                {/* Laptop */}
+                <rect x="10" y="30" width="24" height="16" rx="2" fill="#93c5fd" stroke="#3b82f6" strokeWidth="0.8"/>
+                <rect x="13" y="33" width="18" height="10" rx="1" fill="#eff6ff"/>
+                <rect x="6" y="46" width="32" height="3" rx="1.5" fill="#60a5fa"/>
+              </g>
+
+              {/* Manifest — software module box */}
+              <g transform="translate(100,36)">
+                {/* 3D box: top face */}
+                <polygon points="24,0 48,12 24,24 0,12" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                {/* Front face */}
+                <polygon points="0,12 24,24 24,52 0,40" fill="#93c5fd" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                {/* Right face */}
+                <polygon points="24,24 48,12 48,40 24,52" fill="#bfdbfe" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                {/* Label on front */}
+                <text x="12" y="32" fontSize="7" fill="#1e40af" fontWeight="600">actr</text>
+                <text x="12" y="40" fontSize="6" fill="#2563eb">.toml</text>
+              </g>
+              <text x="124" y="102" textAnchor="middle" fontSize="10" fill="#475569">Manifest</text>
+
+              {/* Arrow: manifest → hash */}
+              <line x1="156" y1="67" x2="228" y2="67" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar)"/>
+              <text x="192" y="60" textAnchor="middle" fontSize="9" fill="#3b82f6">Hash</text>
+              <text x="192" y="72" textAnchor="middle" fontSize="8" fill="#94a3b8">Algorithm</text>
+
+              {/* Hash box */}
+              <g transform="translate(236,52)">
+                <rect width="90" height="30" rx="4" fill="#eff6ff" stroke="#3b82f6" strokeWidth="1.2"/>
+                <text x="45" y="19" textAnchor="middle" fontSize="9" fontFamily="monospace" fill="#1e40af">a7c3f09b...</text>
+              </g>
+              <text x="281" y="98" textAnchor="middle" fontSize="9" fill="#6b7280">Hash</text>
+
+              {/* Arrow: hash → encryption */}
+              <line x1="334" y1="67" x2="406" y2="67" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar)"/>
+              <text x="370" y="60" textAnchor="middle" fontSize="9" fill="#3b82f6">Encryption</text>
+
+              {/* Private key icon */}
+              <g transform="translate(358,82)">
+                <circle cx="12" cy="12" r="9" fill="none" stroke="#f59e0b" strokeWidth="2"/>
+                <circle cx="12" cy="12" r="3.5" fill="#fbbf24" opacity="0.4"/>
+                <line x1="21" y1="12" x2="38" y2="12" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="30" y1="12" x2="30" y2="18" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="36" y1="12" x2="36" y2="18" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
+              </g>
+              <text x="378" y="118" textAnchor="middle" fontSize="9" fill="#b45309">Private Key</text>
+
+              {/* Signed package (right) — box with seal */}
+              <g transform="translate(414,36)">
+                <polygon points="24,0 48,12 24,24 0,12" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                <polygon points="0,12 24,24 24,52 0,40" fill="#93c5fd" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                <polygon points="24,24 48,12 48,40 24,52" fill="#bfdbfe" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                {/* Signature seal on front */}
+                <circle cx="12" cy="33" r="7" fill="#1e40af" opacity="0.2" stroke="#1e40af" strokeWidth="0.8"/>
+                <path d="M9,33 L11,35 L15,30" fill="none" stroke="#1e40af" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </g>
+              <text x="438" y="102" textAnchor="middle" fontSize="10" fill="#475569">Signed</text>
+              <text x="438" y="114" textAnchor="middle" fontSize="10" fill="#475569">Package</text>
+
+              {/* Keypair: private (amber) + public (teal) */}
+              <g transform="translate(490,40)">
+                {/* Private key — amber */}
+                <circle cx="12" cy="12" r="8" fill="none" stroke="#f59e0b" strokeWidth="1.8"/>
+                <circle cx="12" cy="12" r="3" fill="#fbbf24" opacity="0.4"/>
+                <line x1="20" y1="12" x2="34" y2="12" stroke="#f59e0b" strokeWidth="1.8" strokeLinecap="round"/>
+                <line x1="27" y1="12" x2="27" y2="17" stroke="#f59e0b" strokeWidth="1.8" strokeLinecap="round"/>
+                <line x1="32" y1="12" x2="32" y2="17" stroke="#f59e0b" strokeWidth="1.8" strokeLinecap="round"/>
+                <text x="22" y="32" textAnchor="middle" fontSize="8" fontWeight="600" fill="#b45309">Private Key</text>
+
+                {/* Public key — teal */}
+                <circle cx="12" cy="52" r="8" fill="none" stroke="#0d9488" strokeWidth="1.8"/>
+                <circle cx="12" cy="52" r="3" fill="#5eead4" opacity="0.4"/>
+                <line x1="20" y1="52" x2="34" y2="52" stroke="#0d9488" strokeWidth="1.8" strokeLinecap="round"/>
+                <line x1="27" y1="52" x2="27" y2="57" stroke="#0d9488" strokeWidth="1.8" strokeLinecap="round"/>
+                <line x1="32" y1="52" x2="32" y2="57" stroke="#0d9488" strokeWidth="1.8" strokeLinecap="round"/>
+                <text x="22" y="72" textAnchor="middle" fontSize="8" fontWeight="600" fill="#0f766e">Public Key</text>
+
+                {/* Brace connecting them */}
+                <text x="42" y="44" fontSize="9" fill="#6b7280">{'}'}</text>
+                <text x="54" y="44" fontSize="8" fill="#6b7280">Ed25519</text>
+                <text x="54" y="54" fontSize="8" fill="#6b7280">Keypair</text>
+              </g>
+
+              {/* Long arrow across top: manifest directly to signed doc */}
+              <path d="M148,40 L148,32 L430,32 L430,40" fill="none" stroke="#93c5fd" strokeWidth="1.2" strokeDasharray="4 2"/>
+              <polygon points="426,40 430,48 434,40" fill="#93c5fd"/>
+
+              {/* ====== MIDDLE: Network ====== */}
+              <g transform="translate(0,140)">
+                <line x1="20" y1="20" x2="740" y2="20" stroke="none"/>
+                <rect x="20" y="6" width="720" height="28" rx="14" fill="none" stroke="#cbd5e1" strokeWidth="1.2" strokeDasharray="6 3"/>
+                {/* Cloud shape */}
+                <g transform="translate(330,4)">
+                  <ellipse cx="50" cy="18" rx="36" ry="14" fill="white" stroke="#cbd5e1" strokeWidth="1"/>
+                  <ellipse cx="35" cy="20" rx="20" ry="12" fill="white"/>
+                  <ellipse cx="65" cy="20" rx="20" ry="12" fill="white"/>
+                  <ellipse cx="50" cy="14" rx="22" ry="12" fill="white"/>
+                  {/* Cloud outline redrawn for clean look */}
+                  <ellipse cx="50" cy="18" rx="36" ry="14" fill="none" stroke="#cbd5e1" strokeWidth="0.8"/>
+                </g>
+                <text x="380" y="24" textAnchor="middle" fontSize="10" fontWeight="500" fill="#94a3b8">Network</text>
+              </g>
+
+              {/* ====== BOTTOM HALF: Hyper Node (Verifier) ====== */}
+
+              {/* Signed package (bottom-left, received) */}
+              <g transform="translate(28,206)">
+                <polygon points="24,0 48,12 24,24 0,12" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                <polygon points="0,12 24,24 24,52 0,40" fill="#93c5fd" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                <polygon points="24,24 48,12 48,40 24,52" fill="#bfdbfe" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round"/>
+                <circle cx="12" cy="33" r="7" fill="#1e40af" opacity="0.2" stroke="#1e40af" strokeWidth="0.8"/>
+                <path d="M9,33 L11,35 L15,30" fill="none" stroke="#1e40af" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </g>
+              <text x="52" y="272" textAnchor="middle" fontSize="9" fill="#475569">Signed Package</text>
+
+              {/* === Path 1 (top): manifest → hash === */}
+              <line x1="82" y1="230" x2="180" y2="230" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar)"/>
+              <text x="131" y="223" textAnchor="middle" fontSize="9" fill="#3b82f6">Hash</text>
+              <text x="131" y="235" textAnchor="middle" fontSize="8" fill="#94a3b8">Algorithm</text>
+
+              {/* Hash result 1 */}
+              <g transform="translate(188,215)">
+                <rect width="90" height="30" rx="4" fill="#eff6ff" stroke="#3b82f6" strokeWidth="1.2"/>
+                <text x="45" y="19" textAnchor="middle" fontSize="9" fontFamily="monospace" fill="#1e40af">a7c3f09b...</text>
+              </g>
+              <text x="233" y="260" textAnchor="middle" fontSize="9" fill="#6b7280">Hash</text>
+
+              {/* === Path 2 (bottom): signature → decrypt with pubkey === */}
+              <line x1="82" y1="255" x2="180" y2="310" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar)"/>
+              <text x="131" y="296" textAnchor="middle" fontSize="9" fill="#3b82f6">Decryption</text>
+
+              {/* Public key icon — teal (matches top) */}
+              <g transform="translate(112,316)">
+                <circle cx="12" cy="12" r="9" fill="none" stroke="#0d9488" strokeWidth="2"/>
+                <circle cx="12" cy="12" r="3.5" fill="#5eead4" opacity="0.4"/>
+                <line x1="21" y1="12" x2="38" y2="12" stroke="#0d9488" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="30" y1="12" x2="30" y2="18" stroke="#0d9488" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="36" y1="12" x2="36" y2="18" stroke="#0d9488" strokeWidth="2" strokeLinecap="round"/>
+              </g>
+              <text x="134" y="352" textAnchor="middle" fontSize="9" fill="#0f766e">Public Key</text>
+              <text x="134" y="363" textAnchor="middle" fontSize="8" fill="#0d9488">(from Registry)</text>
+
+              {/* Hash result 2 */}
+              <g transform="translate(188,295)">
+                <rect width="90" height="30" rx="4" fill="#eff6ff" stroke="#3b82f6" strokeWidth="1.2"/>
+                <text x="45" y="19" textAnchor="middle" fontSize="9" fontFamily="monospace" fill="#1e40af">a7c3f09b...</text>
+              </g>
+              <text x="233" y="340" textAnchor="middle" fontSize="9" fill="#6b7280">Hash</text>
+
+              {/* Curly brace between two hashes */}
+              <path d="M286,230 C300,230 296,260 296,270 C296,280 300,310 286,310" fill="none" stroke="#6b7280" strokeWidth="1.2"/>
+              {/* Brace point */}
+              <circle cx="300" cy="270" r="2" fill="#6b7280"/>
+
+              {/* Comparison text */}
+              <text x="365" y="262" textAnchor="middle" fontSize="10" fill="#475569">Signature is valid</text>
+              <text x="365" y="276" textAnchor="middle" fontSize="10" fill="#475569">when hash values</text>
+              <text x="365" y="290" textAnchor="middle" fontSize="10" fill="#475569">are equal.</text>
+
+              {/* Verifier: Hyper Node */}
+              <text x="650" y="244" textAnchor="middle" fontSize="13" fontWeight="700" fill="#16a34a">Hyper Node</text>
+
+              {/* Server icon */}
+              <g transform="translate(620,256)">
+                {/* Monitor */}
+                <rect x="10" y="0" width="40" height="30" rx="3" fill="#d1fae5" stroke="#22c55e" strokeWidth="1.2"/>
+                <rect x="14" y="4" width="32" height="20" rx="2" fill="white"/>
+                {/* Screen content - checkmark */}
+                <path d="M24,12 L28,17 L36,8" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                {/* Stand */}
+                <rect x="26" y="30" width="8" height="4" fill="#a7f3d0"/>
+                <rect x="20" y="34" width="20" height="3" rx="1.5" fill="#86efac"/>
+                {/* Person */}
+                <circle cx="60" cy="14" r="8" fill="#bbf7d0"/>
+                <circle cx="60" cy="11" r="4" fill="#f0fdf4"/>
+                <ellipse cx="60" cy="19" rx="6" ry="3.5" fill="#f0fdf4"/>
+              </g>
+
+            </svg>
+          </div>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+// ── Create modal (3-step) ─────────────────────────────────────────
+
+type CreateStep = 'input' | 'verify' | 'done';
+
+function CreateModal({
+  onClose,
+  onDone,
+  resumeMfr,
+}: {
+  onClose: () => void;
+  onDone: (keychain: MfrKeychain) => void;
+  resumeMfr?: Manufacturer;
+}) {
+  const [step, setStep] = useState<CreateStep>(resumeMfr ? 'verify' : 'input');
+  const [name, setName] = useState(resumeMfr?.name ?? '');
+  const [contact, setContact] = useState('');
+  const [loading, setLoading] = useState(!!resumeMfr);
+  const [error, setError] = useState<string | null>(null);
+  const [applyResult, setApplyResult] = useState<ApplyResponse | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+  const [verifyAttempted, setVerifyAttempted] = useState(false);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Resume: fetch existing challenge
+  useEffect(() => {
+    if (!resumeMfr) return;
+    mfrApi.getChallenge(resumeMfr.id).then(res => {
+      setApplyResult(res);
+      setLoading(false);
+    }).catch(e => {
+      setError(String(e));
+      setLoading(false);
+    });
+  }, [resumeMfr]);
+
+  // Cleanup cooldown timer
+  useEffect(() => () => {
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+  }, []);
+
+  // Cancel: void the pending record only if freshly created (not resumed)
+  const handleCancel = () => {
+    if (applyResult && !resumeMfr) {
+      mfrApi.delete(applyResult.mfr_id).catch(() => {});
+    }
+    onClose();
+  };
+
+  const startCooldown = () => {
+    setCooldown(VERIFY_COOLDOWN_SECS);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setCooldown(prev => {
+        if (prev <= 1) {
+          clearInterval(cooldownRef.current!);
+          cooldownRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const handleApply = async () => {
+    if (!name.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await mfrApi.apply({
+        github_login: name.trim(),
+        contact: contact.trim() || undefined,
+      });
+      setApplyResult(res);
+      setStep('verify');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerify = async () => {
+    if (!applyResult) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const kc = await mfrApi.verify(applyResult.mfr_id);
+      onDone(kc);
+    } catch (e) {
+      setError(String(e));
+      setVerifyAttempted(true);
+      startCooldown();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginName = name.trim().toLowerCase();
+  const verifyFile = applyResult?.verify_file ?? '';
+  const ghCommand = applyResult
+    ? `gh repo create ${loginName}/${VERIFY_REPO} --public 2>/dev/null; if [ -d ${VERIFY_REPO} ]; then cd ${VERIFY_REPO} && git pull; else gh repo clone ${loginName}/${VERIFY_REPO} && cd ${VERIFY_REPO}; fi && echo "${applyResult.challenge_token}" > ${verifyFile} && git add . && git commit -m "actrix verify" && git push -u origin main && cd -`
+    : '';
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold text-gray-900">Register Manufacturer</h2>
+          <button onClick={handleCancel} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+        </div>
+
+        {/* Step indicators */}
+        <div className="flex items-center gap-2 mb-5 text-xs">
+          {(['input', 'verify', 'done'] as CreateStep[]).map((s, i) => {
+            const labels = ['1. Name', '2. Verify', '3. Certificate'];
+            const active = s === step;
+            const done = (['input', 'verify', 'done'].indexOf(step) > i);
+            return (
+              <span
+                key={s}
+                className={`px-2 py-1 rounded-full ${
+                  active ? 'bg-gray-800 text-white' : done ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-400'
+                }`}
+              >
+                {labels[i]}
+              </span>
+            );
+          })}
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">{error}</div>
+        )}
+
+        {/* Step 1: Input */}
+        {step === 'input' && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">GitHub Account / Org Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && void handleApply()}
+                placeholder="user or org name"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+                autoFocus
+              />
+              <p className="text-xs text-gray-400 mt-1">This will be the manufacturer name in package identifiers.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Contact (optional)</label>
+              <input
+                type="text"
+                value={contact}
+                onChange={e => setContact(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && void handleApply()}
+                placeholder="email or URL"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={handleCancel} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+              <button
+                onClick={() => void handleApply()}
+                disabled={loading || !name.trim()}
+                className="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-700 disabled:opacity-50"
+              >
+                {loading ? 'Submitting...' : 'Next'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Verify */}
+        {step === 'verify' && applyResult && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              On <strong>GitHub.com</strong>, create a public repo <code className="bg-gray-100 px-1 rounded text-gray-800">{loginName}/{VERIFY_REPO}</code> with a file <code className="bg-gray-100 px-1 rounded text-gray-800">{verifyFile}</code> containing the token below.
+            </p>
+
+            {/* Token */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-gray-500">Challenge Token</label>
+                <CopyButton text={applyResult.challenge_token} className="text-xs text-blue-600 hover:text-blue-800 relative" />
+              </div>
+              <div className="bg-gray-100 rounded-lg p-3 font-mono text-xs break-all select-all">{applyResult.challenge_token}</div>
+            </div>
+
+            {/* gh command */}
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Terminal size={12} className="text-gray-400" />
+                <label className="text-xs text-gray-500">gh CLI (one-liner)</label>
+                <CopyButton text={ghCommand} className="text-xs text-blue-600 hover:text-blue-800 ml-auto relative" />
+              </div>
+              <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap">{ghCommand}</pre>
+            </div>
+
+            {/* Manual steps */}
+            <details className="text-xs text-gray-500">
+              <summary className="cursor-pointer hover:text-gray-700">Manual steps</summary>
+              <ol className="list-decimal ml-4 mt-2 space-y-1">
+                <li>Go to <a href="https://github.com/new" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">github.com/new</a> and create a public repo named <code>{VERIFY_REPO}</code>{loginName.includes('-') || loginName.length > 15 ? '' : ` under ${loginName}`}</li>
+                <li>Add a file named <code>{verifyFile}</code></li>
+                <li>Paste the token above as the file content</li>
+                <li>Commit and push</li>
+              </ol>
+            </details>
+
+            <div className="text-xs text-gray-400">
+              Expires: {new Date(applyResult.expires_at * 1000).toLocaleString()}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={handleCancel} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+              <button
+                onClick={() => void handleVerify()}
+                disabled={loading || cooldown > 0}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50"
+              >
+                {loading ? 'Verifying...' : cooldown > 0 ? `Retry in ${cooldown}s` : verifyAttempted ? 'Verify Again' : 'Verify'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────
+
 export function MfrService() {
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
   const [packages, setPackages] = useState<ActrPackage[]>([]);
@@ -68,6 +673,8 @@ export function MfrService() {
   const [error, setError] = useState<string | null>(null);
   const [keychain, setKeychain] = useState<MfrKeychain | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [resumeMfr, setResumeMfr] = useState<Manufacturer | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -86,16 +693,6 @@ export function MfrService() {
   }, []);
 
   useEffect(() => { void loadData(); }, [loadData]);
-
-  const handleApprove = async (mfr: Manufacturer) => {
-    setActionLoading(mfr.id);
-    try {
-      const kc = await mfrApi.approve(mfr.id);
-      setKeychain(kc);
-      await loadData();
-    } catch (e) { setError(String(e)); }
-    finally { setActionLoading(null); }
-  };
 
   const handleSuspend = async (mfr: Manufacturer) => {
     if (!confirm(`Suspend "${mfr.name}"?`)) return;
@@ -126,6 +723,13 @@ export function MfrService() {
     catch (e) { setError(String(e)); }
   };
 
+  const handleCreateDone = (kc: MfrKeychain) => {
+    setKeychain(kc);
+    setShowCreate(false);
+    setResumeMfr(null);
+    void loadData();
+  };
+
   const stats = {
     total: manufacturers.length,
     active: manufacturers.filter(m => m.status === 'active').length,
@@ -144,13 +748,30 @@ export function MfrService() {
   return (
     <div className="p-6 space-y-6">
       {keychain && <KeychainModal keychain={keychain} onClose={() => setKeychain(null)} />}
+      {(showCreate || resumeMfr) && (
+        <CreateModal
+          onClose={() => { setShowCreate(false); setResumeMfr(null); }}
+          onDone={handleCreateDone}
+          resumeMfr={resumeMfr ?? undefined}
+        />
+      )}
 
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <Building2 size={24} /> Manufacturer Registry
-        </h1>
-        <p className="text-gray-500 text-sm mt-1">Manage registered actor manufacturers and published packages.</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <Building2 size={24} /> Manufacturer Registry
+          </h1>
+          <p className="text-gray-500 text-sm mt-1">Manage registered actor manufacturers and published packages.</p>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-1 px-4 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+        >
+          <Plus size={14} /> New
+        </button>
       </div>
+
+      <HowItWorks />
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{error}</div>
@@ -184,14 +805,14 @@ export function MfrService() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
             <tr>
-              {['Name', 'Domain', 'Status', 'Verified', 'Packages', 'Actions'].map(h => (
+              {['Name', 'Status', 'Verified', 'Packages', 'Actions'].map(h => (
                 <th key={h} className="px-4 py-2 text-left font-medium">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {manufacturers.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No manufacturers registered</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No manufacturers registered</td></tr>
             )}
             {manufacturers.map(mfr => {
               const pkgCount = packages.filter(p => p.mfr_id === mfr.id).length;
@@ -203,7 +824,6 @@ export function MfrService() {
                   onClick={() => setSelectedMfr(isSelected ? null : mfr)}
                 >
                   <td className="px-4 py-3 font-mono font-medium text-gray-900">{mfr.name}</td>
-                  <td className="px-4 py-3 text-gray-600">{mfr.domain}</td>
                   <td className="px-4 py-3"><StatusBadge status={mfr.status} /></td>
                   <td className="px-4 py-3 text-gray-500">{mfr.verified_at ? ts(mfr.verified_at) : '—'}</td>
                   <td className="px-4 py-3">
@@ -215,10 +835,9 @@ export function MfrService() {
                     <div className="flex gap-1">
                       {mfr.status === 'pending' && (
                         <button
-                          onClick={() => void handleApprove(mfr)}
-                          disabled={actionLoading === mfr.id}
-                          className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-                        >Approve</button>
+                          onClick={() => setResumeMfr(mfr)}
+                          className="px-2 py-1 text-xs bg-gray-800 text-white rounded hover:bg-gray-700"
+                        >Continue</button>
                       )}
                       {mfr.status === 'active' && (
                         <button

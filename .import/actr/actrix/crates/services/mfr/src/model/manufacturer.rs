@@ -37,11 +37,13 @@ impl std::str::FromStr for MfrStatus {
     }
 }
 
+/// Manufacturer record.
+/// `name` is the GitHub user/org login (lowercased) — it IS the identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manufacturer {
     pub id: i64,
+    /// GitHub user/org login (lowercased), e.g. "octocat"
     pub name: String,
-    pub domain: String,
     pub public_key: String,
     pub contact: Option<String>,
     pub status: MfrStatus,
@@ -60,7 +62,6 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Manufacturer {
         Ok(Manufacturer {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            domain: row.try_get("domain")?,
             public_key: row.try_get("public_key")?,
             contact: row.try_get("contact")?,
             status,
@@ -77,22 +78,20 @@ impl Manufacturer {
     pub async fn create(
         pool: &SqlitePool,
         name: &str,
-        domain: &str,
         contact: Option<&str>,
     ) -> Result<Self, MfrError> {
         let now = Utc::now().timestamp();
         let id = sqlx::query(
-            "INSERT INTO mfr (name, domain, contact, status, created_at) VALUES (?, ?, ?, 'pending', ?)"
+            "INSERT INTO mfr (name, contact, status, created_at) VALUES (?, ?, 'pending', ?)"
         )
         .bind(name)
-        .bind(domain)
         .bind(contact)
         .bind(now)
         .execute(pool)
         .await
         .map_err(|e| {
             if e.to_string().contains("UNIQUE") {
-                MfrError::AlreadyExists(format!("name '{}' or domain '{}' already registered", name, domain))
+                MfrError::AlreadyExists(format!("'{}' already registered", name))
             } else {
                 MfrError::Database(e)
             }

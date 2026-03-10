@@ -88,12 +88,12 @@ export function Overview2Page() {
 
         const pillRoutes: Record<string, string> = {
           Admin: "/admin", Control: "/admin/services/control", Signer: "/admin/services/signer",
-          AIS: "/admin/services/ais", Signaling: "/admin/services/signaling",
+          AIS: "/admin/services/ais", MFR: "/admin/mfr", Signaling: "/admin/services/signaling",
           STUN: "/admin/services/stun", TURN: "/admin/services/turn",
         };
         const pillHoverStrokes: Record<string, string> = {
           Admin: "#6366f1", Control: "#d97706", Signer: "#d97706",
-          AIS: "#16a34a", Signaling: "#16a34a", STUN: "#16a34a", TURN: "#16a34a",
+          AIS: "#16a34a", MFR: "#16a34a", Signaling: "#16a34a", STUN: "#16a34a", TURN: "#16a34a",
         };
         const pill = (x: number, y: number, label: string, on: boolean, w = 84, colors?: { fill: string; stroke: string; text: string }) => {
           const fill = colors?.fill ?? (on ? "#ecfdf5" : "#f8fafc");
@@ -182,7 +182,7 @@ export function Overview2Page() {
 
                 {/* ═══════════════════════════════════════════ */}
                 {/* ROW 2: Services  y=106 h=110               */}
-                {/* 1 box w=1020, 6 equal pills w=152, gap=14  */}
+                {/* 1 box w=1020, 8 pills w=112, gap=12        */}
                 {/* ═══════════════════════════════════════════ */}
 
                 <g transform="translate(20,106)">
@@ -192,31 +192,33 @@ export function Overview2Page() {
                   </text>
 
                   {/* Protocol group labels */}
-                  <line x1={16} y1={34} x2={714} y2={34} stroke="#cbd5e1" strokeWidth={0.8} />
-                  <text x={365} y={30} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#94a3b8">http+websocket/{httpPort}</text>
-                  <line x1={726} y1={34} x2={998} y2={34} stroke="#cbd5e1" strokeWidth={0.8} />
-                  <text x={862} y={30} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#94a3b8">udp/{icePort}</text>
+                  <line x1={16} y1={34} x2={748} y2={34} stroke="#cbd5e1" strokeWidth={0.8} />
+                  <text x={382} y={30} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#94a3b8">http+websocket/{httpPort}</text>
+                  <line x1={760} y1={34} x2={998} y2={34} stroke="#cbd5e1" strokeWidth={0.8} />
+                  <text x={878} y={30} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#94a3b8">udp/{icePort}</text>
 
-                  {/* 7 pills: w=130, gap=12 */}
-                  {pill(16, 41, "Admin", true, 130, controlColors)}
-                  {pill(158, 41, "Control", true, 130, signerColors)}
-                  {pill(300, 41, "Signer", serviceOn("Signer"), 130, signerColors)}
-                  {pill(442, 41, "AIS", serviceOn("AIS"), 130)}
-                  {pill(584, 41, "Signaling", serviceOn("Signaling"), 130)}
-                  {pill(726, 41, "STUN", serviceOn("STUN"), 130)}
-                  {pill(868, 41, "TURN", serviceOn("TURN"), 130)}
+                  {/* 8 pills: w=112, gap=12 */}
+                  {pill(16, 41, "Admin", true, 112, controlColors)}
+                  {pill(140, 41, "Control", true, 112, signerColors)}
+                  {pill(264, 41, "Signer", serviceOn("Signer"), 112, signerColors)}
+                  {pill(388, 41, "AIS", serviceOn("AIS"), 112)}
+                  {pill(512, 41, "MFR", true, 112)}
+                  {pill(636, 41, "Signaling", serviceOn("Signaling"), 112)}
+                  {pill(760, 41, "STUN", serviceOn("STUN"), 112)}
+                  {pill(884, 41, "TURN", serviceOn("TURN"), 112)}
 
-                  <text x={81} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/admin</text>
-                  <text x={223} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">gRPC</text>
-                  <text x={365} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">gRPC</text>
-                  <text x={507} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/ais</text>
-                  <text x={649} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/signaling</text>
-                  <text x={791} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}</text>
-                  <text x={933} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}, 49152-65535</text>
+                  <text x={72} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/admin</text>
+                  <text x={196} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">gRPC</text>
+                  <text x={320} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">gRPC</text>
+                  <text x={444} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/ais</text>
+                  <text x={568} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/mfr</text>
+                  <text x={692} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/signaling</text>
+                  <text x={816} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}</text>
+                  <text x={940} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}, 49152-65535</text>
 
                   {/* Cluster internal label under Control + Signer */}
-                  <line x1={158} y1={93} x2={430} y2={93} stroke="#d97706" strokeWidth={0.6} opacity={0.5} />
-                  <text x={294} y={101} textAnchor="middle" fontSize={7} fill="#92400e" opacity={0.6}>cluster internal service</text>
+                  <line x1={140} y1={93} x2={376} y2={93} stroke="#d97706" strokeWidth={0.6} opacity={0.5} />
+                  <text x={258} y={101} textAnchor="middle" fontSize={7} fill="#92400e" opacity={0.6}>cluster internal service</text>
                 </g>
 
                 {/* ═══════════════════════════════════════════ */}

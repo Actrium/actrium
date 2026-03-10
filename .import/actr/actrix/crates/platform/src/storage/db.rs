@@ -125,11 +125,11 @@ impl Database {
             .await; // intentionally ignore error (column may already exist)
 
         // MFR (Manufacturer Registry) tables
+        // name = GitHub user/org login (lowercased), serves as manufacturer identity
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS mfr (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 name         TEXT    NOT NULL UNIQUE,
-                domain       TEXT    NOT NULL UNIQUE,
                 public_key   TEXT    NOT NULL DEFAULT '',
                 contact      TEXT,
                 status       TEXT    NOT NULL DEFAULT 'pending',
@@ -143,12 +143,13 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
+        // GitHub verification challenge for identity verification
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS mfr_challenge (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 mfr_id      INTEGER NOT NULL REFERENCES mfr(id),
                 token       TEXT    NOT NULL,
-                dns_host    TEXT    NOT NULL,
+                gist_url    TEXT    NOT NULL DEFAULT '',
                 expires_at  INTEGER NOT NULL,
                 verified_at INTEGER,
                 created_at  INTEGER NOT NULL

@@ -11,10 +11,11 @@ export function Login() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
-  if (isAuthenticated) {
-    navigate("/admin", { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/admin", { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

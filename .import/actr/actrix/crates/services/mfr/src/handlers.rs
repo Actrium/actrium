@@ -18,7 +18,8 @@ pub fn create_router(state: MfrState) -> Router {
     Router::new()
         // Public registration flow
         .route("/apply", post(apply))
-        .route("/{id}/verify", post(verify_domain))
+        .route("/{id}/verify", post(verify_github))
+        .route("/{id}/challenge", get(get_challenge))
         .route("/{id}/status", get(get_status))
         .route("/resolve/{name}", get(resolve_by_name))
         // Package management
@@ -38,7 +39,7 @@ pub fn create_router(state: MfrState) -> Router {
 
 #[derive(Deserialize)]
 struct ApplyRequest {
-    domain: String,
+    github_login: String,
     contact: Option<String>,
 }
 
@@ -46,8 +47,8 @@ struct ApplyRequest {
 struct ApplyResponse {
     mfr_id: i64,
     challenge_token: String,
-    dns_host: String,
     expires_at: i64,
+    verify_file: String,
     instructions: String,
 }
 
@@ -62,25 +63,51 @@ async fn apply(
     State(s): State<MfrState>,
     Json(req): Json<ApplyRequest>,
 ) -> Result<Json<ApplyResponse>, MfrError> {
-    let (mfr, challenge) = s.manager.apply(&req.domain, req.contact.as_deref()).await?;
+    let (mfr, challenge) = s.manager.apply(&req.github_login, req.contact.as_deref()).await?;
+    let filename = crate::github::verify_filename(s.manager.domain());
     Ok(Json(ApplyResponse {
         mfr_id: mfr.id,
         challenge_token: challenge.token.clone(),
-        dns_host: challenge.dns_host.clone(),
         expires_at: challenge.expires_at,
+        verify_file: filename.clone(),
         instructions: format!(
-            "Add a DNS TXT record: {} = \"{}\"",
-            challenge.dns_host, challenge.token
+            "Create a public GitHub repo '{}/{}' with a file '{}' containing the token above, then call POST /{}/verify",
+            mfr.name,
+            crate::github::VERIFY_REPO,
+            filename,
+            mfr.id,
         ),
     }))
 }
 
-async fn verify_domain(
+async fn verify_github(
     State(s): State<MfrState>,
     Path(id): Path<i64>,
 ) -> Result<Json<crate::manager::MfrKeychain>, MfrError> {
-    let keychain = s.manager.verify_domain(id).await?;
+    let keychain = s.manager.verify_github(id).await?;
     Ok(Json(keychain))
+}
+
+async fn get_challenge(
+    State(s): State<MfrState>,
+    Path(id): Path<i64>,
+) -> Result<Json<ApplyResponse>, MfrError> {
+    let mfr = s.manager.get_status(id).await?;
+    let challenge = s.manager.get_challenge(id).await?;
+    let filename = crate::github::verify_filename(s.manager.domain());
+    Ok(Json(ApplyResponse {
+        mfr_id: mfr.id,
+        challenge_token: challenge.token,
+        expires_at: challenge.expires_at,
+        verify_file: filename.clone(),
+        instructions: format!(
+            "Create a public GitHub repo '{}/{}' with a file '{}' containing the token above, then call POST /{}/verify",
+            mfr.name,
+            crate::github::VERIFY_REPO,
+            filename,
+            mfr.id,
+        ),
+    }))
 }
 
 async fn get_status(

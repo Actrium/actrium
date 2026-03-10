@@ -704,7 +704,10 @@ async fn serve_spa() -> impl IntoResponse {
 
 // ── Router builder ─────────────────────────────────────────────
 
-pub fn build_admin_api_router(state: Arc<AdminApiState>) -> Router {
+pub fn build_admin_api_router(
+    state: Arc<AdminApiState>,
+    mfr_router: Option<Router>,
+) -> Router {
     let authed_api = Router::new()
         .route("/admin/api/node", get(get_node_info))
         .route("/admin/api/node/services", get(get_node_services))
@@ -750,12 +753,24 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>) -> Router {
         .route("/admin/api/services/ais/keys", get(get_ais_keys))
         .route("/admin/api/services/{name}", get(get_service_detail))
         .route("/admin/api/network/probe/{port}", get(probe_port))
-        .route("/admin/api/metrics/timeseries", get(get_metrics_timeseries))
+        .route("/admin/api/metrics/timeseries", get(get_metrics_timeseries));
+
+    let authed_api = authed_api
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
         ))
         .with_state(state.clone());
+
+    // Nest MFR router under /admin/api/mfr with auth (if provided)
+    let authed_mfr = mfr_router.map(|mfr| {
+        Router::new()
+            .nest("/admin/api/mfr", mfr)
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                auth_middleware,
+            ))
+    });
 
     let public = Router::new()
         .route("/admin/api/auth/login", post(login))
@@ -765,7 +780,12 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>) -> Router {
         .route("/admin/{*path}", get(serve_spa))
         .route("/admin", get(serve_spa));
 
-    public.merge(authed_api).merge(spa)
+    let combined = public.merge(authed_api).merge(spa);
+    if let Some(mfr) = authed_mfr {
+        combined.merge(mfr)
+    } else {
+        combined
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────
