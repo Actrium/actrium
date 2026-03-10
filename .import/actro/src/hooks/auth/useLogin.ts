@@ -154,6 +154,8 @@ export const useLogin = (): UseLoginResult => {
         await handleNativeLogin(authApi.loginWithWechat(res.code));
       } else if (res.type === 'apple' && res.id_token) {
         await handleNativeLogin(authApi.loginWithApple(res.id_token));
+      } else if (res.type === 'google' && res.id_token) {
+        await handleNativeLogin(authApi.loginWithGoogle(res.id_token));
       }
     });
 

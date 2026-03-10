@@ -159,6 +159,7 @@
       "loginTip": "You can log in via the following ways",
       "wechatLogin": "WeChat Login",
       "appleLogin": "Sign in with Apple",
+      "googleLogin": "Sign in with Google",
       "readAndAgree": "I have read and agree to",
       "userAgreement": "User Agreement",
       "privacyPolicy": "Privacy Policy",

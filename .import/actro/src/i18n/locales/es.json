@@ -159,6 +159,7 @@
       "loginTip": "Puedes iniciar sesión de las siguientes formas",
       "wechatLogin": "Iniciar sesión con WeChat",
       "appleLogin": "Iniciar sesión con Apple",
+      "googleLogin": "Iniciar sesión con Google",
       "readAndAgree": "He leído y acepto",
       "userAgreement": "los \"Términos de servicio\"",
       "privacyPolicy": "la \"Política de privacidad\"",
