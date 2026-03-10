@@ -23,6 +23,7 @@ class UserInfoModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
     }
 
     private val wxApiHelper: WxApiHelper = WxApiHelper.getInstance(reactContext.applicationContext)
+    private val googleSignInHelper: GoogleSignInHelper = GoogleSignInHelper.getInstance()
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val instanceId = UUID.randomUUID().toString().substring(0, 8)
 
@@ -72,6 +73,38 @@ class UserInfoModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
                 }
             }
         }
+
+        // 收集 Google 登录结果
+        scope.launch {
+            googleSignInHelper.idToken.collect { token ->
+                if (instanceId != currentInstanceId) return@collect
+                if (!token.isNullOrEmpty()) {
+                    val params = Arguments.createMap().apply {
+                        putString("type", "google")
+                        putString("id_token", token)
+                    }
+                    if (reactContext.hasActiveReactInstance()) {
+                        sendEvent("onLoginResult", params)
+                    }
+                }
+            }
+        }
+
+        scope.launch {
+            googleSignInHelper.authErr.collect { err ->
+                if (instanceId != currentInstanceId) return@collect
+                if (!err.isNullOrEmpty()) {
+                    val params = Arguments.createMap().apply {
+                        putString("type", "google")
+                        putBoolean("error", true)
+                        putString("message", err)
+                    }
+                    if (reactContext.hasActiveReactInstance()) {
+                        sendEvent("onLoginResult", params)
+                    }
+                }
+            }
+        }
     }
 
     override fun getName(): String {
@@ -103,8 +136,9 @@ class UserInfoModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
     @ReactMethod
     fun loginWithType(type: String) {
         Log.e("UserInfoModule", "loginWithType called with: $type")
-        if (type == "wechat") {
-            wxApiHelper.login()
+        when (type) {
+            "wechat" -> wxApiHelper.login()
+            "google" -> googleSignInHelper.signIn(currentActivity)
         }
     }
 }
