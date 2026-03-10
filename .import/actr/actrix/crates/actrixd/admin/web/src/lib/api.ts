@@ -323,7 +323,6 @@ export const api = {
 export interface Manufacturer {
   id: number;
   name: string;
-  domain: string;
   public_key: string;
   contact?: string;
   status: 'pending' | 'active' | 'suspended' | 'revoked';
@@ -349,9 +348,7 @@ export interface ActrPackage {
 }
 
 export interface MfrCertificate {
-  mfr_id: number;
   mfr_name: string;
-  mfr_domain: string;
   mfr_pubkey: string;
   issued_at: number;
   expires_at: number;
@@ -363,67 +360,54 @@ export interface MfrKeychain {
 }
 
 export interface ApplyRequest {
-  domain: string;
+  github_login: string;
   contact?: string;
 }
 
 export interface ApplyResponse {
   mfr_id: number;
   challenge_token: string;
-  dns_host: string;
   expires_at: number;
+  verify_file: string;
   instructions: string;
 }
 
-// MFR API functions
+// MFR API functions — routed through /admin/api/mfr, so paths are relative to BASE
 export const mfrApi = {
-  async list(status?: string): Promise<Manufacturer[]> {
+  list: (status?: string) => {
     const params = status ? `?status=${status}` : '';
-    const res = await fetch(`/admin/api/mfr/admin/list${params}`);
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    return request<Manufacturer[]>(`/mfr/admin/list${params}`);
   },
 
-  async apply(req: ApplyRequest): Promise<ApplyResponse> {
-    const res = await fetch('/admin/api/mfr/apply', {
+  apply: (req: ApplyRequest) =>
+    request<ApplyResponse>('/mfr/apply', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
+    }),
 
-  async approve(id: number): Promise<MfrKeychain> {
-    const res = await fetch(`/admin/api/mfr/admin/${id}/approve`, { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
+  verify: (id: number) =>
+    request<MfrKeychain>(`/mfr/${id}/verify`, { method: 'POST' }),
 
-  async suspend(id: number): Promise<void> {
-    const res = await fetch(`/admin/api/mfr/admin/${id}/suspend`, { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text());
-  },
+  getChallenge: (id: number) =>
+    request<ApplyResponse>(`/mfr/${id}/challenge`),
 
-  async reinstate(id: number): Promise<void> {
-    const res = await fetch(`/admin/api/mfr/admin/${id}/reinstate`, { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text());
-  },
+  approve: (id: number) =>
+    request<MfrKeychain>(`/mfr/admin/${id}/approve`, { method: 'POST' }),
 
-  async delete(id: number): Promise<void> {
-    const res = await fetch(`/admin/api/mfr/admin/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error(await res.text());
-  },
+  suspend: (id: number) =>
+    request<void>(`/mfr/admin/${id}/suspend`, { method: 'POST' }),
 
-  async listPackages(mfr?: string): Promise<ActrPackage[]> {
+  reinstate: (id: number) =>
+    request<void>(`/mfr/admin/${id}/reinstate`, { method: 'POST' }),
+
+  delete: (id: number) =>
+    request<void>(`/mfr/admin/${id}`, { method: 'DELETE' }),
+
+  listPackages: (mfr?: string) => {
     const params = mfr ? `?mfr=${mfr}` : '';
-    const res = await fetch(`/admin/api/mfr/pkg${params}`);
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    return request<ActrPackage[]>(`/mfr/pkg${params}`);
   },
 
-  async revokePackage(id: number): Promise<void> {
-    const res = await fetch(`/admin/api/mfr/pkg/${id}/revoke`, { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text());
-  },
+  revokePackage: (id: number) =>
+    request<void>(`/mfr/pkg/${id}/revoke`, { method: 'POST' }),
 };

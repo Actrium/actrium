@@ -19,7 +19,7 @@ pub enum MfrError {
     InvalidName(String),
     #[error("invalid status for this operation: {0}")]
     InvalidStatus(String),
-    #[error("domain verification failed: {0}")]
+    #[error("verification failed: {0}")]
     VerificationFailed(String),
     #[error("challenge expired or not found")]
     ChallengeNotFound,
@@ -27,8 +27,8 @@ pub enum MfrError {
     InvalidSignature,
     #[error("package already published, revoke first")]
     PackageAlreadyPublished,
-    #[error("dns error: {0}")]
-    Dns(String),
+    #[error("github api error: {0}")]
+    GitHub(String),
     #[error("crypto error: {0}")]
     Crypto(String),
     #[error("unauthorized")]

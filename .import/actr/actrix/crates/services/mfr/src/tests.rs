@@ -6,8 +6,8 @@ use sqlx::SqlitePool;
 use crate::{
     MfrError, crypto,
     manager::{MfrManager, PublishRequest, lookup_package},
-    model::{ActrPackage, DomainChallenge, Manufacturer, MfrStatus, PkgStatus},
-    reserved::{domain_to_name, is_reserved, validate_name},
+    model::{ActrPackage, GitHubGistChallenge, Manufacturer, MfrStatus, PkgStatus},
+    reserved::{is_reserved, validate_github_login},
 };
 
 // ─── 测试辅助 ────────────────────────────────────────────────────────────────
@@ -22,7 +22,6 @@ async fn setup_test_pool() -> SqlitePool {
         "CREATE TABLE IF NOT EXISTS mfr (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
-            domain TEXT NOT NULL UNIQUE,
             public_key TEXT NOT NULL DEFAULT '',
             contact TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
@@ -42,7 +41,7 @@ async fn setup_test_pool() -> SqlitePool {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             mfr_id INTEGER NOT NULL REFERENCES mfr(id),
             token TEXT NOT NULL,
-            dns_host TEXT NOT NULL,
+            gist_url TEXT NOT NULL DEFAULT '',
             expires_at INTEGER NOT NULL,
             verified_at INTEGER,
             created_at INTEGER NOT NULL
@@ -99,80 +98,82 @@ fn test_non_reserved_names() {
 }
 
 #[test]
-fn test_validate_name_reserved() {
+fn test_validate_github_login_reserved() {
     assert!(matches!(
-        validate_name("self"),
+        validate_github_login("self"),
         Err(MfrError::ReservedName(_))
     ));
     assert!(matches!(
-        validate_name("acme"),
+        validate_github_login("acme"),
         Err(MfrError::ReservedName(_))
     ));
     assert!(matches!(
-        validate_name("actrix"),
+        validate_github_login("actrix"),
         Err(MfrError::ReservedName(_))
     ));
 }
 
 #[test]
-fn test_validate_name_too_short() {
-    assert!(matches!(validate_name("ab"), Err(MfrError::InvalidName(_))));
-}
-
-#[test]
-fn test_validate_name_too_long() {
-    let long = "a".repeat(129);
+fn test_validate_github_login_too_long() {
+    let long = "a".repeat(40);
     assert!(matches!(
-        validate_name(&long),
+        validate_github_login(&long),
         Err(MfrError::InvalidName(_))
     ));
 }
 
 #[test]
-fn test_validate_name_invalid_chars() {
+fn test_validate_github_login_empty() {
     assert!(matches!(
-        validate_name("My Company"),
-        Err(MfrError::InvalidName(_))
-    ));
-    assert!(matches!(
-        validate_name("my_company"),
-        Err(MfrError::InvalidName(_))
-    ));
-    assert!(matches!(
-        validate_name("MyCompany"),
+        validate_github_login(""),
         Err(MfrError::InvalidName(_))
     ));
 }
 
 #[test]
-fn test_validate_name_dot_boundary() {
-    // must not start or end with dot
+fn test_validate_github_login_hyphen_boundary() {
     assert!(matches!(
-        validate_name(".com.myco"),
+        validate_github_login("-abc"),
         Err(MfrError::InvalidName(_))
     ));
     assert!(matches!(
-        validate_name("com.myco."),
+        validate_github_login("abc-"),
         Err(MfrError::InvalidName(_))
     ));
 }
 
 #[test]
-fn test_validate_name_valid() {
-    assert!(validate_name("com.mycompany").is_ok());
-    assert!(validate_name("com.my-company").is_ok());
-    assert!(validate_name("com.example.sub").is_ok());
-    assert!(validate_name("abc").is_ok());
-    let max = "a".repeat(128);
-    assert!(validate_name(&max).is_ok());
+fn test_validate_github_login_consecutive_hyphens() {
+    assert!(matches!(
+        validate_github_login("a--b"),
+        Err(MfrError::InvalidName(_))
+    ));
 }
 
 #[test]
-fn test_domain_to_name() {
-    assert_eq!(domain_to_name("myco.com"), "com.myco");
-    assert_eq!(domain_to_name("sub.example.com"), "com.example.sub");
-    assert_eq!(domain_to_name("example.com:8080"), "com.example");
-    assert_eq!(domain_to_name("single"), "single");
+fn test_validate_github_login_invalid_chars() {
+    assert!(matches!(
+        validate_github_login("my_company"),
+        Err(MfrError::InvalidName(_))
+    ));
+    assert!(matches!(
+        validate_github_login("my company"),
+        Err(MfrError::InvalidName(_))
+    ));
+    assert!(matches!(
+        validate_github_login("com.example"),
+        Err(MfrError::InvalidName(_))
+    ));
+}
+
+#[test]
+fn test_validate_github_login_valid() {
+    assert!(validate_github_login("octocat").is_ok());
+    assert!(validate_github_login("my-company").is_ok());
+    assert!(validate_github_login("user123").is_ok());
+    assert!(validate_github_login("a").is_ok());
+    let max = "a".repeat(39);
+    assert!(validate_github_login(&max).is_ok());
 }
 
 // ─── crypto.rs 纯单元测试 ────────────────────────────────────────────────────
@@ -274,17 +275,11 @@ fn test_verify_signature_bad_pubkey_encoding() {
 #[tokio::test]
 async fn test_manufacturer_create_and_get() {
     let pool = setup_test_pool().await;
-    let mfr = Manufacturer::create(
-        &pool,
-        "testco",
-        "testco.example.com",
-        Some("admin@testco.com"),
-    )
-    .await
-    .expect("create should succeed");
+    let mfr = Manufacturer::create(&pool, "testco", Some("admin@testco.com"))
+        .await
+        .expect("create should succeed");
 
     assert_eq!(mfr.name, "testco");
-    assert_eq!(mfr.domain, "testco.example.com");
     assert_eq!(mfr.status, MfrStatus::Pending);
     assert!(mfr.verified_at.is_none());
     assert_eq!(mfr.contact.as_deref(), Some("admin@testco.com"));
@@ -307,7 +302,7 @@ async fn test_manufacturer_get_nonexistent() {
 #[tokio::test]
 async fn test_manufacturer_get_by_name() {
     let pool = setup_test_pool().await;
-    let mfr = Manufacturer::create(&pool, "namedco", "namedco.com", None)
+    let mfr = Manufacturer::create(&pool, "namedco", None)
         .await
         .unwrap();
 
@@ -324,10 +319,8 @@ async fn test_manufacturer_get_by_name() {
 #[tokio::test]
 async fn test_manufacturer_duplicate_name() {
     let pool = setup_test_pool().await;
-    Manufacturer::create(&pool, "dupco", "dupco.com", None)
-        .await
-        .unwrap();
-    let result = Manufacturer::create(&pool, "dupco", "other.com", None).await;
+    Manufacturer::create(&pool, "dupco", None).await.unwrap();
+    let result = Manufacturer::create(&pool, "dupco", None).await;
     assert!(
         matches!(result, Err(MfrError::AlreadyExists(_))),
         "duplicate name should return AlreadyExists"
@@ -335,22 +328,9 @@ async fn test_manufacturer_duplicate_name() {
 }
 
 #[tokio::test]
-async fn test_manufacturer_duplicate_domain() {
-    let pool = setup_test_pool().await;
-    Manufacturer::create(&pool, "co1", "shared.com", None)
-        .await
-        .unwrap();
-    let result = Manufacturer::create(&pool, "co2", "shared.com", None).await;
-    assert!(
-        matches!(result, Err(MfrError::AlreadyExists(_))),
-        "duplicate domain should return AlreadyExists"
-    );
-}
-
-#[tokio::test]
 async fn test_manufacturer_activate() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "activeco", "activeco.com", None)
+    let mut mfr = Manufacturer::create(&pool, "activeco", None)
         .await
         .unwrap();
 
@@ -371,7 +351,7 @@ async fn test_manufacturer_activate() {
 #[tokio::test]
 async fn test_manufacturer_lifecycle_full() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "lifecycle", "lifecycle.com", None)
+    let mut mfr = Manufacturer::create(&pool, "lifecycle", None)
         .await
         .unwrap();
 
@@ -393,7 +373,7 @@ async fn test_manufacturer_lifecycle_full() {
 #[tokio::test]
 async fn test_manufacturer_invalid_transitions_from_pending() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "transco", "transco.com", None)
+    let mut mfr = Manufacturer::create(&pool, "transco", None)
         .await
         .unwrap();
 
@@ -407,7 +387,7 @@ async fn test_manufacturer_invalid_transitions_from_pending() {
 #[tokio::test]
 async fn test_manufacturer_cannot_activate_twice() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "twiceco", "twiceco.com", None)
+    let mut mfr = Manufacturer::create(&pool, "twiceco", None)
         .await
         .unwrap();
 
@@ -419,12 +399,8 @@ async fn test_manufacturer_cannot_activate_twice() {
 #[tokio::test]
 async fn test_manufacturer_list_all() {
     let pool = setup_test_pool().await;
-    Manufacturer::create(&pool, "list1", "list1.com", None)
-        .await
-        .unwrap();
-    Manufacturer::create(&pool, "list2", "list2.com", None)
-        .await
-        .unwrap();
+    Manufacturer::create(&pool, "list1", None).await.unwrap();
+    Manufacturer::create(&pool, "list2", None).await.unwrap();
 
     let all = Manufacturer::list(&pool, None).await.unwrap();
     assert_eq!(all.len(), 2);
@@ -433,10 +409,10 @@ async fn test_manufacturer_list_all() {
 #[tokio::test]
 async fn test_manufacturer_list_by_status() {
     let pool = setup_test_pool().await;
-    Manufacturer::create(&pool, "statuslist1", "statuslist1.com", None)
+    Manufacturer::create(&pool, "statuslist1", None)
         .await
         .unwrap();
-    let mut mfr2 = Manufacturer::create(&pool, "statuslist2", "statuslist2.com", None)
+    let mut mfr2 = Manufacturer::create(&pool, "statuslist2", None)
         .await
         .unwrap();
     mfr2.activate(&pool, "pk".to_string()).await.unwrap();
@@ -457,9 +433,7 @@ async fn test_manufacturer_list_by_status() {
 #[tokio::test]
 async fn test_manufacturer_delete() {
     let pool = setup_test_pool().await;
-    let mfr = Manufacturer::create(&pool, "delco", "delco.com", None)
-        .await
-        .unwrap();
+    let mfr = Manufacturer::create(&pool, "delco", None).await.unwrap();
     let id = mfr.id;
 
     Manufacturer::delete(&pool, id).await.unwrap();
@@ -473,20 +447,16 @@ async fn test_manufacturer_delete() {
 #[tokio::test]
 async fn test_challenge_create() {
     let pool = setup_test_pool().await;
-    let mfr = Manufacturer::create(&pool, "chco", "challenge.com", None)
-        .await
-        .unwrap();
+    let mfr = Manufacturer::create(&pool, "chco", None).await.unwrap();
 
-    let ch = DomainChallenge::create(&pool, mfr.id, "challenge.com")
-        .await
-        .unwrap();
+    let ch = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
 
     assert!(
         ch.token.starts_with("actrix-verify="),
         "token should start with 'actrix-verify=', got: {}",
         ch.token
     );
-    assert_eq!(ch.dns_host, "_actrix-verify.challenge.com");
+    assert!(ch.gist_url.is_empty());
     assert!(ch.verified_at.is_none());
     assert!(ch.expires_at > ch.created_at);
     assert_eq!(ch.mfr_id, mfr.id);
@@ -495,14 +465,14 @@ async fn test_challenge_create() {
 #[tokio::test]
 async fn test_challenge_get_active_found() {
     let pool = setup_test_pool().await;
-    let mfr = Manufacturer::create(&pool, "activech", "activech.com", None)
+    let mfr = Manufacturer::create(&pool, "activech", None)
         .await
         .unwrap();
-    let ch = DomainChallenge::create(&pool, mfr.id, "activech.com")
-        .await
-        .unwrap();
+    let ch = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
 
-    let active = DomainChallenge::get_active(&pool, mfr.id).await.unwrap();
+    let active = GitHubGistChallenge::get_active(&pool, mfr.id)
+        .await
+        .unwrap();
     assert!(active.is_some());
     assert_eq!(active.unwrap().id, ch.id);
 }
@@ -510,28 +480,29 @@ async fn test_challenge_get_active_found() {
 #[tokio::test]
 async fn test_challenge_get_active_none_when_empty() {
     let pool = setup_test_pool().await;
-    let mfr = Manufacturer::create(&pool, "nochco", "nochco.com", None)
+    let mfr = Manufacturer::create(&pool, "nochco", None).await.unwrap();
+
+    let active = GitHubGistChallenge::get_active(&pool, mfr.id)
         .await
         .unwrap();
-
-    let active = DomainChallenge::get_active(&pool, mfr.id).await.unwrap();
     assert!(active.is_none());
 }
 
 #[tokio::test]
 async fn test_challenge_mark_verified() {
     let pool = setup_test_pool().await;
-    let mfr = Manufacturer::create(&pool, "verch", "verch.com", None)
-        .await
-        .unwrap();
-    let mut ch = DomainChallenge::create(&pool, mfr.id, "verch.com")
-        .await
-        .unwrap();
+    let mfr = Manufacturer::create(&pool, "verch", None).await.unwrap();
+    let mut ch = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
 
-    ch.mark_verified(&pool).await.unwrap();
+    ch.mark_verified(&pool, "https://gist.github.com/verch/abc123")
+        .await
+        .unwrap();
     assert!(ch.verified_at.is_some());
+    assert_eq!(ch.gist_url, "https://gist.github.com/verch/abc123");
 
-    let active = DomainChallenge::get_active(&pool, mfr.id).await.unwrap();
+    let active = GitHubGistChallenge::get_active(&pool, mfr.id)
+        .await
+        .unwrap();
     assert!(
         active.is_none(),
         "verified challenge should not appear in get_active"
@@ -541,16 +512,10 @@ async fn test_challenge_mark_verified() {
 #[tokio::test]
 async fn test_challenge_token_unique() {
     let pool = setup_test_pool().await;
-    let mfr = Manufacturer::create(&pool, "tokenco", "tokenco.com", None)
-        .await
-        .unwrap();
+    let mfr = Manufacturer::create(&pool, "tokenco", None).await.unwrap();
 
-    let ch1 = DomainChallenge::create(&pool, mfr.id, "tokenco.com")
-        .await
-        .unwrap();
-    let ch2 = DomainChallenge::create(&pool, mfr.id, "tokenco.com")
-        .await
-        .unwrap();
+    let ch1 = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch2 = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
 
     assert_ne!(
         ch1.token, ch2.token,
@@ -563,9 +528,7 @@ async fn test_challenge_token_unique() {
 #[tokio::test]
 async fn test_package_publish_and_get() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "pkgco", "pkgco.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "pkgco", None).await.unwrap();
     mfr.activate(&pool, "pubkey".to_string()).await.unwrap();
 
     let pkg = ActrPackage::publish(
@@ -605,9 +568,7 @@ async fn test_package_get_by_type_not_found() {
 #[tokio::test]
 async fn test_package_duplicate_rejected() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "dupkg", "dupkg.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "dupkg", None).await.unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
 
     ActrPackage::publish(&pool, mfr.id, "dupkg", "svc", "v1", "m", "s")
@@ -623,9 +584,7 @@ async fn test_package_duplicate_rejected() {
 #[tokio::test]
 async fn test_package_revoke() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "revpkg", "revpkg.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "revpkg", None).await.unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
 
     let mut pkg = ActrPackage::publish(&pool, mfr.id, "revpkg", "svc", "v1", "m", "s")
@@ -648,9 +607,7 @@ async fn test_package_revoke() {
 #[tokio::test]
 async fn test_package_list_by_mfr() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "listpkg", "listpkg.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "listpkg", None).await.unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
 
     ActrPackage::publish(&pool, mfr.id, "listpkg", "alpha", "v1", "m", "s")
@@ -667,9 +624,7 @@ async fn test_package_list_by_mfr() {
 #[tokio::test]
 async fn test_package_get_by_id() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "idpkg", "idpkg.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "idpkg", None).await.unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
 
     let pkg = ActrPackage::publish(&pool, mfr.id, "idpkg", "svc", "v1", "m", "s")
@@ -701,9 +656,7 @@ async fn test_lookup_package_not_registered() {
 #[tokio::test]
 async fn test_lookup_package_active() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "lookco", "lookco.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "lookco", None).await.unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
     ActrPackage::publish(&pool, mfr.id, "lookco", "svc", "v1", "m", "s")
         .await
@@ -716,7 +669,7 @@ async fn test_lookup_package_active() {
 #[tokio::test]
 async fn test_lookup_package_revoked() {
     let pool = setup_test_pool().await;
-    let mut mfr = Manufacturer::create(&pool, "revokedlook", "revokedlook.com", None)
+    let mut mfr = Manufacturer::create(&pool, "revokedlook", None)
         .await
         .unwrap();
     mfr.activate(&pool, "pk".to_string()).await.unwrap();
@@ -735,9 +688,6 @@ async fn test_lookup_package_revoked() {
 async fn test_manager_apply_reserved_rejected() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    // "acme.example.com" → name = "com.example.acme", not reserved
-    // Use a domain that maps directly to a reserved name (single-label)
-    // Reserved names: "self", "acme", "actrix" — single-label domains map to themselves
     let result = manager.apply("acme", None).await;
     assert!(matches!(result, Err(MfrError::ReservedName(_))));
 }
@@ -747,25 +697,22 @@ async fn test_manager_apply_valid() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
     let (mfr, challenge) = manager
-        .apply("newco.com", Some("admin@newco.com"))
+        .apply("octocat", Some("admin@octocat.dev"))
         .await
         .unwrap();
 
-    assert_eq!(mfr.name, "com.newco");
+    assert_eq!(mfr.name, "octocat");
     assert_eq!(mfr.status, MfrStatus::Pending);
     assert!(challenge.token.starts_with("actrix-verify="));
-    assert_eq!(challenge.dns_host, "_actrix-verify.newco.com");
+    assert!(challenge.gist_url.is_empty());
 }
 
 #[tokio::test]
-async fn test_manager_apply_invalid_name() {
+async fn test_manager_apply_invalid_login() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    // Domain with uppercase letters in derived name — domain is case-sensitive in DNS
-    // but we lowercase in domain_to_name; let's use a domain that produces underscores
-    // Actually domain_to_name just reverses parts, valid domains can't have underscores
-    // Use single char domain to trigger too-short error
-    let result = manager.apply("ab", None).await;
+    // Underscore is not allowed in GitHub logins
+    let result = manager.apply("my_company", None).await;
     assert!(matches!(result, Err(MfrError::InvalidName(_))));
 }
 
@@ -773,10 +720,10 @@ async fn test_manager_apply_invalid_name() {
 async fn test_manager_get_status() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("statusco.com", None).await.unwrap();
+    let (mfr, _) = manager.apply("statusco", None).await.unwrap();
 
     let status = manager.get_status(mfr.id).await.unwrap();
-    assert_eq!(status.name, "com.statusco");
+    assert_eq!(status.name, "statusco");
     assert_eq!(status.status, MfrStatus::Pending);
 }
 
@@ -792,10 +739,10 @@ async fn test_manager_get_status_not_found() {
 async fn test_manager_admin_approve() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("approveco.com", None).await.unwrap();
+    let (mfr, _) = manager.apply("approveco", None).await.unwrap();
 
     let keychain = manager.admin_approve(mfr.id).await.unwrap();
-    assert_eq!(keychain.certificate.mfr_name, "com.approveco");
+    assert_eq!(keychain.certificate.mfr_name, "approveco");
     assert!(!keychain.private_key.is_empty());
     assert!(!keychain.certificate.mfr_pubkey.is_empty());
     assert!(keychain.certificate.expires_at > keychain.certificate.issued_at);
@@ -805,7 +752,7 @@ async fn test_manager_admin_approve() {
 async fn test_manager_admin_suspend_reinstate() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("suspco.com", None).await.unwrap();
+    let (mfr, _) = manager.apply("suspco", None).await.unwrap();
     manager.admin_approve(mfr.id).await.unwrap();
 
     manager.admin_suspend(mfr.id).await.unwrap();
@@ -821,7 +768,7 @@ async fn test_manager_admin_suspend_reinstate() {
 async fn test_manager_admin_delete() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("deleteco.com", None).await.unwrap();
+    let (mfr, _) = manager.apply("deleteco", None).await.unwrap();
     let id = mfr.id;
 
     manager.admin_delete(id).await.unwrap();
@@ -835,13 +782,13 @@ async fn test_manager_publish_invalid_signature() {
 
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("sigco.com", None).await.unwrap();
+    let (mfr, _) = manager.apply("sigco", None).await.unwrap();
     manager.admin_approve(mfr.id).await.unwrap();
 
     let bad_sig = base64::engine::general_purpose::STANDARD.encode([0u8; 64]);
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "com.sigco".to_string(),
+            manufacturer: "sigco".to_string(),
             name: "svc".to_string(),
             version: "v1".to_string(),
             manifest: "manifest content".to_string(),
@@ -865,14 +812,11 @@ async fn test_manager_publish_valid_signature() {
 
     let pool = setup_test_pool().await;
 
-    // 使用已知密钥对，绕过 DNS 验证直接激活 MFR
     let signing_key = SigningKey::generate(&mut OsRng);
     let pub_b64 =
         base64::engine::general_purpose::STANDARD.encode(signing_key.verifying_key().to_bytes());
 
-    let mut mfr = Manufacturer::create(&pool, "validpub", "validpub.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "validpub", None).await.unwrap();
     mfr.activate(&pool, pub_b64).await.unwrap();
 
     let manifest = "type = \"validpub:client:v1\"\nbinary_hash = \"sha256:abc\"";
@@ -898,7 +842,7 @@ async fn test_manager_publish_valid_signature() {
 #[tokio::test]
 async fn test_manager_publish_inactive_mfr() {
     let pool = setup_test_pool().await;
-    Manufacturer::create(&pool, "pendingmfr", "pendingmfr.com", None)
+    Manufacturer::create(&pool, "pendingmfr", None)
         .await
         .unwrap();
 
@@ -922,12 +866,11 @@ async fn test_manager_publish_inactive_mfr() {
 async fn test_manager_resolve_by_name() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("resolveco.com", None).await.unwrap();
+    let (mfr, _) = manager.apply("resolveco", None).await.unwrap();
     manager.admin_approve(mfr.id).await.unwrap();
 
-    let info = manager.resolve_by_name("com.resolveco").await.unwrap();
-    assert_eq!(info.name, "com.resolveco");
-    assert_eq!(info.domain, "resolveco.com");
+    let info = manager.resolve_by_name("resolveco").await.unwrap();
+    assert_eq!(info.name, "resolveco");
     assert!(!info.public_key.is_empty());
 }
 
@@ -935,9 +878,9 @@ async fn test_manager_resolve_by_name() {
 async fn test_manager_resolve_by_name_not_active() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    manager.apply("pendingres.com", None).await.unwrap();
+    manager.apply("pendingres", None).await.unwrap();
 
-    let result = manager.resolve_by_name("com.pendingres").await;
+    let result = manager.resolve_by_name("pendingres").await;
     assert!(matches!(result, Err(MfrError::InvalidStatus(_))));
 }
 
@@ -951,9 +894,7 @@ async fn test_manager_get_and_revoke_package() {
     let key = SigningKey::generate(&mut OsRng);
     let pub_b64 = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
 
-    let mut mfr = Manufacturer::create(&pool, "revmgr", "revmgr.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "revmgr", None).await.unwrap();
     mfr.activate(&pool, pub_b64).await.unwrap();
 
     let manifest = "type = \"revmgr:svc:v1\"";
@@ -986,8 +927,8 @@ async fn test_manager_admin_list() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
 
-    manager.apply("adminlist1.com", None).await.unwrap();
-    let (mfr2, _) = manager.apply("adminlist2.com", None).await.unwrap();
+    manager.apply("adminlist1", None).await.unwrap();
+    let (mfr2, _) = manager.apply("adminlist2", None).await.unwrap();
     manager.admin_approve(mfr2.id).await.unwrap();
 
     let all = manager.admin_list(None).await.unwrap();
@@ -995,7 +936,7 @@ async fn test_manager_admin_list() {
 
     let active = manager.admin_list(Some(MfrStatus::Active)).await.unwrap();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].name, "com.adminlist2");
+    assert_eq!(active[0].name, "adminlist2");
 }
 
 #[tokio::test]
@@ -1008,9 +949,7 @@ async fn test_manager_list_packages_by_mfr() {
     let key = SigningKey::generate(&mut OsRng);
     let pub_b64 = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
 
-    let mut mfr = Manufacturer::create(&pool, "listmgr", "listmgr.com", None)
-        .await
-        .unwrap();
+    let mut mfr = Manufacturer::create(&pool, "listmgr", None).await.unwrap();
     mfr.activate(&pool, pub_b64).await.unwrap();
 
     let manager = MfrManager::new(pool);

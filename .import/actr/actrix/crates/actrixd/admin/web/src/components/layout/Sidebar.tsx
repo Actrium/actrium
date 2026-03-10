@@ -46,9 +46,9 @@ const serviceItems: NavItem[] = [
   { to: "/admin/services/stun", icon: Shield, label: "STUN" },
   { to: "/admin/services/turn", icon: ArrowLeftRight, label: "TURN" },
   { to: "/admin/services/signaling", icon: Radio, label: "Signaling" },
-  { to: "/admin/services/signer", icon: Key, label: "Signer" },
-  { to: "/admin/services/ais", icon: Fingerprint, label: "AIS" },
   { to: "/admin/mfr", icon: Building2, label: "MFR" },
+  { to: "/admin/services/ais", icon: Fingerprint, label: "AIS" },
+  { to: "/admin/services/signer", icon: Key, label: "Signer" },
 ];
 
 const hostItems: NavItem[] = [
