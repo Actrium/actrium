@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private var isLayoutComplete = false
     private var permissionListener: PermissionListener? = null
     private lateinit var activeRecyclerAdapter: com.askaway.android.adapter.ActiveRecyclerAdapter
+    private var currentSourceView: View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -308,9 +309,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     /**
      * 更新内容组件的显隐状态
      */
-    private fun updateContentVisibility(checkedId: Int, showPage:Boolean= true) {
+    private fun updateContentVisibility(checkedId: Int, showPage: Boolean = true) {
         when (checkedId) {
-            R.id.navTag -> if(showPage) showBookmark()
+            R.id.navTag -> if (showPage) showBookmark()
             R.id.navActivity -> {
                 // 显示活动页
                 binding.flBookmark.visibility = View.GONE
@@ -318,7 +319,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 binding.flSet.visibility = View.GONE
             }
 
-            R.id.navSettings -> if(showPage) showSet()
+            R.id.navSettings -> if (showPage) showSet()
         }
     }
 
@@ -328,7 +329,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flSet.visibility = View.GONE
         binding.flBookmark.removeAllViews()
         if (binding.flBookmark.childCount == 0) {
-            val bundle = sourceBundle?:ReactNativeBundle.getBookmarkBundle()
+            val bundle = sourceBundle ?: ReactNativeBundle.getBookmarkBundle()
             val targetView = createReactRootView("canvas-kotlin", bundle)
             binding.flBookmark.addView(targetView)
         }
@@ -341,7 +342,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flSet.visibility = View.VISIBLE
         binding.flSet.removeAllViews()
         if (binding.flSet.childCount == 0) {
-            val bundle = sourceBundle?:ReactNativeBundle.getSetBundle()
+            val bundle = sourceBundle ?: ReactNativeBundle.getSetBundle()
             val targetView = createReactRootView("canvas-kotlin", bundle)
             binding.flSet.addView(targetView)
         }
@@ -373,6 +374,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         if (isReactNativeVisible) return
         isReactNativeVisible = true
 
+        currentSourceView = sourceView
+
         if (sourceView != null) {
             // Reset all transformation properties to default to ensure accurate measurements
             binding.flReactNative.translationX = 0f
@@ -390,9 +393,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
             // Ensure view has valid dimensions, otherwise fallback to slide up after layout
             if ((binding.flReactNative.width == 0 || binding.flReactNative.height == 0)) {
-                 isReactNativeVisible = false
-                 binding.flReactNative.post { showReactNativeView(sourceView) }
-                 return
+                isReactNativeVisible = false
+                binding.flReactNative.post { showReactNativeView(sourceView) }
+                return
             }
 
             // Top-Aligned Expand Animation (Container Transform)
@@ -481,7 +484,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flSearch.removeAllViews()
 
         // 加载搜索 React Native 视图
-        val bundle = sourceBundle?:ReactNativeBundle.getSearchBundle()
+        val bundle = sourceBundle ?: ReactNativeBundle.getSearchBundle()
         val targetView = createReactRootView("canvas-kotlin", bundle)
         binding.flSearch.addView(targetView)
 
@@ -539,18 +542,105 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             }
         }
 
-        // 创建滑出到底部的动画
-        ObjectAnimator.ofFloat(binding.flReactNative, "translationY", 0f, binding.flReactNative.height.toFloat()).apply {
-            duration = 300
-            interpolator = DecelerateInterpolator()
-            start()
-            addUpdateListener { animation ->
-                if (animation.animatedFraction == 1f) {
+        val sourceView = currentSourceView
+        if (sourceView != null && sourceView.isAttachedToWindow) {
+            val sourceLoc = IntArray(2)
+            sourceView.getLocationInWindow(sourceLoc)
+
+            val targetLoc = IntArray(2)
+            binding.flReactNative.getLocationInWindow(targetLoc)
+
+            val width = binding.flReactNative.width
+            val height = binding.flReactNative.height
+            val scale = sourceView.width.toFloat() / width
+
+            // Calculate End Clip Height (matches source aspect ratio)
+            val endVisibleHeight = sourceView.height.toFloat() / scale
+
+            // Calculate vertical center inset to clip symmetrically from top and bottom
+            val verticalInset = (height - endVisibleHeight) / 2f
+
+            // Adjust translationY so that the visible center ends up at source center
+            // Visual Top = TranslationY + ClipTop * Scale
+            // Target Visual Top = SourceLoc[1] - TargetLoc[1] (relative to current position)
+            // Correction: sourceLoc is absolute. targetLoc is absolute.
+            // We want the view's Visual Top after animation to match Source Top.
+            // Since we animate TranslationY relative to current (0), endY should be relative diff.
+            // Current Abs Top = targetLoc[1].
+            // Target Abs Top = sourceLoc[1].
+            // Target Abs Top = Current Abs Top + EndTranslationY + verticalInset * Scale
+            // EndTranslationY = (sourceLoc[1] - targetLoc[1]) - verticalInset * Scale
+
+            val baseEndY = (sourceLoc[1] - targetLoc[1]).toFloat()
+            val endX = (sourceLoc[0] - targetLoc[0]).toFloat()
+            val endY = baseEndY - verticalInset * scale
+
+            val set = android.animation.AnimatorSet()
+
+            val clipAnimator = android.animation.ValueAnimator.ofFloat(0f, verticalInset)
+            clipAnimator.addUpdateListener { animation ->
+                val inset = animation.animatedValue as Float
+                // Clip from both top and bottom
+                val top = inset.toInt()
+                val bottom = (height - inset).toInt()
+                binding.flReactNative.clipBounds = android.graphics.Rect(0, top, width, bottom)
+            }
+
+            set.playTogether(
+                ObjectAnimator.ofFloat(binding.flReactNative, "translationX", 0f, endX),
+                ObjectAnimator.ofFloat(binding.flReactNative, "translationY", 0f, endY),
+                ObjectAnimator.ofFloat(binding.flReactNative, "scaleX", 1f, scale),
+                ObjectAnimator.ofFloat(binding.flReactNative, "scaleY", 1f, scale),
+                clipAnimator
+            )
+            set.duration = 350
+            set.interpolator = DecelerateInterpolator()
+            set.addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
                     binding.flReactNative.visibility = View.GONE
                     isReactNativeVisible = false
+                    // Reset properties
+                    binding.flReactNative.translationX = 0f
+                    binding.flReactNative.translationY = 0f
+                    binding.flReactNative.scaleX = 1f
+                    binding.flReactNative.scaleY = 1f
+                    binding.flReactNative.clipBounds = null
+                    binding.flReactNative.pivotX = 0f
+                    binding.flReactNative.pivotY = 0f
                 }
-            }
+            })
+
+            // Ensure pivot is set to 0,0 for Top-Left based transformations
+            binding.flReactNative.pivotX = 0f
+            binding.flReactNative.pivotY = 0f
+            set.start()
+
+        } else {
+            // Fallback: Scale down vertically to center (Adjust both top and bottom)
+            binding.flReactNative.pivotX = binding.flReactNative.width / 2f
+            binding.flReactNative.pivotY = binding.flReactNative.height / 2f
+
+            val set = android.animation.AnimatorSet()
+            set.playTogether(
+                ObjectAnimator.ofFloat(binding.flReactNative, "scaleY", 1f, 0f),
+                ObjectAnimator.ofFloat(binding.flReactNative, "alpha", 1f, 0f)
+            )
+            set.duration = 300
+            set.interpolator = DecelerateInterpolator()
+            set.addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    binding.flReactNative.visibility = View.GONE
+                    isReactNativeVisible = false
+                    // Reset
+                    binding.flReactNative.scaleY = 1f
+                    binding.flReactNative.alpha = 1f
+                    binding.flReactNative.pivotX = 0f
+                    binding.flReactNative.pivotY = 0f
+                }
+            })
+            set.start()
         }
+        currentSourceView = null
     }
 
     private fun screenshotView(view: View, tabId: String): String? {
