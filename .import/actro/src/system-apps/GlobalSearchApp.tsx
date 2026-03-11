@@ -61,8 +61,145 @@ interface SearchResultGroup {
   items: SearchResultItem[];
 }
 
+type SearchLocale = 'zh-Hans' | 'zh-Hant' | 'en' | 'es' | 'fr' | 'ja' | 'ko' | 'ru';
+
+interface LocalizedSettingSearchCopy {
+  settingsKeywords: string[];
+  feedbackKeywords: string[];
+  aboutName: string;
+  aboutKeywords: string[];
+  aboutAppName: string;
+  aboutAppKeywords: string[];
+  icpName: string;
+  icpKeywords: string[];
+  logoutKeywords: string[];
+}
+
+const LOCALIZED_SETTING_SEARCH_COPY: Record<SearchLocale, LocalizedSettingSearchCopy> = {
+  'zh-Hans': {
+    settingsKeywords: ['设置', '偏好设置', '系统设置'],
+    feedbackKeywords: ['吐个槽', '反馈', '举报', '意见'],
+    aboutName: 'AskAway',
+    aboutKeywords: ['AskAway', '关于'],
+    aboutAppName: '关于 AskAway',
+    aboutAppKeywords: ['关于 AskAway', '关于'],
+    icpName: 'ICP 备案',
+    icpKeywords: ['ICP 备案', '备案'],
+    logoutKeywords: ['退出登录', '退出'],
+  },
+  'zh-Hant': {
+    settingsKeywords: ['設置', '偏好設置', '系統設置'],
+    feedbackKeywords: ['吐個槽', '回饋', '檢舉', '意見'],
+    aboutName: 'AskAway',
+    aboutKeywords: ['AskAway', '關於'],
+    aboutAppName: '關於 AskAway',
+    aboutAppKeywords: ['關於 AskAway', '關於'],
+    icpName: 'ICP 備案',
+    icpKeywords: ['ICP 備案', '備案'],
+    logoutKeywords: ['退出登入', '退出'],
+  },
+  en: {
+    settingsKeywords: ['settings', 'preferences', 'system settings'],
+    feedbackKeywords: ['feedback', 'report', 'support'],
+    aboutName: 'AskAway',
+    aboutKeywords: ['askaway', 'about'],
+    aboutAppName: 'About AskAway',
+    aboutAppKeywords: ['about askaway', 'about'],
+    icpName: 'ICP Filing',
+    icpKeywords: ['icp filing', 'icp'],
+    logoutKeywords: ['logout', 'sign out'],
+  },
+  es: {
+    settingsKeywords: ['configuracion', 'ajustes', 'preferencias'],
+    feedbackKeywords: ['comentarios', 'reportes', 'opinion'],
+    aboutName: 'AskAway',
+    aboutKeywords: ['askaway', 'acerca de'],
+    aboutAppName: 'Acerca de AskAway',
+    aboutAppKeywords: ['acerca de askaway', 'acerca de'],
+    icpName: 'Registro ICP',
+    icpKeywords: ['registro icp', 'icp'],
+    logoutKeywords: ['cerrar sesion'],
+  },
+  fr: {
+    settingsKeywords: ['parametres', 'preferences', 'reglages'],
+    feedbackKeywords: ['avis', 'signalement', 'retour'],
+    aboutName: 'AskAway',
+    aboutKeywords: ['askaway', 'a propos'],
+    aboutAppName: 'A propos de AskAway',
+    aboutAppKeywords: ['a propos de askaway', 'a propos'],
+    icpName: 'Enregistrement ICP',
+    icpKeywords: ['enregistrement icp', 'icp'],
+    logoutKeywords: ['deconnexion'],
+  },
+  ja: {
+    settingsKeywords: ['設定', '環境設定'],
+    feedbackKeywords: ['フィードバック', '通報'],
+    aboutName: 'AskAway',
+    aboutKeywords: ['askaway', 'について'],
+    aboutAppName: 'AskAway について',
+    aboutAppKeywords: ['askaway について', 'について'],
+    icpName: 'ICP 登録',
+    icpKeywords: ['icp 登録', 'icp'],
+    logoutKeywords: ['ログアウト'],
+  },
+  ko: {
+    settingsKeywords: ['설정', '환경설정'],
+    feedbackKeywords: ['피드백', '신고', '의견'],
+    aboutName: 'AskAway',
+    aboutKeywords: ['askaway', '정보'],
+    aboutAppName: 'AskAway 정보',
+    aboutAppKeywords: ['askaway 정보', '정보'],
+    icpName: 'ICP 등록',
+    icpKeywords: ['icp 등록', 'icp'],
+    logoutKeywords: ['로그아웃'],
+  },
+  ru: {
+    settingsKeywords: ['настроики', 'параметры'],
+    feedbackKeywords: ['отзыв', 'жалоба'],
+    aboutName: 'AskAway',
+    aboutKeywords: ['askaway', 'о приложении'],
+    aboutAppName: 'О AskAway',
+    aboutAppKeywords: ['о askaway', 'о приложении'],
+    icpName: 'Регистрация ICP',
+    icpKeywords: ['регистрация icp', 'icp'],
+    logoutKeywords: ['выити'],
+  },
+};
+
+function resolveSearchLocale(language?: string): SearchLocale {
+  const normalizedLanguage = (language || '').toLowerCase();
+
+  if (
+    normalizedLanguage.includes('zh-hant') ||
+    normalizedLanguage.includes('zh-tw') ||
+    normalizedLanguage.includes('zh-hk') ||
+    normalizedLanguage.includes('zh-mo')
+  ) {
+    return 'zh-Hant';
+  }
+  if (normalizedLanguage.includes('zh')) {
+    return 'zh-Hans';
+  }
+  if (normalizedLanguage.startsWith('es')) {
+    return 'es';
+  }
+  if (normalizedLanguage.startsWith('fr')) {
+    return 'fr';
+  }
+  if (normalizedLanguage.startsWith('ja')) {
+    return 'ja';
+  }
+  if (normalizedLanguage.startsWith('ko')) {
+    return 'ko';
+  }
+  if (normalizedLanguage.startsWith('ru')) {
+    return 'ru';
+  }
+  return 'en';
+}
+
 export default function GlobalSearchApp() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState(''); // 回车后才更新
   const [bookmarks, setBookmarks] = useState<TBookmarkItem[]>([]);
@@ -73,6 +210,8 @@ export default function GlobalSearchApp() {
   const tabIdMap = useTabIdMapStore((s) => s.tabIdMap);
   const userInfo = useUserStore((s) => s.userInfo);
   const isLoggedIn = !!userInfo;
+  const searchLocale = resolveSearchLocale(i18n.resolvedLanguage || i18n.language);
+  const localizedSearchCopy = LOCALIZED_SETTING_SEARCH_COPY[searchLocale];
 
   const isPhone = screenWidth < 600;
   const inputWidth = isPhone ? screenWidth * 0.85 : 500;
@@ -118,9 +257,6 @@ export default function GlobalSearchApp() {
   const handleOpenSettings = useCallback(() => {
     openSettingsWithDeepLink('main');
   }, [openSettingsWithDeepLink]);
-  const handleOpenSettingsAccount = useCallback(() => {
-    openSettingsWithDeepLink('accountDetail');
-  }, [openSettingsWithDeepLink]);
   const handleOpenAbout = useCallback(
     (aboutPage: SettingsAboutPage = 'aboutApp') => {
       openSettingsWithDeepLink('aboutAskAway', aboutPage);
@@ -134,63 +270,56 @@ export default function GlobalSearchApp() {
         id: 'setting-main',
         type: 'setting',
         name: t('actr.search.settings'),
-        searchKeywords: ['setting', 'settings', '设置', '偏好设置'],
+        // 只保留当前界面语言的关键词，避免中英混搜导致误命中。
+        searchKeywords: localizedSearchCopy.settingsKeywords,
         icon: 'askaway_gery',
         action: handleOpenSettings,
-      },
-      {
-        id: 'setting-account',
-        type: 'setting',
-        name: t('actr.auth.login'),
-        searchKeywords: ['账号', '账户', 'account', 'profile', 'login', '登录'],
-        icon: 'askaway_gery',
-        action: handleOpenSettingsAccount,
       },
       {
         id: 'setting-feedback',
         type: 'setting',
         name: t('actr.settings.feedback'),
-        searchKeywords: ['feedback', '吐槽', '意见', 'support', 'mail'],
+        searchKeywords: localizedSearchCopy.feedbackKeywords,
         icon: 'feedback',
         action: () => openSettingsWithDeepLink('main', undefined, 'feedback'),
       },
       {
         id: 'setting-about',
         type: 'setting',
-        name: 'AskAway',
-        searchKeywords: ['about', 'askaway', '关于'],
+        name: localizedSearchCopy.aboutName,
+        searchKeywords: localizedSearchCopy.aboutKeywords,
         icon: 'askaway_gery',
         action: () => openSettingsWithDeepLink('aboutAskAway'),
       },
       {
         id: 'setting-about-app',
         type: 'setting',
-        name: '关于 AskAway',
-        searchKeywords: ['about askaway', 'askaway', '关于 askaway'],
+        name: localizedSearchCopy.aboutAppName,
+        searchKeywords: localizedSearchCopy.aboutAppKeywords,
         icon: 'askaway_gery',
         action: () => handleOpenAbout('aboutApp'),
       },
       {
         id: 'setting-user-agreement',
         type: 'setting',
-        name: '用户协议',
-        searchKeywords: ['user agreement', 'agreement', '用户协议', '条款'],
+        name: t('actr.auth.userAgreement'),
+        searchKeywords: [t('actr.auth.userAgreement')],
         icon: 'askaway_gery',
         action: () => handleOpenAbout('userAgreement'),
       },
       {
         id: 'setting-privacy-policy',
         type: 'setting',
-        name: '隐私政策',
-        searchKeywords: ['privacy', 'privacy policy', '隐私', '隐私政策'],
+        name: t('actr.auth.privacyPolicy'),
+        searchKeywords: [t('actr.auth.privacyPolicy')],
         icon: 'askaway_gery',
         action: () => handleOpenAbout('privacyPolicy'),
       },
       {
         id: 'setting-icp',
         type: 'setting',
-        name: 'ICP 备案',
-        searchKeywords: ['icp', '备案', 'license'],
+        name: localizedSearchCopy.icpName,
+        searchKeywords: localizedSearchCopy.icpKeywords,
         icon: 'askaway_gery',
         action: () => handleOpenAbout('icp'),
       },
@@ -201,7 +330,7 @@ export default function GlobalSearchApp() {
         id: 'setting-logout',
         type: 'setting',
         name: t('actr.settings.logout'),
-        searchKeywords: ['logout', 'sign out', '退出'],
+        searchKeywords: localizedSearchCopy.logoutKeywords,
         icon: 'logout',
         action: () => openSettingsWithDeepLink('main', undefined, 'logout'),
       });
@@ -211,10 +340,10 @@ export default function GlobalSearchApp() {
   }, [
     t,
     handleOpenSettings,
-    handleOpenSettingsAccount,
     handleOpenAbout,
     openSettingsWithDeepLink,
     isLoggedIn,
+    localizedSearchCopy,
   ]);
 
   // 搜索结果

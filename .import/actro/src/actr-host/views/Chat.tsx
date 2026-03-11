@@ -37,10 +37,12 @@ import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { useUnreadStore } from '../store/useUnreadStore';
 import { setTabUnreadStatus } from '../../../src/native-bridge/tab/TabModule';
 import { GlobalAlert } from '../../../src/components';
+import TemporarySupramarkMockChat from './ChatMock';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
 const EMPTY_SELECTED_PARTS = new Set<'attachments' | 'question' | 'answer'>();
+
 
 interface MessageRowProps {
   appId: string;
@@ -179,7 +181,15 @@ const MessageRow = React.memo(function MessageRow({
   );
 });
 
-export default function Chat() {
+interface ChatProps {
+  showTemporaryMock?: boolean;
+}
+
+export default function Chat({ showTemporaryMock = false }: ChatProps) {
+  if (showTemporaryMock) {
+    return <TemporarySupramarkMockChat />;
+  }
+
   const { t } = useTranslation();
   const { tab } = useTab();
   const { width } = useWindowDimensions();
