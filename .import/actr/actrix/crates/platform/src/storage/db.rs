@@ -137,7 +137,8 @@ impl Database {
                 updated_at   INTEGER,
                 verified_at  INTEGER,
                 suspended_at INTEGER,
-                revoked_at   INTEGER
+                revoked_at   INTEGER,
+                key_expires_at  INTEGER
             )",
         )
         .execute(&self.pool)
@@ -149,7 +150,7 @@ impl Database {
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 mfr_id      INTEGER NOT NULL REFERENCES mfr(id),
                 token       TEXT    NOT NULL,
-                gist_url    TEXT    NOT NULL DEFAULT '',
+                verify_url  TEXT    NOT NULL DEFAULT '',
                 expires_at  INTEGER NOT NULL,
                 verified_at INTEGER,
                 created_at  INTEGER NOT NULL

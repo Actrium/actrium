@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 use crate::{
     MfrError, crypto,
     manager::{MfrManager, PublishRequest, lookup_package},
-    model::{ActrPackage, GitHubGistChallenge, Manufacturer, MfrStatus, PkgStatus},
+    model::{ActrPackage, GitHubRepoChallenge, Manufacturer, MfrStatus, PkgStatus},
     reserved::{is_reserved, validate_github_login},
 };
 
@@ -29,7 +29,8 @@ async fn setup_test_pool() -> SqlitePool {
             updated_at INTEGER,
             verified_at INTEGER,
             suspended_at INTEGER,
-            revoked_at INTEGER
+            revoked_at INTEGER,
+            key_expires_at INTEGER
         )",
     )
     .execute(&pool)
@@ -41,7 +42,7 @@ async fn setup_test_pool() -> SqlitePool {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             mfr_id INTEGER NOT NULL REFERENCES mfr(id),
             token TEXT NOT NULL,
-            gist_url TEXT NOT NULL DEFAULT '',
+            verify_url TEXT NOT NULL DEFAULT '',
             expires_at INTEGER NOT NULL,
             verified_at INTEGER,
             created_at INTEGER NOT NULL
@@ -441,14 +442,14 @@ async fn test_challenge_create() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "chco", None).await.unwrap();
 
-    let ch = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
 
     assert!(
         ch.token.starts_with("actrix-verify="),
         "token should start with 'actrix-verify=', got: {}",
         ch.token
     );
-    assert!(ch.gist_url.is_empty());
+    assert!(ch.verify_url.is_empty());
     assert!(ch.verified_at.is_none());
     assert!(ch.expires_at > ch.created_at);
     assert_eq!(ch.mfr_id, mfr.id);
@@ -458,9 +459,9 @@ async fn test_challenge_create() {
 async fn test_challenge_get_active_found() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "activech", None).await.unwrap();
-    let ch = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
 
-    let active = GitHubGistChallenge::get_active(&pool, mfr.id)
+    let active = GitHubRepoChallenge::get_active(&pool, mfr.id)
         .await
         .unwrap();
     assert!(active.is_some());
@@ -472,7 +473,7 @@ async fn test_challenge_get_active_none_when_empty() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "nochco", None).await.unwrap();
 
-    let active = GitHubGistChallenge::get_active(&pool, mfr.id)
+    let active = GitHubRepoChallenge::get_active(&pool, mfr.id)
         .await
         .unwrap();
     assert!(active.is_none());
@@ -482,15 +483,15 @@ async fn test_challenge_get_active_none_when_empty() {
 async fn test_challenge_mark_verified() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "verch", None).await.unwrap();
-    let mut ch = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
+    let mut ch = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
 
-    ch.mark_verified(&pool, "https://gist.github.com/verch/abc123")
+    ch.mark_verified(&pool, "https://github.com/verch/actr-mfr-verify")
         .await
         .unwrap();
     assert!(ch.verified_at.is_some());
-    assert_eq!(ch.gist_url, "https://gist.github.com/verch/abc123");
+    assert_eq!(ch.verify_url, "https://github.com/verch/actr-mfr-verify");
 
-    let active = GitHubGistChallenge::get_active(&pool, mfr.id)
+    let active = GitHubRepoChallenge::get_active(&pool, mfr.id)
         .await
         .unwrap();
     assert!(
@@ -504,8 +505,8 @@ async fn test_challenge_token_unique() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "tokenco", None).await.unwrap();
 
-    let ch1 = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
-    let ch2 = GitHubGistChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch1 = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch2 = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
 
     assert_ne!(
         ch1.token, ch2.token,
@@ -694,7 +695,7 @@ async fn test_manager_apply_valid() {
     assert_eq!(mfr.name, "octocat");
     assert_eq!(mfr.status, MfrStatus::Pending);
     assert!(challenge.token.starts_with("actrix-verify="));
-    assert!(challenge.gist_url.is_empty());
+    assert!(challenge.verify_url.is_empty());
 }
 
 #[tokio::test]

@@ -33,6 +33,8 @@ pub enum MfrError {
     Crypto(String),
     #[error("unauthorized")]
     Unauthorized,
+    #[error("certificate expired: signing key has expired, please renew")]
+    CertificateExpired,
 }
 
 impl IntoResponse for MfrError {
@@ -52,6 +54,7 @@ impl IntoResponse for MfrError {
             MfrError::VerificationFailed(_) | MfrError::ChallengeNotFound => {
                 (StatusCode::BAD_REQUEST, self.to_string())
             }
+            MfrError::CertificateExpired => (StatusCode::FORBIDDEN, self.to_string()),
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal error".to_string(),
