@@ -18,3 +18,8 @@ cd askit && bun install
 cd Subsystem && npm install
 cd .. && pod install
 ```
+
+#### 说明
+
+- `Subsystem` 里的 `react-native-webview` 依赖 `patch-package` 自动打补丁，安装依赖后会在 `postinstall` 执行。
+- Metro 需要固定解析到 `Subsystem/node_modules/react-native-webview`，不能落到 `supermark/node_modules/react-native-webview`，否则 iOS 下可能出现旧架构 `shouldStartLoadWithLockIdentifier` 相关崩溃。
