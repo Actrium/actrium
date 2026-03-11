@@ -242,9 +242,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                     viewModel.activeList.collect { activeModels ->
                         Log.d("MainActivity", "activeList changed: " + activeModels.size)
                         activeRecyclerAdapter.updateData(activeModels)
-                        if (activeModels.isEmpty()) {
-                            finish()
-                        }
                     }
                 }
             }
