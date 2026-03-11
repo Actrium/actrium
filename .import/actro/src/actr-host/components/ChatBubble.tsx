@@ -28,6 +28,11 @@ import { useMessageStore } from '../store/useMessageStore';
 import { Animated, Easing } from 'react-native';
 import { FeedbackFormModal } from './FeedbackFormModal';
 import { IAttachmentItem } from '../types/attachment';
+import { Supramark } from '@supramark/rn';
+import {
+  SUPRAMARK_CONTAINER_RENDERERS,
+  SUPRAMARK_FULL_CONFIG,
+} from '../libs/supramarkConfig';
 
 interface ChatBubbleProps {
   content?: string;
@@ -255,6 +260,14 @@ export default function ChatBubble({
   }, [attachments]);
   const isAttachmentOnly = parsedAttachments.length > 0 && !content;
   const hasAttachments = parsedAttachments.length > 0;
+  const markdownTextStyle = React.useMemo(
+    () => ({
+      color: '#252525',
+      fontSize: isSmall ? 11 : 16,
+      lineHeight: isSmall ? 15 : 22,
+    }),
+    [isSmall],
+  );
 
   const getDisplayFileName = React.useCallback((item: IAttachmentItem): string => {
     const legacyName = (item as any).name as string | undefined;
@@ -401,15 +414,32 @@ export default function ChatBubble({
         </View>
       )}
       {content ? (
-        <Text
-          style={[
-            isQuestion ? styles.questionText : styles.answerText,
-            isSmall && styles.smallText,
-          ]}
-          numberOfLines={numberOfLines}
-        >
-          {content}
-        </Text>
+        numberOfLines ? (
+          <Text
+            style={[
+              isQuestion ? styles.questionText : styles.answerText,
+              isSmall && styles.smallText,
+            ]}
+            numberOfLines={numberOfLines}
+          >
+            {content}
+          </Text>
+        ) : (
+          <View style={styles.markdownContainer}>
+            <Supramark
+              markdown={content}
+              config={SUPRAMARK_FULL_CONFIG}
+              containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
+              styles={{
+                paragraph: markdownTextStyle,
+                text: markdownTextStyle,
+                listItemText: markdownTextStyle,
+                inlineCode: markdownTextStyle,
+                code: markdownTextStyle,
+              }}
+            />
+          </View>
+        )
       ) : null}
 
       {!isQuestion && isLatest && !isSmall && (
@@ -552,7 +582,7 @@ export default function ChatBubble({
       <View
         style={{
           width: hasAttachments ? '100%' : undefined,
-          maxWidth: hasAttachments ? '100%' : '80%',
+          maxWidth: '100%',
           alignSelf: isQuestion ? 'flex-end' : 'flex-start',
         }}
       >
@@ -673,6 +703,10 @@ const styles = StyleSheet.create({
   smallText: {
     fontSize: 11,
     lineHeight: 15,
+  },
+  markdownContainer: {
+    flexShrink: 1,
+    width: '100%',
   },
   attachmentsContainer: {
     marginBottom: 8,
