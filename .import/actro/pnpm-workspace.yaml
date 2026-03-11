@@ -2,4 +2,5 @@ packages:
   - 'packages/core'
   - 'packages/renderers/*'
   - 'packages/features/*'
+  - 'packages/features/*/*'
   - 'examples/*'
