@@ -40,6 +40,7 @@ target 'Canvas' do
   pod 'react-native-webview', :path => 'Subsystem/node_modules/react-native-webview'
   pod 'RNGestureHandler', :path => 'Subsystem/node_modules/react-native-gesture-handler'
   pod 'RNReanimated', :path => 'Subsystem/node_modules/react-native-reanimated'
+  pod 'RNSVG', :path => 'Subsystem/node_modules/react-native-svg'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 微信 SDK
