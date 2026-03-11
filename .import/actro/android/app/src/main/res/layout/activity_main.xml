@@ -15,12 +15,21 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <LinearLayout
+        <FrameLayout
             android:id="@+id/llActive"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_marginTop="54dp"
             android:orientation="vertical">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyApps"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:paddingBottom="100dp"
+                android:paddingTop="80dp"
+                android:clipToPadding="false" />
+
             <!-- 标题栏 -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -28,6 +37,7 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="16dp"
+                android:background="@drawable/top_gradient"
                 android:paddingVertical="14dp">
 
                 <TextView
@@ -52,13 +62,8 @@
 
             </LinearLayout>
 
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/recyApps"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:paddingBottom="100dp"
-                android:clipToPadding="false" />
-        </LinearLayout>
+
+        </FrameLayout>
 
         <FrameLayout
             android:id="@+id/flSet"
