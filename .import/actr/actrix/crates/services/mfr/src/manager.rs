@@ -1,6 +1,6 @@
 use crate::{
     MfrError, crypto, github,
-    model::{ActrPackage, GitHubGistChallenge, Manufacturer, MfrStatus, PkgStatus},
+    model::{ActrPackage, GitHubRepoChallenge, Manufacturer, MfrStatus, PkgStatus},
     reserved,
 };
 use serde::{Deserialize, Serialize};
@@ -65,16 +65,16 @@ impl MfrManager {
 
     /// Step 1: Apply for manufacturer registration via GitHub identity.
     /// The GitHub login (user or org) becomes the manufacturer name.
-    /// Returns a challenge token that the user must place in a public Gist.
+    /// Returns a challenge token that the user must place in a public repo.
     pub async fn apply(
         &self,
         github_login: &str,
         contact: Option<&str>,
-    ) -> Result<(Manufacturer, GitHubGistChallenge), MfrError> {
+    ) -> Result<(Manufacturer, GitHubRepoChallenge), MfrError> {
         let login = github_login.to_ascii_lowercase();
         reserved::validate_github_login(&login)?;
         let mfr = Manufacturer::create(&self.pool, &login, contact).await?;
-        let challenge = GitHubGistChallenge::create(&self.pool, mfr.id).await?;
+        let challenge = GitHubRepoChallenge::create(&self.pool, mfr.id).await?;
         platform::recording::info!("MFR application received: github_login={}", login,);
         Ok((mfr, challenge))
     }
@@ -94,7 +94,7 @@ impl MfrManager {
             )));
         }
 
-        let mut challenge = GitHubGistChallenge::get_active(&self.pool, mfr_id)
+        let mut challenge = GitHubRepoChallenge::get_active(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::ChallengeNotFound)?;
 
@@ -136,22 +136,19 @@ impl MfrManager {
     }
 
     fn build_keychain(&self, mfr: &Manufacturer, private_key: String) -> MfrKeychain {
-        use chrono::Utc;
-        let now = Utc::now().timestamp();
-        let expires_at = now + 365 * 24 * 3600; // 1 year
         MfrKeychain {
             private_key,
             certificate: MfrCertificate {
                 mfr_name: mfr.name.clone(),
                 mfr_pubkey: mfr.public_key.clone(),
-                issued_at: now,
-                expires_at,
+                issued_at: mfr.verified_at.unwrap_or(mfr.created_at),
+                expires_at: mfr.key_expires_at.unwrap_or(0),
             },
         }
     }
 
     /// Get the active (unexpired, unverified) challenge for a pending MFR.
-    pub async fn get_challenge(&self, mfr_id: i64) -> Result<GitHubGistChallenge, MfrError> {
+    pub async fn get_challenge(&self, mfr_id: i64) -> Result<GitHubRepoChallenge, MfrError> {
         let mfr = Manufacturer::get(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::NotFound)?;
@@ -161,7 +158,7 @@ impl MfrManager {
                 mfr.status
             )));
         }
-        GitHubGistChallenge::get_active(&self.pool, mfr_id)
+        GitHubRepoChallenge::get_active(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::ChallengeNotFound)
     }
@@ -182,15 +179,11 @@ impl MfrManager {
                 name
             )));
         }
-        let cert = {
-            use chrono::Utc;
-            let now = Utc::now().timestamp();
-            MfrCertificate {
-                mfr_name: mfr.name.clone(),
-                mfr_pubkey: mfr.public_key.clone(),
-                issued_at: now,
-                expires_at: now + 365 * 24 * 3600,
-            }
+        let cert = MfrCertificate {
+            mfr_name: mfr.name.clone(),
+            mfr_pubkey: mfr.public_key.clone(),
+            issued_at: mfr.verified_at.unwrap_or(mfr.created_at),
+            expires_at: mfr.key_expires_at.unwrap_or(0),
         };
         Ok(MfrPublicInfo {
             id: mfr.id,
@@ -209,6 +202,13 @@ impl MfrManager {
                 "MFR '{}' is not active",
                 req.manufacturer
             )));
+        }
+
+        // Check if signing key has expired
+        if let Some(key_expires) = mfr.key_expires_at {
+            if chrono::Utc::now().timestamp() > key_expires {
+                return Err(MfrError::CertificateExpired);
+            }
         }
 
         // Verify signature: MFR's Ed25519 private key signed the manifest bytes

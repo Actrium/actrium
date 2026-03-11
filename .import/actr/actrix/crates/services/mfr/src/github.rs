@@ -6,7 +6,7 @@
 //! 2. User triggers verification via the API
 //! 3. We fetch the file via GitHub Contents API and check that it contains the token
 //!
-//! Using a repo (not Gist) because GitHub orgs cannot create Gists.
+//! Using a public repo because GitHub orgs cannot create Gists.
 
 use crate::MfrError;
 use serde::Deserialize;
@@ -54,6 +54,38 @@ pub async fn verify_repo(
         return Err(MfrError::VerificationFailed(format!(
             "Repo '{github_login}/{VERIFY_REPO}' or file '{filename}' not found — ensure the repo is public"
         )));
+    }
+
+    // Read rate limit headers
+    let remaining: Option<u64> = resp
+        .headers()
+        .get("x-ratelimit-remaining")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok());
+    let reset: Option<i64> = resp
+        .headers()
+        .get("x-ratelimit-reset")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok());
+
+    // Handle rate limit exceeded (403)
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        let reset_info = reset
+            .map(|ts| format!(", resets at unix timestamp {ts}"))
+            .unwrap_or_default();
+        return Err(MfrError::GitHub(format!(
+            "rate limit exceeded{reset_info} — consider using a GitHub token"
+        )));
+    }
+
+    // Warn when quota is low
+    if let Some(rem) = remaining {
+        if rem < 5 {
+            platform::recording::warn!(
+                "GitHub API rate limit low: {rem} requests remaining (resets at {:?})",
+                reset
+            );
+        }
     }
 
     if !resp.status().is_success() {

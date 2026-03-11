@@ -52,6 +52,8 @@ pub struct Manufacturer {
     pub verified_at: Option<i64>,
     pub suspended_at: Option<i64>,
     pub revoked_at: Option<i64>,
+    /// Signing key expiration (unix timestamp). Set on activate(), checked on publish.
+    pub key_expires_at: Option<i64>,
 }
 
 impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Manufacturer {
@@ -70,6 +72,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Manufacturer {
             verified_at: row.try_get("verified_at")?,
             suspended_at: row.try_get("suspended_at")?,
             revoked_at: row.try_get("revoked_at")?,
+            key_expires_at: row.try_get("key_expires_at").unwrap_or(None),
         })
     }
 }
@@ -148,12 +151,14 @@ impl Manufacturer {
             )));
         }
         let now = Utc::now().timestamp();
+        let key_expires_at = now + 365 * 24 * 3600; // 1 year
         sqlx::query(
-            "UPDATE mfr SET status = 'active', public_key = ?, verified_at = ?, updated_at = ? WHERE id = ?",
+            "UPDATE mfr SET status = 'active', public_key = ?, verified_at = ?, updated_at = ?, key_expires_at = ? WHERE id = ?",
         )
         .bind(&public_key)
         .bind(now)
         .bind(now)
+        .bind(key_expires_at)
         .bind(self.id)
         .execute(pool)
         .await?;
@@ -161,6 +166,7 @@ impl Manufacturer {
         self.public_key = public_key;
         self.verified_at = Some(now);
         self.updated_at = Some(now);
+        self.key_expires_at = Some(key_expires_at);
         Ok(())
     }
 
