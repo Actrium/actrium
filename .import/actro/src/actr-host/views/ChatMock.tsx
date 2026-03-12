@@ -295,6 +295,29 @@ Bob --> Alice: World
     is_read: 1,
     progress: Progress.completed,
   },
+  {
+    message_id: 'temp-mock-mermaid',
+    app_id: TEMP_MOCK_APP_ID,
+    session_id: 'temp-mock-session',
+    is_preset: 0,
+    question_time: 1710000022000,
+    question_content: 'Mermaid diagram 示例',
+    answer_time: 1710000023000,
+    answer_content: `# Mermaid diagram 示例
+
+\`\`\`mermaid
+graph TD
+  A[开始] --> B{条件判断}
+  B -->|是| C[执行操作]
+  B -->|否| D[跳过]
+  C --> E[结束]
+  D --> E
+\`\`\``,
+    attachments: '',
+    is_edited: 0,
+    is_read: 1,
+    progress: Progress.completed,
+  },
 ];
 
 export default function TemporarySupramarkMockChat() {

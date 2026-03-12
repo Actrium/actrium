@@ -5,7 +5,7 @@ import LoadApp from './LoadApp';
 
 import { useTab } from '../contexts/TabContext';
 
-const ENABLE_TEMP_CHAT_MOCK_ENTRY = false;
+const ENABLE_TEMP_CHAT_MOCK_ENTRY = true;
 
 const Main = () => {
   const { tab } = useTab();

@@ -22,6 +22,7 @@ const supramarkSourceMap = {
   '@supramark/feature-definition-list': path.resolve(supermarkRoot, 'packages/features/feature-definition-list/src/index.ts'),
   '@supramark/feature-diagram-dot': path.resolve(supermarkRoot, 'packages/features/feature-diagram-dot/src/index.ts'),
   '@supramark/feature-diagram-echarts': path.resolve(supermarkRoot, 'packages/features/feature-diagram-echarts/src/index.ts'),
+  '@supramark/feature-diagram-mermaid': path.resolve(supermarkRoot, 'packages/features/feature-diagram-mermaid/src/index.ts'),
   '@supramark/feature-diagram-plantuml': path.resolve(supermarkRoot, 'packages/features/feature-diagram-plantuml/src/index.ts'),
   '@supramark/feature-diagram-vega-lite': path.resolve(supermarkRoot, 'packages/features/feature-diagram-vega-lite/src/index.ts'),
   '@supramark/feature-emoji': path.resolve(supermarkRoot, 'packages/features/feature-emoji/src/index.ts'),
@@ -171,6 +172,13 @@ const customConfig = {
         return {
           type: 'sourceFile',
           filePath: path.resolve(projectRoot, 'src', 'actr-host', 'shims', 'viz-js-viz.js'),
+        };
+      }
+      // beautiful-mermaid 内部使用 Node.js Buffer，在 RN/Hermes 上不可用，用 shim 替代
+      if (moduleName === 'beautiful-mermaid') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(projectRoot, 'src', 'actr-host', 'shims', 'beautiful-mermaid.js'),
         };
       }
       // tslib 的 ESM/CJS 混合导出兼容
