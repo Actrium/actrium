@@ -482,20 +482,15 @@ export default function GlobalSearchApp() {
   // 渲染搜索结果列表
   const renderResults = () => {
     if (!searchQuery.trim()) {
-      return (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyStateText}>
-            {t('actr.search.inputHint')}
-          </Text>
-        </View>
-      );
+      return null;
     }
 
     if (searchResults.length === 0) {
       return (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyStateText}>
-            {t('actr.search.noResults')}
+          <Text style={styles.emptyStateTitle}>无结果</Text>
+          <Text style={styles.emptyStateDescription}>
+            无结果。请尝试新搜索词。
           </Text>
         </View>
       );
@@ -736,9 +731,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 40,
   },
-  emptyStateText: {
-    fontSize: 15,
+  emptyStateTitle: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '500',
+    color: '#FFF',
+    textAlign: 'center',
+  },
+  emptyStateDescription: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 20,
     color: '#8E8E93',
+    textAlign: 'center',
   },
   searchRow: {
     flexDirection: 'row',
