@@ -7,6 +7,7 @@ import { createDiagramDotFeatureConfig } from '@supramark/feature-diagram-dot';
 import { createDiagramPlantUmlFeatureConfig } from '@supramark/feature-diagram-plantuml';
 import { createDiagramVegaLiteFeatureConfig } from '@supramark/feature-diagram-vega-lite';
 import { createDiagramEchartsFeatureConfig } from '@supramark/feature-diagram-echarts';
+import { createDiagramMermaidFeatureConfig } from '@supramark/feature-diagram-mermaid';
 import {
   admonitionFeature,
   renderAdmonitionContainerRN,
@@ -43,6 +44,7 @@ export const SUPRAMARK_FULL_CONFIG: SupramarkConfig = {
     createDiagramPlantUmlFeatureConfig(true),
     createDiagramVegaLiteFeatureConfig(true),
     createDiagramEchartsFeatureConfig(true),
+    createDiagramMermaidFeatureConfig(true),
     { id: '@supramark/feature-footnote', enabled: true },
     { id: '@supramark/feature-emoji', enabled: true },
     { id: '@supramark/feature-admonition', enabled: true },
