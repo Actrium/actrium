@@ -19,14 +19,18 @@ defaultConfig.resolver.sourceExts = [
 const subsystemPath = path.resolve(__dirname, 'Subsystem');
 const supermarkRoot = path.resolve(__dirname, '..', 'supermark');
 const loomShimsDir = path.resolve(__dirname, 'loom', 'src', 'actr-host', 'shims');
+const loomNodeModules = path.resolve(__dirname, 'loom', 'node_modules');
+const yarnLinkRoot = path.resolve(process.env.HOME || '', '.config', 'yarn', 'link');
 
 const config = {
   watchFolders: [
     //path.resolve(__dirname, '../loom'),
     supermarkRoot,
+    yarnLinkRoot,
   ],
   resolver: {
     nodeModulesPaths: [
+      loomNodeModules,
       path.resolve(__dirname, 'node_modules'),
     ],
     // 确保 react 和 react-native 使用主项目的版本，避免冲突
@@ -50,6 +54,13 @@ const config = {
       // @viz-js/viz 使用 import.meta + WASM，Hermes 不支持，用 shim 让其 fallback 到 Kroki 服务端渲染
       if (moduleName === '@viz-js/viz') {
         return { type: 'sourceFile', filePath: path.resolve(loomShimsDir, 'viz-js-viz.js') };
+      }
+      // beautiful-mermaid 内部使用 Node.js Buffer，在 RN/Hermes 上不可用，用 shim 替代
+      if (moduleName === 'beautiful-mermaid') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(loomShimsDir, 'beautiful-mermaid.js'),
+        };
       }
       // tslib 的 ESM/CJS 混合导出兼容
       if (moduleName === 'tslib') {

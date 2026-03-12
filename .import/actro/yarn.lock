@@ -1832,6 +1832,9 @@
 "@supramark/feature-diagram-echarts@file:../supermark/packages/features/feature-diagram-echarts":
   version "0.1.0"
 
+"@supramark/feature-diagram-mermaid@file:../supermark/packages/features/feature-diagram-mermaid":
+  version "0.1.0"
+
 "@supramark/feature-diagram-plantuml@file:../supermark/packages/features/feature-diagram-plantuml":
   version "0.1.0"
 
@@ -1854,7 +1857,7 @@
   version "0.1.0"
 
 "@supramark/rn-diagram-worker@file:../supermark/packages/renderers/rn-diagram-worker":
-  version "0.2.0"
+  version "0.3.0"
   dependencies:
     "@supramark/core" "workspace:*"
     "@supramark/diagram-engine" "workspace:*"

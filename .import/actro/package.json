@@ -7,7 +7,9 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "supramark:link": "yarn link @supramark/core @supramark/diagram-engine @supramark/feature-admonition @supramark/feature-core-markdown @supramark/feature-definition-list @supramark/feature-diagram-dot @supramark/feature-diagram-echarts @supramark/feature-diagram-mermaid @supramark/feature-diagram-plantuml @supramark/feature-diagram-vega-lite @supramark/feature-emoji @supramark/feature-footnote @supramark/feature-gfm @supramark/feature-math @supramark/feature-weather @supramark/rn @supramark/rn-diagram-worker @supramark/web-diagram",
+    "supramark:unlink": "yarn unlink @supramark/core @supramark/diagram-engine @supramark/feature-admonition @supramark/feature-core-markdown @supramark/feature-definition-list @supramark/feature-diagram-dot @supramark/feature-diagram-echarts @supramark/feature-diagram-mermaid @supramark/feature-diagram-plantuml @supramark/feature-diagram-vega-lite @supramark/feature-emoji @supramark/feature-footnote @supramark/feature-gfm @supramark/feature-math @supramark/feature-weather @supramark/rn @supramark/rn-diagram-worker @supramark/web-diagram"
   },
   "dependencies": {
     "@babel/runtime": "^7.28.4",
@@ -70,6 +72,7 @@
     "@supramark/feature-definition-list": "file:../supermark/packages/features/feature-definition-list",
     "@supramark/feature-diagram-dot": "file:../supermark/packages/features/feature-diagram-dot",
     "@supramark/feature-diagram-echarts": "file:../supermark/packages/features/feature-diagram-echarts",
+    "@supramark/feature-diagram-mermaid": "file:../supermark/packages/features/feature-diagram-mermaid",
     "@supramark/feature-diagram-plantuml": "file:../supermark/packages/features/feature-diagram-plantuml",
     "@supramark/feature-diagram-vega-lite": "file:../supermark/packages/features/feature-diagram-vega-lite",
     "@supramark/feature-emoji": "file:../supermark/packages/features/feature-emoji",
@@ -104,6 +107,7 @@
     "@supramark/feature-definition-list": "file:../supermark/packages/features/feature-definition-list",
     "@supramark/feature-diagram-dot": "file:../supermark/packages/features/feature-diagram-dot",
     "@supramark/feature-diagram-echarts": "file:../supermark/packages/features/feature-diagram-echarts",
+    "@supramark/feature-diagram-mermaid": "file:../supermark/packages/features/feature-diagram-mermaid",
     "@supramark/feature-diagram-plantuml": "file:../supermark/packages/features/feature-diagram-plantuml",
     "@supramark/feature-diagram-vega-lite": "file:../supermark/packages/features/feature-diagram-vega-lite",
     "@supramark/feature-emoji": "file:../supermark/packages/features/feature-emoji",
