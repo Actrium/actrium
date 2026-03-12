@@ -172,4 +172,8 @@ dependencies {
     implementation("org.greenrobot:eventbus:3.3.1")
     implementation("io.coil-kt:coil:2.6.0")
     implementation("com.tencent.mm.opensdk:wechat-sdk-android:+")
+    // Google Sign-In (Credential Manager)
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 }
