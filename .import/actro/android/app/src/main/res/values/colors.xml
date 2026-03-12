@@ -16,6 +16,6 @@
     <color name="yellow">#F2BF44</color>
     <color name="nav_bg">#FFFFFF</color>
     <color name="nav_indicator">#EDEDED</color>
-    <color name="splash_bg">#FFFFFF</color>
+    <color name="splash_bg">#000000</color>
 </resources>
 
