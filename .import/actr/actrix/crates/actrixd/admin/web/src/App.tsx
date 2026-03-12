@@ -18,11 +18,11 @@ import { NetworkPage } from "./pages/host/NetworkPage";
 import { StatusPage } from "./pages/host/StatusPage";
 import { AboutPage } from "./pages/About";
 import type { ReactNode } from "react";
+import { useAuth } from "./lib/auth";
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  // TODO: Re-enable authentication check
-  // const { isAuthenticated } = useAuth();
-  // if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
   return <>{children}</>;
 }
 
