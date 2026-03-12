@@ -1,6 +1,7 @@
 package com.askaway.android
 
 import android.animation.ObjectAnimator
+import android.graphics.Color
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.content.Intent
@@ -18,6 +19,9 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -55,8 +59,23 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        // 设置沉浸式，使内容能够延伸到状态栏区域，同时处理状态栏字体颜色
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        // 假设背景是浅色，设置状态栏图标为深色
+        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = true
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // 处理系统栏（状态栏、导航栏）的内边距，防止内容被遮挡
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            // 仅应用底部和左右的内边距，保留顶部不做处理，以实现内容延伸到状态栏
+            v.setPadding(systemBars.left, 0, systemBars.right, systemBars.bottom)
+            insets
+        }
 
         // 初始化 flReactNative 为隐藏状态
         binding.flReactNative.visibility = View.INVISIBLE // 使用 INVISIBLE 而不是 GONE，以便能获取高度
