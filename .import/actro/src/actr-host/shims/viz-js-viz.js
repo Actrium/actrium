@@ -10,8 +10,7 @@
 //
 // 运行时行为：
 //   dot.ts 中 `await import('@viz-js/viz')` 实际加载的是本 shim。
-//   instance() 返回的 renderString() 会抛错，被 dot.ts 的 try-catch 捕获后
-//   自动 fallback 到 Kroki 服务端渲染，因此 Graphviz 图表功能仍然可用。
+//   instance() 返回的 renderString() 会抛错，被上层转成 diagram error UI。
 
 async function instance() {
   return {
