@@ -14,7 +14,6 @@ const yarnLinkRoot = path.resolve(process.env.HOME || '', '.config', 'yarn', 'li
 const supramarkSourceMap = {
   '@supramark/core': path.resolve(supermarkRoot, 'packages/core/src/index.rn.ts'),
   '@supramark/rn': path.resolve(supermarkRoot, 'packages/renderers/rn/src/index.ts'),
-  '@supramark/rn-diagram-worker': path.resolve(supermarkRoot, 'packages/renderers/rn-diagram-worker/src/index.ts'),
   '@supramark/diagram-engine': path.resolve(supermarkRoot, 'packages/renderers/diagram-engine/src/index.ts'),
   '@supramark/web-diagram': path.resolve(supermarkRoot, 'packages/renderers/web-diagram/index.js'),
   '@supramark/feature-admonition': path.resolve(supermarkRoot, 'packages/features/feature-admonition/src/index.ts'),
@@ -172,13 +171,6 @@ const customConfig = {
         return {
           type: 'sourceFile',
           filePath: path.resolve(projectRoot, 'src', 'actr-host', 'shims', 'viz-js-viz.js'),
-        };
-      }
-      // beautiful-mermaid 内部使用 Node.js Buffer，在 RN/Hermes 上不可用，用 shim 替代
-      if (moduleName === 'beautiful-mermaid') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(projectRoot, 'src', 'actr-host', 'shims', 'beautiful-mermaid.js'),
         };
       }
       // tslib 的 ESM/CJS 混合导出兼容
