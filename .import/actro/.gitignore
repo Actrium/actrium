@@ -1,0 +1,37 @@
+# Build output
+build/
+output/
+install/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.framework
+
+# Rust
+target/
+Cargo.lock
+
+# Node
+node_modules/
+*.tgz
+
+# Archives
+*.tar.gz
+*.zip
