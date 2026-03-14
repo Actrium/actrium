@@ -8,7 +8,7 @@ This repository now covers three delivery paths:
 - A safe Rust crate on top of the native C ABI
 - A WebAssembly-powered web package for browsers, Web Workers, and edge runtimes
 
-Native builds target iOS (XCFramework), Android (`.so`), macOS (`.dylib`), Linux (`.so`) and Windows (`.dll`). Web builds use `@viz-js/viz` as the Wasm backend.
+Native builds target iOS (XCFramework), Android (`.so`), macOS (`.dylib`), Linux (`.so`) and Windows (`.dll`). Web builds are powered by compiled WebAssembly.
 
 ## Architecture
 
@@ -45,8 +45,8 @@ graphviz-anywhere/
 ### Native build
 
 ```bash
-git clone --recursive https://github.com/kookyleo/graphviz-native.git
-cd graphviz-native
+git clone --recursive https://github.com/kookyleo/graphviz-anywhere.git
+cd graphviz-anywhere
 
 ./scripts/build-linux.sh
 ./scripts/build-macos.sh
@@ -58,7 +58,7 @@ cd graphviz-native
 Build outputs land in `output/<platform>/`.
 
 Prebuilt native binaries are published from the current repository namespace:
-[GitHub Releases](https://github.com/kookyleo/graphviz-native/releases).
+[GitHub Releases](https://github.com/kookyleo/graphviz-anywhere/releases).
 
 ## C API
 
