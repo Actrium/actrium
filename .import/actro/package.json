@@ -11,7 +11,9 @@
     "url": "https://github.com/nicekook/graphviz-anywhere.git"
   },
   "workspaces": [
-    "packages/*",
+    "packages/core-js",
+    "packages/js/web",
+    "packages/react-native",
     "web"
   ],
   "scripts": {
