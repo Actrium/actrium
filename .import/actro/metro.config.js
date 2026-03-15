@@ -55,13 +55,7 @@ const config = {
       if (moduleName === '@viz-js/viz') {
         return { type: 'sourceFile', filePath: path.resolve(loomShimsDir, 'viz-js-viz.js') };
       }
-      // beautiful-mermaid 内部使用 Node.js Buffer，在 RN/Hermes 上不可用，用 shim 替代
-      if (moduleName === 'beautiful-mermaid') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(loomShimsDir, 'beautiful-mermaid.js'),
-        };
-      }
+      
       // tslib 的 ESM/CJS 混合导出兼容
       if (moduleName === 'tslib') {
         return { type: 'sourceFile', filePath: path.resolve(loomShimsDir, 'tslib.js') };
