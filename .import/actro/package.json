@@ -1,0 +1,25 @@
+{
+  "name": "graphviz-anywhere",
+  "version": "0.1.0",
+  "description": "Graphviz for native runtimes and the web",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "kookyleo <kookyleo@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicekook/graphviz-anywhere.git"
+  },
+  "workspaces": [
+    "packages/*",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "npm run lint --workspaces",
+    "fmt": "npm run fmt --workspaces",
+    "test": "npm run test --workspaces"
+  },
+  "devDependencies": {}
+}
