@@ -22,7 +22,7 @@ export function useTabNativeEvents(tabId: string) {
       console.log('进入 Tab，执行消息更新操作');
 
       // 更新内存状态
-      useUnreadStore.getState().clearUnread(currentAppId, tabId);
+      useUnreadStore.getState().clearUnread(tabId);
     });
 
     const unsubscribe2 = TabEvents.onTabExitedFullscreen(async (event) => {
@@ -46,16 +46,18 @@ export function useTabNativeEvents(tabId: string) {
         // 收藏，更新数据库
         await BookmarkRepository.addBookmark({
           app_id: currentAppId,
-          tab_id: event.tabId,
           sort_order: 0,
         });
       } else {
-        // 取消收藏，删除数据库
-        await BookmarkRepository.removeBookmark(event.tabId);
+        // 取消收藏，按 app_id 删除
+        await BookmarkRepository.removeBookmarkByAppId(currentAppId);
       }
 
-      // 通知 native 收藏成功
-      await setTabBookmarkStatus(event.tabId, event.isBookmarked);
+      // 通知所有同 appId 的 tab 更新收藏状态
+      const allTabIds = useTabIdMapStore.getState().getTabIdsByAppId(currentAppId);
+      await Promise.all(
+        allTabIds.map((id) => setTabBookmarkStatus(id, event.isBookmarked)),
+      );
     });
 
     return () => {

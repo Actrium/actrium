@@ -3,16 +3,16 @@ import { MessageRepository } from '../../repository/MessageRepository';
 import { setTabUnreadStatus } from '../../native-bridge/tab/TabModule';
 
 interface UnreadState {
-  // appId -> 未读消息数量
+  // tabId -> 未读消息数量
   unreadCounts: Record<string, number>;
   // 总未读消息数量
   totalUnread: number;
 
-  // 增加指定应用的未读数
-  incrementUnread: (appId: string, tabId: string) => void;
+  // 增加指定 Tab 的未读数
+  incrementUnread: (tabId: string) => void;
 
-  // 清空指定应用的未读数
-  clearUnread: (appId: string, tabId: string) => void;
+  // 清空指定 Tab 的未读数
+  clearUnread: (tabId: string) => void;
 
   // 批量设置未读数（用于初始化）
   setUnreadCounts: (counts: Record<string, number>) => void;
@@ -25,12 +25,12 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
   unreadCounts: {},
   totalUnread: 0,
 
-  incrementUnread: (appId: string, tabId: string) => {
+  incrementUnread: (tabId: string) => {
     set((state) => {
-      const currentCount = state.unreadCounts[appId] || 0;
+      const currentCount = state.unreadCounts[tabId] || 0;
       const newUnreadCounts = {
         ...state.unreadCounts,
-        [appId]: currentCount + 1,
+        [tabId]: currentCount + 1,
       };
       const newTotalUnread = Object.values(newUnreadCounts).reduce(
         (sum, count) => sum + count,
@@ -38,7 +38,7 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
       );
 
       console.log(
-        `[UnreadStore] Increment unread for ${appId}: ${currentCount} -> ${currentCount + 1}`,
+        `[UnreadStore] Increment unread for ${tabId}: ${currentCount} -> ${currentCount + 1}`,
       );
 
       return {
@@ -52,15 +52,15 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
     );
   },
 
-  clearUnread: (appId: string, tabId: string) => {
+  clearUnread: (tabId: string) => {
     set((state) => {
-      const { [appId]: _, ...restCounts } = state.unreadCounts;
+      const { [tabId]: _, ...restCounts } = state.unreadCounts;
       const newTotalUnread = Object.values(restCounts).reduce(
         (sum, count) => sum + count,
         0,
       );
 
-      console.log(`[UnreadStore] Clear unread for ${appId}`);
+      console.log(`[UnreadStore] Clear unread for ${tabId}`);
 
       return {
         unreadCounts: restCounts,
@@ -69,7 +69,7 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
     });
 
     // 更新数据库，标为已读
-    MessageRepository.markAllAsReadByAppId(appId);
+    MessageRepository.markAllAsReadByTabId(tabId);
     // 通知 native 更新 tab 未读状态
     setTabUnreadStatus(tabId, false).catch((e) => {
       // console.error('[UnreadStore] Failed to notify native clear:', e),

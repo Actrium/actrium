@@ -42,6 +42,7 @@ const CATEGORIES: Category[] = [
 interface FeedbackFormModalProps {
   visible: boolean;
   onClose: () => void;
+  tabId?: string;
   appId?: string;
   messageId?: string;
 }
@@ -49,6 +50,7 @@ interface FeedbackFormModalProps {
 export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   visible,
   onClose,
+  tabId,
   appId,
   messageId,
 }) => {
@@ -62,7 +64,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   >('idle');
 
   const targetMsg = useMessageStore((state) =>
-    appId && messageId ? state.messageById[appId]?.[messageId] : undefined,
+    tabId && messageId ? state.messageById[tabId]?.[messageId] : undefined,
   );
 
   const animValue = React.useRef(new Animated.Value(0)).current;

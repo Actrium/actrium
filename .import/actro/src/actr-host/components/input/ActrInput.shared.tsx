@@ -64,9 +64,9 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     'text_send' | 'voice_start' | null
   >(null);
 
-  const inputText = useInputStore((state) => state.inputs[appId]?.text || '');
+  const inputText = useInputStore((state) => state.inputs[tab.id]?.text || '');
   const editingMessageId = useInputStore(
-    (state) => state.inputs[appId]?.editingMessageId,
+    (state) => state.inputs[tab.id]?.editingMessageId,
   );
   const clearInputInStore = useInputStore((state) => state.clearInput);
   const setInputText = useInputStore((state) => state.setInputText);
@@ -75,8 +75,8 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   );
 
   const handleCancelEdit = () => {
-    setEditingMessageId(appId, null);
-    clearInputInStore(appId);
+    setEditingMessageId(tab.id, null);
+    clearInputInStore(tab.id);
   };
 
   const deleteMessageFromStore = useMessageStore(
@@ -92,7 +92,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     takePhoto,
     pickImage,
     pickDocument,
-  } = useAttachmentManager(appId);
+  } = useAttachmentManager(tab.id);
 
   // Hook for toolbox states
   const {
@@ -160,7 +160,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     (data: TActrMessageResponse) => {
       const message_id = data.message_id;
       // 1. 获取当前 Store 中的消息进行累加
-      const currentMsg = useMessageStore.getState().getMessage(appId, message_id);
+      const currentMsg = useMessageStore.getState().getMessage(tab.id, message_id);
 
       if (!currentMsg) {
         console.warn('[ActrInput] No messages in store to update');
@@ -177,22 +177,22 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       };
 
       // 2. 更新 Store，如果是结束状态则触发持久化
-      updateMessage(appId, currentMsg.message_id, updates, isFinished);
+      updateMessage(tab.id, currentMsg.message_id, updates, isFinished);
 
       // 3. 消息接收完成时，判断当前是否为活跃 tab
       if (data.isEnd) {
         getCurrentFullscreenTab().then((currentTabId) => {
           if (currentTabId === tab.id) {
             // 当前 tab 正在前台，直接标为已读，无需增加未读数
-            updateMessage(appId, currentMsg.message_id, { is_read: 1 }, true);
+            updateMessage(tab.id, currentMsg.message_id, { is_read: 1 }, true);
           } else {
             // 后台 tab，增加未读计数并通知 native
-            useUnreadStore.getState().incrementUnread(appId, tab.id);
+            useUnreadStore.getState().incrementUnread(tab.id, tab.id);
           }
         });
       }
     },
-    [appId, updateMessage],
+    [tab.id, updateMessage],
   );
 
   // 语音消息接收回调
@@ -200,7 +200,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     (data: TActrMessageResponse) => {
       const messageId = data.message_id;
 
-      const currentMsg = useMessageStore.getState().getMessage(appId, messageId);
+      const currentMsg = useMessageStore.getState().getMessage(tab.id, messageId);
 
       if (!currentMsg) return;
 
@@ -214,9 +214,9 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
         progress: isFinished ? 2 : 1,
       };
 
-      updateMessage(appId, messageId, updates, isFinished);
+      updateMessage(tab.id, messageId, updates, isFinished);
     },
-    [appId, updateMessage],
+    [tab.id, updateMessage],
   );
 
   // 使用多实例连接 Hook
@@ -279,9 +279,9 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     // 2. 处理编辑模式：若是在修改旧消息，发送前先从库中移除旧版本
     if (editingMessageId) {
       const messageIdToDelete = editingMessageId;
-      setEditingMessageId(appId, null);
+      setEditingMessageId(tab.id, null);
       try {
-        deleteMessageFromStore(appId, messageIdToDelete);
+        deleteMessageFromStore(tab.id, messageIdToDelete);
       } catch (e) {
         console.error(
           '[ActrInput] Failed to delete message during re-edit:',
@@ -305,6 +305,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     const newMessage: IMessage = {
       message_id: Utils.generateId(),
       app_id: appId,
+      tab_id: tab.id,
       session_id: session_id,
       is_preset: 0,
       question_time: Date.now(),
@@ -318,7 +319,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     };
 
     // 4. 同步 UI 状态（Store 内部会自动持久化到本地）
-    addMessage(appId, newMessage);
+    addMessage(tab.id, newMessage);
 
     const reqMsg = {
       message_id: newMessage.message_id,
@@ -331,7 +332,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     };
 
     // 6. 重置输入框状态
-    clearInputInStore(appId);
+    clearInputInStore(tab.id);
 
     // 如果不是语音，直接发送
     if (!isVoice) {
@@ -362,7 +363,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     processMessageSend(inputText);
   };
   const handleClearInput = () => {
-    setInputText(appId, '');
+    setInputText(tab.id, '');
   };
 
   // 稳定的 handleSend ref，传给 StableTextInput 避免因回调变化触发子组件重渲染
@@ -447,7 +448,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
           handleCancelEdit={handleCancelEdit}
           textInputNode={
             <StableTextInput
-              appId={appId}
+              tabId={tab.id}
               hasAttachments={attachments.length > 0}
               isSendOnEnter={isSendOnEnter}
               handleSendRef={handleSendRef}

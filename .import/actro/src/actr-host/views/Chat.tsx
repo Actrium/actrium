@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 import {
   View,
   Text,
@@ -43,20 +49,24 @@ const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
 const EMPTY_SELECTED_PARTS = new Set<'attachments' | 'question' | 'answer'>();
 
-
 interface MessageRowProps {
+  tabId: string;
   appId: string;
   messageId: string;
   index: number;
   layoutTokens: ReturnType<typeof getHostLayoutTokens>;
   selectionMode: boolean;
   selectedParts: Set<'attachments' | 'question' | 'answer'>;
-  toggleSelection: (messageId: string, part: 'attachments' | 'question' | 'answer') => void;
+  toggleSelection: (
+    messageId: string,
+    part: 'attachments' | 'question' | 'answer',
+  ) => void;
   handleEdit: (msg: IMessage) => void;
   handleCopy: (text: string) => void;
 }
 
 const MessageRow = React.memo(function MessageRow({
+  tabId,
   appId,
   messageId,
   index,
@@ -70,8 +80,8 @@ const MessageRow = React.memo(function MessageRow({
   const { t } = useTranslation();
   const item = useMessageStore(
     useCallback(
-      (state) => state.messageById[appId]?.[messageId],
-      [appId, messageId],
+      (state) => state.messageById[tabId]?.[messageId],
+      [tabId, messageId],
     ),
   );
 
@@ -101,7 +111,9 @@ const MessageRow = React.memo(function MessageRow({
               <View style={styles.checkboxContainer}>
                 <Checkbox
                   checked={selectedParts.has('attachments')}
-                  onPress={() => toggleSelection(item.message_id, 'attachments')}
+                  onPress={() =>
+                    toggleSelection(item.message_id, 'attachments')
+                  }
                 />
               </View>
             )}
@@ -110,13 +122,20 @@ const MessageRow = React.memo(function MessageRow({
                 type='question'
                 attachments={item.attachments}
                 containerStyle={{ marginBottom: 4 }}
-                onEdit={isLatest && !selectionMode ? () => handleEdit(item) : undefined}
+                onEdit={
+                  isLatest && !selectionMode
+                    ? () => handleEdit(item)
+                    : undefined
+                }
                 onCopy={() => handleCopy(item.question_content)}
                 msgId={item.message_id}
+                tabId={tabId}
                 appId={appId}
                 selectionKey={`${item.message_id}:attachments`}
                 isSelected={selectedParts.has('attachments')}
-                onToggleSelection={() => toggleSelection(item.message_id, 'attachments')}
+                onToggleSelection={() =>
+                  toggleSelection(item.message_id, 'attachments')
+                }
               />
             </View>
           </View>
@@ -135,13 +154,20 @@ const MessageRow = React.memo(function MessageRow({
               <ChatBubble
                 type='question'
                 msgId={item.message_id}
+                tabId={tabId}
                 appId={appId}
                 content={item.question_content}
-                onEdit={isLatest && !selectionMode ? () => handleEdit(item) : undefined}
+                onEdit={
+                  isLatest && !selectionMode
+                    ? () => handleEdit(item)
+                    : undefined
+                }
                 onCopy={() => handleCopy(item.question_content)}
                 selectionKey={`${item.message_id}:question`}
                 isSelected={selectedParts.has('question')}
-                onToggleSelection={() => toggleSelection(item.message_id, 'question')}
+                onToggleSelection={() =>
+                  toggleSelection(item.message_id, 'question')
+                }
               />
             </View>
           </View>
@@ -159,13 +185,16 @@ const MessageRow = React.memo(function MessageRow({
             <ChatBubble
               type='answer'
               msgId={item.message_id}
+              tabId={tabId}
               appId={appId}
               content={item.answer_content}
               isLatest={isLatest}
               onCopy={() => handleCopy(item.answer_content)}
               selectionKey={`${item.message_id}:answer`}
               isSelected={selectedParts.has('answer')}
-              onToggleSelection={() => toggleSelection(item.message_id, 'answer')}
+              onToggleSelection={() =>
+                toggleSelection(item.message_id, 'answer')
+              }
             />
           </View>
         ) : isLatest &&
@@ -199,8 +228,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
 
   const messageIds = useMessageStore(
     useCallback(
-      (state) => state.messageIds[appId] || EMPTY_MESSAGE_IDS,
-      [appId],
+      (state) => state.messageIds[tab.id] || EMPTY_MESSAGE_IDS,
+      [tab.id],
     ),
   );
   const setMessagesInStore = useMessageStore((state) => state.setMessages);
@@ -214,10 +243,14 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     (state) => state.deleteSelectedMessages,
   );
 
-  const cleanAppInfo = useAppStore((state) => state.cleanAppInfo);
   const appInfo = useAppStore((state) => state.apps[appId]);
-  const addMessage = useMessageStore((state) => state.addMessage);
   const removeTabIdMap = useTabIdMapStore((state) => state.removeTabIdMap);
+  const setStoreText = useInputStore((state) => state.setInputText);
+  const clearInput = useInputStore((state) => state.clearInput);
+  const setStoreAttachments = useInputStore((state) => state.setAttachments);
+  const setEditingMessageId = useInputStore(
+    (state) => state.setEditingMessageId,
+  );
 
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -257,17 +290,18 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     await AppSessionService.initSession(tab.id, appId);
   }, [appId, appInfo, tab.id]);
 
+  // 暂时先留着
   // 初始化加载第一页
   const loadInitialMessages = useCallback(async () => {
     try {
-      const data = await MessageRepository.getAllMessages(appId, PAGE_SIZE, 0);
-      setMessagesInStore(appId, data);
+      const data = await MessageRepository.getAllMessages(tab.id, PAGE_SIZE, 0);
+      setMessagesInStore(tab.id, data);
       setHasMore(data.length === PAGE_SIZE);
     } catch (error) {
       console.error('[Main] Failed to load initial messages:', error);
-      setMessagesInStore(appId, []);
+      setMessagesInStore(tab.id, []);
     }
-  }, [appId, setMessagesInStore]);
+  }, [tab.id, setMessagesInStore]);
 
   // 加载更多
   const handleLoadMore = useCallback(async () => {
@@ -278,13 +312,13 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     try {
       const offset = messageIds.length;
       const data = await MessageRepository.getAllMessages(
-        appId,
+        tab.id,
         PAGE_SIZE,
         offset,
       );
 
       if (data.length > 0) {
-        appendOldMessages(appId, data);
+        appendOldMessages(tab.id, data);
       }
 
       setHasMore(data.length === PAGE_SIZE);
@@ -293,39 +327,30 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [appId, messageIds.length, isLoadingMore, hasMore, appendOldMessages]);
+  }, [tab.id, messageIds.length, isLoadingMore, hasMore, appendOldMessages]);
 
   useEffect(() => {
+    // FIXME 暂时不再从 db 加载历史消息，因为每次创建的 tab 都不一样
     // 🌟 无条件执行：确保每次挂载都能同步最新第一页数据，覆盖旧缓存导致的错乱
-    loadInitialMessages();
+    // loadInitialMessages();
     loadAppInfo();
 
-    if (appId) {
-      // 同步更新未读消息 store
-      useUnreadStore.getState().clearUnread(appId, tab.id);
-    }
-
     return () => {
-      // TODO 是否已经保存到书签
-      // cleanMessage(appId);
-      // cleanAppInfo(appId);
-      // removeTabIdMap(tab.id);
+      // 销毁时清除当前 tab 下的历史对话，id 映射，未读消息数量，输出框状态
+      cleanMessage(tab.id);
+      removeTabIdMap(tab.id);
+      useUnreadStore.getState().clearUnread(tab.id);
+      clearInput(tab.id);
     };
-  }, [appId, loadInitialMessages, cleanMessage, loadAppInfo, cleanAppInfo]);
-
-  const setStoreText = useInputStore((state) => state.setInputText);
-  const setStoreAttachments = useInputStore((state) => state.setAttachments);
-  const setEditingMessageId = useInputStore(
-    (state) => state.setEditingMessageId,
-  );
+  }, [tab.id]);
 
   const handleEdit = useCallback(
     (msg: IMessage) => {
       // 填充文字
-      setStoreText(appId, msg.question_content || '');
+      setStoreText(tab.id, msg.question_content || '');
 
       // 设置正在编辑的消息 ID
-      setEditingMessageId(appId, msg.message_id);
+      setEditingMessageId(tab.id, msg.message_id);
 
       // 填充附件
       if (msg.attachments) {
@@ -342,15 +367,15 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
             latitude: att.latitude,
             longitude: att.longitude,
           }));
-          setStoreAttachments(appId, mapped);
+          setStoreAttachments(tab.id, mapped);
         } catch (e) {
           console.error('Failed to parse attachments for edit', e);
         }
       } else {
-        setStoreAttachments(appId, []);
+        setStoreAttachments(tab.id, []);
       }
     },
-    [appId, setStoreText, setStoreAttachments, setEditingMessageId],
+    [tab.id, setStoreText, setStoreAttachments, setEditingMessageId],
   );
 
   const input = useMemo(() => {
@@ -361,6 +386,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     ({ item: messageId, index }: { item: string; index: number }) => {
       return (
         <MessageRow
+          tabId={tab.id}
           appId={appId}
           messageId={messageId}
           index={index}
@@ -373,7 +399,16 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         />
       );
     },
-    [appId, layoutTokens, selectionMode, selectedItems, toggleSelection, handleEdit, handleCopy],
+    [
+      tab.id,
+      appId,
+      layoutTokens,
+      selectionMode,
+      selectedItems,
+      toggleSelection,
+      handleEdit,
+      handleCopy,
+    ],
   );
 
   const ListHeaderComponent = useMemo(() => {
@@ -402,32 +437,36 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
 
   // 处理删除按钮点击
   const handleDeletePress = useCallback(() => {
-    GlobalAlert.alert(t('actr.chat.deleteConfirmTitle'), t('actr.chat.deleteConfirmMsg'), [
-      {
-        text: t('common.cancel'),
-        style: 'cancel',
-        onPress: () => {
-          exitSelectionMode();
+    GlobalAlert.alert(
+      t('actr.chat.deleteConfirmTitle'),
+      t('actr.chat.deleteConfirmMsg'),
+      [
+        {
+          text: t('common.cancel'),
+          style: 'cancel',
+          onPress: () => {
+            exitSelectionMode();
+          },
         },
-      },
-      {
-        text: t('common.delete'),
-        style: 'destructive',
-        onPress: () => {
-          // 使用 setTimeout 避免阻塞 Alert 关闭动画
-          setTimeout(() => {
-            deleteSelectedMessages(appId).catch((error) => {
-              console.error(
-                '[Chat] Failed to delete selected messages:',
-                error,
-              );
-              toastRef.current?.show(t('actr.chat.deleteFailed'));
-            });
-          }, 0);
+        {
+          text: t('common.delete'),
+          style: 'destructive',
+          onPress: () => {
+            // 使用 setTimeout 避免阻塞 Alert 关闭动画
+            setTimeout(() => {
+              deleteSelectedMessages(tab.id).catch((error) => {
+                console.error(
+                  '[Chat] Failed to delete selected messages:',
+                  error,
+                );
+                toastRef.current?.show(t('actr.chat.deleteFailed'));
+              });
+            }, 0);
+          },
         },
-      },
-    ]);
-  }, [appId, deleteSelectedMessages, exitSelectionMode, t]);
+      ],
+    );
+  }, [tab.id, deleteSelectedMessages, exitSelectionMode, t]);
 
   return (
     <View

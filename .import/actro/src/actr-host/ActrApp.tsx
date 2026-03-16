@@ -129,10 +129,10 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     [],
   );
 
-  // 应用启动时从数据库同步未读消息数量
-  useEffect(() => {
-    useUnreadStore.getState().syncFromDatabase();
-  }, []);
+  // FIXME 应用启动时从数据库同步未读消息数量
+  // useEffect(() => {
+  //   useUnreadStore.getState().syncFromDatabase();
+  // }, []);
 
   const handleEngineChange = useCallback(
     (tabId: string, next: Engine | null) => {

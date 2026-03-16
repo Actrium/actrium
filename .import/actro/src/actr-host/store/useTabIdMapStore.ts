@@ -7,10 +7,12 @@ interface currentAppState {
   appUrls: Record<string, string>;
   setTabIdMap: (tabId: string, appId: string, url?: string) => void;
   removeTabIdMap: (tabId: string) => void;
+  /** 根据 appId 查找所有关联的 tabId */
+  getTabIdsByAppId: (appId: string) => string[];
 }
 
 // tab_id -> app_id
-export const useTabIdMapStore = create<currentAppState>((set) => ({
+export const useTabIdMapStore = create<currentAppState>((set, get) => ({
   tabIdMap: {},
   appUrls: {},
   setTabIdMap: (tabId, appId, url) =>
@@ -21,10 +23,13 @@ export const useTabIdMapStore = create<currentAppState>((set) => ({
   removeTabIdMap: (tabId) =>
     set((state) => {
       const newTabIdMap = { ...state.tabIdMap };
-      const appId = newTabIdMap[tabId];
       delete newTabIdMap[tabId];
-      
+
       // We keep appUrls for now as multiple tabs might point to the same app
       return { tabIdMap: newTabIdMap };
     }),
+  getTabIdsByAppId: (appId) => {
+    const { tabIdMap } = get();
+    return Object.keys(tabIdMap).filter((tabId) => tabIdMap[tabId] === appId);
+  },
 }));

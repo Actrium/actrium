@@ -41,7 +41,6 @@ export const initDatabase = async () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category_id INTEGER,                -- 指向书签分类表（可为空，表示未分类）
         app_id TEXT NOT NULL,               -- 指向应用信息表
-        tab_id TEXT,                        -- 对应的 tab ID（用于识别是否已打开）
         created_at INTEGER DEFAULT (strftime('%s','now')), -- 创建时间
         sort_order INTEGER DEFAULT 0,
         FOREIGN KEY (category_id) REFERENCES bookmark_categories (id) ON DELETE CASCADE,
@@ -55,6 +54,7 @@ export const initDatabase = async () => {
         message_id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,       -- 会话 ID
         app_id TEXT NOT NULL,           -- 指向应用信息表
+        tab_id TEXT NOT NULL,           -- 所属 Tab ID
         question_time INTEGER,          -- 提问时间
         question_content TEXT,          -- 提问内容
         answer_time INTEGER,            -- 回答时间
@@ -88,8 +88,8 @@ export const initDatabase = async () => {
 
     // 7. 为 app_chat_history 创建索引以优化未读消息查询
     await db.executeSql(`
-      CREATE INDEX IF NOT EXISTS idx_chat_history_app_read
-      ON app_chat_history (app_id, is_read);
+      CREATE INDEX IF NOT EXISTS idx_chat_history_tab_read
+      ON app_chat_history (tab_id, is_read);
     `, [], true);
 
     console.log('[SQLite] Database tables reset and initialized successfully');

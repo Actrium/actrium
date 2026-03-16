@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useInputStore } from '../../store/useInputStore';
 
 interface StableTextInputProps {
-  appId: string;
+  tabId: string;
   hasAttachments: boolean;
   isSendOnEnter: boolean;
   handleSendRef: React.MutableRefObject<() => void>;
@@ -27,7 +27,7 @@ interface StableTextInputProps {
 }
 
 export const StableTextInput = React.memo(function StableTextInput({
-  appId,
+  tabId,
   hasAttachments,
   isSendOnEnter,
   handleSendRef,
@@ -47,7 +47,7 @@ export const StableTextInput = React.memo(function StableTextInput({
   const inputRef = useRef<TextInput>(null);
   const localTextRef = useRef('');
   const [initialText] = useState(
-    () => useInputStore.getState().inputs[appId]?.text ?? '',
+    () => useInputStore.getState().inputs[tabId]?.text ?? '',
   );
   const [mobileInputHeight, setMobileInputHeight] = useState(MOBILE_MIN_HEIGHT);
   const [isEmpty, setIsEmpty] = useState(initialText.length === 0);
@@ -55,12 +55,12 @@ export const StableTextInput = React.memo(function StableTextInput({
 
   // 不订阅组件重渲染：仅同步 ref，避免输入中被父级 render 打断。
   React.useEffect(() => {
-    localTextRef.current = useInputStore.getState().inputs[appId]?.text ?? '';
-  }, [appId]);
+    localTextRef.current = useInputStore.getState().inputs[tabId]?.text ?? '';
+  }, [tabId]);
 
   React.useEffect(() => {
     const unsubscribe = useInputStore.subscribe((state) => {
-      const text = state.inputs[appId]?.text ?? '';
+      const text = state.inputs[tabId]?.text ?? '';
       if (text !== localTextRef.current) {
         // 外部清空/回填时，直接改原生文本，不触发输入组件重建。
         localTextRef.current = text;
@@ -82,7 +82,7 @@ export const StableTextInput = React.memo(function StableTextInput({
       }
     });
     return unsubscribe;
-  }, [appId]);
+  }, [tabId]);
 
   React.useEffect(() => {
     if (!inputRefExternal) return;
@@ -106,9 +106,9 @@ export const StableTextInput = React.memo(function StableTextInput({
           prev === MOBILE_MIN_HEIGHT ? prev : MOBILE_MIN_HEIGHT,
         );
       }
-      setInputText(appId, text);
+      setInputText(tabId, text);
     },
-    [appId, mobileMode, setInputText],
+    [tabId, mobileMode, setInputText],
   );
 
   const inputStyle = React.useMemo(
