@@ -14,20 +14,13 @@ Native builds target iOS (XCFramework), Android (`.so`), macOS (`.dylib`), Linux
 
 ```
 graphviz-anywhere/
-├── src/                      # C ABI wrapper (graphviz_api.h/.c)
+├── capi/                     # C ABI wrapper (graphviz_api.h/.c)
+├── packages/
+│   ├── rust/                 # Safe Rust crate (graphviz-anywhere)
+│   ├── react-native/         # React Native package
+│   └── web/                  # Wasm-powered web package
 ├── scripts/                  # Per-platform native build scripts
-├── rust/
-│   ├── graphviz-sys/         # Raw FFI bindings (graphviz-anywhere-sys)
-│   └── graphviz/             # Safe Rust wrapper (graphviz-anywhere)
-├── react-native/             # React Native native module
-│   ├── ios/                  # iOS bridge (ObjC)
-│   ├── android/              # Android bridge (Java + JNI)
-│   ├── macos/                # macOS bridge (ObjC)
-│   ├── windows/              # Windows bridge (C++/WinRT)
-│   └── src/                  # TypeScript API
-├── web/                      # WebAssembly renderer package
-│   └── src/                  # Lazy / worker / server deployment presets
-├── example/
+├── examples/
 │   ├── rust/                 # Rust usage example
 │   ├── react-native/         # RN usage example
 │   └── web/                  # Web usage notes
@@ -82,7 +75,7 @@ gv_context_free(ctx);
 
 ```toml
 [dependencies]
-graphviz-anywhere = { path = "rust/graphviz" }
+graphviz-anywhere = { path = "packages/rust" }
 ```
 
 ```rust
@@ -111,16 +104,14 @@ GRAPHVIZ_ANYWHERE_DIR=output/linux-x86_64 cargo build
 
 ## React Native
 
-The package name stays `react-native-graphviz` for ecosystem discoverability, while the repository and Rust surface move under the `graphviz-anywhere` umbrella.
-
 ```bash
-npm install react-native-graphviz
+npm install @kookyleo/graphviz-anywhere-rn
 # or
-yarn add react-native-graphviz
+yarn add @kookyleo/graphviz-anywhere-rn
 ```
 
 ```ts
-import { renderDot, getVersion } from 'react-native-graphviz';
+import { renderDot, getVersion } from '@kookyleo/graphviz-anywhere-rn';
 
 const svg = await renderDot('digraph { mobile -> native }');
 const svg2 = await renderDot('graph { a -- b }', 'neato', 'svg');
@@ -139,15 +130,15 @@ RN compatibility: `react-native >= 0.71.0`, tested with `0.84.x`. `react-native-
 
 ## Web Wasm
 
-The new `web/` package adds Graphviz rendering in browsers and edge runtimes through WebAssembly.
+The `packages/web/` package adds Graphviz rendering in browsers and edge runtimes through WebAssembly.
 
 ```bash
-cd web
+cd packages/web
 npm install
 ```
 
 ```ts
-import { createLazyWasmRenderer } from 'graphviz-anywhere-web';
+import { createLazyWasmRenderer } from '@kookyleo/graphviz-anywhere-web';
 
 const renderer = createLazyWasmRenderer();
 const svg = await renderer.render('digraph { web -> wasm }');
@@ -171,7 +162,7 @@ Use `createLazyWasmRenderer()` for docs sites, product pages, or pages where dia
 Use `createWorkerWasmRenderer()` for diagram editors, whiteboards, or large-graph exploration so layout work stays off the main thread.
 
 ```ts
-import { createWorkerWasmRenderer } from 'graphviz-anywhere-web';
+import { createWorkerWasmRenderer } from '@kookyleo/graphviz-anywhere-web';
 
 const renderer = createWorkerWasmRenderer({ timeoutMs: 8000 });
 const svg = await renderer.render('digraph { editor -> worker -> svg }');
@@ -182,7 +173,7 @@ const svg = await renderer.render('digraph { editor -> worker -> svg }');
 Use `createServerWasmRenderer()` for SSR, preview APIs, or edge handlers that render repeatedly and want to amortize Wasm startup cost across requests.
 
 ```ts
-import { createServerWasmRenderer } from 'graphviz-anywhere-web';
+import { createServerWasmRenderer } from '@kookyleo/graphviz-anywhere-web';
 
 const renderer = createServerWasmRenderer();
 await renderer.preload();
@@ -215,9 +206,9 @@ Renaming the project to `graphviz-anywhere` is reasonable because the repository
 
 The migration strategy in this repository is:
 
-- Rust crates are renamed to `graphviz-anywhere` and `graphviz-anywhere-sys`
-- the React Native npm package stays `react-native-graphviz`
-- the repository path and release URLs can be renamed later without forcing another API rename right now
+- the Rust crate is published as `graphviz-anywhere`
+- the React Native npm package is published as `@kookyleo/graphviz-anywhere-rn`
+- the Web npm package is published as `@kookyleo/graphviz-anywhere-web`
 
 ## Testing
 
@@ -226,7 +217,7 @@ The migration strategy in this repository is:
 Run vitest for the web package:
 
 ```bash
-cd web
+cd packages/web
 npm install
 npm test -- --run          # Run once
 npm test                   # Watch mode
@@ -248,22 +239,13 @@ Run cargo tests for Rust bindings:
 # Build native C library first (macOS example)
 ./scripts/build-macos.sh
 
-# Run tests with environment variables
-cd rust/graphviz
-GRAPHVIZ_NATIVE_DIR=/path/to/native/output \
-  DYLD_LIBRARY_PATH=/path/to/native/output/lib \
-  cargo test --lib
-
-# Or for graphviz-sys
-cd rust/graphviz-sys
-GRAPHVIZ_NATIVE_DIR=/path/to/native/output \
-  DYLD_LIBRARY_PATH=/path/to/native/output/lib \
-  cargo test --lib
+# Run tests from the consolidated Rust crate
+cd packages/rust
+GRAPHVIZ_ANYWHERE_DIR=/path/to/native/output cargo test --lib
 ```
 
 Test coverage includes:
-- 31 tests for graphviz crate (Engine, Format, Error, GraphvizContext)
-- 6 tests for graphviz-sys crate (FFI constants, error codes)
+- tests for the Rust crate (Engine, Format, Error, GraphvizContext)
 
 All Rust tests verify type safety, error handling, and trait implementations.
 

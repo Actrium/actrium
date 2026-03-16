@@ -1,6 +1,6 @@
 {
   "name": "graphviz-anywhere",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Graphviz for native runtimes and the web",
   "private": true,
   "type": "module",
@@ -11,12 +11,12 @@
     "url": "https://github.com/nicekook/graphviz-anywhere.git"
   },
   "workspaces": [
-    "packages/core-js",
-    "react-native",
-    "web"
+    "packages/react-native",
+    "packages/web"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
+    "check:publish:npm": "node scripts/check-npm-publish.mjs packages/web packages/react-native",
     "typecheck": "npm run typecheck --workspaces",
     "lint": "npm run lint --workspaces",
     "fmt": "npm run fmt --workspaces",

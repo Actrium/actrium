@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "packages/rust",
+  "examples/rust",
+]
+default-members = ["packages/rust"]
+resolver = "2"
