@@ -13,8 +13,12 @@ import {
   ActivityIndicator,
   NativeModules,
   StyleSheet,
-  Animated,
 } from 'react-native';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { logger } from '../logger';
@@ -45,6 +49,7 @@ import ExtensionPanel from './components/ExtensionPanel';
 import { ChatHeader } from './components/ChatHeader';
 import { exitFullscreen } from '../native-bridge/tab/TabModule';
 import { useTabNativeEvents } from './hooks/useTabNativeEvents';
+import { useExtensionPanelGesture } from './hooks/useExtensionPanelGesture';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -100,8 +105,22 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const pendingUpdateRef = useRef(false);
   const lastBatchesRef = useRef<number>(0);
 
-  // 中间窗口的动画值（由 ExtensionPanel 控制）
-  const centerAnimValue = useRef(new Animated.Value(0)).current;
+  // 中间窗口的动画值（Phone 模式由手势 + ExtensionPanel 驱动）
+  const centerAnimValue = useSharedValue(0);
+  // 面板滑动位置（由 hook 和 PhoneExtensionPanel 共享）
+  const slideAnim = useSharedValue(0);
+
+  // 手势结束后同步面板可见状态（仅 Phone 模式使用）
+  const handlePanelVisibilityChange = useCallback((visible: boolean) => {
+    setLocalLeftPanelVisible(visible);
+  }, []);
+
+  // 扩展面板手势（Phone 模式：右滑打开/左滑关闭；Tablet 模式：空手势）
+  const { gesture: panelGesture, isGesturing } = useExtensionPanelGesture({
+    slideAnim,
+    centerAnimValue,
+    onVisibilityChange: handlePanelVisibilityChange,
+  });
 
   React.useEffect(() => {
     isActiveRef.current = isActive;
@@ -369,6 +388,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   const main = React.useMemo(() => <Main />, []);
 
+  // 中间对话区域的动画样式（跟随 centerAnimValue 偏移）
+  const centerAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: centerAnimValue.value }],
+  }));
+
   if (isActive && gate.status === 'blocked') {
     return (
       <View
@@ -454,55 +478,52 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   return (
     <TabProvider tab={tab}>
-      <View style={styles.screen}>
-        <View style={[threeColumnStyle, { marginTop: sheetTopOffset }]}>
-          {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
-          {/* {isLeftPanelVisible && (
-            <View
-              style={[
-                styles.leftPanel,
-                {
-                  width: leftWidth,
-                },
-              ]}
-            >
-              {leftPanel}
-            </View>
-          )} */}
+      <GestureDetector gesture={panelGesture}>
+        <View style={styles.screen}>
+          <View style={[threeColumnStyle, { marginTop: sheetTopOffset }]}>
+            {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
+            {/* {isLeftPanelVisible && (
+              <View
+                style={[
+                  styles.leftPanel,
+                  {
+                    width: leftWidth,
+                  },
+                ]}
+              >
+                {leftPanel}
+              </View>
+            )} */}
 
-          {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
-          <ChatHeader
-            onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
-            onRightPress={() => exitFullscreen()}
-            appId={appId}
-            leftDisabled={!appId}
-            leftActive={localLeftPanelVisible}
-            showLeftButton={Boolean(appId)}
-            appName={appId ? appName : '添加应用'}
-            includeSafeTopInset={false}
-          />
+            {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
+            <ChatHeader
+              onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
+              onRightPress={() => exitFullscreen()}
+              appId={appId}
+              leftDisabled={!appId}
+              leftActive={localLeftPanelVisible}
+              showLeftButton={Boolean(appId)}
+              appName={appId ? appName : '添加应用'}
+              includeSafeTopInset={false}
+            />
 
-          {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
-          <Animated.View
-            style={[
-              styles.centerColumn,
-              {
-                transform: [{ translateX: centerAnimValue }],
-              },
-            ]}
-          >
-            {main}
-          </Animated.View>
+            {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
+            <Animated.View style={[styles.centerColumn, centerAnimStyle]}>
+              {main}
+            </Animated.View>
 
-          {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入 */}
-          <ExtensionPanel
-            visible={localLeftPanelVisible}
-            content={rightPanel}
-            width={rightWidth}
-            centerAnimValue={centerAnimValue}
-          />
+            {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入（支持手势） */}
+            <ExtensionPanel
+              visible={localLeftPanelVisible}
+              content={rightPanel}
+              width={rightWidth}
+              centerAnimValue={centerAnimValue}
+              slideAnim={slideAnim}
+              isGesturing={isGesturing}
+            />
+          </View>
         </View>
-      </View>
+      </GestureDetector>
     </TabProvider>
   );
 };
