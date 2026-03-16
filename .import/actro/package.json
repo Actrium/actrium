@@ -12,8 +12,7 @@
   },
   "workspaces": [
     "packages/core-js",
-    "packages/js/web",
-    "packages/react-native",
+    "react-native",
     "web"
   ],
   "scripts": {
