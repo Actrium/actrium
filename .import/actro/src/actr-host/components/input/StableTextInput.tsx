@@ -146,6 +146,9 @@ export const StableTextInput = React.memo(function StableTextInput({
   );
 
   const shouldShowPlaceholder = isEmpty;
+  const enterKeyHint = isSendOnEnter ? 'send' : 'enter';
+  const returnKeyType = isSendOnEnter ? 'send' : 'default';
+  const submitBehavior = isSendOnEnter ? 'blurAndSubmit' : 'newline';
 
   return (
     <View style={styles.container}>
@@ -166,7 +169,10 @@ export const StableTextInput = React.memo(function StableTextInput({
         defaultValue={initialText}
         onChangeText={handleChangeText}
         onContentSizeChange={handleContentSizeChange}
-        // send_on_enter=true 时，Enter 提交发送；false 时，Enter 插入换行。
+        // 根据发送模式同步键盘右下角语义，确保 iOS / Android 都显示正确的发送/回车动作。
+        enterKeyHint={enterKeyHint}
+        returnKeyType={returnKeyType}
+        submitBehavior={submitBehavior}
         blurOnSubmit={isSendOnEnter}
         onSubmitEditing={() => {
           if (isSendOnEnter) {
