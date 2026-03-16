@@ -170,7 +170,7 @@ export function useActrConnection({
       return res;
     } catch (e: any) {
       useMessageStore.getState().updateMessage(
-        appId,
+        tabId,
         message_id,
         {
           progress: Progress.failed,

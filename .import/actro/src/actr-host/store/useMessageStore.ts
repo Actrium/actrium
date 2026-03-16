@@ -5,34 +5,34 @@ import { MessageRepository } from '../../repository/MessageRepository';
 type MessagePart = 'attachments' | 'question' | 'answer';
 
 interface MessageState {
-  // Key is appId
+  // Key is tabId
   messageIds: Record<string, string[]>;
   messageById: Record<string, Record<string, IMessage>>;
-  getMessage: (appId: string, messageId: string) => IMessage | undefined;
-  setMessages: (appId: string, msgs: IMessage[]) => void;
+  getMessage: (tabId: string, messageId: string) => IMessage | undefined;
+  setMessages: (tabId: string, msgs: IMessage[]) => void;
   // 新消息加到开头（inverted 列表最下方）
-  addMessage: (appId: string, msg: IMessage) => void;
+  addMessage: (tabId: string, msg: IMessage) => void;
   // 加载更多（旧消息）加到末尾（inverted 列表最上方）
-  appendOldMessages: (appId: string, msgs: IMessage[]) => void;
+  appendOldMessages: (tabId: string, msgs: IMessage[]) => void;
   updateMessage: (
-    appId: string,
+    tabId: string,
     messageId: string,
     updates: Partial<IMessage>,
     persist?: boolean,
   ) => void;
-  deleteMessage: (appId: string, messageId: string) => void;
-  cleanMessage: (appId: string) => void;
+  deleteMessage: (tabId: string, messageId: string) => void;
+  cleanMessage: (tabId: string) => void;
   // 选择模式相关 删除时使用
   selectionMode: boolean;
   selectedItems: Record<string, Set<MessagePart>>;
   enterSelectionMode: (
     messageId: string,
-    appId?: string,
+    tabId?: string,
     defaultPart?: MessagePart,
   ) => void;
   toggleSelection: (messageId: string, part: MessagePart) => void;
   exitSelectionMode: () => void;
-  deleteSelectedMessages: (appId: string) => Promise<void>;
+  deleteSelectedMessages: (tabId: string) => Promise<void>;
 }
 
 const buildMessageIndex = (msgs: IMessage[]) => {
@@ -56,28 +56,28 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   messageById: {},
   selectionMode: false,
   selectedItems: {},
-  getMessage: (appId, messageId) => get().messageById[appId]?.[messageId],
-  setMessages: (appId, msgs) => {
+  getMessage: (tabId, messageId) => get().messageById[tabId]?.[messageId],
+  setMessages: (tabId, msgs) => {
     const { ids, byId } = buildMessageIndex(msgs);
     set((state) => ({
-      messageIds: { ...state.messageIds, [appId]: ids },
-      messageById: { ...state.messageById, [appId]: byId },
+      messageIds: { ...state.messageIds, [tabId]: ids },
+      messageById: { ...state.messageById, [tabId]: byId },
     }));
   },
-  addMessage: (appId, msg) => {
+  addMessage: (tabId, msg) => {
     set((state) => {
-      const currentIds = state.messageIds[appId] || [];
-      const currentById = state.messageById[appId] || {};
+      const currentIds = state.messageIds[tabId] || [];
+      const currentById = state.messageById[tabId] || {};
       const exists = !!currentById[msg.message_id];
 
       return {
         messageIds: {
           ...state.messageIds,
-          [appId]: exists ? currentIds : [msg.message_id, ...currentIds],
+          [tabId]: exists ? currentIds : [msg.message_id, ...currentIds],
         },
         messageById: {
           ...state.messageById,
-          [appId]: {
+          [tabId]: {
             ...currentById,
             [msg.message_id]: msg,
           },
@@ -90,10 +90,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       console.error('[useMessageStore] Failed to save added message:', e),
     );
   },
-  appendOldMessages: (appId, msgs) =>
+  appendOldMessages: (tabId, msgs) =>
     set((state) => {
-      const currentIds = state.messageIds[appId] || [];
-      const currentById = state.messageById[appId] || {};
+      const currentIds = state.messageIds[tabId] || [];
+      const currentById = state.messageById[tabId] || {};
       const appendIds: string[] = [];
       const nextById = { ...currentById };
 
@@ -109,19 +109,19 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       return {
         messageIds: {
           ...state.messageIds,
-          [appId]: [...currentIds, ...appendIds],
+          [tabId]: [...currentIds, ...appendIds],
         },
         messageById: {
           ...state.messageById,
-          [appId]: nextById,
+          [tabId]: nextById,
         },
       };
     }),
-  updateMessage: (appId, messageId, updates, persist = false) => {
+  updateMessage: (tabId, messageId, updates, persist = false) => {
     let persistedMsg: IMessage | undefined;
 
     set((state) => {
-      const currentById = state.messageById[appId] || {};
+      const currentById = state.messageById[tabId] || {};
       const currentMsg = currentById[messageId];
       if (!currentMsg) return state;
 
@@ -131,7 +131,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       return {
         messageById: {
           ...state.messageById,
-          [appId]: {
+          [tabId]: {
             ...currentById,
             [messageId]: updatedMsg,
           },
@@ -145,10 +145,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       );
     }
   },
-  deleteMessage: (appId, messageId) => {
+  deleteMessage: (tabId, messageId) => {
     set((state) => {
-      const currentIds = state.messageIds[appId] || [];
-      const currentById = state.messageById[appId] || {};
+      const currentIds = state.messageIds[tabId] || [];
+      const currentById = state.messageById[tabId] || {};
       if (!currentById[messageId]) return state;
 
       const nextById = { ...currentById };
@@ -157,11 +157,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       return {
         messageIds: {
           ...state.messageIds,
-          [appId]: currentIds.filter((id) => id !== messageId),
+          [tabId]: currentIds.filter((id) => id !== messageId),
         },
         messageById: {
           ...state.messageById,
-          [appId]: nextById,
+          [tabId]: nextById,
         },
       };
     });
@@ -171,25 +171,25 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       console.error('[useMessageStore] Failed to delete message from DB:', e),
     );
   },
-  cleanMessage: (appId) =>
+  cleanMessage: (tabId) =>
     set((state) => {
       const newMessageIds = { ...state.messageIds };
       const newMessageById = { ...state.messageById };
-      delete newMessageIds[appId];
-      delete newMessageById[appId];
+      delete newMessageIds[tabId];
+      delete newMessageById[tabId];
       return { messageIds: newMessageIds, messageById: newMessageById };
     }),
   enterSelectionMode: (
     messageId: string,
-    appId?: string,
+    tabId?: string,
     defaultPart?: MessagePart,
   ) => {
     const state = get();
 
-    // 如果没有提供 appId，尝试从所有消息中查找
+    // 如果没有提供 tabId，尝试从所有消息中查找
     let message: IMessage | undefined;
-    if (appId) {
-      message = state.messageById[appId]?.[messageId];
+    if (tabId) {
+      message = state.messageById[tabId]?.[messageId];
     } else {
       for (const byId of Object.values(state.messageById)) {
         message = byId[messageId];
@@ -248,10 +248,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       selectedItems: {},
     });
   },
-  deleteSelectedMessages: async (appId: string) => {
+  deleteSelectedMessages: async (tabId: string) => {
     const state = get();
     const selectedItems = state.selectedItems;
-    const byId = state.messageById[appId] || {};
+    const byId = state.messageById[tabId] || {};
 
     // 收集需要删除的消息和需要更新的消息
     const messagesToDelete: string[] = [];
@@ -291,8 +291,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
     // 批量更新 store（一次性更新，减少重新渲染）
     set((innerState) => {
-      const currentIds = innerState.messageIds[appId] || [];
-      const currentById = innerState.messageById[appId] || {};
+      const currentIds = innerState.messageIds[tabId] || [];
+      const currentById = innerState.messageById[tabId] || {};
 
       const nextById = { ...currentById };
 
@@ -310,11 +310,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       return {
         messageIds: {
           ...innerState.messageIds,
-          [appId]: currentIds.filter((id) => !messagesToDelete.includes(id)),
+          [tabId]: currentIds.filter((id) => !messagesToDelete.includes(id)),
         },
         messageById: {
           ...innerState.messageById,
-          [appId]: nextById,
+          [tabId]: nextById,
         },
         selectionMode: false,
         selectedItems: {},

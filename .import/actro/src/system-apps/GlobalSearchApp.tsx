@@ -377,7 +377,6 @@ export default function GlobalSearchApp() {
         name: b.app_name || '',
         logo: b.logo || undefined,
         appId: b.app_id,
-        tabId: b.tab_id || undefined,
         url: b.url || undefined,
       }));
 

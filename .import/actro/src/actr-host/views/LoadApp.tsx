@@ -20,7 +20,6 @@ import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { useTab } from '../contexts/TabContext';
 import { extractAppIdFromUrl } from '../utils';
 import { AppSessionService } from '../../services/AppSessionService';
-import { BookmarkRepository } from '../../repository/BookmarkRepository';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../styles/shadows';
 import { setTabBookmarkStatus } from '../../../src/native-bridge/tab/TabModule';
@@ -165,8 +164,6 @@ const LoadApp = () => {
         }
 
         setTabIdMap(tabCtx.tab.id, appId, url);
-        // 将收藏表中对应的收藏项 tab_id 更新为当前 tab
-        void BookmarkRepository.updateTabId(appId, tabCtx.tab.id);
       } catch (error) {
         console.error('[LoadApp] Failed to resolve app from url:', error);
         GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));

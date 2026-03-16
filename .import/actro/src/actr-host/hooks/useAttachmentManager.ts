@@ -7,20 +7,20 @@ import RNFS from 'react-native-fs';
 import { Utils } from '../../utils/utils';
 import { GlobalAlert } from '../../../src/components';
 
-export const useAttachmentManager = (appId: string) => {
+export const useAttachmentManager = (tabId: string) => {
   const { t } = useTranslation();
   const attachments = useInputStore(
-    (state) => state.inputs[appId]?.attachments || EMPTY_ATTACHMENTS,
+    (state) => state.inputs[tabId]?.attachments || EMPTY_ATTACHMENTS,
   );
   const setStoreAttachments = useInputStore((state) => state.setAttachments);
 
   const removeAttachment = (id: string) => {
     const next = attachments.filter((item) => item.id !== id);
-    setStoreAttachments(appId, next);
+    setStoreAttachments(tabId, next);
   };
 
   const clearAttachments = () => {
-    setStoreAttachments(appId, []);
+    setStoreAttachments(tabId, []);
   };
 
   const copyAssetToTemp = async (
@@ -174,7 +174,7 @@ export const useAttachmentManager = (appId: string) => {
       );
     }
 
-    setStoreAttachments(appId, [...currentList, ...newItemsToAdd]);
+    setStoreAttachments(tabId, [...currentList, ...newItemsToAdd]);
   };
 
   const handleConfirmLocation = async (data: {
@@ -214,7 +214,7 @@ export const useAttachmentManager = (appId: string) => {
       aspect_ratio: 1,
     };
 
-    setStoreAttachments(appId, [locationItem]);
+    setStoreAttachments(tabId, [locationItem]);
   };
 
   return {

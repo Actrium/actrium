@@ -5,7 +5,6 @@ export type TBookmarkItem = {
   id: number;
   category_id: number | null;
   app_id: string;
-  tab_id: string | null;
   created_at: number;
   sort_order: number;
   // 以下是 JOIN apps 表后得到的字段
@@ -46,7 +45,6 @@ export class BookmarkRepository {
           bi.id,
           bi.category_id,
           bi.app_id,
-          bi.tab_id,
           bi.created_at,
           bi.sort_order,
           a.app_name,
@@ -122,47 +120,33 @@ export class BookmarkRepository {
   /**
    * 添加一个书签
    * category_id 可选，为空时表示未分类
-   * tab_id 可选，用于识别对应的 tab
    */
   static async addBookmark({
     app_id,
-    tab_id,
     category_id,
     sort_order = 0,
   }: {
     app_id: string;
-    tab_id?: string | null;
     category_id?: number | null;
     sort_order?: number;
   }) {
     return await db.executeSql(
-      'INSERT INTO bookmark_items (category_id, app_id, tab_id, sort_order) VALUES (?, ?, ?, ?)',
-      [category_id ?? null, app_id, tab_id ?? null, sort_order]
+      'INSERT INTO bookmark_items (category_id, app_id, sort_order) VALUES (?, ?, ?)',
+      [category_id ?? null, app_id, sort_order]
     );
   }
 
   /**
-   * 删除一个书签
-   */
-  static async removeBookmark(tabId: string) {
-    return await db.executeSql('DELETE FROM bookmark_items WHERE tab_id = ?', [tabId]);
-  }
-
-  /**
-   * 按书签主键删除，避免 tab_id 为空时无法删除
+   * 删除一个书签（按主键）
    */
   static async removeBookmarkById(id: number) {
     return await db.executeSql('DELETE FROM bookmark_items WHERE id = ?', [id]);
   }
 
   /**
-   * 更新收藏项的 tab_id（按 app_id 匹配）
-   * 用于应用加载成功后，将当前 tab 与收藏记录关联
+   * 按 app_id 删除书签
    */
-  static async updateTabId(appId: string, tabId: string) {
-    return await db.executeSql(
-      'UPDATE bookmark_items SET tab_id = ? WHERE app_id = ?',
-      [tabId, appId]
-    );
+  static async removeBookmarkByAppId(appId: string) {
+    return await db.executeSql('DELETE FROM bookmark_items WHERE app_id = ?', [appId]);
   }
 }

@@ -45,6 +45,7 @@ interface ChatBubbleProps {
   onCopy?: () => void;
   isLatest?: boolean;
   msgId?: string;
+  tabId?: string;
   appId?: string;
   selectionKey?: string;
   isSelected?: boolean;
@@ -62,6 +63,7 @@ export default function ChatBubble({
   onCopy,
   isLatest = false,
   msgId,
+  tabId,
   appId,
   selectionKey,
   isSelected = false,
@@ -224,10 +226,10 @@ export default function ChatBubble({
             'appId:',
             appId,
           );
-          if (msgId && appId) {
+          if (msgId && tabId) {
             const defaultPart =
               attachments && !content ? 'attachments' : undefined;
-            enterSelectionMode(msgId, appId, defaultPart);
+            enterSelectionMode(msgId, tabId, defaultPart);
           }
         },
         icon: <Icon type='delete' size={16} color='#FF3B30' />,
@@ -243,7 +245,7 @@ export default function ChatBubble({
     isSmall,
     handleReadAloud,
     msgId,
-    appId,
+    tabId,
     enterSelectionMode,
     attachments,
     content,
@@ -507,7 +509,7 @@ export default function ChatBubble({
                 <DropdownMenuItem
                   onPress={() => {
                     if (msgId && appId) {
-                      enterSelectionMode(msgId, appId);
+                      enterSelectionMode(msgId, tabId);
                     }
                     close();
                   }}
@@ -523,6 +525,7 @@ export default function ChatBubble({
       <FeedbackFormModal
         visible={showFeedbackModal}
         onClose={() => setShowFeedbackModal(false)}
+        tabId={tabId}
         appId={appId}
         messageId={msgId}
       />

@@ -493,7 +493,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
                   <View style={styles.mobileTextInputWrap}>
                     <StableTextInput
-                      appId={appId}
+                      tabId={tab.id}
                       hasAttachments={attachments.length > 0}
                       isSendOnEnter={isSendOnEnter}
                       handleSendRef={handleSendRef}
@@ -799,8 +799,8 @@ const styles = StyleSheet.create({
   },
   unreadBadge: {
     position: 'absolute',
-    top: -2,
-    right: -2,
+    top: -12,
+    right: -12,
     backgroundColor: '#FF3B30',
     borderRadius: 10,
     minWidth: 20,
