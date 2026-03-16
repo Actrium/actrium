@@ -30,6 +30,16 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     const { top: topInsetRaw } = useSafeAreaInsets();
     const topInset = includeSafeTopInset ? topInsetRaw : 0;
     const hasAppId = Boolean(appId);
+    const [showCloseButton, setShowCloseButton] = React.useState(false);
+
+    React.useEffect(() => {
+      if (hasAppId) {
+        setShowCloseButton(false);
+        return;
+      }
+      const timer = setTimeout(() => setShowCloseButton(true), 500);
+      return () => clearTimeout(timer);
+    }, [hasAppId]);
 
     return (
       <View
@@ -63,12 +73,23 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             {appName}
           </Text>
         )}
-        <HostIconButton
-          iconType={hasAppId ? 'history' : 'close'}
-          iconSize={hasAppId ? 22 : 16}
-          onPress={hasAppId ? () => {} : onRightPress}
-          style={styles.headerButton}
-        />
+        {hasAppId ? (
+          <HostIconButton
+            iconType='history'
+            iconSize={22}
+            onPress={() => {}}
+            style={styles.headerButton}
+          />
+        ) : showCloseButton ? (
+          <HostIconButton
+            iconType='close'
+            iconSize={16}
+            onPress={onRightPress}
+            style={styles.headerButton}
+          />
+        ) : (
+          <View style={styles.headerButtonPlaceholder} />
+        )}
       </View>
     );
   },
