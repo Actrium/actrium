@@ -8,13 +8,11 @@ import {
   TouchableOpacity,
   Pressable,
   TouchableWithoutFeedback,
-  Dimensions,
   ActivityIndicator,
   Animated,
-  Easing,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
@@ -22,6 +20,7 @@ import { submitFeedback, FeedbackContext } from '../../api/feedback';
 import { useMessageStore } from '../store/useMessageStore';
 import dayjs from 'dayjs';
 import { GlobalAlert } from '../../../src/components';
+import { TABLET_MIN_WIDTH } from '../../utils/device';
 
 interface Category {
   id: string;
@@ -54,15 +53,16 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   messageId,
 }) => {
   const { t } = useTranslation();
+  const { width } = useWindowDimensions();
+  const isPhone = width < TABLET_MIN_WIDTH;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState('');
   const [status, setStatus] = useState<
     'idle' | 'submitting' | 'success' | 'error'
   >('idle');
 
-  const targetMsg = useMessageStore(
-    (state) =>
-      appId && messageId ? state.messageById[appId]?.[messageId] : undefined,
+  const targetMsg = useMessageStore((state) =>
+    appId && messageId ? state.messageById[appId]?.[messageId] : undefined,
   );
 
   const animValue = React.useRef(new Animated.Value(0)).current;
@@ -96,7 +96,10 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
 
   const handleSubmit = async () => {
     if (selectedIds.size === 0) {
-      GlobalAlert.alert(t('common.hint'), t('actr.chat.selectCategoryTip') || '请至少选择一个举报分类');
+      GlobalAlert.alert(
+        t('common.hint'),
+        t('actr.chat.selectCategoryTip') || '请至少选择一个举报分类',
+      );
       return;
     }
 
@@ -162,10 +165,12 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   if (status === 'success') {
     return (
       <Modal visible={visible} transparent animationType='fade'>
-        <View style={styles.backdrop}>
+        <View style={[styles.backdrop, isPhone && styles.backdropPhone]}>
           <View style={styles.successContainer}>
             <Icon type='copy' size={40} color='#34C759' />
-            <Text style={styles.successText}>{t('actr.chat.feedbackSuccess')}</Text>
+            <Text style={styles.successText}>
+              {t('actr.chat.feedbackSuccess')}
+            </Text>
           </View>
         </View>
       </Modal>
@@ -181,11 +186,12 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
     >
       <KeyboardAvoidingView behavior='padding' style={{ flex: 1 }}>
         <TouchableWithoutFeedback onPress={handleClose}>
-          <View style={styles.backdrop}>
+          <View style={[styles.backdrop, isPhone && styles.backdropPhone]}>
             <TouchableWithoutFeedback>
               <Animated.View
                 style={[
                   styles.container,
+                  isPhone && styles.containerPhone,
                   {
                     transform: [{ translateY }],
                   },
@@ -194,21 +200,28 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                 <ScrollView
                   bounces={false}
                   showsVerticalScrollIndicator={false}
-                  contentContainerStyle={styles.scrollContent}
+                  contentContainerStyle={[
+                    styles.scrollContent,
+                    isPhone && styles.scrollContentPhone,
+                  ]}
                   keyboardShouldPersistTaps='handled'
                 >
-                  <View style={styles.header}>
-                    <Text style={styles.title}>{t('actr.chat.feedbackTitle')}</Text>
-                    <TouchableOpacity
-                      onPress={handleClose}
-                      style={styles.closeButton}
-                    >
-                      <Icon type='close' size={20} color='#999' />
-                    </TouchableOpacity>
+                  <View style={[styles.header, isPhone && styles.headerPhone]}>
+                    <Text style={[styles.title, isPhone && styles.titlePhone]}>
+                      {t('actr.chat.feedbackTitle')}
+                    </Text>
+                    {!isPhone && (
+                      <TouchableOpacity
+                        onPress={handleClose}
+                        style={styles.closeButton}
+                      >
+                        <Icon type='close' size={20} color='#999' />
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   <View style={styles.section}>
-                    <View style={styles.grid}>
+                    <View style={[styles.grid, isPhone && styles.gridPhone]}>
                       {CATEGORIES.map((cat) => {
                         const isSelected = selectedIds.has(cat.id);
                         return (
@@ -217,12 +230,16 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                             onPress={() => toggleCategory(cat.id)}
                             style={[
                               styles.tag,
+                              isPhone && styles.tagPhone,
+                              isPhone && { width: undefined },
                               isSelected && styles.tagSelected,
+                              isSelected && isPhone && styles.tagSelectedPhone,
                             ]}
                           >
                             <Text
                               style={[
                                 styles.tagText,
+                                isPhone && styles.tagTextPhone,
                                 isSelected && styles.tagTextSelected,
                               ]}
                               numberOfLines={1}
@@ -236,9 +253,14 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   </View>
 
                   <View style={styles.section}>
-                    <View style={styles.feedbackInputWrapper}>
+                    <View
+                      style={[
+                        styles.feedbackInputWrapper,
+                        isPhone && styles.feedbackInputWrapperPhone,
+                      ]}
+                    >
                       <TextInput
-                        style={styles.input}
+                        style={[styles.input, isPhone && styles.inputPhone]}
                         placeholder={t('actr.chat.feedbackPlaceholder')}
                         placeholderTextColor='#999'
                         multiline
@@ -251,20 +273,36 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   </View>
 
                   {status === 'error' && (
-                    <Text style={styles.errorText}>{t('actr.chat.feedbackFailed')}</Text>
+                    <Text style={styles.errorText}>
+                      {t('actr.chat.feedbackFailed')}
+                    </Text>
                   )}
 
-                  <View style={styles.footer}>
+                  <View style={[styles.footer, isPhone && styles.footerPhone]}>
                     <TouchableOpacity
-                      style={[styles.button, styles.cancelButton]}
+                      style={[
+                        styles.button,
+                        styles.cancelButton,
+                        isPhone && styles.buttonPhone,
+                        isPhone && styles.cancelButtonPhone,
+                      ]}
                       onPress={handleClose}
                     >
-                      <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+                      <Text
+                        style={[
+                          styles.cancelButtonText,
+                          isPhone && styles.cancelButtonTextPhone,
+                        ]}
+                      >
+                        {t('common.cancel')}
+                      </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[
                         styles.button,
                         styles.submitButton,
+                        isPhone && styles.buttonPhone,
+                        isPhone && styles.submitButtonPhone,
                         status === 'submitting' && styles.buttonDisabled,
                       ]}
                       onPress={handleSubmit}
@@ -273,7 +311,14 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                       {status === 'submitting' ? (
                         <ActivityIndicator color='#fff' size='small' />
                       ) : (
-                        <Text style={styles.submitButtonText}>{t('actr.chat.submit')}</Text>
+                        <Text
+                          style={[
+                            styles.submitButtonText,
+                            isPhone && styles.submitButtonTextPhone,
+                          ]}
+                        >
+                          {t('actr.chat.submit')}
+                        </Text>
                       )}
                     </TouchableOpacity>
                   </View>
@@ -295,10 +340,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 40,
   },
+  backdropPhone: {
+    paddingVertical: 20,
+  },
   container: {
     width: '90%',
     maxWidth: 500,
-    // maxHeight: '85%',
     backgroundColor: '#fff',
     borderRadius: 34,
     overflow: 'hidden',
@@ -308,8 +355,15 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 5,
   },
+  containerPhone: {
+    width: '90%',
+    borderRadius: 34,
+  },
   scrollContent: {
     padding: 24,
+  },
+  scrollContentPhone: {
+    padding: 14,
   },
 
   header: {
@@ -318,10 +372,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
+  headerPhone: {
+    marginBottom: 0,
+  },
   title: {
     fontSize: 20,
     fontWeight: '700',
     color: '#1A1A1A',
+  },
+  titlePhone: {
+    fontSize: 17,
+    color: '#292929',
+    marginTop: 8,
+    marginLeft: 8,
+    marginRight: 8,
+    marginBottom: 24,
   },
   closeButton: {
     padding: 4,
@@ -334,8 +399,11 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
   },
+  gridPhone: {
+    gap: 10,
+  },
   tag: {
-    width: '48.5%', // 2 columns with gap
+    width: '48.5%',
     height: 48,
     backgroundColor: '#F5F5F7',
     borderRadius: 34,
@@ -345,14 +413,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'transparent',
   },
+  tagPhone: {
+    height: 28,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
   tagSelected: {
     backgroundColor: '#007AFF',
     borderColor: 'transparent',
+  },
+  tagSelectedPhone: {
+    backgroundColor: '#34A8FB',
   },
   tagText: {
     fontSize: 14,
     color: '#48484A',
     fontWeight: '500',
+  },
+  tagTextPhone: {
+    fontSize: 15,
   },
   tagTextSelected: {
     color: '#fff',
@@ -364,6 +443,10 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     padding: 0,
   },
+  inputPhone: {
+    fontSize: 17,
+    minHeight: 71,
+  },
   feedbackInputWrapper: {
     backgroundColor: '#F5F5F7',
     borderRadius: 34,
@@ -371,11 +454,19 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 9,
   },
+  feedbackInputWrapperPhone: {
+    backgroundColor: '#E3E3E3',
+    borderRadius: 26,
+  },
 
   footer: {
     flexDirection: 'row',
     gap: 16,
     marginTop: 8,
+  },
+  footerPhone: {
+    gap: 12,
+    marginTop: 4,
   },
   button: {
     flex: 1,
@@ -384,21 +475,37 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  buttonPhone: {
+    height: 48,
+    borderRadius: 24,
+  },
   cancelButton: {
     backgroundColor: '#F2F2F7',
+  },
+  cancelButtonPhone: {
+    backgroundColor: '#D9D9D9',
   },
   cancelButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#48484A',
   },
+  cancelButtonTextPhone: {
+    fontSize: 15,
+  },
   submitButton: {
     backgroundColor: '#007AFF',
+  },
+  submitButtonPhone: {
+    backgroundColor: '#34A8FB',
   },
   submitButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  submitButtonTextPhone: {
+    fontSize: 15,
   },
   buttonDisabled: {
     opacity: 0.5,
