@@ -1,21 +1,38 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Animated, StyleSheet, Easing } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+  runOnJS,
+} from 'react-native-reanimated';
 import { LAYOUT, CHAT_HEADER_HEIGHT } from '../../constants';
-import type { ExtensionPanelProps } from './types';
+import type { PhoneExtensionPanelProps } from './types';
+
+/** 收尾动画时长 */
+const ANIM_DURATION = 250;
 
 /**
  * 骨架屏组件 - 内容加载前的占位
  */
 const SkeletonPlaceholder: React.FC = () => (
   <View style={styles.skeletonContainer}>
-    {/* 顶部标题骨架 */}
     <View style={styles.skeletonHeader}>
       <View style={[styles.skeletonBlock, { width: 120, height: 24 }]} />
     </View>
-    {/* 内容骨架 */}
     <View style={styles.skeletonContent}>
-      <View style={[styles.skeletonBlock, { width: '100%', height: 60, marginBottom: 12 }]} />
-      <View style={[styles.skeletonBlock, { width: '80%', height: 40, marginBottom: 12 }]} />
+      <View
+        style={[
+          styles.skeletonBlock,
+          { width: '100%', height: 60, marginBottom: 12 },
+        ]}
+      />
+      <View
+        style={[
+          styles.skeletonBlock,
+          { width: '80%', height: 40, marginBottom: 12 },
+        ]}
+      />
       <View style={[styles.skeletonBlock, { width: '90%', height: 40 }]} />
     </View>
   </View>
@@ -23,60 +40,65 @@ const SkeletonPlaceholder: React.FC = () => (
 
 /**
  * Phone 扩展面板
- * - 从左侧滑入
- * - 推动中间窗口 80%
- * - 右侧保留 20% 显示对话页面
- * - 有右侧分割线
- * - 内容未加载时显示骨架屏
+ * - 手势由父组件通过 GestureDetector 控制（useExtensionPanelGesture hook）
+ * - 本组件只负责：渲染面板内容 + 响应按钮触发的 visible prop 变化
+ * - 推动中间对话窗口 80%，右侧保留 20%
  */
-const PhoneExtensionPanel: React.FC<ExtensionPanelProps> = ({
+const PhoneExtensionPanel: React.FC<PhoneExtensionPanelProps> = ({
   visible,
   content,
   width,
   centerAnimValue,
+  slideAnim,
+  isGesturing,
 }) => {
-  // 动画值：控制滑动距离
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  // 面板最大滑动距离
+  const maxSlide = width * 0.8;
 
-  // 控制面板的实际渲染（动画结束后再移除）
+  // 控制面板是否渲染（动画结束后再移除，避免闪烁）
   const [shouldRender, setShouldRender] = useState(visible);
 
-  // Debug log
-  console.log('[PhoneExtensionPanel] visible:', visible, 'hasContent:', !!content, 'shouldRender:', shouldRender);
-
+  // ─── visible 变化时确保渲染状态同步 ────────────────────
+  // 无论是按钮触发还是手势触发，visible=true 时都要渲染面板
   useEffect(() => {
-    const targetValue = visible ? width * 0.8 : 0;
-    console.log('[PhoneExtensionPanel] useEffect - visible:', visible, 'targetValue:', targetValue);
-
-    // 如果要显示，先渲染组件再播放动画
     if (visible) {
       setShouldRender(true);
     }
+  }, [visible]);
 
-    // 同时动画：面板滑入 + 中间窗口移动
-    Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: targetValue,
-        duration: 300,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(centerAnimValue, {
-        toValue: targetValue,
-        duration: 300,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      console.log('[PhoneExtensionPanel] animation finished:', finished, 'visible:', visible);
-      // 动画结束后，如果是隐藏状态，才移除组件
+  // ─── 按钮触发的动画同步（visible prop 变化时） ────────
+  // 手势进行中时跳过动画，避免和手势的 onUpdate 冲突
+  useEffect(() => {
+    if (isGesturing.value) return;
+
+    const target = visible ? maxSlide : 0;
+    const timingConfig = {
+      duration: ANIM_DURATION,
+      easing: Easing.out(Easing.cubic),
+    };
+
+    slideAnim.value = withTiming(target, timingConfig);
+    centerAnimValue.value = withTiming(target, timingConfig, (finished) => {
+      // 关闭动画结束后移除渲染
       if (finished && !visible) {
-        setShouldRender(false);
+        runOnJS(setShouldRender)(false);
       }
     });
-  }, [visible, width, slideAnim, centerAnimValue]);
+  }, [visible, maxSlide, slideAnim, centerAnimValue]);
 
-  // 不渲染
+  // ─── 面板动画样式 ─────────────────────────────────────
+  const panelAnimStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        // slideAnim [0, maxSlide] → translateX [-maxSlide, 0]
+        // 0 → 面板完全隐藏在左侧屏幕外
+        // maxSlide → 面板完全可见
+        translateX: slideAnim.value - maxSlide,
+      },
+    ],
+  }));
+
+  // 面板不渲染时直接返回 null
   if (!shouldRender) {
     return null;
   }
@@ -85,18 +107,8 @@ const PhoneExtensionPanel: React.FC<ExtensionPanelProps> = ({
     <Animated.View
       style={[
         styles.panel,
-        {
-          width: width * 0.8,
-          paddingTop: CHAT_HEADER_HEIGHT,
-          transform: [
-            {
-              translateX: slideAnim.interpolate({
-                inputRange: [0, width * 0.8],
-                outputRange: [-width * 0.8, 0],
-              }),
-            },
-          ],
-        },
+        { width: maxSlide, paddingTop: CHAT_HEADER_HEIGHT },
+        panelAnimStyle,
       ]}
     >
       <View style={styles.borderRight} />
@@ -107,6 +119,7 @@ const PhoneExtensionPanel: React.FC<ExtensionPanelProps> = ({
 
 export default PhoneExtensionPanel;
 
+// ─── 样式 ───────────────────────────────────────────────
 const styles = StyleSheet.create({
   panel: {
     position: 'absolute',
@@ -123,7 +136,6 @@ const styles = StyleSheet.create({
     width: 1,
     backgroundColor: LAYOUT.BORDER_COLOR,
   },
-  // 骨架屏样式
   skeletonContainer: {
     flex: 1,
     backgroundColor: '#fff',
