@@ -16,7 +16,6 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
 import ActrInput from '../components/ActrInput';
@@ -41,9 +40,9 @@ import { AppSessionService } from '../../services/AppSessionService';
 import { getHostLayoutTokens } from '../../utils/layout';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { useUnreadStore } from '../store/useUnreadStore';
-import { setTabUnreadStatus } from '../../../src/native-bridge/tab/TabModule';
 import { GlobalAlert } from '../../../src/components';
 import TemporarySupramarkMockChat from './ChatMock';
+import { CHAT_HEADER_HEIGHT } from '../constants';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
@@ -53,10 +52,10 @@ interface MessageRowProps {
   tabId: string;
   appId: string;
   messageId: string;
-  index: number;
   layoutTokens: ReturnType<typeof getHostLayoutTokens>;
   selectionMode: boolean;
   selectedParts: Set<'attachments' | 'question' | 'answer'>;
+  isLatest: boolean;
   toggleSelection: (
     messageId: string,
     part: 'attachments' | 'question' | 'answer',
@@ -69,10 +68,10 @@ const MessageRow = React.memo(function MessageRow({
   tabId,
   appId,
   messageId,
-  index,
   layoutTokens,
   selectionMode,
   selectedParts,
+  isLatest,
   toggleSelection,
   handleEdit,
   handleCopy,
@@ -86,8 +85,6 @@ const MessageRow = React.memo(function MessageRow({
   );
 
   if (!item) return null;
-
-  const isLatest = index === 0;
 
   return (
     <View
@@ -222,7 +219,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const { t } = useTranslation();
   const { tab } = useTab();
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
 
@@ -255,24 +251,30 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const { keyboardInset, dismissKeyboard } = useKeyboardInset();
+  const [showLoadMoreHeader, setShowLoadMoreHeader] = useState(false);
+  const { keyboardInset, isKeyboardVisible, dismissKeyboard } =
+    useKeyboardInset();
   const toastRef = React.useRef<ToastRef>(null);
   const flatListRef = useRef<FlatList>(null);
+  const isNearBottomRef = useRef(true);
+  const previousMessageCountRef = useRef(messageIds.length);
+  const forceScrollToBottomUntilRef = useRef(0);
 
-  // 滚动到底部（inverted 列表中 scrollToOffset 0 就是底部）
+  // 正序列表下通过 scrollToEnd 回到底部。
   const scrollToBottom = useCallback(() => {
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    flatListRef.current?.scrollToEnd({ animated: true });
   }, []);
 
-  // 监听滚动位置，判断是否显示回到底部按钮
-  const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const offsetY = event.nativeEvent.contentOffset.y;
-      // 当滚动超过 200 像素时显示按钮
-      setShowScrollToBottom(offsetY > 200);
-    },
-    [],
-  );
+  const handleContentSizeChange = useCallback(() => {
+    // 异步内容（如 Supramark 卡片）撑高时，若用户仍在底部附近，则保持贴底。
+    const shouldKeepBottom =
+      isNearBottomRef.current || Date.now() < forceScrollToBottomUntilRef.current;
+    if (!shouldKeepBottom) return;
+
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated: false });
+    });
+  }, []);
 
   const handleCopy = useCallback((text: string) => {
     if (!text) return;
@@ -329,6 +331,28 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     }
   }, [tab.id, messageIds.length, isLoadingMore, hasMore, appendOldMessages]);
 
+  // 监听滚动位置，判断是否显示回到底部按钮，并在接近顶部时加载更旧消息。
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } =
+        event.nativeEvent;
+      const distanceFromBottom =
+        contentSize.height - layoutMeasurement.height - contentOffset.y;
+      const canScrollForHistory =
+        contentSize.height > layoutMeasurement.height + 8;
+      const isNearTop = contentOffset.y < 120;
+
+      isNearBottomRef.current = distanceFromBottom < 80;
+      setShowScrollToBottom(distanceFromBottom > 200);
+      setShowLoadMoreHeader(hasMore && canScrollForHistory && isNearTop);
+
+      if (hasMore && canScrollForHistory && isNearTop) {
+        handleLoadMore();
+      }
+    },
+    [handleLoadMore, hasMore],
+  );
+
   useEffect(() => {
     // FIXME 暂时不再从 db 加载历史消息，因为每次创建的 tab 都不一样
     // 🌟 无条件执行：确保每次挂载都能同步最新第一页数据，覆盖旧缓存导致的错乱
@@ -343,6 +367,29 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       clearInput(tab.id);
     };
   }, [tab.id]);
+
+  useEffect(() => {
+    const previousCount = previousMessageCountRef.current;
+    if (messageIds.length > previousCount) {
+      // 新消息插入后的短时间窗口内，允许后续 loading/异步内容继续把列表推到底。
+      forceScrollToBottomUntilRef.current = Date.now() + 1200;
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      });
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 120);
+    }
+    previousMessageCountRef.current = messageIds.length;
+  }, [messageIds.length]);
+
+  useEffect(() => {
+    if (!isKeyboardVisible) return;
+    // 跟随键盘 frame 变化持续贴底，避免“键盘先抬起、列表再补滚动”的二段感。
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated: false });
+    });
+  }, [isKeyboardVisible, keyboardInset]);
 
   const handleEdit = useCallback(
     (msg: IMessage) => {
@@ -389,10 +436,10 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           tabId={tab.id}
           appId={appId}
           messageId={messageId}
-          index={index}
           layoutTokens={layoutTokens}
           selectionMode={selectionMode}
           selectedParts={selectedItems[messageId] || EMPTY_SELECTED_PARTS}
+          isLatest={index === messageIds.length - 1}
           toggleSelection={toggleSelection}
           handleEdit={handleEdit}
           handleCopy={handleCopy}
@@ -405,6 +452,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       layoutTokens,
       selectionMode,
       selectedItems,
+      messageIds.length,
       toggleSelection,
       handleEdit,
       handleCopy,
@@ -412,7 +460,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   );
 
   const ListHeaderComponent = useMemo(() => {
-    if (!hasMore) return null;
+    if (!showLoadMoreHeader) return null;
     return (
       <View style={{ paddingVertical: 20 }}>
         {isLoadingMore ? (
@@ -424,7 +472,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         )}
       </View>
     );
-  }, [hasMore, isLoadingMore]);
+  }, [isLoadingMore, showLoadMoreHeader, t]);
 
   // 计算选中的数量
   const selectedCount = useMemo(() => {
@@ -475,40 +523,40 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         { backgroundColor: layoutTokens.isTablet ? '#ffffff' : '#F2F2F6' },
       ]}
     >
-      <View style={styles.contentArea}>
-        {messageIds.length === 0 && !isLoadingMore ? (
-          <TouchableWithoutFeedback onPress={dismissKeyboard}>
+      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+        <View style={styles.contentArea}>
+          {messageIds.length === 0 && !isLoadingMore ? (
             <View style={{ flex: 1 }}>
               <ChatEmpty />
             </View>
-          </TouchableWithoutFeedback>
-        ) : (
-          <FlatList
-            ref={flatListRef}
-            data={messageIds}
-            renderItem={renderItem}
-            keyExtractor={(item) => item}
-            inverted={true}
-            onEndReached={handleLoadMore}
-            onEndReachedThreshold={0.1}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            style={styles.chatScrollView}
-            contentContainerStyle={[
-              styles.chatContent,
-              {
-                paddingTop: 24 + insets.top,
-                paddingBottom: layoutTokens.chatListBottomPadding,
-              },
-            ]}
-            ListFooterComponent={ListHeaderComponent}
-            showsHorizontalScrollIndicator={false}
-            horizontal={false}
-            keyboardShouldPersistTaps='handled'
-            keyboardDismissMode='on-drag'
-          />
-        )}
-      </View>
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              data={messageIds}
+              renderItem={renderItem}
+              keyExtractor={(item) => item}
+              onScroll={handleScroll}
+              onContentSizeChange={handleContentSizeChange}
+              scrollEventThrottle={16}
+              style={styles.chatScrollView}
+              contentContainerStyle={[
+                styles.chatContent,
+                {
+                  paddingTop: CHAT_HEADER_HEIGHT + 12,
+                  paddingBottom: layoutTokens.chatListBottomPadding,
+                },
+              ]}
+              ListHeaderComponent={ListHeaderComponent}
+              ListHeaderComponentStyle={styles.listHeader}
+              showsHorizontalScrollIndicator={false}
+              horizontal={false}
+              keyboardShouldPersistTaps='handled'
+              keyboardDismissMode='on-drag'
+              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            />
+          )}
+        </View>
+      </TouchableWithoutFeedback>
 
       {/* 回到底部按钮 */}
       {!selectionMode && (
@@ -585,9 +633,11 @@ const styles = StyleSheet.create({
     width: '100%', // 确保滚动条在窗口最边缘
   },
   chatContent: {
-    paddingTop: 24,
     width: '100%',
     alignItems: 'stretch', // 允许子项宽度自动扩展，然后由子项自己的 alignSelf: 'center' 处理居中
+  },
+  listHeader: {
+    paddingBottom: 20,
   },
   messageListWrapper: {
     width: '100%',
