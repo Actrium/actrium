@@ -1,3 +1,4 @@
+import { CONSOLE_BASE } from './app';
 import { http } from './https';
 
 export interface FeedbackContext {
@@ -17,5 +18,5 @@ export interface FeedbackPayload {
 }
 
 export const submitFeedback = async (payload: FeedbackPayload) => {
-  return await http.post<any>('/api/feedbacks', payload);
+  return await http.post<any>(`${CONSOLE_BASE}/api/feedbacks`, payload);
 };
