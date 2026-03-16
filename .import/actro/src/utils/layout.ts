@@ -23,7 +23,7 @@ export function getHostLayoutTokens(width: number): HostLayoutTokens {
 
   return {
     isTablet,
-    contentMaxWidth: isTablet ? 760 : width,
+    contentMaxWidth: isTablet ? 750 : width,
     messageHorizontalPadding: isTablet ? 20 : 12,
     chatListBottomPadding: isTablet ? 40 : 24,
     inputHorizontalPadding: isTablet ? 16 : 12,

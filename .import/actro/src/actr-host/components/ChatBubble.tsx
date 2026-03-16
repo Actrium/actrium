@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
   TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { Icon } from './Icon';
 import { useTranslation } from 'react-i18next';
@@ -270,6 +271,13 @@ export default function ChatBubble({
     }),
     [isSmall],
   );
+  const markdownParagraphStyle = React.useMemo(
+    () => ({
+      ...markdownTextStyle,
+      marginBottom: 0,
+    }),
+    [markdownTextStyle],
+  );
 
   const getDisplayFileName = React.useCallback((item: IAttachmentItem): string => {
     const legacyName = (item as any).name as string | undefined;
@@ -433,8 +441,8 @@ export default function ChatBubble({
               config={SUPRAMARK_FULL_CONFIG}
               containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
               styles={{
-                paragraph: markdownTextStyle,
-                text: markdownTextStyle,
+                paragraph: markdownParagraphStyle,
+                // text: markdownTextStyle,
                 listItemText: markdownTextStyle,
                 inlineCode: markdownTextStyle,
                 code: markdownTextStyle,
@@ -570,6 +578,7 @@ export default function ChatBubble({
   );
 
   const handleBubblePress = () => {
+    Keyboard.dismiss();
     if (selectionMode && onToggleSelection) {
       onToggleSelection();
     }
@@ -591,7 +600,6 @@ export default function ChatBubble({
       >
         <Pressable
           onPress={handleBubblePress}
-          disabled={!selectionMode}
           style={({ pressed }) => [
             selectionMode && pressed && styles.bubblePressed,
           ]}

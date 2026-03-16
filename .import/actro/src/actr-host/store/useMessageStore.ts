@@ -10,9 +10,9 @@ interface MessageState {
   messageById: Record<string, Record<string, IMessage>>;
   getMessage: (tabId: string, messageId: string) => IMessage | undefined;
   setMessages: (tabId: string, msgs: IMessage[]) => void;
-  // 新消息加到开头（inverted 列表最下方）
+  // 正序列表：新消息追加到末尾
   addMessage: (tabId: string, msg: IMessage) => void;
-  // 加载更多（旧消息）加到末尾（inverted 列表最上方）
+  // 正序列表：加载更多旧消息时追加到开头
   appendOldMessages: (tabId: string, msgs: IMessage[]) => void;
   updateMessage: (
     tabId: string,
@@ -36,10 +36,16 @@ interface MessageState {
 }
 
 const buildMessageIndex = (msgs: IMessage[]) => {
+  const sortedMsgs = [...msgs].sort((a, b) => {
+    if (a.question_time !== b.question_time) {
+      return a.question_time - b.question_time;
+    }
+    return a.message_id.localeCompare(b.message_id);
+  });
   const ids: string[] = [];
   const byId: Record<string, IMessage> = {};
 
-  for (const msg of msgs) {
+  for (const msg of sortedMsgs) {
     if (!msg?.message_id) continue;
     const id = msg.message_id;
     if (!byId[id]) {
@@ -73,7 +79,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       return {
         messageIds: {
           ...state.messageIds,
-          [tabId]: exists ? currentIds : [msg.message_id, ...currentIds],
+          [tabId]: exists ? currentIds : [...currentIds, msg.message_id],
         },
         messageById: {
           ...state.messageById,
@@ -94,14 +100,20 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((state) => {
       const currentIds = state.messageIds[tabId] || [];
       const currentById = state.messageById[tabId] || {};
-      const appendIds: string[] = [];
+      const prependIds: string[] = [];
       const nextById = { ...currentById };
+      const sortedMsgs = [...msgs].sort((a, b) => {
+        if (a.question_time !== b.question_time) {
+          return a.question_time - b.question_time;
+        }
+        return a.message_id.localeCompare(b.message_id);
+      });
 
-      for (const msg of msgs) {
+      for (const msg of sortedMsgs) {
         if (!msg?.message_id) continue;
         const id = msg.message_id;
         if (!nextById[id]) {
-          appendIds.push(id);
+          prependIds.push(id);
         }
         nextById[id] = msg;
       }
@@ -109,7 +121,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       return {
         messageIds: {
           ...state.messageIds,
-          [tabId]: [...currentIds, ...appendIds],
+          [tabId]: [...prependIds, ...currentIds],
         },
         messageById: {
           ...state.messageById,
