@@ -31,6 +31,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 interface UseExtensionPanelGestureParams {
+  /** 扩展面板基准宽度；需与按钮触发路径保持一致 */
+  panelWidth: number;
   /** 面板滑动动画值（0 = 关闭，maxSlide = 打开） */
   slideAnim: SharedValue<number>;
   /** 中间对话区域偏移动画值 */
@@ -46,6 +48,7 @@ interface UseExtensionPanelGestureParams {
  * - 手势跟手，松手后根据速度和距离自动吸附
  */
 export function useExtensionPanelGesture({
+  panelWidth,
   slideAnim,
   centerAnimValue,
   onVisibilityChange,
@@ -53,8 +56,8 @@ export function useExtensionPanelGesture({
   const { width } = useWindowDimensions();
   const isTablet = isTabletWidth(width);
 
-  // 面板最大滑动距离（面板宽度 = 屏幕宽度 * 0.8）
-  const maxSlide = width * 0.8;
+  // 与按钮触发路径保持一致：手势路径也基于固定面板宽度计算实际展开宽度。
+  const maxSlide = panelWidth * 0.8;
   // 手势开始时记录的起始位置
   const startX = useSharedValue(0);
   // 手势进行中标记（防止 useEffect 中的按钮动画和手势冲突）
