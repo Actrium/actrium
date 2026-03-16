@@ -110,6 +110,10 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const centerAnimValue = useSharedValue(0);
   // 面板滑动位置（由 hook 和 PhoneExtensionPanel 共享）
   const slideAnim = useSharedValue(0);
+  // 优化：使用固定宽度 + flexShrink，让 Yoga 自动处理收缩
+  // 不再依赖 propsContainerWidth 计算，避免 re-render
+  // 注意：rightWidth 应该始终是固定值，不要根据 isLeftPanelVisible 变化
+  const rightWidth = LAYOUT.RIGHT_PANEL_WIDTH;
 
   // 手势结束后同步面板可见状态（仅 Phone 模式使用）
   const handlePanelVisibilityChange = useCallback((visible: boolean) => {
@@ -118,6 +122,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   // 扩展面板手势（Phone 模式：右滑打开/左滑关闭；Tablet 模式：空手势）
   const { gesture: panelGesture, isGesturing } = useExtensionPanelGesture({
+    panelWidth: rightWidth,
     slideAnim,
     centerAnimValue,
     onVisibilityChange: handlePanelVisibilityChange,
@@ -126,11 +131,6 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   React.useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
-
-  // 优化：使用固定宽度 + flexShrink，让 Yoga 自动处理收缩
-  // 不再依赖 propsContainerWidth 计算，避免 re-render
-  // 注意：rightWidth 应该始终是固定值，不要根据 isLeftPanelVisible 变化
-  const rightWidth = LAYOUT.RIGHT_PANEL_WIDTH;
 
   useEffect(() => {
     if (guestLoadingStatus) return;
