@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   NativeModules,
   StyleSheet,
+  Pressable,
 } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -510,6 +511,13 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
             <Animated.View style={[styles.centerColumn, centerAnimStyle]}>
               {main}
+              {/* 扩展面板打开时，对话区域的点击遮罩 — 点击关闭面板 */}
+              {localLeftPanelVisible && (
+                <Pressable
+                  style={styles.dismissOverlay}
+                  onPress={() => setLocalLeftPanelVisible(false)}
+                />
+              )}
             </Animated.View>
 
             {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入（支持手势） */}
@@ -552,9 +560,14 @@ const styles = StyleSheet.create({
   },
   centerColumn: {
     flex: 1,
-    backgroundColor: '#ffffff', // White background like the source
+    backgroundColor: '#ffffff',
     minWidth: LAYOUT.CENTER_MIN_WIDTH,
     justifyContent: 'space-between',
+  },
+  // 扩展面板打开时覆盖在对话区域上的透明遮罩，点击可关闭面板
+  dismissOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
   },
   container: {
     flex: 1,
