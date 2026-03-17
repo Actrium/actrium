@@ -23,7 +23,7 @@ const useAuth = (appId: string) => {
     const clientId = appInfo?.client_id || '';
 
     // 允许匿名访问
-    if (true || appInfo?.allow_anonymous_access) {
+    if (appInfo?.allow_anonymous_access) {
       return { status: 'authorized', clientId, appId };
     }
 

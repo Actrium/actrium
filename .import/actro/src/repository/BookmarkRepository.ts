@@ -149,4 +149,35 @@ export class BookmarkRepository {
   static async removeBookmarkByAppId(appId: string) {
     return await db.executeSql('DELETE FROM bookmark_items WHERE app_id = ?', [appId]);
   }
+
+  /**
+   * 根据 app_id 查询收藏项
+   */
+  static async getBookmarkByAppId(appId: string): Promise<TBookmarkItem | null> {
+    try {
+      const rows = await db.selectAll<TBookmarkItem>(
+        `SELECT
+          bi.id,
+          bi.category_id,
+          bi.app_id,
+          bi.created_at,
+          bi.sort_order,
+          a.app_name,
+          a.logo,
+          a.url,
+          (SELECT question_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_question,
+          (SELECT answer_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_answer
+         FROM bookmark_items bi
+         LEFT JOIN apps a ON bi.app_id = a.app_id
+         WHERE bi.app_id = ?
+         ORDER BY bi.sort_order ASC, bi.id ASC
+         LIMIT 1`,
+        [appId],
+      );
+      return rows[0] ?? null;
+    } catch (error) {
+      console.error('[BookmarkRepository] Failed to get bookmark by appId', error);
+      return null;
+    }
+  }
 }

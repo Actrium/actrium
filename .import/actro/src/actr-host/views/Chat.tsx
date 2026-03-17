@@ -42,6 +42,8 @@ import { useUnreadStore } from '../store/useUnreadStore';
 import { GlobalAlert } from '../../../src/components';
 import TemporarySupramarkMockChat from './ChatMock';
 import { CHAT_HEADER_HEIGHT } from '../constants';
+import { BookmarkRepository } from '../../repository/BookmarkRepository';
+import { setTabBookmarkStatus } from '../../native-bridge/tab/TabModule';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
@@ -291,6 +293,20 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     await AppSessionService.initSession(tab.id, appId);
   }, [appId, appInfo, tab.id]);
 
+  const syncInitialBookmarkStatus = useCallback(async () => {
+    if (!appId) return;
+
+    try {
+      // 首次进入聊天页时，按 appId 回查收藏表并同步当前 tab 的原生收藏态。
+      const bookmarkItem = await BookmarkRepository.getBookmarkByAppId(appId);
+      if (!bookmarkItem) return;
+
+      await setTabBookmarkStatus(tab.id, true);
+    } catch (error) {
+      console.error('[Chat] Failed to sync initial bookmark status:', error);
+    }
+  }, [appId, tab.id]);
+
   // 暂时先留着
   // 初始化加载第一页
   const loadInitialMessages = useCallback(async () => {
@@ -366,6 +382,10 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       // clearInput(tab.id);
     };
   }, [tab.id]);
+
+  useEffect(() => {
+    void syncInitialBookmarkStatus();
+  }, [syncInitialBookmarkStatus]);
 
   useEffect(() => {
     const previousCount = previousMessageCountRef.current;
