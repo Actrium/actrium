@@ -111,7 +111,7 @@ impl MfrManager {
         challenge.mark_verified(&self.pool, &url).await?;
         mfr.activate(&self.pool, public_key.clone()).await?;
 
-        let keychain = self.build_keychain(&mfr, private_key);
+        let keychain = self.build_keychain(&mfr, private_key)?;
         platform::recording::info!(
             "MFR verified via GitHub repo and keychain issued: mfr_id={}, name={}",
             mfr_id,
@@ -132,19 +132,24 @@ impl MfrManager {
             mfr_id,
             mfr.name
         );
-        Ok(self.build_keychain(&mfr, private_key))
+        Ok(self.build_keychain(&mfr, private_key)?)
     }
 
-    fn build_keychain(&self, mfr: &Manufacturer, private_key: String) -> MfrKeychain {
-        MfrKeychain {
+    fn build_keychain(
+        &self,
+        mfr: &Manufacturer,
+        private_key: String,
+    ) -> Result<MfrKeychain, MfrError> {
+        let expires_at = mfr.key_expires_at.ok_or(MfrError::CertificateExpired)?;
+        Ok(MfrKeychain {
             private_key,
             certificate: MfrCertificate {
                 mfr_name: mfr.name.clone(),
                 mfr_pubkey: mfr.public_key.clone(),
                 issued_at: mfr.verified_at.unwrap_or(mfr.created_at),
-                expires_at: mfr.key_expires_at.unwrap_or(0),
+                expires_at,
             },
-        }
+        })
     }
 
     /// Get the active (unexpired, unverified) challenge for a pending MFR.
@@ -179,11 +184,12 @@ impl MfrManager {
                 name
             )));
         }
+        let expires_at = mfr.key_expires_at.ok_or(MfrError::CertificateExpired)?;
         let cert = MfrCertificate {
             mfr_name: mfr.name.clone(),
             mfr_pubkey: mfr.public_key.clone(),
             issued_at: mfr.verified_at.unwrap_or(mfr.created_at),
-            expires_at: mfr.key_expires_at.unwrap_or(0),
+            expires_at,
         };
         Ok(MfrPublicInfo {
             id: mfr.id,
@@ -204,11 +210,11 @@ impl MfrManager {
             )));
         }
 
-        // Check if signing key has expired
-        if let Some(key_expires) = mfr.key_expires_at {
-            if chrono::Utc::now().timestamp() > key_expires {
-                return Err(MfrError::CertificateExpired);
-            }
+        // Check if signing key has expired — None means key_expires_at was not set,
+        // which is treated as invalid (not "never expires")
+        let key_expires = mfr.key_expires_at.ok_or(MfrError::CertificateExpired)?;
+        if chrono::Utc::now().timestamp() > key_expires {
+            return Err(MfrError::CertificateExpired);
         }
 
         // Verify signature: MFR's Ed25519 private key signed the manifest bytes
