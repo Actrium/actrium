@@ -6,7 +6,7 @@
   "scripts": {
     "start": "react-native start --verbose --reset-cache",
     "log": "bun log-server.ts",
-    "dev": "bun scripts/dev.ts",
+    "dev": "node scripts/dev-start.js",
     "typecheck": "tsc --noEmit",
     "lint:logs": "node scripts/check-logs.js",
     "test": "echo \"Error: no test specified\" && exit 1",
