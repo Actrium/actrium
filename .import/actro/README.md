@@ -1,5 +1,11 @@
 # canvas-kotlin
 
+### 运行
+
+```bash
+yarn dev
+```
+
 
 ### dev
 
