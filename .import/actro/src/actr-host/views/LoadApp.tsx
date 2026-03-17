@@ -29,6 +29,7 @@ import { Icon } from '../components/Icon';
 import { LoadAppCameraPanel } from './components/LoadAppCameraPanel';
 import { GlobalAlert } from '../../../src/components';
 import { CHAT_HEADER_HEIGHT } from '../constants';
+import { isTabletWidth } from '../../utils/device';
 
 // 在短时间窗口内抑制同一 URL 的重复加载，
 // 典型场景是权限弹窗前后扫码回调抖动导致重复触发。
@@ -54,15 +55,17 @@ const LoadApp = () => {
   const tabCtx = useTab();
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
   const { width: screenWidth } = useWindowDimensions();
+  const isPad = isTabletWidth(screenWidth);
 
   // 响应式尺寸：手机端使用屏幕宽度的 85%，iPad 端保持 500
   const isPhone = screenWidth < 600;
   const scanSize = isPhone ? screenWidth * 0.85 : 500;
-  const inputWidth = isPhone ? screenWidth * 0.85 : 500;
+  const padInputWidth = 600;
   const containerGap = isPhone ? 24 : 36;
   const scanBorderRadius = isPhone ? 20 : 34;
   const inputBorderRadius = 24;
-  const scanTopMargin = CHAT_HEADER_HEIGHT + 10;
+  // Pad 模式不再展示 ChatHeader，因此不需要预留 Header 高度。
+  const scanTopMargin = isPad ? 10 : CHAT_HEADER_HEIGHT + 10;
 
   const requestNetworkPermissionOnMount = useCallback(async () => {
     try {
@@ -108,7 +111,8 @@ const LoadApp = () => {
     }
   }, []);
 
-  const showInputField = inputExpanded && !cameraActive;
+  // Pad 端输入框常驻展示，Phone 端保持原有“按钮切换输入框”交互。
+  const showInputField = isPad || (inputExpanded && !cameraActive);
 
   useEffect(() => {
     if (!showInputField) return;
@@ -274,54 +278,64 @@ const LoadApp = () => {
 
   return (
     <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: keyboardInset },
-        ]}
-        keyboardShouldPersistTaps='handled'
-      >
-        <View style={[styles.LoadAppContainer, { gap: containerGap }]}>
-          {/* camera scan qrcode */}
-          <View
-            style={[
-              styles.scanArea,
-              {
-                width: scanSize,
-                height: scanSize,
-                borderRadius: scanBorderRadius,
-                marginTop: scanTopMargin,
-              },
-            ]}
-          >
-            <LoadAppCameraPanel
-              tabId={tabCtx.tab.id}
-              cameraActive={cameraActive}
-              onCameraActiveChange={setCameraActive}
-              onBeforeOpenCamera={() => {
-                setInputExpanded(false);
-                inputRef.current?.blur();
-                dismissKeyboard();
-              }}
-              onAfterCameraPermissionGranted={() => {
-                void requestNetworkPermissionOnMount();
-              }}
-              onScanUrl={(url) => {
-                void handleResolveUrl(url);
-              }}
-            />
+      <View style={styles.padContainer}>
+        {/* Pad 端扫码区保持主体居中，输入框改为底部独立定位，避免受整体居中布局影响。 */}
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            styles.padScrollContent,
+            { paddingBottom: keyboardInset },
+          ]}
+          keyboardShouldPersistTaps='handled'
+        >
+          <View style={[styles.LoadAppContainer, { gap: containerGap }]}>
+            {/* camera scan qrcode */}
+            <View
+              style={[
+                styles.scanArea,
+                {
+                  width: scanSize,
+                  height: scanSize,
+                  borderRadius: scanBorderRadius,
+                  marginTop: scanTopMargin,
+                },
+              ]}
+            >
+              <LoadAppCameraPanel
+                tabId={tabCtx.tab.id}
+                cameraActive={cameraActive}
+                onCameraActiveChange={setCameraActive}
+                onBeforeOpenCamera={() => {
+                  setInputExpanded(false);
+                  inputRef.current?.blur();
+                  dismissKeyboard();
+                }}
+                onAfterCameraPermissionGranted={() => {
+                  void requestNetworkPermissionOnMount();
+                }}
+                onScanUrl={(url) => {
+                  void handleResolveUrl(url);
+                }}
+              />
+            </View>
           </View>
+        </ScrollView>
 
-          {/* input app url */}
-          {renderInput(
-            [
-              styles.input,
-              { width: inputWidth, borderRadius: inputBorderRadius },
-            ],
-            [styles.inputContainer, { borderRadius: inputBorderRadius }],
-          )}
-        </View>
-      </ScrollView>
+        {renderInput(
+          [
+            styles.padInput,
+            { width: padInputWidth, borderRadius: inputBorderRadius },
+          ],
+          [
+            styles.padInputContainer,
+            {
+              width: padInputWidth,
+              borderRadius: inputBorderRadius,
+              bottom: 42 + keyboardInset,
+            },
+          ],
+        )}
+      </View>
     </TouchableWithoutFeedback>
   );
 };
@@ -336,6 +350,14 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     backgroundColor: '#fff',
+  },
+  padContainer: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#fff',
+  },
+  padScrollContent: {
+    paddingBottom: 120,
   },
   phoneScanSection: {
     flex: 1,
@@ -380,17 +402,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
   },
-  input: {
-    // width / borderRadius 由动态样式控制
+  // Pad 端输入框为常显模式，单独维护尺寸，避免影响 Phone 端 Dock 输入样式。
+  padInput: {
     paddingLeft: 39,
     paddingRight: 34,
-    paddingVertical: 14,
+    height: 48,
+    paddingVertical: 0,
     fontSize: 17,
   },
-  inputContainer: {
-    position: 'relative',
+  padInputContainer: {
+    position: 'absolute',
+    left: '50%',
+    height: 48,
     backgroundColor: '#fff',
-    // borderRadius 由动态样式控制
+    marginLeft: -300,
+    // width / borderRadius 由动态样式控制
     ...HOST_SHADOWS.inputPill,
   },
   phoneInputContainer: {

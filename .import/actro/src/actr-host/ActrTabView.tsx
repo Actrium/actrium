@@ -14,6 +14,7 @@ import {
   NativeModules,
   StyleSheet,
   Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -51,6 +52,7 @@ import { ChatHeader } from './components/ChatHeader';
 import { exitFullscreen } from '../native-bridge/tab/TabModule';
 import { useTabNativeEvents } from './hooks/useTabNativeEvents';
 import { useExtensionPanelGesture } from './hooks/useExtensionPanelGesture';
+import { isTabletWidth } from '../utils/device';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -75,7 +77,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   onEngineChange,
 }) => {
   const { top: topInsetRaw } = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const gate = evaluateTabGate(tab);
+  const isPad = isTabletWidth(windowWidth);
 
   // 🆕 通过 tab.id 获取 appId
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
@@ -384,7 +388,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   // 渲染三栏布局 - 使用纯 flex 布局，让 Yoga 自动适应
   // 不依赖 propsContainerWidth，避免 re-render
-  const threeColumnStyle = styles.threeColumn;
+  // Pad 宿主页需要贴齐顶部展示，不再保留 Phone 场景的模拟圆角。
+  const threeColumnStyle = [
+    styles.threeColumn,
+    isPad && styles.threeColumnPad,
+  ];
   const sheetTopOffset = topInsetRaw;
 
   const main = React.useMemo(() => <Main />, []);
@@ -477,61 +485,66 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     );
   }
 
+  const tabContent = (
+    <View style={styles.screen}>
+      <View style={[threeColumnStyle, { marginTop: sheetTopOffset }]}>
+        {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
+        {/* {isLeftPanelVisible && (
+          <View
+            style={[
+              styles.leftPanel,
+              {
+                width: leftWidth,
+              },
+            ]}
+          >
+            {leftPanel}
+          </View>
+        )} */}
+
+        {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
+        {!isPad && (
+          <ChatHeader
+            onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
+            onRightPress={() => exitFullscreen()}
+            appId={appId}
+            leftDisabled={!appId}
+            leftActive={localLeftPanelVisible}
+            showLeftButton={Boolean(appId)}
+            appName={appId ? appName : '添加应用'}
+            includeSafeTopInset={false}
+          />
+        )}
+
+        {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
+        <Animated.View style={[styles.centerColumn, centerAnimStyle]}>
+          {main}
+          {/* 扩展面板打开时，对话区域的点击遮罩 — 点击关闭面板 */}
+          {localLeftPanelVisible && (
+            <Pressable
+              style={styles.dismissOverlay}
+              onPress={() => setLocalLeftPanelVisible(false)}
+            />
+          )}
+        </Animated.View>
+
+        {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入（支持手势） */}
+        <ExtensionPanel
+          visible={localLeftPanelVisible}
+          content={rightPanel}
+          width={rightWidth}
+          centerAnimValue={centerAnimValue}
+          slideAnim={slideAnim}
+          isGesturing={isGesturing}
+        />
+      </View>
+    </View>
+  );
+
   return (
     <TabProvider tab={tab}>
-      <GestureDetector gesture={panelGesture}>
-        <View style={styles.screen}>
-          <View style={[threeColumnStyle, { marginTop: sheetTopOffset }]}>
-            {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
-            {/* {isLeftPanelVisible && (
-              <View
-                style={[
-                  styles.leftPanel,
-                  {
-                    width: leftWidth,
-                  },
-                ]}
-              >
-                {leftPanel}
-              </View>
-            )} */}
-
-            {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
-            <ChatHeader
-              onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
-              onRightPress={() => exitFullscreen()}
-              appId={appId}
-              leftDisabled={!appId}
-              leftActive={localLeftPanelVisible}
-              showLeftButton={Boolean(appId)}
-              appName={appId ? appName : '添加应用'}
-              includeSafeTopInset={false}
-            />
-
-            {/* 中间对话窗口 - flex 自适应，被扩展面板推动（Phone 模式） */}
-            <Animated.View style={[styles.centerColumn, centerAnimStyle]}>
-              {main}
-              {/* 扩展面板打开时，对话区域的点击遮罩 — 点击关闭面板 */}
-              {localLeftPanelVisible && (
-                <Pressable
-                  style={styles.dismissOverlay}
-                  onPress={() => setLocalLeftPanelVisible(false)}
-                />
-              )}
-            </Animated.View>
-
-            {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入（支持手势） */}
-            <ExtensionPanel
-              visible={localLeftPanelVisible}
-              content={rightPanel}
-              width={rightWidth}
-              centerAnimValue={centerAnimValue}
-              slideAnim={slideAnim}
-              isGesturing={isGesturing}
-            />
-          </View>
-        </View>
-      </GestureDetector>
+      {/* Pad 不需要侧滑手势，直接跳过 GestureDetector，避免手势层吞掉点击。 */}
+      {isPad ? tabContent : <GestureDetector gesture={panelGesture}>{tabContent}</GestureDetector>}
     </TabProvider>
   );
 };
@@ -547,6 +560,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden', // 防止横向滚动条
     borderTopLeftRadius: 38,
     borderTopRightRadius: 38,
+  },
+  threeColumnPad: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
   },
   screen: {
     flex: 1,

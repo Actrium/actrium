@@ -356,7 +356,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   useEffect(() => {
     // FIXME 暂时不再从 db 加载历史消息，因为每次创建的 tab 都不一样
     // 🌟 无条件执行：确保每次挂载都能同步最新第一页数据，覆盖旧缓存导致的错乱
-    // loadInitialMessages();
+    loadInitialMessages();
     loadAppInfo();
 
     return () => {
@@ -542,7 +542,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
               contentContainerStyle={[
                 styles.chatContent,
                 {
-                  paddingTop: CHAT_HEADER_HEIGHT + 12,
+                  // Pad 模式不展示 ChatHeader，顶部只保留内容呼吸位。
+                  paddingTop: layoutTokens.isTablet ? 12 : CHAT_HEADER_HEIGHT + 12,
                   paddingBottom: layoutTokens.chatListBottomPadding,
                 },
               ]}
@@ -560,7 +561,13 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
 
       {/* 回到底部按钮 */}
       {!selectionMode && (
-        <View style={styles.scrollToBottomContainer}>
+        <View
+          style={[
+            styles.scrollToBottomContainer,
+            // Pad 端按钮额外上移 40，避免与更高的输入区视觉距离过近。
+            layoutTokens.isTablet && styles.scrollToBottomContainerPad,
+          ]}
+        >
           <ScrollToBottomButton
             visible={showScrollToBottom}
             onPress={scrollToBottom}
@@ -627,6 +634,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 99,
     pointerEvents: 'box-none',
+  },
+  scrollToBottomContainerPad: {
+    bottom: 160,
   },
   chatScrollView: {
     flex: 1,

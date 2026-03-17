@@ -187,7 +187,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
             updateMessage(tab.id, currentMsg.message_id, { is_read: 1 }, true);
           } else {
             // 后台 tab，增加未读计数并通知 native
-            useUnreadStore.getState().incrementUnread(tab.id, tab.id);
+            useUnreadStore.getState().incrementUnread(tab.id);
           }
         });
       }
