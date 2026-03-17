@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Easing } from 'react-native';
-import { CHAT_HEADER_HEIGHT } from '../../constants';
 import type { TabletExtensionPanelProps } from './types';
 
 /**
@@ -57,7 +56,6 @@ const TabletExtensionPanel: React.FC<TabletExtensionPanelProps> = ({
         styles.panel,
         {
           width,
-          paddingTop: CHAT_HEADER_HEIGHT,
           transform: [{ translateX: slideAnim }],
         },
       ]}
