@@ -212,7 +212,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
         <Camera
           style={StyleSheet.absoluteFill}
           device={device}
-          isActive={true}
+          isActive={cameraActive}
           codeScanner={codeScanner}
           {...(Platform.OS === 'android'
             ? { androidPreviewViewType: 'texture-view' as const }
