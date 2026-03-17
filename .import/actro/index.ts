@@ -32,6 +32,7 @@ import 'react-native-get-random-values';
 
 import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';
+const PromiseRejectionTracking = require('promise/setimmediate/rejection-tracking');
 
 // 🔴 统一日志工具 - 输出到:
 // 1. 远程日志服务器 (actr log server, 跨平台)
@@ -57,6 +58,21 @@ const sendLog = (level: string, msg: string) => {
 const nlog = (msg: string) => sendLog('log', msg);
 const nwarn = (msg: string) => sendLog('warn', msg);
 const nerror = (msg: string) => sendLog('error', msg);
+
+// 统一捕获未处理的 Promise 拒绝，避免异步错误只在运行时静默丢失。
+PromiseRejectionTracking.enable({
+  allRejections: true,
+  onUnhandled: (id: number, error: unknown) => {
+    const errorText =
+      error instanceof Error
+        ? `${error.message}\n${error.stack ?? ''}`
+        : String(error);
+    nerror(`🔴 [UNHANDLED PROMISE] id=${id}\n${errorText}`);
+  },
+  onHandled: (id: number) => {
+    nwarn(`🟡 [PROMISE HANDLED LATE] id=${id}`);
+  },
+});
 
 nlog('📱 Bundle 开始执行');
 nlog('📦 NativeModules keys: ' + Object.keys(NativeModules || {}).slice(0, 15).join(', '));

@@ -58,7 +58,7 @@ export function installConsoleInterceptor(): void {
     originalConsole.log(...args);
     const msg = formatArgs(args);
     sendRemoteLog('log', msg);
-    nativeLogger?.log?.(msg);
+    // nativeLogger?.log?.(msg);
   };
 
   // Hook console.warn
@@ -66,7 +66,7 @@ export function installConsoleInterceptor(): void {
     originalConsole.warn(...args);
     const msg = formatArgs(args);
     sendRemoteLog('warn', msg);
-    nativeLogger?.warn?.(msg);
+    // nativeLogger?.warn?.(msg);
   };
 
   // Hook console.error
@@ -74,7 +74,7 @@ export function installConsoleInterceptor(): void {
     originalConsole.error(...args);
     const msg = formatArgs(args);
     sendRemoteLog('error', msg);
-    nativeLogger?.error?.(msg);
+    // nativeLogger?.error?.(msg);
   };
 
   // Hook console.debug (forward to log)
@@ -82,7 +82,7 @@ export function installConsoleInterceptor(): void {
     originalConsole.debug(...args);
     const msg = `[debug] ${formatArgs(args)}`;
     sendRemoteLog('log', msg);
-    nativeLogger?.log?.(msg);
+    // nativeLogger?.log?.(msg);
   };
 
   // Hook console.info (forward to log)
@@ -90,7 +90,7 @@ export function installConsoleInterceptor(): void {
     originalConsole.info(...args);
     const msg = formatArgs(args);
     sendRemoteLog('log', msg);
-    nativeLogger?.log?.(msg);
+    // nativeLogger?.log?.(msg);
   };
 
   // Log that interceptor is installed
