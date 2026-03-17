@@ -4,6 +4,7 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.graphics.Rect
+import android.util.Log
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 
@@ -125,6 +126,8 @@ object ViewAnimationHelper {
 
             val width = targetView.width
             val height = targetView.height
+            Log.e("ViewAnimationHelper", "animateHide: targetView width=$width, sourceView width=${sourceView.width}")
+            Log.e("ViewAnimationHelper", "animateHide: targetView height=$height, sourceView height=${sourceView.height}")
             val scale = sourceView.width.toFloat() / width
 
             // Calculate End Clip Height (matches source aspect ratio)
@@ -147,7 +150,7 @@ object ViewAnimationHelper {
                 val bottom = (height - inset).toInt()
                 targetView.clipBounds = Rect(1, top, width, bottom)
             }
-
+            Log.e("ViewAnimationHelper", "animateHide: endX=$endX, endY=$endY, scale=$scale, verticalInset=$verticalInset")
             set.playTogether(
                 ObjectAnimator.ofFloat(targetView, "translationX", 0f, endX),
                 ObjectAnimator.ofFloat(targetView, "translationY", 0f, endY),
@@ -155,7 +158,7 @@ object ViewAnimationHelper {
                 ObjectAnimator.ofFloat(targetView, "scaleY", 1f, scale),
                 clipAnimator
             )
-            set.duration = 350
+            set.duration = 250
             set.interpolator = DecelerateInterpolator()
             set.addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
