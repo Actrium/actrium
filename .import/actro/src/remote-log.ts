@@ -2,25 +2,39 @@
  * Remote Log Forwarder
  *
  * 将 JS 日志通过 HTTP POST 转发到开发机上的 actr log server。
- * 自动根据平台选择正确的 host 地址：
- *   - iOS / macOS: localhost（模拟器和宿主机共享网络栈）
- *   - Android 模拟器: 10.0.2.2（模拟器访问宿主机的特殊地址）
- *   - Android 真机: 需要通过 adb reverse 或手动配置局域网 IP
+ *
+ * Host 解析策略：
+ *   从 RN 的 scriptURL（Metro bundle 地址）中提取开发机 IP，
+ *   这样无论是模拟器、真机、还是任何平台都能自动适配，无需手动配置。
+ *
+ * 端口约定：
+ *   - iOS / macOS: 9999（与 actr dev --log-server 保持一致）
+ *   - Android: 9998（独立 log server）
  *
  * 仅在 __DEV__ 模式下生效，Release 构建不会发送任何远程日志。
  */
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 
-// iOS/macOS 使用 9999（与 actr dev --log-server 保持一致）
-// Android 使用 9998（独立 log server，避免端口冲突）
 const LOG_PORT = Platform.OS === 'android' ? 9998 : 9999;
 
+/**
+ * 从 Metro bundle 的 scriptURL 中提取开发机 host。
+ * scriptURL 形如 "http://10.30.3.87:8082/index.bundle?platform=ios&..."
+ * 真机、模拟器、任何平台都适用。
+ */
 function resolveHost(): string {
-  if (Platform.OS === 'android') {
-    // Android 模拟器通过 10.0.2.2 访问宿主机 localhost。
-    // 真机开发时请先执行: adb reverse tcp:9998 tcp:9998
-    return '10.0.2.2';
+  try {
+    const sourceCode = NativeModules.SourceCode;
+    const scriptURL: string | undefined =
+      sourceCode?.getConstants?.()?.scriptURL ?? sourceCode?.scriptURL;
+    if (scriptURL) {
+      const match = scriptURL.match(/^https?:\/\/([^:/]+)/);
+      if (match?.[1]) return match[1];
+    }
+  } catch {
+    // ignore
   }
+  // fallback: 模拟器 / 本地开发
   return 'localhost';
 }
 
