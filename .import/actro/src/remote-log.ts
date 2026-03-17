@@ -11,12 +11,14 @@
  */
 import { Platform } from 'react-native';
 
-const LOG_PORT = 9999;
+// iOS/macOS 使用 9999（与 actr dev --log-server 保持一致）
+// Android 使用 9998（独立 log server，避免端口冲突）
+const LOG_PORT = Platform.OS === 'android' ? 9998 : 9999;
 
 function resolveHost(): string {
   if (Platform.OS === 'android') {
     // Android 模拟器通过 10.0.2.2 访问宿主机 localhost。
-    // 真机开发时请先执行: adb reverse tcp:9999 tcp:9999
+    // 真机开发时请先执行: adb reverse tcp:9998 tcp:9998
     return '10.0.2.2';
   }
   return 'localhost';

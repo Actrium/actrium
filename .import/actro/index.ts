@@ -34,27 +34,16 @@ import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';
 
 // 🔴 统一日志工具 - 输出到:
-// 1. 远程日志服务器 (node log-server.js, 端口 9999)
-// 2. Xcode 原生控制台 (通过 NativeLogger)
+// 1. 远程日志服务器 (actr log server, 端口 9999, 跨平台)
+// 2. 原生控制台 (通过 NativeLogger, 仅 iOS/macOS)
+import { sendRemoteLog } from './src/remote-log';
+
 const NativeLogger = NativeModules.NativeLogger;
-const LOG_SERVER = 'http://localhost:9999/log';
 
 const sendLog = (level: string, msg: string) => {
-  // 发送到远程日志服务器（注意：某些 runtime/离线 bundle 场景下 `fetch` 可能不存在，必须保护）
-  try {
-    const fetchFn = (globalThis as any).fetch as unknown;
-    if (typeof fetchFn === 'function') {
-      (fetchFn as any)(LOG_SERVER, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level, msg }),
-      })?.catch?.(() => {}); // 静默失败
-    }
-  } catch {
-    // ignore
-  }
+  sendRemoteLog(level, msg);
 
-  // 同时输出到 Xcode
+  // NativeLogger 仅在 iOS/macOS 上可用，Android 上为 undefined（静默跳过）
   try {
     if (level === 'error') {
       NativeLogger?.error?.(msg);
