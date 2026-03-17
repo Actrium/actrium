@@ -23,6 +23,7 @@ import { AppSessionService } from '../../services/AppSessionService';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../styles/shadows';
 import { setTabBookmarkStatus } from '../../../src/native-bridge/tab/TabModule';
+import { TabEvents } from '../../../src/native-bridge/tab/TabEvents';
 import { HostIconButton } from '../components/HostIconButton';
 import SafeBottomView from '../components/SafeBottomView';
 import { Icon } from '../components/Icon';
@@ -101,6 +102,18 @@ const LoadApp = () => {
     void requestNetworkPermissionOnMount();
   }, [requestNetworkPermissionOnMount]);
 
+  useEffect(() => {
+    const unsubscribeWillExit = TabEvents.onTabWillExitFullscreen((event) => {
+      if (event.tabId !== tabCtx.tab.id) return;
+      // 退出动作发起时先同步关闭相机，避免 Native 切页后摄像头仍短暂存活。
+      setCameraActive(false);
+    });
+
+    return () => {
+      unsubscribeWillExit();
+    };
+  }, [tabCtx.tab.id]);
+
   // 若 tab 预设了 appUrl，视为从收藏加载，mount 时自动触发加载，无需用户手动输入
   useEffect(() => {
     if (tabCtx.tab.appUrl) {
@@ -157,12 +170,18 @@ const LoadApp = () => {
         if (!initResult.ok) {
           if (initResult.reason === 'APP_NOT_FOUND') {
             const nowForAlert = Date.now();
-            if (nowForAlert - lastNotFoundAlertAtRef.current >= ALERT_DEDUP_MS) {
+            if (
+              nowForAlert - lastNotFoundAlertAtRef.current >=
+              ALERT_DEDUP_MS
+            ) {
               GlobalAlert.alert(t('actr.app.notExist'));
               lastNotFoundAlertAtRef.current = nowForAlert;
             }
           } else {
-            GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.networkRetry'));
+            GlobalAlert.alert(
+              t('actr.app.loadFailed'),
+              t('actr.app.networkRetry'),
+            );
           }
           return;
         }

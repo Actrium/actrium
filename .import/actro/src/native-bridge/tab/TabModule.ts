@@ -1,4 +1,5 @@
 import { NativeModules } from 'react-native';
+import { emitTabWillExitFullscreen } from './TabEvents';
 
 const { TabModule } = NativeModules;
 
@@ -20,6 +21,14 @@ export const openTab = async (data: {
 // 退出 tab
 export const exitFullscreen = async (): Promise<boolean> => {
   try {
+    const currentTabId = await TabModule.getCurrentFullscreenTab();
+    if (currentTabId) {
+      // 先在 JS 侧广播退出前事件，给相机/录音等资源一个同步清理机会。
+      emitTabWillExitFullscreen({
+        tabId: currentTabId,
+        timestamp: Date.now(),
+      });
+    }
     return TabModule.exitFullscreen();
   } catch (e) {
     console.error(e);
