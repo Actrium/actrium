@@ -19,6 +19,12 @@ cd Subsystem && npm install
 cd .. && pod install
 ```
 
+5. 运行
+
+```shell
+cd Subsystem && yarn dev
+```
+
 #### 说明
 
 - `Subsystem` 里的 `react-native-webview` 依赖 `patch-package` 自动打补丁，安装依赖后会在 `postinstall` 执行。
