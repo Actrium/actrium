@@ -86,47 +86,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                     binding.flReactNative.visibility = View.GONE
                     isLayoutComplete = true
                     binding.flReactNative.viewTreeObserver.removeOnGlobalLayoutListener(this)
-
-                    // 设置自定义 OutlineProvider 以支持圆角裁剪（仅上方圆角）
-                    // 38dp 转换为 px
-                    val cornerRadiusDp = 38f
-                    val cornerRadiusPx = cornerRadiusDp * resources.displayMetrics.density
-
-                    binding.flRNContent.outlineProvider = object : ViewOutlineProvider() {
-                        override fun getOutline(view: View, outline: Outline) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                // Android 11+ 使用 setPath
-                                val path = Path()
-                                val width = view.width.toFloat()
-                                val height = view.height.toFloat()
-                                val radius = cornerRadiusPx
-
-                                // 从左上角开始
-                                path.moveTo(radius, 0f)
-                                // 顶部直线到右上角
-                                path.lineTo(width - radius, 0f)
-                                // 右上角圆角 (90度圆弧)
-                                path.arcTo(width - radius * 2, 0f, width, radius * 2, 270f, 90f, false)
-                                // 右侧直线到右下角
-                                path.lineTo(width, height)
-                                // 底部直线到左下角
-                                path.lineTo(0f, height)
-                                // 左侧直线到左上角
-                                path.lineTo(0f, radius)
-                                // 左上角圆角 (90度圆弧)
-                                path.arcTo(0f, 0f, radius * 2, radius * 2, 180f, 90f, false)
-                                path.close()
-
-                                outline.setPath(path)
-                            } else {
-                                // Android 5.0-10 使用 setRoundRect，所有角都会有圆角
-                                outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx)
-                            }
-                        }
-                    }
-                    binding.flRNContent.elevation = 0.0f
-                    binding.flRNContent.clipToOutline = true
-
                     Log.d("MainActivity", "flReactNative initial height: ${binding.flReactNative.height}")
                 }
             }

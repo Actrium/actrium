@@ -1,0 +1,10 @@
+<resources>
+    <declare-styleable name="RoundedCornerLayout">
+        <attr name="cornerRadius" format="dimension" />
+        <attr name="cornerTopLeftRadius" format="dimension" />
+        <attr name="cornerTopRightRadius" format="dimension" />
+        <attr name="cornerBottomRightRadius" format="dimension" />
+        <attr name="cornerBottomLeftRadius" format="dimension" />
+    </declare-styleable>
+</resources>
+
