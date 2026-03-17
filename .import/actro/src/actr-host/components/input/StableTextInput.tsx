@@ -24,6 +24,8 @@ interface StableTextInputProps {
   desktopInputStyle: StyleProp<TextStyle>;
   mobileInputStyle: StyleProp<TextStyle>;
   editable?: boolean;
+  autoGrowMaxLines?: number;
+  autoGrowLineHeight?: number;
 }
 
 export const StableTextInput = React.memo(function StableTextInput({
@@ -38,18 +40,34 @@ export const StableTextInput = React.memo(function StableTextInput({
   desktopInputStyle,
   mobileInputStyle,
   editable = true,
+  autoGrowMaxLines,
+  autoGrowLineHeight,
 }: StableTextInputProps) {
   const { t } = useTranslation();
   const MOBILE_LINE_HEIGHT = 22;
   const MOBILE_MAX_LINES = 5;
   const MOBILE_MIN_HEIGHT = MOBILE_LINE_HEIGHT;
   const MOBILE_MAX_HEIGHT = MOBILE_LINE_HEIGHT * MOBILE_MAX_LINES;
+  const autoGrowEnabled =
+    !mobileMode &&
+    typeof autoGrowMaxLines === 'number' &&
+    autoGrowMaxLines > 1 &&
+    typeof autoGrowLineHeight === 'number' &&
+    autoGrowLineHeight > 0;
+  const DESKTOP_LINE_HEIGHT = autoGrowLineHeight ?? 0;
+  const DESKTOP_MIN_HEIGHT = autoGrowEnabled ? DESKTOP_LINE_HEIGHT : 0;
+  const DESKTOP_MAX_HEIGHT = autoGrowEnabled
+    ? DESKTOP_LINE_HEIGHT * autoGrowMaxLines!
+    : 0;
   const inputRef = useRef<TextInput>(null);
   const localTextRef = useRef('');
   const [initialText] = useState(
     () => useInputStore.getState().inputs[tabId]?.text ?? '',
   );
   const [mobileInputHeight, setMobileInputHeight] = useState(MOBILE_MIN_HEIGHT);
+  const [desktopInputHeight, setDesktopInputHeight] = useState(
+    autoGrowEnabled ? DESKTOP_MIN_HEIGHT : 0,
+  );
   const [isEmpty, setIsEmpty] = useState(initialText.length === 0);
   const setInputText = useInputStore((state) => state.setInputText);
 
@@ -72,6 +90,11 @@ export const StableTextInput = React.memo(function StableTextInput({
           if (mobileMode) {
             setMobileInputHeight((prev) =>
               prev === MOBILE_MIN_HEIGHT ? prev : MOBILE_MIN_HEIGHT,
+            );
+          }
+          if (autoGrowEnabled) {
+            setDesktopInputHeight((prev) =>
+              prev === DESKTOP_MIN_HEIGHT ? prev : DESKTOP_MIN_HEIGHT,
             );
           }
           // Android multiline 对 setNativeProps({ text: '' }) 有时不稳定，clear() 更可靠。
@@ -106,9 +129,14 @@ export const StableTextInput = React.memo(function StableTextInput({
           prev === MOBILE_MIN_HEIGHT ? prev : MOBILE_MIN_HEIGHT,
         );
       }
+      if (autoGrowEnabled && text.length === 0) {
+        setDesktopInputHeight((prev) =>
+          prev === DESKTOP_MIN_HEIGHT ? prev : DESKTOP_MIN_HEIGHT,
+        );
+      }
       setInputText(tabId, text);
     },
-    [tabId, mobileMode, setInputText],
+    [DESKTOP_MIN_HEIGHT, autoGrowEnabled, mobileMode, setInputText, tabId],
   );
 
   const inputStyle = React.useMemo(
@@ -119,9 +147,17 @@ export const StableTextInput = React.memo(function StableTextInput({
             height: mobileInputHeight,
             maxHeight: MOBILE_MAX_HEIGHT,
           }
-        : null,
+        : autoGrowEnabled
+          ? {
+              height: desktopInputHeight,
+              maxHeight: DESKTOP_MAX_HEIGHT,
+            }
+          : null,
     ],
     [
+      DESKTOP_MAX_HEIGHT,
+      autoGrowEnabled,
+      desktopInputHeight,
       desktopInputStyle,
       hasAttachments,
       mobileInputHeight,
@@ -132,17 +168,37 @@ export const StableTextInput = React.memo(function StableTextInput({
 
   const handleContentSizeChange = useCallback(
     (e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
-      if (!mobileMode) return;
-      // mobile 文本框高度限制在 1~5 行，超过后由 TextInput 内部滚动承载。
-      const nextHeight = Math.max(
-        MOBILE_MIN_HEIGHT,
-        Math.min(e.nativeEvent.contentSize.height, MOBILE_MAX_HEIGHT),
-      );
-      if (Math.abs(nextHeight - mobileInputHeight) > 1) {
-        setMobileInputHeight(nextHeight);
+      if (mobileMode) {
+        // mobile 文本框高度限制在 1~5 行，超过后由 TextInput 内部滚动承载。
+        const nextHeight = Math.max(
+          MOBILE_MIN_HEIGHT,
+          Math.min(e.nativeEvent.contentSize.height, MOBILE_MAX_HEIGHT),
+        );
+        if (Math.abs(nextHeight - mobileInputHeight) > 1) {
+          setMobileInputHeight(nextHeight);
+        }
+        return;
+      }
+
+      if (autoGrowEnabled) {
+        // Pad 端默认 1 行，输入增长时扩展到最多 5 行，超过后改由输入框内部滚动。
+        const nextHeight = Math.max(
+          DESKTOP_MIN_HEIGHT,
+          Math.min(e.nativeEvent.contentSize.height, DESKTOP_MAX_HEIGHT),
+        );
+        if (Math.abs(nextHeight - desktopInputHeight) > 1) {
+          setDesktopInputHeight(nextHeight);
+        }
       }
     },
-    [mobileInputHeight, mobileMode],
+    [
+      DESKTOP_MAX_HEIGHT,
+      DESKTOP_MIN_HEIGHT,
+      autoGrowEnabled,
+      desktopInputHeight,
+      mobileInputHeight,
+      mobileMode,
+    ],
   );
 
   const shouldShowPlaceholder = isEmpty;
@@ -165,7 +221,11 @@ export const StableTextInput = React.memo(function StableTextInput({
         editable={editable}
         placeholder=''
         multiline={true}
-        scrollEnabled={mobileMode && mobileInputHeight >= MOBILE_MAX_HEIGHT}
+        scrollEnabled={
+          mobileMode
+            ? mobileInputHeight >= MOBILE_MAX_HEIGHT
+            : autoGrowEnabled && desktopInputHeight >= DESKTOP_MAX_HEIGHT
+        }
         defaultValue={initialText}
         onChangeText={handleChangeText}
         onContentSizeChange={handleContentSizeChange}
@@ -189,6 +249,7 @@ export const StableTextInput = React.memo(function StableTextInput({
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
+    width: '100%',
   },
   placeholderOverlay: {
     position: 'absolute',

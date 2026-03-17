@@ -361,10 +361,10 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
 
     return () => {
       // 销毁时清除当前 tab 下的历史对话，id 映射，未读消息数量，输出框状态
-      cleanMessage(tab.id);
-      removeTabIdMap(tab.id);
-      useUnreadStore.getState().clearUnread(tab.id);
-      clearInput(tab.id);
+      // cleanMessage(tab.id);
+      // removeTabIdMap(tab.id);
+      // useUnreadStore.getState().clearUnread(tab.id);
+      // clearInput(tab.id);
     };
   }, [tab.id]);
 
@@ -581,6 +581,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           styles.inputContainer,
           {
             backgroundColor: layoutTokens.isTablet ? '#fff' : '#F2F2F6',
+            marginTop: layoutTokens.isTablet ? 8 : 0,
             marginBottom: layoutTokens.isTablet ? keyboardInset : 0,
           },
         ]}
