@@ -34,24 +34,21 @@ import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';
 
 // 🔴 统一日志工具 - 输出到:
-// 1. 远程日志服务器 (actr log server, 端口 9999, 跨平台)
+// 1. 远程日志服务器 (actr log server, 跨平台)
 // 2. 原生控制台 (通过 NativeLogger, 仅 iOS/macOS)
-import { sendRemoteLog } from './src/remote-log';
+// 尽早安装 console 拦截器，确保后续所有 console.xxx 都能转发到远程 log server
+import { installConsoleInterceptor } from './src/devtools-console';
+installConsoleInterceptor();
 
 const NativeLogger = NativeModules.NativeLogger;
 
 const sendLog = (level: string, msg: string) => {
-  sendRemoteLog(level, msg);
-
-  // NativeLogger 仅在 iOS/macOS 上可用，Android 上为 undefined（静默跳过）
+  // 远程日志转发由 devtools-console.ts 的 console 拦截器统一处理，
+  // 这里通过 console 输出，拦截器会自动转发到远程 log server。
   try {
-    if (level === 'error') {
-      NativeLogger?.error?.(msg);
-    } else if (level === 'warn') {
-      NativeLogger?.warn?.(msg);
-    } else {
-      NativeLogger?.log?.(msg);
-    }
+    if (level === 'error') console.error(msg);
+    else if (level === 'warn') console.warn(msg);
+    else console.log(msg);
   } catch {
     // ignore
   }
