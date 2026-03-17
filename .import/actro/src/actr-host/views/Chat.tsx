@@ -11,7 +11,6 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
-  TouchableWithoutFeedback,
   useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
@@ -523,41 +522,41 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         { backgroundColor: layoutTokens.isTablet ? '#ffffff' : '#F2F2F6' },
       ]}
     >
-      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-        <View style={styles.contentArea}>
-          {messageIds.length === 0 && !isLoadingMore ? (
-            <View style={{ flex: 1 }}>
-              <ChatEmpty />
-            </View>
-          ) : (
-            <FlatList
-              ref={flatListRef}
-              data={messageIds}
-              renderItem={renderItem}
-              keyExtractor={(item) => item}
-              onScroll={handleScroll}
-              onContentSizeChange={handleContentSizeChange}
-              scrollEventThrottle={16}
-              style={styles.chatScrollView}
-              contentContainerStyle={[
-                styles.chatContent,
-                {
-                  // Pad 模式不展示 ChatHeader，顶部只保留内容呼吸位。
-                  paddingTop: layoutTokens.isTablet ? 12 : CHAT_HEADER_HEIGHT + 12,
-                  paddingBottom: layoutTokens.chatListBottomPadding,
-                },
-              ]}
-              ListHeaderComponent={ListHeaderComponent}
-              ListHeaderComponentStyle={styles.listHeader}
-              showsHorizontalScrollIndicator={false}
-              horizontal={false}
-              keyboardShouldPersistTaps='handled'
-              keyboardDismissMode='on-drag'
-              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-            />
-          )}
-        </View>
-      </TouchableWithoutFeedback>
+      <View style={styles.contentArea}>
+        {messageIds.length === 0 && !isLoadingMore ? (
+          <View style={{ flex: 1 }}>
+            <ChatEmpty />
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messageIds}
+            renderItem={renderItem}
+            keyExtractor={(item) => item}
+            onScroll={handleScroll}
+            onContentSizeChange={handleContentSizeChange}
+            onScrollBeginDrag={dismissKeyboard}
+            scrollEventThrottle={16}
+            style={styles.chatScrollView}
+            contentContainerStyle={[
+              styles.chatContent,
+              {
+                // Pad 模式不展示 ChatHeader，顶部只保留内容呼吸位。
+                paddingTop: layoutTokens.isTablet ? 12 : CHAT_HEADER_HEIGHT + 12,
+                paddingBottom: layoutTokens.chatListBottomPadding,
+              },
+            ]}
+            ListHeaderComponent={ListHeaderComponent}
+            ListHeaderComponentStyle={styles.listHeader}
+            showsHorizontalScrollIndicator={false}
+            horizontal={false}
+            // 让列表空白区域点击时由滚动容器负责收起键盘，同时不再用外层 Touchable 截断拖拽手势。
+            keyboardShouldPersistTaps='never'
+            keyboardDismissMode='on-drag'
+            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          />
+        )}
+      </View>
 
       {/* 回到底部按钮 */}
       {!selectionMode && (
