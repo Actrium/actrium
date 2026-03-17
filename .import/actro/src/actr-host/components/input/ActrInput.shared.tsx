@@ -454,6 +454,8 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
               handleSendRef={handleSendRef}
               desktopInputStyle={styles.input}
               mobileInputStyle={styles.mobileInputText}
+              autoGrowMaxLines={5}
+              autoGrowLineHeight={22}
             />
           }
           takePhoto={takePhoto}
@@ -546,16 +548,16 @@ const styles = StyleSheet.create({
   },
   input: {
     fontSize: 17,
+    lineHeight: 24,
     color: '#333',
-    minHeight: 40, // 恢复紧凑高度
+    minHeight: 24,
     textAlignVertical: 'top',
     padding: 0,
     marginBottom: 0, // 移动到底部容器
-    flex: 1,
   },
   inputRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     marginBottom: 12,
     position: 'relative',
   },
