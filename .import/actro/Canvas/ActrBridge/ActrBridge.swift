@@ -578,16 +578,8 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         guard let targetId = self.serverActId else {
             throw ActrError.StateError(msg: "Server ActId not initialized")
         }
-        let responseData = try await ctx.callRaw(
-            target: targetId,
-            routeKey: Ask_UsrPromptRequest.routeKey,
-            payloadType: .rpcReliable,
-            payload: try userMessage.serializedData(),
-            timeoutMs: 300000
-        )
+      
         
-        // 反序列化为 Ask_AssistantReply
-        let reply = try Ask_AssistantReply(serializedBytes: responseData)
         
         // 注册文本响应流
         if !req.textResponseStreamID.isEmpty {
@@ -610,6 +602,18 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
             )
             logger.info("[AskLocalServiceHandlerImpl] Voice response stream registered: \(req.voiceResponseStreamID)")
         }
+        
+        let responseData = try await ctx.callRaw(
+            target: targetId,
+            routeKey: Ask_UsrPromptRequest.routeKey,
+            payloadType: .rpcReliable,
+            payload: try userMessage.serializedData(),
+            timeoutMs: 300000
+        )
+        
+        
+        // 反序列化为 Ask_AssistantReply
+        let reply = try Ask_AssistantReply(serializedBytes: responseData)
         
         var resp = DataStreamApp_TextMessageResponse()
         resp.questionID = reply.questionID
@@ -642,17 +646,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         guard let targetId = self.serverActId else {
             throw ActrError.StateError(msg: "Server ActId not initialized")
         }
-        let responseData = try await ctx.callRaw(
-            target: targetId,
-            routeKey: Ask_UsrPromptRequest.routeKey,
-            payloadType: .rpcReliable,
-            payload: try userMessage.serializedData(),
-            timeoutMs: 300000
-        )
-        
-        // 反序列化为 Ask_AssistantReply
-        let reply = try Ask_AssistantReply(serializedBytes: responseData)
-        
+
         // 注册文本响应流
         if !req.textResponseStreamID.isEmpty {
             let callback = StreamPrintCallback(streamId: req.textResponseStreamID, type: .text, onMessage: nil)
@@ -674,6 +668,18 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
             )
             logger.info("[AskLocalServiceHandlerImpl] Voice response stream registered: \(req.voiceResponseStreamID)")
         }
+        
+        let responseData = try await ctx.callRaw(
+            target: targetId,
+            routeKey: Ask_UsrPromptRequest.routeKey,
+            payloadType: .rpcReliable,
+            payload: try userMessage.serializedData(),
+            timeoutMs: 300000
+        )
+        
+        // 反序列化为 Ask_AssistantReply
+        let reply = try Ask_AssistantReply(serializedBytes: responseData)
+        
         
         var resp = DataStreamApp_StartVoiceMessageResponse()
         resp.questionID = reply.questionID
