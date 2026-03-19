@@ -9,19 +9,37 @@ export enum Progress {
   overdue = 5,
 }
 
+export type MessageType = 'text' | 'voice';
+
+export interface IVoicePayload {
+  local_file_uri: string;      // 本地文件 URI，供播放器直接使用
+  local_file_path: string;     // 本地文件绝对路径，供文件检查/删除使用
+  duration_ms: number;         // 语音时长（毫秒）
+  mime_type: string;           // 文件 MIME 类型，例如 audio/wav
+  file_size: number;           // 文件大小（字节）
+  sample_rate: number;         // 采样率，例如 16000
+  channels: number;            // 声道数，当前通常为 1（单声道）
+  bits_per_sample: number;     // 每个采样点的位深，例如 16
+  status: 'recording' | 'ready'; // 本地语音文件状态：录制中 / 已就绪
+}
+
 export interface IMessage {
   message_id: string;
   app_id: string; // 所属 App ID
   tab_id: string; // 所属 Tab ID
   session_id: string; // 所属会话 ID
+  question_type?: MessageType;          // 提问类型 (text/voice)
   is_preset: number;
   question_time: number;
   question_content: string;
+  question_voice_payload?: string;      // 提问语音元数据 (JSON string)
+  answer_type?: MessageType;            // 回答类型 (text/voice)
   answer_time: number;
   answer_content: string;
-  attachments?: string;       // 附件信息 (JSON string)
-  is_edited?: number;         // 是否编辑过
-  is_read?: number;           // 是否已读 (0 未读/1 已读)
+  answer_voice_payload?: string;        // 回答语音元数据 (JSON string)
+  attachments?: string;                 // 附件信息 (JSON string)
+  is_edited?: number;                   // 是否编辑过
+  is_read?: number;                     // 是否已读 (0 未读/1 已读)
   progress: number;
 }
 
@@ -52,18 +70,22 @@ export class MessageRepository {
   static async saveMessage(msg: IMessage) {
     const sql = `
       INSERT OR REPLACE INTO app_chat_history
-      (message_id, app_id, tab_id, session_id, question_time, question_content, answer_time, answer_content, attachments, is_preset, is_edited, is_read, progress)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (message_id, app_id, tab_id, session_id, question_type, question_time, question_content, question_voice_payload, answer_type, answer_time, answer_content, answer_voice_payload, attachments, is_preset, is_edited, is_read, progress)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     return await db.executeSql(sql, [
       msg.message_id,
       msg.app_id,
       msg.tab_id,
       msg.session_id,
+      msg.question_type || 'text',
       msg.question_time,
       msg.question_content,
+      msg.question_voice_payload || null,
+      msg.answer_type || 'text',
       msg.answer_time,
       msg.answer_content,
+      msg.answer_voice_payload || null,
       msg.attachments || null,
       msg.is_preset,
       msg.is_edited || 0,

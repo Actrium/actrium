@@ -55,10 +55,14 @@ export const initDatabase = async () => {
         session_id TEXT NOT NULL,       -- 会话 ID
         app_id TEXT NOT NULL,           -- 指向应用信息表
         tab_id TEXT NOT NULL,           -- 所属 Tab ID
-        question_time INTEGER,          -- 提问时间
-        question_content TEXT,          -- 提问内容
-        answer_time INTEGER,            -- 回答时间
-        answer_content TEXT,            -- 回答内容
+        question_type TEXT DEFAULT 'text',          -- 提问类型 (text/voice)
+        question_time INTEGER,                      -- 提问时间
+        question_content TEXT,                      -- 提问内容
+        question_voice_payload TEXT,                -- 提问语音元数据 (JSON，对应 IVoicePayload：{ local_file_uri, local_file_path, duration_ms, mime_type, file_size, sample_rate, channels, bits_per_sample, status })
+        answer_type TEXT DEFAULT 'text',            -- 回答类型 (text/voice)
+        answer_time INTEGER,                        -- 回答时间
+        answer_content TEXT,                        -- 回答内容
+        answer_voice_payload TEXT,                  -- 回答语音元数据 (JSON，对应 IVoicePayload：{ local_file_uri, local_file_path, duration_ms, mime_type, file_size, sample_rate, channels, bits_per_sample, status })
         attachments TEXT,               -- 附件信息 (JSON: images, files, location)
         is_preset INTEGER DEFAULT 0,    -- 是否为预设问题 (0/1)
         is_edited INTEGER DEFAULT 0,    -- 是否编辑过 (0/1)
@@ -67,6 +71,29 @@ export const initDatabase = async () => {
         FOREIGN KEY (app_id) REFERENCES apps (app_id) ON DELETE CASCADE
       );
     `, [], true);
+
+    // question_voice_payload / answer_voice_payload mock:
+    // {
+    //   "local_file_uri": "file:///var/mobile/Containers/Data/Application/xxx/Documents/actr-voices/msg-123-answer.wav",
+    //   "local_file_path": "/var/mobile/Containers/Data/Application/xxx/Documents/actr-voices/msg-123-answer.wav",
+    //   "duration_ms": 3200,
+    //   "mime_type": "audio/wav",
+    //   "file_size": 102444,
+    //   "sample_rate": 16000,
+    //   "channels": 1,
+    //   "bits_per_sample": 16,
+    //   "status": "ready"
+    // }
+    // 字段说明：
+    // local_file_uri: 本地文件 URI，供播放器直接使用
+    // local_file_path: 本地文件绝对路径，供文件存在性检查和删除使用
+    // duration_ms: 语音时长，单位毫秒
+    // mime_type: 文件 MIME 类型，当前语音消息统一为 audio/wav
+    // file_size: 文件大小，单位字节
+    // sample_rate: 采样率，当前默认 16000
+    // channels: 声道数，当前默认 1（单声道）
+    // bits_per_sample: 每个采样点的位深，当前默认 16
+    // status: 本地语音文件状态，recording 表示录制中，ready 表示已落盘可播放
 
     // 5. 创建授权信息表 (用于持久化 sessionToken)
     await db.executeSql(`

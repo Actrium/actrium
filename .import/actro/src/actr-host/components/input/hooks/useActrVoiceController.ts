@@ -4,6 +4,8 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useAudioStream } from '../../../hooks/useAudioStream';
 import { useTranslation } from 'react-i18next';
 import { GlobalAlert } from '../../../../../src/components';
+import type { IMessage } from '../../../../repository/MessageRepository';
+import { saveVoiceMessageWav } from '../../../utils/VoiceMessageStorage';
 
 interface UseActrVoiceControllerParams {
   processVoiceMessageSend: (
@@ -14,6 +16,12 @@ interface UseActrVoiceControllerParams {
   sendVoiceChunk: (chunk: Uint8Array) => Promise<unknown>;
   startVoice: (payload: any) => void;
   endVoice: () => Promise<unknown>;
+  onVoiceMessageReady: (payload: {
+    messageId: string;
+    message: IMessage;
+    voicePayload: string;
+  }) => void;
+  onVoiceMessageCanceled: (messageId: string) => void;
 }
 
 interface UseActrVoiceControllerResult {
@@ -35,10 +43,14 @@ export function useActrVoiceController(
     sendVoiceChunk,
     startVoice,
     endVoice,
+    onVoiceMessageReady,
+    onVoiceMessageCanceled,
   } = params;
 
   // 语音流本地缓冲：<1s 先入队，达到阈值后再按序发送。
   const chunkQueueRef = useRef<Uint8Array[]>([]);
+  // 中文注释：本地完整录音单独缓存，避免发送队列被 drain 后无法回放落盘。
+  const recordedChunksRef = useRef<Uint8Array[]>([]);
   const isSendingRef = useRef(false);
   const isDrainingRef = useRef(false);
   // 1s 阈值：避免误触就触发服务端语音会话。
@@ -50,6 +62,8 @@ export function useActrVoiceController(
   // 通过 ref 同步追踪录音状态，避免依赖 React state 带来的时序延迟。
   const isVoiceRecordingRef = useRef(false);
   const isVoiceStartPendingRef = useRef(false);
+  const currentVoiceMessageIdRef = useRef<string | null>(null);
+  const pendingVoiceMessageRef = useRef<IMessage | null>(null);
 
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [isCancellingVoice, setIsCancellingVoice] = useState(false);
@@ -68,6 +82,7 @@ export function useActrVoiceController(
   } = useAudioStream({
     onAudioChunk: (chunk) => {
       chunkQueueRef.current.push(chunk);
+      recordedChunksRef.current.push(chunk);
       void drainQueue();
     },
   });
@@ -105,10 +120,19 @@ export function useActrVoiceController(
         return;
       }
 
+      currentVoiceMessageIdRef.current = reqMsg.message_id;
+      pendingVoiceMessageRef.current = reqMsg.localMessage ?? null;
+
       if (stopRequestedRef.current) {
         console.log('[Voice] Stop requested during threshold commit, aborting');
         isStartingRef.current = false;
         chunkQueueRef.current = [];
+        recordedChunksRef.current = [];
+        if (currentVoiceMessageIdRef.current) {
+          onVoiceMessageCanceled(currentVoiceMessageIdRef.current);
+          currentVoiceMessageIdRef.current = null;
+        }
+        pendingVoiceMessageRef.current = null;
         return;
       }
 
@@ -120,6 +144,12 @@ export function useActrVoiceController(
         await endVoice();
         isStartingRef.current = false;
         chunkQueueRef.current = [];
+        recordedChunksRef.current = [];
+        if (currentVoiceMessageIdRef.current) {
+          onVoiceMessageCanceled(currentVoiceMessageIdRef.current);
+          currentVoiceMessageIdRef.current = null;
+        }
+        pendingVoiceMessageRef.current = null;
         return;
       }
 
@@ -174,12 +204,15 @@ export function useActrVoiceController(
 
     // 每次新录音会话都重置状态，避免继承上次未清理的队列/标志位。
     chunkQueueRef.current = [];
+    recordedChunksRef.current = [];
     isSendingRef.current = false;
     isDrainingRef.current = false;
     isCommittedRef.current = false;
     isStartingRef.current = false;
     stopRequestedRef.current = false;
     hasEverStartedRef.current = false;
+    currentVoiceMessageIdRef.current = null;
+    pendingVoiceMessageRef.current = null;
 
     isVoiceStartPendingRef.current = true;
     setVoiceRecording(true);
@@ -264,6 +297,7 @@ export function useActrVoiceController(
       setVoiceRecording(false);
       isVoiceStartPendingRef.current = false;
       hasEverStartedRef.current = false;
+      stopRequestedRef.current = false;
 
       try {
         stopRecording();
@@ -274,7 +308,10 @@ export function useActrVoiceController(
             `[Voice] 误触丢弃 | 时长: ${duration}ms | 丢弃切片: ${chunkQueueRef.current.length} 个`,
           );
           chunkQueueRef.current = [];
+          recordedChunksRef.current = [];
           isSendingRef.current = false;
+          pendingVoiceMessageRef.current = null;
+          currentVoiceMessageIdRef.current = null;
           return;
         }
 
@@ -283,7 +320,13 @@ export function useActrVoiceController(
           console.log(`[Voice] 用户取消发送 | 时长: ${duration}ms`);
           isSendingRef.current = false;
           chunkQueueRef.current = [];
+          recordedChunksRef.current = [];
           await endVoice();
+          if (currentVoiceMessageIdRef.current) {
+            onVoiceMessageCanceled(currentVoiceMessageIdRef.current);
+          }
+          currentVoiceMessageIdRef.current = null;
+          pendingVoiceMessageRef.current = null;
           return;
         }
 
@@ -297,15 +340,45 @@ export function useActrVoiceController(
         }
         await drainQueue();
         await endVoice();
+        if (
+          currentVoiceMessageIdRef.current &&
+          recordedChunksRef.current.length > 0 &&
+          pendingVoiceMessageRef.current
+        ) {
+          const voicePayload = await saveVoiceMessageWav({
+            messageId: currentVoiceMessageIdRef.current,
+            chunks: recordedChunksRef.current,
+          });
+          onVoiceMessageReady({
+            messageId: currentVoiceMessageIdRef.current,
+            message: pendingVoiceMessageRef.current,
+            voicePayload: JSON.stringify(voicePayload),
+          });
+        }
+        chunkQueueRef.current = [];
+        isSendingRef.current = false;
+        recordedChunksRef.current = [];
+        currentVoiceMessageIdRef.current = null;
+        pendingVoiceMessageRef.current = null;
         console.log('[Voice] endVoice 完成，语音发送结束');
       } catch (e) {
         console.error('[Voice] handleVoiceEnd failed:', e);
         chunkQueueRef.current = [];
+        recordedChunksRef.current = [];
         isSendingRef.current = false;
         GlobalAlert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingError'));
       }
     },
-    [drainQueue, duration, endVoice, hookIsRecording, setVoiceRecording, stopRecording],
+    [
+      drainQueue,
+      duration,
+      endVoice,
+      hookIsRecording,
+      onVoiceMessageCanceled,
+      onVoiceMessageReady,
+      setVoiceRecording,
+      stopRecording,
+    ],
   );
 
   const handleVoiceChangeState = useCallback((isCancelling: boolean) => {
@@ -331,10 +404,13 @@ export function useActrVoiceController(
         thresholdTimerRef.current = null;
       }
       chunkQueueRef.current = [];
+      recordedChunksRef.current = [];
       isSendingRef.current = false;
       isDrainingRef.current = false;
       isVoiceRecordingRef.current = false;
       isVoiceStartPendingRef.current = false;
+      currentVoiceMessageIdRef.current = null;
+      pendingVoiceMessageRef.current = null;
     };
   }, []);
 

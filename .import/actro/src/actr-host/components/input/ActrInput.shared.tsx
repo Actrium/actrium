@@ -32,6 +32,10 @@ import { useActrVoiceController } from './hooks/useActrVoiceController';
 import { LoginModal, AuthorizeModal } from '../../../system-apps/auth';
 import { useUnreadStore } from '../../store/useUnreadStore';
 import { getCurrentFullscreenTab, openTab } from '../../../../src/native-bridge/tab/TabModule';
+import {
+  cleanupVoiceMessageFile,
+  saveVoiceMessageWav,
+} from '../../utils/VoiceMessageStorage';
 
 const { NativeLogger } = NativeModules;
 
@@ -82,6 +86,10 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   const deleteMessageFromStore = useMessageStore(
     (state) => state.deleteMessage,
   );
+  const pendingVoiceMessageUpdatesRef = useRef<
+    Record<string, Partial<IMessage>>
+  >({});
+  const answerVoiceChunksRef = useRef<Record<string, Uint8Array[]>>({});
 
   const [showMapModal, setShowMapModal] = useState(false);
   // Hook for attachment logic
@@ -196,27 +204,116 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   );
 
   // 语音消息接收回调
+  const finalizeAnswerVoiceMessage = useCallback(
+    async (messageId: string) => {
+      try {
+        const chunks = answerVoiceChunksRef.current[messageId];
+        if (!chunks?.length) return;
+
+        const voicePayload = await saveVoiceMessageWav({
+          messageId: `${messageId}-answer`,
+          chunks,
+        });
+        const serializedVoicePayload = JSON.stringify(voicePayload);
+        const currentMsg = useMessageStore.getState().getMessage(tab.id, messageId);
+
+        // 中文注释：当问题语音消息尚未入列时，先把 answer 语音落盘结果挂到 pending updates，等消息入列后再合并。
+        if (!currentMsg) {
+          pendingVoiceMessageUpdatesRef.current[messageId] = {
+            ...(pendingVoiceMessageUpdatesRef.current[messageId] || {}),
+            answer_type: 'voice',
+            answer_voice_payload: serializedVoicePayload,
+            answer_time: Date.now(),
+            progress: 2,
+          };
+          delete answerVoiceChunksRef.current[messageId];
+          return;
+        }
+
+        updateMessage(
+          tab.id,
+          messageId,
+          {
+            answer_type: 'voice',
+            answer_voice_payload: serializedVoicePayload,
+            answer_time: Date.now(),
+            progress: 2,
+          },
+          true,
+        );
+        delete answerVoiceChunksRef.current[messageId];
+      } catch (error) {
+        console.error('[ActrInput] 保存 answer 语音消息失败:', error);
+      }
+    },
+    [tab.id, updateMessage],
+  );
+
+  const handleAnswerVoiceFinishedReadState = useCallback(
+    (messageId: string) => {
+      getCurrentFullscreenTab().then((currentTabId) => {
+        if (currentTabId === tab.id) {
+          const currentMsg = useMessageStore.getState().getMessage(tab.id, messageId);
+          if (currentMsg) {
+            updateMessage(tab.id, messageId, { is_read: 1 }, true);
+            return;
+          }
+
+          pendingVoiceMessageUpdatesRef.current[messageId] = {
+            ...(pendingVoiceMessageUpdatesRef.current[messageId] || {}),
+            is_read: 1,
+          };
+        } else {
+          useUnreadStore.getState().incrementUnread(tab.id);
+        }
+      });
+    },
+    [tab.id, updateMessage],
+  );
+
   const onReceiveVoice = useCallback(
     (data: TActrMessageResponse) => {
       const messageId = data.message_id;
-
       const currentMsg = useMessageStore.getState().getMessage(tab.id, messageId);
+      const isFinished = data.isEnd || data.status === 2;
+      const fallbackMessage = t('actr.voice.voiceMessageReceived');
+      const newContent = currentMsg?.answer_content
+        ? currentMsg.answer_content
+        : fallbackMessage;
 
-      if (!currentMsg) return;
+      if (data.message instanceof Uint8Array) {
+        answerVoiceChunksRef.current[messageId] = [
+          ...(answerVoiceChunksRef.current[messageId] || []),
+          data.message,
+        ];
+      }
 
-      const isFinished = data.status === 2;
-      const newContent =
-        currentMsg.answer_content + t('actr.voice.voiceMessageReceived');
-
-      const updates = {
+      const updates: Partial<IMessage> = {
+        answer_type: 'voice',
         answer_time: Date.now(),
         answer_content: newContent,
         progress: isFinished ? 2 : 1,
       };
 
+      if (!currentMsg) {
+        pendingVoiceMessageUpdatesRef.current[messageId] = {
+          ...(pendingVoiceMessageUpdatesRef.current[messageId] || {}),
+          ...updates,
+        };
+        if (isFinished) {
+          void finalizeAnswerVoiceMessage(messageId);
+          handleAnswerVoiceFinishedReadState(messageId);
+        }
+        return;
+      }
+
       updateMessage(tab.id, messageId, updates, isFinished);
+      if (isFinished) {
+        void finalizeAnswerVoiceMessage(messageId);
+        handleAnswerVoiceFinishedReadState(messageId);
+      }
     },
-    [tab.id, updateMessage],
+    [finalizeAnswerVoiceMessage, handleAnswerVoiceFinishedReadState, t, tab.id, updateMessage],
   );
 
   // 使用多实例连接 Hook
@@ -307,9 +404,10 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       app_id: appId,
       tab_id: tab.id,
       session_id: session_id,
+      question_type: isVoice ? 'voice' : 'text',
       is_preset: 0,
       question_time: Date.now(),
-      question_content: trimmedContent,
+      question_content: isVoice ? '' : trimmedContent,
       answer_time: 0,
       answer_content: '',
       attachments:
@@ -317,9 +415,6 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       is_edited: editingMessageId ? 1 : 0,
       progress: 0,
     };
-
-    // 4. 同步 UI 状态（Store 内部会自动持久化到本地）
-    addMessage(tab.id, newMessage);
 
     const reqMsg = {
       message_id: newMessage.message_id,
@@ -329,6 +424,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
         (att) => att.attachment_type !== 'location',
       ),
       location: location,
+      localMessage: newMessage,
     };
 
     // 6. 重置输入框状态
@@ -336,6 +432,8 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
 
     // 如果不是语音，直接发送
     if (!isVoice) {
+      // 文字消息保留原有“先入列表再发送”的交互。
+      addMessage(tab.id, newMessage);
       await sendMessage(reqMsg);
     }
 
@@ -387,6 +485,26 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     startVoice,
     endVoice,
     beforeVoiceStart: handleVoiceAuthPrecheck,
+    onVoiceMessageReady: ({ messageId, message, voicePayload }) => {
+      const pendingUpdates = pendingVoiceMessageUpdatesRef.current[messageId];
+      const newMessage: IMessage = {
+        ...message,
+        question_voice_payload: voicePayload,
+        progress: pendingUpdates?.progress ?? 1,
+        ...pendingUpdates,
+      };
+      delete pendingVoiceMessageUpdatesRef.current[messageId];
+      addMessage(tab.id, newMessage);
+    },
+    onVoiceMessageCanceled: (messageId) => {
+      delete pendingVoiceMessageUpdatesRef.current[messageId];
+      delete answerVoiceChunksRef.current[messageId];
+      const currentMessage = useMessageStore.getState().getMessage(tab.id, messageId);
+      if (currentMessage?.question_voice_payload) {
+        void cleanupVoiceMessageFile(currentMessage.question_voice_payload);
+      }
+      deleteMessageFromStore(tab.id, messageId);
+    },
   });
 
   return (

@@ -11,6 +11,7 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Keyboard,
+  Alert,
 } from 'react-native';
 import { Icon } from './Icon';
 import { useTranslation } from 'react-i18next';
@@ -18,7 +19,10 @@ import { SmartImage } from './SmartImage';
 
 import { LongPressMenu } from './LongPressMenu';
 import { WaveForm } from './WaveForm';
-import { useVoiceStore } from '../store/useVoiceStore';
+import {
+  useVoiceStore,
+  type VoicePlaybackMode,
+} from '../store/useVoiceStore';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -34,9 +38,16 @@ import {
   SUPRAMARK_CONTAINER_RENDERERS,
   SUPRAMARK_FULL_CONFIG,
 } from '../libs/supramarkConfig';
+import {
+  formatVoiceDuration,
+  parseVoicePayload,
+  playVoiceMessageFile,
+  stopVoiceMessagePlayback,
+} from '../utils/VoiceMessageStorage';
 
 interface ChatBubbleProps {
   content?: string;
+  voicePayload?: string;
   type: 'question' | 'answer';
   size?: 'small' | 'normal';
   numberOfLines?: number;
@@ -55,6 +66,7 @@ interface ChatBubbleProps {
 
 export default function ChatBubble({
   content,
+  voicePayload,
   type,
   size = 'normal',
   numberOfLines,
@@ -73,15 +85,18 @@ export default function ChatBubble({
   const { t } = useTranslation();
   const isQuestion = type === 'question';
   const isSmall = size === 'small';
+  const parsedVoicePayload = React.useMemo(
+    () => parseVoicePayload(voicePayload),
+    [voicePayload],
+  );
+  const isVoiceQuestion = isQuestion && !!parsedVoicePayload;
+  const isVoiceAnswer = !isQuestion && !!parsedVoicePayload;
+  const isVoiceBubble = !!parsedVoicePayload;
 
-  const { playingId, setPlayingId } = useVoiceStore();
-  const deleteMessage = useMessageStore((s) => s.deleteMessage);
+  const { activePlayback, setActivePlayback, updatePlaybackStatus, clearPlayback } =
+    useVoiceStore();
   const selectionMode = useMessageStore((s) => s.selectionMode);
   const enterSelectionMode = useMessageStore((s) => s.enterSelectionMode);
-
-  const [readAloudStatus, setReadAloudStatus] = React.useState<
-    'idle' | 'loading' | 'playing'
-  >('idle');
 
   const [isCopied, setIsCopied] = React.useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = React.useState(false);
@@ -93,6 +108,44 @@ export default function ChatBubble({
   } | null>(null);
 
   const spinValue = React.useRef(new Animated.Value(0)).current;
+  const bubblePart = type;
+  const isCurrentPlaybackTarget =
+    activePlayback.messageId === msgId &&
+    activePlayback.part === bubblePart &&
+    activePlayback.appId === (appId ?? null);
+  const isVoiceBubblePlaying =
+    isCurrentPlaybackTarget && activePlayback.mode === 'voice_message';
+  const readAloudStatus: 'idle' | 'loading' | 'playing' =
+    isCurrentPlaybackTarget && activePlayback.mode === 'read_aloud'
+      ? activePlayback.status
+      : 'idle';
+
+  const beginPlayback = React.useCallback(
+    (mode: VoicePlaybackMode, status: 'loading' | 'playing' = 'playing') => {
+      if (!msgId) return;
+      // 中文注释：切换全局播放目标前先停掉本地语音文件播放，保证新的播放态和实际音频输出一致。
+      stopVoiceMessagePlayback();
+      setActivePlayback({
+        appId: appId ?? null,
+        messageId: msgId,
+        part: bubblePart,
+        mode,
+        status,
+      });
+    },
+    [appId, bubblePart, msgId, setActivePlayback],
+  );
+
+  const clearPlaybackIfCurrent = React.useCallback(() => {
+    const playback = useVoiceStore.getState().activePlayback;
+    const isSamePlayback =
+      playback.messageId === msgId &&
+      playback.part === bubblePart &&
+      playback.appId === (appId ?? null);
+    if (isSamePlayback) {
+      clearPlayback();
+    }
+  }, [appId, bubblePart, clearPlayback, msgId]);
 
   React.useEffect(() => {
     if (readAloudStatus === 'loading') {
@@ -124,28 +177,39 @@ export default function ChatBubble({
   const startPlayback = React.useCallback(() => {
     if (!msgId) return;
     console.log('[ChatBubble] startPlayback:', content);
-    setPlayingId(appId ?? null, msgId);
-    setReadAloudStatus('loading');
+    beginPlayback('read_aloud', 'loading');
 
     // 模拟加载 1s -> 播放 3s
     const loadTimer = setTimeout(() => {
-      setReadAloudStatus('playing');
+      const playback = useVoiceStore.getState().activePlayback;
+      const isSamePlayback =
+        playback.messageId === msgId &&
+        playback.part === bubblePart &&
+        playback.appId === (appId ?? null) &&
+        playback.mode === 'read_aloud';
+      if (!isSamePlayback) return;
+
+      updatePlaybackStatus('playing');
       const playTimer = setTimeout(() => {
-        setReadAloudStatus('idle');
-        setPlayingId(null, null);
+        clearPlaybackIfCurrent();
       }, 3000);
       timersRef.current.push(playTimer);
     }, 1000);
     timersRef.current.push(loadTimer);
-  }, [content, msgId, setPlayingId, appId]);
+  }, [
+    appId,
+    beginPlayback,
+    bubblePart,
+    clearPlaybackIfCurrent,
+    content,
+    msgId,
+    updatePlaybackStatus,
+  ]);
 
   const stopPlayback = React.useCallback(() => {
     console.log('[ChatBubble] stopPlayback');
-    setReadAloudStatus('idle');
-    if (playingId === msgId) {
-      setPlayingId(null, null);
-    }
-  }, [msgId, playingId, setPlayingId]);
+    clearPlaybackIfCurrent();
+  }, [clearPlaybackIfCurrent]);
 
   const timersRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -158,25 +222,54 @@ export default function ChatBubble({
     if (!msgId) return;
 
     // 如果当前正在播放/加载此消息，则停止
-    if (playingId === msgId) {
+    if (readAloudStatus !== 'idle') {
       stopPlayback();
       return;
     }
 
     startPlayback();
-  }, [msgId, playingId, startPlayback, stopPlayback]);
+  }, [msgId, readAloudStatus, startPlayback, stopPlayback]);
 
-  // 监听全局播放 ID 变化，实现互斥播放
+  const handleVoiceBubblePress = React.useCallback(async () => {
+    if (!msgId || !parsedVoicePayload) return;
+
+    if (isVoiceBubblePlaying) {
+      stopVoiceMessagePlayback();
+      clearPlaybackIfCurrent();
+      return;
+    }
+
+    try {
+      beginPlayback('voice_message');
+      await playVoiceMessageFile(voicePayload);
+    } catch (error) {
+      Alert.alert(
+        t('common.hint'),
+        error instanceof Error ? error.message : t('common.error'),
+      );
+    } finally {
+      clearPlaybackIfCurrent();
+    }
+  }, [
+    beginPlayback,
+    clearPlaybackIfCurrent,
+    isVoiceBubblePlaying,
+    msgId,
+    parsedVoicePayload,
+    t,
+    voicePayload,
+  ]);
+
+  // 中文注释：任意其它气泡接管全局播放后，当前气泡的本地计时器必须立刻清理，避免 UI 残留。
   React.useEffect(() => {
-    if (playingId !== msgId && readAloudStatus !== 'idle') {
+    if (!isCurrentPlaybackTarget && readAloudStatus !== 'idle') {
       console.log(
         '[ChatBubble] Global playback changed, stopping current msg:',
         msgId,
       );
-      setReadAloudStatus('idle');
       clearLocalTimers();
     }
-  }, [playingId, msgId, readAloudStatus]);
+  }, [isCurrentPlaybackTarget, msgId, readAloudStatus]);
 
   React.useEffect(() => {
     return () => clearLocalTimers();
@@ -423,7 +516,28 @@ export default function ChatBubble({
           </ScrollView>
         </View>
       )}
-      {content ? (
+      {isVoiceBubble && parsedVoicePayload ? (
+        <View
+          style={[
+            styles.voiceBubbleCard,
+            isVoiceBubblePlaying && styles.voiceBubbleCardPlaying,
+          ]}
+        >
+          <View style={styles.voiceBubbleMain}>
+            <Icon type='voice' size={18} color='#333' />
+            <Text
+              style={styles.voiceDurationText}
+            >
+              {formatVoiceDuration(parsedVoicePayload.duration_ms)}
+            </Text>
+          </View>
+          <Text
+            style={styles.voiceHintText}
+          >
+            {isVoiceBubblePlaying ? '播放中' : '点击播放语音'}
+          </Text>
+        </View>
+      ) : content ? (
         numberOfLines ? (
           <Text
             style={[
@@ -581,6 +695,12 @@ export default function ChatBubble({
     Keyboard.dismiss();
     if (selectionMode && onToggleSelection) {
       onToggleSelection();
+      return;
+    }
+
+    // 中文注释：语音气泡的点击与长按统一走外层容器，避免内层 Pressable 抢占长按菜单手势。
+    if (isVoiceBubble) {
+      void handleVoiceBubblePress();
     }
   };
 
@@ -612,7 +732,10 @@ export default function ChatBubble({
               !hasAttachments;
             if (shouldShowMenu) {
               return (
-                <LongPressMenu options={menuOptions}>
+                <LongPressMenu
+                  options={menuOptions}
+                  onPress={isVoiceBubble ? handleBubblePress : undefined}
+                >
                   {bubbleContent}
                 </LongPressMenu>
               );
@@ -680,6 +803,31 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 20,
     minWidth: 44,
+  },
+  voiceBubbleCard: {
+    minWidth: 120,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    gap: 4,
+  },
+  voiceBubbleCardPlaying: {
+    opacity: 0.85,
+  },
+  voiceBubbleMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  voiceDurationText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#252525',
+  },
+  voiceHintText: {
+    fontSize: 12,
+    color: '#666',
   },
   // 文本基础样式
   questionText: {

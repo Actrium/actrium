@@ -138,7 +138,7 @@ const MessageRow = React.memo(function MessageRow({
             </View>
           </View>
         )}
-        {item.question_content ? (
+        {item.question_content || item.question_type === 'voice' ? (
           <View style={styles.bubbleWithCheckbox}>
             {selectionMode && (
               <View style={styles.checkboxContainer}>
@@ -155,12 +155,17 @@ const MessageRow = React.memo(function MessageRow({
                 tabId={tabId}
                 appId={appId}
                 content={item.question_content}
+                voicePayload={item.question_voice_payload}
                 onEdit={
-                  isLatest && !selectionMode
+                  isLatest && !selectionMode && item.question_type !== 'voice'
                     ? () => handleEdit(item)
                     : undefined
                 }
-                onCopy={() => handleCopy(item.question_content)}
+                onCopy={
+                  item.question_type !== 'voice'
+                    ? () => handleCopy(item.question_content)
+                    : undefined
+                }
                 selectionKey={`${item.message_id}:question`}
                 isSelected={selectedParts.has('question')}
                 onToggleSelection={() =>
@@ -170,7 +175,7 @@ const MessageRow = React.memo(function MessageRow({
             </View>
           </View>
         ) : null}
-        {item.answer_content ? (
+        {item.answer_content || item.answer_type === 'voice' ? (
           <View style={styles.bubbleWithCheckbox}>
             {selectionMode && (
               <View style={styles.checkboxContainer}>
@@ -186,8 +191,13 @@ const MessageRow = React.memo(function MessageRow({
               tabId={tabId}
               appId={appId}
               content={item.answer_content}
+              voicePayload={item.answer_voice_payload}
               isLatest={isLatest}
-              onCopy={() => handleCopy(item.answer_content)}
+              onCopy={
+                item.answer_type !== 'voice'
+                  ? () => handleCopy(item.answer_content)
+                  : undefined
+              }
               selectionKey={`${item.message_id}:answer`}
               isSelected={selectedParts.has('answer')}
               onToggleSelection={() =>

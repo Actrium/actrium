@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { IMessage } from '../../repository/MessageRepository';
 import { MessageRepository } from '../../repository/MessageRepository';
+import { cleanupVoiceMessageFile } from '../utils/VoiceMessageStorage';
 
 type MessagePart = 'attachments' | 'question' | 'answer';
 
@@ -55,6 +56,20 @@ const buildMessageIndex = (msgs: IMessage[]) => {
   }
 
   return { ids, byId };
+};
+
+const cleanupMessageVoiceFiles = async (
+  message?: Pick<IMessage, 'question_voice_payload' | 'answer_voice_payload'>,
+) => {
+  if (!message) return;
+
+  // 中文注释：消息删除或局部删除时，统一在这里回收提问/回答对应的本地语音文件，避免不同入口遗漏。
+  if (message.question_voice_payload) {
+    await cleanupVoiceMessageFile(message.question_voice_payload);
+  }
+  if (message.answer_voice_payload) {
+    await cleanupVoiceMessageFile(message.answer_voice_payload);
+  }
 };
 
 export const useMessageStore = create<MessageState>((set, get) => ({
@@ -158,10 +173,13 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
   deleteMessage: (tabId, messageId) => {
+    let deletedMessage: IMessage | undefined;
+
     set((state) => {
       const currentIds = state.messageIds[tabId] || [];
       const currentById = state.messageById[tabId] || {};
       if (!currentById[messageId]) return state;
+      deletedMessage = currentById[messageId];
 
       const nextById = { ...currentById };
       delete nextById[messageId];
@@ -177,6 +195,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         },
       };
     });
+
+    void cleanupMessageVoiceFiles(deletedMessage);
 
     // 异步持久化
     MessageRepository.deleteMessage(messageId).catch((e) =>
@@ -217,15 +237,20 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     if (defaultPart) {
       if (defaultPart === 'attachments' && message.attachments) {
         selectedParts.add('attachments');
-      } else if (defaultPart === 'question' && message.question_content) {
+      } else if (
+        defaultPart === 'question' &&
+        (message.question_content || message.question_type === 'voice')
+      ) {
         selectedParts.add('question');
-      } else if (defaultPart === 'answer' && message.answer_content) {
+      } else if (defaultPart === 'answer' && (message.answer_content || message.answer_type === 'voice')) {
         selectedParts.add('answer');
       }
     } else {
       if (message.attachments) selectedParts.add('attachments');
-      if (message.question_content) selectedParts.add('question');
-      if (message.answer_content) selectedParts.add('answer');
+      if (message.question_content || message.question_type === 'voice') {
+        selectedParts.add('question');
+      }
+      if (message.answer_content || message.answer_type === 'voice') selectedParts.add('answer');
     }
 
     set({
@@ -279,8 +304,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       // 检查是否所有部分都被选中
       const allParts = new Set<MessagePart>();
       if (message.attachments) allParts.add('attachments');
-      if (message.question_content) allParts.add('question');
-      if (message.answer_content) allParts.add('answer');
+      if (message.question_content || message.question_type === 'voice') {
+        allParts.add('question');
+      }
+      if (message.answer_content || message.answer_type === 'voice') allParts.add('answer');
 
       if (parts.size === allParts.size && parts.size > 0) {
         messagesToDelete.push(messageId);
@@ -291,9 +318,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         }
         if (parts.has('question')) {
           updates.question_content = '';
+          updates.question_voice_payload = undefined;
         }
         if (parts.has('answer')) {
           updates.answer_content = '';
+          updates.answer_voice_payload = undefined;
         }
         if (Object.keys(updates).length > 0) {
           messagesToUpdate.push({ messageId, updates });
@@ -337,6 +366,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     Promise.all([
       ...messagesToDelete.map(async (messageId) => {
         try {
+          await cleanupMessageVoiceFiles(byId[messageId]);
           await MessageRepository.deleteMessage(messageId);
         } catch (error) {
           console.error('[useMessageStore] Failed to delete message from DB:', error);
@@ -346,6 +376,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         try {
           const message = byId[messageId];
           if (message) {
+            if (updates.question_voice_payload === undefined && message.question_voice_payload) {
+              await cleanupVoiceMessageFile(message.question_voice_payload);
+            }
+            if (updates.answer_voice_payload === undefined && message.answer_voice_payload) {
+              await cleanupVoiceMessageFile(message.answer_voice_payload);
+            }
             await MessageRepository.saveMessage({ ...message, ...updates });
           }
         } catch (error) {
