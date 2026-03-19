@@ -14,7 +14,7 @@ interface UseActrVoiceControllerParams {
   ) => Promise<any>;
   beforeVoiceStart: () => Promise<boolean>;
   sendVoiceChunk: (chunk: Uint8Array) => Promise<unknown>;
-  startVoice: (payload: any) => void;
+  startVoice: (payload: any) => Promise<string>;
   endVoice: () => Promise<unknown>;
   onVoiceMessageReady: (payload: {
     messageId: string;
@@ -137,7 +137,7 @@ export function useActrVoiceController(
       }
 
       // 进入 committed 态后再启动服务端语音会话。
-      startVoice({ ...reqMsg! });
+      await startVoice({ ...reqMsg! });
 
       if (stopRequestedRef.current) {
         console.log('[Voice] Stop requested after startVoice, ending');
@@ -339,6 +339,10 @@ export function useActrVoiceController(
           await new Promise((r) => setTimeout(r, 10));
         }
         await drainQueue();
+
+        // FIXME 手动延迟 100ms，防止 end 包在全部切片发送前发送
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
         await endVoice();
         if (
           currentVoiceMessageIdRef.current &&
