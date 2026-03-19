@@ -142,7 +142,7 @@ public struct DataStreamApp_StartVoiceMessageResponse: Sendable {
   public init() {}
 }
 
-public struct DataStreamApp_VoiceChunkMessage: Sendable {
+public struct DataStreamApp_VoiceChunkMessage: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
