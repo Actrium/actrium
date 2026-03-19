@@ -128,15 +128,23 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                 }
             }
             val request = builder.build()
-            // TODO: send request to backend or further processing
+            // send request to backend or further processing
             GlobalScope.launch {
-                clients[tabId]?.call(
-                    "data_stream_app.AskLocalService.SendText",
-                    PayloadType.RPC_RELIABLE,
-                    request.toByteArray(),
-                    30000L
-                )
-                promise.resolve(null)
+                try {
+                    clients[tabId]?.call(
+                        "data_stream_app.AskLocalService.SendText",
+                        PayloadType.RPC_RELIABLE,
+                        request.toByteArray(),
+                        30000L
+                    )
+                    promise.resolve(null)
+                } catch (e: Exception) {
+                    try {
+                        promise.reject("USR_PROMPT_REQUEST_ERROR", e.localizedMessage, e)
+                    } catch (ex: Exception) {
+                        Log.e("ActrBridge", "sendTextMessage promise.reject failed", ex)
+                    }
+                }
             }
         } catch (e: Exception) {
             promise.reject("USR_PROMPT_REQUEST_ERROR", e.localizedMessage, e)
@@ -198,7 +206,11 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                 result.putString("errorMessage", response.errorMessage)
                 promise.resolve(result)
             } catch (e: Exception) {
-                promise.reject("ACTR_ERROR", e.localizedMessage, e)
+                try {
+                    promise.reject("ACTR_ERROR", e.localizedMessage, e)
+                } catch (ex: Exception) {
+                    Log.e("ActrBridge", "uploadAttachment promise.reject failed", ex)
+                }
             }
         }
     }
