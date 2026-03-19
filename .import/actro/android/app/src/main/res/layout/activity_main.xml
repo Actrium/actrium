@@ -19,9 +19,7 @@
         <FrameLayout
             android:id="@+id/llActive"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_marginTop="54dp"
-            android:orientation="vertical">
+            android:layout_height="match_parent">
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/recyApps"
@@ -35,17 +33,17 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@drawable/top_gradient"
-                android:gravity="center_vertical"
                 android:orientation="horizontal"
+                android:gravity="center_vertical"
                 android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
+                android:paddingVertical="20dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="AskAway"
                     android:textColor="@android:color/white"
-                    android:textSize="34sp" />
+                    android:textSize="34.2sp" />
 
                 <View
                     android:layout_width="0dp"
@@ -72,6 +70,7 @@
 
         <!-- 导航栏 -->
         <LinearLayout
+            android:id="@+id/llNav"
             android:layout_width="match_parent"
             android:layout_height="95dp"
             android:layout_gravity="bottom"
@@ -170,7 +169,6 @@
         android:id="@+id/flReactNative"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginTop="54dp"
         android:background="@drawable/react_native_bg"
         android:fitsSystemWindows="false"
         android:focusableInTouchMode="true">
