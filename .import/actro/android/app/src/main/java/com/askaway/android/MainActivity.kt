@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
@@ -21,6 +22,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -62,18 +64,25 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         // 假设背景是浅色，设置状态栏图标为深色
-        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = true
+        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = false
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // 处理系统栏（状态栏、导航栏）的内边距，防止内容被遮挡
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            val imeBars = insets.getInsets(WindowInsetsCompat.Type.ime())
             // 仅应用底部和左右的内边距，保留顶部不做处理，以实现内容延伸到状态栏
-            v.setPadding(systemBars.left, 0, systemBars.right, systemBars.bottom)
+            v.setPadding(systemBars.left, 0, systemBars.right, 0)
+            // 底部沉浸式判断：当 decorFitsSystemWindows=false 且导航栏 inset 为 0，说明内容已延伸到底部
+            val isBottomImmersive = navBars.bottom == 0
+            binding.llNav.updateLayoutParams<ViewGroup.MarginLayoutParams>  {
+                bottomMargin = navBars.bottom
+            }
             insets
         }
+
 
         // 初始化 flReactNative 为隐藏状态
         binding.flReactNative.visibility = View.INVISIBLE // 使用 INVISIBLE 而不是 GONE，以便能获取高度
@@ -94,6 +103,14 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flContent.post {
             viewModel.containerWidth = binding.flContent.width.pxToDp().toInt()
             viewModel.containerHeight = binding.flContent.height.pxToDp().toInt()
+            val statusBarHeight = getStatusBarHeight()
+            binding.llActive.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                topMargin = statusBarHeight
+            }
+            binding.flReactNative.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                topMargin = statusBarHeight
+            }
+
         }
         binding.flReactNative.adjustKeyboard()
 
