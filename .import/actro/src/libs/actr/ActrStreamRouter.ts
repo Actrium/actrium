@@ -129,6 +129,7 @@ export class ActrStreamRouter {
               message_id: messageId,
               message: chunk,
               status: data.status,
+              sequence: data.sequence,
               isEnd,
             }),
           );

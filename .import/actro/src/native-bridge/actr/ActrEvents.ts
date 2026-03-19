@@ -8,6 +8,7 @@ export type ActrStreamMessageEvent = {
   message: string;
   status: number;
   metadata?: { value: string; key: string }[];
+  sequence?: number; // 语音包顺序
 };
 
 type Unsubscribe = () => void;

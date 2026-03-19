@@ -44,6 +44,14 @@ interface ActrInputProps {
   variant?: 'pad' | 'mobile';
 }
 
+interface AnswerVoiceBufferState {
+  nextSequence: number;
+  pendingBySequence: Record<number, Uint8Array>;
+  orderedChunks: Uint8Array[];
+  receivedSequences: number[];
+  endSequence?: number;
+}
+
 export default function ActrInput({ appId, variant }: ActrInputProps) {
   const { t } = useTranslation();
   const { tab } = useTab();
@@ -89,7 +97,9 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   const pendingVoiceMessageUpdatesRef = useRef<
     Record<string, Partial<IMessage>>
   >({});
-  const answerVoiceChunksRef = useRef<Record<string, Uint8Array[]>>({});
+  const answerVoiceBuffersRef = useRef<
+    Record<string, AnswerVoiceBufferState>
+  >({});
 
   const [showMapModal, setShowMapModal] = useState(false);
   // Hook for attachment logic
@@ -204,10 +214,57 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
   );
 
   // 语音消息接收回调
+  const getOrCreateAnswerVoiceBuffer = useCallback(
+    (messageId: string): AnswerVoiceBufferState => {
+      const existingBuffer = answerVoiceBuffersRef.current[messageId];
+      if (existingBuffer) return existingBuffer;
+
+      const newBuffer: AnswerVoiceBufferState = {
+        nextSequence: 1,
+        pendingBySequence: {},
+        orderedChunks: [],
+        receivedSequences: [],
+      };
+      answerVoiceBuffersRef.current[messageId] = newBuffer;
+      return newBuffer;
+    },
+    [],
+  );
+
+  const flushAnswerVoiceBuffer = useCallback((messageId: string) => {
+    const buffer = answerVoiceBuffersRef.current[messageId];
+    if (!buffer) return;
+
+    while (buffer.pendingBySequence[buffer.nextSequence]) {
+      buffer.orderedChunks.push(buffer.pendingBySequence[buffer.nextSequence]);
+      delete buffer.pendingBySequence[buffer.nextSequence];
+      buffer.nextSequence += 1;
+    }
+  }, []);
+
+  const buildAnswerVoiceChunksForFinalize = useCallback(
+    (messageId: string): Uint8Array[] => {
+      const buffer = answerVoiceBuffersRef.current[messageId];
+      if (!buffer) return [];
+
+      const orderedPendingSequences = Object.keys(buffer.pendingBySequence)
+        .map((key) => Number(key))
+        .sort((a, b) => a - b);
+
+      return [
+        ...buffer.orderedChunks,
+        ...orderedPendingSequences.map(
+          (sequence) => buffer.pendingBySequence[sequence],
+        ),
+      ];
+    },
+    [],
+  );
+
   const finalizeAnswerVoiceMessage = useCallback(
     async (messageId: string) => {
       try {
-        const chunks = answerVoiceChunksRef.current[messageId];
+        const chunks = buildAnswerVoiceChunksForFinalize(messageId);
         if (!chunks?.length) return;
 
         const voicePayload = await saveVoiceMessageWav({
@@ -226,7 +283,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
             answer_time: Date.now(),
             progress: 2,
           };
-          delete answerVoiceChunksRef.current[messageId];
+          delete answerVoiceBuffersRef.current[messageId];
           return;
         }
 
@@ -241,12 +298,12 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
           },
           true,
         );
-        delete answerVoiceChunksRef.current[messageId];
+        delete answerVoiceBuffersRef.current[messageId];
       } catch (error) {
         console.error('[ActrInput] 保存 answer 语音消息失败:', error);
       }
     },
-    [tab.id, updateMessage],
+    [buildAnswerVoiceChunksForFinalize, tab.id, updateMessage],
   );
 
   const handleAnswerVoiceFinishedReadState = useCallback(
@@ -282,10 +339,56 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
         : fallbackMessage;
 
       if (data.message instanceof Uint8Array) {
-        answerVoiceChunksRef.current[messageId] = [
-          ...(answerVoiceChunksRef.current[messageId] || []),
-          data.message,
-        ];
+        const sequence = data.sequence;
+
+        if (typeof sequence === 'number') {
+          console.warn(
+            `[ActrInput] 收到 answer 语音包: messageId=${messageId}, sequence=${sequence}`,
+          );
+          const buffer = getOrCreateAnswerVoiceBuffer(messageId);
+
+          if (
+            sequence < buffer.nextSequence ||
+            buffer.pendingBySequence[sequence]
+          ) {
+            console.warn(
+              `[ActrInput] 收到重复 answer 语音包，已忽略: messageId=${messageId}, sequence=${sequence}`,
+            );
+          } else {
+            buffer.pendingBySequence[sequence] = data.message;
+            buffer.receivedSequences.push(sequence);
+            buffer.receivedSequences.sort((a, b) => a - b);
+            if (isFinished) {
+              buffer.endSequence = sequence;
+            }
+            flushAnswerVoiceBuffer(messageId);
+          }
+
+          if (isFinished && buffer.endSequence != null) {
+            const hasMissingPackets = buffer.nextSequence <= buffer.endSequence;
+            if (hasMissingPackets) {
+              const missingSequences: number[] = [];
+              for (
+                let seq = buffer.nextSequence;
+                seq <= buffer.endSequence;
+                seq += 1
+              ) {
+                if (!buffer.pendingBySequence[seq]) {
+                  missingSequences.push(seq);
+                }
+              }
+              console.error(
+                `[ActrInput] answer 语音包乱序且缺包，仍继续落盘: messageId=${messageId}, endSequence=${buffer.endSequence}, nextSequence=${buffer.nextSequence}, received=${buffer.receivedSequences.join(',')}, missing=${missingSequences.join(',')}`,
+              );
+            }
+          }
+        } else {
+          console.warn(
+            `[ActrInput] answer 语音包缺少 sequence，降级按到达顺序处理: messageId=${messageId}`,
+          );
+          const buffer = getOrCreateAnswerVoiceBuffer(messageId);
+          buffer.orderedChunks.push(data.message);
+        }
       }
 
       const updates: Partial<IMessage> = {
@@ -294,13 +397,14 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
         answer_content: newContent,
         progress: isFinished ? 2 : 1,
       };
+      const canFinalizeVoice = isFinished;
 
       if (!currentMsg) {
         pendingVoiceMessageUpdatesRef.current[messageId] = {
           ...(pendingVoiceMessageUpdatesRef.current[messageId] || {}),
           ...updates,
         };
-        if (isFinished) {
+        if (canFinalizeVoice) {
           void finalizeAnswerVoiceMessage(messageId);
           handleAnswerVoiceFinishedReadState(messageId);
         }
@@ -308,12 +412,20 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
       }
 
       updateMessage(tab.id, messageId, updates, isFinished);
-      if (isFinished) {
+      if (canFinalizeVoice) {
         void finalizeAnswerVoiceMessage(messageId);
         handleAnswerVoiceFinishedReadState(messageId);
       }
     },
-    [finalizeAnswerVoiceMessage, handleAnswerVoiceFinishedReadState, t, tab.id, updateMessage],
+    [
+      finalizeAnswerVoiceMessage,
+      flushAnswerVoiceBuffer,
+      getOrCreateAnswerVoiceBuffer,
+      handleAnswerVoiceFinishedReadState,
+      t,
+      tab.id,
+      updateMessage,
+    ],
   );
 
   // 使用多实例连接 Hook
@@ -498,7 +610,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     },
     onVoiceMessageCanceled: (messageId) => {
       delete pendingVoiceMessageUpdatesRef.current[messageId];
-      delete answerVoiceChunksRef.current[messageId];
+      delete answerVoiceBuffersRef.current[messageId];
       const currentMessage = useMessageStore.getState().getMessage(tab.id, messageId);
       if (currentMessage?.question_voice_payload) {
         void cleanupVoiceMessageFile(currentMessage.question_voice_payload);
