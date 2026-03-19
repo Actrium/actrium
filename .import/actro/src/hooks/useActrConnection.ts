@@ -1,17 +1,15 @@
 import { useEffect, useMemo } from 'react';
 import RNFS from 'react-native-fs';
-import { ConnectionManager } from '../native-bridge/actr/ActrConnection';
-import { AppInfo } from '../api/types';
 import {
+  ActrConnectionManager,
   generateActrToml,
   generateActrLockToml,
-} from '../native-bridge/actr/ActrConfigUtils';
-import { IAttachmentItem } from '../actr-host/types/attachment';
-import {
   AttachmentType,
   TActrMessageResponse,
   TLocation,
-} from '../native-bridge/actr/ActrConnection.type';
+} from '../libs/actr';
+import { AppInfo } from '../api/types';
+import { IAttachmentItem } from '../actr-host/types/attachment';
 import { Utils } from '../utils/utils';
 import { useMessageStore } from '../actr-host/store/useMessageStore';
 import { Progress } from '../repository/MessageRepository';
@@ -51,7 +49,7 @@ export function useActrConnection({
   const connection = useMemo(() => {
     if (!appId || !config?.server_actor_type) return null;
 
-    return ConnectionManager.getOrCreate({
+    return ActrConnectionManager.getOrCreate({
       appId,
       tabId,
       // actorType: `${config?.server_actor_type?.manufacturer}+${config?.server_actor_type?.name}`,
