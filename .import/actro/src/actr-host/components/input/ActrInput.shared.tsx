@@ -20,7 +20,7 @@ import { useActrConnection } from '../../../hooks/useActrConnection';
 import {
   TActrMessageResponse,
   TLocation,
-} from '../../../native-bridge/actr/ActrConnection.type';
+} from '../../../libs/actr';
 import { useAuth, AuthStatus } from '../../../hooks/auth';
 import { useAuthTaskStore } from '../../store/useAuthTaskStore';
 import { Utils } from '../../../utils/utils';
