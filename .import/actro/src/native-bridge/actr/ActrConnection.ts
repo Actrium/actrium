@@ -133,6 +133,11 @@ export class ActrStreamRouter {
       const reg = this.streamRegistry.get(data.streamID);
       if (!reg) {
         // 找不到注册项属于正常情况，说明该 streamID 不属于当前已注册的任何 connection
+        console.log(
+          `[ActrStreamRouter: ???] Received message:`,
+          JSON.stringify(data),
+        );
+
         return;
       }
 
@@ -577,9 +582,9 @@ export class ActrConnection {
       tabId: this.tabId,
     });
 
-    if (res.status_code !== 0) {
+    if (res.statusCode !== 0) {
       console.error(
-        `[ActrConnection:${this.appId}] Upload attachment failed: ${res.status_code}, ${JSON.stringify(res)}`,
+        `[ActrConnection:${this.appId}] Upload attachment failed: ${res.statusCode}, ${JSON.stringify(res)}`,
       );
     }
 

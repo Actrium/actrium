@@ -21,12 +21,14 @@ interface LongPressMenuProps {
   children: React.ReactNode;
   options: MenuOption[];
   disabled?: boolean;
+  onPress?: () => void;
 }
 
 export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   children,
   options,
   disabled,
+  onPress,
 }) => {
   const [visible, setVisible] = useState(false);
   const [menuLayout, setMenuLayout] = useState<LayoutRectangle | null>(null);
@@ -159,6 +161,10 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     <>
       <View ref={triggerRef} collapsable={false}>
         <Pressable
+          onPress={() => {
+            if (disabled) return;
+            onPress?.();
+          }}
           onPressIn={handlePressIn}
           onLongPress={handleLongPress}
           delayLongPress={400}

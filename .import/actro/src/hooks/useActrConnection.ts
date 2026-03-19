@@ -54,7 +54,8 @@ export function useActrConnection({
     return ConnectionManager.getOrCreate({
       appId,
       tabId,
-      actorType: `${config?.server_actor_type?.manufacturer}+${config?.server_actor_type?.name}`,
+      // actorType: `${config?.server_actor_type?.manufacturer}+${config?.server_actor_type?.name}`,
+      actorType: 'bot+bot-service'
     });
   }, [appId, config]);
 
