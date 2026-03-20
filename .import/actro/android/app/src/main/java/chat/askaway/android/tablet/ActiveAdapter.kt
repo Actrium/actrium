@@ -45,6 +45,7 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
                 binding.ivIcon.load(item.icon)
             }
             binding.ivDel.setOnClickListener { onDeleteClick?.invoke(item) }
+            binding.root.setOnClickListener { onItemClick?.invoke(item, binding.root) }
         }
     }
 }

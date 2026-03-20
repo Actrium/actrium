@@ -3,9 +3,13 @@ package chat.askaway.android.tablet
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.postDelayed
+import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -107,7 +111,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.ivAdd.postDelayed(300L) {
             binding.ivAdd.performClick()
         }
-        binding.flRNContent.adjustKeyboard()
+//        binding.flRNContent.adjustKeyboard()
     }
 
     override fun onPause() {

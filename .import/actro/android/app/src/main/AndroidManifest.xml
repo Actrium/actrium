@@ -59,7 +59,7 @@
 
         <activity
             android:name="chat.askaway.android.tablet.TabletActivity"
-            android:windowSoftInputMode="adjustPan|stateHidden" />
+            android:windowSoftInputMode="adjustNothing" />
 
         <activity
             android:name="com.askaway.android.MainActivity"
