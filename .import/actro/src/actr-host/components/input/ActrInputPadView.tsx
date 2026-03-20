@@ -3,6 +3,7 @@ import { Pressable, View } from 'react-native';
 import { AttachmentPreviewBar } from '../AttachmentPreviewBar';
 import { Icon } from '../Icon';
 import { ActrInputPadToolbox } from './ActrInputPadToolbox';
+import { AuthGateOverlay } from './AuthGateOverlay';
 import type { ActrInputStyles } from './ActrInput.shared';
 
 interface ActrInputPadViewProps {
@@ -24,6 +25,9 @@ interface ActrInputPadViewProps {
   handleVoiceChangeState: (isCancelling: boolean) => void;
   handleVoiceEnd: (isCancelled: boolean) => Promise<void>;
   toolboxProps: Record<string, any>;
+  appId: string;
+  /** 输入框聚焦前的授权预检，未授权返回 false */
+  checkInputAuth?: () => Promise<boolean>;
 }
 
 export default function ActrInputPadView(props: ActrInputPadViewProps) {
@@ -46,6 +50,8 @@ export default function ActrInputPadView(props: ActrInputPadViewProps) {
     handleVoiceChangeState,
     handleVoiceEnd,
     toolboxProps,
+    appId,
+    checkInputAuth,
   } = props;
 
   return (
@@ -71,6 +77,12 @@ export default function ActrInputPadView(props: ActrInputPadViewProps) {
           },
         ]}
       >
+        {/* 中文注释：Pad 端整块输入区（含附件、输入框、工具栏、按住说话）统一由授权门禁覆盖。 */}
+        <AuthGateOverlay
+          appId={appId}
+          checkInputAuth={checkInputAuth}
+        />
+
         <AttachmentPreviewBar
           attachments={attachments}
           removeAttachment={removeAttachment}

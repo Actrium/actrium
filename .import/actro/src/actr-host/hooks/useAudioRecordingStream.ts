@@ -1,5 +1,5 @@
 /**
- * useAudioStream Hook
+ * useAudioRecordingStream Hook
  *
  * 实时语音流式传输的 React Hook
  */
@@ -13,7 +13,7 @@ import {
 import { useIntervalTimer } from '../../hooks';
 import { GlobalAlert } from '../../../src/components';
 
-export interface UseAudioStreamOptions {
+export interface UseAudioRecordingStreamOptions {
   onAudioChunk: (chunk: Uint8Array) => void | Promise<void>;
   onError?: (error: Error) => void;
   onStart?: () => void;
@@ -21,7 +21,7 @@ export interface UseAudioStreamOptions {
   autoRequestPermission?: boolean;
 }
 
-export interface UseAudioStreamReturn {
+export interface UseAudioRecordingStreamReturn {
   isRecording: boolean;
   chunkCount: number;
   error: Error | null;
@@ -64,7 +64,7 @@ async function requestMicrophonePermission(): Promise<boolean> {
 
 /**
  * 计算 PCM 音频数据的分贝值并映射到 0-1
- * 参考 useVoiceRecorder.old.ts 的逻辑
+ * 中文注释：按 16-bit PCM 录音切片估算输入音量，用于语音录制时的实时波形反馈。
  */
 function calculateMetering(chunk: Uint8Array): number {
   if (!chunk || chunk.length === 0) return 0;
@@ -85,7 +85,6 @@ function calculateMetering(chunk: Uint8Array): number {
   // 加上一个极小值避免 log10(0)
   const db = 20 * Math.log10(rms + 1e-6);
 
-  // 参考 useVoiceRecorder.old.ts: MIN_DB = -40
   const MIN_DB = -40;
   let volume = 0;
   if (db > MIN_DB) {
@@ -99,9 +98,9 @@ function calculateMetering(chunk: Uint8Array): number {
 /**
  * 实时语音流式传输 Hook
  */
-export function useAudioStream(
-  options: UseAudioStreamOptions,
-): UseAudioStreamReturn {
+export function useAudioRecordingStream(
+  options: UseAudioRecordingStreamOptions,
+): UseAudioRecordingStreamReturn {
   const {
     onAudioChunk,
     onError,
@@ -191,10 +190,10 @@ export function useAudioStream(
       onStart?.();
       startTimer();
 
-      console.log('[useAudioStream] 录音已开始');
+      console.log('[useAudioRecordingStream] 录音已开始');
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      console.error('[useAudioStream] 启动录音失败:', err);
+      console.error('[useAudioRecordingStream] 启动录音失败:', err);
       setError(err);
       onError?.(err);
       throw err;
@@ -212,10 +211,10 @@ export function useAudioStream(
       onStop?.();
       endTimer();
 
-      console.log('[useAudioStream] 录音已停止');
+      console.log('[useAudioRecordingStream] 录音已停止');
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      console.error('[useAudioStream] 停止录音失败:', err);
+      console.error('[useAudioRecordingStream] 停止录音失败:', err);
       setError(err);
       onError?.(err);
     }
@@ -225,7 +224,7 @@ export function useAudioStream(
   useEffect(() => {
     const MAX_DURATION = 60000; // 60s
     if (isRecording && duration >= MAX_DURATION) {
-      console.log('[useAudioStream] 达到最大录音时长，自动停止');
+      console.log('[useAudioRecordingStream] 达到最大录音时长，自动停止');
       stop();
     }
   }, [duration, isRecording, stop]);

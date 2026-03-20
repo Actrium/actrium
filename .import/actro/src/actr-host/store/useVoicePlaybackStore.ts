@@ -38,7 +38,7 @@ const IDLE_PLAYBACK: IVoicePlaybackState = {
  * 中文注释：统一维护“哪条消息的哪一部分在以什么模式播放，以及当前阶段”，
  * 避免 question / answer 共用一个 messageId 时出现播放态串联。
  */
-export const useVoiceStore = create<VoiceState>((set) => ({
+export const useVoicePlaybackStore = create<VoiceState>((set) => ({
   activePlayback: IDLE_PLAYBACK,
   setActivePlayback: (payload) =>
     set({

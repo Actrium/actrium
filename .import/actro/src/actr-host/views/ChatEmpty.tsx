@@ -1,5 +1,12 @@
 import { useMemo } from 'react';
-import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
+import {
+  Keyboard,
+  StyleSheet,
+  Text,
+  TouchableWithoutFeedback,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import { useAppStore } from '../store/useAppStore';
 import { useTab } from '../contexts/TabContext';
@@ -18,16 +25,22 @@ export default function ChatEmpty() {
   }, [appInfo?.app_id]);
 
   return (
-    <View style={[styles.centerContent, { maxWidth: layoutTokens.contentMaxWidth }]}>
-      <View style={styles.logoContainer}>
-        <Text style={[styles.appName, { fontSize: layoutTokens.chatEmptyTitleSize }]}>
-          {appInfo?.app_name}
-        </Text>
-        <Text style={styles.tabTitle}>
-          <Text style={styles.tabTitleBold}>{appInfoByLang?.welcome_text}</Text>
-        </Text>
+    <TouchableWithoutFeedback
+      onPress={Keyboard.dismiss}
+      accessible={false}
+    >
+      <View style={[styles.centerContent, { maxWidth: layoutTokens.contentMaxWidth }]}>
+        {/* 中文注释：空态页没有滚动容器，补一层点击空白收起键盘，和消息列表页交互保持一致。 */}
+        <View style={styles.logoContainer}>
+          <Text style={[styles.appName, { fontSize: layoutTokens.chatEmptyTitleSize }]}>
+            {appInfo?.app_name}
+          </Text>
+          <Text style={styles.tabTitle}>
+            <Text style={styles.tabTitleBold}>{appInfoByLang?.welcome_text}</Text>
+          </Text>
+        </View>
       </View>
-    </View>
+    </TouchableWithoutFeedback>
   );
 }
 

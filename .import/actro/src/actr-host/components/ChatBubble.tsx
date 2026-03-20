@@ -20,9 +20,9 @@ import { SmartImage } from './SmartImage';
 import { LongPressMenu } from './LongPressMenu';
 import { WaveForm } from './WaveForm';
 import {
-  useVoiceStore,
+  useVoicePlaybackStore,
   type VoicePlaybackMode,
-} from '../store/useVoiceStore';
+} from '../store/useVoicePlaybackStore';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -94,7 +94,7 @@ export default function ChatBubble({
   const isVoiceBubble = !!parsedVoicePayload;
 
   const { activePlayback, setActivePlayback, updatePlaybackStatus, clearPlayback } =
-    useVoiceStore();
+    useVoicePlaybackStore();
   const selectionMode = useMessageStore((s) => s.selectionMode);
   const enterSelectionMode = useMessageStore((s) => s.enterSelectionMode);
 
@@ -137,7 +137,7 @@ export default function ChatBubble({
   );
 
   const clearPlaybackIfCurrent = React.useCallback(() => {
-    const playback = useVoiceStore.getState().activePlayback;
+    const playback = useVoicePlaybackStore.getState().activePlayback;
     const isSamePlayback =
       playback.messageId === msgId &&
       playback.part === bubblePart &&
@@ -181,7 +181,7 @@ export default function ChatBubble({
 
     // 模拟加载 1s -> 播放 3s
     const loadTimer = setTimeout(() => {
-      const playback = useVoiceStore.getState().activePlayback;
+      const playback = useVoicePlaybackStore.getState().activePlayback;
       const isSamePlayback =
         playback.messageId === msgId &&
         playback.part === bubblePart &&
