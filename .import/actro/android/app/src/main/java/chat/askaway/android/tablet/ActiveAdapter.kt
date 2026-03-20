@@ -3,13 +3,13 @@ package chat.askaway.android.tablet
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import coil.load
 import com.askaway.android.R
+import com.askaway.android.databinding.ItemTabletAppBinding
 import com.askaway.android.model.ActiveModel
 
-class ActiveAdapter: RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
+class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
 
     private val items = mutableListOf<ActiveModel>()
     var onItemClick: ((ActiveModel, View) -> Unit)? = null
@@ -22,24 +22,29 @@ class ActiveAdapter: RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ActiveViewHolder {
-        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_tablet_app, parent, false)
-        return ActiveViewHolder(view)
+        val binding = ItemTabletAppBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+        return ActiveViewHolder(binding)
     }
 
     override fun onBindViewHolder(holder: ActiveViewHolder, position: Int) {
-        val item = items[position]
-        holder.tvAppName.text = item.name
-        // 加载icon图片资源，建议使用Glide/Picasso等库
-        // 例如：Glide.with(holder.ivIcon).load(item.icon).into(holder.ivIcon)
-        // 删除按钮可绑定点击事件
-        // holder.ivDel.setOnClickListener { ... }
+        holder.bind(items[position], onItemClick, onDeleteClick)
     }
 
     override fun getItemCount(): Int = items.size
 
-    class ActiveViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val ivIcon: ImageView = itemView.findViewById(R.id.ivIcon)
-        val tvAppName: TextView = itemView.findViewById(R.id.tvAppName)
-        val ivDel: ImageView = itemView.findViewById(R.id.ivDel)
+    class ActiveViewHolder(private val binding: ItemTabletAppBinding) : RecyclerView.ViewHolder(binding.root) {
+        fun bind(
+            item: ActiveModel,
+            onItemClick: ((ActiveModel, View) -> Unit)?,
+            onDeleteClick: ((ActiveModel) -> Unit)?
+        ) {
+            binding.tvAppName.text = item.name
+            if (item.icon.isEmpty()) {
+                binding.ivIcon.setImageResource(R.drawable.app_default)
+            } else {
+                binding.ivIcon.load(item.icon)
+            }
+            binding.ivDel.setOnClickListener { onDeleteClick?.invoke(item) }
+        }
     }
 }

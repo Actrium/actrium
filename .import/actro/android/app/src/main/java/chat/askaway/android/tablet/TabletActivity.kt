@@ -34,6 +34,26 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         adapter = ActiveAdapter()
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         binding.rvApp.adapter = adapter
+        adapter.onDeleteClick = {
+            Log.e("TabletActivity", "onDelete")
+            for (i in binding.flRNContent.childCount - 1 downTo 0) {
+                val child = binding.flRNContent.getChildAt(i)
+                if (child.tag == it.id) {
+                    binding.flRNContent.removeViewAt(i)
+                    // 必须手动卸载 React 应用以释放 JS 资源并停止执行
+                    if (child is ReactRootView) {
+                        try {
+                            child.unmountReactApplication()
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error unmounting React application", e)
+                        }
+                    }
+                    break
+                }
+            }
+            // 移除当前 item
+            viewModel.removeActiveModel(it.id)
+        }
 
         // 监听 RecyclerView 的布局变化，更新 ivAdd 位置
         binding.rvApp.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -55,7 +75,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         // 监听 StateFlow 并更新 Adapter
         lifecycleScope.launchWhenStarted {
             viewModel.tabletUseCase.collect { useCase ->
-                Log.e("TabletActivity", "Received new TabletUseCase with ${useCase?.appList?.size ?: 0} apps")
                 if (useCase != null) {
                     adapter.updateData(useCase.appList)
                     // 数据更新后，延迟更新位置以确保布局完成
@@ -63,7 +82,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         updateAddButtonPosition()
                     }
                     useCase.currentApp?.let {
-                        Log.e("TabletActivity", "useCase")
                         val currentTabId = it.getString("currentTabId")
                         var found = false
                         for (i in 0 until binding.flRNContent.childCount) {
@@ -74,14 +92,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                                 break
                             }
                         }
-                        Log.e("TabletActivity", "is found:${found}")
                         if (!found) {
                             val targetView = createReactRootView("canvas-kotlin", it)
-                            Log.e("MainActivity", "Received new React Native status: $it")
                             targetView.tag = currentTabId
                             binding.flRNContent.addView(targetView)
-                            Log.e("TabletActivity", "addViewSuccess:${binding.flRNContent.childCount}")
-                            Log.e("TabletActivity", "targetView:${targetView.width} ${targetView.height}")
                         }
                     }
                 }
