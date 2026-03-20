@@ -1,17 +1,29 @@
 package chat.askaway.android.tablet
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.view.postDelayed
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.askaway.android.BuildConfig
+import com.askaway.android.MainApplication
 import com.askaway.android.databinding.ActivityTabletBinding
+import com.askaway.android.utils.adjustKeyboard
+import com.facebook.react.ReactRootView
+import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
+import com.facebook.react.modules.core.PermissionAwareActivity
+import com.facebook.react.modules.core.PermissionListener
+import com.facebook.react.uimanager.PixelUtil.pxToDp
 
-class TabletActivity : AppCompatActivity() {
+class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
 
     private lateinit var binding: ActivityTabletBinding
     private lateinit var adapter: ActiveAdapter
+    private var permissionListener: PermissionListener? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,6 +38,11 @@ class TabletActivity : AppCompatActivity() {
         // 监听 RecyclerView 的布局变化，更新 ivAdd 位置
         binding.rvApp.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             updateAddButtonPosition()
+        }
+
+        binding.flRNContent.post {
+            viewModel.containerWidth = binding.flRNContent.width.pxToDp().toInt()
+            viewModel.containerHeight = binding.flRNContent.height.pxToDp().toInt()
         }
 
         // 监听 RecyclerView 的滚动，更新 ivAdd 位置
@@ -45,12 +62,50 @@ class TabletActivity : AppCompatActivity() {
                     binding.rvApp.post {
                         updateAddButtonPosition()
                     }
+                    useCase.currentApp?.let {
+                        Log.e("TabletActivity", "useCase")
+                        val currentTabId = it.getString("currentTabId")
+                        var found = false
+                        for (i in 0 until binding.flRNContent.childCount) {
+                            val child = binding.flRNContent.getChildAt(i)
+                            if (child.tag == currentTabId) {
+                                child.bringToFront()
+                                found = true
+                                break
+                            }
+                        }
+                        Log.e("TabletActivity", "is found:${found}")
+                        if (!found) {
+                            val targetView = createReactRootView("canvas-kotlin", it)
+                            Log.e("MainActivity", "Received new React Native status: $it")
+                            targetView.tag = currentTabId
+                            binding.flRNContent.addView(targetView)
+                            Log.e("TabletActivity", "addViewSuccess:${binding.flRNContent.childCount}")
+                            Log.e("TabletActivity", "targetView:${targetView.width} ${targetView.height}")
+                        }
+                    }
                 }
             }
         }
         binding.ivAdd.setOnClickListener {
             viewModel.addApp()
         }
+        binding.ivAdd.postDelayed(300L) {
+            binding.ivAdd.performClick()
+        }
+        binding.flRNContent.adjustKeyboard()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        val application = application as MainApplication
+        application.reactNativeHost.reactInstanceManager.onHostPause(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val application = application as MainApplication
+        application.reactNativeHost.reactInstanceManager.onHostResume(this, this)
     }
 
     private fun updateAddButtonPosition() {
@@ -83,5 +138,67 @@ class TabletActivity : AppCompatActivity() {
 
             binding.ivAdd.translationX = finalX
         }
+    }
+
+    private fun createReactRootView(componentName: String, launchOptions: Bundle?): ReactRootView {
+        val application = application as MainApplication
+        val reactInstanceManager = application.reactNativeHost.reactInstanceManager
+
+        return ReactRootView(this).apply {
+            // 为新架构启用 Fabric
+            if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
+                setIsFabric(true)
+            }
+            // 启动 React 应用
+            startReactApplication(reactInstanceManager, componentName, launchOptions)
+        }
+    }
+
+    override fun invokeDefaultOnBackPressed() {
+        @Suppress("DEPRECATION")
+        super.onBackPressed()
+    }
+
+    override fun checkPermission(permission: String, pid: Int, uid: Int): Int {
+        return super.checkPermission(permission, pid, uid)
+    }
+
+    override fun checkSelfPermission(permission: String): Int {
+        return ContextCompat.checkSelfPermission(this, permission)
+    }
+
+    override fun shouldShowRequestPermissionRationale(permission: String): Boolean {
+        return super.shouldShowRequestPermissionRationale(permission)
+    }
+
+    override fun requestPermissions(
+        permissions: Array<String>,
+        requestCode: Int,
+        listener: PermissionListener?,
+    ) {
+        permissionListener = listener
+        super.requestPermissions(permissions, requestCode)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        val handled =
+            permissionListener?.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults,
+            ) ?: false
+        if (handled) {
+            permissionListener = null
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val application = application as MainApplication
+        application.reactNativeHost.reactInstanceManager
+            .onActivityResult(this, requestCode, resultCode, data)
     }
 }

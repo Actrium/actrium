@@ -24,6 +24,7 @@
                 android:id="@+id/rvApp"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
+                android:clipToPadding="false"
                 android:paddingEnd="44dp" />
 
             <View
@@ -36,6 +37,7 @@
                 android:id="@+id/ivAdd"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
+                android:layout_marginTop="8dp"
                 android:padding="10dp"
                 android:src="@drawable/ic_add"
                 app:tint="#000" />
@@ -54,5 +56,5 @@
     <FrameLayout
         android:id="@+id/flRNContent"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"/>
 </LinearLayout>
