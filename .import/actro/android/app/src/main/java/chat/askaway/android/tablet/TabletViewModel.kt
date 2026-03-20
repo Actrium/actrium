@@ -21,6 +21,7 @@ class TabletViewModel : ViewModel() {
 
     var containerHeight = 1000
     var containerWidth = 720
+    var currentDisplayModel = PageMode.TAB
 
     init {
         _tabletUseCase.value = TabletUseCase()
@@ -79,5 +80,9 @@ class TabletViewModel : ViewModel() {
         appList.removeAll { it.id == id }
         _tabletUseCase.value = _tabletUseCase.value?.copy(appList = _tabletUseCase.value!!.appList.filter { it.id != id })
         Log.e("TabletViewModel", "removeActiveModel ${id}")
+    }
+
+    fun changeDisplayMode(mode: PageMode) {
+        _tabletUseCase.value = _tabletUseCase.value?.copy(pageMode = mode)
     }
 }

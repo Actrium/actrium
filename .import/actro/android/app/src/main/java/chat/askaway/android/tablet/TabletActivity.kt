@@ -3,20 +3,16 @@ package chat.askaway.android.tablet
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
 import androidx.core.view.postDelayed
-import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.askaway.android.BuildConfig
 import com.askaway.android.MainApplication
 import com.askaway.android.databinding.ActivityTabletBinding
-import com.askaway.android.utils.adjustKeyboard
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
@@ -39,7 +35,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         binding.rvApp.adapter = adapter
         adapter.onDeleteClick = {
-            Log.e("TabletActivity", "onDelete")
             for (i in binding.flRNContent.childCount - 1 downTo 0) {
                 val child = binding.flRNContent.getChildAt(i)
                 if (child.tag == it.id) {
@@ -75,6 +70,8 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 updateAddButtonPosition()
             }
         })
+        binding.ivHome.setOnClickListener { viewModel.changeDisplayMode(PageMode.GRID) }
+        binding.tvBack.setOnClickListener { viewModel.changeDisplayMode(PageMode.TAB) }
 
         // 监听 StateFlow 并更新 Adapter
         lifecycleScope.launchWhenStarted {
@@ -101,6 +98,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                             targetView.tag = currentTabId
                             binding.flRNContent.addView(targetView)
                         }
+                    }
+                    if (useCase.pageMode != viewModel.currentDisplayModel) {
+                        changeMode(useCase.pageMode)
+                        viewModel.currentDisplayModel = useCase.pageMode
                     }
                 }
             }
@@ -155,6 +156,20 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             val finalX = targetX.coerceAtMost(maxX.toFloat())
 
             binding.ivAdd.translationX = finalX
+        }
+    }
+
+    private fun changeMode(mode: PageMode) {
+        if (mode == PageMode.TAB) {
+            binding.llTitleTab.isVisible = true
+            binding.flRNContent.isVisible = true
+            binding.rlTitleGrid.isVisible = false
+            binding.rvGridApp.isVisible = false
+        } else {
+            binding.rlTitleGrid.isVisible = true
+            binding.rvGridApp.isVisible = true
+            binding.llTitleTab.isVisible = false
+            binding.flRNContent.isVisible = false
         }
     }
 
