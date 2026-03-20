@@ -3,12 +3,12 @@ import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useTranslation } from 'react-i18next';
 
-interface VoiceOverlayProps {
+interface VoiceRecordingOverlayProps {
   isCancelling: boolean;
   metering?: number;
 }
 
-export const VoiceOverlay: React.FC<VoiceOverlayProps> = ({ isCancelling, metering = 0 }) => {
+export const VoiceRecordingOverlay: React.FC<VoiceRecordingOverlayProps> = ({ isCancelling, metering = 0 }) => {
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
   const isPhone = width < 768;

@@ -16,6 +16,7 @@ import { Icon } from '../Icon';
 import type { ActrInputStyles } from './ActrInput.shared';
 import type { PanResponderInstance } from 'react-native';
 import { StableTextInput } from './StableTextInput';
+import { AuthGateOverlay } from './AuthGateOverlay';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { BookmarkRepository } from '../../../repository/BookmarkRepository';
 import { useUnreadStore } from '../../store/useUnreadStore';
@@ -55,6 +56,8 @@ interface ActrInputMobileViewProps {
   onAddBookmark?: () => void;
   editingMessageId?: string | null;
   handleCancelEdit?: () => void;
+  /** 输入框聚焦前的授权预检，未授权返回 false */
+  checkInputAuth?: () => Promise<boolean>;
 }
 
 export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
@@ -91,6 +94,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     onAddBookmark,
     editingMessageId,
     handleCancelEdit,
+    checkInputAuth,
   } = props;
   const [mobileInputMode, setMobileInputMode] = React.useState<'text' | 'voice_hold'>(
     'text',
@@ -316,11 +320,20 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
   const hasAttachments = attachments.length > 0;
   const isEditing = !!editingMessageId;
+  const shouldShowExitTabButton = !isEditing && !isInputFocused;
+  const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
 
   return (
     <SafeBottomView style={styles.mobileSafeArea} minBottom={10}>
       <View style={[styles.mobileContainer, { paddingHorizontal: 26 }]}>
         <View style={styles.mobileInputRow}>
+          {/* 中文注释：Phone 端除独立退出 Tab 按钮外，其余输入操作区统一由授权门禁覆盖。 */}
+          <AuthGateOverlay
+            appId={appId}
+            checkInputAuth={checkInputAuth}
+            style={{ right: authOverlayRightInset }}
+          />
+
           {/* 左侧取消编辑按钮 - 编辑状态时显示 */}
           {isEditing && (
             <HostIconButton

@@ -1,7 +1,7 @@
-import { Alert, Linking } from 'react-native';
+import { Linking } from 'react-native';
 import { Camera } from 'react-native-vision-camera';
 import React, { useCallback, useRef, useState } from 'react';
-import { useAudioStream } from '../../../hooks/useAudioStream';
+import { useAudioRecordingStream } from '../../../hooks/useAudioRecordingStream';
 import { useTranslation } from 'react-i18next';
 import { GlobalAlert } from '../../../../../src/components';
 import type { IMessage } from '../../../../repository/MessageRepository';
@@ -10,9 +10,8 @@ import { saveVoiceMessageWav } from '../../../utils/VoiceMessageStorage';
 interface UseActrVoiceControllerParams {
   processVoiceMessageSend: (
     content: string,
-    options?: { isVoice?: boolean; skipAuthCheck?: boolean },
+    options?: { isVoice?: boolean },
   ) => Promise<any>;
-  beforeVoiceStart: () => Promise<boolean>;
   sendVoiceChunk: (chunk: Uint8Array) => Promise<unknown>;
   startVoice: (payload: any) => Promise<string>;
   endVoice: () => Promise<unknown>;
@@ -39,7 +38,6 @@ export function useActrVoiceController(
   const { t } = useTranslation();
   const {
     processVoiceMessageSend,
-    beforeVoiceStart,
     sendVoiceChunk,
     startVoice,
     endVoice,
@@ -79,7 +77,7 @@ export function useActrVoiceController(
     metering,
     start: startRecording,
     stop: stopRecording,
-  } = useAudioStream({
+  } = useAudioRecordingStream({
     onAudioChunk: (chunk) => {
       chunkQueueRef.current.push(chunk);
       recordedChunksRef.current.push(chunk);
@@ -177,13 +175,6 @@ export function useActrVoiceController(
   ]);
 
   const handleVoiceStart = useCallback(async () => {
-    const canStartVoice = await beforeVoiceStart();
-    if (!canStartVoice) {
-      setVoiceRecording(false);
-      setIsCancellingVoice(false);
-      return;
-    }
-
     const status = Camera.getMicrophonePermissionStatus();
 
     if (status === 'denied') {
@@ -248,7 +239,6 @@ export function useActrVoiceController(
       GlobalAlert.alert(t('actr.voice.recordingFailed'), t('actr.voice.recordingStartFailed'));
     }
   }, [
-    beforeVoiceStart,
     onThresholdReached,
     setVoiceRecording,
     startRecording,

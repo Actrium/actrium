@@ -4,6 +4,7 @@ import { setTabBookmarkStatus } from '../../native-bridge/tab/TabModule';
 import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { useUnreadStore } from '../store/useUnreadStore';
 import { BookmarkRepository } from '../../repository/BookmarkRepository';
+import { useAuth } from '../../hooks/auth';
 
 /**
  * 监听与当前 tab 相关的原生事件：
@@ -12,24 +13,34 @@ import { BookmarkRepository } from '../../repository/BookmarkRepository';
  * - 收藏状态变化：写数据库并通知 native
  */
 export function useTabNativeEvents(tabId: string) {
+  const currentAppId = useTabIdMapStore((state) => state.tabIdMap[tabId]);
+  const { checkAuth } = useAuth(currentAppId || '');
+
   React.useEffect(() => {
     const unsubscribe = TabEvents.onTabEnteredFullscreen(async (event) => {
       if (event.tabId !== tabId) return;
 
-      const currentAppId = useTabIdMapStore.getState().tabIdMap[tabId];
-      if (!currentAppId) return;
+      const nextAppId = useTabIdMapStore.getState().tabIdMap[tabId];
+      if (!nextAppId) return;
 
       console.log('进入 Tab，执行消息更新操作');
 
       // 更新内存状态
       useUnreadStore.getState().clearUnread(tabId);
+
+      try {
+        // 进入全屏时静默预热登录/授权状态，避免首次点击输入框时再等待检测。
+        await checkAuth();
+      } catch (error) {
+        console.error('[useTabNativeEvents] Failed to prefetch auth status:', error);
+      }
     });
 
     const unsubscribe2 = TabEvents.onTabExitedFullscreen(async (event) => {
       if (event.tabId !== tabId) return;
 
-      const currentAppId = useTabIdMapStore.getState().tabIdMap[tabId];
-      if (!currentAppId) return;
+      const nextAppId = useTabIdMapStore.getState().tabIdMap[tabId];
+      if (!nextAppId) return;
 
       console.log('退出 Tab，执行消息更新操作');
     });
@@ -65,5 +76,5 @@ export function useTabNativeEvents(tabId: string) {
       unsubscribe2();
       unsubscribe3();
     };
-  }, [tabId]);
+  }, [checkAuth, tabId]);
 }
