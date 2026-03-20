@@ -18,9 +18,9 @@ import data_stream_app.Local.VoiceChunkMessageResponse
 import io.actor_rtc.actr.ActrException
 import io.actor_rtc.actr.ActrId
 import io.actor_rtc.actr.ContextBridge
-import io.actor_rtc.actr.PayloadType
 import io.actor_rtc.actr.DataStream
 import io.actor_rtc.actr.MetadataEntry
+import io.actor_rtc.actr.PayloadType
 import io.actr.datastreamapp.generated.UnifiedHandler
 
 
@@ -70,15 +70,7 @@ class MyUnifiedHandler : UnifiedHandler {
                 }
             }.build()
             Log.e("send_text", "send_text___2")
-            val responseBytes = ctx.callRaw(
-                target,
-                PROMPT_ROUTE_KEY,
-                PayloadType.RPC_RELIABLE,
-                usrPromptRequest.toByteArray(),
-                PROMPT_TIMEOUT_MS
-            )
-            Log.e("send_text", "send_text___3")
-            val reply = Ask.AssistantReply.parseFrom(responseBytes)
+
 
             // Register streams AFTER the prompt is accepted (mirrors iOS handler behavior).
             if (request.textResponseStreamId.isNotEmpty()) {
@@ -96,7 +88,15 @@ class MyUnifiedHandler : UnifiedHandler {
                 val callback = AskAwayDataStreamCallback(streamId, StreamType.VOICE)
                 ctx.registerStream(streamId, callback)
             }
-
+            val responseBytes = ctx.callRaw(
+                target,
+                PROMPT_ROUTE_KEY,
+                PayloadType.RPC_RELIABLE,
+                usrPromptRequest.toByteArray(),
+                PROMPT_TIMEOUT_MS
+            )
+            Log.e("send_text", "send_text___3")
+            val reply = Ask.AssistantReply.parseFrom(responseBytes)
             Local.TextMessageResponse.newBuilder().apply {
                 questionId = reply.questionId
                 sessionId = reply.sessionId
@@ -148,15 +148,6 @@ class MyUnifiedHandler : UnifiedHandler {
                 }
             }.build()
 
-            val responseBytes = ctx.callRaw(
-                target,
-                PROMPT_ROUTE_KEY,
-                PayloadType.RPC_RELIABLE,
-                usrPromptRequest.toByteArray(),
-                PROMPT_TIMEOUT_MS
-            )
-
-            val reply = Ask.AssistantReply.parseFrom(responseBytes)
 
             // Register streams AFTER the prompt is accepted
             if (request.textResponseStreamId.isNotEmpty()) {
@@ -172,6 +163,16 @@ class MyUnifiedHandler : UnifiedHandler {
                 val callback = AskAwayDataStreamCallback(streamId, StreamType.VOICE)
                 ctx.registerStream(streamId, callback)
             }
+
+            val responseBytes = ctx.callRaw(
+                target,
+                PROMPT_ROUTE_KEY,
+                PayloadType.RPC_RELIABLE,
+                usrPromptRequest.toByteArray(),
+                PROMPT_TIMEOUT_MS
+            )
+
+            val reply = Ask.AssistantReply.parseFrom(responseBytes)
 
             StartVoiceMessageResponse.newBuilder().apply {
                 questionId = reply.questionId
