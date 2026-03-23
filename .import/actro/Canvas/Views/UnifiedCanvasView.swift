@@ -1300,6 +1300,35 @@ private struct TabCardView: View {
                 .lineLimit(1)
 
             Spacer()
+            
+            // 收藏星（标题为空时隐藏）
+            if !tab.title.isEmpty {
+                Button(action: {
+                    // 切换收藏状态并发送通知给 RN
+                    let newBookmarkStatus = !tab.isBookmarked
+                    
+                    // 立即更新本地状态（UI 响应）
+                    if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+                        viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                    }
+                    
+                    // 发送通知给 RN 侧处理实际的收藏逻辑
+                    NotificationCenter.default.post(
+                        name: .tabBookmarkChangedFromNative,
+                        object: nil,
+                        userInfo: [
+                            "tabId": tab.id.uuidString,
+                            "isBookmarked": newBookmarkStatus
+                        ]
+                    )
+                }) {
+                    Image(systemName: "star.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(tab.isBookmarked ? Color(hex: "#EAC15B") : Color(hex: "#404040"))
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Color.clear))
+                }
+            }
         }
         .padding(.horizontal, 8)
     }

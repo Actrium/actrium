@@ -194,6 +194,18 @@ struct PhoneTabCardView: View {
             .background(Color(hex: "#E5E5EA"))
         }
         .frame(height: (UIScreen.main.bounds.width - 32) * 0.54)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GetTabCardRect"))) { notification in
+                        if let targetId = notification.userInfo?["tabId"] as? UUID, targetId == tab.id {
+                            // 更新位置并发送回 PhoneMainView
+                            let globalFrame = geo.frame(in: .global)
+                            NotificationCenter.default.post(name: NSNotification.Name("UpdateTabCardRect"), object: nil, userInfo: ["rect": globalFrame])
+                        }
+                    }
+            }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         .asMatchedTransitionSource(id: tab.id, in: animation)
@@ -209,27 +221,24 @@ struct PhoneBrowserView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .top) {
-                Color.black.ignoresSafeArea(.all, edges: .top).frame(height: 200)
-                SingleTabRootView(
-                    tab: tab,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
-                    containerSize: geometry.size
+            SingleTabRootView(
+                tab: tab,
+                viewModel: viewModel,
+                historyVM: historyVM,
+                bookmarkVM: bookmarkVM,
+                containerSize: geometry.size
+            )
+            .id(tab.id)
+            .onAppear {
+                // Tab 进入全屏视图
+                NotificationCenter.default.post(
+                    name: .tabEnteredFullscreenFromNative,
+                    object: nil,
+                    userInfo: [
+                        "tabId": tab.id.uuidString,
+                        "title": tab.title
+                    ]
                 )
-                .id(tab.id)
-                .onAppear {
-                    // Tab 进入全屏视图
-                    NotificationCenter.default.post(
-                        name: .tabEnteredFullscreenFromNative,
-                        object: nil,
-                        userInfo: [
-                            "tabId": tab.id.uuidString,
-                            "title": tab.title
-                        ]
-                    )
-                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
