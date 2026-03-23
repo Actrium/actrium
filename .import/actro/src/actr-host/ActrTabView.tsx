@@ -101,7 +101,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [leftPanel, setLeftPanel] = useState<React.ReactElement | null>(null);
   const [rightPanel, setRightPanel] = useState<React.ReactElement | null>(null);
+  // Phone 模式下由内部状态控制面板显隐（手势/按钮驱动）
   const [localLeftPanelVisible, setLocalLeftPanelVisible] = useState(false);
+
+  // 统一面板可见性：Pad 由父组件 props 控制，Phone 由内部状态控制
+  const panelVisible = isPad ? isLeftPanelVisible : localLeftPanelVisible;
 
   const engineRef = useRef<Engine | null>(null);
   const adapterRef = useRef<{ dispose: () => void } | null>(null);
@@ -509,7 +513,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             onRightPress={() => exitFullscreen()}
             appId={appId}
             leftDisabled={!appId}
-            leftActive={localLeftPanelVisible}
+            leftActive={panelVisible}
             showLeftButton={Boolean(appId)}
             appName={appId ? appName : '添加应用'}
             includeSafeTopInset={false}
@@ -520,7 +524,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         <Animated.View style={[styles.centerColumn, centerAnimStyle]}>
           {main}
           {/* 扩展面板打开时，对话区域的点击遮罩 — 点击关闭面板 */}
-          {localLeftPanelVisible && (
+          {panelVisible && (
             <Pressable
               style={styles.dismissOverlay}
               onPress={() => setLocalLeftPanelVisible(false)}
@@ -530,7 +534,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
         {/* 扩展面板 - Tablet 右侧固定 / Phone 左侧滑入（支持手势） */}
         <ExtensionPanel
-          visible={localLeftPanelVisible}
+          visible={panelVisible}
           content={rightPanel}
           width={rightWidth}
           centerAnimValue={centerAnimValue}
