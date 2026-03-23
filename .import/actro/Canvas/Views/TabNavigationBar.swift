@@ -42,7 +42,7 @@ struct TabNavigationBar: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView()
+            SettingsView(systemType: .settings, viewModel: viewModel)
         }
     }
     
@@ -144,6 +144,7 @@ private struct OverviewNavigationBar: View {
                             selectedTab = .bookmarks
                             // 切换到书签页（系统 Tab）
                             viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
+                            viewModel.currentSystemTabType = .bookmarks
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "book.fill")
