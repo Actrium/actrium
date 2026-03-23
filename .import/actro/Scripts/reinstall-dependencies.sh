@@ -2,43 +2,43 @@
 #
 # Clean cache and reinstall the project dependent libraries.
 
-if [[ -d ./build ]]; then
-  printf 'Cleaning build caches...'
-  rm -rf ./build
-  printf '\t✅\n'
+# 全局清理
+echo "🧹 全局清理旧构建和依赖..."
+rm -rf build
+rm -rf Subsystem/node_modules
+rm -rf Pods
+
+# 清理 Watchman 和 Metro 缓存
+if command -v watchman &> /dev/null; then
+    echo "🧹 清理 Watchman 缓存..."
+    watchman watch-del-all
 fi
 
-if [[ -d ~/Library/Developer/Xcode/DerivedData ]]; then
-  printf 'Cleaning Xcode caches...'
-  rm -rf ~/Library/Developer/Xcode/DerivedData/
-  printf '\t✅\n'
+# 安装依赖
+echo "📦 安装 React Native 依赖..."
+cd Subsystem
+
+if command -v npm &> /dev/null; then
+    echo "📦 使用 npm 安装依赖 (优先)..."
+    npm install
+elif command -v bun &> /dev/null; then
+    echo "⚠️  npm 未安装，使用 bun..."
+    echo "🧹 删除 lock 文件以避免 bun 冲突..."
+    bun install
+else
+    echo "❌ 错误: 未找到 npm 或 bun"
+    exit 1
 fi
 
-if [[ -d ./Pods ]]; then
-  printf 'Cleaning CocoPods files...'
-  rm -rf ./Pods
-  printf '\t✅\n'
-fi
-
-if [[ -d ./Subsystem/node_modules ]]; then
-  printf 'Cleaning bun files...'
-  rm -rf ./Subsystem/node_modules
-  rm -rf ./Subsystem/bun.lock
-  printf '\t\t✅\n'
-fi
-
-printf '\n\n\33[4;32m%s\33[0m\n' 'Reinstalling node modules...'
-printf '=============================\n'
-cd Subsystem && bun install
-
-printf '\n\n\33[4;32m%s\33[0m\n' 'Copying modified node modules...'
-printf '=============================\n'
-cp -rvf ./modify_modules/* ./node_modules/
-
-printf '\n\n\33[4;32m%s\33[0m\n' 'Reinstalling CocoPods files...'
-printf '=============================\n'
-cd - || exit 1
+echo "📦 安装 CocoaPods 依赖..."
+cd ..
 pod install
+
+# 清理
+echo "🧹 清理旧构建..."
+xcodebuild clean \
+    -workspace Canvas.xcworkspace \
+    -scheme "AskAway"
 
 printf '\33[1;32m%s\33[0m\n' 'Done!'
 exit 0
