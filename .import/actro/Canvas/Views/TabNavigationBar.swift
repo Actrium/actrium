@@ -66,6 +66,7 @@ struct TabNavigationBar: View {
                     viewModel.currentTabId = firstTab.id
                 }
             }
+            viewModel.currentSystemTabType = nil
         } else {
             // 从 Focus 切换到 Overview
             viewModel.canvasMode = .overview
