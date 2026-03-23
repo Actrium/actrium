@@ -160,6 +160,53 @@ class BrowserViewModel: ObservableObject {
         additionalProps: [String: Any]? = nil,
         replaceAdditionalProps: Bool = false
     ) -> Tab {
+        // 中文注释：login 在 iPad 端需要纳入普通 tabs 体系，
+        // 现有的 TabBar / currentTab / Focus 模式都只围绕 tabs 工作。
+        // 如果继续放在 systemTabs，登录页签虽然被创建，但宿主无法正确聚焦和展示。
+        if type == .login {
+            if let existingTabIndex = tabs.firstIndex(where: { $0.systemTabType == type }) {
+                var existingTab = tabs[existingTabIndex]
+                if replaceAdditionalProps {
+                    existingTab.additionalProps = additionalProps
+                    existingTab.reloadNonce &+= 1
+                    tabs[existingTabIndex] = existingTab
+                } else if let additionalProps = additionalProps {
+                    existingTab.additionalProps = additionalProps
+                    existingTab.reloadNonce &+= 1
+                    tabs[existingTabIndex] = existingTab
+                }
+
+                // 中文注释：统一走 switchToTab，复用宿主已有的页签切换通知和状态同步链路。
+                switchToTab(id: existingTab.id)
+                logger.debug("🔄 返回已有登录标签: \(type.title)")
+                return existingTab
+            }
+
+            let newTab = Tab(
+                id: UUID(),
+                title: type.title,
+                systemTabType: type,
+                backgroundColor: "#1e1e1e",
+                additionalProps: additionalProps
+            )
+            tabs.append(newTab)
+            tabSlotPositions[newTab.id] = tabs.count - 1
+            logger.notice(" 已创建登录标签: \(type.title)")
+
+            NotificationCenter.default.post(
+                name: .tabOpenedFromNative,
+                object: nil,
+                userInfo: [
+                    "tabId": newTab.id.uuidString,
+                    "title": newTab.title,
+                    "systemTabType": type.rawValue
+                ]
+            )
+            // 中文注释：新建完成后立即切换，保证 iPad 端选中态、Focus 模式与 RN 侧事件保持一致。
+            switchToTab(id: newTab.id)
+            return newTab
+        }
+
         // Check if system tab already exists
         if var existingTab = systemTabs[type] {
             if replaceAdditionalProps {
@@ -218,8 +265,9 @@ class BrowserViewModel: ObservableObject {
 
     func switchToTab(id: UUID) {
         let previousTabId = currentTabId
+        let targetTab = tabs.first(where: { $0.id == id })
         
-        if let tab = tabs.first(where: { $0.id == id }) {
+        if let tab = targetTab {
             logger.debug("🔄 切换到标签页: \(tab.title)")
         }
         currentTabId = id
