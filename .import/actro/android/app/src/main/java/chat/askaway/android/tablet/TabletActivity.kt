@@ -10,6 +10,7 @@ import androidx.core.view.postDelayed
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import chat.askaway.android.utils.GridViewColumnCalculator
 import com.askaway.android.BuildConfig
 import com.askaway.android.MainApplication
 import com.askaway.android.databinding.ActivityTabletBinding
@@ -24,13 +25,16 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     private lateinit var binding: ActivityTabletBinding
     private lateinit var adapter: ActiveAdapter
     private var permissionListener: PermissionListener? = null
+    private lateinit var gridAppAdapter: GridAppAdapter
+    private lateinit var viewModel: TabletViewModel
+    private var gridWidth = 0
+    private var gridHeight = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityTabletBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        val viewModel = TabletViewModel()
+        viewModel = TabletViewModel()
         adapter = ActiveAdapter()
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         binding.rvApp.adapter = adapter
@@ -53,6 +57,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             // 移除当前 item
             viewModel.removeActiveModel(it.id)
         }
+        gridAppAdapter = GridAppAdapter()
+        binding.gvApp.adapter = gridAppAdapter
+        binding.gvApp.numColumns = 2
 
         // 监听 RecyclerView 的布局变化，更新 ivAdd 位置
         binding.rvApp.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -62,6 +69,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.flRNContent.post {
             viewModel.containerWidth = binding.flRNContent.width.pxToDp().toInt()
             viewModel.containerHeight = binding.flRNContent.height.pxToDp().toInt()
+            gridWidth = binding.gvApp.width
+            gridHeight = binding.gvApp.height
+            gridAppAdapter.dimensionRatio = viewModel.containerWidth * 1.0f / viewModel.containerHeight
         }
 
         // 监听 RecyclerView 的滚动，更新 ivAdd 位置
@@ -99,10 +109,21 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                             binding.flRNContent.addView(targetView)
                         }
                     }
+
                     if (useCase.pageMode != viewModel.currentDisplayModel) {
                         changeMode(useCase.pageMode)
                         viewModel.currentDisplayModel = useCase.pageMode
                     }
+                    Log.e("TabletActivity", "useCase.appList.size:${useCase.appList.size}")
+                    val column = GridViewColumnCalculator.calculateNumColumns(
+                        this@TabletActivity,
+                        gridWidth,
+                        gridHeight,
+                        useCase.appList.size + 1,
+                        viewModel.containerWidth * 1.0f / viewModel.containerHeight
+                    )
+                    binding.gvApp.numColumns = column
+                    gridAppAdapter.updateAppList(useCase.appList, emptyList())
                 }
             }
         }
@@ -164,10 +185,11 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             binding.llTitleTab.isVisible = true
             binding.flRNContent.isVisible = true
             binding.rlTitleGrid.isVisible = false
-            binding.rvGridApp.isVisible = false
+            binding.flGrid.isVisible = false
+//            autoFitGridLayoutManager.updateItemAspectRatio(viewModel.containerWidth * 1.0f / viewModel.containerHeight)
         } else {
             binding.rlTitleGrid.isVisible = true
-            binding.rvGridApp.isVisible = true
+            binding.flGrid.isVisible = true
             binding.llTitleTab.isVisible = false
             binding.flRNContent.isVisible = false
         }

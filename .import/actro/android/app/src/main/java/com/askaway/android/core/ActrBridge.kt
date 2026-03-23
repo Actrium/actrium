@@ -216,16 +216,25 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
     }
 
     suspend fun rtcInit(tabId: String, actorType: String, path: String){
-        LogUtil.e("ActrBridge", "RTC initialized")
+        LogUtil.e("ActrBridge", "RTC initialized__${path}")
         val clientSystem = createActrSystem(path)
+        Log.e("ActrBridge", "init_____1")
         val handler = MyUnifiedHandler()
+        Log.e("ActrBridge", "init_____2")
         val clientWorkload = UnifiedWorkload(handler)
+        Log.e("ActrBridge", "init_____3")
         val clientNode = clientSystem.attach(clientWorkload)
+        Log.e("ActrBridge", "init_____4")
         val clientRef = clientNode.start()
+        Log.e("ActrBridge", "init_____5")
         val parts = actorType.split("+")
+        Log.e("ActrBridge", "init_____6")
         val manufacturer = parts[0]
+        Log.e("ActrBridge", "init_____7")
         val name = parts[1]
+        Log.e("ActrBridge", "manufacturer:${manufacturer} name:${name}")
         val serverType = ActrType(manufacturer, name)
+        Log.e("ActrBridge", "init_____8")
         val serverActorIds = clientRef.discover(serverType, 1u)
         handler.setServerActId(serverActorIds[0])
         clients[tabId] = clientRef
