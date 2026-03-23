@@ -1399,8 +1399,9 @@ private struct TabCardView: View {
     }
 
     // 内容区域视图
+    @ViewBuilder
     private var contentView: some View {
-        ZStack {
+        let content = ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
 
@@ -1445,8 +1446,13 @@ private struct TabCardView: View {
         }
         .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
-        .onTapGesture {
-            onSelect()
+
+        if isFocused {
+            content
+        } else {
+            content.onTapGesture {
+                onSelect()
+            }
         }
     }
 }

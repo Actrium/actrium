@@ -12,7 +12,6 @@ class TabModule: NSObject {
         
         // 如果提供了 systemAppType，打开系统 tab
         if let systemAppType = options["systemAppType"] as? String {
-            let newTabId = UUID()
             var additionalProps = [String: Any]()
             for (key, value) in options {
                 if let keyString = key as? String, keyString != "tabId" && keyString != "systemAppType" {
@@ -20,10 +19,25 @@ class TabModule: NSObject {
                 }
             }
             DispatchQueue.main.async {
-                var userInfo: [String: Any] = [
-                    "tabId": newTabId,
-                    "systemAppType": systemAppType
-                ]
+                #if os(iOS)
+                let isPhone = UIDevice.current.userInterfaceIdiom == .phone
+                #else
+                let isPhone = false
+                #endif
+
+                if !isPhone,
+                   let viewModel = BrowserViewModel.active,
+                   let systemTabType = SystemTabType(rawValue: systemAppType) {
+                    let tab = viewModel.openSystemTab(
+                        systemTabType,
+                        additionalProps: additionalProps.isEmpty ? nil : additionalProps,
+                        replaceAdditionalProps: !additionalProps.isEmpty
+                    )
+                    resolve(tab.id.uuidString)
+                    return
+                }
+
+                var userInfo: [String: Any] = ["systemAppType": systemAppType]
                 if !additionalProps.isEmpty {
                     userInfo["additionalProps"] = additionalProps
                 }
@@ -42,7 +56,7 @@ class TabModule: NSObject {
                     )
                 }
                 #endif
-                resolve(newTabId.uuidString)
+                resolve("")
             }
             return
         }
