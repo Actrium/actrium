@@ -32,6 +32,7 @@ struct ContentView: View {
                             }
                         }
                         .ignoresSafeArea()
+                        .background(Color.black)
                     }
                     // 顶层兜底：拖入 .actr 或目录时创建新标签
                     .dropDestination(for: URL.self) { urls, location in

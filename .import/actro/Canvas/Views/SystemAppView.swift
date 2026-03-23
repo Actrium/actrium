@@ -13,7 +13,7 @@ struct SystemAppView: View {
         GeometryReader { geometry in
             if let tab = systemTab {
                 ZStack {
-                    Color(white: 0.97).ignoresSafeArea()
+                    Color.black.ignoresSafeArea()
                     SingleTabRootView(
                         tab: tab,
                         viewModel: viewModel,
@@ -32,7 +32,7 @@ struct SystemAppView: View {
                         .padding(.top, 8)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(white: 0.97))
+                .background(Color.black)
             }
         }
         .ignoresSafeArea(.container)
