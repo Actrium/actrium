@@ -59,8 +59,8 @@ update_xcode_env() {
 main() {
   case $1 in
   're') # 从新安装 RN 的依赖库（同时更新配置）
-    update_ios_config
-    update_xcode_env
+    # update_ios_config
+    # update_xcode_env
     ./Scripts/reinstall-dependencies.sh
     ;;
   
