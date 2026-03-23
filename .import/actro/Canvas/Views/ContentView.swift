@@ -24,8 +24,14 @@ struct ContentView: View {
                         // 顶部导航栏
                         TabNavigationBar(viewModel: viewModel, showAllTabs: $showAllTabs)
                         
-                        // 内容区域
-                        UnifiedCanvasView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                        // 内容区域：根据 systemTabType 判断是否渲染系统页签
+                        ZStack {
+                            UnifiedCanvasView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                            if let systemType = viewModel.currentSystemTabType {
+                                SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                            }
+                        }
+                        .ignoresSafeArea()
                     }
                     // 顶层兜底：拖入 .actr 或目录时创建新标签
                     .dropDestination(for: URL.self) { urls, location in
