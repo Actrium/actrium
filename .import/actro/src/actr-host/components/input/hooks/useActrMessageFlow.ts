@@ -113,7 +113,9 @@ export function useActrMessageFlow(
           openTab?.({ systemAppType: 'login' })
             .then((newTabId: string) => {
               if (newTabId) {
-                useAuthTaskStore.getState().regTask(newTabId, clientId, appId);
+                useAuthTaskStore
+                  .getState()
+                  .regTask(newTabId, clientId, appId, tabId);
               }
             })
             .catch((err: any) => {

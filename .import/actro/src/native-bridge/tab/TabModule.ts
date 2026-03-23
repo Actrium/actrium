@@ -3,7 +3,7 @@ import { emitTabWillExitFullscreen } from './TabEvents';
 
 const { TabModule } = NativeModules;
 
-// 打开 tab
+// 打开 tab（for phone）
 export const openTab = async (data: {
   tabId?: string;
   appUrl?: string;
@@ -16,6 +16,26 @@ export const openTab = async (data: {
     console.error(e);
   }
   return '';
+};
+
+// 选中指定 tab（for pad）
+export const selectTab = async (tabId: string): Promise<boolean> => {
+  try {
+    return TabModule.selectTab(tabId);
+  } catch (e) {
+    console.error(e);
+  }
+  return false;
+};
+
+// 关闭指定 tab
+export const closeTab = async (tabId: string): Promise<boolean> => {
+  try {
+    return TabModule.closeTab(tabId);
+  } catch (e) {
+    console.error(e);
+  }
+  return false;
 };
 
 // 退出 tab
