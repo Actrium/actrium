@@ -33,6 +33,7 @@ class TabModule: NSObject {
                         additionalProps: additionalProps.isEmpty ? nil : additionalProps,
                         replaceAdditionalProps: !additionalProps.isEmpty
                     )
+                    viewModel.currentSystemTabType = systemTabType
                     resolve(tab.id.uuidString)
                     return
                 }
@@ -113,6 +114,7 @@ class TabModule: NSObject {
             }
             
             // 切换到目标 tab
+            viewModel.currentSystemTabType = nil
             viewModel.currentTabId = tab.id
             
             #if os(iOS)
