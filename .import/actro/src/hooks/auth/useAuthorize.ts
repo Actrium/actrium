@@ -116,6 +116,14 @@ export const useAuthorize = ({
       return false;
     }
 
+    if (!clientId || !appId) {
+      // 中文注释：授权依赖 clientId/appId，参数未就绪时直接拦截，
+      // 避免向后端发送空参数请求，触发“应用错误”这类误导性提示。
+      GlobalAlert.alert(t('common.error'), t('actr.auth.authorizationFailed'));
+      setStep('failed');
+      return false;
+    }
+
     setLoading(true);
     setStep('authorizing');
 

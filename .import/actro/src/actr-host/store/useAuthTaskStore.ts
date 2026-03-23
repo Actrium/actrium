@@ -3,6 +3,7 @@ import { create } from 'zustand';
 interface AuthTask {
   clientId: string;
   appId: string;
+  sourceTabId?: string;
 }
 
 export type AppAuthorizationStatus = 'unknown' | 'authorized' | 'not_authorized';
@@ -16,7 +17,12 @@ interface AuthTaskState {
   addUnauthorizedAppId: (appId: string) => void;
   getAppAuthorizationStatus: (appId: string) => AppAuthorizationStatus;
   clearAuthorizationCache: () => void;
-  regTask: (tabId: string, clientId: string, appId: string) => void;
+  regTask: (
+    tabId: string,
+    clientId: string,
+    appId: string,
+    sourceTabId?: string,
+  ) => void;
   updateTask: (tabId: string, data: Partial<AuthTask>) => void;
   getTask: (tabId: string) => AuthTask | undefined;
   clearTask: (tabId: string) => void;
@@ -55,9 +61,9 @@ export const useAuthTaskStore = create<AuthTaskState>((set, get) => ({
     set(() => ({
       alreadyAuthorizedAppIds: {},
     })),
-  regTask: (tabId, clientId, appId) =>
+  regTask: (tabId, clientId, appId, sourceTabId) =>
     set((state) => ({
-      tasks: { ...state.tasks, [tabId]: { clientId, appId } },
+      tasks: { ...state.tasks, [tabId]: { clientId, appId, sourceTabId } },
     })),
   updateTask: (tabId, data) =>
     set((state) => ({
