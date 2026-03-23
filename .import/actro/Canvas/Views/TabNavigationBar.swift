@@ -24,9 +24,11 @@ struct TabNavigationBar: View {
         ZStack {
             if isInOverviewMode {
                 // Overview 模式的导航栏
-                OverviewNavigationBar(onBack: {
-                    toggleOverviewMode()
-                }, height: tabHeight, openSettings: { showSettings = true })
+                OverviewNavigationBar(
+                    viewModel: viewModel,
+                    onBack: {toggleOverviewMode()},
+                    height: tabHeight, openSettings: { showSettings = true }
+                )
             } else {
                 // Focus 模式的导航栏（标签页列表）
                 FocusModeNavigationBar(
@@ -73,6 +75,7 @@ struct TabNavigationBar: View {
 
 /// Overview 模式的导航栏（中间改为“活跃”，图标在上文字在下，选中使用 accentColor，未选中使用 gray）
 private struct OverviewNavigationBar: View {
+    @ObservedObject var viewModel: BrowserViewModel
     let onBack: () -> Void
     let height: CGFloat
     let openSettings: () -> Void
@@ -121,7 +124,10 @@ private struct OverviewNavigationBar: View {
 
                     // 按钮堆栈
                     HStack(spacing: 0) {
-                        Button(action: { selectedTab = .active }) {
+                        Button(action: {
+                            selectedTab = .active
+                            viewModel.currentSystemTabType = nil
+                        }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "rectangle.grid.1x2.fill")
                                     .font(.system(size: 14))
@@ -135,7 +141,8 @@ private struct OverviewNavigationBar: View {
 
                         Button(action: {
                             selectedTab = .bookmarks
-                            // TODO: 实现书签页切换
+                            // 切换到书签页（系统 Tab）
+                            viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "book.fill")

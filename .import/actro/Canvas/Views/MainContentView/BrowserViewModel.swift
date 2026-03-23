@@ -31,6 +31,9 @@ class BrowserViewModel: ObservableObject {
     // MARK: - System Tabs (单独管理，不混入 tabs 数组)
     @Published var systemTabs: [SystemTabType: Tab] = [:]
 
+    // MARK: - System Tab Management
+    @Published var currentSystemTabType: SystemTabType? = nil
+
     // MARK: - Tab Groups
     @Published var tabGroups: [TabGroup] = []
 
@@ -170,6 +173,7 @@ class BrowserViewModel: ObservableObject {
                 systemTabs[type] = existingTab
             }
             logger.debug("🔄 返回已有系统标签: \(type.title)")
+            currentSystemTabType = type
             return existingTab
         }
 
@@ -182,6 +186,7 @@ class BrowserViewModel: ObservableObject {
             additionalProps: additionalProps
         )
         systemTabs[type] = newTab
+        currentSystemTabType = type
         logger.notice(" 已创建系统标签: \(type.title)")
         
         // 发送通知到 RN
