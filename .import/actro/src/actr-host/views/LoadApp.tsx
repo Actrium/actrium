@@ -31,6 +31,7 @@ import { LoadAppCameraPanel } from './components/LoadAppCameraPanel';
 import { GlobalAlert } from '../../../src/components';
 import { CHAT_HEADER_HEIGHT } from '../constants';
 import { isTabletWidth } from '../../utils/device';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 
 // 在短时间窗口内抑制同一 URL 的重复加载，
 // 典型场景是权限弹窗前后扫码回调抖动导致重复触发。
@@ -263,7 +264,14 @@ const LoadApp = () => {
     return (
       <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
         <View style={styles.phoneContainer}>
-          <View style={styles.phoneScanSection}>
+          <View
+            style={[
+              styles.phoneScanSection,
+              // 中文注释：iOS 上输入 Dock 通过 StickyView 浮动到键盘上方，
+              // 内容区需要同步让出键盘高度，避免视觉上仍然“顶到底部”。
+              { marginBottom: Platform.OS === 'ios' ? keyboardInset : 0 },
+            ]}
+          >
             <View style={[styles.phoneScanArea, { marginTop: scanTopMargin }]}>
               <LoadAppCameraPanel
                 tabId={tabCtx.tab.id}
@@ -283,13 +291,16 @@ const LoadApp = () => {
               />
             </View>
           </View>
-          <View style={styles.phoneInputDock}>
+          <KeyboardStickyView
+            enabled={Platform.OS === 'ios'}
+            style={styles.phoneInputDock}
+          >
             <SafeBottomView style={styles.phoneInputSafeArea} minBottom={12}>
               <View style={styles.phoneInputSection}>
                 {renderInput(styles.phoneInput, styles.phoneInputContainer)}
               </View>
             </SafeBottomView>
-          </View>
+          </KeyboardStickyView>
         </View>
       </TouchableWithoutFeedback>
     );

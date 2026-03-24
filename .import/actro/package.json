@@ -76,6 +76,7 @@
     "react-native-gesture-handler": "^2.30.0",
     "react-native-get-random-values": "^1.11.0",
     "react-native-image-picker": "^8.2.1",
+    "react-native-keyboard-controller": "^1.21.1",
     "react-native-linear-gradient": "^2.8.3",
     "react-native-live-audio-stream": "^1.1.1",
     "react-native-localize": "^3.6.1",
@@ -104,7 +105,7 @@
     "@types/node": "^22.19.3",
     "@types/react": "19.0.0",
     "@types/react-native-sqlite-storage": "^6.0.5",
-    "typescript": "^5.9.3",
-    "patch-package": "^8.0.0"
+    "patch-package": "^8.0.0",
+    "typescript": "^5.9.3"
   }
 }
