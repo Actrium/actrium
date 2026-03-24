@@ -8,7 +8,11 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
+#endif
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -34,11 +38,11 @@ public struct DataStreamApp_TextMessage: Sendable {
   public var messageID: String = String()
 
   public var location: Ask_Location {
-    get {return _location ?? Ask_Location()}
+    get {_location ?? Ask_Location()}
     set {_location = newValue}
   }
   /// Returns true if `location` has been explicitly set.
-  public var hasLocation: Bool {return self._location != nil}
+  public var hasLocation: Bool {self._location != nil}
   /// Clears the value of `location`. Subsequent reads from it will return its default value.
   public mutating func clearLocation() {self._location = nil}
 
@@ -95,11 +99,11 @@ public struct DataStreamApp_StartVoiceMessage: Sendable {
   public var streamID: String = String()
 
   public var location: Ask_Location {
-    get {return _location ?? Ask_Location()}
+    get {_location ?? Ask_Location()}
     set {_location = newValue}
   }
   /// Returns true if `location` has been explicitly set.
-  public var hasLocation: Bool {return self._location != nil}
+  public var hasLocation: Bool {self._location != nil}
   /// Clears the value of `location`. Subsequent reads from it will return its default value.
   public mutating func clearLocation() {self._location = nil}
 
@@ -142,7 +146,7 @@ public struct DataStreamApp_StartVoiceMessageResponse: Sendable {
   public init() {}
 }
 
-public struct DataStreamApp_VoiceChunkMessage: @unchecked Sendable {
+public struct DataStreamApp_VoiceChunkMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -186,16 +190,7 @@ fileprivate let _protobuf_package = "data_stream_app"
 
 extension DataStreamApp_TextMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TextMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "text"),
-    2: .standard(proto: "session_id"),
-    3: .standard(proto: "message_id"),
-    4: .same(proto: "location"),
-    5: .standard(proto: "attachment_ids"),
-    6: .standard(proto: "stream_id"),
-    7: .standard(proto: "text_response_stream_id"),
-    8: .standard(proto: "voice_response_stream_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{3}session_id\0\u{3}message_id\0\u{1}location\0\u{3}attachment_ids\0\u{3}stream_id\0\u{3}text_response_stream_id\0\u{3}voice_response_stream_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -264,13 +259,7 @@ extension DataStreamApp_TextMessage: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 extension DataStreamApp_TextMessageResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TextMessageResponse"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "question_id"),
-    2: .standard(proto: "session_id"),
-    3: .same(proto: "text"),
-    4: .standard(proto: "status_code"),
-    5: .standard(proto: "error_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}question_id\0\u{3}session_id\0\u{1}text\0\u{3}status_code\0\u{3}error_message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -320,15 +309,7 @@ extension DataStreamApp_TextMessageResponse: SwiftProtobuf.Message, SwiftProtobu
 
 extension DataStreamApp_StartVoiceMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".StartVoiceMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "session_id"),
-    2: .standard(proto: "message_id"),
-    3: .standard(proto: "stream_id"),
-    4: .same(proto: "location"),
-    5: .standard(proto: "attachment_ids"),
-    7: .standard(proto: "text_response_stream_id"),
-    8: .standard(proto: "voice_response_stream_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}session_id\0\u{3}message_id\0\u{3}stream_id\0\u{1}location\0\u{3}attachment_ids\0\u{4}\u{2}text_response_stream_id\0\u{3}voice_response_stream_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -392,13 +373,7 @@ extension DataStreamApp_StartVoiceMessage: SwiftProtobuf.Message, SwiftProtobuf.
 
 extension DataStreamApp_StartVoiceMessageResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".StartVoiceMessageResponse"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "question_id"),
-    2: .standard(proto: "session_id"),
-    3: .same(proto: "text"),
-    4: .standard(proto: "status_code"),
-    5: .standard(proto: "error_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}question_id\0\u{3}session_id\0\u{1}text\0\u{3}status_code\0\u{3}error_message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -448,14 +423,7 @@ extension DataStreamApp_StartVoiceMessageResponse: SwiftProtobuf.Message, SwiftP
 
 extension DataStreamApp_VoiceChunkMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".VoiceChunkMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "session_id"),
-    2: .standard(proto: "message_id"),
-    3: .standard(proto: "chunk_id"),
-    4: .standard(proto: "chunk_data"),
-    5: .standard(proto: "stream_id"),
-    6: .same(proto: "metadata"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}session_id\0\u{3}message_id\0\u{3}chunk_id\0\u{3}chunk_data\0\u{3}stream_id\0\u{1}metadata\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -510,11 +478,7 @@ extension DataStreamApp_VoiceChunkMessage: SwiftProtobuf.Message, SwiftProtobuf.
 
 extension DataStreamApp_VoiceChunkMessageResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".VoiceChunkMessageResponse"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "stream_id"),
-    2: .same(proto: "status"),
-    3: .same(proto: "message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}stream_id\0\u{1}status\0\u{1}message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
