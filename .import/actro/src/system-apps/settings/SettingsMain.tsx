@@ -18,6 +18,7 @@ interface SettingsMainProps {
   onFeedbackPress: () => void;
   onLoginPress: () => void;
   onLogout: () => void;
+  appVersionText: string;
   isTablet: boolean;
 }
 
@@ -27,6 +28,7 @@ export const SettingsMain = ({
   onFeedbackPress,
   onLoginPress,
   onLogout,
+  appVersionText,
   isTablet,
 }: SettingsMainProps) => {
   const { t } = useTranslation();
@@ -80,6 +82,7 @@ export const SettingsMain = ({
         <SettingsItem
           icon='askaway_gery'
           label='AskAway'
+          value={appVersionText}
           onPress={onAboutPress}
         />
       </View>
