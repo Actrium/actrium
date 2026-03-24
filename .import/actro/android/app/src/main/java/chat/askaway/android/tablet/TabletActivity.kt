@@ -3,6 +3,10 @@ package chat.askaway.android.tablet
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.LayoutInflater
+import android.view.View
+import android.widget.FrameLayout
+import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
@@ -13,12 +17,14 @@ import androidx.recyclerview.widget.RecyclerView
 import chat.askaway.android.utils.GridViewColumnCalculator
 import com.askaway.android.BuildConfig
 import com.askaway.android.MainApplication
+import com.askaway.android.R
 import com.askaway.android.databinding.ActivityTabletBinding
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.facebook.react.uimanager.PixelUtil.pxToDp
+import com.askaway.android.core.ReactNativeBundle
 
 class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
 
@@ -114,6 +120,12 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         changeMode(useCase.pageMode)
                         viewModel.currentDisplayModel = useCase.pageMode
                     }
+                    if (useCase.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS) {
+                        showSettingsPopup()
+                    } else {
+                        hideSettingsPopup()
+                    }
+
                     Log.e("TabletActivity", "useCase.appList.size:${useCase.appList.size}")
                     val column = GridViewColumnCalculator.calculateNumColumns(
                         this@TabletActivity,
@@ -132,6 +144,11 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         }
         binding.ivAdd.postDelayed(300L) {
             binding.ivAdd.performClick()
+        }
+
+        // 设置按钮点击事件
+        binding.ivSet.setOnClickListener {
+            viewModel.showSet()
         }
 //        binding.flRNContent.adjustKeyboard()
     }
@@ -255,5 +272,72 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         val application = application as MainApplication
         application.reactNativeHost.reactInstanceManager
             .onActivityResult(this, requestCode, resultCode, data)
+    }
+
+    private fun showSettingsPopup(sourceBundle: Bundle? = null) {
+        // 如果已经显示，则不重复显示
+        if (binding.flSet.isVisible) return
+
+        // 加载弹窗布局
+        val popupView = LayoutInflater.from(this).inflate(R.layout.layout_settings_popup, binding.flSet, false)
+        binding.flSet.removeAllViews()
+        binding.flSet.addView(popupView)
+        // 获取遮罩和内容视图
+        val vMask = popupView.findViewById<View>(R.id.vMask)
+        val llContent = popupView.findViewById<FrameLayout>(R.id.llContent)
+        val bundle = sourceBundle ?: ReactNativeBundle.getSetBundle()
+        val targetView = createReactRootView("canvas-kotlin", bundle)
+        llContent.addView(targetView)
+
+        // 设置初始状态
+        binding.flSet.visibility = View.VISIBLE
+        vMask.alpha = 0f
+        llContent.scaleX = 0.7f
+        llContent.scaleY = 0.7f
+        llContent.alpha = 0f
+
+        // 执行弹出动画
+        vMask.animate()
+            .alpha(1f)
+            .setDuration(200)
+            .start()
+
+        llContent.animate()
+            .scaleX(1f)
+            .scaleY(1f)
+            .alpha(1f)
+            .setDuration(250)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .start()
+
+        // 点击遮罩关闭
+        vMask.setOnClickListener {
+            viewModel.hideSet()
+        }
+    }
+
+    private fun hideSettingsPopup() {
+        if (!binding.flSet.isVisible) return
+
+        val popupView = binding.flSet.getChildAt(0) ?: return
+        val vMask = popupView.findViewById<View>(R.id.vMask)
+        val llContent = popupView.findViewById<View>(R.id.llContent)
+        // 执行关闭动画
+        vMask.animate()
+            .alpha(0f)
+            .setDuration(200)
+            .start()
+
+        llContent.animate()
+            .scaleX(0.7f)
+            .scaleY(0.7f)
+            .alpha(0f)
+            .setDuration(200)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .withEndAction {
+                binding.flSet.visibility = View.GONE
+                binding.flSet.removeAllViews()
+            }
+            .start()
     }
 }

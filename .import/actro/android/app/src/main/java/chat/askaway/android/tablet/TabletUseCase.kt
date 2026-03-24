@@ -6,7 +6,8 @@ import com.askaway.android.model.ActiveModel
 data class TabletUseCase(
     val appList: List<ActiveModel> = emptyList(),
     val currentApp: Bundle? = null,
-    val pageMode: PageMode = PageMode.TAB
+    val pageMode: PageMode = PageMode.TAB,
+    val showPageType: String = ""
 )
 
 /**

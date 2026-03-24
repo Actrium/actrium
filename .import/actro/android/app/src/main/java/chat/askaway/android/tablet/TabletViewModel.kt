@@ -1,7 +1,9 @@
 package chat.askaway.android.tablet
 
+import android.os.Bundle
 import android.util.Log
 import androidx.lifecycle.ViewModel
+import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
@@ -13,6 +15,7 @@ import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
 import java.util.UUID
 
+
 class TabletViewModel : ViewModel() {
 
     private val _tabletUseCase = MutableStateFlow<TabletUseCase?>(null)
@@ -22,6 +25,7 @@ class TabletViewModel : ViewModel() {
     var containerHeight = 1000
     var containerWidth = 720
     var currentDisplayModel = PageMode.TAB
+    val pageBundle = Bundle()
 
     init {
         _tabletUseCase.value = TabletUseCase()
@@ -84,5 +88,15 @@ class TabletViewModel : ViewModel() {
 
     fun changeDisplayMode(mode: PageMode) {
         _tabletUseCase.value = _tabletUseCase.value?.copy(pageMode = mode)
+    }
+
+    fun showSet() {
+        _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS)
+    }
+
+    fun hideSet(){
+        if(_tabletUseCase.value?.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS){
+            _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = "")
+        }
     }
 }
