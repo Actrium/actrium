@@ -200,6 +200,7 @@ struct UnifiedCanvasView: View {
                                         .font(.system(size: 15))
                                         .foregroundColor(.primary)
                                         .focused($isSearchTabsFocused)
+                                        .disabled(true)
                                 }
                             }
                             .padding(.horizontal, 20)
@@ -211,6 +212,16 @@ struct UnifiedCanvasView: View {
                             .background(Color(uiColor: UIColor(white: 0.2, alpha: 0.95)))
                             #endif
                             .cornerRadius(24)
+                            .onTapGesture {
+                                viewModel.openSystemTab(.globalSearch, additionalProps: nil, replaceAdditionalProps: true)
+                                viewModel.currentSystemTabType = .globalSearch
+                            }
+                            .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
+                                // RN 请求退出搜索页
+                                withAnimation {
+                                    viewModel.currentSystemTabType = nil
+                                }
+                            }
                             
                             Spacer()
                         }
