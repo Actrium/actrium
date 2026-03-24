@@ -29,8 +29,12 @@ export default function ChatEmpty() {
       onPress={Keyboard.dismiss}
       accessible={false}
     >
-      <View style={[styles.centerContent, { maxWidth: layoutTokens.contentMaxWidth }]}>
-        {/* 中文注释：空态页没有滚动容器，补一层点击空白收起键盘，和消息列表页交互保持一致。 */}
+      <View
+        style={[
+          styles.centerContent,
+          { maxWidth: layoutTokens.contentMaxWidth },
+        ]}
+      >
         <View style={styles.logoContainer}>
           <Text style={[styles.appName, { fontSize: layoutTokens.chatEmptyTitleSize }]}>
             {appInfo?.app_name}

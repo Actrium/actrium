@@ -14,6 +14,7 @@ import {
   useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -44,6 +45,11 @@ import TemporarySupramarkMockChat from './ChatMock';
 import { CHAT_HEADER_HEIGHT } from '../constants';
 import { BookmarkRepository } from '../../repository/BookmarkRepository';
 import { setTabBookmarkStatus } from '../../native-bridge/tab/TabModule';
+import {
+  KeyboardStickyView,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
@@ -265,6 +271,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const [showLoadMoreHeader, setShowLoadMoreHeader] = useState(false);
   const { keyboardInset, isKeyboardVisible, dismissKeyboard } =
     useKeyboardInset();
+  const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
   const toastRef = React.useRef<ToastRef>(null);
   const flatListRef = useRef<FlatList>(null);
   const isNearBottomRef = useRef(true);
@@ -458,6 +465,20 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     return <ActrInput appId={appId} />;
   }, [appId]);
 
+  const contentAreaAnimatedStyle = useAnimatedStyle(() => {
+    if (Platform.OS !== 'ios' || layoutTokens.isTablet) {
+      return {
+        paddingBottom: 0,
+      };
+    }
+
+    return {
+      // 中文注释：keyboard-controller 在 iOS 上给出的是负位移，这里转成正的底部内边距，
+      // 让内容区随键盘高度实时压缩，而不是等键盘收起后再错位回弹。
+      paddingBottom: Math.max(-keyboardHeight.value, 0),
+    };
+  }, [layoutTokens.isTablet]);
+
   const renderItem = useCallback(
     ({ item: messageId, index }: { item: string; index: number }) => {
       return (
@@ -552,7 +573,12 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         { backgroundColor: layoutTokens.isTablet ? '#ffffff' : '#F2F2F6' },
       ]}
     >
-      <View style={styles.contentArea}>
+      <Reanimated.View
+        style={[
+          styles.contentArea,
+          contentAreaAnimatedStyle,
+        ]}
+      >
         {messageIds.length === 0 && !isLoadingMore ? (
           <View style={{ flex: 1 }}>
             <ChatEmpty />
@@ -586,7 +612,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
             maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           />
         )}
-      </View>
+      </Reanimated.View>
 
       {/* 回到底部按钮 */}
       {!selectionMode && (
@@ -605,7 +631,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       )}
 
       {/* 输入框 */}
-      <View
+      <KeyboardStickyView
+        enabled={Platform.OS === 'ios' && !layoutTokens.isTablet}
         style={[
           styles.inputContainer,
           {
@@ -616,7 +643,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         ]}
       >
         <View style={styles.inputInner}>{input}</View>
-      </View>
+      </KeyboardStickyView>
 
       {/* 删除按钮 - 绝对定位在输入框中心 */}
       {selectionMode && (
