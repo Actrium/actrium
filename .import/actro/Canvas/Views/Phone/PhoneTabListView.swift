@@ -235,9 +235,7 @@ struct PhoneBrowserView: View {
                     ]
                 )
             }
-        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        .ignoresSafeArea(.container, edges: .bottom)
     }
 }

@@ -106,7 +106,6 @@ struct PhoneMainView: View {
                             : (transitionRect.midY - topInset)
                     )
                     .zIndex(100)
-                    .ignoresSafeArea(.container, edges: .bottom)
                 }
             }
         }
