@@ -44,6 +44,20 @@ struct TabNavigationBar: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(systemType: .settings, viewModel: viewModel)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openTabFromRN)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let systemAppTypeStr = userInfo["systemAppType"] as? String,
+                  let systemTabType = SystemTabType(rawValue: systemAppTypeStr) else { return }
+            let additionalProps = userInfo["additionalProps"] as? [String: Any]
+            showSettings = true
+            withAnimation {
+                let _ = viewModel.openSystemTab(
+                    systemTabType,
+                    additionalProps: additionalProps,
+                    replaceAdditionalProps: additionalProps != nil
+                )
+            }
+        }
     }
     
     private func calculateTabWidth() -> CGFloat {

@@ -33,7 +33,19 @@ class TabModule: NSObject {
                         additionalProps: additionalProps.isEmpty ? nil : additionalProps,
                         replaceAdditionalProps: !additionalProps.isEmpty
                     )
-                    viewModel.currentSystemTabType = systemTabType
+                    if systemTabType == .settings {
+                        var userInfo: [String: Any] = ["systemAppType": systemAppType]
+                        if !additionalProps.isEmpty {
+                            userInfo["additionalProps"] = additionalProps
+                        }
+                        NotificationCenter.default.post(
+                            name: .openTabFromRN,
+                            object: nil,
+                            userInfo: userInfo
+                        )
+                    } else {
+                        viewModel.currentSystemTabType = systemTabType
+                    }
                     resolve(tab.id.uuidString)
                     return
                 }
