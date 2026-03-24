@@ -140,5 +140,12 @@
             android:id="@+id/flRNContent"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
+
+        <FrameLayout
+            android:id="@+id/flSet"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:visibility="gone" />
     </FrameLayout>
 </LinearLayout>
