@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,13 @@ import {
   ActivityIndicator,
   Image,
   ImageBackground,
+  useWindowDimensions,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { LoginContent } from './LoginContent';
 import { useLoginFlow, LoginFlowMode } from '../../hooks/auth';
 import { HostIconButton } from '../../actr-host/components/HostIconButton';
+import { getHostLayoutTokens } from '../../utils/layout';
 
 interface LoginModalProps {
   visible: boolean;
@@ -33,6 +35,8 @@ export const LoginModal = ({
   mode = 'login_and_authorize',
 }: LoginModalProps) => {
   const { t } = useTranslation();
+  const { width } = useWindowDimensions();
+  const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
   const { step, loading } = useLoginFlow({
     mode,
     clientId,
@@ -113,7 +117,15 @@ export const LoginModal = ({
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.overlay}>
           <TouchableWithoutFeedback>
-            <View style={styles.modalContainer}>
+            <View
+              style={[
+                styles.modalContainer,
+                {
+                  // phone 端保持 95% 宽度，只有 pad 端才限制最大宽度为 400
+                  maxWidth: layoutTokens.isTablet ? 400 : undefined,
+                },
+              ]}
+            >
               <ImageBackground
                 source={require('../../assets/login/login_bg.png')}
                 style={styles.modalBg}
@@ -166,7 +178,6 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: '95%',
-    // maxWidth: 360,
     backgroundColor: 'rgba(203, 214, 253, 1)',
     borderRadius: 33,
     overflow: 'hidden',
