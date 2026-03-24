@@ -204,7 +204,7 @@ export default function GlobalSearchApp() {
   const [searchQuery, setSearchQuery] = useState(''); // 回车后才更新
   const [bookmarks, setBookmarks] = useState<TBookmarkItem[]>([]);
   const inputRef = useRef<TextInput>(null);
-  const { keyboardInset, dismissKeyboard } = useKeyboardInset();
+  const { keyboardInset, isKeyboardVisible, dismissKeyboard } = useKeyboardInset();
   const { width: screenWidth } = useWindowDimensions();
   const apps = useAppStore((s) => s.apps);
   const tabIdMap = useTabIdMapStore((s) => s.tabIdMap);
@@ -425,6 +425,20 @@ export default function GlobalSearchApp() {
     setSearchQuery('');
   }, []);
 
+  const handleCloseSearch = useCallback(() => {
+    dismissKeyboard();
+
+    // 键盘和页面退出同帧触发时，Native 往往会直接执行关闭，导致键盘来不及先收起。
+    if (isKeyboardVisible) {
+      setTimeout(() => {
+        exitSearch();
+      }, 180);
+      return;
+    }
+
+    exitSearch();
+  }, [dismissKeyboard, isKeyboardVisible]);
+
   // 点击搜索结果项
   const handleItemPress = useCallback((item: SearchResultItem) => {
     if (item.type === 'setting') {
@@ -552,9 +566,7 @@ export default function GlobalSearchApp() {
         iconColor='#404040'
         backgroundColor='#FFF'
         style={styles.standaloneCloseButton}
-        onPress={() => {
-          exitSearch();
-        }}
+        onPress={handleCloseSearch}
       />
     </View>
   );
@@ -608,13 +620,6 @@ export default function GlobalSearchApp() {
               { width: inputWidth, height: resultsAreaSize },
             ]}
           >
-            <View style={styles.resultsHeader}>
-              <Text style={styles.resultsHeaderTitle}>
-                {searchQuery.length > 0
-                  ? t('actr.search.resultsIn')
-                  : t('actr.search.recent')}
-              </Text>
-            </View>
             <ScrollView
               style={{ flex: 1 }}
               contentContainerStyle={styles.resultsListContent}
