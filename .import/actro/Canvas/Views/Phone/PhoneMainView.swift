@@ -82,7 +82,6 @@ struct PhoneMainView: View {
             if let tab = transitioningTab {
                 GeometryReader { geometry in
                     let screenWidth = geometry.size.width
-                    let screenHeight = geometry.size.height
                     let topInset = geometry.safeAreaInsets.top
 
                     let browserHeight = showBrowser
