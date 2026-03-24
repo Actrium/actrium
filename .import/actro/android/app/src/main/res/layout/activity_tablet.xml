@@ -95,55 +95,14 @@
                     android:padding="8dp"
                     android:src="@drawable/set" />
             </RelativeLayout>
+
         </FrameLayout>
 
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
-            <LinearLayout
-                android:id="@+id/flGrid"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="vertical">
-
-                <GridView
-                    android:id="@+id/gvApp"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_margin="20dp"
-                    android:layout_weight="1"
-                    android:background="#0FF"
-                    android:horizontalSpacing="20dp"
-                    android:verticalSpacing="20dp" />
-
-                <LinearLayout
-                    android:id="@+id/llSearch"
-                    android:layout_width="match_parent"
-                    android:layout_height="64dp"
-                    android:layout_gravity="center_horizontal"
-                    android:layout_marginHorizontal="200dp"
-                    android:background="@drawable/tablet_search_bg"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:paddingStart="32dp">
-
-                    <ImageView
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:src="@drawable/ic_search" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:paddingStart="16dp"
-                        android:text="搜索应用"
-                        android:textColor="#FFF"
-                        android:textSize="18sp" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <FrameLayout
+            <chat.askaway.android.tablet.TabGridContainer
                 android:id="@+id/flRNContent"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
@@ -154,6 +113,32 @@
                 android:layout_height="match_parent"
                 android:layout_gravity="center"
                 android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/llSearch"
+                android:layout_width="match_parent"
+                android:layout_height="64dp"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginHorizontal="200dp"
+                android:background="@drawable/tablet_search_bg"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone"
+                android:paddingStart="32dp">
+
+                <ImageView
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:src="@drawable/ic_search" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="16dp"
+                    android:text="搜索应用"
+                    android:textColor="#FFF"
+                    android:textSize="18sp" />
+            </LinearLayout>
         </FrameLayout>
     </LinearLayout>
 
