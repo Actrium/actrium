@@ -51,6 +51,13 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   const scanLineLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const isSupported = Platform.OS === 'ios' || Platform.OS === 'android';
 
+  const stopScanLineAnimation = useCallback(() => {
+    scanLineLoopRef.current?.stop();
+    scanLineLoopRef.current = null;
+    scanLineAnim.stopAnimation();
+    scanLineAnim.setValue(0);
+  }, [scanLineAnim]);
+
   useEffect(() => {
     // 相机关闭后解锁，确保下一次用户主动扫码仍可正常触发。
     if (!cameraActive) {
@@ -74,9 +81,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
     const shouldPlayScanAnimation =
       cameraActive && device != null && scanTravelDistance > 0;
     if (!shouldPlayScanAnimation) {
-      scanLineLoopRef.current?.stop();
-      scanLineLoopRef.current = null;
-      scanLineAnim.setValue(0);
+      stopScanLineAnimation();
       return;
     }
 
@@ -87,12 +92,14 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
           toValue: 1,
           duration: 1400,
           easing: Easing.linear,
-          useNativeDriver: false,
+          // 位移动画只依赖 transform，交给原生线程执行后，
+          // 扫码成功时即使 JS 正在初始化会话，也不会把扫描线拖卡。
+          useNativeDriver: true,
         }),
         Animated.timing(scanLineAnim, {
           toValue: 0,
           duration: 0,
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
       ]),
     );
@@ -100,10 +107,9 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
     loop.start();
 
     return () => {
-      loop.stop();
-      scanLineLoopRef.current = null;
+      stopScanLineAnimation();
     };
-  }, [cameraActive, device, scanLineAnim, scanTravelDistance]);
+  }, [cameraActive, device, scanLineAnim, scanTravelDistance, stopScanLineAnimation]);
 
   const handleOpenCamera = useCallback(async () => {
     onBeforeOpenCamera?.();
@@ -151,8 +157,10 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
       const scannedValue = codes[0]?.value?.trim();
       if (!scannedValue || scanLockedRef.current) return;
 
-      // 先上锁，再立即关闭相机，尽量切断后续重复帧回调。
+      // 先上锁并立即停掉扫描线，保证“扫到码”这一刻视觉上立刻静止，
+      // 避免后续 URL 解析和会话初始化挤占 JS 后出现最后几帧卡顿。
       scanLockedRef.current = true;
+      stopScanLineAnimation();
       onCameraActiveChange(false);
       onScanUrl(scannedValue);
     },
