@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import {
+  InteractionManager,
   NativeModules,
   NativeSyntheticEvent,
   Platform,
@@ -286,7 +287,11 @@ const LoadApp = () => {
                   void requestNetworkPermissionOnMount();
                 }}
                 onScanUrl={(url) => {
-                  void handleResolveUrl(url);
+                  // 先让相机关闭和扫码层收起完成一帧提交，再启动会话初始化，
+                  // 避免重活直接堵住 JS，导致“已扫中但动画最后卡一下”的观感。
+                  InteractionManager.runAfterInteractions(() => {
+                    void handleResolveUrl(url);
+                  });
                 }}
               />
             </View>
@@ -344,7 +349,11 @@ const LoadApp = () => {
                   void requestNetworkPermissionOnMount();
                 }}
                 onScanUrl={(url) => {
-                  void handleResolveUrl(url);
+                  // 先让相机关闭和扫码层收起完成一帧提交，再启动会话初始化，
+                  // 避免重活直接堵住 JS，导致“已扫中但动画最后卡一下”的观感。
+                  InteractionManager.runAfterInteractions(() => {
+                    void handleResolveUrl(url);
+                  });
                 }}
               />
             </View>
