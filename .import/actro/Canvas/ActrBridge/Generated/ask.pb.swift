@@ -8,7 +8,11 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
+#endif
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -92,11 +96,11 @@ public struct Ask_UsrPromptRequest: Sendable {
 
   /// Optional location context
   public var location: Ask_Location {
-    get {return _location ?? Ask_Location()}
+    get {_location ?? Ask_Location()}
     set {_location = newValue}
   }
   /// Returns true if `location` has been explicitly set.
-  public var hasLocation: Bool {return self._location != nil}
+  public var hasLocation: Bool {self._location != nil}
   /// Clears the value of `location`. Subsequent reads from it will return its default value.
   public mutating func clearLocation() {self._location = nil}
 
@@ -140,7 +144,7 @@ public struct Ask_AssistantReply: Sendable {
 }
 
 /// Attachment upload request
-public struct Ask_AttachRequest: @unchecked Sendable {
+public struct Ask_AttachRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -210,28 +214,12 @@ public struct Ask_Location: Sendable {
 fileprivate let _protobuf_package = "ask"
 
 extension Ask_AttachmentType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "ATTACHMENT_TYPE_UNKNOWN"),
-    1: .same(proto: "IMAGE"),
-    2: .same(proto: "DOCUMENT"),
-    3: .same(proto: "AUDIO"),
-    4: .same(proto: "VIDEO"),
-    99: .same(proto: "OTHER"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ATTACHMENT_TYPE_UNKNOWN\0\u{1}IMAGE\0\u{1}DOCUMENT\0\u{1}AUDIO\0\u{1}VIDEO\0\u{2}_\u{1}OTHER\0")
 }
 
 extension Ask_UsrPromptRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".UsrPromptRequest"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "question_id"),
-    2: .standard(proto: "session_id"),
-    3: .same(proto: "text"),
-    4: .standard(proto: "voice_stream_id"),
-    5: .same(proto: "location"),
-    6: .standard(proto: "attachment_ids"),
-    7: .standard(proto: "text_response_stream_id"),
-    8: .standard(proto: "voice_response_stream_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}question_id\0\u{3}session_id\0\u{1}text\0\u{3}voice_stream_id\0\u{1}location\0\u{3}attachment_ids\0\u{3}text_response_stream_id\0\u{3}voice_response_stream_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -300,13 +288,7 @@ extension Ask_UsrPromptRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 extension Ask_AssistantReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AssistantReply"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "question_id"),
-    2: .standard(proto: "session_id"),
-    3: .same(proto: "text"),
-    4: .standard(proto: "status_code"),
-    5: .standard(proto: "error_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}question_id\0\u{3}session_id\0\u{1}text\0\u{3}status_code\0\u{3}error_message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -356,12 +338,7 @@ extension Ask_AssistantReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
 extension Ask_AttachRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AttachRequest"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "filename"),
-    3: .same(proto: "type"),
-    4: .same(proto: "data"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}filename\0\u{1}type\0\u{1}data\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -406,11 +383,7 @@ extension Ask_AttachRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
 
 extension Ask_AttachResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AttachResponse"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "status_code"),
-    3: .standard(proto: "error_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}status_code\0\u{3}error_message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -450,12 +423,7 @@ extension Ask_AttachResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
 extension Ask_Location: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Location"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "latitude"),
-    2: .same(proto: "longitude"),
-    3: .same(proto: "address"),
-    4: .standard(proto: "place_name"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}latitude\0\u{1}longitude\0\u{1}address\0\u{3}place_name\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
