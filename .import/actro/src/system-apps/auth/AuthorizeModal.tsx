@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,12 +6,14 @@ import {
   StyleSheet,
   Modal,
   TouchableWithoutFeedback,
+  useWindowDimensions,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { AuthorizeContent } from './AuthorizeContent';
 import { useAppStore } from '../../actr-host/store/useAppStore';
 import { useAuthorize } from '../../hooks/auth';
 import { HostIconButton } from '../../actr-host/components/HostIconButton';
+import { getHostLayoutTokens } from '../../utils/layout';
 
 interface AuthorizeModalProps {
   visible: boolean;
@@ -27,6 +29,8 @@ export const AuthorizeModal = ({
   onSuccess,
 }: AuthorizeModalProps) => {
   const { t } = useTranslation();
+  const { width } = useWindowDimensions();
+  const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
   const appInfo = useAppStore((state) => state.apps[appId]);
 
   const { step, loading, authorize } = useAuthorize({
@@ -68,7 +72,15 @@ export const AuthorizeModal = ({
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.overlay}>
           <TouchableWithoutFeedback>
-            <View style={styles.modalContainer}>
+            <View
+              style={[
+                styles.modalContainer,
+                {
+                  // phone 端保持 95% 宽度，只有 pad 端才限制最大宽度为 400
+                  maxWidth: layoutTokens.isTablet ? 400 : undefined,
+                },
+              ]}
+            >
               <View style={styles.modalContentWrapper}>
                 {/* Header：左侧 app logo + 标题，右侧关闭按钮 */}
                 <View style={styles.header}>
@@ -134,7 +146,6 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: '95%',
-    // maxWidth: 360,
     backgroundColor: '#E8E8E9',
     borderRadius: 33,
     overflow: 'hidden',
@@ -188,5 +199,7 @@ const styles = StyleSheet.create({
   },
   content: {
     width: '100%',
+    // 授权内容在 pad 端会被 maxWidth 收窄，不显式居中时会默认贴左
+    alignItems: 'center',
   },
 });
