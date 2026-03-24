@@ -125,6 +125,13 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     } else {
                         hideSettingsPopup()
                     }
+                    if (useCase.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SEARCH) {
+                        Log.e("TableActivity","----------1")
+                        showSearch()
+                    } else {
+                        Log.e("TableActivity","----------2")
+                        hideSearch()
+                    }
 
                     Log.e("TabletActivity", "useCase.appList.size:${useCase.appList.size}")
                     val column = GridViewColumnCalculator.calculateNumColumns(
@@ -149,6 +156,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         // 设置按钮点击事件
         binding.ivSet.setOnClickListener {
             viewModel.showSet()
+        }
+        binding.llSearch.setOnClickListener {
+            Log.e("TabletActivity", "llSearch click")
+            viewModel.showSearch()
         }
 //        binding.flRNContent.adjustKeyboard()
     }
@@ -339,5 +350,18 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 binding.flSet.removeAllViews()
             }
             .start()
+    }
+
+    private fun showSearch(sourceBundle: Bundle? = null) {
+        if (binding.flSearch.isVisible) return
+        binding.flSearch.isVisible = true
+        binding.flSearch.removeAllViews()
+        val bundle = sourceBundle ?: ReactNativeBundle.getSearchBundle()
+        val targetView = createReactRootView("canvas-kotlin", bundle)
+        binding.flSearch.addView(targetView)
+    }
+
+    private fun hideSearch() {
+        binding.flSearch.isVisible = false
     }
 }

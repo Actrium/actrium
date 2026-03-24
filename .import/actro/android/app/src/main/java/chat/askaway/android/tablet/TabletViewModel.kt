@@ -94,8 +94,18 @@ class TabletViewModel : ViewModel() {
         _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS)
     }
 
-    fun hideSet(){
-        if(_tabletUseCase.value?.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS){
+    fun hideSet() {
+        if (_tabletUseCase.value?.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS) {
+            _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = "")
+        }
+    }
+
+    fun showSearch() {
+        _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SEARCH)
+    }
+
+    fun hideSearch() {
+        if (_tabletUseCase.value?.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SEARCH) {
             _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = "")
         }
     }
