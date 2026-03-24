@@ -624,17 +624,19 @@ export default function GlobalSearchApp() {
             </ScrollView>
           </View>
 
-          {/* 搜索框 */}
-          {renderSearchInput(
-            [
-              styles.input,
-              { width: inputWidth, borderRadius: inputBorderRadius },
-            ],
-            [
-              styles.inputContainer,
-              { borderRadius: inputBorderRadius, backgroundColor: '#FFF' },
-            ],
-          )}
+          {/* Pad 端输入区和结果区共用同一套宽度约束，避免输入行额外撑满父容器 */}
+          <View style={{ width: inputWidth }}>
+            {renderSearchInput(
+              [
+                styles.input,
+                { borderRadius: inputBorderRadius },
+              ],
+              [
+                styles.inputContainer,
+                { borderRadius: inputBorderRadius, backgroundColor: '#FFF' },
+              ],
+            )}
+          </View>
         </View>
       </ScrollView>
     </TouchableWithoutFeedback>

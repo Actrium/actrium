@@ -31,7 +31,7 @@ import { Icon } from '../components/Icon';
 import { LoadAppCameraPanel } from './components/LoadAppCameraPanel';
 import { GlobalAlert } from '../../../src/components';
 import { CHAT_HEADER_HEIGHT } from '../constants';
-import { isTabletWidth } from '../../utils/device';
+import { isTablet } from '../../utils/device';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 
 // 在短时间窗口内抑制同一 URL 的重复加载，
@@ -58,7 +58,7 @@ const LoadApp = () => {
   const tabCtx = useTab();
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
   const { width: screenWidth } = useWindowDimensions();
-  const isPad = isTabletWidth(screenWidth);
+
 
   // 响应式尺寸：手机端使用屏幕宽度的 85%，iPad 端保持 500
   const isPhone = screenWidth < 600;
@@ -68,7 +68,7 @@ const LoadApp = () => {
   const scanBorderRadius = isPhone ? 20 : 34;
   const inputBorderRadius = 24;
   // Pad 模式不再展示 ChatHeader，因此不需要预留 Header 高度。
-  const scanTopMargin = isPad ? 10 : CHAT_HEADER_HEIGHT + 10;
+  const scanTopMargin = isTablet ? 10 : CHAT_HEADER_HEIGHT + 10;
 
   const requestNetworkPermissionOnMount = useCallback(async () => {
     try {
@@ -127,7 +127,7 @@ const LoadApp = () => {
   }, []);
 
   // Pad 端输入框常驻展示，Phone 端保持原有“按钮切换输入框”交互。
-  const showInputField = isPad || (inputExpanded && !cameraActive);
+  const showInputField = isTablet || (inputExpanded && !cameraActive);
 
   useEffect(() => {
     if (!showInputField) return;

@@ -8,10 +8,17 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
+
+// Pad 端固定展示 4 列，但宽度必须按真实可用空间计算，不能再写死设计稿百分比。
+const BOOKMARK_GRID_COLUMNS = 4;
+const BOOKMARK_HORIZONTAL_PADDING = 20;
+const BOOKMARK_GRID_COLUMN_GAP = 16;
+const BOOKMARK_GRID_ROW_GAP = 16;
 
 export default function BookmarksPadView({
   groups,
@@ -23,11 +30,20 @@ export default function BookmarksPadView({
   removeBookmark,
 }: UseBookmarksPageResult) {
   const { t } = useTranslation();
+  const { width } = useWindowDimensions();
   const flatBookmarks = React.useMemo(
     () =>
       groups.flatMap((group) => group.items).filter((item) => Boolean(item.app_name)),
     [groups],
   );
+  const cardWidth = React.useMemo(() => {
+    const contentWidth = Math.max(width - BOOKMARK_HORIZONTAL_PADDING * 2, 0);
+
+    return (
+      contentWidth -
+      BOOKMARK_GRID_COLUMN_GAP * (BOOKMARK_GRID_COLUMNS - 1)
+    ) / BOOKMARK_GRID_COLUMNS;
+  }, [width]);
 
   const handleRemoveBookmark = React.useCallback(
     async (item: TBookmarkItem) => {
@@ -82,7 +98,7 @@ export default function BookmarksPadView({
           {flatBookmarks.map((item) => (
             <TouchableOpacity
               key={item.id}
-              style={styles.card}
+              style={[styles.card, { width: cardWidth }]}
               activeOpacity={0.8}
               onPress={() => openBookmark(item)}
             >
@@ -120,17 +136,16 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingTop: 30,
-    paddingHorizontal: 30,
+    paddingHorizontal: BOOKMARK_HORIZONTAL_PADDING,
     paddingBottom: 48,
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    columnGap: 40,
-    rowGap: 20,
+    columnGap: BOOKMARK_GRID_COLUMN_GAP,
+    rowGap: BOOKMARK_GRID_ROW_GAP,
   },
   card: {
-    width: '22.3077%',
   },
   cardInner: {
     height: 56,
@@ -140,6 +155,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 13,
+    paddingRight: 38,
   },
   cardLogo: {
     width: 32,
@@ -155,9 +171,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   removeButton: {
+    position: 'absolute',
+    top: 18,
+    right: 10,
     width: 20,
     height: 20,
-    marginLeft: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },

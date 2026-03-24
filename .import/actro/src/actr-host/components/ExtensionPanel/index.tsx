@@ -1,6 +1,5 @@
 import React from 'react';
-import { useWindowDimensions } from 'react-native';
-import { isTabletWidth } from '../../../utils/device';
+import { isTablet } from '../../../utils/device';
 import TabletExtensionPanel from './TabletExtensionPanel';
 import PhoneExtensionPanel from './PhoneExtensionPanel';
 import type { ExtensionPanelProps } from './types';
@@ -11,9 +10,6 @@ import type { ExtensionPanelProps } from './types';
  * - Phone: 左侧滑入，推动中间窗口（手势由父组件 GestureDetector 控制）
  */
 const ExtensionPanel: React.FC<ExtensionPanelProps> = (props) => {
-  const { width } = useWindowDimensions();
-  const isTablet = isTabletWidth(width);
-
   if (isTablet) {
     return (
       <TabletExtensionPanel

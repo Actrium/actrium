@@ -8,7 +8,7 @@ import {
   runOnJS,
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
-import { isTabletWidth } from '../../utils/device';
+import { isTablet } from '../../utils/device';
 
 // ─── 手势配置常量 ───────────────────────────────────────
 /** 水平滑动超过此距离才激活手势（避免误触） */
@@ -53,9 +53,6 @@ export function useExtensionPanelGesture({
   centerAnimValue,
   onVisibilityChange,
 }: UseExtensionPanelGestureParams) {
-  const { width } = useWindowDimensions();
-  const isTablet = isTabletWidth(width);
-
   // 与按钮触发路径保持一致：手势路径也基于固定面板宽度计算实际展开宽度。
   const maxSlide = panelWidth * 0.8;
   // 手势开始时记录的起始位置
