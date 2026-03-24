@@ -110,12 +110,12 @@ export function useActrMessageFlow(
 
       if (status === 'not_logged_in') {
         if (isTablet) {
-          openTab?.({ systemAppType: 'login' })
-            .then((newTabId: string) => {
+          openTab?.({ tabSystemAppType: 'login' })
+            .then(({ tabId: newTabId }: { tabId: string }) => {
               if (newTabId) {
                 useAuthTaskStore
                   .getState()
-                  .regTask(newTabId, clientId, appId, tabId);
+                  .regTask(newTabId, { clientId, appId, sourceTabId: tabId });
               }
             })
             .catch((err: any) => {
@@ -150,7 +150,9 @@ export function useActrMessageFlow(
   const onReceiveMessage = useCallback(
     (data: TActrMessageResponse) => {
       const messageId = data.message_id;
-      const currentMsg = useMessageStore.getState().getMessage(tabId, messageId);
+      const currentMsg = useMessageStore
+        .getState()
+        .getMessage(tabId, messageId);
 
       if (!currentMsg) {
         console.warn('[ActrInput] No messages in store to update');
@@ -242,7 +244,9 @@ export function useActrMessageFlow(
           chunks,
         });
         const serializedVoicePayload = JSON.stringify(voicePayload);
-        const currentMsg = useMessageStore.getState().getMessage(tabId, messageId);
+        const currentMsg = useMessageStore
+          .getState()
+          .getMessage(tabId, messageId);
 
         // 中文注释：回答语音可能先于问题语音消息入列，先缓存更新，等问题消息补入后再合并。
         if (!currentMsg) {
@@ -280,10 +284,9 @@ export function useActrMessageFlow(
     (messageId: string) => {
       getCurrentFullscreenTab().then((currentTabId) => {
         if (currentTabId === tabId) {
-          const currentMsg = useMessageStore.getState().getMessage(
-            tabId,
-            messageId,
-          );
+          const currentMsg = useMessageStore
+            .getState()
+            .getMessage(tabId, messageId);
           if (currentMsg) {
             updateMessage(tabId, messageId, { is_read: 1 }, true);
             return;
@@ -304,7 +307,9 @@ export function useActrMessageFlow(
   const onReceiveVoice = useCallback(
     (data: TActrMessageResponse) => {
       const messageId = data.message_id;
-      const currentMsg = useMessageStore.getState().getMessage(tabId, messageId);
+      const currentMsg = useMessageStore
+        .getState()
+        .getMessage(tabId, messageId);
       const isFinished = data.isEnd || data.status === 2;
       const fallbackMessage = t('actr.voice.voiceMessageReceived');
       const newContent = currentMsg?.answer_content
@@ -400,33 +405,36 @@ export function useActrMessageFlow(
     ],
   );
 
-  const { sendMessage, sendVoiceChunk, startVoice, endVoice, session_id, connection } =
-    useActrConnection({
-      appId,
-      tabId,
-      config: appInfo
-        ? {
-            app_id: appInfo.app_id,
-            key_id: appInfo.key_id,
-            authority_services: appInfo.authority_services,
-            signaling_services: appInfo.signaling_services,
-            stun_services: appInfo.stun_services,
-            turn_services: appInfo.turn_services,
-            realm_id: appInfo.realm_id,
-            server_actor_type: appInfo.server_actor_type,
-          }
-        : undefined,
-      callbacks: {
-        onMessage: onReceiveMessage,
-        onVoice: onReceiveVoice,
-      },
-    });
+  const {
+    sendMessage,
+    sendVoiceChunk,
+    startVoice,
+    endVoice,
+    session_id,
+    connection,
+  } = useActrConnection({
+    appId,
+    tabId,
+    config: appInfo
+      ? {
+          app_id: appInfo.app_id,
+          key_id: appInfo.key_id,
+          authority_services: appInfo.authority_services,
+          signaling_services: appInfo.signaling_services,
+          stun_services: appInfo.stun_services,
+          turn_services: appInfo.turn_services,
+          realm_id: appInfo.realm_id,
+          server_actor_type: appInfo.server_actor_type,
+        }
+      : undefined,
+    callbacks: {
+      onMessage: onReceiveMessage,
+      onVoice: onReceiveVoice,
+    },
+  });
 
   const processMessageSend = useCallback(
-    async (
-      content: string,
-      options?: { isVoice?: boolean },
-    ) => {
+    async (content: string, options?: { isVoice?: boolean }) => {
       const { isVoice } = options || {};
 
       if (connection?.reason) {
@@ -446,7 +454,10 @@ export function useActrMessageFlow(
         try {
           deleteMessageFromStore(tabId, messageIdToDelete);
         } catch (e) {
-          console.error('[ActrInput] Failed to delete message during re-edit:', e);
+          console.error(
+            '[ActrInput] Failed to delete message during re-edit:',
+            e,
+          );
         }
       }
 
@@ -561,7 +572,9 @@ export function useActrMessageFlow(
     onVoiceMessageCanceled: (messageId: string) => {
       delete pendingVoiceMessageUpdatesRef.current[messageId];
       delete answerVoiceBuffersRef.current[messageId];
-      const currentMessage = useMessageStore.getState().getMessage(tabId, messageId);
+      const currentMessage = useMessageStore
+        .getState()
+        .getMessage(tabId, messageId);
       if (currentMessage?.question_voice_payload) {
         void cleanupVoiceMessageFile(currentMessage.question_voice_payload);
       }

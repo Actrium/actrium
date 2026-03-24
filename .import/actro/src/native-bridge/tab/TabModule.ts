@@ -7,15 +7,16 @@ const { TabModule } = NativeModules;
 export const openTab = async (data: {
   tabId?: string;
   appUrl?: string;
-  systemAppType?: string;
+  systemAppType?: string; // 通用的系统 app（非 tab 中）
+  tabSystemAppType?: string; // for tab
   systemAppPayload?: Record<string, unknown>;
-}): Promise<string> => {
+}): Promise<{tabId: string}> => {
   try {
     return TabModule.openTab(data);
   } catch (e) {
     console.error(e);
   }
-  return '';
+  return {tabId: ''};
 };
 
 // 选中指定 tab（for pad）
