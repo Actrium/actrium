@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.event.ReactModuleEvent
+import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
 import com.askaway.android.utils.addMap
@@ -41,6 +42,43 @@ class TabletViewModel : ViewModel() {
     fun onReactNativeCall(event: ReactModuleEvent) {
         when (event.methodName) {
             ReactModuleEvent.EVENT_UPDATE_TAB_INFO -> updateAppInfo(event.params)
+            ReactModuleEvent.EVENT_OPEN_TAB -> {
+                val systemAppType = event.params["systemAppType"] as? String
+                if (systemAppType == null) { // 打开应用
+                    val tabId = event.params["tabId"] as? String
+                    Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId")
+                    val hasActive = tabId != null && appList.any { it.id == tabId }
+                    if (hasActive) {
+                        val appModel = appList.find { it.id == tabId }
+
+                        appModel?.let {
+                            _tabletUseCase.value = _tabletUseCase.value?.copy(
+                                currentApp = it.genReactNativeBundle(
+                                    Params.appList,
+                                    containerHeight,
+                                    containerWidth
+                                )
+                            )
+                        }
+                    } else {
+                        val filteredParams = event.params.filterKeys { it != "tabId" }
+                        addApp(filteredParams)
+                    }
+                } else {  // 打开其他页面
+                    Log.e(
+                        "MainViewModel",
+                        "Received EVENT_OPEN_TAB for systemAppType: $systemAppType with params: ${event.params}"
+                    )
+                    pageBundle.clear()
+                    val bundle = Bundle()
+                    bundle.addMap(event.params)
+                    val filteredParams = event.params.filterKeys { it != "systemAppType" }
+                    pageBundle.putBundle("tab", bundle)
+                    pageBundle.putBoolean("singleTabMode", true)
+                    pageBundle.addMap(filteredParams)
+                    _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = systemAppType)
+                }
+            }
         }
     }
 
@@ -107,6 +145,14 @@ class TabletViewModel : ViewModel() {
     fun hideSearch() {
         if (_tabletUseCase.value?.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SEARCH) {
             _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = "")
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        // 反注册 EventBus
+        if (EventBus.getDefault().isRegistered(this)) {
+            EventBus.getDefault().unregister(this)
         }
     }
 }
