@@ -20,7 +20,7 @@ import { submitFeedback, FeedbackContext } from '../../api/feedback';
 import { useMessageStore } from '../store/useMessageStore';
 import dayjs from 'dayjs';
 import { GlobalAlert } from '../../../src/components';
-import { TABLET_MIN_WIDTH } from '../../utils/device';
+import { isPhone } from '../../utils/device';
 
 interface Category {
   id: string;
@@ -55,8 +55,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   messageId,
 }) => {
   const { t } = useTranslation();
-  const { width } = useWindowDimensions();
-  const isPhone = width < TABLET_MIN_WIDTH;
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState('');
   const [status, setStatus] = useState<

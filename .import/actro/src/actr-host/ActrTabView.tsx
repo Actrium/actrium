@@ -52,7 +52,7 @@ import { ChatHeader } from './components/ChatHeader';
 import { exitFullscreen } from '../native-bridge/tab/TabModule';
 import { useTabNativeEvents } from './hooks/useTabNativeEvents';
 import { useExtensionPanelGesture } from './hooks/useExtensionPanelGesture';
-import { isTabletWidth } from '../utils/device';
+import { isTablet } from '../utils/device';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -77,9 +77,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   onEngineChange,
 }) => {
   const { top: topInsetRaw } = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
   const gate = evaluateTabGate(tab);
-  const isPad = isTabletWidth(windowWidth);
+
 
   // 🆕 通过 tab.id 获取 appId
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
@@ -105,7 +104,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const [localLeftPanelVisible, setLocalLeftPanelVisible] = useState(false);
 
   // 统一面板可见性：Pad 由父组件 props 控制，Phone 由内部状态控制
-  const panelVisible = isPad ? isLeftPanelVisible : localLeftPanelVisible;
+  const panelVisible = isTablet ? isLeftPanelVisible : localLeftPanelVisible;
 
   const engineRef = useRef<Engine | null>(null);
   const adapterRef = useRef<{ dispose: () => void } | null>(null);
@@ -395,7 +394,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // Pad 宿主页需要贴齐顶部展示，不再保留 Phone 场景的模拟圆角。
   const threeColumnStyle = [
     styles.threeColumn,
-    isPad && styles.threeColumnPad,
+    isTablet && styles.threeColumnPad,
   ];
   const sheetTopOffset = topInsetRaw;
 
@@ -507,7 +506,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         )} */}
 
         {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
-        {!isPad && (
+        {!isTablet && (
           <ChatHeader
             onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
             onRightPress={() => exitFullscreen()}
@@ -548,7 +547,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   return (
     <TabProvider tab={tab}>
       {/* Pad 不需要侧滑手势，直接跳过 GestureDetector，避免手势层吞掉点击。 */}
-      {isPad ? tabContent : <GestureDetector gesture={panelGesture}>{tabContent}</GestureDetector>}
+      {isTablet ? tabContent : <GestureDetector gesture={panelGesture}>{tabContent}</GestureDetector>}
     </TabProvider>
   );
 };

@@ -1,5 +1,5 @@
 import { isIOS } from './device';
-import { getWidthClass } from './device';
+import { isTablet } from './device';
 
 export interface HostLayoutTokens {
   isTablet: boolean;
@@ -19,8 +19,6 @@ export interface HostLayoutTokens {
 }
 
 export function getHostLayoutTokens(width: number): HostLayoutTokens {
-  const isTablet = getWidthClass(width) === 'tablet';
-
   return {
     isTablet,
     contentMaxWidth: isTablet ? 750 : width,
