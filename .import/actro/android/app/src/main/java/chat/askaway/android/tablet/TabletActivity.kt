@@ -31,7 +31,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     private lateinit var binding: ActivityTabletBinding
     private lateinit var adapter: ActiveAdapter
     private var permissionListener: PermissionListener? = null
-    private lateinit var gridAppAdapter: GridAppAdapter
     private lateinit var viewModel: TabletViewModel
     private var gridWidth = 0
     private var gridHeight = 0
@@ -50,9 +49,18 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 if (child.tag == it.id) {
                     binding.flRNContent.removeViewAt(i)
                     // 必须手动卸载 React 应用以释放 JS 资源并停止执行
-                    if (child is ReactRootView) {
+                    // 如果是 ScalableContainer，需要获取内部的 ReactRootView
+                    val reactRootView = if (child is ScalableContainer && child.childCount > 0) {
+                        child.getChildAt(0) as? ReactRootView
+                    } else if (child is ReactRootView) {
+                        child
+                    } else {
+                        null
+                    }
+
+                    reactRootView?.let { rootView ->
                         try {
-                            child.unmountReactApplication()
+                            rootView.unmountReactApplication()
                         } catch (e: Exception) {
                             Log.e("MainActivity", "Error unmounting React application", e)
                         }
@@ -63,9 +71,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             // 移除当前 item
             viewModel.removeActiveModel(it.id)
         }
-        gridAppAdapter = GridAppAdapter()
-        binding.gvApp.adapter = gridAppAdapter
-        binding.gvApp.numColumns = 2
 
         // 监听 RecyclerView 的布局变化，更新 ivAdd 位置
         binding.rvApp.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -75,9 +80,21 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.flRNContent.post {
             viewModel.containerWidth = binding.flRNContent.width.pxToDp().toInt()
             viewModel.containerHeight = binding.flRNContent.height.pxToDp().toInt()
-            gridWidth = binding.gvApp.width
-            gridHeight = binding.gvApp.height
-            gridAppAdapter.dimensionRatio = viewModel.containerWidth * 1.0f / viewModel.containerHeight
+            binding.flRNContent.itemAspectRatio = viewModel.containerWidth * 1.0f / viewModel.containerHeight
+        }
+
+        // 设置 TabGridContainer 的点击事件
+        binding.flRNContent.onItemClick = { position ->
+            if (binding.flRNContent.isGridMode) {
+                // 点击网格中的 item，切换到 TAB 模式并显示该 item
+                binding.flRNContent.currentPosition = position
+                viewModel.changeDisplayMode(PageMode.TAB)
+                // 同时更新 ViewModel 中的当前 app
+                val appList = viewModel.tabletUseCase.value?.appList
+                if (appList != null && position < appList.size) {
+                    // 这里需要根据你的业务逻辑来更新当前选中的 app
+                }
+            }
         }
 
         // 监听 RecyclerView 的滚动，更新 ivAdd 位置
@@ -101,11 +118,12 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     useCase.currentApp?.let {
                         val currentTabId = it.getString("currentTabId")
                         var found = false
+                        var foundIndex = -1
                         for (i in 0 until binding.flRNContent.childCount) {
                             val child = binding.flRNContent.getChildAt(i)
                             if (child.tag == currentTabId) {
-                                child.bringToFront()
                                 found = true
+                                foundIndex = i
                                 break
                             }
                         }
@@ -113,6 +131,11 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                             val targetView = createReactRootView("canvas-kotlin", it)
                             targetView.tag = currentTabId
                             binding.flRNContent.addView(targetView)
+                            foundIndex = binding.flRNContent.childCount - 1
+                        }
+                        // 更新当前显示的位置
+                        if (foundIndex >= 0) {
+                            binding.flRNContent.currentPosition = foundIndex
                         }
                     }
 
@@ -141,8 +164,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         useCase.appList.size + 1,
                         viewModel.containerWidth * 1.0f / viewModel.containerHeight
                     )
-                    binding.gvApp.numColumns = column
-                    gridAppAdapter.updateAppList(useCase.appList, emptyList())
                 }
             }
         }
@@ -213,13 +234,16 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             binding.llTitleTab.isVisible = true
             binding.flRNContent.isVisible = true
             binding.rlTitleGrid.isVisible = false
-            binding.flGrid.isVisible = false
-//            autoFitGridLayoutManager.updateItemAspectRatio(viewModel.containerWidth * 1.0f / viewModel.containerHeight)
+            // 切换到 TAB 模式
+            binding.flRNContent.isGridMode = false
+            binding.llSearch.isVisible = false
         } else {
             binding.rlTitleGrid.isVisible = true
-            binding.flGrid.isVisible = true
+            binding.llSearch.isVisible = true  // 隐藏旧的 GridView
             binding.llTitleTab.isVisible = false
-            binding.flRNContent.isVisible = false
+            binding.flRNContent.isVisible = true  // 显示 flRNContent
+            // 切换到 GRID 模式
+            binding.flRNContent.isGridMode = true
         }
     }
 
