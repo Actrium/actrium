@@ -87,9 +87,10 @@ struct PhoneMainView: View {
                     .position(x: showBrowser ? UIScreen.main.bounds.midX : transitionRect.midX,
                               y: showBrowser ? UIScreen.main.bounds.midY : transitionRect.midY)
                     .zIndex(100)
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(.container)
             }
         }
+        .background(Color.black)
         .onChange(of: selectedTab) { oldValue, newValue in
             // 切换到系统页签时，刷新系统页签
             switch newValue {
@@ -196,12 +197,6 @@ struct PhoneMainView: View {
     }
     
     private func executeTransition(to tab: Tab) {
-        // 如果没有位置信息，默认使用屏幕中心的一个矩形
-        if transitionRect == .zero {
-            let width = UIScreen.main.bounds.width - 32
-            transitionRect = CGRect(x: 16, y: 300, width: width, height: width * 0.54)
-        }
-        
         transitioningTab = tab
         
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
@@ -280,7 +275,11 @@ extension PhoneMainView {
             .frame(width: 0, height: 0)
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateTabCardRect"))) { notification in
                 if let rect = notification.userInfo?["rect"] as? CGRect {
-                    self.transitionRect = rect
+                    if self.transitionRect == .zero {
+                        self.transitionRect = CGRect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width+32, height: rect.size.height)
+                    } else {
+                        self.transitionRect = rect
+                    }
                 }
             }
     }
