@@ -42,6 +42,7 @@ class TabletViewModel : ViewModel() {
     fun onReactNativeCall(event: ReactModuleEvent) {
         when (event.methodName) {
             ReactModuleEvent.EVENT_UPDATE_TAB_INFO -> updateAppInfo(event.params)
+            ReactModuleEvent.EVENT_EXIT_SEARCH -> hideSearch()
             ReactModuleEvent.EVENT_OPEN_TAB -> {
                 val systemAppType = event.params["systemAppType"] as? String
                 if (systemAppType == null) { // 打开应用

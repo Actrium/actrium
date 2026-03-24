@@ -17,6 +17,7 @@ import org.greenrobot.eventbus.ThreadMode
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
+import com.askaway.android.MainActivity
 
 class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     override fun getName(): String {
@@ -88,7 +89,7 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     fun exitSearch() {
         EventBus.getDefault().post(ReactModuleEvent(ReactModuleEvent.EVENT_EXIT_SEARCH))
         val activity = currentActivity
-        if (activity != null) {
+        if (activity != null && activity is MainActivity) {
             activity.runOnUiThread {
                 try {
                     val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
