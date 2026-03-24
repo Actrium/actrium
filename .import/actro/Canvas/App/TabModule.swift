@@ -191,17 +191,7 @@ class TabModule: NSObject {
     @objc
     func exitSearch(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         logger.notice("[TabModule] exitSearch called")
-        
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom != .phone {
-            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
-            return
-        }
-        #else
-        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
-        return
-        #endif
-
         DispatchQueue.main.async {
             // 发送通知，让 PhoneMainView 退出搜索页
             NotificationCenter.default.post(
@@ -210,6 +200,10 @@ class TabModule: NSObject {
             )
             resolve(true)
         }
+        #else
+        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
+        return
+        #endif
     }
     
     @objc
@@ -305,15 +299,6 @@ class TabModule: NSObject {
         logger.notice("[TabModule] getCurrentFullscreenTab called")
         
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom != .phone {
-            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
-            return
-        }
-        #else
-        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
-        return
-        #endif
-        
         DispatchQueue.main.async {
             guard let viewModel = BrowserViewModel.active else {
                 reject("NO_VIEW_MODEL", "BrowserViewModel not available", nil)
@@ -327,6 +312,10 @@ class TabModule: NSObject {
                 resolve("") // 没有全屏 tab 时返回空字符串
             }
         }
+        #else
+        reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
+        return
+        #endif
     }
 
     @objc
