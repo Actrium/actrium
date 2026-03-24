@@ -286,7 +286,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const handleContentSizeChange = useCallback(() => {
     // 异步内容（如 Supramark 卡片）撑高时，若用户仍在底部附近，则保持贴底。
     const shouldKeepBottom =
-      isNearBottomRef.current || Date.now() < forceScrollToBottomUntilRef.current;
+      isNearBottomRef.current ||
+      Date.now() < forceScrollToBottomUntilRef.current;
     if (!shouldKeepBottom) return;
 
     requestAnimationFrame(() => {
@@ -392,11 +393,15 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     loadAppInfo();
 
     return () => {
-      // 销毁时清除当前 tab 下的历史对话，id 映射，未读消息数量，输出框状态
-      // cleanMessage(tab.id);
-      // removeTabIdMap(tab.id);
-      // useUnreadStore.getState().clearUnread(tab.id);
-      // clearInput(tab.id);
+      // 销毁时清除当前 tab 下的历史对话，id 映射，未读消息数量，输出框状态，tabid映射
+      // debug 环境方便热更新，不做清理
+      if (!__DEV__) {
+        cleanMessage(tab.id);
+        removeTabIdMap(tab.id);
+        useUnreadStore.getState().clearUnread(tab.id);
+        clearInput(tab.id);
+        removeTabIdMap(tab.id);
+      }
     };
   }, [tab.id]);
 
@@ -573,12 +578,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         { backgroundColor: layoutTokens.isTablet ? '#ffffff' : '#F2F2F6' },
       ]}
     >
-      <Reanimated.View
-        style={[
-          styles.contentArea,
-          contentAreaAnimatedStyle,
-        ]}
-      >
+      <Reanimated.View style={[styles.contentArea, contentAreaAnimatedStyle]}>
         {messageIds.length === 0 && !isLoadingMore ? (
           <View style={{ flex: 1 }}>
             <ChatEmpty />
@@ -598,7 +598,9 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
               styles.chatContent,
               {
                 // Pad 模式不展示 ChatHeader，顶部只保留内容呼吸位。
-                paddingTop: layoutTokens.isTablet ? 12 : CHAT_HEADER_HEIGHT + 12,
+                paddingTop: layoutTokens.isTablet
+                  ? 12
+                  : CHAT_HEADER_HEIGHT + 12,
                 paddingBottom: layoutTokens.chatListBottomPadding,
               },
             ]}

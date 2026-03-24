@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import DeviceInfo from 'react-native-device-info';
 import { SettingsMain } from './settings/SettingsMain';
 import { AccountDetail } from './settings/AccountDetail';
 import { AboutAskAway } from './settings/AboutAskAway';
@@ -96,6 +97,13 @@ export default function SettingsApp({
     () => parseSettingsDeepLinkPayload(systemAppPayload),
     [systemAppPayload],
   );
+  const appVersionText = useMemo(() => {
+    const version = DeviceInfo.getVersion();
+    const buildNumber = DeviceInfo.getBuildNumber();
+
+    // 构建号为空时只显示版本号，避免设置页出现无意义的空括号
+    return buildNumber ? `${version}(${buildNumber})` : version;
+  }, []);
 
   useEffect(() => {
     if (!deepLink.page) {
@@ -153,6 +161,7 @@ export default function SettingsApp({
           onFeedbackPress={handleFeedbackPress}
           onLoginPress={handleLoginPress}
           onLogout={handleLogout}
+          appVersionText={appVersionText}
           isTablet={isTablet}
         />
       )}
