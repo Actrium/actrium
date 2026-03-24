@@ -80,14 +80,35 @@ struct PhoneMainView: View {
             
             // 自定义浏览器层
             if let tab = transitioningTab {
-                PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
-                    .frame(width: showBrowser ? UIScreen.main.bounds.width : transitionRect.width,
-                           height: showBrowser ? UIScreen.main.bounds.height : (transitionRect.width * 0.54))
-                    .cornerRadius(showBrowser ? 0 : 22)
-                    .position(x: showBrowser ? UIScreen.main.bounds.midX : transitionRect.midX,
-                              y: showBrowser ? UIScreen.main.bounds.midY : transitionRect.midY)
+                GeometryReader { geometry in
+                    let screenWidth = geometry.size.width
+                    let screenHeight = geometry.size.height
+                    let topInset = geometry.safeAreaInsets.top
+
+                    let browserHeight = showBrowser
+                    ? (UIScreen.main.bounds.height - topInset)
+                        : (transitionRect.width * 0.54)
+
+                    PhoneBrowserView(
+                        tab: tab,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM
+                    )
+                    .frame(
+                        width: showBrowser ? screenWidth : transitionRect.width,
+                        height: browserHeight
+                    )
+                    .cornerRadius(showBrowser ? 16 : 22)
+                    .position(
+                        x: showBrowser ? screenWidth / 2 : transitionRect.midX,
+                        y: showBrowser
+                            ? (browserHeight / 2)
+                            : (transitionRect.midY - topInset)
+                    )
                     .zIndex(100)
-                    .ignoresSafeArea(.container)
+                    .ignoresSafeArea(.container, edges: .bottom)
+                }
             }
         }
         .background(Color.black)
