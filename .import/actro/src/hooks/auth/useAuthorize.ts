@@ -117,9 +117,10 @@ export const useAuthorize = ({
     }
 
     if (!clientId || !appId) {
-      // 中文注释：授权依赖 clientId/appId，参数未就绪时直接拦截，
+      // 授权依赖 clientId/appId，参数未就绪时直接拦截
       // 避免向后端发送空参数请求，触发“应用错误”这类误导性提示。
       GlobalAlert.alert(t('common.error'), t('actr.auth.authorizationFailed'));
+      console.error(`clientId: ${clientId} or appId: ${appId} not exist`)
       setStep('failed');
       return false;
     }
@@ -149,7 +150,7 @@ export const useAuthorize = ({
     } finally {
       setLoading(false);
     }
-  }, [clientId, sessionToken, userInfo, handleFinalizeAuth]);
+  }, [clientId, appId, sessionToken, userInfo, handleFinalizeAuth]);
 
   return {
     step,

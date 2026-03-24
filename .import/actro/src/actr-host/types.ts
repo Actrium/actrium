@@ -7,6 +7,9 @@ export type SystemAppType =
   | 'bookmarkTags'
   | 'globalSearch';
 
+// System app types (in tab) eg: pad tab
+export type TabSystemAppType = 'login'
+
 // History item passed from native
 export type HistoryItemData = {
   id: string;
@@ -81,8 +84,11 @@ export type TabRouterProps = ActrProps & {
   containerWidth?: number;
   containerHeight?: number;
 
+  // FIXME 这些应该放到 tab 里面？
   // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
   appUrl?: string;
   // Native-transparent payload for system app deep-links/actions
   systemAppPayload?: Record<string, unknown>;
+  // System app type (in tab)
+  tabSystemAppType?: TabSystemAppType;
 };
