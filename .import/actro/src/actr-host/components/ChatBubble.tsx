@@ -429,6 +429,9 @@ export default function ChatBubble({
             contentContainerStyle={styles.attachmentsScrollContent}
             scrollEnabled
             scrollEventThrottle={16}
+            // 中文注释：附件区域需要保留横向滚动能力，改为在自身触摸/拖动开始时收键盘，避免外层 Pressable 抢手势。
+            onTouchStart={Keyboard.dismiss}
+            onScrollBeginDrag={Keyboard.dismiss}
           >
             {parsedAttachments.map((item: IAttachmentItem, idx: number) => {
               const isLast = idx === parsedAttachments.length - 1;
@@ -718,31 +721,38 @@ export default function ChatBubble({
           alignSelf: isQuestion ? 'flex-end' : 'flex-start',
         }}
       >
-        <Pressable
-          onPress={handleBubblePress}
-          style={({ pressed }) => [
-            selectionMode && pressed && styles.bubblePressed,
-          ]}
-        >
-          {(() => {
-            const shouldShowMenu =
-              !selectionMode &&
-              menuOptions.length > 0 &&
-              (!isLatest || isQuestion) &&
-              !hasAttachments;
-            if (shouldShowMenu) {
-              return (
-                <LongPressMenu
-                  options={menuOptions}
-                  onPress={isVoiceBubble ? handleBubblePress : undefined}
-                >
-                  {bubbleContent}
-                </LongPressMenu>
-              );
-            }
-            return bubbleContent;
-          })()}
-        </Pressable>
+        {hasAttachments ? (
+          // 中文注释：附件气泡不再包外层 Pressable，避免与内部横向 ScrollView 竞争 responder。
+          <View>
+            {bubbleContent}
+          </View>
+        ) : (
+          <Pressable
+            onPress={handleBubblePress}
+            style={({ pressed }) => [
+              selectionMode && pressed && styles.bubblePressed,
+            ]}
+          >
+            {(() => {
+              const shouldShowMenu =
+                !selectionMode &&
+                menuOptions.length > 0 &&
+                (!isLatest || isQuestion) &&
+                !hasAttachments;
+              if (shouldShowMenu) {
+                return (
+                  <LongPressMenu
+                    options={menuOptions}
+                    onPress={isVoiceBubble ? handleBubblePress : undefined}
+                  >
+                    {bubbleContent}
+                  </LongPressMenu>
+                );
+              }
+              return bubbleContent;
+            })()}
+          </Pressable>
+        )}
       </View>
     </View>
   );

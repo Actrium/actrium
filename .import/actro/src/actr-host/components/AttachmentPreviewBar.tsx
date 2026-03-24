@@ -25,6 +25,13 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
 }) => {
   if (attachments.length === 0) return null;
 
+  const getImagePreviewWidth = (item: IAttachmentItem): number => {
+    const ratio = item.aspect_ratio && item.aspect_ratio > 0
+      ? item.aspect_ratio
+      : 1;
+    return Math.max(57, Math.round(82 * ratio));
+  };
+
   const getDisplayFileName = (item: IAttachmentItem): string => {
     const legacyName = (item as any).name as string | undefined;
     const fileName = item.file_name || legacyName;
@@ -62,17 +69,28 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
         style={styles.attachmentScroll}
       >
         {attachments.map((item) => (
-          <View key={item.id} style={styles.attachmentItem}>
+          <View
+            key={item.id}
+            style={[
+              styles.attachmentItem,
+              // 中文注释：图片附件维持固定高度，并按原始比例撑开；过窄时由最小宽度兜住，避免竖图缩成一条。
+              item.attachment_type === 'image'
+                ? [
+                    styles.imageAttachmentItem,
+                    { width: getImagePreviewWidth(item) },
+                  ]
+                : null,
+            ]}
+          >
             {item.attachment_type === 'image' ? (
-              <SmartImage
-                cdnUrl={item.cdn_url}
-                localUrl={item.local_url}
-                style={[
-                  styles.previewImage,
-                  { aspectRatio: item.aspect_ratio },
-                ]}
-                resizeMode='cover'
-              />
+              <View style={styles.imagePreviewFrame}>
+                <SmartImage
+                  cdnUrl={item.cdn_url}
+                  localUrl={item.local_url}
+                  style={styles.previewImageContain}
+                  resizeMode='cover'
+                />
+              </View>
             ) : item.attachment_type === 'location' ? (
               <TouchableOpacity
                 activeOpacity={0.7}
@@ -148,16 +166,32 @@ const styles = StyleSheet.create({
   },
   attachmentList: {
     paddingRight: 16,
-    height: 67,
+    height: 82,
   },
   attachmentItem: {
-    height: 67,
+    height: 82,
     marginRight: 16,
     position: 'relative',
     borderRadius: 10,
     overflow: 'hidden',
   },
+  imageAttachmentItem: {
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePreviewFrame: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   previewImage: {
+    height: '100%',
+    backgroundColor: '#f5f5f5',
+  },
+  previewImageContain: {
+    width: '100%',
     height: '100%',
     backgroundColor: '#f5f5f5',
   },
