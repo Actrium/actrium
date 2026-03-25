@@ -40,5 +40,8 @@ xcodebuild clean \
     -workspace Canvas.xcworkspace \
     -scheme "AskAway"
 
+# 安装 Swift Package Manager 依赖
+# xcodebuild -resolvePackageDependencies
+
 printf '\33[1;32m%s\33[0m\n' 'Done!'
 exit 0
