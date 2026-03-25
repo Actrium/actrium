@@ -50,11 +50,12 @@ class ScalableContainer @JvmOverloads constructor(
 
     override fun dispatchDraw(canvas: Canvas) {
         if (targetWidth > 0 && targetHeight > 0 && originalWidth > 0 && originalHeight > 0) {
-            // 计算缩放比例
-            val scale = targetWidth.toFloat() / originalWidth
+            // 计算宽高的缩放比例，分别缩放以填充满容器
+            val scaleX = targetWidth.toFloat() / originalWidth
+            val scaleY = targetHeight.toFloat() / originalHeight
 
             canvas.save()
-            canvas.scale(scale, scale, 0f, 0f)
+            canvas.scale(scaleX, scaleY, 0f, 0f)
             super.dispatchDraw(canvas)
             canvas.restore()
         } else {
