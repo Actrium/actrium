@@ -133,6 +133,9 @@
       "loadFailed": "Error al cargar",
       "networkRetry": "Revisa tu red e intenta de nuevo",
       "retryLater": "Inténtalo más tarde",
+      "cameraPermissionDeniedTitle": "Sin permiso de cámara",
+      "cameraPermissionDeniedMessage": "Activa el acceso a la cámara en Ajustes y vuelve a intentarlo",
+      "cameraInitFailedTitle": "Error al iniciar la cámara",
       "requestCameraPermission": "Solicitando permiso de cámara...",
       "openCameraScan": "Abrir cámara para escanear",
       "initCamera": "Iniciando cámara...",
@@ -210,7 +213,13 @@
       "nickname": "Apodo",
       "email": "Correo electrónico",
       "deleteAccount": "Eliminar cuenta",
-      "logoutAccount": "Cerrar sesión de la cuenta"
+      "logoutAccount": "Cerrar sesión de la cuenta",
+      "aboutAskAway": "Acerca de AskAway",
+      "userAgreement": "Acuerdo de Usuario",
+      "privacyPolicy": "Política de Privacidad",
+      "icp": "Registro ICP",
+      "account": "Cuenta",
+      "feedbackSubject": "#ComentariosSobre"
     }
   }
 }

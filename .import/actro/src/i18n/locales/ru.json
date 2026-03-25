@@ -133,6 +133,9 @@
       "loadFailed": "Ошибка загрузки",
       "networkRetry": "Проверьте сеть и попробуйте еще раз",
       "retryLater": "Пожалуйста, попробуйте позже",
+      "cameraPermissionDeniedTitle": "Нет доступа к камере",
+      "cameraPermissionDeniedMessage": "Включите доступ к камере в настройках и попробуйте снова",
+      "cameraInitFailedTitle": "Не удалось инициализировать камеру",
       "requestCameraPermission": "Запрос разрешения на камеру...",
       "openCameraScan": "Открыть камеру для сканирования",
       "initCamera": "Инициализация камеры...",
@@ -210,7 +213,13 @@
       "nickname": "Никнейм",
       "email": "Email",
       "deleteAccount": "Удалить аккаунт",
-      "logoutAccount": "Выйти из аккаунта"
+      "logoutAccount": "Выйти из аккаунта",
+      "aboutAskAway": "О AskAway",
+      "userAgreement": "Пользовательское соглашение",
+      "privacyPolicy": "Политика конфиденциальности",
+      "icp": "Регистрация ICP",
+      "account": "Аккаунт",
+      "feedbackSubject": "#ОтзывыО"
     }
   }
 }

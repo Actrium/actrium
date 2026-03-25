@@ -11,12 +11,15 @@ import {
 } from 'react-native';
 
 type GlobalAlertOptions = AlertOptions;
+type GlobalAlertButton = AlertButton & {
+  variant?: 'primary';
+};
 
 type AlertRequest = {
   id: number;
   title?: string;
   message?: string;
-  buttons?: AlertButton[];
+  buttons?: GlobalAlertButton[];
   options?: GlobalAlertOptions;
 };
 
@@ -66,13 +69,13 @@ function subscribe(listener: QueueListener) {
   };
 }
 
-const defaultButton: AlertButton = { text: 'OK' };
+const defaultButton: GlobalAlertButton = { text: 'OK' };
 
 export const GlobalAlert = {
   alert(
     title?: string,
     message?: string,
-    buttons?: AlertButton[],
+    buttons?: GlobalAlertButton[],
     options?: GlobalAlertOptions,
   ) {
     enqueue({
@@ -137,7 +140,7 @@ export const GlobalAlertHost: React.FC = () => {
     dismissWithAnimation(true);
   }, [current, dismissWithAnimation]);
 
-  const handlePressButton = React.useCallback((button: AlertButton) => {
+  const handlePressButton = React.useCallback((button: GlobalAlertButton) => {
     dismissWithAnimation(false, button.onPress);
   }, [dismissWithAnimation]);
 
@@ -174,14 +177,20 @@ export const GlobalAlertHost: React.FC = () => {
                 <Pressable
                   key={`${current.id}-${index}-${button.text ?? 'button'}`}
                   onPress={() => handlePressButton(button)}
-                  style={[
+                  style={({ pressed }) => [
                     styles.button,
+                    // 用视觉变体区分主操作，避免把“去设置”误做成 destructive/cancel 语义。
+                    button.variant === 'primary' ? styles.buttonPrimary : undefined,
                     isTwoButtons ? styles.buttonHalf : styles.buttonFull,
+                    pressed ? styles.buttonPressed : undefined,
                   ]}
                 >
                   <Text
                     style={[
                       styles.buttonText,
+                      button.variant === 'primary'
+                        ? styles.buttonTextPrimary
+                        : undefined,
                       button.style === 'cancel'
                         ? styles.buttonTextCancel
                         : undefined,
@@ -268,6 +277,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
+  buttonPressed: {
+    opacity: 0.72,
+  },
+  buttonPrimary: {
+    backgroundColor: '#1677FF',
+  },
   buttonFull: {
     width: '100%',
   },
@@ -278,6 +293,10 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 22,
     color: '#101010',
+  },
+  buttonTextPrimary: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
   buttonTextCancel: {
     fontWeight: '600',

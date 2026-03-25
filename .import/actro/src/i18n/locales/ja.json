@@ -133,6 +133,9 @@
       "loadFailed": "読み込み失敗",
       "networkRetry": "ネットワークを確認して再試行してください",
       "retryLater": "しばらくしてから再試行してください",
+      "cameraPermissionDeniedTitle": "カメラ権限がありません",
+      "cameraPermissionDeniedMessage": "設定でカメラ権限を有効にしてから再試行してください",
+      "cameraInitFailedTitle": "カメラの初期化に失敗しました",
       "requestCameraPermission": "カメラの権限をリクエスト中...",
       "openCameraScan": "カメラを開いてスキャン",
       "initCamera": "カメラを初期化中...",
@@ -210,7 +213,13 @@
       "nickname": "ニックネーム",
       "email": "メールアドレス",
       "deleteAccount": "アカウント削除",
-      "logoutAccount": "アカウントからログアウト"
+      "logoutAccount": "アカウントからログアウト",
+      "aboutAskAway": "AskAway について",
+      "userAgreement": "利用規約",
+      "privacyPolicy": "プライバシーポリシー",
+      "icp": "ICP 登録",
+      "account": "アカウント",
+      "feedbackSubject": "#フィードバックについて"
     }
   }
 }

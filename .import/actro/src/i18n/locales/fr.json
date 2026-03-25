@@ -133,6 +133,9 @@
       "loadFailed": "Échec du chargement",
       "networkRetry": "Veuillez vérifier votre connexion et réessayer",
       "retryLater": "Veuillez réessayer plus tard",
+      "cameraPermissionDeniedTitle": "Pas d'autorisation pour la caméra",
+      "cameraPermissionDeniedMessage": "Activez l'accès à la caméra dans Réglages puis réessayez",
+      "cameraInitFailedTitle": "Échec de l'initialisation de la caméra",
       "requestCameraPermission": "Demande de permission caméra...",
       "openCameraScan": "Ouvrir la caméra pour scanner",
       "initCamera": "Initialisation de la caméra...",
@@ -210,7 +213,13 @@
       "nickname": "Pseudo",
       "email": "E-mail",
       "deleteAccount": "Supprimer le compte",
-      "logoutAccount": "Déconnexion du compte"
+      "logoutAccount": "Déconnexion du compte",
+      "aboutAskAway": "À propos d'AskAway",
+      "userAgreement": "Accord de l'Utilisateur",
+      "privacyPolicy": "Politique de Confidentialité",
+      "icp": "Enregistrement ICP",
+      "account": "Compte",
+      "feedbackSubject": "#CommentairesSur"
     }
   }
 }

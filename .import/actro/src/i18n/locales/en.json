@@ -133,6 +133,9 @@
       "loadFailed": "Load failed",
       "networkRetry": "Please check your network and try again",
       "retryLater": "Please try again later",
+      "cameraPermissionDeniedTitle": "No camera permission",
+      "cameraPermissionDeniedMessage": "Please enable camera access in Settings and try again",
+      "cameraInitFailedTitle": "Camera initialization failed",
       "requestCameraPermission": "Requesting camera permission...",
       "openCameraScan": "Open camera to scan",
       "initCamera": "Initializing camera...",
@@ -210,7 +213,13 @@
       "nickname": "Nickname",
       "email": "Email",
       "deleteAccount": "Delete Account",
-      "logoutAccount": "Logout Account"
+      "logoutAccount": "Logout Account",
+      "aboutAskAway": "About AskAway",
+      "userAgreement": "User Agreement",
+      "privacyPolicy": "Privacy Policy",
+      "icp": "ICP Filing",
+      "account": "Account",
+      "feedbackSubject": "#FeedbackAbout"
     }
   }
 }

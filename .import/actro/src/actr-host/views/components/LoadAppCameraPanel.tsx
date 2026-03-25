@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Linking,
   Platform,
   StyleSheet,
   Text,
@@ -50,6 +51,21 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   const scanLineAnim = useRef(new Animated.Value(0)).current;
   const scanLineLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const isSupported = Platform.OS === 'ios' || Platform.OS === 'android';
+
+  const showCameraPermissionAlert = useCallback(() => {
+    GlobalAlert.alert(
+      t('actr.app.cameraPermissionDeniedTitle'),
+      t('actr.app.cameraPermissionDeniedMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('actr.voice.goToSettings'),
+          variant: 'primary',
+          onPress: () => Linking.openSettings(),
+        },
+      ],
+    );
+  }, [t]);
 
   const stopScanLineAnimation = useCallback(() => {
     scanLineLoopRef.current?.stop();
@@ -119,27 +135,37 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
       return;
     }
 
-    if (!device) {
-      onCameraActiveChange(true);
-      return;
-    }
-
     setRequesting(true);
     try {
       let status = await Camera.getCameraPermissionStatus();
-      if (status !== 'granted') {
+
+      // 已被用户拒绝或系统限制时，继续走初始化只会落到“相机初始化失败”，
+      // 这里先明确给出权限缺失提示，并把入口引导到系统设置。
+      if (status === 'denied' || status === 'restricted') {
+        showCameraPermissionAlert();
+        return;
+      }
+
+      if (status === 'not-determined') {
         status = await Camera.requestCameraPermission();
       }
+
       if (status === 'granted') {
+        // 权限通过后再判断设备是否可用，避免“没权限导致 device 为空”被误判成初始化异常。
+        if (!device) {
+          console.error('[LoadAppCameraPanel] Camera device unavailable after permission granted');
+          GlobalAlert.alert(t('actr.app.cameraInitFailedTitle'), t('actr.app.retryLater'));
+          return;
+        }
         void onAfterCameraPermissionGranted?.();
         onCameraActiveChange(true);
       } else {
         console.error('[LoadAppCameraPanel] Camera permission denied:', status);
-        GlobalAlert.alert('相机初始化失败', '请稍后重试');
+        showCameraPermissionAlert();
       }
     } catch (e) {
       console.error('[LoadAppCameraPanel] Camera init failed:', e);
-      GlobalAlert.alert('相机初始化失败', '请稍后重试');
+      GlobalAlert.alert(t('actr.app.cameraInitFailedTitle'), t('actr.app.retryLater'));
     } finally {
       setRequesting(false);
     }
@@ -149,6 +175,8 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
     onAfterCameraPermissionGranted,
     onBeforeOpenCamera,
     onCameraActiveChange,
+    showCameraPermissionAlert,
+    t,
   ]);
 
   const codeScanner = useCodeScanner({

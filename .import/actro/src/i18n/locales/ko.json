@@ -133,6 +133,9 @@
       "loadFailed": "로드 실패",
       "networkRetry": "네트워크 확인 후 다시 시도해 주세요",
       "retryLater": "잠시 후 다시 시도해 주세요",
+      "cameraPermissionDeniedTitle": "카메라 권한이 없습니다",
+      "cameraPermissionDeniedMessage": "설정에서 카메라 권한을 켠 뒤 다시 시도해 주세요",
+      "cameraInitFailedTitle": "카메라 초기화에 실패했습니다",
       "requestCameraPermission": "카메라 권한 요청 중...",
       "openCameraScan": "카메라를 열어 QR 코드 스캔",
       "initCamera": "카메라 초기화 중...",
@@ -210,7 +213,13 @@
       "nickname": "닉네임",
       "email": "이메일",
       "deleteAccount": "계정 삭제",
-      "logoutAccount": "계정 로그아웃"
+      "logoutAccount": "계정 로그아웃",
+      "aboutAskAway": "AskAway 정보",
+      "userAgreement": "사용자 계약",
+      "privacyPolicy": "개인정보 처리방침",
+      "icp": "ICP 등록",
+      "account": "계정",
+      "feedbackSubject": "#피드백_관하여"
     }
   }
 }

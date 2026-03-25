@@ -20,11 +20,11 @@ interface AboutAskAwayProps {
 
 export type AboutPageKey = 'aboutApp' | 'userAgreement' | 'privacyPolicy' | 'icp';
 
-const ABOUT_PAGE_CONFIG: Record<AboutPageKey, { label: string; path: string }> = {
-  aboutApp: { label: '关于 AskAway', path: 'AskAway.html' },
-  userAgreement: { label: '用户协议', path: 'user.html' },
-  privacyPolicy: { label: '隐私政策', path: 'privacy.html' },
-  icp: { label: 'ICP 备案', path: 'icp.html' },
+const ABOUT_PAGE_CONFIG: Record<AboutPageKey, { path: string }> = {
+  aboutApp: { path: 'AskAway.html' },
+  userAgreement: { path: 'user.html' },
+  privacyPolicy: { path: 'privacy.html' },
+  icp: { path: 'icp.html' },
 };
 
 const getLanguageSegment = (language: string): 'zh-Hans' | 'en' => {
@@ -37,7 +37,7 @@ const getAboutPageUrl = (page: AboutPageKey, language: string): string => {
 };
 
 export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProps) => {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
   const [currentPage, setCurrentPage] = useState<AboutPageKey | null>(null);
 
@@ -85,26 +85,26 @@ export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProp
       ]}
       showsVerticalScrollIndicator={false}
     >
-      <SettingsBackHeader onBack={onBack} title='关于 AskAway' marginBottom={24} />
+      <SettingsBackHeader onBack={onBack} title={t('actr.settings.aboutAskAway')} marginBottom={24} />
 
       <View style={styles.groupCard}>
         <AboutItem
-          label={ABOUT_PAGE_CONFIG.aboutApp.label}
+          label={t('actr.settings.aboutAskAway')}
           onPress={() => setCurrentPage('aboutApp')}
         />
         <View style={styles.divider} />
         <AboutItem
-          label={ABOUT_PAGE_CONFIG.userAgreement.label}
+          label={t('actr.settings.userAgreement')}
           onPress={() => setCurrentPage('userAgreement')}
         />
         <View style={styles.divider} />
         <AboutItem
-          label={ABOUT_PAGE_CONFIG.privacyPolicy.label}
+          label={t('actr.settings.privacyPolicy')}
           onPress={() => setCurrentPage('privacyPolicy')}
         />
         <View style={styles.divider} />
         <AboutItem
-          label={ABOUT_PAGE_CONFIG.icp.label}
+          label={t('actr.settings.icp')}
           onPress={() => setCurrentPage('icp')}
         />
       </View>

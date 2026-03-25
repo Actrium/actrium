@@ -65,7 +65,7 @@ export const SettingsMain = ({
         />
         <View style={styles.accountInfo}>
           <Text style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
-            {isLoggedIn ? (userInfo.user.display_name || 'Account') : t('actr.auth.login')}
+            {isLoggedIn ? (userInfo.user.display_name || t('actr.settings.account')) : t('actr.auth.login')}
           </Text>
         </View>
         <Icon type='next' size={16} color='#fff' />
@@ -81,7 +81,7 @@ export const SettingsMain = ({
         <View style={styles.itemDivider} />
         <SettingsItem
           icon='askaway_gery'
-          label='AskAway'
+          label={t('actr.settings.aboutAskAway')}
           value={appVersionText}
           onPress={onAboutPress}
         />

@@ -80,7 +80,7 @@ export default function SettingsApp({
   const consumedPageTokensRef = useRef<Set<string>>(new Set());
   const consumedActionTokensRef = useRef<Set<string>>(new Set());
 
-  const handleFeedbackPress = useMemo(() => createFeedbackAction(), []);
+  const handleFeedbackPress = useMemo(() => createFeedbackAction({ t }), [t]);
 
   const handleLogout = useMemo(
     () =>
