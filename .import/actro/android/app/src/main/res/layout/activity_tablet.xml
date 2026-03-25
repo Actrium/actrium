@@ -163,6 +163,7 @@
                 android:layout_height="64dp"
                 android:layout_gravity="bottom|center_horizontal"
                 android:layout_marginHorizontal="200dp"
+                android:layout_marginBottom="16dp"
                 android:background="@drawable/tablet_search_bg"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"

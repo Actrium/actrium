@@ -139,8 +139,27 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         }
                         if (!found) {
                             val targetView = createReactRootView("canvas-kotlin", it)
-                            targetView.tag = currentTabId
-                            binding.flRNContent.addView(targetView)
+
+                            // 创建 ScalableContainer 包装 targetView
+                            val scalableContainer = ScalableContainer(this@TabletActivity)
+                            scalableContainer.addView(targetView, FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            ))
+
+                            // 创建 tablet_item_app 布局
+                            val itemAppView = layoutInflater.inflate(R.layout.tablet_item_app, binding.flRNContent, false)
+                            itemAppView.tag = currentTabId
+
+                            // 将 scalableContainer 添加到 flAppContent 中
+                            val flAppContent = itemAppView.findViewById<FrameLayout>(R.id.flAppContent)
+                            flAppContent.addView(scalableContainer, FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            ))
+
+                            // 将 itemAppView 添加到 flRNContent
+                            binding.flRNContent.addView(itemAppView)
                             foundIndex = binding.flRNContent.childCount - 1
                         }
                         // 更新当前显示的位置
