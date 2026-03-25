@@ -133,6 +133,9 @@
       "loadFailed": "加载失败",
       "networkRetry": "请检查网络后重试",
       "retryLater": "请稍后重试",
+      "cameraPermissionDeniedTitle": "没有相机权限",
+      "cameraPermissionDeniedMessage": "请在系统设置中开启相机权限后再试",
+      "cameraInitFailedTitle": "相机初始化失败",
       "requestCameraPermission": "正在申请相机权限...",
       "openCameraScan": "打开相机扫码",
       "initCamera": "正在初始化相机...",
@@ -210,7 +213,13 @@
       "nickname": "昵称",
       "email": "邮箱",
       "deleteAccount": "删除账号",
-      "logoutAccount": "退出账号"
+      "logoutAccount": "退出账号",
+      "aboutAskAway": "关于 AskAway",
+      "userAgreement": "用户协议",
+      "privacyPolicy": "隐私政策",
+      "icp": "ICP 备案",
+      "account": "账号",
+      "feedbackSubject": "#吐个槽关于"
     }
   }
 }

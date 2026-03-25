@@ -4,9 +4,9 @@ import { AuthRepository } from '../../repository/AuthRepository';
 import { CURRENT_ENV } from '../../api/auth';
 import { GlobalAlert } from '../../components';
 
-export const createFeedbackAction = () => {
+export const createFeedbackAction = ({ t }: { t: TFunction }) => {
   return () => {
-    const subject = encodeURIComponent('#吐个槽关于');
+    const subject = encodeURIComponent(t('actr.settings.feedbackSubject'));
     const mailto = `mailto:support@askaway.chat?subject=${subject}`;
     Linking.openURL(mailto);
   };
