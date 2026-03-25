@@ -1,127 +1,231 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React from 'react';
 import {
-  View,
-  StyleSheet,
-  TouchableWithoutFeedback,
-  Text,
-  Pressable,
-  ViewStyle,
-  StyleProp,
-  Modal,
+  Animated,
   Dimensions,
   Keyboard,
+  Modal,
   Platform,
+  Pressable,
+  StyleProp,
+  StyleSheet,
+  Text,
+  TouchableWithoutFeedback,
+  View,
+  ViewStyle,
 } from 'react-native';
+
+type AnchorMode = 'center' | 'start' | 'end';
+type VerticalPlacement = 'auto' | 'top' | 'bottom';
+
+const DEFAULT_ESTIMATED_WIDTH = 228;
+const DEFAULT_ESTIMATED_HEIGHT = 120;
+const DEFAULT_HORIZONTAL_MARGIN = 16;
+const DEFAULT_VERTICAL_MARGIN = 12;
+const MENU_FADE_IN_DURATION = 300;
 
 interface DropdownMenuProps {
   trigger: React.ReactNode;
   children: React.ReactNode | ((close: () => void) => React.ReactNode);
   triggerType?: 'press' | 'longPress';
-  verticalGap?: number;
-  dropdownStyle?: StyleProp<ViewStyle>;
-  style?: StyleProp<ViewStyle>;
-  triggerStyle?: StyleProp<ViewStyle>;
   disabled?: boolean;
   onBeforeOpen?: () => void;
+  style?: StyleProp<ViewStyle>;
+  triggerStyle?: StyleProp<ViewStyle>;
+  dropdownStyle?: StyleProp<ViewStyle>;
+  width?: number;
+  minWidth?: number;
+  maxWidth?: number;
+  estimatedWidth?: number;
+  estimatedHeight?: number;
+  horizontalMargin?: number;
+  verticalMargin?: number;
+  verticalGap?: number;
+  anchorMode?: AnchorMode;
+  placement?: VerticalPlacement;
 }
+
+interface TriggerRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface MenuPosition {
+  top: number;
+  left: number;
+  maxWidth: number;
+}
+
+const clamp = (value: number, min: number, max: number) => {
+  if (max < min) {
+    return min;
+  }
+  return Math.min(Math.max(value, min), max);
+};
 
 export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   trigger,
   children,
   triggerType = 'press',
-  verticalGap = 8,
-  dropdownStyle,
-  style,
-  triggerStyle,
   disabled = false,
   onBeforeOpen,
+  style,
+  triggerStyle,
+  dropdownStyle,
+  width,
+  minWidth,
+  maxWidth,
+  estimatedWidth = DEFAULT_ESTIMATED_WIDTH,
+  estimatedHeight = DEFAULT_ESTIMATED_HEIGHT,
+  horizontalMargin = DEFAULT_HORIZONTAL_MARGIN,
+  verticalMargin = DEFAULT_VERTICAL_MARGIN,
+  verticalGap = 8,
+  anchorMode = 'center',
+  placement = 'auto',
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [triggerRect, setTriggerRect] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
-  const [menuSize, setMenuSize] = useState<{ width: number; height: number }>({
-    width: 228,
-    height: 120,
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [triggerRect, setTriggerRect] = React.useState<TriggerRect | null>(null);
+  const [menuSize, setMenuSize] = React.useState({
+    width: estimatedWidth,
+    height: estimatedHeight,
   });
-  const triggerRef = useRef<View>(null);
-  const rafRef = useRef<number | null>(null);
+  const [isMeasured, setIsMeasured] = React.useState(false);
+  const triggerRef = React.useRef<View>(null);
+  const rafRef = React.useRef<number | null>(null);
+  const menuOpacity = React.useRef(new Animated.Value(0)).current;
 
-  const calculatePosition = useCallback((openWhenMeasured = true) => {
-    triggerRef.current?.measureInWindow((x, y, width, height) => {
-      if (width <= 0 || height <= 0) return;
-      setTriggerRect({ x, y, width, height });
+  const close = React.useCallback(() => {
+    menuOpacity.stopAnimation();
+    menuOpacity.setValue(0);
+    setIsOpen(false);
+    setTriggerRect(null);
+    setIsMeasured(false);
+  }, [menuOpacity]);
+
+  const measureTrigger = React.useCallback((openWhenMeasured = true) => {
+    triggerRef.current?.measureInWindow((x, y, measuredWidth, measuredHeight) => {
+      if (measuredWidth <= 0 || measuredHeight <= 0) {
+        return;
+      }
+      setTriggerRect({
+        x,
+        y,
+        width: measuredWidth,
+        height: measuredHeight,
+      });
       if (openWhenMeasured) {
+        setMenuSize({
+          width: width ?? estimatedWidth,
+          height: estimatedHeight,
+        });
+        setIsMeasured(false);
         setIsOpen(true);
       }
     });
-  }, []);
+  }, [estimatedHeight, estimatedWidth, width]);
 
-  const scheduleRecalculatePosition = useCallback(() => {
-    if (!isOpen) return;
-    if (rafRef.current != null) return;
+  const scheduleMeasureTrigger = React.useCallback(() => {
+    if (!isOpen || rafRef.current != null) {
+      return;
+    }
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
-      calculatePosition(false);
+      measureTrigger(false);
     });
-  }, [calculatePosition, isOpen]);
+  }, [isOpen, measureTrigger]);
 
-  const menuPosition = React.useMemo(() => {
-    if (!triggerRect) return null;
+  const menuPosition = React.useMemo<MenuPosition | null>(() => {
+    if (!triggerRect) {
+      return null;
+    }
 
     const screenWidth = Dimensions.get('window').width;
     const screenHeight = Dimensions.get('window').height;
-    const horizontalMargin = 16;
-    const verticalMargin = 12;
-    const gap = verticalGap;
+    const maxSafeWidth = Math.max(0, screenWidth - horizontalMargin * 2);
+    const requestedWidth = width ?? menuSize.width;
+    const nextMaxWidth = Math.min(maxWidth ?? maxSafeWidth, maxSafeWidth);
+    const nextMinWidth = Math.min(minWidth ?? 0, nextMaxWidth);
+    const resolvedWidth = clamp(requestedWidth, nextMinWidth, nextMaxWidth);
+    const resolvedHeight = Math.max(estimatedHeight, menuSize.height || 0);
 
-    const menuWidth = Math.max(228, menuSize.width || 0);
-    const menuHeight = Math.max(120, menuSize.height || 0);
-
-    const aboveTop = triggerRect.y - menuHeight - gap;
-    const belowTop = triggerRect.y + triggerRect.height + gap;
-    const maxTop = Math.max(verticalMargin, screenHeight - verticalMargin - menuHeight);
-
-    // 优先显示在触发器上方；如果上方空间不足再显示到下方。
-    const preferredTop = aboveTop >= verticalMargin ? aboveTop : belowTop;
-    const top = Math.max(verticalMargin, Math.min(preferredTop, maxTop));
-
-    const centeredLeft = triggerRect.x + triggerRect.width / 2 - menuWidth / 2;
-    const maxLeft = screenWidth - menuWidth - horizontalMargin;
-    const left = Math.max(horizontalMargin, Math.min(centeredLeft, maxLeft));
-
-    return { top, left };
-  }, [menuSize.height, menuSize.width, triggerRect, verticalGap]);
-
-  const toggle = () => {
-    if (disabled) return;
-    if (isOpen) {
-      setIsOpen(false);
-    } else {
-      onBeforeOpen?.();
-      calculatePosition();
+    let idealLeft = triggerRect.x;
+    if (anchorMode === 'center') {
+      idealLeft = triggerRect.x + triggerRect.width / 2 - resolvedWidth / 2;
+    } else if (anchorMode === 'end') {
+      idealLeft = triggerRect.x + triggerRect.width - resolvedWidth;
     }
-  };
 
-  const close = () => {
-    setIsOpen(false);
-    setTriggerRect(null);
-  };
+    const aboveTop = triggerRect.y - resolvedHeight - verticalGap;
+    const belowTop = triggerRect.y + triggerRect.height + verticalGap;
+    const canPlaceAbove = aboveTop >= verticalMargin;
+    const canPlaceBelow = belowTop + resolvedHeight <= screenHeight - verticalMargin;
 
-  useEffect(() => {
-    if (!isOpen) return;
+    let idealTop = belowTop;
+    if (placement === 'top') {
+      idealTop = aboveTop;
+    } else if (placement === 'bottom') {
+      idealTop = belowTop;
+    } else if (canPlaceAbove || !canPlaceBelow) {
+      idealTop = aboveTop;
+    }
+
+    const left = clamp(
+      idealLeft,
+      horizontalMargin,
+      screenWidth - horizontalMargin - resolvedWidth,
+    );
+    const top = clamp(
+      idealTop,
+      verticalMargin,
+      screenHeight - verticalMargin - resolvedHeight,
+    );
+
+    return {
+      top,
+      left,
+      maxWidth: nextMaxWidth,
+    };
+  }, [
+    anchorMode,
+    estimatedHeight,
+    horizontalMargin,
+    maxWidth,
+    menuSize.height,
+    menuSize.width,
+    minWidth,
+    placement,
+    triggerRect,
+    verticalGap,
+    verticalMargin,
+    width,
+  ]);
+
+  const toggle = React.useCallback(() => {
+    if (disabled) {
+      return;
+    }
+    if (isOpen) {
+      close();
+      return;
+    }
+    onBeforeOpen?.();
+    measureTrigger(true);
+  }, [close, disabled, isOpen, measureTrigger, onBeforeOpen]);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
 
     const keyboardShowEvent =
       Platform.OS === 'ios' ? 'keyboardDidChangeFrame' : 'keyboardDidShow';
     const keyboardHideEvent = 'keyboardDidHide';
-    const onLayoutChanged = () => scheduleRecalculatePosition();
+    const handleLayoutChanged = () => scheduleMeasureTrigger();
 
-    const showSub = Keyboard.addListener(keyboardShowEvent, onLayoutChanged);
-    const hideSub = Keyboard.addListener(keyboardHideEvent, onLayoutChanged);
-    const dimensionSub = Dimensions.addEventListener('change', onLayoutChanged);
+    const showSub = Keyboard.addListener(keyboardShowEvent, handleLayoutChanged);
+    const hideSub = Keyboard.addListener(keyboardHideEvent, handleLayoutChanged);
+    const dimensionSub = Dimensions.addEventListener('change', handleLayoutChanged);
 
     return () => {
       showSub.remove();
@@ -132,7 +236,20 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         rafRef.current = null;
       }
     };
-  }, [isOpen, scheduleRecalculatePosition]);
+  }, [isOpen, scheduleMeasureTrigger]);
+
+  React.useEffect(() => {
+    if (!isOpen || !isMeasured) {
+      return;
+    }
+
+    menuOpacity.setValue(0);
+    Animated.timing(menuOpacity, {
+      toValue: 1,
+      duration: MENU_FADE_IN_DURATION,
+      useNativeDriver: true,
+    }).start();
+  }, [isMeasured, isOpen, menuOpacity]);
 
   return (
     <View ref={triggerRef} collapsable={false} style={style}>
@@ -153,29 +270,46 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         <Modal
           visible={isOpen}
           transparent
-          animationType="fade"
+          animationType='none'
           onRequestClose={close}
         >
           <TouchableWithoutFeedback onPress={close}>
             <View style={styles.modalBackdrop}>
-              <View
+              <Animated.View
                 style={[
                   styles.dropdown,
                   {
                     top: menuPosition.top,
                     left: menuPosition.left,
+                    width,
+                    minWidth,
+                    maxWidth: menuPosition.maxWidth,
+                    opacity: isMeasured ? menuOpacity : 0,
                   },
                   dropdownStyle,
                 ]}
                 onLayout={(event) => {
-                  const { width, height } = event.nativeEvent.layout;
-                  if (Math.abs(width - menuSize.width) > 1 || Math.abs(height - menuSize.height) > 1) {
-                    setMenuSize({ width, height });
+                  if (width != null) {
+                    if (!isMeasured) {
+                      setIsMeasured(true);
+                    }
+                    return;
+                  }
+
+                  const { width: nextWidth, height: nextHeight } = event.nativeEvent.layout;
+                  const widthChanged = Math.abs(nextWidth - menuSize.width) > 1;
+                  const heightChanged = Math.abs(nextHeight - menuSize.height) > 1;
+
+                  if (widthChanged || heightChanged) {
+                    setMenuSize({ width: nextWidth, height: nextHeight });
+                  }
+                  if (!isMeasured) {
+                    setIsMeasured(true);
                   }
                 }}
               >
                 {typeof children === 'function' ? children(close) : children}
-              </View>
+              </Animated.View>
             </View>
           </TouchableWithoutFeedback>
         </Modal>
@@ -196,7 +330,7 @@ export const DropdownMenuItem: React.FC<{
         styles.dropdownItem,
         {
           backgroundColor: isActive
-            ? '#D1D1D6' // Even darker than E5E5EA
+            ? '#D1D1D6'
             : pressed
             ? '#F2F2F7'
             : 'transparent',
@@ -210,20 +344,14 @@ export const DropdownMenuItem: React.FC<{
 
 export const DropdownMenuText: React.FC<{
   children: string;
-  isActive?: boolean;
   color?: string;
-}> = ({ children, isActive, color }) => {
-  return (
-    <Text style={[styles.dropdownText, color && { color }]}>
-      {children}
-    </Text>
-  );
+}> = ({ children, color }) => {
+  return <Text style={[styles.dropdownText, color && { color }]}>{children}</Text>;
 };
 
 export const DropdownMenuSubText: React.FC<{
   children: string;
-  isActive?: boolean;
-}> = ({ children, isActive }) => {
+}> = ({ children }) => {
   return <Text style={styles.dropdownSubText}>{children}</Text>;
 };
 
@@ -237,15 +365,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 34,
     padding: 10,
-    minWidth: 228,
     gap: 8,
-
-    // iOS Shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 16,
-    // Android Shadow
     elevation: 8,
   },
   dropdownItem: {
@@ -258,7 +382,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   dropdownItemContent: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -267,11 +390,13 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: '#333333',
     fontWeight: '500',
+    flexShrink: 1,
   },
   dropdownSubText: {
     fontSize: 13,
     color: '#999999',
     marginTop: 2,
     fontWeight: '400',
+    flexShrink: 1,
   },
 });

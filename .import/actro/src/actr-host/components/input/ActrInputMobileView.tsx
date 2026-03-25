@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { AttachmentPreviewBar } from '../AttachmentPreviewBar';
-import { DropdownMenu } from '../DropdownMenu';
 import { HostIconButton } from '../HostIconButton';
 import { Icon } from '../Icon';
 import type { ActrInputStyles } from './ActrInput.shared';
@@ -18,11 +17,11 @@ import type { PanResponderInstance } from 'react-native';
 import { StableTextInput } from './StableTextInput';
 import { AuthGateOverlay } from './AuthGateOverlay';
 import { HOST_SHADOWS } from '../../styles/shadows';
-import { BookmarkRepository } from '../../../repository/BookmarkRepository';
 import { useUnreadStore } from '../../store/useUnreadStore';
 import { useTab } from '../../contexts/TabContext';
 import { exitFullscreen } from '../../../native-bridge';
 import SafeBottomView from '../SafeBottomView';
+import { DropdownMenu } from '../DropdownMenu';
 
 type ActrInputMobileSharedStyles = Pick<ActrInputStyles, 'input' | 'mobileInputText'>;
 
@@ -136,13 +135,11 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   }, []);
 
   const runAfterMenuClose = React.useCallback(
-    (close: () => void, action: () => void | Promise<void>) => {
+    (action: () => void | Promise<void>) => {
       if (attachmentActionLockRef.current) {
         return;
       }
       attachmentActionLockRef.current = true;
-
-      close();
       const run = () => {
         Promise.resolve(action())
           .catch((error) => {
@@ -352,29 +349,36 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                 styles.mobileInputPill,
                 hasAttachments && styles.mobileInputPillWithAttachment,
               ]}>
-                {hasAttachments && (
-                  <>
-                    <View style={styles.mobileAttachmentArea}>
-                      <AttachmentPreviewBar
-                        attachments={attachments}
-                        removeAttachment={removeAttachment}
-                        hideSeparator
-                      />
-                    </View>
-                    <View style={styles.mobileAttachmentDivider} />
-                  </>
-                )}
+                  {hasAttachments && (
+                    <>
+                      <View style={styles.mobileAttachmentArea}>
+                        <AttachmentPreviewBar
+                          attachments={attachments}
+                          removeAttachment={removeAttachment}
+                          hideSeparator
+                        />
+                      </View>
+                      <View style={styles.mobileAttachmentDivider} />
+                    </>
+                  )}
                 <View style={styles.mobileInputInnerRow}>
                   <DropdownMenu
-                    verticalGap={24}
+                    estimatedWidth={228}
+                    minWidth={228}
+                    anchorMode='start'
                     trigger={
                       <View style={styles.mobilePlusButton}>
                         <Icon type='link' size={20} color='#404040' />
                       </View>
                     }
+                    onBeforeOpen={() => {
+                      setMobileInputMode('text');
+                      setIsInputFocused(false);
+                      mobileTextInputRef.current?.blur();
+                    }}
                   >
                     {(close) => (
-                      <View>
+                      <View style={styles.mobileDropdownContent}>
                         {showSearchEntry && (
                           <TouchableOpacity
                             style={[
@@ -386,12 +390,14 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               close();
                             }}
                           >
-                            <Icon
-                              type='network'
-                              active={isWebSearchActive}
-                              size={20}
-                              color={isWebSearchActive ? '#34A8FB' : '#2C2C2C'}
-                            />
+                            <View style={styles.mobileMenuItemIcon}>
+                              <Icon
+                                type='network'
+                                active={isWebSearchActive}
+                                size={20}
+                                color={isWebSearchActive ? '#34A8FB' : '#2C2C2C'}
+                              />
+                            </View>
                             <View style={styles.mobileMenuTextBlock}>
                               <Text style={styles.mobileMenuTitle}>{t('actr.input.webSearch')}</Text>
                               <Text style={styles.mobileMenuSubtitle}>
@@ -412,12 +418,14 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               close();
                             }}
                           >
-                            <Icon
-                              type='share_position'
-                              active={isLocationActive}
-                              size={20}
-                              color={isLocationActive ? '#34A8FB' : '#2C2C2C'}
-                            />
+                            <View style={styles.mobileMenuItemIcon}>
+                              <Icon
+                                type='share_position'
+                                active={isLocationActive}
+                                size={20}
+                                color={isLocationActive ? '#34A8FB' : '#2C2C2C'}
+                              />
+                            </View>
                             <View style={styles.mobileMenuTextBlock}>
                               <Text style={styles.mobileMenuTitle}>{t('actr.input.shareLocation')}</Text>
                               <Text style={styles.mobileMenuSubtitle}>
@@ -434,14 +442,16 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                             close();
                           }}
                         >
-                          <Icon type='geolocation' size={22} color='#2C2C2C' />
+                          <View style={styles.mobileMenuItemIcon}>
+                            <Icon type='geolocation' size={22} color='#2C2C2C' />
+                          </View>
                           <View style={styles.mobileMenuTextBlock}>
                             <Text style={styles.mobileMenuTitle}>{t('actr.input.location')}</Text>
                             <Text style={styles.mobileMenuSubtitle}>{t('actr.input.sendLocation')}</Text>
                           </View>
                         </TouchableOpacity>
 
-                        <View style={styles.mobileMenuDivider} />
+                        {showNewlineEntry ? <View style={styles.mobileMenuDivider} /> : null}
 
                         {showNewlineEntry && (
                           <TouchableOpacity
@@ -454,13 +464,15 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               close();
                             }}
                           >
-                            <Icon
-                              type='enter'
-                              active={!isSendOnEnter}
-                              size={18}
-                              color={!isSendOnEnter ? '#34A8FB' : '#2C2C2C'}
-                            />
-                             <View style={styles.mobileMenuTextBlock}>
+                            <View style={styles.mobileMenuItemIcon}>
+                              <Icon
+                                type='enter'
+                                active={!isSendOnEnter}
+                                size={18}
+                                color={!isSendOnEnter ? '#34A8FB' : '#2C2C2C'}
+                              />
+                            </View>
+                            <View style={styles.mobileMenuTextBlock}>
                               <Text style={styles.mobileMenuTitle}>{t('actr.input.enterToNewLine')}</Text>
                               <Text style={styles.mobileMenuSubtitle}>
                                 {t('actr.input.enterToNewLineTip')}
@@ -475,28 +487,31 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                           <TouchableOpacity
                             style={styles.mobileQuickAction}
                             onPress={() => {
-                              runAfterMenuClose(close, takePhoto);
+                              close();
+                              runAfterMenuClose(takePhoto);
                             }}
                           >
-                             <Icon type='camera' size={20} />
+                            <Icon type='camera' size={20} />
                             <Text style={styles.mobileQuickActionText}>{t('actr.input.camera')}</Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.mobileQuickAction}
                             onPress={() => {
-                              runAfterMenuClose(close, pickImage);
+                              close();
+                              runAfterMenuClose(pickImage);
                             }}
                           >
-                             <Icon type='image' size={20} />
+                            <Icon type='image' size={20} />
                             <Text style={styles.mobileQuickActionText}>{t('actr.input.photos')}</Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.mobileQuickAction}
                             onPress={() => {
-                              runAfterMenuClose(close, pickDocument);
+                              close();
+                              runAfterMenuClose(pickDocument);
                             }}
                           >
-                             <Icon type='file' size={20} />
+                            <Icon type='file' size={20} />
                             <Text style={styles.mobileQuickActionText}>{t('actr.input.files')}</Text>
                           </TouchableOpacity>
                         </View>
@@ -713,6 +728,65 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  mobileDropdownContent: {
+    width: 228,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  mobileMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginVertical: 3,
+    borderRadius: 20,
+  },
+  mobileMenuItemActive: {
+    backgroundColor: '#EDEDED',
+  },
+  mobileMenuItemIcon: {
+    width: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileMenuTextBlock: {
+    flex: 1,
+  },
+  mobileMenuTitle: {
+    fontSize: 17,
+    color: '#333333',
+  },
+  mobileMenuSubtitle: {
+    fontSize: 13,
+    color: '#999999',
+    marginTop: 2,
+  },
+  mobileMenuDivider: {
+    height: 1,
+    backgroundColor: '#E0E0E0',
+    marginVertical: 8,
+    marginHorizontal: 10,
+  },
+  mobileQuickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    paddingBottom: 4,
+    alignItems: 'flex-start',
+  },
+  mobileQuickAction: {
+    width: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  mobileQuickActionText: {
+    fontSize: 14,
+    color: '#2C2C2C',
+    fontWeight: '500',
+  },
   mobileTextInputWrap: {
     flex: 1,
     alignSelf: 'stretch',
@@ -760,54 +834,6 @@ const styles = StyleSheet.create({
   mobileVoiceHoldText: {
     color: '#333333',
     fontSize: 17,
-    fontWeight: '500',
-  },
-  mobileMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    marginVertical: 3,
-    borderRadius: 20,
-  },
-  mobileMenuItemActive: {
-    backgroundColor: '#EDEDED',
-  },
-  mobileMenuTextBlock: {
-    flex: 1,
-  },
-  mobileMenuTitle: {
-    fontSize: 17,
-    color: '#333333',
-  },
-  mobileMenuSubtitle: {
-    fontSize: 13,
-    color: '#999999',
-    marginTop: 2,
-  },
-  mobileMenuDivider: {
-    height: 1,
-    backgroundColor: '#E0E0E0',
-    marginVertical: 8,
-    marginHorizontal: 10,
-  },
-  mobileQuickActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 8,
-    paddingBottom: 4,
-    alignItems: 'flex-start',
-  },
-  mobileQuickAction: {
-    width: 60,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-  },
-  mobileQuickActionText: {
-    fontSize: 14,
-    color: '#2C2C2C',
     fontWeight: '500',
   },
   unreadBadge: {

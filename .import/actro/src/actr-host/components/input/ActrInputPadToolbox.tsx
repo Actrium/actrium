@@ -14,8 +14,8 @@ import { Icon } from '../Icon';
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuText,
   DropdownMenuSubText,
+  DropdownMenuText,
 } from '../DropdownMenu';
 
 interface ActrInputPadToolboxProps {
@@ -132,6 +132,9 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
     <View style={styles.actionRow}>
       <View style={[styles.leftActions, isPhone && styles.leftActionsPhone]}>
         <DropdownMenu
+          estimatedWidth={228}
+          minWidth={228}
+          anchorMode='start'
           trigger={
             <View style={styles.actionCircle}>
               <Icon type="link" />
@@ -187,7 +190,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
             ]}
           >
             <Icon
-              type="network"
+              type='network'
               color={isWebSearchActive ? '#34A8FB' : undefined}
             />
             {!isCompact && <Text style={styles.actionPillText}>{t('actr.input.webSearch')}</Text>}
@@ -196,13 +199,16 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
 
         {showInlineLocationButton && (
           <TouchableOpacity onPress={onPickLocation} style={styles.actionPill}>
-            <Icon type="geolocation" />
+            <Icon type='geolocation' />
             <Text style={styles.actionPillText}>{t('actr.input.location')}</Text>
           </TouchableOpacity>
         )}
 
         {(showMoreOptions || !showInlineLocationButton) && (
           <DropdownMenu
+            estimatedWidth={228}
+            minWidth={228}
+            anchorMode='end'
             trigger={
               <View style={styles.actionCircle}>
                 <Text style={styles.actionPillText}>•••</Text>
@@ -221,7 +227,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                     <View style={{ width: 18, alignItems: 'center' }}>
                       <Icon type="geolocation" size={18} color="#333333" />
                     </View>
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.moreMenuTextBlock}>
                       <DropdownMenuText>{t('actr.input.location')}</DropdownMenuText>
                       <DropdownMenuSubText>{t('actr.input.sendLocation')}</DropdownMenuSubText>
                     </View>
@@ -240,9 +246,9 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                         type="geolocation"
                         size={18}
                         color={isLocationActive ? '#34A8FB' : '#333333'}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
+                        />
+                      </View>
+                    <View style={styles.moreMenuTextBlock}>
                       <DropdownMenuText>{t('actr.input.shareLocation')}</DropdownMenuText>
                       <DropdownMenuSubText>{t('actr.input.shareLocationTip')}</DropdownMenuSubText>
                     </View>
@@ -261,9 +267,9 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                         type="enter"
                         size={16}
                         color={isSendOnEnter ? '#34A8FB' : '#333333'}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
+                        />
+                      </View>
+                    <View style={styles.moreMenuTextBlock}>
                       <DropdownMenuText>{t('actr.input.sendKeySettings')}</DropdownMenuText>
                       <DropdownMenuSubText>{t('actr.input.enterToSendMessage')}</DropdownMenuSubText>
                     </View>
@@ -337,6 +343,9 @@ const styles = StyleSheet.create({
   },
   actionPillActive: {
     backgroundColor: '#D1D1D6',
+  },
+  moreMenuTextBlock: {
+    alignSelf: 'flex-start',
   },
   actionPillText: {
     fontSize: 14,
