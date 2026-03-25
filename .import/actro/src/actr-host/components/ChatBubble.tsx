@@ -613,6 +613,8 @@ export default function ChatBubble({
             )}
           </Pressable>
           <DropdownMenu
+            estimatedWidth={180}
+            anchorMode='end'
             trigger={
               <View style={styles.toolbarButton}>
                 <Icon type='more' size={18} />
