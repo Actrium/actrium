@@ -18,7 +18,7 @@
                 android:id="@+id/llTitleTab"
                 android:layout_width="match_parent"
                 android:layout_height="64dp"
-                android:background="#3A3A3C"
+                android:background="#D1D1D6"
                 android:orientation="horizontal"
                 android:paddingStart="8dp"
                 android:paddingTop="12dp"
@@ -61,12 +61,12 @@
 
                 <ImageView
                     android:id="@+id/ivAppMenu"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
                     android:layout_marginStart="16dp"
-                    android:background="@drawable/app_menu_bg"
                     android:padding="10dp"
-                    android:src="@drawable/ic_app_menu" />
+                    android:src="@drawable/ic_app_menu"
+                    app:tint="#000000" />
             </LinearLayout>
 
             <RelativeLayout

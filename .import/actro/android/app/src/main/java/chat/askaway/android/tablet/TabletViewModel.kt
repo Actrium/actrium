@@ -120,8 +120,25 @@ class TabletViewModel : ViewModel() {
     }
 
     fun removeActiveModel(id: String) {
-        appList.removeAll { it.id == id }
-        _tabletUseCase.value = _tabletUseCase.value?.copy(appList = _tabletUseCase.value!!.appList.filter { it.id != id })
+        val index = appList.indexOfFirst { it.id == id }
+        if(index!=-1){
+            appList.removeAt(index)
+            if(appList.size>0){
+                val newIndex = maxOf(0,index -1)
+                val activeModel = appList[newIndex]
+                val bundle = activeModel.genReactNativeBundle(appList, containerHeight, containerWidth)
+                _tabletUseCase.value = _tabletUseCase.value?.copy(
+                    appList = _tabletUseCase.value!!.appList.filter { it.id != id },
+                    currentApp = bundle
+                )
+            }else{
+                _tabletUseCase.value = _tabletUseCase.value?.copy(
+                    appList = _tabletUseCase.value!!.appList.filter { it.id != id },
+                    currentApp = null
+                )
+            }
+        }
+
         Log.e("TabletViewModel", "removeActiveModel ${id}")
     }
 
