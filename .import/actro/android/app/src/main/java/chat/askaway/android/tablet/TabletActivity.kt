@@ -25,6 +25,8 @@ import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.facebook.react.uimanager.PixelUtil.pxToDp
 import com.askaway.android.core.ReactNativeBundle
+import android.content.Context
+import android.view.inputmethod.InputMethodManager
 
 class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
 
@@ -97,6 +99,11 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             }
         }
 
+        // 设置网格模式下的添加按钮点击事件
+        binding.flRNContent.onAddClick = {
+            viewModel.addApp()
+        }
+
         // 监听 RecyclerView 的滚动，更新 ivAdd 位置
         binding.rvApp.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
@@ -104,7 +111,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             }
         })
         binding.ivHome.setOnClickListener { viewModel.changeDisplayMode(PageMode.GRID) }
-        binding.tvBack.setOnClickListener { viewModel.changeDisplayMode(PageMode.TAB) }
+        binding.tvBack.setOnClickListener {
+            viewModel.hideBookmark()
+            viewModel.changeDisplayMode(PageMode.TAB)
+        }
 
         // 监听 StateFlow 并更新 Adapter
         lifecycleScope.launchWhenStarted {
@@ -149,11 +159,14 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         hideSettingsPopup()
                     }
                     if (useCase.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SEARCH) {
-                        Log.e("TableActivity","----------1")
                         showSearch()
                     } else {
-                        Log.e("TableActivity","----------2")
                         hideSearch()
+                    }
+                    if (useCase.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_BOOKMARK) {
+                        showBookmark()
+                    } else {
+                        hideBookmark()
                     }
 
                     Log.e("TabletActivity", "useCase.appList.size:${useCase.appList.size}")
@@ -181,6 +194,13 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.llSearch.setOnClickListener {
             Log.e("TabletActivity", "llSearch click")
             viewModel.showSearch()
+        }
+        binding.navTag.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                viewModel.showBookmark()
+            } else {
+                viewModel.hideBookmark()
+            }
         }
 //        binding.flRNContent.adjustKeyboard()
     }
@@ -387,5 +407,25 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     private fun hideSearch() {
         binding.flSearch.isVisible = false
+        hideKeyboard()
+    }
+
+    private fun showBookmark(sourceBundle: Bundle? = null) {
+        if (binding.flBookmark.isVisible) return
+        binding.flBookmark.isVisible = true
+        binding.flBookmark.removeAllViews()
+        val bundle = sourceBundle ?: ReactNativeBundle.getBookmarkBundle()
+        val targetView = createReactRootView("canvas-kotlin", bundle)
+        binding.flBookmark.addView(targetView)
+    }
+
+    private fun hideBookmark() {
+        binding.flBookmark.isVisible = false
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        val view = currentFocus ?: window.decorView
+        imm.hideSoftInputFromWindow(view.windowToken, 0)
     }
 }

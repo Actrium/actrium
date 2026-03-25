@@ -63,6 +63,11 @@ class ScalableContainer @JvmOverloads constructor(
     }
 
     fun setScale(targetW: Int, targetH: Int, originalW: Int, originalH: Int) {
+        if (this.targetWidth == targetW && this.targetHeight == targetH &&
+            this.originalWidth == originalW && this.originalHeight == originalH) {
+            // 参数没有变化，不需要重新布局
+            return
+        }
         this.targetWidth = targetW
         this.targetHeight = targetH
         this.originalWidth = originalW
@@ -72,6 +77,11 @@ class ScalableContainer @JvmOverloads constructor(
     }
 
     fun clearScale() {
+        if (this.targetWidth == 0 && this.targetHeight == 0 &&
+            this.originalWidth == 0 && this.originalHeight == 0) {
+            // 已经清除了，不需要重复操作
+            return
+        }
         this.targetWidth = 0
         this.targetHeight = 0
         this.originalWidth = 0

@@ -149,6 +149,16 @@ class TabletViewModel : ViewModel() {
         }
     }
 
+    fun showBookmark() {
+        _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_BOOKMARK)
+    }
+
+    fun hideBookmark() {
+        if (_tabletUseCase.value?.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_BOOKMARK) {
+            _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = "")
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         // 反注册 EventBus
