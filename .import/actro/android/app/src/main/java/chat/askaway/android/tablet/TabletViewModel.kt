@@ -119,19 +119,31 @@ class TabletViewModel : ViewModel() {
         )
     }
 
+    fun changeActiveModel(id: String) {
+        Log.e("TabletViewModel", "changeActiveModel")
+        val index = appList.indexOfFirst { it.id == id }
+        if (index != -1) {
+            val activeModel = appList[index]
+            val bundle = activeModel.genReactNativeBundle(appList, containerHeight, containerWidth)
+            _tabletUseCase.value = _tabletUseCase.value?.copy(
+                currentApp = bundle
+            )
+        }
+    }
+
     fun removeActiveModel(id: String) {
         val index = appList.indexOfFirst { it.id == id }
-        if(index!=-1){
+        if (index != -1) {
             appList.removeAt(index)
-            if(appList.size>0){
-                val newIndex = maxOf(0,index -1)
+            if (appList.isNotEmpty()) {
+                val newIndex = maxOf(0, index - 1)
                 val activeModel = appList[newIndex]
                 val bundle = activeModel.genReactNativeBundle(appList, containerHeight, containerWidth)
                 _tabletUseCase.value = _tabletUseCase.value?.copy(
                     appList = _tabletUseCase.value!!.appList.filter { it.id != id },
                     currentApp = bundle
                 )
-            }else{
+            } else {
                 _tabletUseCase.value = _tabletUseCase.value?.copy(
                     appList = _tabletUseCase.value!!.appList.filter { it.id != id },
                     currentApp = null
