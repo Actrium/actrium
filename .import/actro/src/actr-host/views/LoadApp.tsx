@@ -1,7 +1,6 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import {
   InteractionManager,
-  NativeModules,
   NativeSyntheticEvent,
   Platform,
   StyleSheet,
@@ -33,6 +32,7 @@ import { GlobalAlert } from '../../../src/components';
 import { CHAT_HEADER_HEIGHT } from '../constants';
 import { isTablet } from '../../utils/device';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
+import { useNetworkPermission } from '../hooks/useNetworkPermission';
 
 // 在短时间窗口内抑制同一 URL 的重复加载，
 // 典型场景是权限弹窗前后扫码回调抖动导致重复触发。
@@ -48,6 +48,8 @@ const LoadApp = () => {
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const insets = useSafeAreaInsets();
   const isResolvingRef = useRef(false);
+  const pendingResolveUrlRef = useRef<string | null>(null);
+  const lastAutoResolvedAppUrlRef = useRef<string | null>(null);
   // 当前正在加载的 URL，用于去重与定位竞态问题。
   const inFlightUrlRef = useRef<string | null>(null);
   // 最近一次完成加载的 URL 信息，用于过滤短时间内的重复回调。
@@ -58,7 +60,7 @@ const LoadApp = () => {
   const tabCtx = useTab();
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
   const { width: screenWidth } = useWindowDimensions();
-
+  const { ensureNetworkPermission } = useNetworkPermission();
 
   // 响应式尺寸：手机端使用屏幕宽度的 85%，iPad 端保持 500
   const isPhone = screenWidth < 600;
@@ -69,40 +71,6 @@ const LoadApp = () => {
   const inputBorderRadius = 24;
   // Pad 模式不再展示 ChatHeader，因此不需要预留 Header 高度。
   const scanTopMargin = isTablet ? 10 : CHAT_HEADER_HEIGHT + 10;
-
-  const requestNetworkPermissionOnMount = useCallback(async () => {
-    try {
-      if (Platform.OS === 'android') {
-        // Android 常规网络访问权限（如 INTERNET）是安装时权限，无运行时申请弹窗。
-        return;
-      }
-
-      if (Platform.OS === 'ios') {
-        const networkPermissionModule =
-          (NativeModules as any).NetworkPermissionModule ??
-          (NativeModules as any).LocalNetworkPermissionModule ??
-          (NativeModules as any).LocalNetworkModule;
-
-        if (networkPermissionModule?.requestPermission) {
-          await Promise.resolve(networkPermissionModule.requestPermission());
-        } else if (networkPermissionModule?.requestLocalNetworkPermission) {
-          await Promise.resolve(
-            networkPermissionModule.requestLocalNetworkPermission(),
-          );
-        } else {
-          console.log(
-            '[LoadApp] Local network permission module is unavailable, skip active request.',
-          );
-        }
-      }
-    } catch (error) {
-      console.warn('[LoadApp] Failed to request network permission:', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    void requestNetworkPermissionOnMount();
-  }, [requestNetworkPermissionOnMount]);
 
   useEffect(() => {
     const unsubscribeWillExit = TabEvents.onTabWillExitFullscreen((event) => {
@@ -115,16 +83,6 @@ const LoadApp = () => {
       unsubscribeWillExit();
     };
   }, [tabCtx.tab.id]);
-
-  // 若 tab 预设了 appUrl，视为从收藏加载，mount 时自动触发加载，无需用户手动输入
-  useEffect(() => {
-    if (tabCtx.tab.appUrl) {
-      void handleResolveUrl(tabCtx.tab.appUrl);
-
-      // FIXME 要手动再通知 native 更新收藏标识
-      void setTabBookmarkStatus(tabCtx.tab.id, true);
-    }
-  }, []);
 
   // Pad 端输入框常驻展示，Phone 端保持原有“按钮切换输入框”交互。
   const showInputField = isTablet || (inputExpanded && !cameraActive);
@@ -200,8 +158,45 @@ const LoadApp = () => {
         setIsResolving(false);
       }
     },
-    [setTabIdMap, tabCtx.tab.id],
+    [setTabIdMap, t, tabCtx.tab.id],
   );
+
+  const enqueueResolveUrl = useCallback(
+    async (rawUrl: string) => {
+      const url = rawUrl.trim();
+      if (!url) return;
+
+      // 首次自动打开收藏 / 扫码时，系统权限弹窗可能还没处理完。
+      // 这里先缓存 URL，等权限结果明确后再继续，避免 getAppInfo 抢跑后直接报网络错误。
+      pendingResolveUrlRef.current = url;
+
+      const granted = await ensureNetworkPermission();
+      if (!granted) {
+        pendingResolveUrlRef.current = null;
+        GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));
+        return;
+      }
+
+      const nextUrl = pendingResolveUrlRef.current;
+      pendingResolveUrlRef.current = null;
+      if (!nextUrl) return;
+
+      await handleResolveUrl(nextUrl);
+    },
+    [ensureNetworkPermission, handleResolveUrl, t],
+  );
+
+  useEffect(() => {
+    if (!tabCtx.tab.appUrl) return;
+    if (lastAutoResolvedAppUrlRef.current === tabCtx.tab.appUrl) return;
+
+    // 预设 appUrl 可能来自收藏恢复，effect 因为 re-render 重跑时不能重复发起初始化。
+    lastAutoResolvedAppUrlRef.current = tabCtx.tab.appUrl;
+    void enqueueResolveUrl(tabCtx.tab.appUrl);
+
+    // FIXME 要手动再通知 native 更新收藏标识
+    void setTabBookmarkStatus(tabCtx.tab.id, true);
+  }, [enqueueResolveUrl, tabCtx.tab.appUrl, tabCtx.tab.id]);
 
   const handleLoadWithUrl = (
     e: NativeSyntheticEvent<TextInputSubmitEditingEventData>,
@@ -209,7 +204,7 @@ const LoadApp = () => {
     const url = e.nativeEvent.text;
     if (!url) return;
 
-    void handleResolveUrl(url);
+    void enqueueResolveUrl(url);
   };
 
   const renderInput = (
@@ -284,13 +279,13 @@ const LoadApp = () => {
                   dismissKeyboard();
                 }}
                 onAfterCameraPermissionGranted={() => {
-                  void requestNetworkPermissionOnMount();
+                  void ensureNetworkPermission();
                 }}
                 onScanUrl={(url) => {
                   // 先让相机关闭和扫码层收起完成一帧提交，再启动会话初始化，
                   // 避免重活直接堵住 JS，导致“已扫中但动画最后卡一下”的观感。
                   InteractionManager.runAfterInteractions(() => {
-                    void handleResolveUrl(url);
+                    void enqueueResolveUrl(url);
                   });
                 }}
               />
@@ -346,13 +341,13 @@ const LoadApp = () => {
                   dismissKeyboard();
                 }}
                 onAfterCameraPermissionGranted={() => {
-                  void requestNetworkPermissionOnMount();
+                  void ensureNetworkPermission();
                 }}
                 onScanUrl={(url) => {
                   // 先让相机关闭和扫码层收起完成一帧提交，再启动会话初始化，
                   // 避免重活直接堵住 JS，导致“已扫中但动画最后卡一下”的观感。
                   InteractionManager.runAfterInteractions(() => {
-                    void handleResolveUrl(url);
+                    void enqueueResolveUrl(url);
                   });
                 }}
               />
