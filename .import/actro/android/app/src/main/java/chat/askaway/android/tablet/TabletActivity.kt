@@ -127,6 +127,8 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     }
                     useCase.currentApp?.let {
                         val currentTabId = it.getString("currentTabId")
+                        adapter.currentId = currentTabId
+                        Log.e("TabletActivity", "adapter.currentId:${adapter.currentId}")
                         var found = false
                         var foundIndex = -1
                         for (i in 0 until binding.flRNContent.childCount) {
@@ -142,10 +144,12 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
                             // 创建 ScalableContainer 包装 targetView
                             val scalableContainer = ScalableContainer(this@TabletActivity)
-                            scalableContainer.addView(targetView, FrameLayout.LayoutParams(
-                                FrameLayout.LayoutParams.MATCH_PARENT,
-                                FrameLayout.LayoutParams.MATCH_PARENT
-                            ))
+                            scalableContainer.addView(
+                                targetView, FrameLayout.LayoutParams(
+                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                    FrameLayout.LayoutParams.MATCH_PARENT
+                                )
+                            )
 
                             // 创建 tablet_item_app 布局
                             val itemAppView = layoutInflater.inflate(R.layout.tablet_item_app, binding.flRNContent, false)
@@ -153,10 +157,12 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
                             // 将 scalableContainer 添加到 flAppContent 中
                             val flAppContent = itemAppView.findViewById<FrameLayout>(R.id.flAppContent)
-                            flAppContent.addView(scalableContainer, FrameLayout.LayoutParams(
-                                FrameLayout.LayoutParams.MATCH_PARENT,
-                                FrameLayout.LayoutParams.MATCH_PARENT
-                            ))
+                            flAppContent.addView(
+                                scalableContainer, FrameLayout.LayoutParams(
+                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                    FrameLayout.LayoutParams.MATCH_PARENT
+                                )
+                            )
 
                             // 将 itemAppView 添加到 flRNContent
                             binding.flRNContent.addView(itemAppView)
