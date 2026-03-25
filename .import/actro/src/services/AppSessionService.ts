@@ -55,7 +55,17 @@ export class AppSessionService {
       // TODO 临时处理
       // appRes.data!.actr_url = 'https://rs1.actrium.example/test/actr.actr';
 
-      if (!appRes?.success || !appRes?.data) {
+      // 这里是首跳请求，权限未决或链路异常都会先落到 success=false。
+      // 如果误判成 APP_NOT_FOUND，UI 会把时序问题说成“应用不存在”，语义是错的。
+      if (!appRes?.success) {
+        return {
+          ok: false,
+          reason: 'NETWORK_ERROR',
+          message: appRes?.message,
+        };
+      }
+
+      if (!appRes?.data) {
         return {
           ok: false,
           reason: 'APP_NOT_FOUND',
