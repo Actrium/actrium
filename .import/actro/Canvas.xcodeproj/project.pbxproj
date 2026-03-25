@@ -14,8 +14,8 @@
 		E57012CD2F20D8BD0033B7CE /* A1SDK in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CC2F20D8BD0033B7CE /* A1SDK */; };
 		E57012D02F20D8DD0033B7CE /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CF2F20D8DD0033B7CE /* Kingfisher */; };
 		E572DEE52F221B84001D2A56 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = E572DEE42F221B84001D2A56 /* MarkdownUI */; };
-		E5881D752F29B1F700882E9D /* Actr in Frameworks */ = {isa = PBXBuildFile; productRef = E5881D742F29B1F700882E9D /* Actr */; };
 		E5B0D7B72F36C3B000299691 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = E5B0D7B62F36C3B000299691 /* assets */; };
+		E5B2BCCC2F73CED900DA3C37 /* Actr in Frameworks */ = {isa = PBXBuildFile; productRef = E5B2BCCB2F73CED900DA3C37 /* Actr */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -80,7 +80,7 @@
 				E572DEE52F221B84001D2A56 /* MarkdownUI in Frameworks */,
 				442EB4E3928B6CB9A596ED32 /* libPods-Canvas.a in Frameworks */,
 				E57012D02F20D8DD0033B7CE /* Kingfisher in Frameworks */,
-				E5881D752F29B1F700882E9D /* Actr in Frameworks */,
+				E5B2BCCC2F73CED900DA3C37 /* Actr in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -151,7 +151,7 @@
 				E57012CC2F20D8BD0033B7CE /* A1SDK */,
 				E57012CF2F20D8DD0033B7CE /* Kingfisher */,
 				E572DEE42F221B84001D2A56 /* MarkdownUI */,
-				E5881D742F29B1F700882E9D /* Actr */,
+				E5B2BCCB2F73CED900DA3C37 /* Actr */,
 			);
 			productName = Canvas;
 			productReference = E55901A52F163A5B00514034 /* AskAway.app */;
@@ -194,7 +194,7 @@
 				E57012CB2F20D8BD0033B7CE /* XCRemoteSwiftPackageReference "a1-sdk-swift" */,
 				E57012CE2F20D8DD0033B7CE /* XCRemoteSwiftPackageReference "Kingfisher" */,
 				E572DEE32F221B83001D2A56 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-				E5881D732F29B1F700882E9D /* XCRemoteSwiftPackageReference "actr-swift" */,
+				E5B2BCCA2F73CED900DA3C37 /* XCRemoteSwiftPackageReference "actr-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E55901A62F163A5B00514034 /* Products */;
@@ -249,9 +249,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Canvas/Pods-Canvas-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -328,10 +332,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					" ",
-				);
+				OTHER_LDFLAGS = "$(inherited)  ";
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -389,10 +390,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					" ",
-				);
+				OTHER_LDFLAGS = "$(inherited)  ";
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../Subsystem/node_modules/react-native";
 				SWIFT_COMPILATION_MODE = wholemodule;
 				USE_HERMES = false;
@@ -788,9 +786,9 @@
 				minimumVersion = 2.4.1;
 			};
 		};
-		E5881D732F29B1F700882E9D /* XCRemoteSwiftPackageReference "actr-swift" */ = {
+		E5B2BCCA2F73CED900DA3C37 /* XCRemoteSwiftPackageReference "actr-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/actor-rtc/actr-swift.git";
+			repositoryURL = "git@github.com:actor-rtc/actr-swift.git";
 			requirement = {
 				kind = exactVersion;
 				version = 0.1.29;
@@ -824,9 +822,9 @@
 			package = E572DEE32F221B83001D2A56 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
 		};
-		E5881D742F29B1F700882E9D /* Actr */ = {
+		E5B2BCCB2F73CED900DA3C37 /* Actr */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = E5881D732F29B1F700882E9D /* XCRemoteSwiftPackageReference "actr-swift" */;
+			package = E5B2BCCA2F73CED900DA3C37 /* XCRemoteSwiftPackageReference "actr-swift" */;
 			productName = Actr;
 		};
 /* End XCSwiftPackageProductDependency section */
