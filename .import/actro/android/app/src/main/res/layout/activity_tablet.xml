@@ -87,6 +87,48 @@
                     android:textColor="#FFF"
                     android:textSize="18sp" />
 
+                <RadioGroup
+                    android:id="@+id/rgNavigation"
+                    android:layout_width="200dp"
+                    android:layout_height="wrap_content"
+                    android:layout_centerInParent="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="12dp">
+
+                    <RadioButton
+                        android:id="@+id/navActivity"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:button="@null"
+                        android:drawableTop="@drawable/nav_activity_selector"
+                        android:drawablePadding="4dp"
+                        android:drawableTint="@color/nav_text_selector"
+                        android:gravity="center"
+                        android:checked="true"
+                        android:text="@string/tab_active"
+                        android:textColor="@color/nav_text_selector"
+                        android:textSize="10sp" />
+
+                    <!-- 标签页 -->
+                    <RadioButton
+                        android:id="@+id/navTag"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:button="@null"
+                        android:drawableTop="@drawable/nav_tag_selector"
+                        android:drawablePadding="4dp"
+                        android:drawableTint="@color/nav_text_selector"
+                        android:gravity="center"
+                        android:text="@string/tab_bookmark"
+                        android:textColor="@color/nav_text_selector"
+                        android:textSize="10sp" />
+
+
+                </RadioGroup>
+
                 <ImageView
                     android:id="@+id/ivSet"
                     android:layout_width="48dp"
@@ -123,8 +165,8 @@
                 android:background="@drawable/tablet_search_bg"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:visibility="gone"
-                android:paddingStart="32dp">
+                android:paddingStart="32dp"
+                android:visibility="gone">
 
                 <ImageView
                     android:layout_width="36dp"
@@ -139,6 +181,11 @@
                     android:textColor="#FFF"
                     android:textSize="18sp" />
             </LinearLayout>
+
+            <FrameLayout
+                android:id="@+id/flBookmark"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
         </FrameLayout>
     </LinearLayout>
 
