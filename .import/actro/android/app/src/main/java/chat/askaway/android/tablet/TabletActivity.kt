@@ -45,6 +45,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         adapter = ActiveAdapter()
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         binding.rvApp.adapter = adapter
+        adapter.onItemClick = {
+            viewModel.changeActiveModel(it.id)
+        }
         adapter.onDeleteClick = {
             for (i in binding.flRNContent.childCount - 1 downTo 0) {
                 val child = binding.flRNContent.getChildAt(i)

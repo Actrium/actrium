@@ -12,7 +12,7 @@ import com.askaway.android.model.ActiveModel
 class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
 
     private val items = mutableListOf<ActiveModel>()
-    var onItemClick: ((ActiveModel, View) -> Unit)? = null
+    var onItemClick: ((ActiveModel) -> Unit)? = null
     var onDeleteClick: ((ActiveModel) -> Unit)? = null
     var currentId: String? = ""
         set(value) {
@@ -51,12 +51,12 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
     class ActiveViewHolder(val binding: ItemTabletAppBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(
             item: ActiveModel,
-            onItemClick: ((ActiveModel, View) -> Unit)?,
+            onItemClick: ((ActiveModel) -> Unit)?,
             onDeleteClick: ((ActiveModel) -> Unit)?
         ) {
             binding.tvAppName.text = item.name
             binding.ivDel.setOnClickListener { onDeleteClick?.invoke(item) }
-            binding.root.setOnClickListener { onItemClick?.invoke(item, binding.root) }
+            binding.root.setOnClickListener { onItemClick?.invoke(item) }
         }
     }
 }
