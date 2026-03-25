@@ -4,18 +4,6 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <chat.askaway.android.view.RoundedCornerLayout
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_marginTop="24dp"
-        app:cornerRadius="16dp">
-
-        <FrameLayout
-            android:id="@+id/flAppContent"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-    </chat.askaway.android.view.RoundedCornerLayout>
-
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="24dp"
@@ -42,4 +30,16 @@
             android:layout_height="20dp"
             android:src="@drawable/ic_mark" />
     </LinearLayout>
+
+    <chat.askaway.android.view.RoundedCornerLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="24dp"
+        app:cornerRadius="16dp">
+
+        <FrameLayout
+            android:id="@+id/flAppContent"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </chat.askaway.android.view.RoundedCornerLayout>
 </FrameLayout>
