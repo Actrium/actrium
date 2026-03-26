@@ -133,6 +133,7 @@
       "mockTitle5": "Suggestions de visites culturelles approfondies et itinéraires recommandés.",
       "notExist": "L'application n'existe pas",
       "loadFailed": "Échec du chargement",
+      "invalidUrl": "QR code ou lien invalide",
       "networkRetry": "Veuillez vérifier votre connexion et réessayer",
       "retryLater": "Veuillez réessayer plus tard",
       "cameraPermissionDeniedTitle": "Pas d'autorisation pour la caméra",

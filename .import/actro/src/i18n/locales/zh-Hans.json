@@ -133,6 +133,7 @@
       "mockTitle5": "关于景区历史文化背景的深度讲解建议与推荐路线。",
       "notExist": "应用不存在",
       "loadFailed": "加载失败",
+      "invalidUrl": "二维码或链接无效",
       "networkRetry": "请检查网络后重试",
       "retryLater": "请稍后重试",
       "cameraPermissionDeniedTitle": "没有相机权限",

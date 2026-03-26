@@ -133,6 +133,7 @@
       "mockTitle5": "關於景區歷史文化背景的深度講解建議與推薦路線。",
       "notExist": "應用不存在",
       "loadFailed": "載入失敗",
+      "invalidUrl": "二維碼或連結無效",
       "networkRetry": "請檢查網絡後重試",
       "retryLater": "請稍後重試",
       "cameraPermissionDeniedTitle": "沒有相機權限",
