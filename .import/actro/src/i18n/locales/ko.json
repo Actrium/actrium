@@ -141,6 +141,7 @@
       "requestCameraPermission": "카메라 권한 요청 중...",
       "openCameraScan": "카메라를 열어 QR 코드 스캔",
       "initCamera": "카메라 초기화 중...",
+      "loading": "로딩 중...",
       "inputUrl": "URL을 입력해 주세요",
       "blockedTitle": "실행 차단됨",
       "blockedReason": "호스트 계약/권한 정책을 충족하지 않음",
