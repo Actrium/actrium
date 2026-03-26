@@ -76,6 +76,12 @@ export const authApi = {
   },
 
   /**
+   * 注销账号
+   */
+  deleteAccount: (sessionToken: string) =>
+    http.delete<string>(`${BASE_URL}/sso/account`, { session_token: sessionToken }, { 'x-a1-authorization': `Bearer ${sessionToken}` }),
+
+  /**
    * 使用临时授权码进行授权
    **/
   getAccessTokenWithTempCode: (

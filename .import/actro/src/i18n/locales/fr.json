@@ -213,6 +213,7 @@
       "nickname": "Pseudo",
       "email": "E-mail",
       "deleteAccount": "Supprimer le compte",
+      "deleteAccountConfirm": "Confirmer la suppression du compte ? Cette action est irréversible et toutes les données du compte seront définitivement supprimées.",
       "logoutAccount": "Déconnexion du compte",
       "aboutAskAway": "À propos d'AskAway",
       "userAgreement": "Accord de l'Utilisateur",

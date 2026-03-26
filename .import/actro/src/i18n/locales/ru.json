@@ -213,6 +213,7 @@
       "nickname": "Никнейм",
       "email": "Email",
       "deleteAccount": "Удалить аккаунт",
+      "deleteAccountConfirm": "Подтвердить удаление аккаунта? Это действие необратимо, все данные аккаунта будут удалены навсегда.",
       "logoutAccount": "Выйти из аккаунта",
       "aboutAskAway": "О AskAway",
       "userAgreement": "Пользовательское соглашение",

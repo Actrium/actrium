@@ -213,6 +213,7 @@
       "nickname": "Nickname",
       "email": "Email",
       "deleteAccount": "Delete Account",
+      "deleteAccountConfirm": "Are you sure you want to delete your account? This action cannot be undone and all account data will be permanently removed.",
       "logoutAccount": "Logout Account",
       "aboutAskAway": "About AskAway",
       "userAgreement": "User Agreement",
