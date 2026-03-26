@@ -141,6 +141,7 @@
       "requestCameraPermission": "Solicitando permiso de cámara...",
       "openCameraScan": "Abrir cámara para escanear",
       "initCamera": "Iniciando cámara...",
+      "loading": "Cargando...",
       "inputUrl": "Ingresa una URL",
       "blockedTitle": "Ejecución bloqueada",
       "blockedReason": "No cumple con el contrato del host/política de permisos",

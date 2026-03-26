@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import {
+  ActivityIndicator,
   InteractionManager,
   NativeSyntheticEvent,
   Platform,
@@ -8,13 +9,13 @@ import {
   TextInput,
   TextInputSubmitEditingEventData,
   TextStyle,
+  Text,
   TouchableWithoutFeedback,
   View,
   ViewStyle,
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { useTab } from '../contexts/TabContext';
@@ -41,11 +42,14 @@ const ALERT_DEDUP_MS = 2000;
 
 const LoadApp = () => {
   const { t } = useTranslation();
+  const tabCtx = useTab();
   const [cameraActive, setCameraActive] = useState(false);
   const [inputExpanded, setInputExpanded] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
+  const [isPresetAppUrlLoading, setIsPresetAppUrlLoading] = useState(
+    Boolean(tabCtx.tab.appUrl),
+  );
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
-  const insets = useSafeAreaInsets();
   const isResolvingRef = useRef(false);
   const pendingResolveUrlRef = useRef<string | null>(null);
   const lastAutoResolvedAppUrlRef = useRef<string | null>(null);
@@ -56,7 +60,6 @@ const LoadApp = () => {
   const lastResolvedAtRef = useRef(0);
   const lastNotFoundAlertAtRef = useRef(0);
   const inputRef = useRef<TextInput>(null);
-  const tabCtx = useTab();
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
   const { width: screenWidth } = useWindowDimensions();
   const { ensureNetworkPermission } = useNetworkPermission();
@@ -83,6 +86,13 @@ const LoadApp = () => {
       clearTimeout(timer);
     };
   }, [showInputField]);
+
+  const renderLoadingView = () => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size='large' color='#007AFF' />
+      <Text style={styles.loadingText}>{t('actr.app.loading')}</Text>
+    </View>
+  );
 
   const handleResolveUrl = useCallback(
     async (rawUrl: string) => {
@@ -174,12 +184,26 @@ const LoadApp = () => {
   );
 
   useEffect(() => {
-    if (!tabCtx.tab.appUrl) return;
+    if (!tabCtx.tab.appUrl) {
+      setIsPresetAppUrlLoading(false);
+      return;
+    }
     if (lastAutoResolvedAppUrlRef.current === tabCtx.tab.appUrl) return;
 
+    const presetAppUrl = tabCtx.tab.appUrl;
+
+    // 预设 appUrl 说明宿主已经明确要恢复目标应用，
+    // 这里先切到加载态，避免用户短暂看到扫码页再跳走。
+    setIsPresetAppUrlLoading(true);
     // 预设 appUrl 可能来自收藏恢复，effect 因为 re-render 重跑时不能重复发起初始化。
-    lastAutoResolvedAppUrlRef.current = tabCtx.tab.appUrl;
-    void enqueueResolveUrl(tabCtx.tab.appUrl);
+    lastAutoResolvedAppUrlRef.current = presetAppUrl;
+    void enqueueResolveUrl(presetAppUrl).finally(() => {
+      // 这里只关闭当前这轮预设 URL 对应的加载态，
+      // 避免旧请求回收时把新一轮 appUrl 恢复流程的 loading 提前关掉。
+      if (lastAutoResolvedAppUrlRef.current === presetAppUrl) {
+        setIsPresetAppUrlLoading(false);
+      }
+    });
 
     // FIXME 要手动再通知 native 更新收藏标识
     void setTabBookmarkStatus(tabCtx.tab.id, true);
@@ -244,6 +268,10 @@ const LoadApp = () => {
   };
 
   if (isPhone) {
+    if (isPresetAppUrlLoading) {
+      return <View style={styles.phoneContainer}>{renderLoadingView()}</View>;
+    }
+
     return (
       <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
         <View style={styles.phoneContainer}>
@@ -291,6 +319,10 @@ const LoadApp = () => {
         </View>
       </TouchableWithoutFeedback>
     );
+  }
+
+  if (isPresetAppUrlLoading) {
+    return <View style={styles.padContainer}>{renderLoadingView()}</View>;
   }
 
   return (
@@ -379,6 +411,17 @@ const styles = StyleSheet.create({
   },
   padScrollContent: {
     paddingBottom: 120,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  loadingText: {
+    marginTop: 12,
+    color: '#666',
+    fontSize: 15,
   },
   phoneScanSection: {
     flex: 1,

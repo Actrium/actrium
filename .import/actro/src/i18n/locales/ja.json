@@ -141,6 +141,7 @@
       "requestCameraPermission": "カメラの権限をリクエスト中...",
       "openCameraScan": "カメラを開いてスキャン",
       "initCamera": "カメラを初期化中...",
+      "loading": "読み込み中...",
       "inputUrl": "URLを入力してください",
       "blockedTitle": "実行がブロックされました",
       "blockedReason": "ホストのコントラクト/権限ポリシーを満たしていません",
