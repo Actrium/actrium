@@ -133,6 +133,7 @@
       "mockTitle5": "Suggestions for in-depth explanations and recommended routes for the historical and cultural background of the scenic area.",
       "notExist": "App does not exist",
       "loadFailed": "Load failed",
+      "invalidUrl": "Invalid QR code or link",
       "networkRetry": "Please check your network and try again",
       "retryLater": "Please try again later",
       "cameraPermissionDeniedTitle": "No camera permission",

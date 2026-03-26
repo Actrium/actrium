@@ -133,6 +133,7 @@
       "mockTitle5": "観光地の歴史文化背景に関する詳細な解説とおすすめルート。",
       "notExist": "アプリが存在しません",
       "loadFailed": "読み込み失敗",
+      "invalidUrl": "無効なQRコードまたはリンクです",
       "networkRetry": "ネットワークを確認して再試行してください",
       "retryLater": "しばらくしてから再試行してください",
       "cameraPermissionDeniedTitle": "カメラ権限がありません",

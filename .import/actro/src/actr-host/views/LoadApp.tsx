@@ -39,6 +39,9 @@ import { useNetworkPermission } from '../hooks/useNetworkPermission';
 const RESOLVE_DEDUP_MS = 3000;
 // 上游重复触发时，避免“应用不存在”弹窗连续轰炸用户。
 const ALERT_DEDUP_MS = 2000;
+// 扫码命中后给相机关闭一个很短的提交窗口，
+// 再弹错误提示，避免相机收起和弹框挂载抢同一帧导致观感卡顿。
+const INVALID_SCAN_ALERT_DELAY_MS = 150;
 
 const LoadApp = () => {
   const { t } = useTranslation();
@@ -112,6 +115,9 @@ const LoadApp = () => {
       const appId = extractAppIdFromUrl(url);
       if (!appId) {
         console.error('扫描到的二维码无效:', url);
+        // 二维码内容不满足宿主约定时，用户侧也需要立即得到可见反馈，
+        // 否则只打日志会表现为“扫了没反应”。
+        GlobalAlert.alert(t('actr.app.invalidUrl'));
         return;
       }
 
@@ -218,6 +224,31 @@ const LoadApp = () => {
     void enqueueResolveUrl(url);
   };
 
+  const handleScannedUrl = useCallback(
+    (rawUrl: string) => {
+      const url = rawUrl.trim();
+      if (!url) return;
+
+      const appId = extractAppIdFromUrl(url);
+      if (!appId) {
+        console.error('扫描到的二维码无效:', url);
+        // 无效二维码不需要走权限校验和初始化链路，
+        // 这里只等相机关闭提交后再弹提示，避免和相机收起抢同一帧。
+        setTimeout(() => {
+          GlobalAlert.alert(t('actr.app.invalidUrl'));
+        }, INVALID_SCAN_ALERT_DELAY_MS);
+        return;
+      }
+
+      // 合法二维码仍然等相机关闭和扫码层收起完成一帧后再继续，
+      // 避免真正的初始化重活堵住相机收起动画。
+      InteractionManager.runAfterInteractions(() => {
+        void enqueueResolveUrl(url);
+      });
+    },
+    [enqueueResolveUrl, t],
+  );
+
   const renderInput = (
     inputStyle: StyleProp<TextStyle>,
     containerStyle: StyleProp<ViewStyle>,
@@ -296,13 +327,7 @@ const LoadApp = () => {
                 onAfterCameraPermissionGranted={() => {
                   void ensureNetworkPermission();
                 }}
-                onScanUrl={(url) => {
-                  // 先让相机关闭和扫码层收起完成一帧提交，再启动会话初始化，
-                  // 避免重活直接堵住 JS，导致“已扫中但动画最后卡一下”的观感。
-                  InteractionManager.runAfterInteractions(() => {
-                    void enqueueResolveUrl(url);
-                  });
-                }}
+                onScanUrl={handleScannedUrl}
               />
             </View>
           </View>
@@ -362,13 +387,7 @@ const LoadApp = () => {
                 onAfterCameraPermissionGranted={() => {
                   void ensureNetworkPermission();
                 }}
-                onScanUrl={(url) => {
-                  // 先让相机关闭和扫码层收起完成一帧提交，再启动会话初始化，
-                  // 避免重活直接堵住 JS，导致“已扫中但动画最后卡一下”的观感。
-                  InteractionManager.runAfterInteractions(() => {
-                    void enqueueResolveUrl(url);
-                  });
-                }}
+                onScanUrl={handleScannedUrl}
               />
             </View>
           </View>

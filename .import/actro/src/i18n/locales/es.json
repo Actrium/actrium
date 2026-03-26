@@ -133,6 +133,7 @@
       "mockTitle5": "Sugerencias de recorridos culturales profundos y rutas recomendadas.",
       "notExist": "La aplicación no existe",
       "loadFailed": "Error al cargar",
+      "invalidUrl": "Codigo QR o enlace invalido",
       "networkRetry": "Revisa tu red e intenta de nuevo",
       "retryLater": "Inténtalo más tarde",
       "cameraPermissionDeniedTitle": "Sin permiso de cámara",
