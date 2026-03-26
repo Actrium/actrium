@@ -132,11 +132,14 @@ struct PhoneMainView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
-            // RN 请求退出全屏 - 先截图再关闭（标题为空时不截图）
+            // RN 请求退出全屏。存在标题时先完成截图，再执行退场，避免快照拿到半退场画面。
             if let tab = transitioningTab, !tab.title.isEmpty {
-                takeSnapshot(for: tab)
+                takeSnapshot(for: tab) {
+                    dismissBrowser(exitingTab: tab)
+                }
+            } else {
+                dismissBrowser()
             }
-            dismissBrowser()
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
             // RN 请求退出搜索页 - 切换回页签列表
@@ -223,25 +226,37 @@ struct PhoneMainView: View {
         }
     }
     
-    private func dismissBrowser() {
+    private func dismissBrowser(exitingTab: Tab? = nil) {
+        let resolvedExitingTab = exitingTab ?? transitioningTab
+
         // 退出时，如果是从 Tabs 进来的，尝试刷新位置
-        if selectedTab == .tabs, let tab = transitioningTab {
+        if selectedTab == .tabs, let tab = resolvedExitingTab {
             NotificationCenter.default.post(name: NSNotification.Name("GetTabCardRect"), object: nil, userInfo: ["tabId": tab.id])
         }
-        
+
         withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
             showBrowser = false
         }
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            // 退出完成事件必须跟退场动画绑定，避免截图分支与无截图分支行为不一致。
+            if let tab = resolvedExitingTab {
+                NotificationCenter.default.post(
+                    name: .tabExitedFullscreenFromNative,
+                    object: nil,
+                    userInfo: ["tabId": tab.id.uuidString]
+                )
+            }
             transitioningTab = nil
         }
     }
 
     /// 截取当前全屏 tab 的快照
-    private func takeSnapshot(for tab: Tab) {
+    private func takeSnapshot(for tab: Tab, completion: @escaping () -> Void) {
         // 延迟一帧，确保捕获正确的内容
         DispatchQueue.main.async {
+            defer { completion() }
+
             let window = UIApplication.shared.connectedScenes
                 .filter { $0.activationState == .foregroundActive }
                 .compactMap { $0 as? UIWindowScene }
@@ -276,12 +291,6 @@ struct PhoneMainView: View {
                     viewModel.tabSnapshots[tab.id] = fullImage
                 }
                 
-                // 发送退出全屏通知到 RN
-                NotificationCenter.default.post(
-                    name: .tabExitedFullscreenFromNative,
-                    object: nil,
-                    userInfo: ["tabId": tab.id.uuidString]
-                )
             }
         }
     }
