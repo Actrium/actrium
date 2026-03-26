@@ -112,7 +112,7 @@ export const AuthorizeContent = ({
         {t('actr.auth.authTip')}
       </Text>
       <Text style={styles.authDetailText}>
-        用户标识、昵称、头像、邮箱。若所选登录方式支持邮箱（如 Apple、Google），也将获取邮箱地址。
+        {t('actr.auth.authDetailTip')}
       </Text>
 
       {userInfo?.profiles?.length ? (
@@ -146,7 +146,7 @@ export const AuthorizeContent = ({
           activeOpacity={0.7}
         >
           <Text style={[styles.rejectButtonText, { fontSize: buttonFontSize, color: colors.rejectButtonText }]}>
-            拒绝
+            {t('common.reject')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -155,7 +155,7 @@ export const AuthorizeContent = ({
           activeOpacity={0.8}
         >
           <Text style={[styles.authorizeButtonText, { fontSize: buttonFontSize, color: colors.authButtonText }]}>
-            允许
+            {t('common.allow')}
           </Text>
         </TouchableOpacity>
       </View>

@@ -1,5 +1,7 @@
 {
   "common": {
+    "reject": "Refuser",
+    "allow": "Autoriser",
     "loading": "Chargement...",
     "error": "Erreur",
     "noData": "Aucune donnée",
@@ -157,6 +159,7 @@
       "officialService": "Service client AskAway"
     },
     "auth": {
+      "authDetailTip": "Identifiant utilisateur, pseudo, avatar et e-mail. Si la méthode de connexion prend en charge l'e-mail (par ex. Apple, Google), l'adresse e-mail sera également obtenue.",
       "serviceInitFailed": "Échec de l'initialisation du service",
       "login": "Connexion",
       "loginTip": "Vous pouvez vous connecter via les méthodes suivantes",

@@ -1,5 +1,7 @@
 {
   "common": {
+    "reject": "拒绝",
+    "allow": "允许",
     "loading": "加载中...",
     "error": "出错了",
     "noData": "暂无数据",
@@ -157,6 +159,7 @@
       "officialService": "AskAway 官方客服"
     },
     "auth": {
+      "authDetailTip": "用户标识、昵称、头像、邮箱。若所选登录方式支持邮箱（如 Apple、Google），也将获取邮箱地址。",
       "serviceInitFailed": "服务初始化失败",
       "login": "登录",
       "loginTip": "你可以通过以下方式登录",
