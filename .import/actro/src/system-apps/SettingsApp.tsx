@@ -13,6 +13,8 @@ import { useUserStore } from '../actr-host/store/useUserStore';
 import { useAuthTaskStore } from '../actr-host/store/useAuthTaskStore';
 import { createFeedbackAction, createLogoutAction, createDeleteAccountAction } from './settings/actions';
 import type { AboutPageKey } from './settings/AboutAskAway';
+import { AuthRepository } from '../repository/AuthRepository';
+import { authApi, CURRENT_ENV } from '../api/auth';
 
 const SETTINGS_CLIENT_ID = '02094310-3454-4929-80b5-8ee85d09f34b';
 export type SettingsPage = 'main' | 'accountDetail' | 'aboutAskAway';
@@ -74,7 +76,10 @@ export default function SettingsApp({
   );
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   const clearUser = useUserStore((state) => state.clearUser);
+  const userInfo = useUserStore((state) => state.userInfo);
   const sessionToken = useUserStore((state) => state.sessionToken);
+  const setUserInfo = useUserStore((state) => state.setUserInfo);
+  const setSessionToken = useUserStore((state) => state.setSessionToken);
   const clearAuthorizationCache = useAuthTaskStore(
     (state) => state.clearAuthorizationCache,
   );
@@ -105,6 +110,40 @@ export default function SettingsApp({
     // 构建号为空时只显示版本号，避免设置页出现无意义的空括号
     return buildNumber ? `${version}(${buildNumber})` : version;
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const ensureUserInfo = async () => {
+      if (userInfo) {
+        return;
+      }
+
+      const token = sessionToken || (await AuthRepository.getToken(CURRENT_ENV));
+      if (!token) {
+        return;
+      }
+
+      // 设置页展示登录信息依赖 userInfo，只有 token 时要在挂载后主动补拉一次
+      try {
+        const userRes = await authApi.getUserInfo(token);
+        if (!userRes.success || !userRes.data || cancelled) {
+          return;
+        }
+
+        setUserInfo(userRes.data);
+        setSessionToken(token);
+      } catch (error) {
+        console.error('[SettingsApp] Failed to fetch user info on mount:', error);
+      }
+    };
+
+    ensureUserInfo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionToken, setSessionToken, setUserInfo, userInfo]);
 
   useEffect(() => {
     if (!deepLink.page) {
