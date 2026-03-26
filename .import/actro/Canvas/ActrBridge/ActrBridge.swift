@@ -34,7 +34,7 @@ public class ActrBridge: RCTEventEmitter {
         let node: ActrNode
         let actr: ActrRef
         let workload: AskLocalServiceWorkload<AskLocalServiceHandlerImpl>
-        let serverActId: ActrId
+        let targetType: ActrType
     }
     
     private var actorInstances: [String: ActorInstance] = [:]
@@ -97,14 +97,8 @@ extension ActrBridge {
         
         do {
             let result = try await Task.detached(priority: .userInitiated) { () throws
-                -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>, ActrId) in
-                let system = try await ActrSystem.from(tomlConfig: configPath)
-                let handler = AskLocalServiceHandlerImpl()
-                let workload = AskLocalServiceWorkload(handler: handler)
-                let node = try system.spawn(workload: workload)
-                let actr = try await node.start()
-                
-                // 解析 actorType 并进行 discover
+                -> (ActrSystem, ActrNode, ActrRef, AskLocalServiceWorkload<AskLocalServiceHandlerImpl>, ActrType) in
+                // 解析 actorType
                 let parts = actorType.split(separator: "+")
                 guard parts.count == 2 else {
                     throw ActrError.StateError(msg: "Invalid actorType format: \(actorType)")
@@ -113,19 +107,22 @@ extension ActrBridge {
                 let name = String(parts[1])
                 let targetType = ActrType(manufacturer: manufacturer, name: name)
                 
+                let system = try await ActrSystem.from(tomlConfig: configPath)
+                let handler = AskLocalServiceHandlerImpl(targetType)
+                let workload = AskLocalServiceWorkload(handler: handler)
+                let node = try system.spawn(workload: workload)
+                let actr = try await node.start()
+                
                 let discovered = try await actr.discover(targetType: targetType, count: 1)
-                guard let serverActId = discovered.first else {
+                guard let _ = discovered.first else {
                     throw ActrError.StateError(msg: "No actor found for target type: \(actorType)")
                 }
                 
-                // 将 serverActId 设置到 handler 中
-                await handler.setServerActId(serverActId)
-                
-                return (system, node, actr, workload, serverActId)
+                return (system, node, actr, workload, targetType)
             }.value
             
-            let (system, node, actr, workload, serverActId) = result
-            let instance = ActorInstance(system: system, node: node, actr: actr, workload: workload, serverActId: serverActId)
+            let (system, node, actr, workload, targetType) = result
+            let instance = ActorInstance(system: system, node: node, actr: actr, workload: workload, targetType: targetType)
             actorInstances[tabId] = instance
             
             // Wait a bit for the signaling client to establish connection
@@ -531,7 +528,8 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
 /// Implementation of AskLocalServiceHandler
 /// TODO: Implement the business logic for each RPC method
 public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
-    private var serverActId: ActrId? = nil
+    private let targetType: ActrType
+    fileprivate var serverActId: ActrId? = nil
     
     fileprivate struct StreamInfo {
         let callback: StreamPrintCallback
@@ -540,11 +538,8 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
     
     fileprivate var activeStreams: [String: StreamInfo] = [:]
     
-    public init() {}
-    
-    public func setServerActId(_ actId: ActrId) async {
-        self.serverActId = actId
-        logger.info("[AskLocalServiceHandlerImpl] Server ActId set: \(actId.realm.realmId)")
+    public init(_ targetType: ActrType) {
+        self.targetType = targetType
     }
     
     public func removeCallback(streamId: String) async {
@@ -575,11 +570,10 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
 
         logger.info("[AskLocalServiceHandlerImpl] User message prepared: \(userMessage.debugDescription)")
         
-        guard let targetId = self.serverActId else {
+        serverActId = try await ctx.discover(targetType: targetType)
+        guard let targetId = serverActId else {
             throw ActrError.StateError(msg: "Server ActId not initialized")
         }
-      
-        
         
         // 注册文本响应流
         if !req.textResponseStreamID.isEmpty {
@@ -643,7 +637,8 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
             userMessage.location = req.location
         }
         
-        guard let targetId = self.serverActId else {
+        serverActId = try await ctx.discover(targetType: targetType)
+        guard let targetId = serverActId else {
             throw ActrError.StateError(msg: "Server ActId not initialized")
         }
 
