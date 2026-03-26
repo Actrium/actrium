@@ -127,7 +127,7 @@ const MessageRow = React.memo(function MessageRow({
                 attachments={item.attachments}
                 containerStyle={{ marginBottom: 4 }}
                 onEdit={
-                  isLatest && !selectionMode
+                  isLatest && !selectionMode && !item.is_edited
                     ? () => handleEdit(item)
                     : undefined
                 }
@@ -163,7 +163,7 @@ const MessageRow = React.memo(function MessageRow({
                 content={item.question_content}
                 voicePayload={item.question_voice_payload}
                 onEdit={
-                  isLatest && !selectionMode && item.question_type !== 'voice'
+                  isLatest && !selectionMode && item.question_type !== 'voice' && !item.is_edited
                     ? () => handleEdit(item)
                     : undefined
                 }
