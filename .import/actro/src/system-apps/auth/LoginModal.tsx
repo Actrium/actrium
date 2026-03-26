@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,8 @@ import { LoginContent } from './LoginContent';
 import { useLoginFlow, LoginFlowMode } from '../../hooks/auth';
 import { HostIconButton } from '../../actr-host/components/HostIconButton';
 import { getHostLayoutTokens } from '../../utils/layout';
+import type { AboutPageKey } from '../settings/aboutPages';
+import { AboutWebViewModal } from '../settings/AboutWebViewModal';
 
 interface LoginModalProps {
   visible: boolean;
@@ -37,12 +39,14 @@ export const LoginModal = ({
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
-  const { step, loading } = useLoginFlow({
+  const { step } = useLoginFlow({
     mode,
     clientId,
     appId,
     autoInit: visible,
   });
+  const [agreePolicy, setAgreePolicy] = useState(false);
+  const [activePolicyPage, setActivePolicyPage] = useState<AboutPageKey | null>(null);
 
   // 记录上一次的 step，用于检测状态变化
   const prevStepRef = useRef<typeof step | null>(null);
@@ -64,8 +68,17 @@ export const LoginModal = ({
   useEffect(() => {
     if (!visible) {
       prevStepRef.current = null;
+      setActivePolicyPage(null);
     }
   }, [visible]);
+
+  const handlePolicyPageOpen = useCallback((page: AboutPageKey) => {
+    setActivePolicyPage(page);
+  }, []);
+
+  const handlePolicyPageClose = useCallback(() => {
+    setActivePolicyPage(null);
+  }, []);
 
   const renderContent = () => {
     if (step === 'checking' || step === 'logging_in') {
@@ -98,7 +111,10 @@ export const LoginModal = ({
       <LoginContent
         variant="light"
         logoSize={0}
-        // buttonMaxWidth={280}
+        agreePolicy={agreePolicy}
+        onAgreePolicyChange={setAgreePolicy}
+        onOpenUserAgreement={() => handlePolicyPageOpen('userAgreement')}
+        onOpenPrivacyPolicy={() => handlePolicyPageOpen('privacyPolicy')}
         fontSize={{ tagline: 17, button: 17 }}
         spacing={{ logoTop: 0, spacer: 16, buttonBottom: 0, policyBottom: 0 }}
       />
@@ -165,6 +181,11 @@ export const LoginModal = ({
           </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
+      <AboutWebViewModal
+        visible={!!activePolicyPage}
+        page={activePolicyPage}
+        onClose={handlePolicyPageClose}
+      />
     </Modal>
   );
 };

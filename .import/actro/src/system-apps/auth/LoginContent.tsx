@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,10 @@ interface LoginContentProps {
   variant?: ThemeVariant;
   logoSize?: number;
   buttonMaxWidth?: number;
+  agreePolicy?: boolean;
+  onAgreePolicyChange?: (value: boolean) => void;
+  onOpenUserAgreement?: () => void;
+  onOpenPrivacyPolicy?: () => void;
   fontSize?: {
     tagline?: number;
     button?: number;
@@ -54,12 +58,20 @@ export const LoginContent = ({
   variant = 'light',
   logoSize = 120,
   buttonMaxWidth = 400,
+  agreePolicy,
+  onAgreePolicyChange,
+  onOpenUserAgreement,
+  onOpenPrivacyPolicy,
   fontSize = {},
   spacing = {},
 }: LoginContentProps) => {
   const { t } = useTranslation();
-  const [agreePolicy, setAgreePolicy] = useState(false);
+  const [innerAgreePolicy, setInnerAgreePolicy] = useState(false);
   const colors = themeColors[variant];
+  const resolvedAgreePolicy = useMemo(
+    () => agreePolicy ?? innerAgreePolicy,
+    [agreePolicy, innerAgreePolicy],
+  );
 
   const {
     tagline: taglineFontSize = 15,
@@ -73,9 +85,19 @@ export const LoginContent = ({
     policyBottom = 32,
   } = spacing;
 
+  const updateAgreePolicy = useCallback(
+    (value: boolean) => {
+      if (agreePolicy === undefined) {
+        setInnerAgreePolicy(value);
+      }
+      onAgreePolicyChange?.(value);
+    },
+    [agreePolicy, onAgreePolicyChange],
+  );
+
   const onLoginPress = useCallback(
     (type: LoginType) => {
-      if (!agreePolicy) {
+      if (!resolvedAgreePolicy) {
         NativeAlert.alert(
           t('actr.auth.agreePolicyTitle'),
           t('actr.auth.agreePolicyDetail'),
@@ -85,7 +107,7 @@ export const LoginContent = ({
               text: t('actr.auth.agreeAndLogin'),
               style: 'destructive',
               onPress: () => {
-                setAgreePolicy(true);
+                updateAgreePolicy(true);
                 LoginBridge.loginWithType(type);
               },
             },
@@ -95,7 +117,7 @@ export const LoginContent = ({
       }
       LoginBridge.loginWithType(type);
     },
-    [agreePolicy, t],
+    [resolvedAgreePolicy, t, updateAgreePolicy],
   );
 
   return (
@@ -175,19 +197,29 @@ export const LoginContent = ({
 
       <View style={[styles.policyContainer, { marginBottom: policyBottom }]}>
         <TouchableOpacity
-          onPress={() => setAgreePolicy(!agreePolicy)}
+          onPress={() => updateAgreePolicy(!resolvedAgreePolicy)}
           style={styles.checkboxContainer}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <View style={[styles.checkbox, agreePolicy && styles.checkboxSelected]}>
-            {agreePolicy && <Text style={styles.checkMark}>✓</Text>}
+          <View style={[styles.checkbox, resolvedAgreePolicy && styles.checkboxSelected]}>
+            {resolvedAgreePolicy && <Text style={styles.checkMark}>✓</Text>}
           </View>
         </TouchableOpacity>
         <Text style={[styles.policyText, { color: colors.policyText }]}>
           {t('actr.auth.readAndAgree')}{' '}
-          <Text style={[styles.linkText, { color: colors.linkText }]}>{t('actr.auth.userAgreement')}</Text>{' '}
+          <Text
+            style={[styles.linkText, { color: colors.linkText }]}
+            onPress={onOpenUserAgreement}
+          >
+            {t('actr.auth.userAgreement')}
+          </Text>{' '}
           {t('common.and')}{' '}
-          <Text style={[styles.linkText, { color: colors.linkText }]}>{t('actr.auth.privacyPolicy')}</Text>
+          <Text
+            style={[styles.linkText, { color: colors.linkText }]}
+            onPress={onOpenPrivacyPolicy}
+          >
+            {t('actr.auth.privacyPolicy')}
+          </Text>
         </Text>
       </View>
     </View>
@@ -260,6 +292,9 @@ const styles = StyleSheet.create({
   policyText: {
     fontSize: 12,
     marginLeft: 6,
+    flexShrink: 1,
   },
-  linkText: {},
+  linkText: {
+    textDecorationLine: 'underline',
+  },
 });
