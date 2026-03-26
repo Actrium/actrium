@@ -40,7 +40,7 @@ public class ActrBridge: RCTEventEmitter {
     private var actorInstances: [String: ActorInstance] = [:]
     
     private let queue = DispatchQueue(label: "com.actr.bridge.queue")
-    
+        
     // MARK: - Connection Status
     
     enum ConnectionStatus {
@@ -74,7 +74,7 @@ public class ActrBridge: RCTEventEmitter {
         logger.info("[ActrBridge] Preparing client stream: stream_id=\(request.streamID)")
         
         do {
-            let _ = try await instance.actr.call(request, timeoutMs: 90000)
+            let _ = try await instance.actr.call(request)
             return (streamID)
         } catch let actrError as ActrError {
             logger.error("[ActrBridge] Prepare client stream error: \(actrError.localizedDescription)")
@@ -264,7 +264,7 @@ extension ActrBridge {
                     reject("INVALID_INPUT", "Missing required field (streamId)", nil)
                     return
                 }
-                let response = try await instance.actr.call(request, timeoutMs: 90000)
+                let response = try await instance.actr.call(request)
                 resolve([
                     "questionId": response.questionID,
                     "sessionId": response.sessionID,
@@ -318,7 +318,7 @@ extension ActrBridge {
                     return
                 }
                 
-                let response = try await instance.actr.call(request, timeoutMs: 90000)
+                let response = try await instance.actr.call(request)
                 appLogger.info("startVoice response======= \(response)")
                 resolve([
                     "sessionId": response.sessionID,
@@ -380,7 +380,7 @@ extension ActrBridge {
                 }
                 request.chunkData = audioBinary
                 
-                let response = try await instance.actr.call(request, timeoutMs: 90000)
+                let response = try await instance.actr.call(request)
                 resolve([
                     "streamID": response.streamID,
                     "status": response.status,
@@ -423,7 +423,7 @@ extension ActrBridge {
                 request.type = Ask_AttachmentType(rawValue: typeInt) ?? .unknown
                 request.data = binaryData
                 
-                let response = try await instance.actr.call(request, timeoutMs: 90000)
+                let response = try await instance.actr.call(request)
                 resolve([
                     "id": response.id,
                     "statusCode": response.statusCode,
@@ -608,7 +608,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
             routeKey: Ask_UsrPromptRequest.routeKey,
             payloadType: .rpcReliable,
             payload: try userMessage.serializedData(),
-            timeoutMs: 300000
+            timeoutMs: 20000
         )
         
         
@@ -674,7 +674,7 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
             routeKey: Ask_UsrPromptRequest.routeKey,
             payloadType: .rpcReliable,
             payload: try userMessage.serializedData(),
-            timeoutMs: 300000
+            timeoutMs: 20000
         )
         
         // 反序列化为 Ask_AssistantReply
