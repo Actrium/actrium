@@ -82,6 +82,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   }, [cameraActive]);
 
   useEffect(() => {
+    // 退出全屏时要关闭相机，重置状态
     const unsubscribe = TabEvents.onTabExitedFullscreen((event) => {
       if (event.tabId !== tabId) return;
       onCameraActiveChange(false);
