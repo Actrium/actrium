@@ -213,6 +213,7 @@
       "nickname": "昵称",
       "email": "邮箱",
       "deleteAccount": "删除账号",
+      "deleteAccountConfirm": "确认删除账号？此操作不可撤销，账号数据将被永久清除。",
       "logoutAccount": "退出账号",
       "aboutAskAway": "关于 AskAway",
       "userAgreement": "用户协议",

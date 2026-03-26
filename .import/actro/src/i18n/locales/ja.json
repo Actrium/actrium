@@ -213,6 +213,7 @@
       "nickname": "ニックネーム",
       "email": "メールアドレス",
       "deleteAccount": "アカウント削除",
+      "deleteAccountConfirm": "アカウントを削除しますか？この操作は取り消せず、アカウントデータは完全に削除されます。",
       "logoutAccount": "アカウントからログアウト",
       "aboutAskAway": "AskAway について",
       "userAgreement": "利用規約",

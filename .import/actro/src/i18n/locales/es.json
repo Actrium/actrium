@@ -213,6 +213,7 @@
       "nickname": "Apodo",
       "email": "Correo electrónico",
       "deleteAccount": "Eliminar cuenta",
+      "deleteAccountConfirm": "¿Confirmas que deseas eliminar tu cuenta? Esta acción no se puede deshacer y todos los datos de la cuenta se eliminarán permanentemente.",
       "logoutAccount": "Cerrar sesión de la cuenta",
       "aboutAskAway": "Acerca de AskAway",
       "userAgreement": "Acuerdo de Usuario",

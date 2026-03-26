@@ -11,7 +11,7 @@ import { AboutAskAway } from './settings/AboutAskAway';
 import { LoginModal } from './auth/LoginModal';
 import { useUserStore } from '../actr-host/store/useUserStore';
 import { useAuthTaskStore } from '../actr-host/store/useAuthTaskStore';
-import { createFeedbackAction, createLogoutAction } from './settings/actions';
+import { createFeedbackAction, createLogoutAction, createDeleteAccountAction } from './settings/actions';
 import type { AboutPageKey } from './settings/AboutAskAway';
 
 const SETTINGS_CLIENT_ID = '02094310-3454-4929-80b5-8ee85d09f34b';
@@ -74,6 +74,7 @@ export default function SettingsApp({
   );
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   const clearUser = useUserStore((state) => state.clearUser);
+  const sessionToken = useUserStore((state) => state.sessionToken);
   const clearAuthorizationCache = useAuthTaskStore(
     (state) => state.clearAuthorizationCache,
   );
@@ -144,10 +145,17 @@ export default function SettingsApp({
     setLoginModalVisible(true);
   };
 
-  const handleDeleteAccount = () => {
-    // TODO: Implement delete account logic
-    console.log('Delete account pressed');
-  };
+  const handleDeleteAccount = useMemo(
+    () =>
+      createDeleteAccountAction({
+        t,
+        sessionToken,
+        clearUser,
+        clearAuthorizationCache,
+        onAfterDelete: () => setCurrentPage('main'),
+      }),
+    [t, sessionToken, clearUser, clearAuthorizationCache],
+  );
 
   return (
     <View style={styles.container}>
