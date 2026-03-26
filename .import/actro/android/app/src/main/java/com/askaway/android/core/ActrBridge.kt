@@ -135,7 +135,7 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                         "data_stream_app.AskLocalService.SendText",
                         PayloadType.RPC_RELIABLE,
                         request.toByteArray(),
-                        30000L
+                        20000L
                     )
                     promise.resolve(null)
                 } catch (e: Exception) {
@@ -195,7 +195,7 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                     "ask.AskService.Attach",
                     PayloadType.RPC_RELIABLE,
                     request.toByteArray(),
-                    90000L
+                    30000L
                 )
 
                 val response = AttachResponse.parseFrom(responseBytes)
@@ -319,7 +319,7 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                     "data_stream_app.AskLocalService.StartSendVoice",
                     PayloadType.RPC_RELIABLE,
                     request.toByteArray(),
-                    90000L // 90 seconds timeout
+                    20000L // 90 seconds timeout
                 )
 
                 val response = StartVoiceMessageResponse.parseFrom(responseBytes)
@@ -391,7 +391,7 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                     "data_stream_app.AskLocalService.SendVoiceChunk",
                     PayloadType.RPC_RELIABLE,
                     request.toByteArray(),
-                    90000L
+                    20000L
                 )
 
                 val response = VoiceChunkMessageResponse.parseFrom(responseBytes)
