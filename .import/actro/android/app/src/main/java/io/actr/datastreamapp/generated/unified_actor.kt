@@ -8,7 +8,7 @@
  * - UnifiedDispatcher for routing requests to local handlers or remote services
  *
  * Local services: 1
- * Remote services: 1
+ * Remote services: 2
  */
 package io.actr.datastreamapp.generated
 
@@ -43,9 +43,10 @@ interface UnifiedHandler : AskLocalServiceHandler {
 object RemoteServiceRegistry {
     /**
      * Map of route key prefix to actor type for remote services
+     * askaway+app_server
      */
     val remoteRoutes: Map<String, ActrType> = mapOf(
-        "ask.Ask" to ActrType(manufacturer = "acmeopenclaw", name = "AskService"),
+        "ask.Ask" to ActrType(manufacturer = "askaway", name = "app_server")
     )
 
     /**

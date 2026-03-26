@@ -1,13 +1,13 @@
 [metadata]
 version = 1
-generated_at = "2026-02-06T06:40:17.912658+00:00"
+generated_at = "2026-03-26T07:38:28.893413+00:00"
 
 [[dependency]]
-name = "ask-service"
-actr_type = "acmeopenclaw+AskService"
-fingerprint = "service_semantic:da14a14320dadd5c9a7699870fa7958c203b620684a2cbc1b45112e36dc4c7a2"
-cached_at = "2026-02-06T06:40:17.912656+00:00"
+name = "bot"
+actr_type = "askaway+app_server"
+fingerprint = "service_semantic:822480b5040acc05c12836b4218cfb00021d435802f566a4e89197feaba9eea4"
+cached_at = "2026-03-26T07:38:28.893411+00:00"
 
 [[dependency.files]]
-path = "ask-service/ask.proto"
+path = "bot/askaway.proto"
 fingerprint = ""
