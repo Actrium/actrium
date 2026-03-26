@@ -1,5 +1,7 @@
 {
   "common": {
+    "reject": "Reject",
+    "allow": "Allow",
     "loading": "Loading...",
     "error": "Error",
     "noData": "No Data",
@@ -157,6 +159,7 @@
       "officialService": "AskAway Official Service"
     },
     "auth": {
+      "authDetailTip": "User identifier, nickname, avatar, and email. If the selected login method supports email (e.g., Apple, Google), the email address will also be obtained.",
       "serviceInitFailed": "Service initialization failed",
       "login": "Login",
       "loginTip": "You can log in via the following ways",

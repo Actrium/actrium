@@ -1,5 +1,7 @@
 {
   "common": {
+    "reject": "Rechazar",
+    "allow": "Permitir",
     "loading": "Cargando...",
     "error": "Error",
     "noData": "Sin datos",
@@ -157,6 +159,7 @@
       "officialService": "Servicio al cliente oficial de AskAway"
     },
     "auth": {
+      "authDetailTip": "Identificador de usuario, apodo, avatar y correo electrónico. Si el método de inicio de sesión seleccionado admite correo electrónico (por ejemplo, Apple, Google), también se obtendrá la dirección de correo electrónico.",
       "serviceInitFailed": "Error al iniciar el servicio",
       "login": "Iniciar sesión",
       "loginTip": "Puedes iniciar sesión de las siguientes formas",
