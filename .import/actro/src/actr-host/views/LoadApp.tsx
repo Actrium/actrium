@@ -23,7 +23,6 @@ import { AppSessionService } from '../../services/AppSessionService';
 import { useKeyboardInset } from '../../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../styles/shadows';
 import { setTabBookmarkStatus } from '../../../src/native-bridge/tab/TabModule';
-import { TabEvents } from '../../../src/native-bridge/tab/TabEvents';
 import { HostIconButton } from '../components/HostIconButton';
 import SafeBottomView from '../components/SafeBottomView';
 import { Icon } from '../components/Icon';
@@ -71,18 +70,6 @@ const LoadApp = () => {
   const inputBorderRadius = 24;
   // Pad 模式不再展示 ChatHeader，因此不需要预留 Header 高度。
   const scanTopMargin = isTablet ? 10 : CHAT_HEADER_HEIGHT + 10;
-
-  useEffect(() => {
-    const unsubscribeWillExit = TabEvents.onTabWillExitFullscreen((event) => {
-      if (event.tabId !== tabCtx.tab.id) return;
-      // 退出动作发起时先同步关闭相机，避免 Native 切页后摄像头仍短暂存活。
-      setCameraActive(false);
-    });
-
-    return () => {
-      unsubscribeWillExit();
-    };
-  }, [tabCtx.tab.id]);
 
   // Pad 端输入框常驻展示，Phone 端保持原有“按钮切换输入框”交互。
   const showInputField = isTablet || (inputExpanded && !cameraActive);
