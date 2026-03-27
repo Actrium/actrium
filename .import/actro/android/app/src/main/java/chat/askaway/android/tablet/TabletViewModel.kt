@@ -96,6 +96,7 @@ class TabletViewModel : ViewModel() {
                     val oldItem = appList[index]
                     appList[index] =
                         oldItem.copy(name = title ?: oldItem.name, icon = icon ?: oldItem.icon, url = url ?: oldItem.url)
+                    Log.e("TabletViewModel", "${appList[index]}")
                 }
                 _tabletUseCase.value = _tabletUseCase.value?.copy(appList = appList)
             }

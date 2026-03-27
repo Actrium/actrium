@@ -17,7 +17,6 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
     var currentId: String? = ""
         set(value) {
             field = value
-            Log.e("ActiveAdapter", "currentId:${value}")
             notifyDataSetChanged()
         }
 

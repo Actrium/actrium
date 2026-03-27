@@ -8,13 +8,13 @@
     <!-- 占位空间，与删除按钮高度一致 -->
     <Space
         android:layout_width="match_parent"
-        android:layout_height="40dp" />
+        android:layout_height="32dp" />
 
     <androidx.cardview.widget.CardView
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
         android:layout_margin="8dp"
+        android:layout_weight="1"
         app:cardBackgroundColor="#2C2C2E"
         app:cardCornerRadius="12dp"
         app:cardElevation="4dp">
@@ -27,8 +27,8 @@
                 android:layout_width="64dp"
                 android:layout_height="64dp"
                 android:layout_gravity="center"
-                android:src="@drawable/ic_add"
                 android:contentDescription="@string/app_name"
+                android:src="@drawable/ic_add"
                 app:tint="#FFFFFF" />
 
         </FrameLayout>
