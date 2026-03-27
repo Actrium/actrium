@@ -18,7 +18,9 @@
     "save": "Enregistrer",
     "and": "et",
     "retry": "Réessayer",
-    "unknownError": "Erreur inconnue"
+    "unknownError": "Erreur inconnue",
+    "networkError": "Échec de la connexion réseau",
+    "networkCheckInfo": "Erreur réseau, veuillez vérifier votre connexion"
   },
   "actr": {
     "appTitle": "Askaway Subsystem",

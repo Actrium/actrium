@@ -18,7 +18,9 @@
     "save": "Guardar",
     "and": "y",
     "retry": "Reintentar",
-    "unknownError": "Error desconocido"
+    "unknownError": "Error desconocido",
+    "networkError": "Error de conexión de red",
+    "networkCheckInfo": "Error de red, por favor comprueba tu conexión"
   },
   "actr": {
     "appTitle": "Askaway Subsystem",

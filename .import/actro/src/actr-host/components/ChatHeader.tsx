@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { HostIconButton } from './HostIconButton';
 import { CHAT_HEADER_HEIGHT } from '../constants';
 import { useNetworkStatus } from '../hooks/networkStatus';
@@ -28,6 +29,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     appId,
     includeSafeTopInset = true,
   }) => {
+    const { t } = useTranslation();
     const { top: topInsetRaw } = useSafeAreaInsets();
     const topInset = includeSafeTopInset ? topInsetRaw : 0;
     const hasAppId = Boolean(appId);
@@ -78,7 +80,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
           )}
           {/* 只有插件会话态才展示网络状态，和右侧 history 按钮保持同一语义边界。 */}
           {hasAppId && showOfflineHint ? (
-            <Text style={styles.networkErrorText}>网络连接失败</Text>
+            <Text style={styles.networkErrorText}>{t('common.networkError')}</Text>
           ) : null}
         </View>
         {hasAppId ? (
