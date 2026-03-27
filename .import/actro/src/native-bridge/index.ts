@@ -6,3 +6,7 @@ export { openTab, exitFullscreen } from './tab/TabModule';
 // Login
 export { LoginBridge } from './login';
 export type { LoginType, LoginResultEvent } from './login';
+
+// Extension
+export { ExtensionEvents } from './extension';
+export type { ExtensionPanelVisibleChangeEvent } from './extension';

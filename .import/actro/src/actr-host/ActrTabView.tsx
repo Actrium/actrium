@@ -1,10 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -53,6 +47,7 @@ import { exitFullscreen } from '../native-bridge/tab/TabModule';
 import { useTabNativeEvents } from './hooks/useTabNativeEvents';
 import { useExtensionPanelGesture } from './hooks/useExtensionPanelGesture';
 import { isTablet } from '../utils/device';
+import { useExtensionPanelVisibility } from './hooks/useExtensionPanelVisibility';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -100,11 +95,15 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [leftPanel, setLeftPanel] = useState<React.ReactElement | null>(null);
   const [rightPanel, setRightPanel] = useState<React.ReactElement | null>(null);
-  // Phone 模式下由内部状态控制面板显隐（手势/按钮驱动）
-  const [localLeftPanelVisible, setLocalLeftPanelVisible] = useState(false);
-
-  // 统一面板可见性：Pad 由父组件 props 控制，Phone 由内部状态控制
-  const panelVisible = isTablet ? isLeftPanelVisible : localLeftPanelVisible;
+  const {
+    panelVisible,
+    handlePhonePanelVisibleChange,
+    togglePhonePanelVisible,
+    closePhonePanel,
+  } = useExtensionPanelVisibility({
+    tabId: tab.id,
+    isLeftPanelVisible,
+  });
 
   const engineRef = useRef<Engine | null>(null);
   const adapterRef = useRef<{ dispose: () => void } | null>(null);
@@ -122,17 +121,12 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // 注意：rightWidth 应该始终是固定值，不要根据 isLeftPanelVisible 变化
   const rightWidth = LAYOUT.RIGHT_PANEL_WIDTH;
 
-  // 手势结束后同步面板可见状态（仅 Phone 模式使用）
-  const handlePanelVisibilityChange = useCallback((visible: boolean) => {
-    setLocalLeftPanelVisible(visible);
-  }, []);
-
   // 扩展面板手势（Phone 模式：右滑打开/左滑关闭；Tablet 模式：空手势）
   const { gesture: panelGesture, isGesturing } = useExtensionPanelGesture({
     panelWidth: rightWidth,
     slideAnim,
     centerAnimValue,
-    onVisibilityChange: handlePanelVisibilityChange,
+    onVisibilityChange: handlePhonePanelVisibleChange,
   });
 
   React.useEffect(() => {
@@ -508,7 +502,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         {/* Header 绝对定位 - 不受 centerColumn 动画影响 */}
         {!isTablet && (
           <ChatHeader
-            onLeftPress={() => setLocalLeftPanelVisible((prev) => !prev)}
+            onLeftPress={togglePhonePanelVisible}
             onRightPress={() => exitFullscreen()}
             appId={appId}
             leftDisabled={!appId}
@@ -526,7 +520,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           {panelVisible && (
             <Pressable
               style={styles.dismissOverlay}
-              onPress={() => setLocalLeftPanelVisible(false)}
+              onPress={closePhonePanel}
             />
           )}
         </Animated.View>
