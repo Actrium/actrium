@@ -43,6 +43,33 @@ const ALERT_DEDUP_MS = 2000;
 // 再弹错误提示，避免相机收起和弹框挂载抢同一帧导致观感卡顿。
 const INVALID_SCAN_ALERT_DELAY_MS = 150;
 
+const extractAlertMessage = (message?: string) => {
+  if (!message) return '';
+
+  try {
+    const parsed = JSON.parse(message);
+    // 接口或底层转发把整包响应序列化进 message 时，只提取真正给用户看的 message 文案。
+    if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        return parsed.message;
+      }
+
+      if (
+        parsed.data &&
+        typeof parsed.data === 'object' &&
+        typeof parsed.data.message === 'string' &&
+        parsed.data.message.trim()
+      ) {
+        return parsed.data.message;
+      }
+    }
+  } catch {
+    // 非 JSON 字符串说明本身就是可展示文案，直接透传。
+  }
+
+  return message;
+};
+
 const LoadApp = () => {
   const { t } = useTranslation();
   const tabCtx = useTab();
@@ -131,6 +158,12 @@ const LoadApp = () => {
           url,
         );
         if (!initResult.ok) {
+          const alertMessage = extractAlertMessage(initResult.message);
+          if (alertMessage) {
+            GlobalAlert.alert(undefined, alertMessage);
+            return;
+          }
+
           if (initResult.reason === 'APP_NOT_FOUND') {
             const nowForAlert = Date.now();
             if (
