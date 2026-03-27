@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Image,
   ActivityIndicator,
+  Platform,
   TouchableOpacity,
 } from 'react-native';
 import { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -39,7 +40,7 @@ export default function BookmarksPhoneView({
   // 中文注释：这里单独给 bookmarks 头部接入顶部安全区，
   // 如果宿主提供的是全尺寸容器，就能直接反映到顶部留白里。
   const headerStyle = React.useMemo(
-    () => [styles.header, { paddingTop: insets.top + 12 }],
+    () => [styles.header, { paddingTop: insets.top + 8 }],
     [insets.top],
   );
 
@@ -105,7 +106,11 @@ export default function BookmarksPhoneView({
     return (
       <View style={styles.container}>
         <View style={headerStyle}>
-          <Text style={styles.headerTitle}>AskAway</Text>
+          <Text
+            style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+          >
+            AskAway
+          </Text>
         </View>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#34A8FB" />
@@ -119,7 +124,11 @@ export default function BookmarksPhoneView({
     return (
       <View style={styles.container}>
         <View style={headerStyle}>
-          <Text style={styles.headerTitle}>AskAway</Text>
+          <Text
+            style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+          >
+            AskAway
+          </Text>
         </View>
         <View style={styles.centerContainer}>
           <Text style={styles.errorText}>{error}</Text>
@@ -135,7 +144,11 @@ export default function BookmarksPhoneView({
     return (
       <View style={styles.container}>
         <View style={headerStyle}>
-          <Text style={styles.headerTitle}>AskAway</Text>
+          <Text
+            style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+          >
+            AskAway
+          </Text>
         </View>
         <View style={styles.centerContainer}>
           <Text style={styles.emptyText}>{t('actr.bookmark.empty')}</Text>
@@ -148,7 +161,11 @@ export default function BookmarksPhoneView({
   return (
     <View style={styles.container}>
       <View style={headerStyle}>
-        <Text style={styles.headerTitle}>AskAway</Text>
+        <Text
+          style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+        >
+          AskAway
+        </Text>
       </View>
 
       <FlatList
@@ -178,8 +195,10 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 34,
     color: '#fff',
-    marginTop: 8,
-    letterSpacing: .3, // 保持和 安卓宿主 一样
+  },
+  androidTitleSpacing: {
+    // 中文注释：仅 Android 追加字间距，对齐原生宿主标题的观感。
+    letterSpacing: 0.3,
   },
   content: {
     flex: 1,
