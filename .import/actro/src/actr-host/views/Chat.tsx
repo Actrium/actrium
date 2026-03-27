@@ -306,6 +306,10 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     }
   }, []);
 
+  const showTopToast = useCallback((message: string) => {
+    toastRef.current?.show(message);
+  }, []);
+
   const loadAppInfo = useCallback(async () => {
     if (!appId || appInfo) return;
     await AppSessionService.initSession(tab.id, appId);
@@ -467,8 +471,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   );
 
   const input = useMemo(() => {
-    return <ActrInput appId={appId} />;
-  }, [appId]);
+    return <ActrInput appId={appId} showTopToast={showTopToast} />;
+  }, [appId, showTopToast]);
 
   const contentAreaAnimatedStyle = useAnimatedStyle(() => {
     if (Platform.OS !== 'ios' || layoutTokens.isTablet) {

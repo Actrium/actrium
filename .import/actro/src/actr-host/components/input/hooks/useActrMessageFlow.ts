@@ -11,6 +11,7 @@ import { useAuth, type AuthStatus } from '../../../../hooks/auth';
 import { useAuthTaskStore } from '../../../store/useAuthTaskStore';
 import { Utils } from '../../../../utils/utils';
 import { useUnreadStore } from '../../../store/useUnreadStore';
+import { getNetworkStatusForSend } from '../../../hooks/networkStatus';
 import {
   getCurrentFullscreenTab,
   openTab,
@@ -28,6 +29,7 @@ interface UseActrMessageFlowParams {
   editingMessageId: string | null;
   attachments: IAttachmentItem[];
   isTablet: boolean;
+  showTopToast?: (message: string) => void;
 }
 
 interface AnswerVoiceBufferState {
@@ -72,7 +74,15 @@ interface UseActrMessageFlowResult {
 export function useActrMessageFlow(
   params: UseActrMessageFlowParams,
 ): UseActrMessageFlowResult {
-  const { appId, tabId, inputText, editingMessageId, attachments, isTablet } =
+  const {
+    appId,
+    tabId,
+    inputText,
+    editingMessageId,
+    attachments,
+    isTablet,
+    showTopToast,
+  } =
     params;
   const { t } = useTranslation();
   const appInfo = useAppStore((state) => state.apps[appId]);
@@ -436,6 +446,13 @@ export function useActrMessageFlow(
   const processMessageSend = useCallback(
     async (content: string, options?: { isVoice?: boolean }) => {
       const { isVoice } = options || {};
+      // 发送前同步读取网络快照，iOS 上 NetInfo.refresh() 是 no-op，无需 await
+      const networkStatus = getNetworkStatusForSend();
+
+      if (networkStatus.shouldBlockSend) {
+        showTopToast?.('网络连接失败');
+        return;
+      }
 
       if (connection?.reason) {
         GlobalAlert.alert(t('actr.auth.serviceInitFailed'), connection.reason);
@@ -520,6 +537,7 @@ export function useActrMessageFlow(
       sendMessage,
       session_id,
       setEditingMessageId,
+      showTopToast,
       t,
       tabId,
     ],

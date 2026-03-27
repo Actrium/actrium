@@ -42,6 +42,7 @@
     "@bam.tech/react-native-image-resizer": "^3.0.11",
     "@react-native-clipboard/clipboard": "^1.16.3",
     "@react-native-community/geolocation": "^3.4.0",
+    "@react-native-community/netinfo": "^12.0.1",
     "@react-native-documents/picker": "^11.0.1",
     "@supramark/core": "file:../../supermark/packages/core",
     "@supramark/diagram-engine": "file:../../supermark/packages/renderers/diagram-engine",

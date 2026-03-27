@@ -29,10 +29,21 @@ initDatabase();
 
 import 'react-native-gesture-handler';
 import 'react-native-get-random-values';
+import NetInfo from '@react-native-community/netinfo';
 
 import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';
 const PromiseRejectionTracking = require('promise/setimmediate/rejection-tracking');
+
+// iOS 默认原生 reachability 在 Wi-Fi 断网场景下事件不稳定，这里统一切到 NetInfo 自己的可达性探测。
+NetInfo.configure({
+  useNativeReachability: false,
+  // Wi-Fi 接口还在但外网断掉时，NetInfo 只能靠主动探测发现异常。
+  // 默认 60 秒长轮询太慢，这里压到 3 秒，避免顶部网络状态长时间不更新。
+  reachabilityLongTimeout: 3 * 1000,
+  reachabilityShortTimeout: 3 * 1000,
+  reachabilityRequestTimeout: 3 * 1000,
+});
 
 // 🔴 统一日志工具 - 输出到:
 // 1. 远程日志服务器 (actr log server, 跨平台)
