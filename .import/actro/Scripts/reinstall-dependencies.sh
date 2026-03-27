@@ -18,15 +18,15 @@ fi
 echo "📦 安装 React Native 依赖..."
 cd Subsystem
 
-if command -v npm &> /dev/null; then
-    echo "📦 使用 npm 安装依赖 (优先)..."
-    npm install
+if command -v yarn &> /dev/null; then
+    echo "📦 使用 yarn 安装依赖 (优先)..."
+    yarn install
 elif command -v bun &> /dev/null; then
-    echo "⚠️  npm 未安装，使用 bun..."
+    echo "⚠️  yarn 未安装，使用 bun..."
     echo "🧹 删除 lock 文件以避免 bun 冲突..."
     bun install
 else
-    echo "❌ 错误: 未找到 npm 或 bun"
+    echo "❌ 错误: 未找到 yarn 或 bun"
     exit 1
 fi
 
