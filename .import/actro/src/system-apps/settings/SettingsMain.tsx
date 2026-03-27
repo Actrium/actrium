@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Platform,
   Text,
   ScrollView,
   StyleSheet,
@@ -42,7 +43,7 @@ export const SettingsMain = ({
     () => [
       styles.scrollContent,
       {
-        paddingTop: insets.top + 12,
+        paddingTop: insets.top + 8,
         paddingHorizontal: isTablet ? 40 : 16,
       },
     ],
@@ -56,7 +57,11 @@ export const SettingsMain = ({
       showsVerticalScrollIndicator={false}
     >
       {/* Page Title */}
-      <Text style={styles.pageTitle}>AskAway</Text>
+      <Text
+        style={[styles.pageTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+      >
+        AskAway
+      </Text>
 
       {/* Account Section */}
       <TouchableOpacity
@@ -124,8 +129,10 @@ const styles = StyleSheet.create({
     fontSize: 34,
     color: '#FFFFFF',
     marginBottom: 24,
-    marginTop: 8,
-    letterSpacing: .3, // 保持和 安卓宿主 一样
+  },
+  androidTitleSpacing: {
+    // 中文注释：仅 Android 追加字间距，对齐原生宿主标题的观感。
+    letterSpacing: 0.3,
   },
   accountCard: {
     flexDirection: 'row',
