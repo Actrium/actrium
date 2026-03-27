@@ -115,11 +115,14 @@ export default function SettingsApp({
     let cancelled = false;
 
     const ensureUserInfo = async () => {
-      if (userInfo) {
+      // 中文注释：设置页只在首次挂载时尝试一次恢复展示态，
+      // 后续 userInfo/sessionToken 的变化不再反向触发恢复，避免清理登录态时把旧用户补回来。
+      const currentUserInfo = useUserStore.getState().userInfo;
+      if (currentUserInfo) {
         return;
       }
 
-      const token = sessionToken || (await AuthRepository.getToken(CURRENT_ENV));
+      const token = await AuthRepository.getToken(CURRENT_ENV);
       if (!token) {
         return;
       }
@@ -143,7 +146,7 @@ export default function SettingsApp({
     return () => {
       cancelled = true;
     };
-  }, [sessionToken, setSessionToken, setUserInfo, userInfo]);
+  }, [setSessionToken, setUserInfo]);
 
   useEffect(() => {
     if (!deepLink.page) {
