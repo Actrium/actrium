@@ -54,7 +54,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.rvApp.adapter = adapter
 
         // 初始化内容区域 adapter
-        contentAdapter = TabletContentAdapter(application as MainApplication, viewModel, reactViewMap)
+        contentAdapter = TabletContentAdapter(reactViewMap)
         binding.rvContent.adapter = contentAdapter
 
         // 获取容器尺寸
@@ -128,6 +128,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             }
         })
         binding.ivHome.setOnClickListener { viewModel.changeDisplayMode(PageMode.GRID) }
+        binding.ivAppMenu.setOnClickListener { viewModel.toggleMenu() }
         binding.tvBack.setOnClickListener {
             viewModel.hideBookmark()
             viewModel.changeDisplayMode(PageMode.TAB)
@@ -137,6 +138,28 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         lifecycleScope.launchWhenStarted {
             viewModel.tabletUseCase.collect { useCase ->
                 if (useCase != null) {
+                    // 为当前 app 创建 ReactRootView（如果还没有）
+                    useCase.currentApp?.let { bundle ->
+                        Log.e("TabletActivity", "bundle:${bundle}")
+                        val currentTabId = bundle.getString("currentTabId")
+                        if (currentTabId != null) {
+                            if (reactViewMap[currentTabId] == null) {
+                                // 创建新的 ReactRootView
+                                val targetView = createReactRootView("canvas-kotlin", bundle)
+                                reactViewMap[currentTabId] = targetView
+                                Log.d("TabletActivity", "Created new ReactRootView for $currentTabId")
+                            } else {
+                                // 更新已存在的 ReactRootView 的属性
+//                                try {
+//                                    reactViewMap[currentTabId]?.setAppProperties(bundle)
+//                                    Log.d("TabletActivity", "Updated ReactRootView properties for $currentTabId")
+//                                } catch (e: Exception) {
+//                                    Log.e("TabletActivity", "Error updating ReactRootView properties", e)
+//                                }
+                            }
+                        }
+                    }
+
                     // 更新顶部应用列表
                     adapter.updateData(useCase.appList)
                     binding.rvApp.post {
@@ -181,15 +204,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     } else {
                         hideBookmark()
                     }
-
-                    Log.e("TabletActivity", "useCase.appList.size:${useCase.appList.size}")
-                    val column = GridViewColumnCalculator.calculateNumColumns(
-                        this@TabletActivity,
-                        gridWidth,
-                        gridHeight,
-                        useCase.appList.size + 1,
-                        viewModel.containerWidth * 1.0f / viewModel.containerHeight
-                    )
                 }
             }
         }

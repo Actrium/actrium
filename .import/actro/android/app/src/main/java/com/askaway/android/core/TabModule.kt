@@ -41,17 +41,19 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     @Subscribe(threadMode = ThreadMode.MAIN)
     fun onReactModuleEvent(event: NativeModuleEvent) {
         Log.e("TabModule", "Received NativeModuleEvent: ${event.methodName} with params: ${event.params}")
-        if (event.methodName == NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED) {
-            val params = Arguments.createMap()
-            event.params.forEach { (key, value) ->
-                when (value) {
-                    is Boolean -> params.putBoolean(key, value)
-                    is String -> params.putString(key, value)
-                    is Int -> params.putInt(key, value)
-                    is Double -> params.putDouble(key, value)
-                }
+        val params = Arguments.createMap()
+        event.params.forEach { (key, value) ->
+            when (value) {
+                is Boolean -> params.putBoolean(key, value)
+                is String -> params.putString(key, value)
+                is Int -> params.putInt(key, value)
+                is Double -> params.putDouble(key, value)
             }
+        }
+        if (event.methodName == NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED) {
             sendEvent("onTabBookmarkChanged", params)
+        }else if(event.methodName == NativeModuleEvent.EVENT_EXTENSION_PANEL_VISIBLE_CHANGE){
+            sendEvent("onExtensionPanelVisibleChange", params)
         }
     }
 
