@@ -188,6 +188,18 @@ class TabletViewModel : ViewModel() {
         }
     }
 
+    /**
+     * 为指定的 app 生成 ReactNative Bundle
+     */
+    fun genBundleForApp(appId: String): Bundle? {
+        val index = appList.indexOfFirst { it.id == appId }
+        return if (index != -1) {
+            appList[index].genReactNativeBundle(appList, containerHeight, containerWidth)
+        } else {
+            null
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         // 反注册 EventBus
