@@ -6,10 +6,10 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
-  Alert as NativeAlert
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { LoginBridge, LoginType } from '../../native-bridge';
+import { GlobalAlertModal } from '../../components';
 
 type ThemeVariant = 'light' | 'dark';
 
@@ -67,6 +67,7 @@ export const LoginContent = ({
 }: LoginContentProps) => {
   const { t } = useTranslation();
   const [innerAgreePolicy, setInnerAgreePolicy] = useState(false);
+  const [pendingLoginType, setPendingLoginType] = useState<LoginType | null>(null);
   const colors = themeColors[variant];
   const resolvedAgreePolicy = useMemo(
     () => agreePolicy ?? innerAgreePolicy,
@@ -98,27 +99,24 @@ export const LoginContent = ({
   const onLoginPress = useCallback(
     (type: LoginType) => {
       if (!resolvedAgreePolicy) {
-        NativeAlert.alert(
-          t('actr.auth.agreePolicyTitle'),
-          t('actr.auth.agreePolicyDetail'),
-          [
-            { text: t('common.cancel'), style: 'cancel' },
-            {
-              text: t('actr.auth.agreeAndLogin'),
-              style: 'destructive',
-              onPress: () => {
-                updateAgreePolicy(true);
-                LoginBridge.loginWithType(type);
-              },
-            },
-          ],
-        );
+        setPendingLoginType(type);
         return;
       }
       LoginBridge.loginWithType(type);
     },
-    [resolvedAgreePolicy, t, updateAgreePolicy],
+    [resolvedAgreePolicy],
   );
+
+  const handlePolicyAlertClose = useCallback(() => {
+    setPendingLoginType(null);
+  }, []);
+
+  const handleAgreeAndLogin = useCallback(() => {
+    if (!pendingLoginType) return;
+    updateAgreePolicy(true);
+    setPendingLoginType(null);
+    LoginBridge.loginWithType(pendingLoginType);
+  }, [pendingLoginType, updateAgreePolicy]);
 
   return (
     <View style={styles.container}>
@@ -222,6 +220,21 @@ export const LoginContent = ({
           </Text>
         </Text>
       </View>
+      <GlobalAlertModal
+        visible={pendingLoginType !== null}
+        title={t('actr.auth.agreePolicyTitle')}
+        message={t('actr.auth.agreePolicyDetail')}
+        buttons={[
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('actr.auth.agreeAndLogin'),
+            variant: 'primary',
+            onPress: handleAgreeAndLogin,
+          },
+        ]}
+        options={{ cancelable: true }}
+        onClose={handlePolicyAlertClose}
+      />
     </View>
   );
 };
