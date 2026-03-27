@@ -7,7 +7,10 @@ import { authApi } from '../../api/auth';
 
 export const createFeedbackAction = ({ t }: { t: TFunction }) => {
   return () => {
-    const subject = encodeURIComponent(t('actr.settings.feedbackSubject'));
+    const feedbackLabel = t('actr.settings.feedback').trim();
+    const aboutAskAwayLabel = t('actr.settings.aboutAskAway').trim();
+    const subjectText = `#${feedbackLabel} ${aboutAskAwayLabel} #`;
+    const subject = encodeURIComponent(subjectText);
     const mailto = `mailto:support@actrium.example?subject=${subject}`;
     Linking.openURL(mailto);
   };
