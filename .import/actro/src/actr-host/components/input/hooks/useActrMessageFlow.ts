@@ -450,7 +450,7 @@ export function useActrMessageFlow(
       const networkStatus = getNetworkStatusForSend();
 
       if (networkStatus.shouldBlockSend) {
-        showTopToast?.('网络连接失败');
+        showTopToast?.(t('common.networkCheckInfo'));
         return;
       }
 

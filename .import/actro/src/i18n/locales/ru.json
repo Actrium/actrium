@@ -18,7 +18,9 @@
     "save": "Сохранить",
     "and": "и",
     "retry": "Повторить",
-    "unknownError": "Неизвестная ошибка"
+    "unknownError": "Неизвестная ошибка",
+    "networkError": "Сбой сетевого подключения",
+    "networkCheckInfo": "Ошибка сети, пожалуйста, проверьте подключение"
   },
   "actr": {
     "appTitle": "Askaway Subsystem",

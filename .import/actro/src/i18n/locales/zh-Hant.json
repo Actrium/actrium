@@ -18,7 +18,9 @@
     "save": "儲存",
     "and": "和",
     "retry": "重試",
-    "unknownError": "未知錯誤"
+    "unknownError": "未知錯誤",
+    "networkError": "網路連線失敗",
+    "networkCheckInfo": "網路錯誤，請檢查網路連線"
   },
   "actr": {
     "appTitle": "Askaway Subsystem",

@@ -18,7 +18,9 @@
     "save": "保存",
     "and": "と",
     "retry": "再試行",
-    "unknownError": "不明なエラー"
+    "unknownError": "不明なエラー",
+    "networkError": "ネットワーク接続に失敗しました",
+    "networkCheckInfo": "ネットワークエラー。接続を確認してください"
   },
   "actr": {
     "appTitle": "Askaway Subsystem",
