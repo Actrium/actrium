@@ -4,6 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HostIconButton } from './HostIconButton';
 import { CHAT_HEADER_HEIGHT } from '../constants';
+import { useNetworkStatus } from '../hooks/networkStatus';
 
 interface ChatHeaderProps {
   onLeftPress: () => void;
@@ -30,6 +31,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     const { top: topInsetRaw } = useSafeAreaInsets();
     const topInset = includeSafeTopInset ? topInsetRaw : 0;
     const hasAppId = Boolean(appId);
+    const { showOfflineHint } = useNetworkStatus();
     const [showCloseButton, setShowCloseButton] = React.useState(false);
 
     React.useEffect(() => {
@@ -68,11 +70,17 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
         ) : (
           <View style={styles.headerButtonPlaceholder} />
         )}
-        {appName && (
-          <Text style={styles.appName} numberOfLines={1}>
-            {appName}
-          </Text>
-        )}
+        <View style={styles.titleContainer}>
+          {appName && (
+            <Text style={styles.appName} numberOfLines={1}>
+              {appName}
+            </Text>
+          )}
+          {/* 只有插件会话态才展示网络状态，和右侧 history 按钮保持同一语义边界。 */}
+          {hasAppId && showOfflineHint ? (
+            <Text style={styles.networkErrorText}>网络连接失败</Text>
+          ) : null}
+        </View>
         {hasAppId ? (
           <HostIconButton
             iconType='history'
@@ -114,12 +122,22 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
   },
-  appName: {
+  titleContainer: {
     flex: 1,
     marginHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  appName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#0a0a0a',
     textAlign: 'center',
+    maxWidth: '100%',
+  },
+  networkErrorText: {
+    marginTop: 2,
+    fontSize: 13,
+    color: '#FF3B30',
   },
 });

@@ -19,9 +19,14 @@ const { NativeLogger } = NativeModules;
 interface ActrInputProps {
   appId: string;
   variant?: 'pad' | 'mobile';
+  showTopToast?: (message: string) => void;
 }
 
-export default function ActrInput({ appId, variant }: ActrInputProps) {
+export default function ActrInput({
+  appId,
+  variant,
+  showTopToast,
+}: ActrInputProps) {
   const { tab } = useTab();
   const { width } = useWindowDimensions();
   const layoutTokens = React.useMemo(() => getHostLayoutTokens(width), [width]);
@@ -88,6 +93,7 @@ export default function ActrInput({ appId, variant }: ActrInputProps) {
     editingMessageId,
     attachments,
     isTablet: layoutTokens.isTablet,
+    showTopToast,
   });
 
   const handleClearInput = () => {
