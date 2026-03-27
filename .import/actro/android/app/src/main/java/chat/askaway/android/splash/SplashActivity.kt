@@ -3,6 +3,7 @@ package chat.askaway.android.splash
 import android.os.Bundle
 import android.content.res.Configuration
 import androidx.appcompat.app.AppCompatActivity
+import chat.askaway.android.tablet.SafariTabActivity
 import chat.askaway.android.tablet.TabletActivity
 import com.askaway.android.databinding.ActivitySplashBinding
 import com.askaway.android.MainActivity
