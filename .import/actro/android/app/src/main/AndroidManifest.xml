@@ -62,6 +62,10 @@
             android:windowSoftInputMode="adjustPan|stateHidden" />
 
         <activity
+            android:name="chat.askaway.android.tablet.SafariTabActivity"
+            android:windowSoftInputMode="adjustPan|stateHidden" />
+
+        <activity
             android:name="com.askaway.android.MainActivity"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustPan|stateHidden" />
