@@ -1,13 +1,14 @@
 import React from 'react';
 import {
-  View,
   Text,
   ScrollView,
   StyleSheet,
   Image,
   TouchableOpacity,
+  View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../actr-host/components/Icon';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
@@ -32,18 +33,26 @@ export const SettingsMain = ({
   isTablet,
 }: SettingsMainProps) => {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const userInfo = useUserStore((state) => state.userInfo);
   const isLoggedIn = !!userInfo;
+  // 中文注释：顶部留白拆成「安全区高度 + 固定设计留白」，
+  // 用来验证 settings 主页是否能拿到宿主传入的真实顶部 safe-area。
+  const scrollContentStyle = React.useMemo(
+    () => [
+      styles.scrollContent,
+      {
+        paddingTop: insets.top + 12,
+        paddingHorizontal: isTablet ? 40 : 16,
+      },
+    ],
+    [insets.top, isTablet],
+  );
 
   return (
     <ScrollView
       style={styles.content}
-      contentContainerStyle={[
-        styles.scrollContent,
-        {
-          paddingHorizontal: isTablet ? 40 : 16,
-        },
-      ]}
+      contentContainerStyle={scrollContentStyle}
       showsVerticalScrollIndicator={false}
     >
       {/* Page Title */}
@@ -109,14 +118,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingTop: 60,
     paddingBottom: 40,
   },
   pageTitle: {
     fontSize: 34,
     color: '#FFFFFF',
     marginBottom: 24,
-    marginTop: 8
+    marginTop: 8,
+    letterSpacing: .3, // 保持和 安卓宿主 一样
   },
   accountCard: {
     flexDirection: 'row',
