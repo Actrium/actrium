@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import com.askaway.android.core.ReactNativeBundle
+import com.askaway.android.event.NativeModuleEvent
 import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
@@ -157,6 +158,20 @@ class TabletViewModel : ViewModel() {
 
     fun changeDisplayMode(mode: PageMode) {
         _tabletUseCase.value = _tabletUseCase.value?.copy(pageMode = mode)
+    }
+
+    fun toggleMenu() {
+        _tabletUseCase.value?.let {
+            it.currentApp?.let { bundle ->
+                val tabId = bundle.getString("tabId")
+                EventBus.getDefault().post(
+                    NativeModuleEvent(
+                        NativeModuleEvent.EVENT_EXTENSION_PANEL_VISIBLE_CHANGE,
+                        mapOf("tabId" to tabId, "visible" to true)
+                    )
+                )
+            }
+        }
     }
 
     fun showSet() {
