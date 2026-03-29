@@ -191,18 +191,6 @@ struct PhoneTabCardView: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(1 / 0.54, contentMode: .fit)
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GetTabCardRect"))) { notification in
-                        if let targetId = notification.userInfo?["tabId"] as? UUID, targetId == tab.id {
-                            // 更新位置并发送回 PhoneMainView
-                            let globalFrame = geo.frame(in: .global)
-                            NotificationCenter.default.post(name: NSNotification.Name("UpdateTabCardRect"), object: nil, userInfo: ["rect": globalFrame])
-                        }
-                    }
-            }
-        )
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         .asMatchedTransitionSource(id: tab.id, in: animation)
@@ -214,7 +202,6 @@ struct PhoneBrowserView: View {
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel
     var bookmarkVM: BookmarkViewModel
-    
     
     var body: some View {
         GeometryReader { geometry in
