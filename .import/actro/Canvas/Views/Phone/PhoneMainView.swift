@@ -9,12 +9,6 @@ struct PhoneMainView: View {
     @State private var fullscreenTab: Tab?
     @State private var skipManualSettingsResetOnce = false
     
-    // 自定义转场动画状态
-    @State private var transitioningTab: Tab?
-    @State private var showBrowser = false
-    @State private var transitionRect: CGRect = .zero
-    @State private var isAnimating = false
-    
     @Namespace private var animation
     
     enum PhoneTab {
@@ -25,90 +19,54 @@ struct PhoneMainView: View {
     }
     
     var body: some View {
-        ZStack {
-            TabView(selection: $selectedTab) {
-                // 书签页：使用 RN 渲染
-                SwiftUI.Tab(TM.active.bookmarks(), systemImage: "book.fill", value: PhoneTab.bookmarks) {
-                    PhoneSystemAppView(
-                        systemType: .bookmarks,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
-                        onSelect: { tab in
-                            startTransition(to: tab)
-                        }
-                    )
-                }
-                
-                SwiftUI.Tab(TM.active.activity(), systemImage: "rectangle.grid.1x2.fill", value: PhoneTab.tabs) {
-                    PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, animation: animation, onSelect: { tab in
-                        startTransition(to: tab)
-                    })
-                }
-                
-                // 设置页：使用 RN 渲染
-                SwiftUI.Tab(TM.active.preferences(), systemImage: "gearshape.fill", value: PhoneTab.settings) {
-                    PhoneSystemAppView(
-                        systemType: .settings,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
-                        onSelect: { tab in
-                            startTransition(to: tab)
-                        }
-                    )
-                }
-
-                // 搜索页：独立显示（不占用固定 tab 位置）
-                SwiftUI.Tab("搜索", systemImage: "magnifyingglass", value: PhoneTab.search, role: .search) {
-                    PhoneSystemAppView(
-                        systemType: .globalSearch,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
-                        onSelect: { tab in
-                            startTransition(to: tab)
-                        }
-                    )
-                    .toolbar(.hidden, for: .tabBar)
-                }
+        TabView(selection: $selectedTab) {
+            // 书签页：使用 RN 渲染
+            SwiftUI.Tab(TM.active.bookmarks(), systemImage: "book.fill", value: PhoneTab.bookmarks) {
+                PhoneSystemAppView(
+                    systemType: .bookmarks,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    onSelect: { tab in
+                        fullscreenTab = tab
+                    }
+                )
             }
-            .accentColor(.blue)
-            .opacity(showBrowser ? 0 : 1)
             
-            transitionReceiver
+            SwiftUI.Tab(TM.active.activity(), systemImage: "rectangle.grid.1x2.fill", value: PhoneTab.tabs) {
+                PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, animation: animation, onSelect: { tab in
+                    fullscreenTab = tab
+                })
+            }
             
-            // 自定义浏览器层
-            if let tab = transitioningTab {
-                GeometryReader { geometry in
-                    let screenWidth = geometry.size.width
-                    let topInset = geometry.safeAreaInsets.top
-
-                    let browserHeight = showBrowser
-                    ? (UIScreen.main.bounds.height - topInset)
-                        : (transitionRect.width * 0.54)
-
-                    PhoneBrowserView(
-                        tab: tab,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM
-                    )
-                    .frame(
-                        width: showBrowser ? screenWidth : transitionRect.width,
-                        height: browserHeight
-                    )
-                    .cornerRadius(showBrowser ? 16 : 22)
-                    .position(
-                        x: showBrowser ? screenWidth / 2 : transitionRect.midX,
-                        y: showBrowser
-                            ? (browserHeight / 2)
-                            : (transitionRect.midY - topInset)
-                    )
-                    .zIndex(100)
-                }
+            // 设置页：使用 RN 渲染
+            SwiftUI.Tab(TM.active.preferences(), systemImage: "gearshape.fill", value: PhoneTab.settings) {
+                PhoneSystemAppView(
+                    systemType: .settings,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    onSelect: { tab in
+                        fullscreenTab = tab
+                    }
+                )
+            }
+            
+            // 搜索页：独立显示（不占用固定 tab 位置）
+            SwiftUI.Tab("搜索", systemImage: "magnifyingglass", value: PhoneTab.search, role: .search) {
+                PhoneSystemAppView(
+                    systemType: .globalSearch,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
+                    onSelect: { tab in
+                        fullscreenTab = tab
+                    }
+                )
+                .toolbar(.hidden, for: .tabBar)
             }
         }
+        .accentColor(.blue)
         .background(Color.black)
         .environment(\.colorScheme, .dark)
         .onChange(of: selectedTab) { oldValue, newValue in
@@ -134,12 +92,12 @@ struct PhoneMainView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
             // RN 请求退出全屏。存在标题时先完成截图，再执行退场，避免快照拿到半退场画面。
-            if let tab = transitioningTab, !tab.title.isEmpty {
+            if let tab = fullscreenTab, !tab.title.isEmpty {
                 takeSnapshot(for: tab) {
-                    dismissBrowser(exitingTab: tab)
+                    fullscreenTab = nil
                 }
             } else {
-                dismissBrowser()
+                fullscreenTab = nil
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
@@ -171,7 +129,7 @@ struct PhoneMainView: View {
             if let tabIdString = notification.userInfo?["tabId"] as? String,
                let tabId = UUID(uuidString: tabIdString),
                let tab = viewModel.tabs.first(where: { $0.id == tabId }) {
-                startTransition(to: tab)
+                fullscreenTab = tab
             }
         }
         .onAppear {
@@ -179,76 +137,31 @@ struct PhoneMainView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 if let currentId = viewModel.currentTabId,
                    let tab = viewModel.tabs.first(where: { $0.id == currentId }) {
-                    startTransition(to: tab)
+                    fullscreenTab = tab
                 }
             }
         }
+        .sheet(item: $fullscreenTab) { tab in
+            PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                .interactiveDismissDisabled(true)
+                .ignoresSafeArea()
+                .asNavigationTransition(id: tab.id, in: animation)
+        }
         .onChange(of: viewModel.currentTabId) { oldValue, newValue in
             guard let newValue = newValue else {
-                dismissBrowser()
+                fullscreenTab = nil
                 return
             }
             
             // 确保全屏视图显示的标签页与 currentTabId 保持同步
-            if transitioningTab?.id != newValue {
+            if fullscreenTab?.id != newValue {
                 if let tab = viewModel.tabs.first(where: { $0.id == newValue }) {
-                    startTransition(to: tab)
+                    fullscreenTab = tab
                 }
             }
         }
-        .onChange(of: transitioningTab?.id) { oldValue, newValue in
+        .onChange(of: fullscreenTab?.id) { oldValue, newValue in
             viewModel.fullscreenTabId = newValue
-        }
-    }
-    
-    private func startTransition(to tab: Tab) {
-        // 如果当前是 Tabs 页签列表，则尝试从通知获取位置，否则直接中心放大
-        if selectedTab == .tabs {
-            // 发送通知获取卡片位置
-            NotificationCenter.default.post(name: NSNotification.Name("GetTabCardRect"), object: nil, userInfo: ["tabId": tab.id])
-            
-            // 延迟一帧，等待 UpdateTabCardRect 通知更新 transitionRect
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                executeTransition(to: tab)
-            }
-        } else {
-            // 从其他页签（书签/设置等）打开，直接从底部弹出
-            let width = UIScreen.main.bounds.width
-            transitionRect = CGRect(x: 0, y: UIScreen.main.bounds.height, width: width, height: width * 0.54)
-            executeTransition(to: tab)
-        }
-    }
-    
-    private func executeTransition(to tab: Tab) {
-        transitioningTab = tab
-        
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-            showBrowser = true
-        }
-    }
-    
-    private func dismissBrowser(exitingTab: Tab? = nil) {
-        let resolvedExitingTab = exitingTab ?? transitioningTab
-
-        // 退出时，如果是从 Tabs 进来的，尝试刷新位置
-        if selectedTab == .tabs, let tab = resolvedExitingTab {
-            NotificationCenter.default.post(name: NSNotification.Name("GetTabCardRect"), object: nil, userInfo: ["tabId": tab.id])
-        }
-
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-            showBrowser = false
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            // 退出完成事件必须跟退场动画绑定，避免截图分支与无截图分支行为不一致。
-            if let tab = resolvedExitingTab {
-                NotificationCenter.default.post(
-                    name: .tabExitedFullscreenFromNative,
-                    object: nil,
-                    userInfo: ["tabId": tab.id.uuidString]
-                )
-            }
-            transitioningTab = nil
         }
     }
 
@@ -294,22 +207,5 @@ struct PhoneMainView: View {
                 
             }
         }
-    }
-}
-
-extension PhoneMainView {
-    /// 这里的 View 用于接收来自卡片的位置更新通知
-    var transitionReceiver: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateTabCardRect"))) { notification in
-                if let rect = notification.userInfo?["rect"] as? CGRect {
-                    if self.transitionRect == .zero {
-                        self.transitionRect = CGRect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width+32, height: rect.size.height)
-                    } else {
-                        self.transitionRect = rect
-                    }
-                }
-            }
     }
 }
