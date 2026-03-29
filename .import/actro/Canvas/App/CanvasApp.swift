@@ -22,11 +22,17 @@ struct BrowserWindowView: View {
     @StateObject private var viewModel = BrowserViewModel()
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
+    
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ContentView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
             .environmentObject(themeManager)
             .focusedSceneValue(\.browserViewModel, viewModel)
+            .onChange(of: colorScheme, { oldValue, newValue in
+                appLogger.info("====== oldValue: \(oldValue), newValue: \(newValue)")
+                themeManager.isDarkMode = newValue == .dark
+            })
             .onAppear {
                 // Check for pending group transfer
                 checkPendingGroupTransfer()
