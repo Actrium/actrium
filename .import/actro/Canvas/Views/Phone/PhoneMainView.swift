@@ -28,7 +28,7 @@ struct PhoneMainView: View {
         ZStack {
             TabView(selection: $selectedTab) {
                 // 书签页：使用 RN 渲染
-                SwiftUI.Tab("书签", systemImage: "book.fill", value: PhoneTab.bookmarks) {
+                SwiftUI.Tab(TM.active.bookmarks(), systemImage: "book.fill", value: PhoneTab.bookmarks) {
                     PhoneSystemAppView(
                         systemType: .bookmarks,
                         viewModel: viewModel,
@@ -40,14 +40,14 @@ struct PhoneMainView: View {
                     )
                 }
                 
-                SwiftUI.Tab("页签", systemImage: "rectangle.grid.1x2.fill", value: PhoneTab.tabs) {
+                SwiftUI.Tab(TM.active.activity(), systemImage: "rectangle.grid.1x2.fill", value: PhoneTab.tabs) {
                     PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, animation: animation, onSelect: { tab in
                         startTransition(to: tab)
                     })
                 }
                 
                 // 设置页：使用 RN 渲染
-                SwiftUI.Tab("偏好设置", systemImage: "gearshape.fill", value: PhoneTab.settings) {
+                SwiftUI.Tab(TM.active.preferences(), systemImage: "gearshape.fill", value: PhoneTab.settings) {
                     PhoneSystemAppView(
                         systemType: .settings,
                         viewModel: viewModel,
