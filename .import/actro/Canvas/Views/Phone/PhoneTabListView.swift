@@ -80,6 +80,8 @@ struct PhoneTabCardView: View {
     let onSelect: () -> Void
     let onClose: () -> Void
     
+    @EnvironmentObject private var theme: ThemeManager
+    
     private let iconWidth = 32.0
     
     var body: some View {
@@ -185,7 +187,7 @@ struct PhoneTabCardView: View {
             }
             .frame(height: 56)
             .padding(.horizontal, 14)
-            .background(Color(hex: "#E5E5EA"))
+            .background(Color(hex: theme.isDarkMode ? "#000000" : "#E5E5EA"))
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(1 / 0.54, contentMode: .fit)

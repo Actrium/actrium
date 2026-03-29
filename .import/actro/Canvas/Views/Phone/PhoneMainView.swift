@@ -110,6 +110,7 @@ struct PhoneMainView: View {
             }
         }
         .background(Color.black)
+        .environment(\.colorScheme, .dark)
         .onChange(of: selectedTab) { oldValue, newValue in
             // 切换到系统页签时，刷新系统页签
             switch newValue {
