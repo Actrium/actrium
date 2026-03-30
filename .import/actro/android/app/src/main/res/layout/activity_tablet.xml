@@ -91,18 +91,21 @@
                 <RadioGroup
                     android:id="@+id/rgNavigation"
                     android:layout_width="200dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="56dp"
                     android:layout_centerInParent="true"
                     android:gravity="center_vertical"
+                    android:background="@drawable/bottom_nav_bg_dark"
                     android:orientation="horizontal"
-                    android:paddingHorizontal="12dp">
+                    android:paddingHorizontal="4dp">
 
                     <RadioButton
                         android:id="@+id/navActivity"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="52dp"
+                        android:padding="8dp"
                         android:layout_weight="1"
                         android:button="@null"
+                        android:background="@drawable/bottom_nav_indicator_dark"
                         android:checked="true"
                         android:drawableTop="@drawable/nav_activity_selector"
                         android:drawablePadding="4dp"
@@ -116,7 +119,8 @@
                     <RadioButton
                         android:id="@+id/navTag"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="52dp"
+                        android:padding="8dp"
                         android:layout_weight="1"
                         android:button="@null"
                         android:drawableTop="@drawable/nav_tag_selector"
