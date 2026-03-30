@@ -199,10 +199,10 @@ struct PhoneMainView: View {
                 )
                 
                 if let croppedImage = fullImage.cropped(to: cropRect) {
-                    viewModel.tabSnapshots[tab.id] = croppedImage
+                    viewModel.setTabSnapshot(croppedImage, for: tab.id)
                 } else {
                     // 如果裁剪失败，保留全屏图作为 fallback
-                    viewModel.tabSnapshots[tab.id] = fullImage
+                    viewModel.setTabSnapshot(fullImage, for: tab.id)
                 }
                 
             }

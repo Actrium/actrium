@@ -128,12 +128,83 @@ class BrowserViewModel: ObservableObject {
 
     // MARK: - Tab Persistence
 
-    /// Save tabs to UserDefaults (only essential fields)
+    /// Get the URL for the images directory
+    private var imagesDirectoryURL: URL {
+        let urls = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        let documentsURL = urls[0]
+        let imagesURL = documentsURL.appendingPathComponent("images", isDirectory: true)
+
+        // Create directory if it doesn't exist
+        if !FileManager.default.fileExists(atPath: imagesURL.path) {
+            do {
+                try FileManager.default.createDirectory(at: imagesURL, withIntermediateDirectories: true)
+            } catch {
+                logger.error("❌ [BrowserViewModel] 无法创建 images 目录: \(error)")
+            }
+        }
+        return imagesURL
+    }
+
+    /// Get the file URL for a tab snapshot
+    private func snapshotURL(for tabId: UUID) -> URL {
+        return imagesDirectoryURL.appendingPathComponent("\(tabId.uuidString).jpg")
+    }
+
+    /// Save a tab snapshot to disk
+    private func saveSnapshot(_ image: UIImage, for tabId: UUID) {
+        let fileURL = snapshotURL(for: tabId)
+        if let jpegData = image.jpegData(compressionQuality: 0.8) {
+            do {
+                try jpegData.write(to: fileURL)
+                logger.debug("💾 [BrowserViewModel] 已保存截图: \(tabId.uuidString.prefix(8))")
+            } catch {
+                logger.error("❌ [BrowserViewModel] 保存截图失败: \(error)")
+            }
+        }
+    }
+
+    /// Load a tab snapshot from disk
+    private func loadSnapshot(for tabId: UUID) -> UIImage? {
+        let fileURL = snapshotURL(for: tabId)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+        do {
+            let data = try Data(contentsOf: fileURL)
+            return UIImage(data: data)
+        } catch {
+            logger.error("❌ [BrowserViewModel] 加载截图失败: \(error)")
+            return nil
+        }
+    }
+
+    /// Delete a tab snapshot from disk
+    private func deleteSnapshot(for tabId: UUID) {
+        let fileURL = snapshotURL(for: tabId)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                logger.debug("🗑️ [BrowserViewModel] 已删除截图: \(tabId.uuidString.prefix(8))")
+            } catch {
+                logger.error("❌ [BrowserViewModel] 删除截图失败: \(error)")
+            }
+        }
+    }
+
+    /// Save tabs to UserDefaults (only essential fields) and snapshots to disk
     private func saveTabs() {
         let persistedTabs = tabs.map { PersistedTab(from: $0) }
         do {
             let data = try JSONEncoder().encode(persistedTabs)
             UserDefaults.standard.set(data, forKey: tabsKey)
+
+            // Save snapshots for all tabs
+            for tab in tabs {
+                if let snapshot = tabSnapshots[tab.id] {
+                    saveSnapshot(snapshot, for: tab.id)
+                }
+            }
+
             logger.debug("💾 [BrowserViewModel] 已保存 \(persistedTabs.count) 个标签页")
         } catch {
             logger.error("❌ [BrowserViewModel] 保存标签页失败: \(error)")
@@ -163,6 +234,13 @@ class BrowserViewModel: ObservableObject {
                     icon: persistedTab.icon,
                     url: persistedTab.appUrl
                 )
+            }
+
+            // Load snapshots for all tabs
+            for tab in tabs {
+                if let snapshot = loadSnapshot(for: tab.id) {
+                    tabSnapshots[tab.id] = snapshot
+                }
             }
 
             // Set current tab to first tab if available
@@ -205,7 +283,7 @@ class BrowserViewModel: ObservableObject {
         }
 
         logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
-        
+
         // 发送通知到 RN
         var userInfo: [String: Any] = [
             "tabId": newTab.id.uuidString,
@@ -222,8 +300,15 @@ class BrowserViewModel: ObservableObject {
             object: nil,
             userInfo: userInfo
         )
-        
+
+        saveTabs()
         return newTab
+    }
+
+    /// Save tab snapshot when set
+    func setTabSnapshot(_ image: UIImage, for tabId: UUID) {
+        tabSnapshots[tabId] = image
+        saveSnapshot(image, for: tabId)
     }
 
     /// Open or get a system tab (History, Bookmarks, Settings)
@@ -376,9 +461,10 @@ class BrowserViewModel: ObservableObject {
     func closeTab(id: UUID) {
         // 清理缓存的 View
         CanvasReactNativeHost.shared.removeViewForTab(tabId: id)
-        
+
         // 清理快照
         tabSnapshots.removeValue(forKey: id)
+        deleteSnapshot(for: id)
         
         // Get the slot position of the tab being closed
         guard let closedPosition = tabSlotPositions[id] else {
@@ -446,6 +532,8 @@ class BrowserViewModel: ObservableObject {
             object: nil,
             userInfo: ["tabId": id.uuidString]
         )
+
+        saveTabs()
     }
 
     func reorderTab(fromIndex source: Int, toIndex destination: Int) {
@@ -466,6 +554,8 @@ class BrowserViewModel: ObservableObject {
             object: nil,
             userInfo: ["tabIds": orderedTabIds]
         )
+
+        saveTabs()
     }
 
     // MARK: - Tab Group Management
@@ -904,6 +994,8 @@ class BrowserViewModel: ObservableObject {
             object: nil,
             userInfo: userInfo
         )
+
+        saveTabs()
     }
 
     func closeCurrentTab() {
