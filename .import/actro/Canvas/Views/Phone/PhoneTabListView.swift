@@ -224,6 +224,16 @@ struct PhoneBrowserView: View {
                     ]
                 )
             }
+            .onDisappear {
+                // Tab 退出全屏视图
+                NotificationCenter.default.post(
+                    name: .tabExitedFullscreenFromNative,
+                    object: nil,
+                    userInfo: [
+                        "tabId": tab.id.uuidString
+                    ]
+                )
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
         }
