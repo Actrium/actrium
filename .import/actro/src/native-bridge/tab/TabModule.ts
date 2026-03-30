@@ -99,15 +99,15 @@ export const updateTabInfo = async ({
   tabId,
   title,
   icon,
-  url,
+  appUrl,
 }: {
   tabId: string;
   title: string;
   icon: string;
-  url: string;
+  appUrl: string;
 }): Promise<boolean> => {
   try {
-    return TabModule.updateTabInfo({ tabId, title, icon, url });
+    return TabModule.updateTabInfo({ tabId, title, icon, appUrl });
   } catch (e) {
     console.error(e);
   }

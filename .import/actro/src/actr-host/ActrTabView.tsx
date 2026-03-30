@@ -554,9 +554,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#ffffff',
     minWidth: 0, // 允许内部列在窗口缩小时收缩
-    overflow: 'hidden', // 防止横向滚动条
-    borderTopLeftRadius: 38,
-    borderTopRightRadius: 38,
   },
   threeColumnPad: {
     borderTopLeftRadius: 0,
@@ -564,7 +561,6 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
-    backgroundColor: 'transparent',
   },
   leftPanel: {
     borderRightWidth: 1,
