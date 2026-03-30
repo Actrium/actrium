@@ -247,6 +247,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   );
   const setMessagesInStore = useMessageStore((state) => state.setMessages);
   const appendOldMessages = useMessageStore((state) => state.appendOldMessages);
+  const updateMessage = useMessageStore((state) => state.updateMessage);
   const cleanMessage = useMessageStore((state) => state.cleanMessage);
   const selectionMode = useMessageStore((state) => state.selectionMode);
   const selectedItems = useMessageStore((state) => state.selectedItems);
@@ -266,6 +267,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   );
 
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasLoadedInitialMessages, setHasLoadedInitialMessages] =
+    useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showLoadMoreHeader, setShowLoadMoreHeader] = useState(false);
@@ -332,15 +335,44 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   // 暂时先留着
   // 初始化加载第一页
   const loadInitialMessages = useCallback(async () => {
+    setHasLoadedInitialMessages(false);
     try {
       const data = await MessageRepository.getAllMessages(tab.id, PAGE_SIZE, 0);
       setMessagesInStore(tab.id, data);
+
+      if (tab.appUrl && data.length > 0) {
+        const latestMessage = data.reduce((latest, current) => {
+          if (current.question_time !== latest.question_time) {
+            return current.question_time > latest.question_time
+              ? current
+              : latest;
+          }
+          return current.message_id.localeCompare(latest.message_id) > 0
+            ? current
+            : latest;
+        });
+
+        // 带 appUrl 进入聊天页通常是恢复中的旧会话，初始化后把当前 tab 最后一条消息强制收敛为完成态，
+        // 避免历史会话残留的 pending/processing 状态在重开后一直卡住。
+        if (latestMessage.progress !== Progress.completed) {
+          updateMessage(
+            tab.id,
+            latestMessage.message_id,
+            { progress: Progress.completed },
+            true,
+          );
+        }
+      }
+
       setHasMore(data.length === PAGE_SIZE);
     } catch (error) {
       console.error('[Main] Failed to load initial messages:', error);
       setMessagesInStore(tab.id, []);
+    } finally {
+      // 只有初始历史消息查询已经完成，且结果仍为空时，才允许展示空态，避免加载过程短暂闪出 ChatEmpty。
+      setHasLoadedInitialMessages(true);
     }
-  }, [tab.id, setMessagesInStore]);
+  }, [tab.id, tab.appUrl, setMessagesInStore, updateMessage]);
 
   // 加载更多
   const handleLoadMore = useCallback(async () => {
@@ -584,7 +616,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       ]}
     >
       <Reanimated.View style={[styles.contentArea, contentAreaAnimatedStyle]}>
-        {messageIds.length === 0 && !isLoadingMore ? (
+        {hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore ? (
           <View style={{ flex: 1 }}>
             <ChatEmpty />
           </View>
