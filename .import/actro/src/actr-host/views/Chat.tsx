@@ -400,6 +400,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       // 销毁时清除当前 tab 下的历史对话，id 映射，未读消息数量，输出框状态，tabid映射
       // debug 环境方便热更新，不做清理
       if (!__DEV__) {
+        console.warn(`清理数据 tab: ${tab.id}`)
         cleanMessage(tab.id);
         removeTabIdMap(tab.id);
         useUnreadStore.getState().clearUnread(tab.id);

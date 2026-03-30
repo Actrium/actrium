@@ -6,8 +6,8 @@ import { db } from './Sqlite';
 export const initDatabase = async () => {
   try {
     // 0. 删除旧表（开发阶段，确保结构最新）
-    await db.executeSql('DROP TABLE IF EXISTS app_chat_history;', [], true);
-    await db.executeSql('DROP TABLE IF EXISTS bookmark_categories;', [], true);
+    // await db.executeSql('DROP TABLE IF EXISTS app_chat_history;', [], true);
+    // await db.executeSql('DROP TABLE IF EXISTS bookmark_categories;', [], true);
     // await db.executeSql('DROP TABLE IF EXISTS bookmark_items;', [], true);
     // await db.executeSql('DROP TABLE IF EXISTS apps;', [], true);
     // await db.executeSql('DROP TABLE IF EXISTS auth;', [], true);

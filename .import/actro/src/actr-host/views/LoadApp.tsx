@@ -111,7 +111,8 @@ const LoadApp = () => {
   const showInputField = isTablet || (inputExpanded && !cameraActive);
 
   useEffect(() => {
-    if (!showInputField) return;
+    // 中文注释：Pad 端输入框常驻展示，但进入页面时不再主动抢焦点，仅保留 Phone 端展开输入框后的自动聚焦。
+    if (!showInputField || isTablet) return;
     const timer = setTimeout(() => {
       inputRef.current?.focus();
     }, 0);
