@@ -96,6 +96,9 @@ const LoadApp = () => {
 
   // 响应式尺寸：手机端使用屏幕宽度的 85%，iPad 端保持 500
   const isPhone = screenWidth < 600;
+  // 中文注释：Android 宿主已经通过 windowSoftInputMode 处理键盘上移，
+  // Pad 端不要再额外叠加 RN 的 keyboardInset，否则扫码区和输入框会被重复抬高。
+  const shouldApplyKeyboardInset = !(Platform.OS === 'android' && !isPhone);
   const scanSize = isPhone ? screenWidth * 0.85 : 500;
   const padInputWidth = 600;
   const containerGap = isPhone ? 24 : 36;
@@ -391,7 +394,7 @@ const LoadApp = () => {
           contentContainerStyle={[
             styles.scrollContent,
             styles.padScrollContent,
-            { paddingBottom: keyboardInset },
+            { paddingBottom: shouldApplyKeyboardInset ? keyboardInset : 0 },
           ]}
           keyboardShouldPersistTaps='handled'
         >
@@ -436,7 +439,7 @@ const LoadApp = () => {
             {
               width: padInputWidth,
               borderRadius: inputBorderRadius,
-              bottom: 42 + keyboardInset,
+              bottom: 42 + (shouldApplyKeyboardInset ? keyboardInset : 0),
             },
           ],
         )}

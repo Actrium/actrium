@@ -18,6 +18,7 @@ import {
   TouchableWithoutFeedback,
   useWindowDimensions,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../actr-host/components/Icon';
@@ -214,6 +215,9 @@ export default function GlobalSearchApp() {
   const localizedSearchCopy = LOCALIZED_SETTING_SEARCH_COPY[searchLocale];
 
   const isPhone = screenWidth < 600;
+  // 中文注释：Android 宿主已经通过 windowSoftInputMode 处理键盘上移，
+  // Pad 端不要再额外叠加 RN 的 keyboardInset，否则会出现双倍键盘高度位移。
+  const shouldApplyKeyboardInset = !(Platform.OS === 'android' && !isPhone);
   const inputWidth = isPhone ? screenWidth * 0.85 : 500;
   const resultsAreaSize = isPhone ? 'auto' : 500;
   const containerGap = isPhone ? 24 : 36;
@@ -608,7 +612,7 @@ export default function GlobalSearchApp() {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: keyboardInset },
+          { paddingBottom: shouldApplyKeyboardInset ? keyboardInset : 0 },
         ]}
         keyboardShouldPersistTaps='handled'
       >
