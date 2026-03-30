@@ -82,7 +82,7 @@ export class AppSessionService {
         tabId: tabId,
         title: appRes.data.app_name,
         icon: appRes.data.info?.logo || '',
-        url: appRes.data.url || '',
+        appUrl: appRes.data.url || '',
       })
 
       useAppStore.getState().setAppInfo(appId, appRes.data);
