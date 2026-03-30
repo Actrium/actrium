@@ -115,14 +115,27 @@ public class TabEventEmitter: RCTEventEmitter {
             logger.warning("[TabEventEmitter] Invalid tabOpened notification")
             return
         }
-        
-        let event: [String: Any] = [
+
+        var event: [String: Any] = [
             "tabId": tabId,
             "title": title,
             "systemTabType": userInfo["systemTabType"] as? String ?? NSNull(),
             "timestamp": Date().timeIntervalSince1970 * 1000
         ]
-        
+
+        // Add icon and appUrl if available
+        if let icon = userInfo["icon"] as? String {
+            event["icon"] = icon
+        } else {
+            event["icon"] = NSNull()
+        }
+
+        if let appUrl = userInfo["appUrl"] as? String {
+            event["appUrl"] = appUrl
+        } else {
+            event["appUrl"] = NSNull()
+        }
+
         logger.debug("[TabEventEmitter] Sending onTabOpened: \(tabId)")
         sendEvent(withName: "onTabOpened", body: event)
     }
@@ -166,13 +179,21 @@ public class TabEventEmitter: RCTEventEmitter {
             logger.warning("[TabEventEmitter] Invalid tabUpdated notification")
             return
         }
-        
-        let event: [String: Any] = [
+
+        var event: [String: Any] = [
             "tabId": tabId,
             "title": userInfo["title"] as? String ?? NSNull(),
             "timestamp": Date().timeIntervalSince1970 * 1000
         ]
-        
+
+        // Add icon and appUrl if available
+        if let icon = userInfo["icon"] as? String {
+            event["icon"] = icon
+        }
+        if let appUrl = userInfo["appUrl"] as? String {
+            event["appUrl"] = appUrl
+        }
+
         logger.debug("[TabEventEmitter] Sending onTabUpdated: \(tabId)")
         sendEvent(withName: "onTabUpdated", body: event)
     }
