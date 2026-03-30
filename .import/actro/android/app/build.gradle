@@ -5,6 +5,9 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "kotlin-parcelize"
 apply plugin: "com.google.protobuf"
+apply plugin: "kotlin-kapt"
+apply plugin: "com.google.devtools.ksp"
+
 
 // Initialize local.properties to read local configurations
 def localProperties = new Properties()
@@ -176,4 +179,8 @@ dependencies {
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("androidx.room:room-runtime:2.8.0-beta01")
+    implementation("androidx.room:room-ktx:2.8.0-beta01")
+    ksp("androidx.room:room-compiler:2.8.0-beta01")
 }
+
