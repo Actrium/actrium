@@ -44,6 +44,21 @@ class TabletViewModel : ViewModel() {
         when (event.methodName) {
             ReactModuleEvent.EVENT_UPDATE_TAB_INFO -> updateAppInfo(event.params)
             ReactModuleEvent.EVENT_EXIT_SEARCH -> hideSearch()
+            ReactModuleEvent.EVENT_TOGGLE_MARK_STATUS -> {
+                val tabId = event.params["tabId"] as? String
+                val marked = event.params["marked"] as? Boolean
+                if (tabId != null && marked != null) {
+                    _tabletUseCase.value?.let { useCase ->
+                        val index = useCase.appList.indexOfFirst { it.id ==tabId }
+                        if(index !=-1){
+                            val appList = useCase.appList.toMutableList()
+                            val oldItem = appList[index]
+                            appList[index] = oldItem.copy(isMarked = marked)
+                            _tabletUseCase.value = _tabletUseCase.value?.copy(appList = appList)
+                        }
+                    }
+                }
+            }
             ReactModuleEvent.EVENT_OPEN_TAB -> {
                 val systemAppType = event.params["systemAppType"] as? String
                 if (systemAppType == null) { // 打开应用
@@ -133,6 +148,15 @@ class TabletViewModel : ViewModel() {
         }
     }
 
+    fun toggleMarkStatus(activeModel: ActiveModel) {
+        EventBus.getDefault().post(
+            NativeModuleEvent(
+                NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED,
+                mapOf("tabId" to activeModel.id, "isBookmarked" to !activeModel.isMarked)
+            )
+        )
+    }
+
     fun removeActiveModel(id: String) {
         val index = appList.indexOfFirst { it.id == id }
         if (index != -1) {
@@ -163,13 +187,17 @@ class TabletViewModel : ViewModel() {
     fun toggleMenu() {
         _tabletUseCase.value?.let {
             it.currentApp?.let { bundle ->
-                val tabId = bundle.getString("tabId")
-                EventBus.getDefault().post(
-                    NativeModuleEvent(
-                        NativeModuleEvent.EVENT_EXTENSION_PANEL_VISIBLE_CHANGE,
-                        mapOf("tabId" to tabId, "visible" to true)
+                val tabId = bundle.getString("currentTabId")
+                val currentApp = _tabletUseCase.value?.appList?.find { it.id == tabId }
+                currentApp?.let { app ->
+                    EventBus.getDefault().post(
+                        NativeModuleEvent(
+                            NativeModuleEvent.EVENT_EXTENSION_PANEL_VISIBLE_CHANGE,
+                            mapOf("tabId" to tabId, "visible" to app.panelVisible)
+                        )
                     )
-                )
+                    currentApp.panelVisible = !currentApp.panelVisible
+                }
             }
         }
     }

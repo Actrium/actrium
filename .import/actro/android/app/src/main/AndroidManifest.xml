@@ -59,6 +59,7 @@
 
         <activity
             android:name="chat.askaway.android.tablet.TabletActivity"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustPan|stateHidden" />
 
         <activity
