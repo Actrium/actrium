@@ -129,6 +129,12 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
                 "title": tab.title,
                 "backgroundColor": tab.backgroundColor
             ]
+
+            // Add icon and appUrl if available
+            if let icon = tab.icon {
+                dict["icon"] = icon
+            }
+
             logger.debug("[props] Tab: \(tab.title), backgroundColor: \(tab.backgroundColor)")
 
             // System app tabs (like chrome:// pages)
@@ -200,7 +206,7 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
 
             // Regular ACTR tabs
             if let url = tab.url {
-                dict["url"] = url.absoluteString
+                dict["appUrl"] = url.absoluteString
             }
             if let htmlContent = tab.htmlContent {
                 dict["htmlContent"] = htmlContent

@@ -43,7 +43,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
 
         let properties = makeProperties()
         let rootView = CanvasReactNativeHost.shared.viewForTab(tabId: tab.id, initialProperties: properties)
-
+        1
         if let rctRootView = rootView as? RCTRootView {
             context.coordinator.rootView = rctRootView
         }
@@ -157,6 +157,11 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             "reloadKey": tab.reloadNonce
         ]
 
+        // Add icon and appUrl if available
+        if let icon = tab.icon {
+            tabDict["icon"] = icon
+        }
+
         // System app tabs (History/Bookmarks)
         if let systemType = tab.systemTabType {
             tabDict["systemAppType"] = systemType.rawValue
@@ -221,7 +226,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
         } else {
             // Regular ACTR tabs
             if let url = tab.url {
-                tabDict["url"] = url.absoluteString
+                tabDict["appUrl"] = url.absoluteString
             }
             if let htmlContent = tab.htmlContent {
                 tabDict["htmlContent"] = htmlContent
