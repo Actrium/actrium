@@ -230,8 +230,16 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         }
         binding.navTag.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
+                // 设置 navTag 背景为 bottom_nav_indicator_dark
+                binding.navTag.background = ContextCompat.getDrawable(this, R.drawable.bottom_nav_indicator_dark)
+                // 设置 navActivity 背景为空
+                binding.navActivity.background = null
                 viewModel.showBookmark()
             } else {
+                // 设置 navTag 背景为空
+                binding.navTag.background = null
+                // 设置 navActivity 背景为 bottom_nav_indicator_dark
+                binding.navActivity.background = ContextCompat.getDrawable(this, R.drawable.bottom_nav_indicator_dark)
                 viewModel.hideBookmark()
             }
         }
