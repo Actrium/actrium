@@ -18,6 +18,8 @@ import chat.askaway.android.utils.GridViewColumnCalculator
 import com.askaway.android.BuildConfig
 import com.askaway.android.MainApplication
 import com.askaway.android.R
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.askaway.android.databinding.ActivityTabletBinding
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
@@ -27,6 +29,7 @@ import com.facebook.react.uimanager.PixelUtil.pxToDp
 import com.askaway.android.core.ReactNativeBundle
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
+import com.askaway.android.utils.adjustKeyboard
 
 class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
 
@@ -47,7 +50,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding = ActivityTabletBinding.inflate(layoutInflater)
         setContentView(binding.root)
         viewModel = TabletViewModel()
-
         // 初始化顶部应用列表 adapter
         adapter = ActiveAdapter()
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
@@ -64,6 +66,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             viewModel.containerWidth = binding.rvContent.width.pxToDp().toInt()
             viewModel.containerHeight = binding.rvContent.height.pxToDp().toInt()
         }
+        binding.rvContent.adjustKeyboard()
 
         // 设置初始模式为 TAB
         changeMode(PageMode.TAB)
@@ -114,6 +117,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 }
             }
             viewModel.removeActiveModel(tabId)
+        }
+        contentAdapter.onMarkClick = { activeModel ->
+            viewModel.toggleMarkStatus(activeModel)
         }
 
         // 监听 RecyclerView 的布局变化，更新 ivAdd 位置
