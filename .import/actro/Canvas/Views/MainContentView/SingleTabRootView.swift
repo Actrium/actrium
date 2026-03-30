@@ -270,7 +270,8 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             "isRightPanelVisible": tab.systemTabType == nil,
             // 显式传递容器尺寸，确保 RN 能感知窗口缩小（onLayout 可能不触发）
             "containerWidth": containerSize.width,
-            "containerHeight": containerSize.height
+            "containerHeight": containerSize.height,
+            "appUrl": tab.url?.absoluteString ?? ""
         ]
         
         // 合并额外参数（从 openTab 传入的参数）
