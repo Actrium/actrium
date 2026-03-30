@@ -296,7 +296,7 @@ class TabModule: NSObject {
                 if let title = options["title"] as? String {
                     viewModel.tabs[index].title = title
                 }
-                if let urlString = options["url"] as? String, let newURL = URL(string: urlString) {
+                if let urlString = options["appUrl"] as? String, let newURL = URL(string: urlString) {
                     viewModel.tabs[index].url = newURL
                 }
                 resolve(true)
