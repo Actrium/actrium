@@ -175,3 +175,27 @@ struct Tab: Identifiable {
         return (r + m, g + m, b + m)
     }
 }
+
+// MARK: - Persistence
+
+/// Persisted tab data for saving to disk (only essential fields)
+struct PersistedTab: Identifiable, Codable {
+    let id: UUID
+    var title: String
+    var icon: String?
+    var appUrl: URL?
+
+    init(id: UUID, title: String, icon: String?, appUrl: URL?) {
+        self.id = id
+        self.title = title
+        self.icon = icon
+        self.appUrl = appUrl
+    }
+
+    init(from tab: Tab) {
+        self.id = tab.id
+        self.title = tab.title
+        self.icon = tab.icon
+        self.appUrl = tab.url
+    }
+}

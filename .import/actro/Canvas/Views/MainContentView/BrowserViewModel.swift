@@ -20,10 +20,18 @@ enum CanvasMode: Equatable {
 class BrowserViewModel: ObservableObject {
     static weak var active: BrowserViewModel?
 
-    @Published var tabs: [Tab] = []
+    @Published var tabs: [Tab] = [] {
+        didSet {
+            saveTabs()
+        }
+    }
     @Published var currentTabId: UUID?
     // 默认所有标签页左侧面板可见；仅在用户切换时记录覆盖值
     @Published private var leftPanelVisibility: [UUID: Bool] = [:]
+
+    // MARK: - Persistence
+    private let tabsKey = "persistedTabs"
+    private var cancellables = Set<AnyCancellable>()
     
     /// Current fullscreen tab ID (for iPhone only, excluding system tabs)
     @Published var fullscreenTabId: UUID?
@@ -59,6 +67,14 @@ class BrowserViewModel: ObservableObject {
 
     init() {
         BrowserViewModel.active = self
+
+        // First, try to load persisted tabs
+        if loadPersistedTabs() {
+            initializeSlotPositions()
+            logger.notice("📦 [BrowserViewModel] 已加载 \(self.tabs.count) 个持久化标签页")
+            return
+        }
+
         #if DEBUG
         // 🔴 开发调试：优先加载 counterapp 开发目录作为启动 tab (Focus 模式)
         let counterAppDevPath = "/Users/toupitutuetoudada/Desktop/work/github/ipad/askaway-ipad/Subsystem/actr-app-examples/counterapp"
@@ -109,6 +125,58 @@ class BrowserViewModel: ObservableObject {
         //     self.openSystemTab(.bookmarks)
         // }
     }
+
+    // MARK: - Tab Persistence
+
+    /// Save tabs to UserDefaults (only essential fields)
+    private func saveTabs() {
+        let persistedTabs = tabs.map { PersistedTab(from: $0) }
+        do {
+            let data = try JSONEncoder().encode(persistedTabs)
+            UserDefaults.standard.set(data, forKey: tabsKey)
+            logger.debug("💾 [BrowserViewModel] 已保存 \(persistedTabs.count) 个标签页")
+        } catch {
+            logger.error("❌ [BrowserViewModel] 保存标签页失败: \(error)")
+        }
+    }
+
+    /// Load persisted tabs from UserDefaults and create full Tab objects
+    /// - Returns: true if tabs were loaded, false if no persisted data or error
+    private func loadPersistedTabs() -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: tabsKey) else {
+            logger.debug("📭 [BrowserViewModel] 没有找到持久化的标签页数据")
+            return false
+        }
+
+        do {
+            let persistedTabs = try JSONDecoder().decode([PersistedTab].self, from: data)
+            guard !persistedTabs.isEmpty else {
+                logger.debug("📭 [BrowserViewModel] 持久化的标签页数据为空")
+                return false
+            }
+
+            // Convert PersistedTab to full Tab objects
+            self.tabs = persistedTabs.map { persistedTab in
+                Tab(
+                    id: persistedTab.id,
+                    title: persistedTab.title,
+                    icon: persistedTab.icon,
+                    url: persistedTab.appUrl
+                )
+            }
+
+            // Set current tab to first tab if available
+            if let firstTab = self.tabs.first {
+                self.currentTabId = firstTab.id
+            }
+
+            logger.notice("✅ [BrowserViewModel] 成功加载 \(self.tabs.count) 个持久化标签页")
+            return true
+        } catch {
+            logger.error("❌ [BrowserViewModel] 加载持久化标签页失败: \(error)")
+            return false
+        }
+    }
     
     @discardableResult
     func addNewTab(focus: Bool = true) -> Tab {
@@ -139,13 +207,20 @@ class BrowserViewModel: ObservableObject {
         logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
         
         // 发送通知到 RN
+        var userInfo: [String: Any] = [
+            "tabId": newTab.id.uuidString,
+            "title": newTab.title
+        ]
+        if let icon = newTab.icon {
+            userInfo["icon"] = icon
+        }
+        if let appUrl = newTab.url?.absoluteString {
+            userInfo["appUrl"] = appUrl
+        }
         NotificationCenter.default.post(
             name: .tabOpenedFromNative,
             object: nil,
-            userInfo: [
-                "tabId": newTab.id.uuidString,
-                "title": newTab.title
-            ]
+            userInfo: userInfo
         )
         
         return newTab
@@ -193,14 +268,21 @@ class BrowserViewModel: ObservableObject {
             tabSlotPositions[newTab.id] = tabs.count - 1
             logger.notice(" 已创建登录标签: \(type.title)")
 
+            var userInfo: [String: Any] = [
+                "tabId": newTab.id.uuidString,
+                "title": newTab.title,
+                "systemTabType": type.rawValue
+            ]
+            if let icon = newTab.icon {
+                userInfo["icon"] = icon
+            }
+            if let appUrl = newTab.url?.absoluteString {
+                userInfo["appUrl"] = appUrl
+            }
             NotificationCenter.default.post(
                 name: .tabOpenedFromNative,
                 object: nil,
-                userInfo: [
-                    "tabId": newTab.id.uuidString,
-                    "title": newTab.title,
-                    "systemTabType": type.rawValue
-                ]
+                userInfo: userInfo
             )
             // 中文注释：新建完成后立即切换，保证 iPad 端选中态、Focus 模式与 RN 侧事件保持一致。
             switchToTab(id: newTab.id)
@@ -235,14 +317,21 @@ class BrowserViewModel: ObservableObject {
         logger.notice(" 已创建系统标签: \(type.title)")
         
         // 发送通知到 RN
+        var userInfo: [String: Any] = [
+            "tabId": newTab.id.uuidString,
+            "title": newTab.title,
+            "systemTabType": type.rawValue
+        ]
+        if let icon = newTab.icon {
+            userInfo["icon"] = icon
+        }
+        if let appUrl = newTab.url?.absoluteString {
+            userInfo["appUrl"] = appUrl
+        }
         NotificationCenter.default.post(
             name: .tabOpenedFromNative,
             object: nil,
-            userInfo: [
-                "tabId": newTab.id.uuidString,
-                "title": newTab.title,
-                "systemTabType": type.rawValue
-            ]
+            userInfo: userInfo
         )
         
         return newTab
@@ -781,18 +870,39 @@ class BrowserViewModel: ObservableObject {
     }
     
     func updateCurrentTabTitle(_ title: String) {
+        updateCurrentTabInfo(title: title, icon: nil, appUrl: nil)
+    }
+
+    /// Update current tab info (title, icon, appUrl)
+    func updateCurrentTabInfo(title: String? = nil, icon: String? = nil, appUrl: URL? = nil) {
         guard let currentTabId = currentTabId,
               let index = tabs.firstIndex(where: { $0.id == currentTabId }) else { return }
-        tabs[index].title = title
-        
+
+        if let title = title {
+            tabs[index].title = title
+        }
+        if let icon = icon {
+            tabs[index].icon = icon
+        }
+        if let appUrl = appUrl {
+            tabs[index].url = appUrl
+        }
+
         // 发送通知到 RN
+        var userInfo: [String: Any] = ["tabId": currentTabId.uuidString]
+        if let title = title {
+            userInfo["title"] = title
+        }
+        if let icon = icon {
+            userInfo["icon"] = icon
+        }
+        if let appUrl = appUrl?.absoluteString {
+            userInfo["appUrl"] = appUrl
+        }
         NotificationCenter.default.post(
             name: .tabUpdatedFromNative,
             object: nil,
-            userInfo: [
-                "tabId": currentTabId.uuidString,
-                "title": title
-            ]
+            userInfo: userInfo
         )
     }
 
@@ -1294,13 +1404,20 @@ class BrowserViewModel: ObservableObject {
         }
         
         // 发送通知到 RN
+        var userInfo: [String: Any] = [
+            "tabId": newTab.id.uuidString,
+            "title": title
+        ]
+        if let icon = newTab.icon {
+            userInfo["icon"] = icon
+        }
+        if let appUrl = newTab.url?.absoluteString {
+            userInfo["appUrl"] = appUrl
+        }
         NotificationCenter.default.post(
             name: .tabOpenedFromNative,
             object: nil,
-            userInfo: [
-                "tabId": newTab.id.uuidString,
-                "title": title
-            ]
+            userInfo: userInfo
         )
     }
 
