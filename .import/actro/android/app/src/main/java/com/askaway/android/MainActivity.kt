@@ -27,6 +27,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
+import chat.askaway.android.data.database.AppDatabase
+import chat.askaway.android.data.repository.ActiveRepository
 import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.databinding.ActivityMainBinding
 import com.askaway.android.global.Params
@@ -47,7 +49,11 @@ import com.askaway.android.utils.ViewAnimationHelper
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
     private lateinit var binding: ActivityMainBinding
-    private val viewModel: MainViewModel by viewModels()
+    private val viewModel: MainViewModel by viewModels {
+        val database = AppDatabase.getDatabase(applicationContext)
+        val repository = ActiveRepository(database.activeDao())
+        MainViewModelFactory(repository)
+    }
     private var reactRootView: ReactRootView? = null
     private val appViews = mutableMapOf<String, ReactRootView>()
     private var isReactNativeVisible = false
@@ -445,6 +451,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         super.onPause()
         val application = application as MainApplication
         application.reactNativeHost.reactInstanceManager.onHostPause(this)
+
+        // 保存 ActiveList 到数据库
+        viewModel.saveActiveListToDatabase()
     }
 
     override fun onResume() {
