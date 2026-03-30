@@ -507,6 +507,10 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     return <ActrInput appId={appId} showTopToast={showTopToast} />;
   }, [appId, showTopToast]);
 
+  // 中文注释：Android 宿主已经在 Native 层处理键盘抬升，
+  // Chat 页只保留 iOS 的联动，避免 Android Pad 再叠加一层 keyboardInset。
+  const shouldApplyKeyboardInset = Platform.OS === 'ios' && layoutTokens.isTablet;
+
   const contentAreaAnimatedStyle = useAnimatedStyle(() => {
     if (Platform.OS !== 'ios' || layoutTokens.isTablet) {
       return {
@@ -677,7 +681,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           {
             backgroundColor: layoutTokens.isTablet ? '#fff' : '#F2F2F6',
             marginTop: layoutTokens.isTablet ? 8 : 0,
-            marginBottom: layoutTokens.isTablet ? keyboardInset : 0,
+            marginBottom: shouldApplyKeyboardInset ? keyboardInset : 0,
           },
         ]}
       >

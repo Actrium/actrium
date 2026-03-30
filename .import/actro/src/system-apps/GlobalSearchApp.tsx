@@ -215,9 +215,9 @@ export default function GlobalSearchApp() {
   const localizedSearchCopy = LOCALIZED_SETTING_SEARCH_COPY[searchLocale];
 
   const isPhone = screenWidth < 600;
-  // 中文注释：Android 宿主已经通过 windowSoftInputMode 处理键盘上移，
-  // Pad 端不要再额外叠加 RN 的 keyboardInset，否则会出现双倍键盘高度位移。
-  const shouldApplyKeyboardInset = !(Platform.OS === 'android' && !isPhone);
+  // 中文注释：Android 的 Phone/Pad 都交给宿主处理键盘抬升，
+  // GlobalSearch 仅在 iOS Pad 追加 RN 的 keyboardInset，避免 Android 端重复位移。
+  const shouldApplyKeyboardInset = Platform.OS === 'ios' && !isPhone;
   const inputWidth = isPhone ? screenWidth * 0.85 : 500;
   const resultsAreaSize = isPhone ? 'auto' : 500;
   const containerGap = isPhone ? 24 : 36;
@@ -633,8 +633,9 @@ export default function GlobalSearchApp() {
             </ScrollView>
           </View>
 
-          {/* Pad 端输入区和结果区共用同一套宽度约束，避免输入行额外撑满父容器 */}
-          <View style={{ width: inputWidth }}>
+          {/* 中文注释：Pad 端输入区单独占一个底部锚点容器，
+              通过 marginTop: 'auto' 把输入框稳定压到页面底部，避免继续跟随整体内容垂直居中。 */}
+          <View style={[styles.padInputSection, { width: inputWidth }]}>
             {renderSearchInput(
               [
                 styles.input,
@@ -672,9 +673,9 @@ const styles = StyleSheet.create({
   GlobalSearchContainer: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
     flexDirection: 'column',
-    paddingVertical: 40,
+    paddingTop: 40,
+    paddingBottom: 16,
   },
   resultsArea: {
     overflow: 'hidden',
@@ -791,6 +792,10 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingHorizontal: 26,
     paddingBottom: 10,
+  },
+  padInputSection: {
+    width: '100%',
+    marginTop: 'auto',
   },
   phoneInputContainer: {
     flex: 1,
