@@ -184,6 +184,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         // 在 TAB 模式下，滚动到当前选中的 app
                         if (useCase.pageMode == PageMode.TAB && currentTabId != null) {
                             val currentIndex = useCase.appList.indexOfFirst { model -> model.id == currentTabId }
+                            Log.e("TabletActivity", "currentIndex:${currentIndex}")
                             if (currentIndex >= 0) {
                                 binding.rvContent.scrollToPosition(currentIndex)
                             }
@@ -195,6 +196,14 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         changeMode(useCase.pageMode)
                         viewModel.currentDisplayModel = useCase.pageMode
                     }
+                    if (useCase.pageMode == PageMode.TAB && adapter.currentId != null) {
+                        val currentIndex = useCase.appList.indexOfFirst { model -> model.id == adapter.currentId }
+                        Log.e("TabletActivity", "currentIndex:${currentIndex}")
+                        if (currentIndex >= 0) {
+                            binding.rvContent.scrollToPosition(currentIndex)
+                        }
+                    }
+
                     if (useCase.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS) {
                         showSettingsPopup(viewModel.pageBundle.deepCopy())
                     } else {

@@ -18,7 +18,7 @@ class TabPagerLayoutManager(context: Context) : LinearLayoutManager(context, HOR
     }
 
     override fun canScrollHorizontally(): Boolean {
-        return true
+        return false
     }
 
     override fun canScrollVertically(): Boolean {
