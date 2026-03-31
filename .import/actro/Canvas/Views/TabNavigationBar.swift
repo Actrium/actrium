@@ -302,9 +302,7 @@ private struct FocusModeNavigationBar: View {
                     viewModel.switchToTab(id: tab.id)
                 },
                 onClose: {
-                    if viewModel.tabs.count > 1 {
-                        viewModel.closeTab(id: tab.id)
-                    }
+                    viewModel.closeTab(id: tab.id)
                 }
             )
             .onHover { hovering in
