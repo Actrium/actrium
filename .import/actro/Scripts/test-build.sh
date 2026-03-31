@@ -74,18 +74,6 @@ npx react-native bundle \
 
 cd "$PROJECT_ROOT"
 
-# 打包示例 App (counterapp.actr)
-echo "📦 打包示例 App (counterapp.actr)..."
-COUNTER_APP_DIR="$PROJECT_ROOT/Subsystem/actr-app-examples/counterapp"
-OUTPUT_ASSET_DIR="$PROJECT_ROOT/Canvas/Resources"
-if [ -d "$COUNTER_APP_DIR" ]; then
-    mkdir -p "$OUTPUT_ASSET_DIR"
-    cd "$COUNTER_APP_DIR"
-    zip -j "$OUTPUT_ASSET_DIR/counterapp.actr" manifest.json unified-app.js
-    echo "✅ counterapp.actr 已更新至 $OUTPUT_ASSET_DIR"
-fi
-cd "$PROJECT_ROOT"
-
 echo "📦 安装 CocoaPods 依赖..."
 pod install
 
