@@ -409,4 +409,14 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
             }
         }
     }
+
+    @ReactMethod
+    fun shutdownService(dict: ReadableMap, promise: Promise){
+        val tabId = dict.getString("tabId")
+        if (tabId == null || !clients.containsKey(tabId)) {
+            promise.reject("NOT_CONNECTED", "ActrBridge not initialized for tabId")
+            return
+        }
+        clients[tabId]?.shutdown()
+    }
 }

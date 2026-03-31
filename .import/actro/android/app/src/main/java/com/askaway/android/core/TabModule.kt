@@ -51,11 +51,7 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
                 is Double -> params.putDouble(key, value)
             }
         }
-        if (event.methodName == NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED) {
-            sendEvent("onTabBookmarkChanged", params)
-        } else if (event.methodName == NativeModuleEvent.EVENT_EXTENSION_PANEL_VISIBLE_CHANGE) {
-            sendEvent("onExtensionPanelVisibleChange", params)
-        }
+        sendEvent(event.methodName, params)
     }
 
     private fun sendEvent(eventName: String, params: WritableMap?) {
