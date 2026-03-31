@@ -153,7 +153,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                                 // 创建新的 ReactRootView
                                 val targetView = createReactRootView("canvas-kotlin", bundle)
                                 reactViewMap[currentTabId] = targetView
-                                Log.d("TabletActivity", "Created new ReactRootView for $currentTabId")
+                                Log.d("TabletActivity", "Created new ReactRootView for $currentTabId ${bundle}")
                             } else {
                                 // 更新已存在的 ReactRootView 的属性
 //                                try {
@@ -196,20 +196,23 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         viewModel.currentDisplayModel = useCase.pageMode
                     }
                     if (useCase.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS) {
-                        showSettingsPopup()
+                        showSettingsPopup(viewModel.pageBundle.deepCopy())
                     } else {
                         hideSettingsPopup()
                     }
                     if (useCase.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SEARCH) {
-                        showSearch()
+                        Log.e("TabletActivity", "showSearch:${viewModel.pageBundle}")
+                        showSearch(viewModel.pageBundle.deepCopy())
                     } else {
+                        Log.e("TabletActivity", "hideSearch")
                         hideSearch()
                     }
                     if (useCase.showPageType == ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_BOOKMARK) {
-                        showBookmark()
+                        showBookmark(viewModel.pageBundle.deepCopy())
                     } else {
                         hideBookmark()
                     }
+                    viewModel.pageBundle.clear()
                 }
             }
         }
@@ -423,7 +426,11 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         // 获取遮罩和内容视图
         val vMask = popupView.findViewById<View>(R.id.vMask)
         val llContent = popupView.findViewById<FrameLayout>(R.id.llContent)
-        val bundle = sourceBundle ?: ReactNativeBundle.getSetBundle()
+        val bundle = if (sourceBundle != null && !sourceBundle.isEmpty) {
+            sourceBundle
+        } else {
+            ReactNativeBundle.getSetBundle()
+        }
         val targetView = createReactRootView("canvas-kotlin", bundle)
         llContent.addView(targetView)
 
@@ -483,7 +490,11 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         if (binding.flSearch.isVisible) return
         binding.flSearch.isVisible = true
         binding.flSearch.removeAllViews()
-        val bundle = sourceBundle ?: ReactNativeBundle.getSearchBundle()
+        val bundle = if (sourceBundle != null && !sourceBundle.isEmpty) {
+            sourceBundle
+        } else {
+            ReactNativeBundle.getSearchBundle()
+        }
         val targetView = createReactRootView("canvas-kotlin", bundle)
         binding.flSearch.addView(targetView)
     }
@@ -497,7 +508,11 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         if (binding.flBookmark.isVisible) return
         binding.flBookmark.isVisible = true
         binding.flBookmark.removeAllViews()
-        val bundle = sourceBundle ?: ReactNativeBundle.getBookmarkBundle()
+        val bundle = if (sourceBundle != null && !sourceBundle.isEmpty) {
+            sourceBundle
+        } else {
+            ReactNativeBundle.getBookmarkBundle()
+        }
         val targetView = createReactRootView("canvas-kotlin", bundle)
         binding.flBookmark.addView(targetView)
     }
