@@ -164,6 +164,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                     break
                 }
             }
+            viewModel.enterFullScreen(activeModel.id)
         }
 
         // 设置删除点击事件
@@ -215,6 +216,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                         }
                         Params.currentTabId = currentTabId
                         showReactNativeView()
+                        viewModel.enterFullScreen(currentTabId)
                     }
                 }
                 launch {
@@ -432,6 +434,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
         val tabId = Params.currentTabId
         if (!tabId.isNullOrEmpty()) {
+            viewModel.exitFullScreen(tabId)
             if (viewModel.canCaptureScreenshot(tabId)) {
                 val screenshotPath = binding.flRNContent.screenshot("$tabId.jpg")
                 if (screenshotPath != null) {

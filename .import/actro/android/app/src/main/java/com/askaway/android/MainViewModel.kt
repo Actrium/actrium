@@ -124,7 +124,10 @@ class MainViewModel(
                         addApp(filteredParams)
                     }
                 } else {  // 打开其他页面
-                    Log.e("MainViewModel", "Received EVENT_OPEN_TAB for systemAppType: $systemAppType with params: ${event.params}")
+                    Log.e(
+                        "MainViewModel",
+                        "Received EVENT_OPEN_TAB for systemAppType: $systemAppType with params: ${event.params}"
+                    )
                     pageBundle.clear()
                     val bundle = Bundle()
                     bundle.addMap(event.params)
@@ -269,5 +272,25 @@ class MainViewModel(
             _activeModelList[index] = oldItem.copy(screenshot = screenshotPath)
             _activeList.tryEmit(_activeModelList.toList())
         }
+    }
+
+    fun enterFullScreen(tabId: String?) {
+        if (tabId == null) return
+        EventBus.getDefault().post(
+            NativeModuleEvent(
+                NativeModuleEvent.EVENT_TAB_ENTERED_FULLSCREEN,
+                mapOf("tabId" to tabId)
+            )
+        )
+    }
+
+    fun exitFullScreen(tabId: String?) {
+        if (tabId == null) return
+        EventBus.getDefault().post(
+            NativeModuleEvent(
+                NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED,
+                mapOf("tabId" to tabId)
+            )
+        )
     }
 }
