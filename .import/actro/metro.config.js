@@ -4,7 +4,7 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const { resolve } = require('metro-resolver');
 
 const projectRoot = __dirname;
-const goAskAwayRoot = path.resolve(projectRoot, '../..');
+const goAskAwayRoot = path.resolve(projectRoot, '..');
 const supermarkRoot = path.resolve(goAskAwayRoot, 'supermark');
 const yarnLinkRoot = path.resolve(process.env.HOME || '', '.config', 'yarn', 'link');
 
