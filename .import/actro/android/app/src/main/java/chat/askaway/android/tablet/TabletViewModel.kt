@@ -49,8 +49,8 @@ class TabletViewModel : ViewModel() {
                 val marked = event.params["marked"] as? Boolean
                 if (tabId != null && marked != null) {
                     _tabletUseCase.value?.let { useCase ->
-                        val index = useCase.appList.indexOfFirst { it.id ==tabId }
-                        if(index !=-1){
+                        val index = useCase.appList.indexOfFirst { it.id == tabId }
+                        if (index != -1) {
                             val appList = useCase.appList.toMutableList()
                             val oldItem = appList[index]
                             appList[index] = oldItem.copy(isMarked = marked)
@@ -59,45 +59,11 @@ class TabletViewModel : ViewModel() {
                     }
                 }
             }
-            ReactModuleEvent.EVENT_OPEN_TAB -> {
-                val systemAppType = event.params["systemAppType"] as? String
-                if (systemAppType == null) { // 打开应用
-                    val tabId = event.params["tabId"] as? String
-                    Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId")
-                    val hasActive = tabId != null && appList.any { it.id == tabId }
-                    if (hasActive) {
-                        val appModel = appList.find { it.id == tabId }
 
-                        appModel?.let {
-                            _tabletUseCase.value = _tabletUseCase.value?.copy(
-                                currentApp = it.genReactNativeBundle(
-                                    Params.appList,
-                                    containerHeight,
-                                    containerWidth
-                                )
-                            )
-                        }
-                    } else {
-                        val filteredParams = event.params.filterKeys { it != "tabId" }
-                        addApp(filteredParams)
-                    }
-                } else {  // 打开其他页面
-                    Log.e(
-                        "MainViewModel",
-                        "Received EVENT_OPEN_TAB for systemAppType: $systemAppType with params: ${event.params}"
-                    )
-                    pageBundle.clear()
-                    val bundle = Bundle()
-                    bundle.addMap(event.params)
-                    val filteredParams = event.params.filterKeys { it != "systemAppType" }
-                    pageBundle.putBundle("tab", bundle)
-                    pageBundle.putBoolean("singleTabMode", true)
-                    pageBundle.addMap(filteredParams)
-                    _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = systemAppType)
-                }
-            }
+            ReactModuleEvent.EVENT_OPEN_TAB -> openTabByReactNative(event.params)
         }
     }
+
 
     private fun updateAppInfo(params: Map<String, Any?>) {
         val tabId = params["tabId"] as? String
@@ -120,6 +86,7 @@ class TabletViewModel : ViewModel() {
     }
 
     fun addApp(params: Map<String, Any?>? = null) {
+        Log.e("TabletViewModel", "addApp:${params}")
         val tabModel = AppModel(id = UUID.randomUUID().toString())
         appList.add(tabModel)
         val activeModel = ActiveModel(
@@ -243,6 +210,76 @@ class TabletViewModel : ViewModel() {
             null
         }
     }
+
+    /**
+     * 通过reactNative调用的方式打开Tab
+     */
+    private fun openTabByReactNative(params: Map<String, Any?>) {
+        Log.e("TabletViewModel", "openTabByReactNative:${params}")
+        if (params.keys.contains(ReactNativeBundle.REACT_NATIVE_VIEW_TYPE)) {
+            openSystemPage(params)
+        } else if (params.keys.contains(ReactNativeBundle.REACT_NATIVE_VIEW_TAB_TYPE)) {
+            openSystemTab(params)
+        } else {
+            openTab(params)
+        }
+    }
+
+    private fun openTab(params: Map<String, Any?>) {
+        val tabId = params["tabId"] as? String
+        Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId")
+        val hasActive = tabId != null && appList.any { it.id == tabId }
+        if (hasActive) {
+            val appModel = appList.find { it.id == tabId }
+            appModel?.let {
+                _tabletUseCase.value = _tabletUseCase.value?.copy(
+                    currentApp = it.genReactNativeBundle(
+                        Params.appList,
+                        containerHeight,
+                        containerWidth
+                    )
+                )
+            }
+        } else {
+            Log.e("TabletViewModel", "no hasActive")
+            val filteredParams = params.filterKeys { it != "tabId" }
+            addApp(filteredParams)
+        }
+    }
+
+    private fun openSystemTab(params: Map<String, Any?>) {
+        val tabId = if (params.keys.contains("tabId")) params["tabId"] as String else UUID.randomUUID().toString()
+        val tabModel = AppModel(id = tabId)
+        appList.add(tabModel)
+        val activeModel = ActiveModel(
+            id = tabModel.id,
+            name = "",
+            icon = "",
+            screenshot = ""
+        )
+        val bundle = tabModel.genReactNativeBundle(appList, containerHeight, containerWidth)
+        bundle.addMap(params)
+        _tabletUseCase.value = _tabletUseCase.value!!.copy(
+            appList = _tabletUseCase.value!!.appList + activeModel,
+            currentApp = bundle
+        )
+    }
+
+    private fun openSystemPage(params: Map<String, Any?>) {
+        pageBundle.clear()
+        val systemAppType = params["systemAppType"] as? String
+        pageBundle.clear()
+        val bundle = Bundle()
+        bundle.addMap(params)
+        val filteredParams = params.filterKeys { it != "systemAppType" }
+        pageBundle.putBundle("tab", bundle)
+        pageBundle.putBoolean("singleTabMode", true)
+        pageBundle.addMap(filteredParams)
+        systemAppType?.let {
+            _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = it)
+        }
+    }
+
 
     override fun onCleared() {
         super.onCleared()

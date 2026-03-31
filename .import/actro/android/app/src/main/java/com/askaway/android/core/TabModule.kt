@@ -18,6 +18,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
 import com.askaway.android.MainActivity
+import java.util.UUID
 
 class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     override fun getName(): String {
@@ -52,7 +53,7 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
         }
         if (event.methodName == NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED) {
             sendEvent("onTabBookmarkChanged", params)
-        }else if(event.methodName == NativeModuleEvent.EVENT_EXTENSION_PANEL_VISIBLE_CHANGE){
+        } else if (event.methodName == NativeModuleEvent.EVENT_EXTENSION_PANEL_VISIBLE_CHANGE) {
             sendEvent("onExtensionPanelVisibleChange", params)
         }
     }
@@ -133,10 +134,16 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
-    fun openTab(dict: ReadableMap) {
+    fun openTab(dict: ReadableMap, promise: Promise) {
         Log.e("TabModule", "openTab called with: $dict")
+        val hashMap = dict.toHashMap()
+        if (dict.hasKey(ReactNativeBundle.REACT_NATIVE_VIEW_TAB_TYPE)) {
+            val tabId = UUID.randomUUID().toString()
+            hashMap.put("tabId", tabId)
+            promise.resolve(tabId)
+        }
         EventBus.getDefault().post(
-            ReactModuleEvent(ReactModuleEvent.EVENT_OPEN_TAB, dict.toHashMap())
+            ReactModuleEvent(ReactModuleEvent.EVENT_OPEN_TAB, hashMap)
         )
     }
 
