@@ -43,7 +43,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
 
         let properties = makeProperties()
         let rootView = CanvasReactNativeHost.shared.viewForTab(tabId: tab.id, initialProperties: properties)
-        1
+
         if let rctRootView = rootView as? RCTRootView {
             context.coordinator.rootView = rctRootView
         }
