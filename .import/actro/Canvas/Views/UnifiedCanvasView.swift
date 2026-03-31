@@ -1401,14 +1401,6 @@ private struct TabCardView: View {
         return baseScale
     }
 
-    // 判断 Tab 是否有 RN 内容需要渲染
-    private var hasRNContent: Bool {
-        tab.systemTabType != nil ||
-        tab.unifiedScript != nil ||
-        tab.leftPanelScript != nil ||
-        tab.guestScript != nil
-    }
-
     // 内容区域视图
     @ViewBuilder
     private var contentView: some View {
@@ -1417,43 +1409,29 @@ private struct TabCardView: View {
             Color(hslString: tab.backgroundColor)
 
             // 每个 Tab 都有独立的 RCTRootView - 实现真正的缩放
-            if hasRNContent {
-                // DEBUG: 记录关键尺寸
-
-                // 关键修复：使用 overlay 而非 frame+scaleEffect 组合
-                // 原来的方式 scaleEffect 后用 frame 对齐会有问题，因为 SwiftUI 使用原始尺寸计算位置
-                // 新方式：用固定尺寸的容器，overlay 放置缩放后的内容
-                Color.clear
-                    .frame(width: cardContentSize.width, height: cardContentSize.height)
-                    .overlay(alignment: .topLeading) {
-                        SingleTabRootView(
-                            tab: tab,
-                            viewModel: viewModel,
-                            historyVM: historyVM,
-                            bookmarkVM: bookmarkVM,
-                            containerSize: CGSize(
-                                width: max(rnRenderSize.width, 1),
-                                height: max(rnRenderSize.height, 1)
-                            )
-                        )
-                        .frame(
+            // 关键修复：使用 overlay 而非 frame+scaleEffect 组合
+            // 原来的方式 scaleEffect 后用 frame 对齐会有问题，因为 SwiftUI 使用原始尺寸计算位置
+            // 新方式：用固定尺寸的容器，overlay 放置缩放后的内容
+            Color.clear
+                .frame(width: cardContentSize.width, height: cardContentSize.height)
+                .overlay(alignment: .topLeading) {
+                    SingleTabRootView(
+                        tab: tab,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        bookmarkVM: bookmarkVM,
+                        containerSize: CGSize(
                             width: max(rnRenderSize.width, 1),
                             height: max(rnRenderSize.height, 1)
                         )
-                        .scaleEffect(rnScaleFactor, anchor: .topLeading)
-                    }
-                    .clipped()
-            } else if let _ = tab.htmlContent {
-                // 有 htmlContent，显示网页内容（暂时用占位）
-                Image(systemName: "doc.text")
-                    .font(.system(size: 32))
-                    .foregroundColor(.white.opacity(0.3))
-            } else {
-                // 空白 Tab
-                Image(systemName: "globe")
-                    .font(.system(size: 32))
-                    .foregroundColor(.white.opacity(0.3))
-            }
+                    )
+                    .frame(
+                        width: max(rnRenderSize.width, 1),
+                        height: max(rnRenderSize.height, 1)
+                    )
+                    .scaleEffect(rnScaleFactor, anchor: .topLeading)
+                }
+                .clipped()
         }
         .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
