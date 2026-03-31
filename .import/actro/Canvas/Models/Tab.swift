@@ -184,12 +184,16 @@ struct PersistedTab: Identifiable, Codable {
     var title: String
     var icon: String?
     var appUrl: URL?
+    var hasUnreadMessage: Bool
+    var isBookmarked: Bool
 
-    init(id: UUID, title: String, icon: String?, appUrl: URL?) {
+    init(id: UUID, title: String, icon: String?, appUrl: URL?, hasUnreadMessage: Bool = false, isBookmarked: Bool = false) {
         self.id = id
         self.title = title
         self.icon = icon
         self.appUrl = appUrl
+        self.hasUnreadMessage = hasUnreadMessage
+        self.isBookmarked = isBookmarked
     }
 
     init(from tab: Tab) {
@@ -197,5 +201,7 @@ struct PersistedTab: Identifiable, Codable {
         self.title = tab.title
         self.icon = tab.icon
         self.appUrl = tab.url
+        self.hasUnreadMessage = tab.hasUnreadMessage
+        self.isBookmarked = tab.isBookmarked
     }
 }
