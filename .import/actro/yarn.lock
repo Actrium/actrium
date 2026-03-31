@@ -1440,7 +1440,7 @@
   dependencies:
     "@sinonjs/commons" "^3.0.0"
 
-"@supramark/core@file:../../supermark/packages/core", "@supramark/core@workspace:*":
+"@supramark/core@file:../supermark/packages/core", "@supramark/core@workspace:*":
   version "0.1.0"
   dependencies:
     katex "^0.16.9"
@@ -1454,58 +1454,58 @@
     remark-parse "^11.0.0"
     unified "^11.0.0"
 
-"@supramark/diagram-engine@file:../../supermark/packages/renderers/diagram-engine", "@supramark/diagram-engine@workspace:*":
+"@supramark/diagram-engine@file:../supermark/packages/renderers/diagram-engine", "@supramark/diagram-engine@workspace:*":
   version "0.1.0"
   dependencies:
     "@supramark/core" "workspace:*"
 
-"@supramark/feature-admonition@file:../../supermark/packages/features/feature-admonition":
+"@supramark/feature-admonition@file:../supermark/packages/features/feature-admonition":
   version "0.1.0"
 
-"@supramark/feature-core-markdown@file:../../supermark/packages/features/feature-core-markdown":
+"@supramark/feature-core-markdown@file:../supermark/packages/features/feature-core-markdown":
   version "0.1.0"
 
-"@supramark/feature-definition-list@file:../../supermark/packages/features/feature-definition-list":
+"@supramark/feature-definition-list@file:../supermark/packages/features/feature-definition-list":
   version "0.1.0"
 
-"@supramark/feature-diagram-dot@file:../../supermark/packages/features/feature-diagram-dot":
+"@supramark/feature-diagram-dot@file:../supermark/packages/features/feature-diagram-dot":
   version "0.1.0"
 
-"@supramark/feature-diagram-echarts@file:../../supermark/packages/features/feature-diagram-echarts":
+"@supramark/feature-diagram-echarts@file:../supermark/packages/features/feature-diagram-echarts":
   version "0.1.0"
 
-"@supramark/feature-diagram-mermaid@file:../../supermark/packages/features/feature-diagram-mermaid":
+"@supramark/feature-diagram-mermaid@file:../supermark/packages/features/feature-diagram-mermaid":
   version "0.1.0"
 
-"@supramark/feature-diagram-plantuml@file:../../supermark/packages/features/feature-diagram-plantuml":
+"@supramark/feature-diagram-plantuml@file:../supermark/packages/features/feature-diagram-plantuml":
   version "0.1.0"
 
-"@supramark/feature-diagram-vega-lite@file:../../supermark/packages/features/feature-diagram-vega-lite":
+"@supramark/feature-diagram-vega-lite@file:../supermark/packages/features/feature-diagram-vega-lite":
   version "0.1.0"
 
-"@supramark/feature-emoji@file:../../supermark/packages/features/feature-emoji":
+"@supramark/feature-emoji@file:../supermark/packages/features/feature-emoji":
   version "0.1.0"
 
-"@supramark/feature-footnote@file:../../supermark/packages/features/feature-footnote":
+"@supramark/feature-footnote@file:../supermark/packages/features/feature-footnote":
   version "0.1.0"
 
-"@supramark/feature-gfm@file:../../supermark/packages/features/feature-gfm":
+"@supramark/feature-gfm@file:../supermark/packages/features/feature-gfm":
   version "0.1.0"
 
-"@supramark/feature-math@file:../../supermark/packages/features/feature-math":
+"@supramark/feature-math@file:../supermark/packages/features/feature-math":
   version "0.1.0"
 
-"@supramark/feature-weather@file:../../supermark/packages/features/feature-weather":
+"@supramark/feature-weather@file:../supermark/packages/features/feature-weather":
   version "0.1.0"
 
-"@supramark/rn@file:../../supermark/packages/renderers/rn":
+"@supramark/rn@file:../supermark/packages/renderers/rn":
   version "0.1.0"
   dependencies:
     "@supramark/core" "workspace:*"
     "@supramark/diagram-engine" "workspace:*"
     mathjax-full "^3.2.2"
 
-"@supramark/web-diagram@file:../../supermark/packages/renderers/web-diagram":
+"@supramark/web-diagram@file:../supermark/packages/renderers/web-diagram":
   version "0.1.0"
 
 "@tsconfig/react-native@^3.0.8":
@@ -1775,7 +1775,7 @@ asap@~2.0.6:
   resolved "https://registry.npmmirror.com/asap/-/asap-2.0.6.tgz"
   integrity sha512-BSHWgDSAiKs50o2Re8ppvp3seVHXSRM44cdSsT9FfNEUUZLOGWVCsiWaRPWM1Znn+mqZ1OfVZ3z3DWEzSp7hRA==
 
-"askit@file:../../askit":
+"askit@file:../askit":
   version "0.1.0"
   dependencies:
     commander "14.0.2"
@@ -4997,7 +4997,7 @@ reusify@^1.0.4:
   resolved "https://registry.npmmirror.com/reusify/-/reusify-1.1.0.tgz"
   integrity sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw==
 
-"rill@file:../../rill":
+"rill@file:../rill":
   version "0.1.0"
 
 rimraf@^3.0.2:
