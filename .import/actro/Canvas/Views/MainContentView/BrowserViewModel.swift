@@ -424,17 +424,8 @@ class BrowserViewModel: ObservableObject {
 
         // 如果这是最后一个标签页
         if tabs.count == 1 {
-            // iPad 端退出应用，Phone 端保持空列表
-            if UIDevice.current.userInterfaceIdiom == .phone {
-                logger.debug("📱 关闭最后一个标签页")
-                tabs.removeAll(where: { $0.id == id })
-                tabSlotPositions.removeValue(forKey: id)
-                currentTabId = nil
-                return
-            } else {
-                logger.debug("🚪 关闭最后一个标签页，应用即将退出")
-                exit(0)
-            }
+            logger.debug("📱 关闭最后一个标签页")
+            currentTabId = nil
         }
 
         // 如果关闭的是当前标签，切换到相邻标签
@@ -463,6 +454,7 @@ class BrowserViewModel: ObservableObject {
 
         // 删除标签页
         tabs.removeAll(where: { $0.id == id })
+        saveTabs()
 
         // 删除该标签的位置映射
         tabSlotPositions.removeValue(forKey: id)
@@ -482,8 +474,11 @@ class BrowserViewModel: ObservableObject {
             object: nil,
             userInfo: ["tabId": id.uuidString]
         )
-
-        saveTabs()
+        
+        if tabs.isEmpty, UIDevice.current.userInterfaceIdiom != .phone {
+            logger.debug("🚪 关闭最后一个标签页，应用即将退出")
+            exit(0)
+        }
     }
 
     func reorderTab(fromIndex source: Int, toIndex destination: Int) {
