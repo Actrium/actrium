@@ -175,7 +175,8 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                 }
 
                 val builder = AttachRequest.newBuilder()
-                builder.id = if (dict.hasKey("id")) dict.getString("id") ?: UUID.randomUUID().toString() else UUID.randomUUID().toString()
+                builder.id = if (dict.hasKey("id")) dict.getString("id") ?: UUID.randomUUID().toString() else UUID.randomUUID()
+                    .toString()
                 builder.filename = if (dict.hasKey("filename")) dict.getString("filename") ?: "file" else "file"
 
                 val typeInt = if (dict.hasKey("type")) dict.getInt("type") else 0
@@ -215,7 +216,7 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
         }
     }
 
-    suspend fun rtcInit(tabId: String, actorType: String, path: String){
+    suspend fun rtcInit(tabId: String, actorType: String, path: String) {
         LogUtil.e("ActrBridge", "RTC initialized__${path}")
         val clientSystem = createActrSystem(path)
         Log.e("ActrBridge", "init_____1")
@@ -294,8 +295,10 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                     val locationMap = dict.getMap("location")
                     if (locationMap != null) {
                         val locationBuilder = Location.newBuilder()
-                        locationBuilder.latitude = if (locationMap.hasKey("latitude")) locationMap.getDouble("latitude") else 0.0
-                        locationBuilder.longitude = if (locationMap.hasKey("longitude")) locationMap.getDouble("longitude") else 0.0
+                        locationBuilder.latitude =
+                            if (locationMap.hasKey("latitude")) locationMap.getDouble("latitude") else 0.0
+                        locationBuilder.longitude =
+                            if (locationMap.hasKey("longitude")) locationMap.getDouble("longitude") else 0.0
                         locationBuilder.address = locationMap.getString("address") ?: ""
                         locationBuilder.placeName = locationMap.getString("placeName") ?: ""
                         builder.location = locationBuilder.build()
@@ -377,11 +380,11 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                 }
 
                 try {
-                     val bytes = Base64.decode(audioData, Base64.DEFAULT)
-                     builder.chunkData = ByteString.copyFrom(bytes)
+                    val bytes = Base64.decode(audioData, Base64.DEFAULT)
+                    builder.chunkData = ByteString.copyFrom(bytes)
                 } catch (e: Exception) {
-                     promise.reject("INVALID_INPUT", "Invalid audioData base64", e)
-                     return@launch
+                    promise.reject("INVALID_INPUT", "Invalid audioData base64", e)
+                    return@launch
                 }
 
                 val request = builder.build()
@@ -418,5 +421,6 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
             return
         }
         clients[tabId]?.shutdown()
+        promise.resolve(null)
     }
 }
