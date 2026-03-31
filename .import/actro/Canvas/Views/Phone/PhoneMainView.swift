@@ -92,7 +92,7 @@ struct PhoneMainView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
             // RN 请求退出全屏。存在标题时先完成截图，再执行退场，避免快照拿到半退场画面。
-            if let tab = fullscreenTab, !tab.title.isEmpty {
+            if let tab = viewModel.tabs.first { $0.id == fullscreenTab?.id}, !tab.title.isEmpty {
                 takeSnapshot(for: tab) {
                     fullscreenTab = nil
                 }
