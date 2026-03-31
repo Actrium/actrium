@@ -127,6 +127,20 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
                     }
                 }
             }
+
+            // Handle location if present
+            if (dict.hasKey("location") && !dict.isNull("location")) {
+                val locationDict = dict.getMap("location")
+                if (locationDict != null) {
+                    val locationBuilder = ask.Ask.Location.newBuilder()
+                    locationBuilder.latitude = locationDict.getDouble("latitude")
+                    locationBuilder.longitude = locationDict.getDouble("longitude")
+                    locationBuilder.address = locationDict.getString("address") ?: ""
+                    locationBuilder.placeName = locationDict.getString("placeName") ?: ""
+                    builder.location = locationBuilder.build()
+                }
+            }
+
             val request = builder.build()
             // send request to backend or further processing
             GlobalScope.launch {
