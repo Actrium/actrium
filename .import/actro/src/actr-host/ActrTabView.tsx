@@ -46,7 +46,7 @@ import { ChatHeader } from './components/ChatHeader';
 import { exitFullscreen } from '../native-bridge/tab/TabModule';
 import { useTabNativeEvents } from './hooks/useTabNativeEvents';
 import { useExtensionPanelGesture } from './hooks/useExtensionPanelGesture';
-import { isTablet } from '../utils/device';
+import { isTablet, isAndroid, isPhone } from '../utils/device';
 import { useExtensionPanelVisibility } from './hooks/useExtensionPanelVisibility';
 
 const log = logger.child('ActrApp');
@@ -388,6 +388,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   // Pad 宿主页需要贴齐顶部展示，不再保留 Phone 场景的模拟圆角。
   const threeColumnStyle = [
     styles.threeColumn,
+    isAndroid && isPhone && styles.threeColumnAndroidPhone,
     isTablet && styles.threeColumnPad,
   ];
   const sheetTopOffset = topInsetRaw;
@@ -555,12 +556,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     minWidth: 0, // 允许内部列在窗口缩小时收缩
   },
+  threeColumnAndroidPhone: {
+    overflow: 'hidden', // 防止横向滚动条
+    borderTopLeftRadius: 38,
+    borderTopRightRadius: 38,
+  },
   threeColumnPad: {
     borderTopLeftRadius: 0,
     borderTopRightRadius: 0,
   },
   screen: {
     flex: 1,
+    backgroundColor: '#000'
   },
   leftPanel: {
     borderRightWidth: 1,
