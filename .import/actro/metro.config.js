@@ -18,17 +18,20 @@ defaultConfig.resolver.sourceExts = [
 // 配置 Subsystem 作为 watchFolder
 const subsystemPath = path.resolve(__dirname, 'Subsystem');
 const supermarkRoot = path.resolve(__dirname, '..', 'supermark');
+const loomRoot = path.resolve(__dirname, '..', 'loom');
 const loomShimsDir = path.resolve(__dirname, 'loom', 'src', 'actr-host', 'shims');
 const loomNodeModules = path.resolve(__dirname, 'loom', 'node_modules');
 const yarnLinkRoot = path.resolve(process.env.HOME || '', '.config', 'yarn', 'link');
 
 const config = {
   watchFolders: [
-    //path.resolve(__dirname, '../loom'),
+    // 中文注释：当前项目内的 loom 是软链，Metro 需要监听其真实目录。
+    loomRoot,
     supermarkRoot,
     yarnLinkRoot,
   ],
   resolver: {
+    unstable_enableSymlinks: true,
     nodeModulesPaths: [
       loomNodeModules,
       path.resolve(__dirname, 'node_modules'),

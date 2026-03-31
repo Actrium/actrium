@@ -3,7 +3,9 @@
 ### 运行
 
 ```bash
+yarn loom
 yarn dev
+yarn android
 ```
 
 

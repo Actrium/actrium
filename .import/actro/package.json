@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "start": "react-native start",
     "dev": "node scripts/dev-start.js",
+    "loom": "ln -s ../loom loom",
     "test": "jest",
     "supramark:link": "yarn link @supramark/core @supramark/diagram-engine @supramark/feature-admonition @supramark/feature-core-markdown @supramark/feature-definition-list @supramark/feature-diagram-dot @supramark/feature-diagram-echarts @supramark/feature-diagram-mermaid @supramark/feature-diagram-plantuml @supramark/feature-diagram-vega-lite @supramark/feature-emoji @supramark/feature-footnote @supramark/feature-gfm @supramark/feature-math @supramark/feature-weather @supramark/rn @supramark/rn-diagram-worker @supramark/web-diagram",
     "supramark:unlink": "yarn unlink @supramark/core @supramark/diagram-engine @supramark/feature-admonition @supramark/feature-core-markdown @supramark/feature-definition-list @supramark/feature-diagram-dot @supramark/feature-diagram-echarts @supramark/feature-diagram-mermaid @supramark/feature-diagram-plantuml @supramark/feature-diagram-vega-lite @supramark/feature-emoji @supramark/feature-footnote @supramark/feature-gfm @supramark/feature-math @supramark/feature-weather @supramark/rn @supramark/rn-diagram-worker @supramark/web-diagram"
