@@ -140,15 +140,16 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
     try {
       let status = await Camera.getCameraPermissionStatus();
 
-      // 已被用户拒绝或系统限制时，继续走初始化只会落到“相机初始化失败”，
-      // 这里先明确给出权限缺失提示，并把入口引导到系统设置。
+      // Android 首次调用可能返回 'denied'，需要尝试申请权限
+      // iOS 的 'denied' 表示用户已明确拒绝，不应再次申请
+      if (status === 'not-determined' || (Platform.OS === 'android' && status === 'denied')) {
+        status = await Camera.requestCameraPermission();
+      }
+
+      // 系统限制或用户明确拒绝后，引导到系统设置
       if (status === 'denied' || status === 'restricted') {
         showCameraPermissionAlert();
         return;
-      }
-
-      if (status === 'not-determined') {
-        status = await Camera.requestCameraPermission();
       }
 
       if (status === 'granted') {
