@@ -153,12 +153,13 @@ struct PhoneTabCardView: View {
                     Button(action: {
                         // 切换收藏状态并发送通知给 RN
                         let newBookmarkStatus = !tab.isBookmarked
-                        
+
                         // 立即更新本地状态（UI 响应）
                         if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
                             viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                            viewModel.saveTabs() // 持久化变更
                         }
-                        
+
                         // 发送通知给 RN 侧处理实际的收藏逻辑
                         NotificationCenter.default.post(
                             name: .tabBookmarkChangedFromNative,

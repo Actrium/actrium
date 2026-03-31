@@ -159,26 +159,6 @@ class BrowserViewModel: ObservableObject {
         }
     }
 
-    /// Save tabs to UserDefaults (only essential fields) and snapshots to disk
-    private func saveTabs() {
-        let persistedTabs = tabs.map { PersistedTab(from: $0) }
-        do {
-            let data = try JSONEncoder().encode(persistedTabs)
-            UserDefaults.standard.set(data, forKey: tabsKey)
-
-            // Save snapshots for all tabs
-            for tab in tabs {
-                if let snapshot = tabSnapshots[tab.id] {
-                    saveSnapshot(snapshot, for: tab.id)
-                }
-            }
-
-            logger.debug("💾 [BrowserViewModel] 已保存 \(persistedTabs.count) 个标签页")
-        } catch {
-            logger.error("❌ [BrowserViewModel] 保存标签页失败: \(error)")
-        }
-    }
-
     /// Load persisted tabs from UserDefaults and create full Tab objects
     /// - Returns: true if tabs were loaded, false if no persisted data or error
     private func loadPersistedTabs() -> Bool {
@@ -200,7 +180,9 @@ class BrowserViewModel: ObservableObject {
                     id: persistedTab.id,
                     title: persistedTab.title,
                     icon: persistedTab.icon,
-                    url: persistedTab.appUrl
+                    url: persistedTab.appUrl,
+                    hasUnreadMessage: persistedTab.hasUnreadMessage,
+                    isBookmarked: persistedTab.isBookmarked
                 )
             }
 
@@ -524,6 +506,26 @@ class BrowserViewModel: ObservableObject {
         )
 
         saveTabs()
+    }
+    
+    /// Save tabs to UserDefaults (only essential fields) and snapshots to disk
+    func saveTabs() {
+        let persistedTabs = tabs.map { PersistedTab(from: $0) }
+        do {
+            let data = try JSONEncoder().encode(persistedTabs)
+            UserDefaults.standard.set(data, forKey: tabsKey)
+
+            // Save snapshots for all tabs
+            for tab in tabs {
+                if let snapshot = tabSnapshots[tab.id] {
+                    saveSnapshot(snapshot, for: tab.id)
+                }
+            }
+
+            logger.debug("💾 [BrowserViewModel] 已保存 \(persistedTabs.count) 个标签页")
+        } catch {
+            logger.error("❌ [BrowserViewModel] 保存标签页失败: \(error)")
+        }
     }
 
     // MARK: - Tab Group Management
