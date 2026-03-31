@@ -465,8 +465,13 @@ export function useActrMessageFlow(
         return;
       }
 
-      if (editingMessageId) {
-        const messageIdToDelete = editingMessageId;
+      // 实时读取最新的附件和编辑状态，避免闭包陷阱
+      const currentInputState = useInputStore.getState().inputs[tabId];
+      const attachmentsSnapshot = currentInputState?.attachments ? [...currentInputState.attachments] : [];
+      const editingMessageIdSnapshot = currentInputState?.editingMessageId || null;
+
+      if (editingMessageIdSnapshot) {
+        const messageIdToDelete = editingMessageIdSnapshot;
         setEditingMessageId(tabId, null);
         try {
           deleteMessageFromStore(tabId, messageIdToDelete);
@@ -479,8 +484,8 @@ export function useActrMessageFlow(
       }
 
       let location: TLocation | undefined;
-      if (attachments.length && attachments[0].attachment_type === 'location') {
-        const local = attachments[0];
+      if (attachmentsSnapshot.length && attachmentsSnapshot[0].attachment_type === 'location') {
+        const local = attachmentsSnapshot[0];
         location = {
           latitude: local.latitude!,
           longitude: local.longitude!,
@@ -501,8 +506,8 @@ export function useActrMessageFlow(
         answer_time: 0,
         answer_content: '',
         attachments:
-          attachments.length > 0 ? JSON.stringify(attachments) : undefined,
-        is_edited: editingMessageId ? 1 : 0,
+          attachmentsSnapshot.length > 0 ? JSON.stringify(attachmentsSnapshot) : undefined,
+        is_edited: editingMessageIdSnapshot ? 1 : 0,
         progress: 0,
       };
 
@@ -510,13 +515,14 @@ export function useActrMessageFlow(
         message_id: newMessage.message_id,
         session_id: newMessage.session_id,
         message: trimmedContent,
-        attachments: attachments.filter(
+        attachments: attachmentsSnapshot.filter(
           (att) => att.attachment_type !== 'location',
         ),
         location,
         localMessage: newMessage,
       };
 
+      // 立即清空输入框，确保在任何异步操作前完成
       clearInputInStore(tabId);
 
       if (!isVoice) {
@@ -529,11 +535,9 @@ export function useActrMessageFlow(
     [
       addMessage,
       appId,
-      attachments,
       clearInputInStore,
       connection?.reason,
       deleteMessageFromStore,
-      editingMessageId,
       sendMessage,
       session_id,
       setEditingMessageId,
@@ -544,8 +548,10 @@ export function useActrMessageFlow(
   );
 
   const handleSend = useCallback(() => {
-    void processMessageSend(inputText);
-  }, [inputText, processMessageSend]);
+    // 实时读取最新的 inputText，避免闭包陷阱
+    const currentInputText = useInputStore.getState().inputs[tabId]?.text || '';
+    void processMessageSend(currentInputText);
+  }, [tabId, processMessageSend]);
 
   const handleLoginModalClose = useCallback(() => {
     setShowLoginModal(false);
