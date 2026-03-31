@@ -118,7 +118,7 @@ class TabletViewModel : ViewModel() {
     fun toggleMarkStatus(activeModel: ActiveModel) {
         EventBus.getDefault().post(
             NativeModuleEvent(
-                NativeModuleEvent.EVENT_EXIT_BOOKMARK_CHANGED,
+                NativeModuleEvent.EVENT_TAB_BOOKMARK_CHANGED,
                 mapOf("tabId" to activeModel.id, "isBookmarked" to !activeModel.isMarked)
             )
         )
