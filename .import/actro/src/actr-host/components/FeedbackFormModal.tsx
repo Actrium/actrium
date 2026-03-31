@@ -12,7 +12,7 @@ import {
   Animated,
   KeyboardAvoidingView,
   ScrollView,
-  useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
@@ -84,6 +84,10 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
     inputRange: [0, 1],
     outputRange: [600, 0],
   });
+
+  // 中文注释：Android 的 Modal 场景下不做 KeyboardAvoidingView 避让，
+  // 避免键盘弹起时触发整块弹窗先上跳再回落的闪动。
+  const shouldUseKeyboardAvoidingView = Platform.OS === 'ios';
 
   const toggleCategory = (id: string) => {
     const next = new Set(selectedIds);
@@ -163,6 +167,151 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
     onClose();
   };
 
+  const modalContent = (
+    <TouchableWithoutFeedback onPress={handleClose}>
+      <View style={[styles.backdrop, isPhone && styles.backdropPhone]}>
+        <TouchableWithoutFeedback>
+          <Animated.View
+            style={[
+              styles.container,
+              isPhone && styles.containerPhone,
+              {
+                transform: [{ translateY }],
+              },
+            ]}
+          >
+            <ScrollView
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[
+                styles.scrollContent,
+                isPhone && styles.scrollContentPhone,
+              ]}
+              keyboardShouldPersistTaps='handled'
+            >
+              <View style={[styles.header, isPhone && styles.headerPhone]}>
+                <Text style={[styles.title, isPhone && styles.titlePhone]}>
+                  {t('actr.chat.feedbackTitle')}
+                </Text>
+                {!isPhone && (
+                  <TouchableOpacity
+                    onPress={handleClose}
+                    style={styles.closeButton}
+                  >
+                    <Icon type='close' size={20} color='#999' />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <View style={styles.section}>
+                <View style={[styles.grid, isPhone && styles.gridPhone]}>
+                  {CATEGORIES.map((cat) => {
+                    const isSelected = selectedIds.has(cat.id);
+                    return (
+                      <Pressable
+                        key={cat.id}
+                        onPress={() => toggleCategory(cat.id)}
+                        style={[
+                          styles.tag,
+                          isPhone && styles.tagPhone,
+                          isPhone && { width: undefined },
+                          isSelected && styles.tagSelected,
+                          isSelected && isPhone && styles.tagSelectedPhone,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.tagText,
+                            isPhone && styles.tagTextPhone,
+                            isSelected && styles.tagTextSelected,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {t(cat.key as any)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.section}>
+                <View
+                  style={[
+                    styles.feedbackInputWrapper,
+                    isPhone && styles.feedbackInputWrapperPhone,
+                  ]}
+                >
+                  <TextInput
+                    style={[styles.input, isPhone && styles.inputPhone]}
+                    placeholder={t('actr.chat.feedbackPlaceholder')}
+                    placeholderTextColor='#999'
+                    multiline
+                    numberOfLines={4}
+                    value={details}
+                    onChangeText={setDetails}
+                    textAlignVertical='top'
+                  />
+                </View>
+              </View>
+
+              {status === 'error' && (
+                <Text style={styles.errorText}>
+                  {t('actr.chat.feedbackFailed')}
+                </Text>
+              )}
+
+              <View style={[styles.footer, isPhone && styles.footerPhone]}>
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    styles.cancelButton,
+                    isPhone && styles.buttonPhone,
+                    isPhone && styles.cancelButtonPhone,
+                  ]}
+                  onPress={handleClose}
+                >
+                  <Text
+                    style={[
+                      styles.cancelButtonText,
+                      isPhone && styles.cancelButtonTextPhone,
+                    ]}
+                  >
+                    {t('common.cancel')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    styles.submitButton,
+                    isPhone && styles.buttonPhone,
+                    isPhone && styles.submitButtonPhone,
+                    status === 'submitting' && styles.buttonDisabled,
+                  ]}
+                  onPress={handleSubmit}
+                  disabled={status === 'submitting'}
+                >
+                  {status === 'submitting' ? (
+                    <ActivityIndicator color='#fff' size='small' />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.submitButtonText,
+                        isPhone && styles.submitButtonTextPhone,
+                      ]}
+                    >
+                      {t('actr.chat.submit')}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </Animated.View>
+        </TouchableWithoutFeedback>
+      </View>
+    </TouchableWithoutFeedback>
+  );
+
   if (status === 'success') {
     return (
       <Modal visible={visible} transparent animationType='fade'>
@@ -185,150 +334,15 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
       animationType='fade'
       onRequestClose={handleClose}
     >
-      <KeyboardAvoidingView behavior='padding' style={{ flex: 1 }}>
-        <TouchableWithoutFeedback onPress={handleClose}>
-          <View style={[styles.backdrop, isPhone && styles.backdropPhone]}>
-            <TouchableWithoutFeedback>
-              <Animated.View
-                style={[
-                  styles.container,
-                  isPhone && styles.containerPhone,
-                  {
-                    transform: [{ translateY }],
-                  },
-                ]}
-              >
-                <ScrollView
-                  bounces={false}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={[
-                    styles.scrollContent,
-                    isPhone && styles.scrollContentPhone,
-                  ]}
-                  keyboardShouldPersistTaps='handled'
-                >
-                  <View style={[styles.header, isPhone && styles.headerPhone]}>
-                    <Text style={[styles.title, isPhone && styles.titlePhone]}>
-                      {t('actr.chat.feedbackTitle')}
-                    </Text>
-                    {!isPhone && (
-                      <TouchableOpacity
-                        onPress={handleClose}
-                        style={styles.closeButton}
-                      >
-                        <Icon type='close' size={20} color='#999' />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  <View style={styles.section}>
-                    <View style={[styles.grid, isPhone && styles.gridPhone]}>
-                      {CATEGORIES.map((cat) => {
-                        const isSelected = selectedIds.has(cat.id);
-                        return (
-                          <Pressable
-                            key={cat.id}
-                            onPress={() => toggleCategory(cat.id)}
-                            style={[
-                              styles.tag,
-                              isPhone && styles.tagPhone,
-                              isPhone && { width: undefined },
-                              isSelected && styles.tagSelected,
-                              isSelected && isPhone && styles.tagSelectedPhone,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.tagText,
-                                isPhone && styles.tagTextPhone,
-                                isSelected && styles.tagTextSelected,
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {t(cat.key as any)}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-
-                  <View style={styles.section}>
-                    <View
-                      style={[
-                        styles.feedbackInputWrapper,
-                        isPhone && styles.feedbackInputWrapperPhone,
-                      ]}
-                    >
-                      <TextInput
-                        style={[styles.input, isPhone && styles.inputPhone]}
-                        placeholder={t('actr.chat.feedbackPlaceholder')}
-                        placeholderTextColor='#999'
-                        multiline
-                        numberOfLines={4}
-                        value={details}
-                        onChangeText={setDetails}
-                        textAlignVertical='top'
-                      />
-                    </View>
-                  </View>
-
-                  {status === 'error' && (
-                    <Text style={styles.errorText}>
-                      {t('actr.chat.feedbackFailed')}
-                    </Text>
-                  )}
-
-                  <View style={[styles.footer, isPhone && styles.footerPhone]}>
-                    <TouchableOpacity
-                      style={[
-                        styles.button,
-                        styles.cancelButton,
-                        isPhone && styles.buttonPhone,
-                        isPhone && styles.cancelButtonPhone,
-                      ]}
-                      onPress={handleClose}
-                    >
-                      <Text
-                        style={[
-                          styles.cancelButtonText,
-                          isPhone && styles.cancelButtonTextPhone,
-                        ]}
-                      >
-                        {t('common.cancel')}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.button,
-                        styles.submitButton,
-                        isPhone && styles.buttonPhone,
-                        isPhone && styles.submitButtonPhone,
-                        status === 'submitting' && styles.buttonDisabled,
-                      ]}
-                      onPress={handleSubmit}
-                      disabled={status === 'submitting'}
-                    >
-                      {status === 'submitting' ? (
-                        <ActivityIndicator color='#fff' size='small' />
-                      ) : (
-                        <Text
-                          style={[
-                            styles.submitButtonText,
-                            isPhone && styles.submitButtonTextPhone,
-                          ]}
-                        >
-                          {t('actr.chat.submit')}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                </ScrollView>
-              </Animated.View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </KeyboardAvoidingView>
+      <View style={{ flex: 1 }}>
+        {shouldUseKeyboardAvoidingView ? (
+          <KeyboardAvoidingView behavior='padding' style={{ flex: 1 }}>
+            {modalContent}
+          </KeyboardAvoidingView>
+        ) : (
+          modalContent
+        )}
+      </View>
     </Modal>
   );
 };
