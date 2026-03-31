@@ -33,6 +33,7 @@ import { CHAT_HEADER_HEIGHT } from '../constants';
 import { isTablet } from '../../utils/device';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useNetworkPermission } from '../hooks/useNetworkPermission';
+import { BookmarkRepository } from '../../repository/BookmarkRepository';
 
 // 在短时间窗口内抑制同一 URL 的重复加载，
 // 典型场景是权限弹窗前后扫码回调抖动导致重复触发。
@@ -82,13 +83,19 @@ const LoadApp = () => {
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const isResolvingRef = useRef(false);
   const pendingResolveUrlRef = useRef<string | null>(null);
-  const lastAutoResolvedAppUrlRef = useRef<string | null>(null);
-  // 当前正在加载的 URL，用于去重与定位竞态问题。
-  const inFlightUrlRef = useRef<string | null>(null);
-  // 最近一次完成加载的 URL 信息，用于过滤短时间内的重复回调。
-  const lastResolvedUrlRef = useRef<string | null>(null);
-  const lastResolvedAtRef = useRef(0);
-  const lastNotFoundAlertAtRef = useRef(0);
+  // 去重状态集合：防止各种场景下的重复加载和重复弹窗
+  const dedupeStateRef = useRef({
+    // 记录已自动加载过的 appUrl（来自收藏恢复），防止 useEffect 重复执行时再次加载
+    lastAutoResolvedUrl: null as string | null,
+    // 记录最近一次完成加载的 URL，配合 lastResolvedAt 实现 3 秒内去重
+    // 场景：权限弹窗前后可能触发重复回调，或用户快速重复扫同一个码
+    lastResolvedUrl: null as string | null,
+    // 记录最近一次完成加载的时间戳，用于 3 秒去重窗口判断
+    lastResolvedAt: 0,
+    // 记录最近一次"应用不存在"弹窗时间，防止 2 秒内重复弹窗轰炸用户
+    // 场景：如果上游重复触发，避免连续多个错误弹窗
+    lastNotFoundAlertAt: 0,
+  });
   const inputRef = useRef<TextInput>(null);
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
   const { width: screenWidth } = useWindowDimensions();
@@ -136,9 +143,10 @@ const LoadApp = () => {
 
       // 保持 single-flight 语义：已有加载进行中时，不再发起新的加载。
       if (isResolvingRef.current) return;
+      // 短时间内抑制同一 URL 的重复加载，防止权限弹窗前后回调抖动。
       if (
-        lastResolvedUrlRef.current === url &&
-        now - lastResolvedAtRef.current < RESOLVE_DEDUP_MS
+        dedupeStateRef.current.lastResolvedUrl === url &&
+        now - dedupeStateRef.current.lastResolvedAt < RESOLVE_DEDUP_MS
       ) {
         return;
       }
@@ -147,13 +155,12 @@ const LoadApp = () => {
       if (!appId) {
         console.error('扫描到的二维码无效:', url);
         // 二维码内容不满足宿主约定时，用户侧也需要立即得到可见反馈，
-        // 否则只打日志会表现为“扫了没反应”。
-        GlobalAlert.alert(t('actr.app.invalidUrl'));
+        // 否则只打日志会表现为”扫了没反应”。
+        GlobalAlert.alert(t('actr.app.invalidUrl'), url);
         return;
       }
 
       isResolvingRef.current = true;
-      inFlightUrlRef.current = url;
       setIsResolving(true);
       try {
         const initResult = await AppSessionService.initSession(
@@ -170,12 +177,13 @@ const LoadApp = () => {
 
           if (initResult.reason === 'APP_NOT_FOUND') {
             const nowForAlert = Date.now();
+            // 避免”应用不存在”弹窗连续轰炸用户。
             if (
-              nowForAlert - lastNotFoundAlertAtRef.current >=
+              nowForAlert - dedupeStateRef.current.lastNotFoundAlertAt >=
               ALERT_DEDUP_MS
             ) {
               GlobalAlert.alert(t('actr.app.notExist'));
-              lastNotFoundAlertAtRef.current = nowForAlert;
+              dedupeStateRef.current.lastNotFoundAlertAt = nowForAlert;
             }
           } else {
             GlobalAlert.alert(
@@ -191,10 +199,9 @@ const LoadApp = () => {
         console.error('[LoadApp] Failed to resolve app from url:', error);
         GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));
       } finally {
-        lastResolvedUrlRef.current = url;
-        lastResolvedAtRef.current = Date.now();
+        dedupeStateRef.current.lastResolvedUrl = url;
+        dedupeStateRef.current.lastResolvedAt = Date.now();
         isResolvingRef.current = false;
-        inFlightUrlRef.current = null;
         setIsResolving(false);
       }
     },
@@ -226,31 +233,48 @@ const LoadApp = () => {
     [ensureNetworkPermission, handleResolveUrl, t],
   );
 
+  // 使用 ref 保存最新的 enqueueResolveUrl，避免 useEffect 因函数重新创建而重复执行
+  const enqueueResolveUrlRef = useRef(enqueueResolveUrl);
+  useEffect(() => {
+    enqueueResolveUrlRef.current = enqueueResolveUrl;
+  }, [enqueueResolveUrl]);
+
   useEffect(() => {
     if (!tabCtx.tab.appUrl) {
       setIsPresetAppUrlLoading(false);
       return;
     }
-    if (lastAutoResolvedAppUrlRef.current === tabCtx.tab.appUrl) return;
+    // 防止同一个 appUrl 重复初始化
+    if (dedupeStateRef.current.lastAutoResolvedUrl === tabCtx.tab.appUrl) return;
 
     const presetAppUrl = tabCtx.tab.appUrl;
 
     // 预设 appUrl 说明宿主已经明确要恢复目标应用，
     // 这里先切到加载态，避免用户短暂看到扫码页再跳走。
     setIsPresetAppUrlLoading(true);
-    // 预设 appUrl 可能来自收藏恢复，effect 因为 re-render 重跑时不能重复发起初始化。
-    lastAutoResolvedAppUrlRef.current = presetAppUrl;
-    void enqueueResolveUrl(presetAppUrl).finally(() => {
+    // 标记已处理，防止 effect 重复执行
+    dedupeStateRef.current.lastAutoResolvedUrl = presetAppUrl;
+    void enqueueResolveUrlRef.current(presetAppUrl).finally(async () => {
       // 这里只关闭当前这轮预设 URL 对应的加载态，
       // 避免旧请求回收时把新一轮 appUrl 恢复流程的 loading 提前关掉。
-      if (lastAutoResolvedAppUrlRef.current === presetAppUrl) {
+      if (dedupeStateRef.current.lastAutoResolvedUrl === presetAppUrl) {
         setIsPresetAppUrlLoading(false);
       }
-    });
 
-    // FIXME 要手动再通知 native 更新收藏标识
-    void setTabBookmarkStatus(tabCtx.tab.id, true);
-  }, [enqueueResolveUrl, tabCtx.tab.appUrl, tabCtx.tab.id]);
+      // 校验应用是否在收藏表中，再设置收藏状态
+      const appId = extractAppIdFromUrl(presetAppUrl);
+      if (appId) {
+        try {
+          const bookmark = await BookmarkRepository.getBookmarkByAppId(appId);
+          if (bookmark) {
+            await setTabBookmarkStatus(tabCtx.tab.id, true);
+          }
+        } catch (error) {
+          console.error('[LoadApp] Failed to check bookmark status:', error);
+        }
+      }
+    });
+  }, [tabCtx.tab.appUrl, tabCtx.tab.id]);
 
   const handleLoadWithUrl = (
     e: NativeSyntheticEvent<TextInputSubmitEditingEventData>,
