@@ -15,7 +15,7 @@
 //! - 清理：定期清理过期数据
 
 use crate::service_registry::{ServiceCapabilities, ServiceInfo, ServiceLocation, ServiceStatus};
-use actr_protocol::{Acl, ActrId, ServiceSpec};
+use actr_protocol::{Acl, ActrId, ActrIdExt, ServiceSpec};
 use anyhow::{Context, Result};
 use prost::Message as ProstMessage;
 use serde_json;
@@ -240,7 +240,7 @@ impl ServiceRegistryStorage {
         platform::recording::debug!(
             "Saved service to cache: {} (Actor {}, expires in {}s)",
             service.service_name,
-            service.actor_id.serial_number,
+            service.actor_id.to_string_repr(),
             self.default_ttl_secs
         );
 
@@ -272,7 +272,7 @@ impl ServiceRegistryStorage {
             platform::recording::debug!(
                 "Updated heartbeat: {} (Actor {}, TTL extended to {})",
                 service_name,
-                actor_id.serial_number,
+                actor_id.to_string_repr(),
                 expires_at
             );
         }
@@ -297,7 +297,7 @@ impl ServiceRegistryStorage {
         platform::recording::debug!(
             "Deleted service from cache: {} (Actor {})",
             service_name,
-            actor_id.serial_number
+            actor_id.to_string_repr()
         );
         Ok(())
     }
@@ -391,7 +391,7 @@ impl ServiceRegistryStorage {
                 Err(e) => {
                     platform::recording::error!(
                         "Failed to deserialize service from cache for Actor {}: {:?}",
-                        actor_id.serial_number,
+                        actor_id.to_string_repr(),
                         e
                     );
                 }
@@ -402,7 +402,7 @@ impl ServiceRegistryStorage {
             platform::recording::debug!(
                 "Loaded {} services from cache for Actor {}",
                 services.len(),
-                actor_id.serial_number
+                actor_id.to_string_repr()
             );
         }
 
