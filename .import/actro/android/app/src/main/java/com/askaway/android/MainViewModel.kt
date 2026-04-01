@@ -7,6 +7,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.askaway.android.data.repository.ActiveRepository
+import chat.askaway.android.utils.TabBundleUtils
 import com.askaway.android.event.NativeModuleEvent
 import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.global.Params
@@ -149,7 +150,7 @@ class MainViewModel(
                 val tabId = event.params["tabId"] as? String
                 val title = event.params["title"] as? String
                 val icon = event.params["icon"] as? String
-                val url = event.params["url"] as? String
+                val url = event.params["appUrl"] as? String
                 if (tabId != null) {
                     val index = _activeModelList.indexOfFirst { it.id == tabId }
                     if (index != -1) {
@@ -196,6 +197,10 @@ class MainViewModel(
         val bundle = tabModel.genReactNativeBundle(Params.appList, containerHeight, containerWidth)
         bundle.addMap(params)
         _currentReactNativeStatus.tryEmit(bundle)
+    }
+
+    fun genBundle(model: ActiveModel): Bundle{
+        return TabBundleUtils.genBundle(model, _activeModelList.toList(),containerHeight, containerWidth )
     }
 
 
