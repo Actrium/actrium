@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   View,
-  Text,
   TouchableOpacity,
   StyleSheet,
   Linking,
@@ -11,6 +10,12 @@ import {
 import { IAttachmentItem } from '../types/attachment';
 import { SmartImage } from './SmartImage';
 import { Icon } from './Icon';
+import { AppText } from '../../components';
+import {
+  attachmentPreview,
+  getTypographyStyle,
+  spacing,
+} from '../../theme/tokens';
 
 interface AttachmentPreviewBarProps {
   attachments: IAttachmentItem[];
@@ -127,21 +132,21 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
                 ) : (
                   <View style={styles.locationPlaceholder}>
                     <Icon type='geolocation' size={24} color='#34A8FB' />
-                    <Text style={styles.locationText}>
+                    <AppText style={styles.locationText}>
                       {item.latitude?.toFixed(4)}, {item.longitude?.toFixed(4)}
-                    </Text>
+                    </AppText>
                   </View>
                 )}
               </TouchableOpacity>
             ) : (
               <View style={styles.fileBlock}>
                 <View style={styles.fileInfo}>
-                  <Text style={styles.fileName} numberOfLines={1}>
+                  <AppText style={styles.fileName} numberOfLines={1}>
                     {getDisplayFileName(item)}
-                  </Text>
+                  </AppText>
                   <View style={styles.fileMetaRow}>
                     <Icon type='file' size={12} color='#34A8FB' />
-                    <Text style={styles.fileType}>{getDisplayFileType(item)}</Text>
+                    <AppText style={styles.fileType}>{getDisplayFileType(item)}</AppText>
                   </View>
                 </View>
               </View>
@@ -150,7 +155,7 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
               style={styles.removeButton}
               onPress={() => removeAttachment(item.id)}
             >
-              <Text style={styles.removeButtonText}>×</Text>
+              <AppText style={styles.removeButtonText}>×</AppText>
             </TouchableOpacity>
           </View>
         ))}
@@ -162,7 +167,7 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
 
 const styles = StyleSheet.create({
   attachmentScroll: {
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   attachmentList: {
     paddingRight: 16,
@@ -200,7 +205,7 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#F7F7F7',
     borderRadius: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.md,
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: '#E8E8E8',
@@ -225,12 +230,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#34A8FB',
-    paddingHorizontal: 8,
+    paddingHorizontal: spacing.sm,
   },
   locationText: {
-    fontSize: 11,
+    ...getTypographyStyle('caption1'),
     color: '#34A8FB',
-    marginTop: 6,
+    marginTop: spacing.xs,
     textAlign: 'center',
   },
   fileInfo: {
@@ -238,7 +243,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   fileName: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#333',
     fontWeight: '500',
     textAlign: 'left',
@@ -249,17 +254,17 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   fileType: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#999',
     textAlign: 'left',
   },
   removeButton: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    top: 4,
+    right: 4,
+    width: attachmentPreview.removeButtonSize,
+    height: attachmentPreview.removeButtonSize,
+    borderRadius: attachmentPreview.removeButtonSize / 2,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -269,12 +274,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
-    top: -1,
   },
   separator: {
     height: 1,
     backgroundColor: '#EAEAEA',
     width: '100%',
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
 });

@@ -8,6 +8,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LAYOUT, CHAT_HEADER_HEIGHT } from '../../constants';
 import type { PhoneExtensionPanelProps } from './types';
+import { extensionPanel } from '../../../theme/tokens';
 
 /** 收尾动画时长 */
 const ANIM_DURATION = 250;
@@ -53,7 +54,7 @@ const PhoneExtensionPanel: React.FC<PhoneExtensionPanelProps> = ({
   isGesturing,
 }) => {
   // 面板最大滑动距离
-  const maxSlide = width * 0.8;
+  const maxSlide = width * extensionPanel.phoneWidthRatio;
 
   // 控制面板是否渲染（动画结束后再移除，避免闪烁）
   const [shouldRender, setShouldRender] = useState(visible);

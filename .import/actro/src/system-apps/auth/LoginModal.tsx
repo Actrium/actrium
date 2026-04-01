@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Modal,
   TouchableWithoutFeedback,
@@ -17,6 +16,8 @@ import { HostIconButton } from '../../actr-host/components/HostIconButton';
 import { getHostLayoutTokens } from '../../utils/layout';
 import type { AboutPageKey } from '../settings/aboutPages';
 import { AboutWebViewModal } from '../settings/AboutWebViewModal';
+import { AppText } from '../../components';
+import { getTypographyStyle } from '../../theme/tokens';
 
 interface LoginModalProps {
   visible: boolean;
@@ -85,7 +86,7 @@ export const LoginModal = ({
       return (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1C69FF" />
-          <Text style={styles.loadingText}>{t('actr.auth.loggingIn')}</Text>
+          <AppText style={styles.loadingText}>{t('actr.auth.loggingIn')}</AppText>
         </View>
       );
     }
@@ -94,7 +95,7 @@ export const LoginModal = ({
       return (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1C69FF" />
-          <Text style={styles.loadingText}>{t('actr.auth.authorizing')}</Text>
+          <AppText style={styles.loadingText}>{t('actr.auth.authorizing')}</AppText>
         </View>
       );
     }
@@ -102,7 +103,7 @@ export const LoginModal = ({
     if (step === 'success') {
       return (
         <View style={styles.loadingContainer}>
-          <Text style={styles.successText}>✓</Text>
+          <AppText style={styles.successText}>✓</AppText>
         </View>
       );
     }
@@ -150,7 +151,7 @@ export const LoginModal = ({
               />
               <View style={styles.modalContentWrapper}>
                 <View style={styles.header}>
-                  <Text style={styles.title}>{t('actr.auth.login') + ' AskAway'}</Text>
+                  <AppText style={styles.title}>{t('actr.auth.login') + ' AskAway'}</AppText>
                   <HostIconButton
                     iconType='close'
                     size={44}
@@ -225,8 +226,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   title: {
-    fontSize: 17,
-    fontWeight: '600',
+    ...getTypographyStyle('title3'),
     color: '#333333',
   },
   logoRow: {
@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#666',
   },
   successText: {

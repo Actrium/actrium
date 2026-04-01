@@ -6,7 +6,6 @@ import {
   Linking,
   Platform,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -17,7 +16,9 @@ import {
   useCodeScanner,
 } from 'react-native-vision-camera';
 import { TabEvents } from '../../../native-bridge/tab/TabEvents';
+import { AppText } from '../../../../src/components';
 import { GlobalAlert } from '../../../../src/components';
+import { getTypographyStyle, spacing } from '../../../theme/tokens';
 
 type LoadAppCameraPanelProps = {
   tabId: string;
@@ -206,7 +207,9 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
           {requesting ? (
             <>
               <ActivityIndicator size='large' color='#34A8FB' />
-              <Text style={styles.infoText}>{t('actr.app.requestCameraPermission')}</Text>
+              <AppText variant='helperText' style={styles.infoText}>
+                {t('actr.app.requestCameraPermission')}
+              </AppText>
             </>
           ) : (
             <TouchableOpacity
@@ -214,7 +217,9 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
               onPress={handleOpenCamera}
               activeOpacity={0.7}
             >
-              <Text style={styles.openCameraBtnText}>{t('actr.app.openCameraScan')}</Text>
+              <AppText variant='scanActionLabel' style={styles.openCameraBtnText}>
+                {t('actr.app.openCameraScan')}
+              </AppText>
             </TouchableOpacity>
           )}
         </View>
@@ -230,7 +235,9 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
       >
         <View style={styles.centerContent}>
           <ActivityIndicator size='large' color='#34A8FB' />
-          <Text style={styles.infoText}>{t('actr.app.initCamera')}</Text>
+          <AppText variant='helperText' style={styles.infoText}>
+            {t('actr.app.initCamera')}
+          </AppText>
         </View>
       </View>
     );
@@ -282,23 +289,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing.md,
   },
   infoText: {
-    fontSize: 16,
+    ...getTypographyStyle('helperText'),
     color: '#666',
     textAlign: 'center',
   },
   openCameraBtn: {
-    paddingHorizontal: 32,
-    paddingVertical: 14,
+    height: Platform.OS === 'android' ? 44 : 48,
+    paddingHorizontal: Platform.OS === 'android' ? 28 : 32,
     backgroundColor: '#34A8FB',
-    borderRadius: 24,
+    borderRadius: Platform.OS === 'android' ? 22 : 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   openCameraBtnText: {
-    fontSize: 17,
+    ...getTypographyStyle('scanActionLabel'),
     color: '#fff',
-    fontWeight: '600',
   },
   cameraContainer: {
     flex: 1,

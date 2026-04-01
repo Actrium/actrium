@@ -1,5 +1,11 @@
 import React from 'react';
-import { StyleSheet, Pressable, Animated, Text } from 'react-native';
+import { StyleSheet, Pressable, Animated } from 'react-native';
+import { AppText } from '../../components';
+import {
+  getTypographyStyle,
+  scrollToBottomButton,
+} from '../../theme/tokens';
+import { HOST_SHADOWS } from '../styles/shadows';
 
 interface ScrollToBottomButtonProps {
   visible: boolean;
@@ -31,7 +37,7 @@ export const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
           pressed && styles.buttonPressed,
         ]}
       >
-        <Text style={styles.arrow}>↓</Text>
+        <AppText style={styles.arrow}>↓</AppText>
       </Pressable>
     </Animated.View>
   );
@@ -42,24 +48,20 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   button: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: scrollToBottomButton.size,
+    height: scrollToBottomButton.size,
+    borderRadius: scrollToBottomButton.size / 2,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
+    ...HOST_SHADOWS.floatingButton,
   },
   buttonPressed: {
     opacity: 0.7,
     transform: [{ scale: 0.95 }],
   },
   arrow: {
-    fontSize: 20,
+    ...getTypographyStyle(scrollToBottomButton.labelTypographyVariant),
     color: '#666',
     fontWeight: '600',
   },

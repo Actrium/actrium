@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   View,
-  Text,
   ScrollView,
   StyleSheet,
   Image,
@@ -11,6 +10,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing, radius } from '../../theme/tokens';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
 
@@ -57,7 +58,7 @@ export default function BookmarksPadView({
       <View style={styles.container}>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#34A8FB" />
-          <Text style={styles.centerText}>{t('common.loading')}</Text>
+          <AppText style={styles.centerText}>{t('common.loading')}</AppText>
         </View>
       </View>
     );
@@ -67,9 +68,9 @@ export default function BookmarksPadView({
     return (
       <View style={styles.container}>
         <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>{error}</Text>
+          <AppText style={styles.errorText}>{error}</AppText>
           <TouchableOpacity style={styles.retryButton} onPress={loadBookmarks}>
-            <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
+            <AppText style={styles.retryButtonText}>{t('common.retry')}</AppText>
           </TouchableOpacity>
         </View>
       </View>
@@ -80,8 +81,8 @@ export default function BookmarksPadView({
     return (
       <View style={styles.container}>
         <View style={styles.centerContainer}>
-          <Text style={styles.emptyText}>{t('actr.bookmark.empty')}</Text>
-          <Text style={styles.emptySubText}>{t('actr.bookmark.emptyHint')}</Text>
+          <AppText style={styles.emptyText}>{t('actr.bookmark.empty')}</AppText>
+          <AppText style={styles.emptySubText}>{t('actr.bookmark.emptyHint')}</AppText>
         </View>
       </View>
     );
@@ -104,9 +105,9 @@ export default function BookmarksPadView({
             >
               <View style={styles.cardInner}>
                 <Image source={{ uri: item.logo! }} style={styles.cardLogo} />
-                <Text style={styles.cardTitle} numberOfLines={1}>
+                <AppText style={styles.cardTitle} numberOfLines={1}>
                   {item.app_name}
-                </Text>
+                </AppText>
                 <Pressable
                   hitSlop={8}
                   style={styles.removeButton}
@@ -115,7 +116,7 @@ export default function BookmarksPadView({
                     handleRemoveBookmark(item);
                   }}
                 >
-                  <Text style={styles.removeButtonText}>×</Text>
+                  <AppText style={styles.removeButtonText}>×</AppText>
                 </Pressable>
               </View>
             </TouchableOpacity>
@@ -149,11 +150,11 @@ const styles = StyleSheet.create({
   },
   cardInner: {
     height: 56,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     backgroundColor: '#3C3C4399',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
     paddingHorizontal: 13,
     paddingRight: 38,
   },
@@ -165,9 +166,9 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: spacing.md,
     color: '#F2F2F7',
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     fontWeight: '500',
   },
   removeButton: {
@@ -191,15 +192,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   centerText: {
-    marginTop: 12,
-    fontSize: 15,
+    marginTop: spacing.md,
+    ...getTypographyStyle('subhead'),
     color: '#8E8E93',
   },
   errorText: {
-    fontSize: 15,
+    ...getTypographyStyle('subhead'),
     color: '#FF453A',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   retryButton: {
     paddingHorizontal: 24,
@@ -208,17 +209,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   retryButtonText: {
-    fontSize: 15,
+    ...getTypographyStyle('subhead'),
     color: '#fff',
     fontWeight: '500',
   },
   emptyText: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#8E8E93',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   emptySubText: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#636366',
   },
 });

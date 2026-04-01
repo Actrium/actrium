@@ -1,11 +1,13 @@
 import React from 'react';
-import { View, StyleSheet, Text } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { HostIconButton } from './HostIconButton';
 import { CHAT_HEADER_HEIGHT } from '../constants';
 import { useNetworkStatus } from '../hooks/networkStatus';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing } from '../../theme/tokens';
 
 interface ChatHeaderProps {
   onLeftPress: () => void;
@@ -74,13 +76,13 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
         )}
         <View style={styles.titleContainer}>
           {appName && (
-            <Text style={styles.appName} numberOfLines={1}>
+            <AppText style={styles.appName} numberOfLines={1}>
               {appName}
-            </Text>
+            </AppText>
           )}
           {/* 只有插件会话态才展示网络状态，和右侧 history 按钮保持同一语义边界。 */}
           {hasAppId && showOfflineHint ? (
-            <Text style={styles.networkErrorText}>{t('common.networkError')}</Text>
+            <AppText style={styles.networkErrorText}>{t('common.networkError')}</AppText>
           ) : null}
         </View>
         {hasAppId ? (
@@ -114,7 +116,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     zIndex: 10,
   },
   headerButton: {
@@ -126,12 +128,12 @@ const styles = StyleSheet.create({
   },
   titleContainer: {
     flex: 1,
-    marginHorizontal: 12,
+    marginHorizontal: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   appName: {
-    fontSize: 16,
+    ...getTypographyStyle('bodyInput'),
     fontWeight: '600',
     color: '#0a0a0a',
     textAlign: 'center',
@@ -139,7 +141,7 @@ const styles = StyleSheet.create({
   },
   networkErrorText: {
     marginTop: 2,
-    fontSize: 13,
+    ...getTypographyStyle('caption1'),
     color: '#FF3B30',
   },
 });

@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   View,
-  Text,
   FlatList,
   StyleSheet,
   Image,
@@ -12,6 +11,8 @@ import {
 import { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import { SwipeRemoveActionRow } from '../components/SwipeRemoveActionRow';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
@@ -91,9 +92,9 @@ export default function BookmarksPhoneView({
           >
             <Image source={{ uri: item.logo! }} style={styles.listItemLogo} />
 
-            <Text style={styles.listItemName} numberOfLines={1}>
+            <AppText style={styles.listItemName} numberOfLines={1}>
               {item.app_name}
-            </Text>
+            </AppText>
           </TouchableOpacity>
         </SwipeRemoveActionRow>
         {!item.isLastInGroup && <View style={styles.listItemDivider} />}
@@ -106,15 +107,15 @@ export default function BookmarksPhoneView({
     return (
       <View style={styles.container}>
         <View style={headerStyle}>
-          <Text
+          <AppText
             style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
           >
             AskAway
-          </Text>
+          </AppText>
         </View>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#34A8FB" />
-          <Text style={styles.centerText}>{t('common.loading')}</Text>
+          <AppText style={styles.centerText}>{t('common.loading')}</AppText>
         </View>
       </View>
     );
@@ -124,16 +125,16 @@ export default function BookmarksPhoneView({
     return (
       <View style={styles.container}>
         <View style={headerStyle}>
-          <Text
+          <AppText
             style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
           >
             AskAway
-          </Text>
+          </AppText>
         </View>
         <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>{error}</Text>
+          <AppText style={styles.errorText}>{error}</AppText>
           <TouchableOpacity style={styles.retryButton} onPress={loadBookmarks}>
-            <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
+            <AppText style={styles.retryButtonText}>{t('common.retry')}</AppText>
           </TouchableOpacity>
         </View>
       </View>
@@ -144,15 +145,15 @@ export default function BookmarksPhoneView({
     return (
       <View style={styles.container}>
         <View style={headerStyle}>
-          <Text
+          <AppText
             style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
           >
             AskAway
-          </Text>
+          </AppText>
         </View>
         <View style={styles.centerContainer}>
-          <Text style={styles.emptyText}>{t('actr.bookmark.empty')}</Text>
-          <Text style={styles.emptySubText}>{t('actr.bookmark.emptyHint')}</Text>
+          <AppText style={styles.emptyText}>{t('actr.bookmark.empty')}</AppText>
+          <AppText style={styles.emptySubText}>{t('actr.bookmark.emptyHint')}</AppText>
         </View>
       </View>
     );
@@ -161,11 +162,11 @@ export default function BookmarksPhoneView({
   return (
     <View style={styles.container}>
       <View style={headerStyle}>
-        <Text
+        <AppText
           style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
         >
           AskAway
-        </Text>
+        </AppText>
       </View>
 
       <FlatList
@@ -189,11 +190,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   header: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
   headerTitle: {
-    fontSize: 34,
+    ...getTypographyStyle('pageTitle'),
     color: '#fff',
   },
   androidTitleSpacing: {
@@ -204,7 +205,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingBottom: 40,
   },
   listItemWrapper: {
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    height: 52,
+    height: controlHeight.xl,
     backgroundColor: '#1a1a1a',
   },
   listItemDivider: {
@@ -241,9 +242,9 @@ const styles = StyleSheet.create({
   },
   listItemName: {
     flex: 1,
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#fff',
-    marginLeft: 12,
+    marginLeft: spacing.md,
     fontWeight: '500',
   },
   centerContainer: {
@@ -253,15 +254,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   centerText: {
-    marginTop: 12,
-    fontSize: 15,
+    marginTop: spacing.md,
+    ...getTypographyStyle('subhead'),
     color: '#8E8E93',
   },
   errorText: {
-    fontSize: 15,
+    ...getTypographyStyle('subhead'),
     color: '#FF453A',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   retryButton: {
     paddingHorizontal: 24,
@@ -270,17 +271,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   retryButtonText: {
-    fontSize: 15,
+    ...getTypographyStyle('subhead'),
     color: '#fff',
     fontWeight: '500',
   },
   emptyText: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#8E8E93',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   emptySubText: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#636366',
   },
 });

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Modal,
   TextInput,
@@ -21,6 +20,9 @@ import { useMessageStore } from '../store/useMessageStore';
 import dayjs from 'dayjs';
 import { GlobalAlert } from '../../../src/components';
 import { isPhone } from '../../utils/device';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing } from '../../theme/tokens';
+import { HOST_SHADOWS } from '../styles/shadows';
 
 interface Category {
   id: string;
@@ -190,9 +192,9 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
               keyboardShouldPersistTaps='handled'
             >
               <View style={[styles.header, isPhone && styles.headerPhone]}>
-                <Text style={[styles.title, isPhone && styles.titlePhone]}>
+                <AppText style={[styles.title, isPhone && styles.titlePhone]}>
                   {t('actr.chat.feedbackTitle')}
-                </Text>
+                </AppText>
                 {!isPhone && (
                   <TouchableOpacity
                     onPress={handleClose}
@@ -219,7 +221,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                           isSelected && isPhone && styles.tagSelectedPhone,
                         ]}
                       >
-                        <Text
+                        <AppText
                           style={[
                             styles.tagText,
                             isPhone && styles.tagTextPhone,
@@ -228,7 +230,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                           numberOfLines={1}
                         >
                           {t(cat.key as any)}
-                        </Text>
+                        </AppText>
                       </Pressable>
                     );
                   })}
@@ -256,9 +258,9 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
               </View>
 
               {status === 'error' && (
-                <Text style={styles.errorText}>
+                <AppText style={styles.errorText}>
                   {t('actr.chat.feedbackFailed')}
-                </Text>
+                </AppText>
               )}
 
               <View style={[styles.footer, isPhone && styles.footerPhone]}>
@@ -271,14 +273,14 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   ]}
                   onPress={handleClose}
                 >
-                  <Text
+                  <AppText
                     style={[
                       styles.cancelButtonText,
                       isPhone && styles.cancelButtonTextPhone,
                     ]}
                   >
                     {t('common.cancel')}
-                  </Text>
+                  </AppText>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
@@ -294,14 +296,14 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   {status === 'submitting' ? (
                     <ActivityIndicator color='#fff' size='small' />
                   ) : (
-                    <Text
+                    <AppText
                       style={[
                         styles.submitButtonText,
                         isPhone && styles.submitButtonTextPhone,
                       ]}
                     >
                       {t('actr.chat.submit')}
-                    </Text>
+                    </AppText>
                   )}
                 </TouchableOpacity>
               </View>
@@ -318,9 +320,9 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
         <View style={[styles.backdrop, isPhone && styles.backdropPhone]}>
           <View style={styles.successContainer}>
             <Icon type='copy' size={40} color='#34C759' />
-            <Text style={styles.successText}>
+            <AppText style={styles.successText}>
               {t('actr.chat.feedbackSuccess')}
-            </Text>
+            </AppText>
           </View>
         </View>
       </Modal>
@@ -334,15 +336,152 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
       animationType='fade'
       onRequestClose={handleClose}
     >
-      <View style={{ flex: 1 }}>
-        {shouldUseKeyboardAvoidingView ? (
-          <KeyboardAvoidingView behavior='padding' style={{ flex: 1 }}>
-            {modalContent}
-          </KeyboardAvoidingView>
-        ) : (
-          modalContent
-        )}
-      </View>
+      <KeyboardAvoidingView behavior='padding' style={{ flex: 1 }}>
+        <TouchableWithoutFeedback onPress={handleClose}>
+          <View style={[styles.backdrop, isPhone && styles.backdropPhone]}>
+            <TouchableWithoutFeedback>
+              <Animated.View
+                style={[
+                  styles.container,
+                  isPhone && styles.containerPhone,
+                  {
+                    transform: [{ translateY }],
+                  },
+                ]}
+              >
+                <ScrollView
+                  bounces={false}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={[
+                    styles.scrollContent,
+                    isPhone && styles.scrollContentPhone,
+                  ]}
+                  keyboardShouldPersistTaps='handled'
+                >
+                  <View style={[styles.header, isPhone && styles.headerPhone]}>
+                    <AppText
+                      style={[styles.title, isPhone && styles.titlePhone]}
+                    >
+                      {t('actr.chat.feedbackTitle')}
+                    </AppText>
+                    {!isPhone && (
+                      <TouchableOpacity
+                        onPress={handleClose}
+                        style={styles.closeButton}
+                      >
+                        <Icon type='close' size={20} color='#999' />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  <View style={styles.section}>
+                    <View style={[styles.grid, isPhone && styles.gridPhone]}>
+                      {CATEGORIES.map((cat) => {
+                        const isSelected = selectedIds.has(cat.id);
+                        return (
+                          <Pressable
+                            key={cat.id}
+                            onPress={() => toggleCategory(cat.id)}
+                            style={[
+                              styles.tag,
+                              isPhone && styles.tagPhone,
+                              isPhone && { width: undefined },
+                              isSelected && styles.tagSelected,
+                              isSelected && isPhone && styles.tagSelectedPhone,
+                            ]}
+                          >
+                            <AppText
+                              style={[
+                                styles.tagText,
+                                isPhone && styles.tagTextPhone,
+                                isSelected && styles.tagTextSelected,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {t(cat.key as any)}
+                            </AppText>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  <View style={styles.section}>
+                    <View
+                      style={[
+                        styles.feedbackInputWrapper,
+                        isPhone && styles.feedbackInputWrapperPhone,
+                      ]}
+                    >
+                      <TextInput
+                        style={[styles.input, isPhone && styles.inputPhone]}
+                        placeholder={t('actr.chat.feedbackPlaceholder')}
+                        placeholderTextColor='#999'
+                        multiline
+                        numberOfLines={4}
+                        value={details}
+                        onChangeText={setDetails}
+                        textAlignVertical='top'
+                      />
+                    </View>
+                  </View>
+
+                  {status === 'error' && (
+                    <AppText style={styles.errorText}>
+                      {t('actr.chat.feedbackFailed')}
+                    </AppText>
+                  )}
+
+                  <View style={[styles.footer, isPhone && styles.footerPhone]}>
+                    <TouchableOpacity
+                      style={[
+                        styles.button,
+                        styles.cancelButton,
+                        isPhone && styles.buttonPhone,
+                        isPhone && styles.cancelButtonPhone,
+                      ]}
+                      onPress={handleClose}
+                    >
+                      <AppText
+                        style={[
+                          styles.cancelButtonText,
+                          isPhone && styles.cancelButtonTextPhone,
+                        ]}
+                      >
+                        {t('common.cancel')}
+                      </AppText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.button,
+                        styles.submitButton,
+                        isPhone && styles.buttonPhone,
+                        isPhone && styles.submitButtonPhone,
+                        status === 'submitting' && styles.buttonDisabled,
+                      ]}
+                      onPress={handleSubmit}
+                      disabled={status === 'submitting'}
+                    >
+                      {status === 'submitting' ? (
+                        <ActivityIndicator color='#fff' size='small' />
+                      ) : (
+                        <AppText
+                          style={[
+                            styles.submitButtonText,
+                            isPhone && styles.submitButtonTextPhone,
+                          ]}
+                        >
+                          {t('actr.chat.submit')}
+                        </AppText>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              </Animated.View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -364,18 +503,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 34,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 5,
+    ...HOST_SHADOWS.modalSurface,
   },
   containerPhone: {
     width: '90%',
     borderRadius: 34,
   },
   scrollContent: {
-    padding: 24,
+    padding: spacing.xxl,
   },
   scrollContentPhone: {
     padding: 14,
@@ -391,12 +526,12 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   title: {
-    fontSize: 20,
+    ...getTypographyStyle('title2'),
     fontWeight: '700',
     color: '#1A1A1A',
   },
   titlePhone: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#292929',
     marginTop: 8,
     marginLeft: 8,
@@ -407,12 +542,12 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   section: {
-    marginBottom: 20,
+    marginBottom: spacing.xl,
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: spacing.md,
   },
   gridPhone: {
     gap: 10,
@@ -441,7 +576,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#34A8FB',
   },
   tagText: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#48484A',
     fontWeight: '500',
   },
@@ -452,14 +587,14 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   input: {
-    fontSize: 17,
+    ...getTypographyStyle('editorInputCompact'),
     color: '#333',
     minHeight: 120,
     textAlignVertical: 'top',
     padding: 0,
   },
   inputPhone: {
-    fontSize: 17,
+    ...getTypographyStyle('editorInputCompact'),
     minHeight: 71,
   },
   feedbackInputWrapper: {
@@ -501,7 +636,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#D9D9D9',
   },
   cancelButtonText: {
-    fontSize: 16,
+    ...getTypographyStyle('bodyInput'),
     fontWeight: '600',
     color: '#48484A',
   },
@@ -515,7 +650,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#34A8FB',
   },
   submitButtonText: {
-    fontSize: 16,
+    ...getTypographyStyle('bodyInput'),
     fontWeight: '600',
     color: '#fff',
   },
@@ -533,14 +668,13 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   successText: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...getTypographyStyle('statusTitle'),
     color: '#1A1A1A',
   },
   errorText: {
     color: '#FF3B30',
-    fontSize: 14,
-    marginBottom: 16,
+    ...getTypographyStyle('body'),
+    marginBottom: spacing.lg,
     textAlign: 'center',
   },
 });

@@ -48,6 +48,8 @@ import { useTabNativeEvents } from './hooks/useTabNativeEvents';
 import { useExtensionPanelGesture } from './hooks/useExtensionPanelGesture';
 import { isTablet, isAndroid, isPhone } from '../utils/device';
 import { useExtensionPanelVisibility } from './hooks/useExtensionPanelVisibility';
+import { AppText } from '../components';
+import { getTypographyStyle, spacing } from '../theme/tokens';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -411,16 +413,15 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           backgroundColor: '#1a1a1a',
         }}
       >
-        <Text
+        <AppText
           style={{
             color: '#ff6b6b',
-            fontSize: 18,
-            fontWeight: '600',
-            marginBottom: 12,
+            ...getTypographyStyle('statusTitle'),
+            marginBottom: spacing.md,
           }}
         >
           已阻止运行
-        </Text>
+        </AppText>
         <Text style={{ color: '#ddd', fontSize: 13, textAlign: 'center' }}>
           {gate.blockedReason ?? '不满足宿主 contract/权限策略'}
         </Text>
@@ -440,9 +441,15 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         }}
       >
         <ActivityIndicator size='large' color='#007AFF' />
-        <Text style={{ color: '#888', fontSize: 14, marginTop: 16 }}>
+        <AppText
+          style={{
+            color: '#888',
+            ...getTypographyStyle('body'),
+            marginTop: spacing.lg,
+          }}
+        >
           初始化 Single Engine (usePanels mode)...
-        </Text>
+        </AppText>
       </View>
     );
   }
@@ -459,16 +466,15 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
           backgroundColor: '#1a1a1a',
         }}
       >
-        <Text
+        <AppText
           style={{
             color: '#ff6b6b',
-            fontSize: 18,
-            fontWeight: '600',
-            marginBottom: 12,
+            ...getTypographyStyle('statusTitle'),
+            marginBottom: spacing.md,
           }}
         >
           Engine 初始化失败
-        </Text>
+        </AppText>
         <Text
           style={{
             color: '#ccc',
@@ -602,7 +608,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: '#888',
-    fontSize: 14,
+    ...getTypographyStyle('body'),
   },
   tabHost: {
     flex: 1,

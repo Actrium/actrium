@@ -10,6 +10,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { Icon } from './Icon';
+import { hostIconButtonSize, hostIconGlyphSize } from '../../theme/tokens';
 
 interface HostIconButtonProps {
   iconType?: string;
@@ -41,9 +42,9 @@ export const HostIconButton: React.FC<HostIconButtonProps> = React.memo(
     onPress,
     disabled = false,
     active = false,
-    size = 44,
+    size = hostIconButtonSize.md,
     borderRadius = size / 2,
-    iconSize = 16,
+    iconSize = hostIconGlyphSize.sm,
     iconColor = '#0a0a0a',
     activeIconColor = '#FFFFFF',
     backgroundColor = '#DFDFE1',

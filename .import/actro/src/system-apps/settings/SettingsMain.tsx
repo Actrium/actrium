@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Platform,
-  Text,
   ScrollView,
   StyleSheet,
   Image,
@@ -11,6 +10,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../actr-host/components/Icon';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing } from '../../theme/tokens';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
 
@@ -57,11 +58,11 @@ export const SettingsMain = ({
       showsVerticalScrollIndicator={false}
     >
       {/* Page Title */}
-      <Text
+      <AppText
         style={[styles.pageTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
       >
         AskAway
-      </Text>
+      </AppText>
 
       {/* Account Section */}
       <TouchableOpacity
@@ -78,9 +79,9 @@ export const SettingsMain = ({
           style={styles.avatar}
         />
         <View style={styles.accountInfo}>
-          <Text style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
+          <AppText style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
             {isLoggedIn ? (userInfo.user.display_name || t('actr.settings.account')) : t('actr.auth.login')}
-          </Text>
+          </AppText>
         </View>
         <Icon type='next' size={16} color='#fff' />
       </TouchableOpacity>
@@ -126,7 +127,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   pageTitle: {
-    fontSize: 34,
+    ...getTypographyStyle('pageTitle'),
     color: '#FFFFFF',
     marginBottom: 24,
   },
@@ -139,7 +140,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#1C1C1E',
     borderRadius: 26,
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.xl,
     paddingVertical: 10,
     marginBottom: 18,
   },
@@ -152,11 +153,10 @@ const styles = StyleSheet.create({
   },
   accountInfo: {
     flex: 1,
-    marginLeft: 16,
+    marginLeft: spacing.lg,
   },
   accountName: {
-    fontSize: 20,
-    fontWeight: '600',
+    ...getTypographyStyle('title2'),
     color: '#FFFFFF',
   },
   groupCard: {
@@ -175,6 +175,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#2C2C2E',
     marginLeft: 55,
-    marginRight: 12,
+    marginRight: spacing.md,
   },
 });

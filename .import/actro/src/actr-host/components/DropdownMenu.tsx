@@ -8,16 +8,18 @@ import {
   Pressable,
   StyleProp,
   StyleSheet,
-  Text,
   TouchableWithoutFeedback,
   View,
   ViewStyle,
 } from 'react-native';
+import { AppText } from '../../components';
+import { dropdownMenu, getTypographyStyle, spacing } from '../../theme/tokens';
+import { HOST_SHADOWS } from '../styles/shadows';
 
 type AnchorMode = 'center' | 'start' | 'end';
 type VerticalPlacement = 'auto' | 'top' | 'bottom';
 
-const DEFAULT_ESTIMATED_WIDTH = 228;
+const DEFAULT_ESTIMATED_WIDTH = dropdownMenu.defaultEstimatedWidth;
 const DEFAULT_ESTIMATED_HEIGHT = 120;
 const DEFAULT_HORIZONTAL_MARGIN = 16;
 const DEFAULT_VERTICAL_MARGIN = 12;
@@ -346,13 +348,21 @@ export const DropdownMenuText: React.FC<{
   children: string;
   color?: string;
 }> = ({ children, color }) => {
-  return <Text style={[styles.dropdownText, color && { color }]}>{children}</Text>;
+  return (
+    <AppText variant='menuLabel' style={[styles.dropdownText, color && { color }]}>
+      {children}
+    </AppText>
+  );
 };
 
 export const DropdownMenuSubText: React.FC<{
   children: string;
 }> = ({ children }) => {
-  return <Text style={styles.dropdownSubText}>{children}</Text>;
+  return (
+    <AppText variant='caption1' style={styles.dropdownSubText}>
+      {children}
+    </AppText>
+  );
 };
 
 const styles = StyleSheet.create({
@@ -364,38 +374,34 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: '#FFFFFF',
     borderRadius: 34,
-    padding: 10,
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 8,
+    padding: dropdownMenu.padding,
+    gap: spacing.sm,
+    ...HOST_SHADOWS.menuSurface,
   },
   dropdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
     borderRadius: 34,
     justifyContent: 'space-between',
   },
   dropdownItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing.md,
   },
   dropdownText: {
-    fontSize: 17,
+    ...getTypographyStyle('menuLabel'),
     color: '#333333',
     fontWeight: '500',
     flexShrink: 1,
   },
   dropdownSubText: {
-    fontSize: 13,
+    ...getTypographyStyle('caption1'),
     color: '#999999',
-    marginTop: 2,
+    marginTop: spacing.xxxs,
     fontWeight: '400',
     flexShrink: 1,
   },

@@ -4,7 +4,10 @@ import React, {
   forwardRef,
   useImperativeHandle,
 } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import { View, StyleSheet, Animated } from 'react-native';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing } from '../../theme/tokens';
+import { HOST_SHADOWS } from '../styles/shadows';
 
 export interface ToastRef {
   show: (message: string) => void;
@@ -40,7 +43,7 @@ export const Toast = forwardRef<ToastRef, {}>((_, ref) => {
   return (
     <Animated.View style={[styles.container, { opacity }]}>
       <View style={styles.bubble}>
-        <Text style={styles.text}>{message}</Text>
+        <AppText style={styles.text}>{message}</AppText>
       </View>
     </Animated.View>
   );
@@ -58,19 +61,14 @@ const styles = StyleSheet.create({
   },
   bubble: {
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
     borderRadius: 24,
-    // Shadow for white background
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...HOST_SHADOWS.floatingButton,
   },
   text: {
     color: '#333333',
-    fontSize: 15,
+    ...getTypographyStyle('subhead'),
     fontWeight: '600',
   },
 });

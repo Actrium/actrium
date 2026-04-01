@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   Pressable,
   Modal,
@@ -9,6 +8,13 @@ import {
   Dimensions,
   LayoutRectangle,
 } from 'react-native';
+import { AppText } from '../../components';
+import {
+  getTypographyStyle,
+  longPressMenu,
+  spacing,
+} from '../../theme/tokens';
+import { HOST_SHADOWS } from '../styles/shadows';
 
 interface MenuOption {
   label: string;
@@ -81,7 +87,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     const screenWidth = Dimensions.get('window').width;
 
     // 确定菜单显示在气泡上方还是下方
-    const menuWidth = 228;
+    const menuWidth = longPressMenu.width;
     const isAbove = menuLayout.y > screenHeight / 2;
 
     // 计算位置
@@ -140,14 +146,15 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
                   }}
                 >
                   {option.icon}
-                  <Text
+                  <AppText
+                    variant='menuLabel'
                     style={[
                       styles.menuText,
                       option.textColor && { color: option.textColor },
                     ]}
                   >
                     {option.label}
-                  </Text>
+                  </AppText>
                 </Pressable>
               ))}
             </View>
@@ -190,29 +197,23 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: '#FFFFFF',
     borderRadius: 34,
-    padding: 10,
-    gap: 4,
-    // iOS Shadow
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    // Android Shadow
-    elevation: 8,
+    padding: longPressMenu.padding,
+    gap: spacing.xxs,
+    ...HOST_SHADOWS.menuSurface,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
     borderRadius: 34,
-    gap: 12,
+    gap: spacing.md,
   },
   menuItemPressed: {
     backgroundColor: '#F2F2F7',
   },
   menuText: {
-    fontSize: 17,
+    ...getTypographyStyle('longPressMenuLabel'),
     color: '#333333',
     fontWeight: '500',
   },

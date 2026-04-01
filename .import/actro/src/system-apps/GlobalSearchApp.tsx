@@ -29,6 +29,7 @@ import { HOST_SHADOWS } from '../actr-host/styles/shadows';
 import { useAppStore } from '../actr-host/store/useAppStore';
 import { useTabIdMapStore } from '../actr-host/store/useTabIdMapStore';
 import { useUserStore } from '../actr-host/store/useUserStore';
+import { getTypographyStyle, globalSearch } from '../theme/tokens';
 import {
   BookmarkRepository,
   TBookmarkItem,
@@ -534,7 +535,7 @@ export default function GlobalSearchApp() {
       <View style={containerStyle}>
         <Icon
           type='search'
-          size={18}
+          size={globalSearch.inputPrefixIconSize}
           color='#999'
           style={styles.inputPrefixIcon}
         />
@@ -554,8 +555,8 @@ export default function GlobalSearchApp() {
         {inputText.length > 0 && (
           <HostIconButton
             iconType='input_clear'
-            size={32}
-            iconSize={19}
+            size={globalSearch.clearButtonSize}
+            iconSize={globalSearch.clearButtonIconSize}
             iconColor='#666'
             backgroundColor='transparent'
             style={styles.clearButton}
@@ -565,8 +566,8 @@ export default function GlobalSearchApp() {
       </View>
       <HostIconButton
         iconType='close'
-        size={48}
-        iconSize={16}
+        size={globalSearch.closeButtonSize}
+        iconSize={globalSearch.closeButtonIconSize}
         iconColor='#404040'
         backgroundColor='#FFF'
         style={styles.standaloneCloseButton}
@@ -695,17 +696,16 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
   },
   resultsListContent: {
-    padding: 20,
+    padding: globalSearch.resultsListPadding,
   },
   groupContainer: {
-    marginBottom: 16,
+    marginBottom: globalSearch.groupSpacing,
   },
   groupTitle: {
-    fontSize: 13,
-    fontWeight: '400',
+    ...getTypographyStyle(globalSearch.groupTitleTypographyVariant),
     color: '#8E8E93',
-    marginBottom: 8,
-    marginLeft: 4,
+    marginBottom: globalSearch.groupTitleMarginBottom,
+    marginLeft: globalSearch.groupTitleMarginLeft,
   },
   groupCard: {
     borderRadius: 26,
@@ -715,13 +715,13 @@ const styles = StyleSheet.create({
   listItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: globalSearch.resultItemPaddingHorizontal,
     height: 52,
   },
   listItemDivider: {
     height: 1,
     backgroundColor: '#2C2C2E',
-    marginLeft: 60,
+    marginLeft: globalSearch.resultDividerInsetLeft,
   },
   listItemLogo: {
     width: 32,
@@ -731,40 +731,37 @@ const styles = StyleSheet.create({
   },
   listItemName: {
     flex: 1,
-    fontSize: 17,
+    ...getTypographyStyle(globalSearch.resultNameTypographyVariant),
     color: '#FFF',
-    marginLeft: 11,
-    fontWeight: '400',
+    marginLeft: globalSearch.resultItemTextGap,
   },
   emptyState: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40,
+    paddingVertical: globalSearch.emptyStatePaddingVertical,
   },
   emptyStateTitle: {
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: '500',
+    ...getTypographyStyle(globalSearch.emptyTitleTypographyVariant),
     color: '#FFF',
     textAlign: 'center',
   },
   emptyStateDescription: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
+    marginTop: globalSearch.emptyStateDescriptionMarginTop,
+    ...getTypographyStyle(globalSearch.emptyDescriptionTypographyVariant),
     color: '#8E8E93',
     textAlign: 'center',
   },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: globalSearch.searchRowGap,
     width: '100%',
   },
   inputContainer: {
     flex: 1,
     position: 'relative',
+    height: globalSearch.inputHeight,
     backgroundColor: '#FFF',
     ...HOST_SHADOWS.inputPill,
     flexDirection: 'row',
@@ -772,9 +769,10 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    fontSize: 17,
+    paddingHorizontal: globalSearch.inputPaddingHorizontal,
+    height: globalSearch.inputHeight,
+    paddingVertical: 0,
+    ...getTypographyStyle(globalSearch.inputTypographyVariant),
     color: '#000',
   },
   phoneInputDock: {
@@ -800,7 +798,7 @@ const styles = StyleSheet.create({
   phoneInputContainer: {
     flex: 1,
     position: 'relative',
-    height: 48,
+    height: globalSearch.inputHeight,
     backgroundColor: '#FFF',
     borderRadius: 24,
     ...HOST_SHADOWS.inputPill,
@@ -809,27 +807,27 @@ const styles = StyleSheet.create({
   },
   phoneInput: {
     flex: 1,
-    height: 48,
+    height: globalSearch.inputHeight,
     borderRadius: 24,
-    paddingHorizontal: 12,
+    paddingHorizontal: globalSearch.inputPaddingHorizontal,
     paddingVertical: 0,
-    fontSize: 17,
+    ...getTypographyStyle(globalSearch.inputTypographyVariant),
     color: '#000',
   },
   inputPrefixIcon: {
-    marginLeft: 11,
+    marginLeft: globalSearch.inputPrefixMarginLeft,
   },
   clearButton: {
-    width: 32,
-    height: 32,
+    width: globalSearch.clearButtonSize,
+    height: globalSearch.clearButtonSize,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 4,
+    marginRight: globalSearch.clearButtonMarginRight,
   },
   standaloneCloseButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: globalSearch.closeButtonSize,
+    height: globalSearch.closeButtonSize,
+    borderRadius: globalSearch.closeButtonSize / 2,
     borderWidth: 1,
     borderColor: '#ECECEF',
     backgroundColor: '#FFF',

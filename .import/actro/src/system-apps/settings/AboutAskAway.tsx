@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
   View,
-  Text,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../actr-host/components/Icon';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import { SettingsBackHeader } from './SettingsBackHeader';
 import { AboutPageKey } from './aboutPages';
 import { AboutWebViewModal } from './AboutWebViewModal';
@@ -83,7 +84,7 @@ interface AboutItemProps {
 const AboutItem = ({ label, onPress }: AboutItemProps) => {
   return (
     <TouchableOpacity style={styles.itemContainer} activeOpacity={0.7} onPress={onPress}>
-      <Text style={styles.itemLabel}>{label}</Text>
+      <AppText style={styles.itemLabel}>{label}</AppText>
       <Icon type='next' size={16} color='#fff' />
     </TouchableOpacity>
   );
@@ -109,18 +110,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    height: 52,
+    paddingHorizontal: spacing.xl,
+    height: controlHeight.xl,
   },
   itemLabel: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#FFFFFF',
     fontWeight: '400',
   },
   divider: {
     height: 1,
     backgroundColor: '#2C2C2E',
-    marginLeft: 20,
-    marginRight: 12,
+    marginLeft: spacing.xl,
+    marginRight: spacing.md,
   },
 });

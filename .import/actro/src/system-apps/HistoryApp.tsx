@@ -4,7 +4,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
-  Text,
   TextInput,
   ScrollView,
   TouchableOpacity,
@@ -14,6 +13,8 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
+import { AppText } from '../components';
+import { getTypographyStyle, spacing, radius } from '../theme/tokens';
 
 // Native module for history actions
 const HistoryModule = NativeModules.HistoryModule;
@@ -104,9 +105,9 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>{t('actr.history.title')}</Text>
+        <AppText style={styles.title}>{t('actr.history.title')}</AppText>
         <View style={[styles.searchContainer, isPhone && styles.searchContainerPhone]}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <AppText style={styles.searchIcon}>🔍</AppText>
           <TextInput
             style={styles.searchInput}
             placeholder={t('actr.history.searchPlaceholder')}
@@ -124,7 +125,7 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
         {/* Closed Groups Section */}
         {groups.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t('actr.history.recentlyClosed')}</Text>
+            <AppText style={styles.sectionTitle}>{t('actr.history.recentlyClosed')}</AppText>
             {groups.map(group => (
               <TouchableOpacity
                 key={group.id}
@@ -132,24 +133,24 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
                 onPress={() => handleRestoreGroup(group as any)}
               >
                 <View style={[styles.groupIcon, { backgroundColor: group.color + '33' }]}>
-                  <Text style={styles.groupIconText}>📁</Text>
+                  <AppText style={styles.groupIconText}>📁</AppText>
                 </View>
                 <View style={styles.groupInfo}>
                   <View style={styles.groupNameRow}>
-                    <Text style={styles.groupName}>
+                    <AppText style={styles.groupName}>
                       {group.name || t('actr.history.unnamedGroup')}
-                    </Text>
+                    </AppText>
                     <View style={[styles.colorDot, { backgroundColor: group.color }]} />
                   </View>
-                  <Text style={styles.groupTabs}>
+                  <AppText style={styles.groupTabs}>
                     {t('actr.history.tabsCount', { count: group.tabs.length })}
-                  </Text>
+                  </AppText>
                 </View>
                 <TouchableOpacity
                   style={styles.restoreButton}
                   onPress={() => handleRestoreGroup(group as any)}
                 >
-                  <Text style={styles.restoreButtonText}>{t('actr.history.restore')}</Text>
+                  <AppText style={styles.restoreButtonText}>{t('actr.history.restore')}</AppText>
                 </TouchableOpacity>
               </TouchableOpacity>
             ))}
@@ -159,36 +160,36 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
         {/* History Items */}
         {groupedItems.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>🕐</Text>
-            <Text style={styles.emptyTitle}>{t('actr.history.noHistory')}</Text>
-            <Text style={styles.emptySubtitle}>
+            <AppText style={styles.emptyIcon}>🕐</AppText>
+            <AppText style={styles.emptyTitle}>{t('actr.history.noHistory')}</AppText>
+            <AppText style={styles.emptySubtitle}>
               {searchQuery
                 ? t('actr.history.noResult', { query: searchQuery })
                 : t('actr.history.visitEmptyTip')}
-            </Text>
+            </AppText>
           </View>
         ) : (
           groupedItems.map((group: any) => (
             <View key={group.date} style={styles.section}>
-              <Text style={styles.sectionTitle}>{group.date}</Text>
+              <AppText style={styles.sectionTitle}>{group.date}</AppText>
               {group.items.map((item: any) => (
                 <TouchableOpacity
                   key={item.id}
                   style={styles.itemRow}
                   onPress={() => handleOpenItem(item as any)}
                 >
-                  <Text style={styles.itemIcon}>📄</Text>
+                  <AppText style={styles.itemIcon}>📄</AppText>
                   <View style={styles.itemInfo}>
-                    <Text style={styles.itemTitle} numberOfLines={1}>
+                    <AppText style={styles.itemTitle} numberOfLines={1}>
                       {item.title}
-                    </Text>
+                    </AppText>
                     {item.appURL && (
-                      <Text style={styles.itemUrl} numberOfLines={1}>
+                      <AppText style={styles.itemUrl} numberOfLines={1}>
                         {item.appURL.split('/').pop()}
-                      </Text>
+                      </AppText>
                     )}
                   </View>
-                  <Text style={styles.itemTime}>{formatTime(item.visitTime)}</Text>
+                  <AppText style={styles.itemTime}>{formatTime(item.visitTime)}</AppText>
                 </TouchableOpacity>
               ))}
             </View>
@@ -200,15 +201,15 @@ export default function HistoryApp({ items, groups }: HistoryAppProps) {
 
       {/* Footer */}
       <View style={styles.footer}>
-        <Text style={styles.footerText}>{t('actr.history.itemsCount', { count: items.length })}</Text>
+        <AppText style={styles.footerText}>{t('actr.history.itemsCount', { count: items.length })}</AppText>
         <TouchableOpacity
           style={[styles.clearButton, items.length === 0 && styles.clearButtonDisabled]}
           onPress={handleClearHistory}
           disabled={items.length === 0}
         >
-          <Text style={[styles.clearButtonText, items.length === 0 && styles.clearButtonTextDisabled]}>
+          <AppText style={[styles.clearButtonText, items.length === 0 && styles.clearButtonTextDisabled]}>
             {t('actr.history.clearHistory')}
-          </Text>
+          </AppText>
         </TouchableOpacity>
       </View>
     </View>
@@ -224,12 +225,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    gap: 12,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '600',
+    ...getTypographyStyle('title2'),
     color: '#fff',
   },
   searchContainer: {
@@ -237,8 +237,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#2d2d2d',
     borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
     flex: 1,
     maxWidth: 420,
     minWidth: 0,
@@ -247,12 +247,12 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   searchIcon: {
-    fontSize: 14,
-    marginRight: 6,
+    ...getTypographyStyle('body'),
+    marginRight: spacing.xs,
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#fff',
     padding: 0,
     minWidth: 0,
@@ -265,26 +265,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    padding: 16,
+    padding: spacing.lg,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: spacing.xxl,
   },
   sectionTitle: {
-    fontSize: 14,
+    ...getTypographyStyle('bodyStrong'),
     fontWeight: '600',
     color: '#888',
-    marginBottom: 12,
+    marginBottom: spacing.md,
     textTransform: 'uppercase',
   },
   groupRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     backgroundColor: '#2d2d2d',
-    borderRadius: 8,
-    marginBottom: 8,
+    borderRadius: radius.sm,
+    marginBottom: spacing.sm,
   },
   groupIcon: {
     width: 32,
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: spacing.md,
   },
   groupIconText: {
     fontSize: 16,
@@ -305,9 +305,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   groupName: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#fff',
-    marginRight: 8,
+    marginRight: spacing.sm,
   },
   colorDot: {
     width: 8,
@@ -315,18 +315,18 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   groupTabs: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#888',
     marginTop: 2,
   },
   restoreButton: {
     backgroundColor: '#0a84ff',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.xs,
   },
   restoreButtonText: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#fff',
     fontWeight: '500',
   },
@@ -334,10 +334,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.md,
     backgroundColor: '#2d2d2d',
-    borderRadius: 8,
-    marginBottom: 4,
+    borderRadius: radius.sm,
+    marginBottom: spacing.xxs,
   },
   itemIcon: {
     fontSize: 18,
@@ -347,16 +347,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   itemTitle: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#fff',
   },
   itemUrl: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#888',
     marginTop: 2,
   },
   itemTime: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#888',
   },
   emptyState: {
@@ -370,34 +370,33 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...getTypographyStyle('title3'),
     color: '#fff',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   emptySubtitle: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#888',
   },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    padding: spacing.lg,
   },
   footerText: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#888',
   },
   clearButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
   },
   clearButtonDisabled: {
     opacity: 0.5,
   },
   clearButtonText: {
-    fontSize: 13,
+    ...getTypographyStyle('body'),
     color: '#0a84ff',
   },
   clearButtonTextDisabled: {

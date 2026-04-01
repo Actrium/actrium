@@ -1,7 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useTranslation } from 'react-i18next';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing } from '../../theme/tokens';
 
 interface VoiceRecordingOverlayProps {
   isCancelling: boolean;
@@ -32,7 +34,7 @@ export const VoiceRecordingOverlay: React.FC<VoiceRecordingOverlayProps> = ({ is
       />
       <View style={[styles.content, { width }]}>
         <View style={styles.textContainer}>
-          <Text style={[styles.text, { color: textColor }]}>{instructionText}</Text>
+          <AppText style={[styles.text, { color: textColor }]}>{instructionText}</AppText>
         </View>
         <View style={[styles.waveformContainer, { width }]}>
           {rectData.map((_, index) => {
@@ -92,11 +94,11 @@ const styles = StyleSheet.create({
     marginTop: 80, // Offset to keep it visually balanced when growing from bottom
   },
   textContainer: {
-    marginBottom: 20,
+    marginBottom: spacing.xl,
   },
   text: {
     color: '#FFF',
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     fontWeight: '500',
   },
   waveformContainer: {
