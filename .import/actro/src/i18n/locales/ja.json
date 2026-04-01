@@ -125,7 +125,9 @@
       "noResults": "検索結果なし",
       "placeholder": "検索...",
       "resultsIn": "検索結果",
-      "recent": "最近の検索"
+      "recent": "最近の検索",
+      "emptyStateTitle": "検索結果なし",
+      "emptyStateDescription": "検索結果なし。新しいキーワードをお試しください。"
     },
     "app": {
       "mockTitle1": "どのように改善すればよいでしょうか？",

@@ -125,7 +125,9 @@
       "noResults": "無搜尋結果",
       "placeholder": "搜尋...",
       "resultsIn": "搜尋結果",
-      "recent": "最近搜尋"
+      "recent": "最近搜尋",
+      "emptyStateTitle": "無結果",
+      "emptyStateDescription": "無結果。請嘗試新搜尋詞。"
     },
     "app": {
       "mockTitle1": "成遊景由成約？什麼改善怎麼樣，送合由周打事組?",

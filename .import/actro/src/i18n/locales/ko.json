@@ -125,7 +125,9 @@
       "noResults": "검색 결과 없음",
       "placeholder": "검색...",
       "resultsIn": "검색 결과",
-      "recent": "최근 검색어"
+      "recent": "최근 검색어",
+      "emptyStateTitle": "결과 없음",
+      "emptyStateDescription": "결과 없음. 새로운 검색어를 시도해 보세요."
     },
     "app": {
       "mockTitle1": "어떻게 개선하면 좋을까요?",
