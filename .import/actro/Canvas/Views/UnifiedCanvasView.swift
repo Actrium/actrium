@@ -167,14 +167,16 @@ struct UnifiedCanvasView: View {
                 // 防止 scale 为 0 导致奇异矩阵
                 .scaleEffect(max(transform.scale, 0.001), anchor: .topLeading)
                 .offset(x: transform.offset.x, y: transform.offset.y)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    // Focus 模式下点击内容区域取消地址栏编辑
-                    if case .focus = viewModel.canvasMode, isAddressBarEditing {
-                        isAddressBarEditing = false
-                        isAddressBarFirstResponder = false
+                // simultaneousGesture 不会与 UIKit（RN）手势识别器竞争，
+                // 避免阻断 UITextField 等 UIResponder 链的触摸事件
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        if case .focus = viewModel.canvasMode, isAddressBarEditing {
+                            isAddressBarEditing = false
+                            isAddressBarFirstResponder = false
+                        }
                     }
-                }
+                )
                 
                 // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
                 if case .overview = viewModel.canvasMode {
@@ -633,12 +635,8 @@ private struct CanvasView: View {
     let onNewTab: () -> Void
     let onCloseTab: (UUID) -> Void
 
-    @State private var draggingTabId: UUID?
     @State private var hoveringOverTabId: UUID?
     @State private var swappingTabId: UUID?  // 正在交换过程中的卡片（用于淡入动画）
-
-    // 固定的槽位索引（拖动开始时记录，不随 tabs 交换而改变）
-    @State private var dragSourceSlotIndexFixed: Int?  // 拖动源槽位 a
     @State private var dropTargetSlotIndexFixed: Int?  // 目标槽位 b
 
     // 构建显示项列表（按位置排序）
@@ -679,80 +677,69 @@ private struct CanvasView: View {
 
                 switch displayItem.item {
                 case .tab(let tab):
-                    let isBeingDragged = draggingTabId == tab.id
                     let isHovering = hoveringOverTabId == tab.id
                     let isSwapping = swappingTabId == tab.id
-
-                    TabCardView(
+                    let isFocusedCard: Bool = {
+                        if case .focus(let id) = mode { return id == tab.id }
+                        return false
+                    }()
+                    let isOverviewMode: Bool = {
+                        if case .overview = mode { return true }
+                        return false
+                    }()
+                    let baseCard = TabCardView(
                         tab: tab,
                         cardWidth: cardWidth,
                         cardHeight: cardHeight,
                         titleBarRatio: titleBarRatio,
                         toolbarHeight: toolbarHeight,
                         currentScale: currentScale,
-                        isFocused: {
-                            if case .focus(let tabId) = mode {
-                                return tabId == tab.id
-                            }
-                            return false
-                        }(),
-                        isBeingDragged: isBeingDragged,
+                        isFocused: isFocusedCard,
                         isHovering: isHovering,
                         isSwapping: isSwapping,
                         viewModel: viewModel,
                         historyVM: historyVM,
                         bookmarkVM: bookmarkVM,
                         viewportSize: viewportSize,
-                        onSelect: {
-                            onSelectTab(tab.id)
-                        },
-                        onDragStart: {
-                            if isBeingDragged {
-                                return NSItemProvider()
-                            }
-                            logger.error("====== 1. draggingTabId: \(draggingTabId), swappingTabId: \(swappingTabId), dropTargetSlotIndexFixed: \(dropTargetSlotIndexFixed), hoveringOverTabId: \(hoveringOverTabId), dragSourceSlotIndexFixed: \(dragSourceSlotIndexFixed), isBeingDragged: \(isBeingDragged), tabId: \(tab.id.uuidString)")
-                            // 清除所有旧状态（防止残留）
-                            swappingTabId = nil
-                            dropTargetSlotIndexFixed = nil
-                            hoveringOverTabId = nil
-
-                            // 设置新的拖动状态
-                            draggingTabId = tab.id
-                            dragSourceSlotIndexFixed = tabSlotPositions[tab.id]
-                            return NSItemProvider(object: tab.id.uuidString as NSString)
-                        },
-                        onClose: {
-                            onCloseTab(tab.id)
-                        }
+                        onSelect: { onSelectTab(tab.id) },
+                        onClose: { onCloseTab(tab.id) }
                     )
-                    .zIndex(isBeingDragged ? 1000 : (draggingTabId != nil ? 100 : Double(itemPosition)))
-                    .onDrop(of: [.text], delegate: TabSwapDropDelegate(
-                        targetTabId: tab.id,
-                        draggingTabId: $draggingTabId,
-                        hoveringOverTabId: $hoveringOverTabId,
-                        dropTargetSlotIndexFixed: $dropTargetSlotIndexFixed,
-                        tabSlotPositions: tabSlotPositions,
-                        onSwapPositions: { tabId1, tabId2 in
-                            // 标记目标卡片为交换中（触发淡入动画）
-                            // 注意：此时 hoveringOverTabId 还是 tabId2，所以 B 卡片还是半透明的
-                            swappingTabId = tabId2
-
-                            // 使用动画执行交换（B 从 b 移动到 a，300ms + 从 0.5 淡入到 1.0）
-                            withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                                onSwapPositions(tabId1, tabId2)
-                                // 清除 hovering 状态，让 B 卡片开始淡入
-                                hoveringOverTabId = nil
-                            }
-
-                            // 延迟清除状态
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                draggingTabId = nil
-                                swappingTabId = nil
-                                dragSourceSlotIndexFixed = nil
-                                dropTargetSlotIndexFixed = nil
-                            }
+                    Group {
+                        // 拖拽排序仅在 Overview 模式下启用
+                        // Focus 模式下所有卡片不附加拖拽手势，避免手势识别器拦截 RN 内容的触摸事件
+                        if isOverviewMode {
+                            baseCard
+                                .draggable(tab.id.uuidString) {
+                                    TabDragPreviewView(tab: tab, cardWidth: cardWidth, cardHeight: cardHeight)
+                                }
+                                .dropDestination(for: String.self) { items, _ in
+                                    guard let sourceIdStr = items.first,
+                                          let sourceId = UUID(uuidString: sourceIdStr),
+                                          sourceId != tab.id else { return false }
+                                    swappingTabId = tab.id
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
+                                        onSwapPositions(sourceId, tab.id)
+                                        hoveringOverTabId = nil
+                                    }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                        swappingTabId = nil
+                                        dropTargetSlotIndexFixed = nil
+                                    }
+                                    return true
+                                } isTargeted: { targeted in
+                                    if targeted {
+                                        hoveringOverTabId = tab.id
+                                        dropTargetSlotIndexFixed = tabSlotPositions[tab.id]
+                                    } else if hoveringOverTabId == tab.id {
+                                        hoveringOverTabId = nil
+                                        dropTargetSlotIndexFixed = nil
+                                    }
+                                }
+                        } else {
+                            baseCard
                         }
-                    ))
+                    }
+                    .zIndex(isFocusedCard ? 1000 : Double(itemPosition))
                     .position(
                         x: position.x + cardWidth / 2,
                         y: position.y + cardHeight / 2
@@ -764,12 +751,6 @@ private struct CanvasView: View {
                         cardHeight: cardHeight,
                         onTap: onNewTab
                     )
-                    // 处理拖到 NewTab 卡片上的情况，清理状态
-                    .onDrop(of: [.text], delegate: NoOpDropDelegate(
-                        draggingTabId: $draggingTabId,
-                        hoveringOverTabId: $hoveringOverTabId,
-                        dragSourceSlotIndexFixed: $dragSourceSlotIndexFixed
-                    ))
                     .position(
                         x: position.x + cardWidth / 2,
                         y: position.y + cardHeight / 2
@@ -783,7 +764,6 @@ private struct CanvasView: View {
                 SlotView(
                     cardWidth: cardWidth,
                     cardHeight: cardHeight,
-                    isDragSource: dragSourceSlotIndexFixed == slotIndex,
                     isDropTarget: dropTargetSlotIndexFixed == slotIndex
                 )
                 .position(
@@ -791,17 +771,10 @@ private struct CanvasView: View {
                     y: positions[slotIndex].y + cardHeight / 2
                 )
                 .zIndex(10000)  // 超高 zIndex，确保边框始终在最上层，不被任何卡片遮挡
-                .animation(nil, value: dragSourceSlotIndexFixed)
                 .animation(nil, value: dropTargetSlotIndexFixed)
                 .allowsHitTesting(false)  // 边框不响应点击，让点击穿透到下层卡片
             }
         }
-        // 全局拖放监听，处理拖到空白区域的情况
-        .onDrop(of: [.text], delegate: CancelDragDropDelegate(
-            draggingTabId: $draggingTabId,
-            hoveringOverTabId: $hoveringOverTabId,
-            dragSourceSlotIndexFixed: $dragSourceSlotIndexFixed
-        ))
     }
 }
 
@@ -810,7 +783,6 @@ private struct CanvasView: View {
 private struct SlotView: View {
     let cardWidth: CGFloat
     let cardHeight: CGFloat
-    let isDragSource: Bool  // 是否为拖动源槽位（显示虚线边框）
     let isDropTarget: Bool  // 是否为目标槽位（显示实线边框）
 
     var body: some View {
@@ -819,14 +791,7 @@ private struct SlotView: View {
             .frame(width: cardWidth, height: cardHeight)
             .overlay(
                 Group {
-                    if isDragSource {
-                        // 拖动源：蓝色虚线
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(
-                                Color.blue.opacity(0.6),
-                                style: StrokeStyle(lineWidth: 2, dash: [5, 5])
-                            )
-                    } else if isDropTarget {
+                    if isDropTarget {
                         // 目标：绿色实线
                         RoundedRectangle(cornerRadius: 10)
                             .strokeBorder(
@@ -856,130 +821,6 @@ private enum DisplayItem {
         case .newTabButton:
             return "newTabButton"
         }
-    }
-}
-
-// MARK: - Tab Swap Drop Delegate
-
-private struct TabSwapDropDelegate: DropDelegate {
-    let targetTabId: UUID?
-    @Binding var draggingTabId: UUID?
-    @Binding var hoveringOverTabId: UUID?
-    @Binding var dropTargetSlotIndexFixed: Int?
-    let tabSlotPositions: [UUID: Int]
-    let onSwapPositions: (UUID?, UUID?) -> Void
-
-    func validateDrop(info: DropInfo) -> Bool {
-        // 始终返回 true 以确保 performDrop 被调用来清理状态
-        // 实际的有效性检查在 performDrop 中进行
-        return draggingTabId != nil
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard let draggingId = draggingTabId else {
-            return false
-        }
-
-        // 拖到自己身上，不执行交换
-        if let targetId = targetTabId, targetId == draggingId {
-            clearAllStates()
-            return false
-        }
-
-        // 执行交换（带动画）
-        // 注意：onSwapPositions 回调中会处理状态清理和动画
-        onSwapPositions(draggingId, targetTabId)
-
-        // 不在这里清除 hoveringOverTabId，因为需要保持半透明状态用于淡入动画
-        // hoveringOverTabId 会在 onSwapPositions 回调的动画块中清除
-
-        return true
-    }
-
-    func dropEntered(info: DropInfo) {
-        if let targetId = targetTabId,
-           let draggingId = draggingTabId,
-           targetId != draggingId {  // 忽略拖到自己身上
-            hoveringOverTabId = targetId
-            // 更新目标槽位索引（跟随 hover 目标变化）
-            dropTargetSlotIndexFixed = tabSlotPositions[targetId]
-        }
-    }
-
-    func dropExited(info: DropInfo) {
-        if let targetId = targetTabId {
-            if hoveringOverTabId == targetId {
-                hoveringOverTabId = nil
-                // 清除目标槽位标记
-                dropTargetSlotIndexFixed = nil
-            }
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        // bug3 修复：返回 .move 操作，避免显示复制指针
-        return DropProposal(operation: .move)
-    }
-
-    func dropSessionDidEnd(_ session: DropSession) {
-        // 清理悬停状态（draggingTabId 由 onSwapPositions 回调延迟清除）
-        hoveringOverTabId = nil
-    }
-
-    private func clearAllStates() {
-        draggingTabId = nil
-        hoveringOverTabId = nil
-        dropTargetSlotIndexFixed = nil
-    }
-}
-
-// MARK: - No-Op Drop Delegate (bug3 修复：空白区域不响应拖放，保持原始鼠标样式)
-
-private struct NoOpDropDelegate: DropDelegate {
-    @Binding var draggingTabId: UUID?
-    @Binding var hoveringOverTabId: UUID?
-    @Binding var dragSourceSlotIndexFixed: Int?
-
-    func validateDrop(info: DropInfo) -> Bool {
-        return draggingTabId != nil
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            draggingTabId = nil
-            hoveringOverTabId = nil
-            dragSourceSlotIndexFixed = nil
-        }
-        return false
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        return DropProposal(operation: .move)
-    }
-}
-
-// MARK: - Cancel Drag Drop Delegate (空白区域拖放处理)
-
-private struct CancelDragDropDelegate: DropDelegate {
-    @Binding var draggingTabId: UUID?
-    @Binding var hoveringOverTabId: UUID?
-    @Binding var dragSourceSlotIndexFixed: Int?
-
-    func validateDrop(info: DropInfo) -> Bool {
-        return true
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            draggingTabId = nil
-            hoveringOverTabId = nil
-            dragSourceSlotIndexFixed = nil
-        }
-        return false
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        return DropProposal(operation: .move)
     }
 }
 
@@ -1235,7 +1076,6 @@ private struct TabCardView: View {
     let toolbarHeight: CGFloat  // toolbar 实际高度，用作缩放基准
     let currentScale: CGFloat
     let isFocused: Bool
-    let isBeingDragged: Bool
     let isHovering: Bool
     let isSwapping: Bool  // 正在交换过程中（用于淡入动画）
     // 新增：用于创建 SingleTabRootView
@@ -1244,7 +1084,6 @@ private struct TabCardView: View {
     var bookmarkVM: BookmarkViewModel?
     let viewportSize: CGSize  // 视口尺寸，用于 RN 渲染
     let onSelect: () -> Void
-    let onDragStart: () -> NSItemProvider
     let onClose: () -> Void
 
     // 悬浮标题栏高度（固定值，Overview 模式下显示在卡片上方）
@@ -1268,29 +1107,18 @@ private struct TabCardView: View {
                     .offset(y: -floatingTitleBarHeight - 4)  // 悬浮在卡片上方，留 4px 间隙
             }
         }
-        // 被拖动的卡片：隐藏（由拖拽预览显示）
-        .opacity(isBeingDragged ? 0.001 : 1.0)
         // hover 时半透明，交换过程中淡入到完全不透明
         .opacity({
             if isSwapping {
                 return 1.0
-            } else if isHovering && !isBeingDragged && !isFocused {
+            } else if isHovering && !isFocused {
                 return 0.5
             } else {
                 return 1.0
             }
         }())
 
-        // 仅在非 Focus 模式下附加拖拽手势（避免在 Focus 模式响应长按拖拽）
-        if isFocused {
-            base
-        } else {
-            base.onDrag {
-                return onDragStart()
-            } preview: {
-                dragPreviewView
-            }
-        }
+        base
     }
 
     // 悬浮标题栏视图（简化版，仅包含标题和关闭按钮）
@@ -1342,43 +1170,6 @@ private struct TabCardView: View {
             }
         }
         .padding(.horizontal, 8)
-    }
-
-    // 拖动预览视图 - 显示卡片 + 悬浮标题栏
-    private var dragPreviewView: some View {
-        ZStack(alignment: .top) {
-            // 卡片主体
-            ZStack {
-                Color(hslString: tab.backgroundColor)
-                Image(systemName: "globe")
-                    .font(.system(size: 32))
-                    .foregroundColor(.white.opacity(0.3))
-            }
-            .frame(width: cardWidth, height: cardHeight)
-            .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
-
-            // 悬浮标题栏
-            HStack(spacing: 8) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.6))
-
-                Text(tab.title.isEmpty ? "New Tab" : tab.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
-                    .lineLimit(1)
-
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .frame(width: cardWidth, height: floatingTitleBarHeight)
-            .offset(y: -floatingTitleBarHeight - 4)
-        }
     }
 
     // 卡片内容区域尺寸（现在等于完整卡片尺寸，因为标题栏悬浮在外部）
@@ -1442,6 +1233,49 @@ private struct TabCardView: View {
             content.onTapGesture {
                 onSelect()
             }
+        }
+    }
+}
+
+// MARK: - Tab Drag Preview View
+
+private struct TabDragPreviewView: View {
+    let tab: Tab
+    let cardWidth: CGFloat
+    let cardHeight: CGFloat
+    private let floatingTitleBarHeight: CGFloat = 24
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            ZStack {
+                Color(hslString: tab.backgroundColor)
+                Image(systemName: "globe")
+                    .font(.system(size: 32))
+                    .foregroundColor(.white.opacity(0.3))
+            }
+            .frame(width: cardWidth, height: cardHeight)
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
+
+            HStack(spacing: 8) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text(tab.title.isEmpty ? "New Tab" : tab.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineLimit(1)
+
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .frame(width: cardWidth, height: floatingTitleBarHeight)
+            .offset(y: -floatingTitleBarHeight - 4)
         }
     }
 }
