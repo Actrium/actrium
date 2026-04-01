@@ -125,7 +125,9 @@
       "noResults": "无搜索结果",
       "placeholder": "搜索...",
       "resultsIn": "搜索结果",
-      "recent": "最近搜索"
+      "recent": "最近搜索",
+      "emptyStateTitle": "无结果",
+      "emptyStateDescription": "无结果。请尝试新搜索词。"
     },
     "app": {
       "mockTitle1": "成游景由成约？什么改善怎么样，送合由周打事组?",

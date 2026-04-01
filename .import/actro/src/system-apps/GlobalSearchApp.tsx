@@ -506,9 +506,9 @@ export default function GlobalSearchApp() {
     if (searchResults.length === 0) {
       return (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyStateTitle}>无结果</Text>
+          <Text style={styles.emptyStateTitle}>{t('actr.search.emptyStateTitle')}</Text>
           <Text style={styles.emptyStateDescription}>
-            无结果。请尝试新搜索词。
+            {t('actr.search.emptyStateDescription')}
           </Text>
         </View>
       );

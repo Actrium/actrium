@@ -125,7 +125,9 @@
       "noResults": "Aucun résultat",
       "placeholder": "Rechercher...",
       "resultsIn": "Résultats de recherche",
-      "recent": "Recherches récentes"
+      "recent": "Recherches récentes",
+      "emptyStateTitle": "Aucun résultat",
+      "emptyStateDescription": "Aucun résultat. Veuillez essayer un nouveau terme de recherche."
     },
     "app": {
       "mockTitle1": "Comment cela peut-il être amélioré ?",
