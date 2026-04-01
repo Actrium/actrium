@@ -143,10 +143,10 @@ struct UnifiedCanvasView: View {
                     currentScale: transform.scale,
                     mode: viewModel.canvasMode,
                     showNewTabButton: searchTabsText.isEmpty,
-                        viewportSize: safeViewportSize,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
+                    viewportSize: safeViewportSize,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    bookmarkVM: bookmarkVM,
                     onSelectTab: { tabId in
                         switchToFocus(tabId: tabId)
                     },
@@ -707,6 +707,10 @@ private struct CanvasView: View {
                             onSelectTab(tab.id)
                         },
                         onDragStart: {
+                            if isBeingDragged {
+                                return NSItemProvider()
+                            }
+                            logger.error("====== 1. draggingTabId: \(draggingTabId), swappingTabId: \(swappingTabId), dropTargetSlotIndexFixed: \(dropTargetSlotIndexFixed), hoveringOverTabId: \(hoveringOverTabId), dragSourceSlotIndexFixed: \(dragSourceSlotIndexFixed), isBeingDragged: \(isBeingDragged), tabId: \(tab.id.uuidString)")
                             // 清除所有旧状态（防止残留）
                             swappingTabId = nil
                             dropTargetSlotIndexFixed = nil
@@ -741,7 +745,7 @@ private struct CanvasView: View {
                             }
 
                             // 延迟清除状态
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                 draggingTabId = nil
                                 swappingTabId = nil
                                 dragSourceSlotIndexFixed = nil
@@ -763,7 +767,8 @@ private struct CanvasView: View {
                     // 处理拖到 NewTab 卡片上的情况，清理状态
                     .onDrop(of: [.text], delegate: NoOpDropDelegate(
                         draggingTabId: $draggingTabId,
-                        hoveringOverTabId: $hoveringOverTabId
+                        hoveringOverTabId: $hoveringOverTabId,
+                        dragSourceSlotIndexFixed: $dragSourceSlotIndexFixed
                     ))
                     .position(
                         x: position.x + cardWidth / 2,
@@ -794,7 +799,8 @@ private struct CanvasView: View {
         // 全局拖放监听，处理拖到空白区域的情况
         .onDrop(of: [.text], delegate: CancelDragDropDelegate(
             draggingTabId: $draggingTabId,
-            hoveringOverTabId: $hoveringOverTabId
+            hoveringOverTabId: $hoveringOverTabId,
+            dragSourceSlotIndexFixed: $dragSourceSlotIndexFixed
         ))
     }
 }
@@ -932,24 +938,23 @@ private struct TabSwapDropDelegate: DropDelegate {
 private struct NoOpDropDelegate: DropDelegate {
     @Binding var draggingTabId: UUID?
     @Binding var hoveringOverTabId: UUID?
+    @Binding var dragSourceSlotIndexFixed: Int?
 
     func validateDrop(info: DropInfo) -> Bool {
         return draggingTabId != nil
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        draggingTabId = nil
-        hoveringOverTabId = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            draggingTabId = nil
+            hoveringOverTabId = nil
+            dragSourceSlotIndexFixed = nil
+        }
         return false
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         return DropProposal(operation: .move)
-    }
-
-    func dropSessionDidEnd(_ session: DropSession) {
-        draggingTabId = nil
-        hoveringOverTabId = nil
     }
 }
 
@@ -958,29 +963,24 @@ private struct NoOpDropDelegate: DropDelegate {
 private struct CancelDragDropDelegate: DropDelegate {
     @Binding var draggingTabId: UUID?
     @Binding var hoveringOverTabId: UUID?
+    @Binding var dragSourceSlotIndexFixed: Int?
 
     func validateDrop(info: DropInfo) -> Bool {
         return true
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        draggingTabId = nil
-        hoveringOverTabId = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            draggingTabId = nil
+            hoveringOverTabId = nil
+            dragSourceSlotIndexFixed = nil
+        }
         return false
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         return DropProposal(operation: .move)
     }
-
-    func dropSessionDidEnd(_ session: DropSession) {
-        draggingTabId = nil
-        hoveringOverTabId = nil
-    }
-
-    // 注意：不要在 dropExited 中清理状态！
-    // 因为当拖动从父视图进入子视图时，父视图的 dropExited 会被调用
-    // 这会导致状态被错误清空
 }
 
 // MARK: - Address Bar Container
