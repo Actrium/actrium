@@ -4,13 +4,14 @@
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   TextInput,
   ScrollView,
   StyleSheet,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { MyTouchableOpacity } from 'askit';
+import { AppText } from '../components';
+import { getTypographyStyle, spacing, radius } from '../theme/tokens';
 
 /**
  * Mock structured data for bookmark cards
@@ -84,27 +85,27 @@ export default function BookmarksApp({ bookmarks = [] }: { bookmarks?: any[] }) 
           {BOOKMARK_CARDS.map((card, index) => (
             <View key={index} style={styles.cardWrapper}>
               <View style={styles.card}>
-                <Text style={styles.cardTitle} numberOfLines={3}>
+                <AppText style={styles.cardTitle} numberOfLines={3}>
                   {t(card.titleKey as any)}
-                </Text>
+                </AppText>
                 
                 <View style={styles.referenceRow}>
-                  <Text style={styles.referenceLabel}>{t(card.referenceKey as any)}</Text>
-                  <Text style={styles.chevronIcon}>▼</Text>
+                  <AppText style={styles.referenceLabel}>{t(card.referenceKey as any)}</AppText>
+                  <AppText style={styles.chevronIcon}>▼</AppText>
                 </View>
 
                 <View style={styles.cardFooter}>
                   <View style={styles.labelGroup}>
-                    <Text style={styles.labelIcon}>{card.labelIcon}</Text>
-                    <Text style={styles.labelName}>{t(card.labelKey as any)}</Text>
+                    <AppText style={styles.labelIcon}>{card.labelIcon}</AppText>
+                    <AppText style={styles.labelName}>{t(card.labelKey as any)}</AppText>
                   </View>
                   
                   <View style={styles.actionGroup}>
                     <MyTouchableOpacity style={styles.starAction}>
-                      <Text style={styles.starIcon}>☆</Text>
+                      <AppText style={styles.starIcon}>☆</AppText>
                     </MyTouchableOpacity>
                     <MyTouchableOpacity style={styles.closeAction}>
-                      <Text style={styles.closeIcon}>×</Text>
+                      <AppText style={styles.closeIcon}>×</AppText>
                     </MyTouchableOpacity>
                   </View>
                 </View>
@@ -117,7 +118,7 @@ export default function BookmarksApp({ bookmarks = [] }: { bookmarks?: any[] }) 
       {/* 底部搜索框 (Bottom Search Box) */}
       <View style={styles.searchOverlay}>
         <View style={styles.searchBar}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <AppText style={styles.searchIcon}>🔍</AppText>
           <TextInput
             style={styles.searchInput}
             placeholder={t('actr.app.searchAppPlaceholder')}
@@ -141,8 +142,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 24,
-    paddingTop: 32,
+    padding: spacing.xxl,
+    paddingTop: spacing.xxxl,
     paddingBottom: 120, // 底部搜索框留白
   },
   grid: {
@@ -157,7 +158,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)', // from-white/95 to-white/90
     borderRadius: 24,
-    padding: 24,
+    padding: spacing.xxl,
     minHeight: 180,
     justifyContent: 'space-between',
     // Shadow properties commented out as requested
@@ -170,24 +171,23 @@ const styles = StyleSheet.create({
     */
   },
   cardTitle: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     fontWeight: '400',
     color: '#364153',
-    lineHeight: 20,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   referenceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginBottom: 20,
+    gap: spacing.xxs,
+    marginBottom: spacing.xl,
   },
   referenceLabel: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#99A1AF',
   },
   chevronIcon: {
-    fontSize: 10,
+    ...getTypographyStyle('caption2'),
     color: '#99A1AF',
   },
   cardFooter: {
@@ -199,44 +199,44 @@ const styles = StyleSheet.create({
   labelGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: spacing.xs,
   },
   labelIcon: {
-    fontSize: 16,
+    ...getTypographyStyle('bodyInput'),
   },
   labelName: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#364153',
   },
   actionGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
   starAction: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: '#d1d5dc',
     alignItems: 'center',
     justifyContent: 'center',
   },
   starIcon: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#364153',
     marginTop: -2,
   },
   closeAction: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: radius.md,
     backgroundColor: '#1e2939',
     alignItems: 'center',
     justifyContent: 'center',
   },
   closeIcon: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#fff',
     marginTop: -1,
   },
@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 30,
     height: 56,
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.xl,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
     maxWidth: 800,
@@ -267,12 +267,12 @@ const styles = StyleSheet.create({
   searchIcon: {
     fontSize: 18,
     color: 'rgba(255, 255, 255, 0.5)',
-    marginRight: 12,
+    marginRight: spacing.md,
   },
   searchInput: {
     flex: 1,
     color: '#fff',
-    fontSize: 16,
+    ...getTypographyStyle('bodyInput'),
     paddingVertical: 0,
   },
 });

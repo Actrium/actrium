@@ -1,7 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useTranslation } from 'react-i18next';
+import { AppText } from '../../components';
+import { deleteActionBar, getTypographyStyle, spacing } from '../../theme/tokens';
+import { HOST_SHADOWS } from '../styles/shadows';
 
 interface DeleteButtonProps {
   selectedCount: number;
@@ -35,7 +38,7 @@ export const DeleteButton: React.FC<DeleteButtonProps> = ({
               pressed && styles.buttonPressed,
             ]}
           >
-            <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
+            <AppText style={styles.cancelButtonText}>{t('common.cancel')}</AppText>
           </Pressable>
           <Pressable
             onPress={onPress}
@@ -44,9 +47,9 @@ export const DeleteButton: React.FC<DeleteButtonProps> = ({
               pressed && styles.buttonPressed,
             ]}
           >
-            <Text style={styles.buttonText}>
+            <AppText style={styles.buttonText}>
               {t('actr.input.deleteWithCount', { count: selectedCount })}
-            </Text>
+            </AppText>
           </Pressable>
         </View>
       </View>
@@ -75,48 +78,37 @@ const styles = StyleSheet.create({
   buttonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing.md,
   },
   cancelButton: {
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 32,
-    paddingVertical: 12,
+    paddingHorizontal: deleteActionBar.buttonPaddingHorizontal,
+    paddingVertical: deleteActionBar.buttonPaddingVertical,
     borderRadius: 24,
-    minWidth: 120,
+    minWidth: deleteActionBar.buttonMinWidth,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 5,
+    ...HOST_SHADOWS.inputPill,
   },
   cancelButtonText: {
     color: '#333333',
-    fontSize: 16,
-    fontWeight: '600',
+    ...getTypographyStyle(deleteActionBar.buttonTypographyVariant),
   },
   button: {
     backgroundColor: '#FF3B30',
-    paddingHorizontal: 32,
-    paddingVertical: 12,
+    paddingHorizontal: deleteActionBar.buttonPaddingHorizontal,
+    paddingVertical: deleteActionBar.buttonPaddingVertical,
     borderRadius: 24,
-    minWidth: 120,
+    minWidth: deleteActionBar.buttonMinWidth,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 5,
+    ...HOST_SHADOWS.inputPill,
   },
   buttonPressed: {
     opacity: 0.8,
   },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    ...getTypographyStyle(deleteActionBar.buttonTypographyVariant),
   },
 });
-

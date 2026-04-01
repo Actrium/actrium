@@ -3,12 +3,12 @@ import {
   Platform,
   PanResponder,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { AppText } from '../../../components';
 import { AttachmentPreviewBar } from '../AttachmentPreviewBar';
 import { HostIconButton } from '../HostIconButton';
 import { Icon } from '../Icon';
@@ -22,6 +22,13 @@ import { useTab } from '../../contexts/TabContext';
 import { exitFullscreen } from '../../../native-bridge';
 import SafeBottomView from '../SafeBottomView';
 import { DropdownMenu } from '../DropdownMenu';
+import {
+  attachmentActionMenu,
+  getTypographyStyle,
+  spacing,
+  inputArea,
+  iconSize,
+} from '../../../theme/tokens';
 
 type ActrInputMobileSharedStyles = Pick<ActrInputStyles, 'input' | 'mobileInputText'>;
 
@@ -335,8 +342,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
           {isEditing && (
             <HostIconButton
               iconType='close'
-              size={48}
-              iconSize={16}
+              size={inputArea.sideButtonSize}
+              iconSize={inputArea.cancelIconSize}
               iconColor='#666'
               onPress={handleCancelEdit}
               style={styles.mobileReservedButton}
@@ -363,12 +370,12 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                   )}
                 <View style={styles.mobileInputInnerRow}>
                   <DropdownMenu
-                    estimatedWidth={228}
-                    minWidth={228}
+                    estimatedWidth={attachmentActionMenu.width}
+                    minWidth={attachmentActionMenu.width}
                     anchorMode='start'
                     trigger={
                       <View style={styles.mobilePlusButton}>
-                        <Icon type='link' size={20} color='#404040' />
+                        <Icon type='link' size={inputArea.smallIconSize} color='#404040' />
                       </View>
                     }
                     onBeforeOpen={() => {
@@ -394,15 +401,17 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               <Icon
                                 type='network'
                                 active={isWebSearchActive}
-                                size={20}
+                                size={inputArea.smallIconSize}
                                 color={isWebSearchActive ? '#34A8FB' : '#2C2C2C'}
                               />
                             </View>
                             <View style={styles.mobileMenuTextBlock}>
-                              <Text style={styles.mobileMenuTitle}>{t('actr.input.webSearch')}</Text>
-                              <Text style={styles.mobileMenuSubtitle}>
+                              <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
+                                {t('actr.input.webSearch')}
+                              </AppText>
+                              <AppText style={styles.mobileMenuSubtitle}>
                                 {t('actr.input.webSearchTip')}
-                              </Text>
+                              </AppText>
                             </View>
                           </TouchableOpacity>
                         )}
@@ -422,15 +431,17 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               <Icon
                                 type='share_position'
                                 active={isLocationActive}
-                                size={20}
+                                size={inputArea.smallIconSize}
                                 color={isLocationActive ? '#34A8FB' : '#2C2C2C'}
                               />
                             </View>
                             <View style={styles.mobileMenuTextBlock}>
-                              <Text style={styles.mobileMenuTitle}>{t('actr.input.shareLocation')}</Text>
-                              <Text style={styles.mobileMenuSubtitle}>
+                              <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
+                                {t('actr.input.shareLocation')}
+                              </AppText>
+                              <AppText style={styles.mobileMenuSubtitle}>
                                 {t('actr.input.shareLocationTip')}
-                              </Text>
+                              </AppText>
                             </View>
                           </TouchableOpacity>
                         )}
@@ -443,11 +454,13 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                           }}
                         >
                           <View style={styles.mobileMenuItemIcon}>
-                            <Icon type='geolocation' size={22} color='#2C2C2C' />
+                            <Icon type='geolocation' size={inputArea.mediumIconSize} color='#2C2C2C' />
                           </View>
                           <View style={styles.mobileMenuTextBlock}>
-                            <Text style={styles.mobileMenuTitle}>{t('actr.input.location')}</Text>
-                            <Text style={styles.mobileMenuSubtitle}>{t('actr.input.sendLocation')}</Text>
+                            <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
+                              {t('actr.input.location')}
+                            </AppText>
+                            <AppText style={styles.mobileMenuSubtitle}>{t('actr.input.sendLocation')}</AppText>
                           </View>
                         </TouchableOpacity>
 
@@ -468,15 +481,17 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               <Icon
                                 type='enter'
                                 active={!isSendOnEnter}
-                                size={18}
+                                size={inputArea.smallIconSize}
                                 color={!isSendOnEnter ? '#34A8FB' : '#2C2C2C'}
                               />
                             </View>
                             <View style={styles.mobileMenuTextBlock}>
-                              <Text style={styles.mobileMenuTitle}>{t('actr.input.enterToNewLine')}</Text>
-                              <Text style={styles.mobileMenuSubtitle}>
+                              <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
+                                {t('actr.input.enterToNewLine')}
+                              </AppText>
+                              <AppText style={styles.mobileMenuSubtitle}>
                                 {t('actr.input.enterToNewLineTip')}
-                              </Text>
+                              </AppText>
                             </View>
                           </TouchableOpacity>
                         )}
@@ -491,8 +506,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               runAfterMenuClose(takePhoto);
                             }}
                           >
-                            <Icon type='camera' size={20} />
-                            <Text style={styles.mobileQuickActionText}>{t('actr.input.camera')}</Text>
+                            <Icon type='camera' size={inputArea.smallIconSize} />
+                            <AppText style={styles.mobileQuickActionText}>{t('actr.input.camera')}</AppText>
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.mobileQuickAction}
@@ -501,8 +516,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               runAfterMenuClose(pickImage);
                             }}
                           >
-                            <Icon type='image' size={20} />
-                            <Text style={styles.mobileQuickActionText}>{t('actr.input.photos')}</Text>
+                            <Icon type='image' size={inputArea.smallIconSize} />
+                            <AppText style={styles.mobileQuickActionText}>{t('actr.input.photos')}</AppText>
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.mobileQuickAction}
@@ -511,8 +526,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               runAfterMenuClose(pickDocument);
                             }}
                           >
-                            <Icon type='file' size={20} />
-                            <Text style={styles.mobileQuickActionText}>{t('actr.input.files')}</Text>
+                            <Icon type='file' size={inputArea.smallIconSize} />
+                            <AppText style={styles.mobileQuickActionText}>{t('actr.input.files')}</AppText>
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -551,14 +566,14 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                       style={styles.mobileMicButton}
                       onPress={onClearInput}
                     >
-                      <Icon type='input_clear' size={22} color='#666' />
+                      <Icon type='input_clear' size={inputArea.mediumIconSize} color='#666' />
                     </TouchableOpacity>
                   ) : shouldShowVoiceSwitchButton ? (
                     <TouchableOpacity
                       style={styles.mobileMicButton}
                       onPress={onSwitchToVoiceHoldMode}
                     >
-                      <Icon type='audio' size={24} color='#666' />
+                      <Icon type='audio' size={inputArea.largeIconSize} color='#666' />
                     </TouchableOpacity>
                   ) : (
                     <View style={styles.mobileMicButton} />
@@ -588,9 +603,9 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                     style={styles.mobileVoiceModeMain}
                     {...voiceHoldPanResponder.panHandlers}
                   >
-                     <Text style={styles.mobileVoiceHoldText}>
+                     <AppText variant='menuLabel' style={styles.mobileVoiceHoldText}>
                       {t('actr.input.holdToSpeak')}
-                    </Text>
+                    </AppText>
                   </View>
 
                   <TouchableOpacity
@@ -599,7 +614,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                   >
                     <Icon
                       type='keyboard'
-                      size={24}
+                      size={inputArea.largeIconSize}
                       color='#666666'
                     />
                   </TouchableOpacity>
@@ -612,12 +627,12 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
           {/* 右侧按钮 - 非编辑状态时显示 */}
           {!isEditing && (
             <>
-              {/* 收藏按钮 - 未聚焦时显示 */}
+              {/* 退出按钮 - 未聚焦时显示 */}
               {!isInputFocused && (
                 <HostIconButton
                   iconType='tab_preview'
-                  size={48}
-                  iconSize={20}
+                  size={inputArea.sideButtonSize}
+                  iconSize={inputArea.sideButtonIconSize}
                   iconColor='#404040'
                   onPress={handleExitTab}
                   style={styles.mobileReservedButton}
@@ -625,9 +640,9 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                   {/* 未读消息角标 */}
                   {totalUnread > 0 && (
                     <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadBadgeText}>
+                      <AppText style={styles.unreadBadgeText}>
                         {totalUnread > 99 ? '99+' : totalUnread}
-                      </Text>
+                      </AppText>
                     </View>
                   )}
                 </HostIconButton>
@@ -637,8 +652,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
               {isInputFocused && !isSendOnEnter && (
                 <HostIconButton
                   iconType='send'
-                  size={48}
-                  iconSize={20}
+                  size={inputArea.sideButtonSize}
+                  iconSize={inputArea.sideButtonIconSize}
                   iconColor={hasInputText ? '#000000' : '#666'}
                   onPress={() => {
                     if (hasInputText) {
@@ -660,7 +675,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 const styles = StyleSheet.create({
   mobileContainer: {
     width: '100%',
-    paddingTop: 6,
+    paddingTop: spacing.xs,
     // paddingBottom: 10,
     backgroundColor: '#F2F2F6',
   },
@@ -677,12 +692,12 @@ const styles = StyleSheet.create({
   },
   mobilePrimaryArea: {
     flex: 1,
-    minHeight: 48,
+    minHeight: inputArea.minHeight,
     position: 'relative',
   },
   mobileInputPill: {
-    minHeight: 48,
-    borderRadius: 24,
+    minHeight: inputArea.minHeight,
+    borderRadius: inputArea.borderRadius,
     backgroundColor: '#FFFFFF',
     ...HOST_SHADOWS.inputPill,
   },
@@ -690,23 +705,23 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   mobileAttachmentArea: {
-    paddingTop: 12,
-    paddingHorizontal: 12,
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.md,
   },
   mobileAttachmentDivider: {
     height: 1,
     backgroundColor: '#EAEAEA',
-    marginHorizontal: 12,
-    marginTop: 12,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
   },
   mobileInputInnerRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
   },
   mobileVoiceSurface: {
-    minHeight: 48,
+    minHeight: inputArea.minHeight,
     borderRadius: 24,
     backgroundColor: '#FFFFFF',
     position: 'relative',
@@ -718,28 +733,28 @@ const styles = StyleSheet.create({
   mobileVoiceInnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
   },
   mobilePlusButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: inputArea.smallButtonSize,
+    height: inputArea.smallButtonSize,
+    borderRadius: inputArea.smallButtonSize / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   mobileDropdownContent: {
-    width: 228,
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 6,
+    width: attachmentActionMenu.width,
+    paddingHorizontal: attachmentActionMenu.contentPaddingHorizontal,
+    paddingTop: attachmentActionMenu.contentPaddingTop,
+    paddingBottom: attachmentActionMenu.contentPaddingBottom,
   },
   mobileMenuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingHorizontal: attachmentActionMenu.itemPaddingHorizontal,
+    paddingVertical: attachmentActionMenu.itemPaddingVertical,
     marginVertical: 3,
     borderRadius: 20,
   },
@@ -755,35 +770,35 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   mobileMenuTitle: {
-    fontSize: 17,
+    ...getTypographyStyle('menuLabel'),
     color: '#333333',
   },
   mobileMenuSubtitle: {
-    fontSize: 13,
+    ...getTypographyStyle('caption1'),
     color: '#999999',
-    marginTop: 2,
+    marginTop: spacing.xxxs,
   },
   mobileMenuDivider: {
     height: 1,
     backgroundColor: '#E0E0E0',
-    marginVertical: 8,
+    marginVertical: spacing.sm,
     marginHorizontal: 10,
   },
   mobileQuickActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxs,
     alignItems: 'flex-start',
   },
   mobileQuickAction: {
     width: 60,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: spacing.xxs,
   },
   mobileQuickActionText: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#2C2C2C',
     fontWeight: '500',
   },
@@ -802,9 +817,9 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   mobileMicButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: inputArea.smallButtonSize,
+    height: inputArea.smallButtonSize,
+    borderRadius: inputArea.smallButtonSize / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -815,25 +830,25 @@ const styles = StyleSheet.create({
     ...HOST_SHADOWS.inputPill,
   },
   mobileVoiceModeSpacer: {
-    width: 34,
-    height: 34,
+    width: inputArea.smallButtonSize,
+    height: inputArea.smallButtonSize,
   },
   mobileVoiceModeMain: {
     flex: 1,
-    height: 34,
+    height: inputArea.smallButtonSize,
     alignItems: 'center',
     justifyContent: 'center',
   },
   mobileVoiceModeKeyboardButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: inputArea.smallButtonSize,
+    height: inputArea.smallButtonSize,
+    borderRadius: inputArea.smallButtonSize / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   mobileVoiceHoldText: {
+    ...getTypographyStyle('menuLabel'),
     color: '#333333',
-    fontSize: 17,
     fontWeight: '500',
   },
   unreadBadge: {
@@ -852,8 +867,7 @@ const styles = StyleSheet.create({
   },
   unreadBadgeText: {
     color: '#FFFFFF',
-    fontSize: 11,
+    ...getTypographyStyle('caption1'),
     fontWeight: '600',
-    lineHeight: 14,
   },
 });

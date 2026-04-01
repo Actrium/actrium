@@ -9,7 +9,6 @@ import {
   TextInput,
   TextInputSubmitEditingEventData,
   TextStyle,
-  Text,
   TouchableWithoutFeedback,
   View,
   ViewStyle,
@@ -34,6 +33,8 @@ import { isTablet } from '../../utils/device';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useNetworkPermission } from '../hooks/useNetworkPermission';
 import { BookmarkRepository } from '../../repository/BookmarkRepository';
+import { AppText } from '../../components';
+import { getTypographyStyle, loadApp, spacing } from '../../theme/tokens';
 
 // 在短时间窗口内抑制同一 URL 的重复加载，
 // 典型场景是权限弹窗前后扫码回调抖动导致重复触发。
@@ -131,7 +132,9 @@ const LoadApp = () => {
   const renderLoadingView = () => (
     <View style={styles.loadingContainer}>
       <ActivityIndicator size='large' color='#007AFF' />
-      <Text style={styles.loadingText}>{t('actr.app.loading')}</Text>
+      <AppText variant='statusBody' style={styles.loadingText}>
+        {t('actr.app.loading')}
+      </AppText>
     </View>
   );
 
@@ -318,8 +321,8 @@ const LoadApp = () => {
       return (
         <HostIconButton
           iconType='keyboard'
-          size={48}
-          iconSize={24}
+          size={loadApp.inputToggleButtonSize}
+          iconSize={loadApp.inputToggleIconSize}
           disableTint
           style={styles.inputToggleBtn}
           activeOpacity={0.8}
@@ -335,7 +338,7 @@ const LoadApp = () => {
       <View style={containerStyle}>
         <Icon
           type='keyboard'
-          size={24}
+          size={loadApp.inputPrefixIconSize}
           disableTint
           style={styles.inputPrefix}
         />
@@ -499,9 +502,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: spacing.md,
     color: '#666',
-    fontSize: 15,
+    ...getTypographyStyle('statusBody'),
   },
   phoneScanSection: {
     flex: 1,
@@ -541,23 +544,20 @@ const styles = StyleSheet.create({
     // width / height / borderRadius 由动态样式控制
     overflow: 'hidden',
     backgroundColor: '#fff',
-
-    shadowColor: '#000000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    ...HOST_SHADOWS.softSurface,
   },
   // Pad 端输入框为常显模式，单独维护尺寸，避免影响 Phone 端 Dock 输入样式。
   padInput: {
     paddingLeft: 39,
     paddingRight: 34,
-    height: 48,
+    height: loadApp.inputHeight,
     paddingVertical: 0,
-    fontSize: 17,
+    ...getTypographyStyle(loadApp.inputTypographyVariant),
   },
   padInputContainer: {
     position: 'absolute',
     left: '50%',
-    height: 48,
+    height: loadApp.inputHeight,
     backgroundColor: '#fff',
     marginLeft: -300,
     // width / borderRadius 由动态样式控制
@@ -566,30 +566,30 @@ const styles = StyleSheet.create({
   phoneInputContainer: {
     position: 'relative',
     width: '100%',
-    height: 48,
+    height: loadApp.inputHeight,
     backgroundColor: '#fff',
     borderRadius: 24,
     ...HOST_SHADOWS.inputPill,
   },
   phoneInput: {
     width: '100%',
-    height: 48,
+    height: loadApp.inputHeight,
     borderRadius: 24,
     paddingLeft: 39,
     paddingRight: 34,
     paddingVertical: 0,
-    fontSize: 17,
+    ...getTypographyStyle(loadApp.inputTypographyVariant),
   },
   inputPrefix: {
     position: 'absolute',
     left: 11,
     top: '50%',
-    marginTop: -12,
+    marginTop: -(loadApp.inputPrefixIconSize / 2),
   },
   inputToggleBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: loadApp.inputToggleButtonSize,
+    height: loadApp.inputToggleButtonSize,
+    borderRadius: loadApp.inputToggleButtonSize / 2,
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',

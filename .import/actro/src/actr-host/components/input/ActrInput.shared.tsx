@@ -13,6 +13,8 @@ import { StableTextInput } from './StableTextInput';
 import { useActrVoiceController } from './hooks/useActrVoiceController';
 import { useActrMessageFlow } from './hooks/useActrMessageFlow';
 import { LoginModal, AuthorizeModal } from '../../../system-apps/auth';
+import { getTypographyStyle } from '../../../theme/tokens';
+import { HOST_SHADOWS } from '../../styles/shadows';
 
 const { NativeLogger } = NativeModules;
 
@@ -262,15 +264,10 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 9,
     // 移除边框，保留纯阴影
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 5, // 兼容 Android 的阴影
+    ...HOST_SHADOWS.inputPill,
   },
   input: {
-    fontSize: 17,
-    lineHeight: 24,
+    ...getTypographyStyle('editorInput'),
     color: '#333',
     minHeight: 24,
     textAlignVertical: 'top',
@@ -294,19 +291,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
-    // Shadow
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
+    ...HOST_SHADOWS.compactFloatingButton,
   },
   mobileInputText: {
-    fontSize: 17,
-    lineHeight: 22,
+    ...getTypographyStyle('editorInputCompact'),
     color: '#333',
     padding: 0,
-    textAlignVertical: 'center',
+    textAlignVertical: 'top',
   },
 });
 

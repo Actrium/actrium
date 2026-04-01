@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { HostIconButton } from '../../actr-host/components/HostIconButton';
+import { AppText } from '../../components';
+import { getTypographyStyle, controlHeight } from '../../theme/tokens';
 
 interface SettingsBackHeaderProps {
   onBack: () => void;
@@ -27,9 +29,9 @@ export const SettingsBackHeader = ({
       </HostIconButton>
       {title ? (
         <View pointerEvents='none' style={styles.titleWrapper}>
-          <Text style={styles.title} numberOfLines={1}>
+          <AppText style={styles.title} numberOfLines={1}>
             {title}
-          </Text>
+          </AppText>
         </View>
       ) : null}
     </View>
@@ -38,7 +40,7 @@ export const SettingsBackHeader = ({
 
 const styles = StyleSheet.create({
   container: {
-    height: 44,
+    height: controlHeight.lg,
     justifyContent: 'center',
   },
   backButton: {
@@ -57,8 +59,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: 20,
-    fontWeight: '600',
+    ...getTypographyStyle('title2'),
     color: '#FFFFFF',
   },
 });

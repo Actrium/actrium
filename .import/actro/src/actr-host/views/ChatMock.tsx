@@ -14,6 +14,7 @@ import {
 } from '../../repository/MessageRepository';
 import ChatBubble from '../components/ChatBubble';
 import { getHostLayoutTokens } from '../../utils/layout';
+import { getTypographyStyle, spacing } from '../../theme/tokens';
 
 const TEMP_MOCK_APP_ID = '__temp_supramark_mock_app__';
 
@@ -486,7 +487,7 @@ const styles = StyleSheet.create({
   },
   messageGroup: {
     width: '100%',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   messageGroupWithCheckbox: {
     paddingLeft: 30, // 为复选框留出空间
@@ -495,7 +496,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     position: 'relative',
-    marginBottom: 4,
+    marginBottom: spacing.xxs,
     width: '100%',
   },
   questionBubbleWrapper: {
@@ -512,12 +513,12 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 4,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xxs,
   },
   loadingText: {
-    marginLeft: 8,
-    fontSize: 14,
+    marginLeft: spacing.sm,
+    ...getTypographyStyle('body'),
     color: '#999',
   },
   deleteButtonContainer: {

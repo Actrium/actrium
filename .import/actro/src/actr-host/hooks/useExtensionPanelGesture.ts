@@ -9,6 +9,7 @@ import {
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { isTablet } from '../../utils/device';
+import { extensionPanel } from '../../theme/tokens';
 
 // ─── 手势配置常量 ───────────────────────────────────────
 /** 水平滑动超过此距离才激活手势（避免误触） */
@@ -54,7 +55,7 @@ export function useExtensionPanelGesture({
   onVisibilityChange,
 }: UseExtensionPanelGestureParams) {
   // 与按钮触发路径保持一致：手势路径也基于固定面板宽度计算实际展开宽度。
-  const maxSlide = panelWidth * 0.8;
+  const maxSlide = panelWidth * extensionPanel.phoneWidthRatio;
   // 手势开始时记录的起始位置
   const startX = useSharedValue(0);
   // 手势进行中标记（防止 useEffect 中的按钮动画和手势冲突）

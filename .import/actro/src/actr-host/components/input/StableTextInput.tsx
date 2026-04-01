@@ -3,13 +3,14 @@ import {
   NativeSyntheticEvent,
   StyleSheet,
   StyleProp,
-  Text,
   TextInput,
   TextInputContentSizeChangeEventData,
   TextStyle,
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { AppText } from '../../../components';
+import { getTypographyStyle, inputTextBaseStyle, typography } from '../../../theme/tokens';
 import { useInputStore } from '../../store/useInputStore';
 
 interface StableTextInputProps {
@@ -44,7 +45,7 @@ export const StableTextInput = React.memo(function StableTextInput({
   autoGrowLineHeight,
 }: StableTextInputProps) {
   const { t } = useTranslation();
-  const MOBILE_LINE_HEIGHT = 22;
+  const MOBILE_LINE_HEIGHT = typography.editorInputCompact.lineHeight;
   const MOBILE_MAX_LINES = 5;
   const MOBILE_MIN_HEIGHT = MOBILE_LINE_HEIGHT;
   const MOBILE_MAX_HEIGHT = MOBILE_LINE_HEIGHT * MOBILE_MAX_LINES;
@@ -141,6 +142,7 @@ export const StableTextInput = React.memo(function StableTextInput({
 
   const inputStyle = React.useMemo(
     () => [
+      inputTextBaseStyle,
       mobileMode ? mobileInputStyle : desktopInputStyle,
       mobileMode
         ? {
@@ -210,9 +212,14 @@ export const StableTextInput = React.memo(function StableTextInput({
     <View style={styles.container}>
       {shouldShowPlaceholder && (
         <View pointerEvents='none' style={styles.placeholderOverlay}>
-          <Text numberOfLines={1} ellipsizeMode='tail' style={styles.placeholderText}>
+          <AppText
+            variant='editorInputCompact'
+            numberOfLines={1}
+            ellipsizeMode='tail'
+            style={styles.placeholderText}
+          >
             {t('actr.input.placeholder')}
-          </Text>
+          </AppText>
         </View>
       )}
       <TextInput
@@ -262,7 +269,6 @@ const styles = StyleSheet.create({
   },
   placeholderText: {
     color: '#999',
-    fontSize: 17,
-    lineHeight: 22,
+    ...getTypographyStyle('editorInputCompact'),
   },
 });

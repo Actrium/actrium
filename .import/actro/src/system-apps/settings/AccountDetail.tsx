@@ -1,13 +1,14 @@
 import React from 'react';
 import {
   View,
-  Text,
   ScrollView,
   StyleSheet,
   Image,
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsBackHeader } from './SettingsBackHeader';
 
@@ -55,17 +56,17 @@ export const AccountDetail = ({
       {/* Account Info Card */}
       <View style={styles.detailCard}>
         <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>{t('actr.settings.nickname')}</Text>
-          <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
+          <AppText style={styles.detailLabel}>{t('actr.settings.nickname')}</AppText>
+          <AppText style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
             {userInfo?.user.display_name || userInfo?.user.cn || '-'}
-          </Text>
+          </AppText>
         </View>
         <View style={styles.divider} />
         <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>{t('actr.settings.email')}</Text>
-          <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
+          <AppText style={styles.detailLabel}>{t('actr.settings.email')}</AppText>
+          <AppText style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
             {userInfo?.user.mail || '-'}
-          </Text>
+          </AppText>
         </View>
       </View>
 
@@ -77,9 +78,9 @@ export const AccountDetail = ({
             onPress={onDeleteAccount}
             activeOpacity={0.7}
           >
-            <Text style={styles.destructiveText}>
+            <AppText style={styles.destructiveText}>
               {t('actr.settings.deleteAccount')}
-            </Text>
+            </AppText>
           </TouchableOpacity>
         </View>
         <View style={styles.divider} />
@@ -89,9 +90,9 @@ export const AccountDetail = ({
             onPress={onLogout}
             activeOpacity={0.7}
           >
-            <Text style={styles.destructiveText}>
+            <AppText style={styles.destructiveText}>
               {t('actr.settings.logoutAccount')}
-            </Text>
+            </AppText>
           </TouchableOpacity>
         </View>
       </View>
@@ -109,7 +110,7 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: spacing.xxxl,
   },
   largeAvatar: {
     width: 120,
@@ -127,21 +128,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    height: 52,
+    paddingHorizontal: spacing.xl,
+    height: controlHeight.xl,
   },
   detailLabel: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#FFFFFF',
     fontWeight: '400',
   },
   detailValue: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#8C8C8C',
     fontWeight: '400',
     flex: 1,
     textAlign: 'right',
-    marginLeft: 16,
+    marginLeft: spacing.lg,
   },
   divider: {
     height: 1,
@@ -154,8 +155,8 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   dangerRow: {
-    paddingHorizontal: 20,
-    height: 52,
+    paddingHorizontal: spacing.xl,
+    height: controlHeight.xl,
     justifyContent: 'center',
   },
   dangerButton: {
@@ -163,7 +164,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   destructiveText: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#FF684E',
   },
 });

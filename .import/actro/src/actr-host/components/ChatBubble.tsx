@@ -16,6 +16,13 @@ import {
 import { Icon } from './Icon';
 import { useTranslation } from 'react-i18next';
 import { SmartImage } from './SmartImage';
+import { AppText } from '../../components';
+import {
+  chatBubbleToolbar,
+  getTypographyStyle,
+  longPressMenu,
+  typography,
+} from '../../theme/tokens';
 
 import { LongPressMenu } from './LongPressMenu';
 import { WaveForm } from './WaveForm';
@@ -29,11 +36,13 @@ import {
   DropdownMenuText,
 } from './DropdownMenu';
 import { useMessageStore } from '../store/useMessageStore';
+import { HOST_SHADOWS } from '../styles/shadows';
 
 import { Animated, Easing } from 'react-native';
 import { FeedbackFormModal } from './FeedbackFormModal';
 import { IAttachmentItem } from '../types/attachment';
 import { Supramark } from '@supramark/rn';
+import type { SupramarkStyles } from '@supramark/rn';
 import {
   SUPRAMARK_CONTAINER_RENDERERS,
   SUPRAMARK_FULL_CONFIG,
@@ -356,13 +365,16 @@ export default function ChatBubble({
   }, [attachments]);
   const isAttachmentOnly = parsedAttachments.length > 0 && !content;
   const hasAttachments = parsedAttachments.length > 0;
+  const messageTypography = isSmall
+    ? typography.messageBodySmall
+    : typography.messageBody;
   const markdownTextStyle = React.useMemo(
     () => ({
       color: '#252525',
-      fontSize: isSmall ? 11 : 16,
-      lineHeight: isSmall ? 15 : 22,
+      fontSize: messageTypography.fontSize,
+      lineHeight: messageTypography.lineHeight,
     }),
-    [isSmall],
+    [messageTypography.fontSize, messageTypography.lineHeight],
   );
   const markdownParagraphStyle = React.useMemo(
     () => ({
@@ -370,6 +382,56 @@ export default function ChatBubble({
       marginBottom: 0,
     }),
     [markdownTextStyle],
+  );
+  const markdownHeadingStyles = React.useMemo(
+    () => ({
+      h1: {
+        ...getTypographyStyle('title2'),
+        color: '#252525',
+        marginBottom: 12,
+      },
+      h2: {
+        ...getTypographyStyle('title3'),
+        color: '#252525',
+        marginBottom: 10,
+      },
+      h3: {
+        ...getTypographyStyle('bodyInput'),
+        color: '#252525',
+        fontWeight: '600',
+        marginBottom: 8,
+      },
+      h4: {
+        ...getTypographyStyle('bodyInput'),
+        color: '#252525',
+        fontWeight: '600',
+        marginBottom: 6,
+      },
+      h5: {
+        ...getTypographyStyle('subhead'),
+        color: '#252525',
+        fontWeight: '600',
+        marginBottom: 4,
+      },
+      h6: {
+        ...getTypographyStyle('footnote'),
+        color: '#252525',
+        fontWeight: '600',
+        marginBottom: 4,
+      },
+    }),
+    [],
+  );
+  const markdownSupramarkStyles = React.useMemo(
+    () =>
+      ({
+        paragraph: markdownParagraphStyle,
+        ...markdownHeadingStyles,
+        listItemText: markdownTextStyle,
+        inlineCode: markdownTextStyle,
+        code: markdownTextStyle,
+      }) as unknown as SupramarkStyles,
+    [markdownHeadingStyles, markdownParagraphStyle, markdownTextStyle],
   );
 
   const getDisplayFileName = React.useCallback((item: IAttachmentItem): string => {
@@ -469,9 +531,9 @@ export default function ChatBubble({
                       </Text>
                       <View style={styles.attachmentFileMetaRow}>
                         <Icon type='file' size={12} color='#34A8FB' />
-                        <Text style={styles.attachmentFileType}>
+                        <AppText style={styles.attachmentFileType}>
                           {getDisplayFileType(item)}
-                        </Text>
+                        </AppText>
                       </View>
                     </View>
                   </View>
@@ -500,7 +562,7 @@ export default function ChatBubble({
                         />
                         <View style={styles.locationTag}>
                           <Icon type='geolocation' size={12} color='#fff' />
-                          <Text style={styles.locationTagText}>{t('actr.attachment.locationTag')}</Text>
+                          <AppText style={styles.locationTagText}>{t('actr.attachment.locationTag')}</AppText>
                         </View>
                       </>
                     ) : (
@@ -534,15 +596,16 @@ export default function ChatBubble({
               {formatVoiceDuration(parsedVoicePayload.duration_ms)}
             </Text>
           </View>
-          <Text
+          <AppText
             style={styles.voiceHintText}
           >
             {isVoiceBubblePlaying ? '播放中' : '点击播放语音'}
-          </Text>
+          </AppText>
         </View>
       ) : content ? (
         numberOfLines ? (
-          <Text
+          <AppText
+            variant={isSmall ? 'messageBodySmall' : 'messageBody'}
             style={[
               isQuestion ? styles.questionText : styles.answerText,
               isSmall && styles.smallText,
@@ -550,20 +613,16 @@ export default function ChatBubble({
             numberOfLines={numberOfLines}
           >
             {content}
-          </Text>
+          </AppText>
         ) : (
           <View style={styles.markdownContainer}>
             <Supramark
               markdown={content}
               config={SUPRAMARK_FULL_CONFIG}
               containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
-              styles={{
-                paragraph: markdownParagraphStyle,
-                // text: markdownTextStyle,
-                listItemText: markdownTextStyle,
-                inlineCode: markdownTextStyle,
-                code: markdownTextStyle,
-              }}
+              // 中文注释：宿主与 supermark 工作区各自持有一份 react-native 类型定义，
+              // 这里做局部类型桥接，避免样式对象在 TS 层被误判为不兼容。
+              styles={markdownSupramarkStyles}
             />
           </View>
         )
@@ -586,7 +645,10 @@ export default function ChatBubble({
             disabled={selectionMode}
             hitSlop={8}
           >
-            <Icon type={isCopied ? 'more' : 'copy'} size={18} />
+            <Icon
+              type={isCopied ? 'more' : 'copy'}
+              size={chatBubbleToolbar.iconSize}
+            />
           </Pressable>
           <Pressable
             style={[
@@ -609,15 +671,16 @@ export default function ChatBubble({
             {readAloudStatus === 'playing' ? (
               <WaveForm />
             ) : (
-              <Icon type='voice' size={18} />
+              <Icon type='voice' size={chatBubbleToolbar.iconSize} />
             )}
           </Pressable>
           <DropdownMenu
-            estimatedWidth={180}
+            width={longPressMenu.width}
+            estimatedWidth={longPressMenu.width}
             anchorMode='end'
             trigger={
               <View style={styles.toolbarButton}>
-                <Icon type='more' size={18} />
+                <Icon type='more' size={chatBubbleToolbar.iconSize} />
               </View>
             }
             disabled={selectionMode}
@@ -687,7 +750,7 @@ export default function ChatBubble({
                 }}
               >
                 <Icon type='suggest' size={16} />
-                <Text style={styles.moreMenuText}>{t('actr.chat.feedback')}</Text>
+                <AppText style={styles.moreMenuText}>{t('actr.chat.feedback')}</AppText>
               </Pressable>
             </View>
           </View>
@@ -771,9 +834,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   toolbarButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: chatBubbleToolbar.buttonSize,
+    height: chatBubbleToolbar.buttonSize,
+    borderRadius: chatBubbleToolbar.buttonSize / 2,
     backgroundColor: '#EAEAEA',
     alignItems: 'center',
     justifyContent: 'center',
@@ -783,9 +846,9 @@ const styles = StyleSheet.create({
   },
   loadingBorder: {
     position: 'absolute',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: chatBubbleToolbar.buttonSize,
+    height: chatBubbleToolbar.buttonSize,
+    borderRadius: chatBubbleToolbar.buttonSize / 2,
     borderWidth: 2,
     borderColor: 'transparent',
     borderTopColor: '#34a8fb',
@@ -838,17 +901,17 @@ const styles = StyleSheet.create({
     color: '#252525',
   },
   voiceHintText: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#666',
   },
   // 文本基础样式
   questionText: {
     color: '#252525',
-    fontSize: 16,
+    ...getTypographyStyle('messageBody'),
   },
   answerText: {
     color: '#252525',
-    fontSize: 16,
+    ...getTypographyStyle('messageBody'),
   },
   // -------------------------
   // 小尺寸变体 (用于书签预览)
@@ -872,8 +935,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   smallText: {
-    fontSize: 11,
-    lineHeight: 15,
+    ...getTypographyStyle('messageBodySmall'),
   },
   markdownContainer: {
     flexShrink: 1,
@@ -926,7 +988,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   attachmentFileType: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#999',
     textAlign: 'left',
   },
@@ -944,7 +1006,7 @@ const styles = StyleSheet.create({
   },
   locationTagText: {
     color: '#fff',
-    fontSize: 10,
+    ...getTypographyStyle('caption2'),
   },
   locationPlaceholder: {
     width: 100,
@@ -980,11 +1042,7 @@ const styles = StyleSheet.create({
     padding: 10,
     width: 228,
     gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 8,
+    ...HOST_SHADOWS.menuSurface,
   },
   moreMenuItem: {
     flexDirection: 'row',
@@ -998,7 +1056,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F2F2F7',
   },
   moreMenuText: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#333333',
     fontWeight: '500',
   },

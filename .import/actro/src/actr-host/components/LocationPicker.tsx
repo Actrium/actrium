@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
   View,
-  Text,
   TouchableOpacity,
   StyleSheet,
   TouchableWithoutFeedback,
@@ -15,6 +14,9 @@ import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import type Geolocation from '@react-native-community/geolocation';
 import { GlobalAlert } from '../../../src/components';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing } from '../../theme/tokens';
+import { HOST_SHADOWS } from '../styles/shadows';
 
 interface LocationPickerProps {
   visible: boolean;
@@ -276,7 +278,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
                     style={styles.confirmButton}
                     onPress={handleConfirm}
                   >
-                    <Text style={styles.confirmButtonText}>{t('common.confirm')}</Text>
+                    <AppText style={styles.confirmButtonText}>{t('common.confirm')}</AppText>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -301,11 +303,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 34,
     overflow: 'hidden',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
+    ...HOST_SHADOWS.mapSurface,
   },
   mapContainer: {
     flex: 1,
@@ -315,7 +313,7 @@ const styles = StyleSheet.create({
   },
   mapActionOverlay: {
     position: 'absolute',
-    bottom: 24,
+    bottom: spacing.xxl,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -328,14 +326,11 @@ const styles = StyleSheet.create({
     borderRadius: 34,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    ...HOST_SHADOWS.mapActionButton,
   },
   confirmButtonText: {
     color: '#fff',
-    fontSize: 16,
+    ...getTypographyStyle('bodyInput'),
     fontWeight: 'bold',
   },
   centerMarkerContainer: {

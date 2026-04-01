@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import {
   View,
-  Text,
   Image,
   StyleSheet,
   Modal,
@@ -14,6 +13,8 @@ import { useAppStore } from '../../actr-host/store/useAppStore';
 import { useAuthorize } from '../../hooks/auth';
 import { HostIconButton } from '../../actr-host/components/HostIconButton';
 import { getHostLayoutTokens } from '../../utils/layout';
+import { AppText } from '../../components';
+import { getTypographyStyle } from '../../theme/tokens';
 
 interface AuthorizeModalProps {
   visible: boolean;
@@ -99,9 +100,9 @@ export const AuthorizeModal = ({
                         ]}
                       />
                     )}
-                    <Text style={styles.headerTitle} numberOfLines={1}>
+                    <AppText style={styles.headerTitle} numberOfLines={1}>
                       {appInfo?.app_name || t('actr.app.officialService')}
-                    </Text>
+                    </AppText>
                   </View>
                   <HostIconButton
                     iconType='close'
@@ -182,8 +183,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E5E5',
   },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: '600',
+    ...getTypographyStyle('title3'),
     color: '#333333',
     flexShrink: 1,
   },

@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   View,
-  Text,
   TouchableOpacity,
   StyleSheet,
   PanResponder,
@@ -11,6 +10,8 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../Icon';
+import { AppText } from '../../../components';
+import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -193,14 +194,14 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
               type='network'
               color={isWebSearchActive ? '#34A8FB' : undefined}
             />
-            {!isCompact && <Text style={styles.actionPillText}>{t('actr.input.webSearch')}</Text>}
+            {!isCompact && <AppText style={styles.actionPillText}>{t('actr.input.webSearch')}</AppText>}
           </TouchableOpacity>
         )}
 
         {showInlineLocationButton && (
           <TouchableOpacity onPress={onPickLocation} style={styles.actionPill}>
             <Icon type='geolocation' />
-            <Text style={styles.actionPillText}>{t('actr.input.location')}</Text>
+            <AppText style={styles.actionPillText}>{t('actr.input.location')}</AppText>
           </TouchableOpacity>
         )}
 
@@ -211,7 +212,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
             anchorMode='end'
             trigger={
               <View style={styles.actionCircle}>
-                <Text style={styles.actionPillText}>•••</Text>
+                <AppText style={styles.actionPillText}>•••</AppText>
               </View>
             }
           >
@@ -308,7 +309,7 @@ const styles = StyleSheet.create({
   leftActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing.sm,
     flex: 1,
     minWidth: 0,
   },
@@ -318,8 +319,8 @@ const styles = StyleSheet.create({
   rightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginLeft: 8,
+    gap: spacing.sm,
+    marginLeft: spacing.sm,
   },
   actionCircle: {
     height: 34,
@@ -348,7 +349,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   actionPillText: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#333333',
     fontWeight: '400',
   },

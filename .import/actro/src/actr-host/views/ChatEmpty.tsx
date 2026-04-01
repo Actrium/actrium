@@ -12,6 +12,8 @@ import { useAppStore } from '../store/useAppStore';
 import { useTab } from '../contexts/TabContext';
 import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { getHostLayoutTokens } from '../../utils/layout';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing } from '../../theme/tokens';
 
 export default function ChatEmpty() {
   const { width } = useWindowDimensions();
@@ -36,12 +38,15 @@ export default function ChatEmpty() {
         ]}
       >
         <View style={styles.logoContainer}>
-          <Text style={[styles.appName, { fontSize: layoutTokens.chatEmptyTitleSize }]}>
+          <AppText
+            variant={layoutTokens.isTablet ? 'emptyTitle' : 'emptyTitleCompact'}
+            style={styles.appName}
+          >
             {appInfo?.app_name}
-          </Text>
-          <Text style={styles.tabTitle}>
+          </AppText>
+          <AppText style={styles.tabTitle}>
             <Text style={styles.tabTitleBold}>{appInfoByLang?.welcome_text}</Text>
-          </Text>
+          </AppText>
         </View>
       </View>
     </TouchableWithoutFeedback>
@@ -60,15 +65,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   appName: {
-    fontSize: 60,
-    fontWeight: '300',
     color: '#1e2939',
-    letterSpacing: 2,
   },
   tabTitle: {
     color: '#364153',
-    marginTop: 16,
-    fontSize: 14,
+    marginTop: spacing.lg,
+    ...getTypographyStyle('body'),
   },
   tabTitleBold: {
     fontWeight: '600',

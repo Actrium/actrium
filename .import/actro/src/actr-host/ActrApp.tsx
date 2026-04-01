@@ -14,7 +14,6 @@
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import {
   View,
-  Text,
   NativeModules,
   NativeEventEmitter,
   StyleSheet,
@@ -23,6 +22,8 @@ import {
   DeviceEventEmitter,
 } from 'react-native';
 import { useUnreadStore } from './store/useUnreadStore';
+import { AppText } from '../components';
+import { getTypographyStyle, radius, spacing } from '../theme/tokens';
 
 // Import RN's Inspector API for accurate view hit testing
 // This uses React's internal renderer to find views at a point
@@ -1106,10 +1107,10 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
               pointerEvents='none'
             >
               <View style={styles.highlightLabel}>
-                <Text style={styles.highlightLabelText}>
+                <AppText style={styles.highlightLabelText}>
                   {highlightedFrame.componentName ||
                     `#${highlightedFrame.nodeId}`}
-                </Text>
+                </AppText>
               </View>
             </View>
           )}
@@ -1131,9 +1132,9 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
           pointerEvents='none'
         >
           <View style={styles.highlightLabel}>
-            <Text style={styles.highlightLabelText}>
+            <AppText style={styles.highlightLabelText}>
               {highlightedFrame.componentName || `#${highlightedFrame.nodeId}`}
-            </Text>
+            </AppText>
           </View>
         </View>
       )}
@@ -1169,13 +1170,13 @@ const styles = StyleSheet.create({
     top: -20,
     left: 0,
     backgroundColor: 'rgba(0, 122, 255, 0.9)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 3,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xxxs,
+    borderRadius: radius.xs,
   },
   highlightLabelText: {
     color: '#fff',
-    fontSize: 10,
+    ...getTypographyStyle('caption2'),
     fontWeight: '600',
   },
 });

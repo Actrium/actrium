@@ -1,6 +1,8 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Image, StyleSheet, TouchableOpacity } from 'react-native';
 import { Icon } from '../../actr-host/components/Icon';
+import { AppText } from '../../components';
+import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 
 interface SettingsItemProps {
   icon: string | any;
@@ -33,10 +35,10 @@ export const SettingsItem = ({
         <Image source={icon} style={styles.itemIconImage} />
       )}
       <View style={styles.itemContent}>
-        <Text style={[styles.itemLabel, destructive && styles.destructiveText]}>
+        <AppText style={[styles.itemLabel, destructive && styles.destructiveText]}>
           {label}
-        </Text>
-        {value && <Text style={styles.itemValue}>{value}</Text>}
+        </AppText>
+        {value && <AppText style={styles.itemValue}>{value}</AppText>}
         {showChevron && <Icon type='next' size={16} color='#fff' />}
       </View>
     </TouchableOpacity>
@@ -47,8 +49,8 @@ const styles = StyleSheet.create({
   itemContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    height: 52,
+    paddingHorizontal: spacing.lg,
+    height: controlHeight.xl,
   },
   itemIconImage: {
     width: 22,
@@ -60,21 +62,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 17,
-    paddingRight: 4,
+    paddingRight: spacing.xxs,
   },
   itemLabel: {
     flex: 1,
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#FFFFFF',
     fontWeight: '400',
   },
   itemValue: {
-    fontSize: 17,
+    ...getTypographyStyle('title3'),
     color: '#8E8E93',
-    marginRight: 8,
+    marginRight: spacing.sm,
   },
   destructiveText: {
-    fontSize: 17,
     color: '#FF684E',
   },
 });

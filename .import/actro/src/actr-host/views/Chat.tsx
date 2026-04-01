@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { AppText } from '../../components';
 import ActrInput from '../components/ActrInput';
 import {
   MessageRepository,
@@ -50,6 +51,11 @@ import {
   useReanimatedKeyboardAnimation,
 } from 'react-native-keyboard-controller';
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import {
+  getTypographyStyle,
+  scrollToBottomButton,
+  spacing,
+} from '../../theme/tokens';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
@@ -216,7 +222,7 @@ const MessageRow = React.memo(function MessageRow({
             item.progress === Progress.processing) ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size='small' color='#999' />
-            <Text style={styles.loadingText}>{t('actr.chat.thinking')}</Text>
+            <AppText style={styles.loadingText}>{t('actr.chat.thinking')}</AppText>
           </View>
         ) : null}
       </View>
@@ -562,9 +568,15 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         {isLoadingMore ? (
           <ActivityIndicator size='small' color='#999' />
         ) : (
-          <Text style={{ textAlign: 'center', color: '#999', fontSize: 12 }}>
+          <AppText
+            style={{
+              textAlign: 'center',
+              color: '#999',
+              ...getTypographyStyle('footnote'),
+            }}
+          >
             {t('actr.chat.loadMore')}
-          </Text>
+          </AppText>
         )}
       </View>
     );
@@ -730,13 +742,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 90, // 在输入框上方
+    bottom: scrollToBottomButton.bottomOffset,
     alignItems: 'center',
     zIndex: 99,
     pointerEvents: 'box-none',
   },
   scrollToBottomContainerPad: {
-    bottom: 160,
+    bottom: scrollToBottomButton.bottomOffsetPad,
   },
   chatScrollView: {
     flex: 1,
@@ -747,7 +759,7 @@ const styles = StyleSheet.create({
     alignItems: 'stretch', // 允许子项宽度自动扩展，然后由子项自己的 alignSelf: 'center' 处理居中
   },
   listHeader: {
-    paddingBottom: 20,
+    paddingBottom: spacing.xl,
   },
   messageListWrapper: {
     width: '100%',
@@ -755,7 +767,7 @@ const styles = StyleSheet.create({
   },
   messageGroup: {
     width: '100%',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   messageGroupWithCheckbox: {
     paddingLeft: 30, // 为复选框留出空间
@@ -764,7 +776,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     position: 'relative',
-    marginBottom: 4,
+    marginBottom: spacing.xxs,
     width: '100%',
   },
   questionBubbleWrapper: {
@@ -781,12 +793,12 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 4,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xxs,
   },
   loadingText: {
-    marginLeft: 8,
-    fontSize: 14,
+    marginLeft: spacing.sm,
+    ...getTypographyStyle('body'),
     color: '#999',
   },
   deleteButtonContainer: {
