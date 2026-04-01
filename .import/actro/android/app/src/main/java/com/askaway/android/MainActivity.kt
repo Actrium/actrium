@@ -155,14 +155,23 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             // 显示 flRNContent
             showReactNativeView(view)
             // 遍历 flRNContent 的子 view，将 tag == activeModel.id 的 view bringToFront
+            var hasCreate = false
             for (i in 0 until binding.flRNContent.childCount) {
                 val child = binding.flRNContent.getChildAt(i)
                 if (child.tag == activeModel.id) {
+                    hasCreate = true
                     Params.currentTabId = activeModel.id
                     child.bringToFront()
                     binding.flRNContent.invalidate()
                     break
                 }
+            }
+            if(!hasCreate){
+                val bundle = viewModel.genBundle(activeModel)
+                val targetView = createReactRootView("canvas-kotlin", bundle)
+                Log.e("MainActivity", "Received new React Native status: $bundle")
+                targetView.tag = activeModel.id
+                binding.flRNContent.addView(targetView)
             }
             viewModel.enterFullScreen(activeModel.id)
         }
@@ -191,7 +200,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         }
 
         binding.ivAdd.post {
-            binding.ivAdd.performClick()
+//            binding.ivAdd.performClick()
         }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
