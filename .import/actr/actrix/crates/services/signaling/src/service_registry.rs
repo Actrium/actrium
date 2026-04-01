@@ -8,7 +8,7 @@
 //! - **SQLite 缓存**：可选，用于重启恢复
 //! - **后台写入**：不阻塞主逻辑，异步写入数据库
 
-use actr_protocol::{ActrId, ActrType};
+use actr_protocol::{ActrId, ActrIdExt, ActrType};
 use platform::RealmError;
 use platform::realm::acl::ActorAcl;
 use serde::{Deserialize, Serialize};
@@ -229,7 +229,7 @@ impl ServiceRegistry {
         platform::recording::info!(
             "注册服务: {} (Actor {}), has_spec={}, has_acl={}, ws_address={:?}",
             service_name,
-            actor_id.serial_number,
+            actor_id.to_string_repr(),
             service_spec.is_some(),
             acl.is_some(),
             ws_address
@@ -282,7 +282,7 @@ impl ServiceRegistry {
                 platform::recording::info!(
                     "清除 storage-restored 幽灵候选: service={}, actor serial={}",
                     service_name,
-                    ghost_id.serial_number
+                    ghost_id.to_string_repr()
                 );
             }
         }
@@ -334,7 +334,7 @@ impl ServiceRegistry {
     ) -> Result<(), String> {
         platform::recording::debug!(
             "更新 Actor {} 负载指标: service_availability_state={}, power={:.2}, backlog={:.2}",
-            actor_id.serial_number,
+            actor_id.to_string_repr(),
             service_availability_state,
             power_reserve,
             mailbox_backlog
@@ -538,7 +538,7 @@ impl ServiceRegistry {
         platform::recording::debug!(
             "更新服务状态: {} (Actor {}) -> {:?}",
             service_name,
-            actor_id.serial_number,
+            actor_id.to_string_repr(),
             status
         );
 
@@ -573,7 +573,7 @@ impl ServiceRegistry {
         platform::recording::info!(
             "注销服务: {} (Actor {})",
             service_name,
-            actor_id.serial_number
+            actor_id.to_string_repr()
         );
 
         // 从服务映射表中移除
@@ -628,7 +628,7 @@ impl ServiceRegistry {
 
     /// 注销 Actor 的所有服务
     pub fn unregister_actor(&mut self, actor_id: &ActrId) {
-        platform::recording::info!("注销 Actor {} 的所有服务", actor_id.serial_number);
+        platform::recording::info!("注销 Actor {} 的所有服务", actor_id.to_string_repr());
 
         if let Some(service_names) = self.actor_index.remove(actor_id) {
             for service_name in &service_names {
@@ -660,7 +660,7 @@ impl ServiceRegistry {
             platform::recording::warn!(
                 "清理内存中的过期服务: {} (Actor {}) [数据库保留用于恢复]",
                 service_name,
-                actor_id.serial_number
+                actor_id.to_string_repr()
             );
             // 只清理内存，不删除数据库
             let _ = self.unregister_service_memory_only(&actor_id, &service_name);
@@ -749,7 +749,7 @@ impl ServiceRegistry {
         if services.is_empty() {
             platform::recording::debug!(
                 "No services found in storage for Actor {}",
-                actor_id.serial_number
+                actor_id.to_string_repr()
             );
             return Ok(false);
         }
@@ -757,7 +757,7 @@ impl ServiceRegistry {
         platform::recording::info!(
             "🔄 Restoring {} service(s) from storage for Actor {}",
             services.len(),
-            actor_id.serial_number
+            actor_id.to_string_repr()
         );
 
         // 将每个服务重新注册到内存
@@ -785,7 +785,7 @@ impl ServiceRegistry {
             platform::recording::info!(
                 "  ✅ Restored service: {} (Actor {})",
                 service.service_name,
-                service.actor_id.serial_number
+                service.actor_id.to_string_repr()
             );
         }
 
@@ -912,15 +912,15 @@ impl ServiceRegistry {
             } else {
                 platform::recording::debug!(
                     "ACL denied service discovery: requester={}, service={}",
-                    requester_id.serial_number,
-                    service.actor_id.serial_number
+                    requester_id.to_string_repr(),
+                    service.actor_id.to_string_repr()
                 );
             }
         }
 
         platform::recording::info!(
             "Service discovery completed with ACL filtering: requester={}, target_type={:?}, total_services={}, allowed_services={}",
-            requester_id.serial_number,
+            requester_id.to_string_repr(),
             target_type,
             total_count,
             allowed_services.len()

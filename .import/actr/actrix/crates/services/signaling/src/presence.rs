@@ -29,7 +29,7 @@
 //! // 向 subscribers 推送 ActrUpEvent
 //! ```
 
-use actr_protocol::{ActrId, ActrType};
+use actr_protocol::{ActrId, ActrIdExt, ActrType};
 use platform::RealmError;
 use platform::realm::acl::ActorAcl;
 use std::collections::HashMap;
@@ -65,7 +65,7 @@ impl PresenceManager {
     pub fn subscribe(&mut self, subscriber: ActrId, target_type: ActrType) {
         platform::recording::info!(
             "Actor {} 订阅 {}/{} 上线事件",
-            subscriber.serial_number,
+            subscriber.to_string_repr(),
             target_type.manufacturer,
             target_type.name
         );
@@ -77,7 +77,7 @@ impl PresenceManager {
             subscribers.push(subscriber);
             platform::recording::debug!("订阅成功，当前订阅者数量: {}", subscribers.len());
         } else {
-            platform::recording::warn!("Actor {} 已经订阅过该类型", subscriber.serial_number);
+            platform::recording::warn!("Actor {} 已经订阅过该类型", subscriber.to_string_repr());
         }
     }
 
@@ -93,7 +93,7 @@ impl PresenceManager {
     pub fn unsubscribe(&mut self, subscriber: &ActrId, target_type: &ActrType) -> bool {
         platform::recording::info!(
             "Actor {} 取消订阅 {}/{} 上线事件",
-            subscriber.serial_number,
+            subscriber.to_string_repr(),
             target_type.manufacturer,
             target_type.name
         );
@@ -112,7 +112,7 @@ impl PresenceManager {
                     platform::recording::debug!("该类型已无订阅者，移除订阅表条目");
                 }
             } else {
-                platform::recording::warn!("Actor {} 未订阅该类型", subscriber.serial_number);
+                platform::recording::warn!("Actor {} 未订阅该类型", subscriber.to_string_repr());
             }
 
             removed
@@ -136,7 +136,7 @@ impl PresenceManager {
     /// # 返回
     /// 取消的订阅数量
     pub fn unsubscribe_all(&mut self, subscriber: &ActrId) -> usize {
-        platform::recording::info!("清理 Actor {} 的所有订阅", subscriber.serial_number);
+        platform::recording::info!("清理 Actor {} 的所有订阅", subscriber.to_string_repr());
 
         let mut removed_count = 0;
 
@@ -225,15 +225,15 @@ impl PresenceManager {
                 Ok(false) => {
                     platform::recording::debug!(
                         "ACL denied discovery notification: subscriber={}, target={}",
-                        subscriber_id.serial_number,
-                        target_actor_id.serial_number
+                        subscriber_id.to_string_repr(),
+                        target_actor_id.to_string_repr()
                     );
                 }
                 Err(e) => {
                     platform::recording::warn!(
                         "ACL check failed, denying notification: subscriber={}, target={}, error={}",
-                        subscriber_id.serial_number,
-                        target_actor_id.serial_number,
+                        subscriber_id.to_string_repr(),
+                        target_actor_id.to_string_repr(),
                         e
                     );
                 }

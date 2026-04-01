@@ -302,7 +302,7 @@ pub async fn handle_websocket_connection(
                     if let Err(e) = send_envelope_to_client(&sub_cid, envelope, &server).await {
                         platform::recording::warn!(
                             "Failed to send ActrUp notification to {}: {}",
-                            subscriber_id.serial_number,
+                            subscriber_id.to_string_repr(),
                             e
                         );
                     }
@@ -549,12 +549,16 @@ async fn handle_actr_to_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = actr_to_server.source.clone();
 
-    platform::recording::info!("📬 处理来自 Actor {} 的消息", source.serial_number);
+    platform::recording::info!("📬 处理来自 Actor {} 的消息", source.to_string_repr());
 
     // 验证 Realm 是否存在、未过期、状态正常
     let realm_id = source.realm.realm_id;
     if let Err(e) = RealmEntity::validate_realm(realm_id).await {
-        platform::recording::warn!("⚠️  Actor {} realm 验证失败: {}", source.serial_number, e);
+        platform::recording::warn!(
+            "⚠️  Actor {} realm 验证失败: {}",
+            source.to_string_repr(),
+            e
+        );
         send_error_response(
             client_id,
             &source,
@@ -578,7 +582,7 @@ async fn handle_actr_to_server(
         Err(e) => {
             platform::recording::warn!(
                 "⚠️  Actor {} credential 验证失败: {}",
-                source.serial_number,
+                source.to_string_repr(),
                 e
             );
             // 发送错误响应
@@ -649,7 +653,7 @@ async fn handle_actr_to_server(
         Some(actr_to_signaling::Payload::Error(error)) => {
             platform::recording::error!(
                 "收到客户端错误报告 (Actor {}): code={}, message={}",
-                source.serial_number,
+                source.to_string_repr(),
                 error.code,
                 error.message
             );
@@ -673,7 +677,7 @@ async fn handle_ping(
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "💓 收到 Actor {} 心跳: availability={}, power_reserve={:.2}, mailbox_backlog={:.2}, sticky_clients={}{}",
-        source.serial_number,
+        source.to_string_repr(),
         ping.availability,
         ping.power_reserve,
         ping.mailbox_backlog,
@@ -695,7 +699,7 @@ async fn handle_ping(
     ) {
         platform::recording::warn!(
             "更新 Actor {} 负载指标失败: {}, 尝试从数据库恢复服务",
-            source.serial_number,
+            source.to_string_repr(),
             e
         );
 
@@ -704,7 +708,7 @@ async fn handle_ping(
             Ok(true) => {
                 platform::recording::info!(
                     "✅ 成功从数据库恢复 Actor {} 的服务注册",
-                    source.serial_number
+                    source.to_string_repr()
                 );
 
                 // 恢复后再次尝试更新负载指标
@@ -716,27 +720,27 @@ async fn handle_ping(
                 ) {
                     platform::recording::error!(
                         "❌ 从数据库恢复后仍无法更新 Actor {} 的负载指标: {}",
-                        source.serial_number,
+                        source.to_string_repr(),
                         e2
                     );
                 } else {
                     platform::recording::info!(
                         "✅ Actor {} 服务恢复后负载指标更新成功",
-                        source.serial_number
+                        source.to_string_repr()
                     );
                 }
             }
             Ok(false) => {
                 platform::recording::warn!(
                     "⚠️  数据库中未找到 Actor {} 的服务信息 (可能已过期或从未注册)",
-                    source.serial_number
+                    source.to_string_repr()
                 );
                 // TODO: 可选 - 在 Pong 响应中添加警告，提示客户端重新注册
             }
             Err(e) => {
                 platform::recording::error!(
                     "❌ 从数据库恢复 Actor {} 的服务失败: {}",
-                    source.serial_number,
+                    source.to_string_repr(),
                     e
                 );
             }
@@ -755,7 +759,7 @@ async fn handle_ping(
     if in_tolerance_period {
         platform::recording::warn!(
             "⚠️  Actor {} credential key is in tolerance period",
-            source.serial_number
+            source.to_string_repr()
         );
         pong.credential_warning = Some(actr_protocol::CredentialWarning {
             r#type: actr_protocol::credential_warning::WarningType::KeyInTolerancePeriod as i32,
@@ -788,7 +792,7 @@ async fn handle_unregister(
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "👋 Actor {} 注销: reason={:?}",
-        source.serial_number,
+        source.to_string_repr(),
         req.reason.as_deref().unwrap_or("未提供")
     );
 
@@ -870,7 +874,11 @@ async fn handle_actr_relay(
     // 验证源 Actor 的 realm（存在、未过期且状态正常）
     let realm_id = source.realm.realm_id;
     if let Err(e) = RealmEntity::validate_realm(realm_id).await {
-        platform::recording::warn!("⚠️  Actor {} realm 验证失败: {}", source.serial_number, e);
+        platform::recording::warn!(
+            "⚠️  Actor {} realm 验证失败: {}",
+            source.to_string_repr(),
+            e
+        );
         send_error_response(
             client_id,
             &source,
@@ -885,8 +893,8 @@ async fn handle_actr_relay(
 
     platform::recording::info!(
         "🔀 中继信令: {} -> {}",
-        source.serial_number,
-        target.serial_number
+        source.to_string_repr(),
+        target.to_string_repr()
     );
 
     platform::recording::debug!("handle_actr_relay: relay={:?}", relay);
@@ -907,8 +915,8 @@ async fn handle_actr_relay(
     if !can_relay {
         platform::recording::warn!(
             "⚠️  ACL denied relay: {} -> {}",
-            source.serial_number,
-            target.serial_number
+            source.to_string_repr(),
+            target.to_string_repr()
         );
         send_error_response(
             client_id,
@@ -929,7 +937,7 @@ async fn handle_actr_relay(
         Err(e) => {
             platform::recording::warn!(
                 "Actor {} credential validation failed: {}",
-                source.serial_number,
+                source.to_string_repr(),
                 e
             );
             send_error_response(
@@ -1048,7 +1056,7 @@ async fn handle_actr_relay(
 
         platform::recording::info!("✅ 信令中继成功");
     } else {
-        platform::recording::warn!("⚠️ 未找到目标 Actor {}", target.serial_number);
+        platform::recording::warn!("⚠️ 未找到目标 Actor {}", target.to_string_repr());
     }
 
     Ok(())
@@ -1105,9 +1113,9 @@ fn determine_webrtc_role(
 
     platform::recording::info!(
         "⚖️ 角色协商完成: {} (role={:?}) -> {} (role={:?}), is_offerer={}",
-        from.serial_number,
+        from.to_string_repr(),
         from_role,
-        to.serial_number,
+        to.to_string_repr(),
         to_role,
         is_offerer
     );
@@ -1150,7 +1158,7 @@ async fn send_role_assignment(
     } else {
         platform::recording::warn!(
             "⚠️ send_role_assignment: 未找到目标 Actor {}",
-            target_actor.serial_number
+            target_actor.to_string_repr()
         );
         Ok(())
     }
@@ -1203,7 +1211,7 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle) {
 
     if let Some(client) = removed_client {
         if let Some(actor_id) = client.actor_id {
-            platform::recording::info!("🧹 清理 Actor {} 的连接", actor_id.serial_number);
+            platform::recording::info!("🧹 清理 Actor {} 的连接", actor_id.to_string_repr());
 
             // Remove all services for this Actor from the ServiceRegistry to avoid stale ghost instances
             server
@@ -1216,12 +1224,12 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle) {
             match actor_index.remove(&actor_id) {
                 Some(mapped_client) if mapped_client != client_id => platform::recording::warn!(
                     "⚠️  Actor {} 索引指向意外客户端 {}，已移除",
-                    actor_id.serial_number,
+                    actor_id.to_string_repr(),
                     mapped_client
                 ),
                 None => platform::recording::warn!(
                     "⚠️  Actor {} 清理时未找到索引条目",
-                    actor_id.serial_number
+                    actor_id.to_string_repr()
                 ),
                 _ => {}
             }
@@ -1245,7 +1253,7 @@ async fn handle_discovery_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "🔍 处理 Actor {} 的 Discovery 请求: manufacturer={:?}, limit={}",
-        source.serial_number,
+        source.to_string_repr(),
         req.manufacturer.as_deref().unwrap_or("*"),
         req.limit.unwrap_or(64)
     );
@@ -1272,18 +1280,18 @@ async fn handle_discovery_request(
             Ok(false) => {
                 platform::recording::debug!(
                     "ACL denied discovery: {} (realm {}) cannot discover {} (realm {})",
-                    source.serial_number,
+                    source.to_string_repr(),
                     source_realm,
-                    service.actor_id.serial_number,
+                    service.actor_id.to_string_repr(),
                     target_realm
                 );
             }
             Err(e) => {
                 platform::recording::warn!(
                     "ACL check failed for {} (realm {}) -> {} (realm {}): {}",
-                    source.serial_number,
+                    source.to_string_repr(),
                     source_realm,
-                    service.actor_id.serial_number,
+                    service.actor_id.to_string_repr(),
                     target_realm,
                     e
                 );
@@ -1339,7 +1347,7 @@ async fn handle_discovery_request(
 
     platform::recording::info!(
         "✅ 为 Actor {} 返回 {} 个服务类型",
-        source.serial_number,
+        source.to_string_repr(),
         entries.len()
     );
 
@@ -1371,7 +1379,7 @@ async fn handle_route_candidates_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "🎯 处理 Actor {} 的 RouteCandidates 请求: target_type={}/{}",
-        source.serial_number,
+        source.to_string_repr(),
         req.target_type.manufacturer,
         req.target_type.name,
     );
@@ -1398,7 +1406,7 @@ async fn handle_route_candidates_request(
             if !connected {
                 platform::recording::warn!(
                     "🚫 过滤幽灵候选: Actor {} (无活跃连接)",
-                    c.actor_id.serial_number
+                    c.actor_id.to_string_repr()
                 );
             }
             connected
@@ -1437,18 +1445,18 @@ async fn handle_route_candidates_request(
             Ok(false) => {
                 platform::recording::debug!(
                     "ACL denied route candidate: {} (realm {}) cannot access {} (realm {})",
-                    source.serial_number,
+                    source.to_string_repr(),
                     source_realm,
-                    candidate.actor_id.serial_number,
+                    candidate.actor_id.to_string_repr(),
                     target_realm
                 );
             }
             Err(e) => {
                 platform::recording::warn!(
                     "ACL check failed for {} (realm {}) -> {} (realm {}): {}",
-                    source.serial_number,
+                    source.to_string_repr(),
                     source_realm,
-                    candidate.actor_id.serial_number,
+                    candidate.actor_id.to_string_repr(),
                     target_realm,
                     e
                 );
@@ -1488,7 +1496,7 @@ async fn handle_route_candidates_request(
 
     platform::recording::info!(
         "✅ 为 Actor {} 返回 {} 个候选",
-        source.serial_number,
+        source.to_string_repr(),
         ranked_actor_ids.len(),
     );
 
@@ -1584,7 +1592,7 @@ async fn handle_get_signing_key_request(
     let key_id = req.key_id;
     platform::recording::debug!(
         "Actor {} requested signing key: key_id={}",
-        source.serial_number,
+        source.to_string_repr(),
         key_id
     );
 
@@ -1649,7 +1657,7 @@ async fn handle_subscribe_actr_up(
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "📢 Actor {} 订阅服务上线事件: target_type={}/{}",
-        source.serial_number,
+        source.to_string_repr(),
         req.target_type.manufacturer,
         req.target_type.name
     );
@@ -1689,7 +1697,7 @@ async fn handle_unsubscribe_actr_up(
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "🔕 Actor {} 取消订阅服务上线事件: target_type={}/{}",
-        source.serial_number,
+        source.to_string_repr(),
         req.target_type.manufacturer,
         req.target_type.name
     );
@@ -1702,7 +1710,7 @@ async fn handle_unsubscribe_actr_up(
     if !removed {
         platform::recording::warn!(
             "Actor {} 未订阅过 {}/{}",
-            source.serial_number,
+            source.to_string_repr(),
             req.target_type.manufacturer,
             req.target_type.name
         );
