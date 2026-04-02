@@ -214,48 +214,73 @@ private struct FocusModeNavigationBar: View {
     }
     
     var body: some View {
-        HStack(spacing: 0) {
-            // 左侧：显示所有标签页按钮
-            Button(action: toggleOverviewMode) {
-                Image(systemName: "rectangle.grid.2x2.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(.primary)
-                    .frame(width: 44, height: tabHeight)
-            }
-            .buttonStyle(.plain)
-            .background(Color(hex: "#D1D1D6"))
-            
-            // 中间：标签页列表
-            if needsScrolling {
-                // 需要滚动时：ScrollView，添加按钮固定在外部
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        tabsContent
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .background(Color(hex: "#D1D1D6"))
-                
-                // 新建标签按钮（固定在右侧）
-                Button(action: {
-                    let newTab = viewModel.addNewTab(focus: false)
-                    viewModel.switchToTab(id: newTab.id)
-                }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .medium))
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                // 左侧：显示所有标签页按钮
+                Button(action: toggleOverviewMode) {
+                    Image(systemName: "rectangle.grid.2x2.fill")
+                        .font(.system(size: 16))
                         .foregroundColor(.primary)
-                        .frame(width: tabHeight, height: tabHeight)
+                        .frame(width: 44, height: tabHeight)
                 }
                 .buttonStyle(.plain)
                 .background(Color(hex: "#D1D1D6"))
-            } else {
-                // 不需要滚动时：添加按钮紧跟在最后一个页签后
-                HStack(spacing: 0) {
-                    tabsContent
-                    
-                    // 新建标签按钮（紧挨最后一个页签）
+                
+                // 中间：标签页列表
+                if needsScrolling {
+                    // 需要滚动时：ScrollView，添加按钮固定在外部
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 0) {
+                            tabsContent
+                            
+                            Color.clear.frame(width: 100)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .background(Color(hex: "#D1D1D6"))
+                } else {
+                    // 不需要滚动时：添加按钮紧跟在最后一个页签后
+                    HStack(spacing: 0) {
+                        tabsContent
+                        
+                        // 新建标签按钮（紧挨最后一个页签）
+                        Button(action: {
+                            let newTab = viewModel.addNewTab()
+                            viewModel.switchToTab(id: newTab.id)
+                        }) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.primary)
+                                .frame(width: tabHeight, height: tabHeight)
+                        }
+                        .buttonStyle(.plain)
+                        .background(Color(hex: "#D1D1D6"))
+                        
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .background(Color(hex: "#D1D1D6"))
+            
+            if needsScrolling {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.clear,
+                        Color(hex: "#D1D1D6")
+                    ]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 100)
+                .allowsHitTesting(false)
+            }
+            
+            HStack(spacing: 0) {
+                if needsScrolling {
+                    // 新建标签按钮（固定在右侧）
                     Button(action: {
-                        let newTab = viewModel.addNewTab()
+                        let newTab = viewModel.addNewTab(focus: false)
                         viewModel.switchToTab(id: newTab.id)
                     }) {
                         Image(systemName: "plus")
@@ -264,28 +289,23 @@ private struct FocusModeNavigationBar: View {
                             .frame(width: tabHeight, height: tabHeight)
                     }
                     .buttonStyle(.plain)
-                    .background(Color(hex: "#D1D1D6"))
-                    
-                    Spacer()
+                    .background(Color(hex: "#D1D1D6").opacity(0.001))
                 }
-                .frame(maxWidth: .infinity)
-                .background(Color(hex: "#D1D1D6"))
+                
+                // 右侧：设置按钮
+                Button(action: {
+                    viewModel.toggleLeftPanelForCurrentTab()
+                }) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 16))
+                        .foregroundColor(.primary)
+                        .frame(width: 44, height: tabHeight)
+                }
+                .buttonStyle(.plain)
+                .background(Color(hex: "#D1D1D6").opacity(0.001))
             }
-            
-            // 右侧：设置按钮
-            Button(action: {
-                viewModel.toggleLeftPanelForCurrentTab()
-            }) {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 16))
-                    .foregroundColor(.primary)
-                    .frame(width: 44, height: tabHeight)
-            }
-            .buttonStyle(.plain)
-            .background(Color(hex: "#D1D1D6"))
         }
         .frame(height: tabHeight)
-        .background(Color(hex: "#D1D1D6"))
     }
     
     // 标签页内容
