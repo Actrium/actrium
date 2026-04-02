@@ -27,7 +27,7 @@ const MENU_FADE_IN_DURATION = 300;
 
 interface DropdownMenuProps {
   trigger: React.ReactNode;
-  children: React.ReactNode | ((close: () => void) => React.ReactNode);
+  children: React.ReactNode | ((close: (callback?: () => void) => void) => React.ReactNode);
   triggerType?: 'press' | 'longPress';
   disabled?: boolean;
   onBeforeOpen?: () => void;
@@ -96,14 +96,25 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   const triggerRef = React.useRef<View>(null);
   const rafRef = React.useRef<number | null>(null);
   const menuOpacity = React.useRef(new Animated.Value(0)).current;
+  const pendingActionRef = React.useRef<(() => void) | null>(null);
 
-  const close = React.useCallback(() => {
+  const close = React.useCallback((callback?: () => void) => {
+    if (typeof callback === 'function') {
+      pendingActionRef.current = callback;
+    }
     menuOpacity.stopAnimation();
     menuOpacity.setValue(0);
     setIsOpen(false);
-    setTriggerRect(null);
     setIsMeasured(false);
   }, [menuOpacity]);
+
+  const handleModalDismiss = React.useCallback(() => {
+    setTriggerRect(null);
+    if (pendingActionRef.current) {
+      pendingActionRef.current();
+      pendingActionRef.current = null;
+    }
+  }, []);
 
   const measureTrigger = React.useCallback((openWhenMeasured = true) => {
     triggerRef.current?.measureInWindow((x, y, measuredWidth, measuredHeight) => {
@@ -268,14 +279,15 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         {trigger}
       </Pressable>
 
-      {isOpen && triggerRect && menuPosition && (
+      {!!triggerRect && !!menuPosition && (
         <Modal
           visible={isOpen}
           transparent
           animationType='none'
-          onRequestClose={close}
+          onRequestClose={() => close()}
+          onDismiss={handleModalDismiss}
         >
-          <TouchableWithoutFeedback onPress={close}>
+          <TouchableWithoutFeedback onPress={() => close()}>
             <View style={styles.modalBackdrop}>
               <Animated.View
                 style={[
