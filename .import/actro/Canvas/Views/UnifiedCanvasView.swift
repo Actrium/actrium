@@ -667,9 +667,6 @@ private struct CanvasView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // 画布背景
-            Color.clear
-
             // 第一层：卡片层（可移动，带动画）
             ForEach(displayItems, id: \.item.id) { displayItem in
                 let itemPosition = displayItem.position
@@ -1230,16 +1227,6 @@ private struct TabCardView: View {
                 onSelect()
             }
         }
-    }
-}
-
-extension Color {
-    static var random: Color {
-        Color(
-            red: Double.random(in: 0...1),
-            green: Double.random(in: 0...1),
-            blue: Double.random(in: 0...1)
-        )
     }
 }
 
