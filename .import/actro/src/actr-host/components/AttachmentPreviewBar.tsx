@@ -125,9 +125,6 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
                       ]}
                       resizeMode='cover'
                     />
-                    <View style={styles.locationOverlay}>
-                      <Icon type='geolocation' size={14} color='#fff' />
-                    </View>
                   </>
                 ) : (
                   <View style={styles.locationPlaceholder}>
@@ -209,14 +206,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: '#E8E8E8',
-  },
-  locationOverlay: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: 'rgba(52, 168, 251, 0.8)',
-    borderRadius: 6,
-    padding: 4,
   },
   locationContainer: {
     height: '100%',

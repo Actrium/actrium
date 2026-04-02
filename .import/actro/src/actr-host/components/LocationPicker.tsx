@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import MapView, { Region } from 'react-native-maps';
 import { useTranslation } from 'react-i18next';
+import ViewShot from 'react-native-view-shot';
 import { Icon } from './Icon';
 import type Geolocation from '@react-native-community/geolocation';
 import { GlobalAlert } from '../../../src/components';
@@ -35,7 +36,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
 }) => {
   const { t } = useTranslation();
   const [mapRegion, setMapRegion] = useState<Region | null>(null);
-  const mapRef = useRef<MapView>(null);
+  const mapShotRef = useRef<ViewShot>(null);
   const currentRegionRef = useRef<Region | null>(null);
   const getGeolocation = (): typeof Geolocation | null => {
     try {
@@ -197,24 +198,17 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   };
 
   const handleConfirm = async () => {
-    if (!mapRef.current) return;
+    if (!mapShotRef.current) return;
 
     const selectedRegion = currentRegionRef.current || mapRegion;
     if (!selectedRegion) return;
 
     try {
-      const snapshot = await mapRef.current.takeSnapshot({
-        // 🌟 关键：显式传递 region 强制快照器定位到正确区域
-        region: {
-          latitude: selectedRegion.latitude,
-          longitude: selectedRegion.longitude,
-          latitudeDelta: selectedRegion.latitudeDelta || 0.005,
-          longitudeDelta: selectedRegion.longitudeDelta || 0.005,
-        },
-        format: 'png',
-        quality: 1,
-        result: 'file',
-      });
+      // 直接截图整个地图容器，让地图和悬浮图钉一起进入快照，避免原生 Marker 干扰底图标识
+      const snapshot = await mapShotRef.current.capture();
+      if (!snapshot) {
+        throw new Error('Location view snapshot is empty');
+      }
 
       const snapshotUri = snapshot.startsWith('file://')
         ? snapshot
@@ -249,25 +243,36 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
         <View style={styles.modalOverlay}>
           <TouchableWithoutFeedback>
             <View style={styles.mapModalContent}>
-              <View style={styles.mapContainer}>
+              <ViewShot
+                ref={mapShotRef}
+                style={styles.mapContainer}
+                options={{
+                  format: 'png',
+                  quality: 1,
+                  result: 'tmpfile',
+                }}
+              >
                 {mapRegion && (
                   <>
                     <MapView
-                      ref={mapRef}
                       style={styles.map}
                       mapType='standard'
                       initialRegion={mapRegion}
+                      onRegionChange={(r) => {
+                        // 记录当前地图中心点，确认时按这个中心点输出经纬度
+                        currentRegionRef.current = r;
+                      }}
                       onRegionChangeComplete={(r) => {
                         currentRegionRef.current = r;
                       }}
                     />
-                    {/* 使用悬浮中心点代替 Marker，确保在快照时 100% 可见且不干扰地图渲染 */}
+                    {/* 保持屏幕中心悬浮图钉，交互仍然是“拖地图选中心点” */}
                     <View
                       style={styles.centerMarkerContainer}
                       pointerEvents='none'
                     >
                       <View style={styles.centerMarker}>
-                        <Icon type='geolocation' size={24} color='#34A8FB' />
+                        <Icon type='location_pin' size={84} disableTint />
                       </View>
                     </View>
                   </>
@@ -281,7 +286,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
                     <AppText style={styles.confirmButtonText}>{t('common.confirm')}</AppText>
                   </TouchableOpacity>
                 </View>
-              </View>
+              </ViewShot>
             </View>
           </TouchableWithoutFeedback>
         </View>
@@ -311,6 +316,15 @@ const styles = StyleSheet.create({
   map: {
     ...StyleSheet.absoluteFillObject,
   },
+  centerMarkerContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    // 确保图标在地图正中心，稍微往上偏一点点符合视觉习惯
+  },
+  centerMarker: {
+    marginTop: -24,
+  },
   mapActionOverlay: {
     position: 'absolute',
     bottom: spacing.xxl,
@@ -332,15 +346,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     ...getTypographyStyle('bodyInput'),
     fontWeight: 'bold',
-  },
-  centerMarkerContainer: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    // 确保图标在地图正中心，稍微往上偏一点点符合视觉习惯
-  },
-  centerMarker: {
-    marginTop: -24,
   },
 });
 
