@@ -106,11 +106,15 @@ const LoadApp = () => {
   const shouldApplyKeyboardInset = !(Platform.OS === 'android' && !isPhone);
   const scanSize = isPhone ? screenWidth * 0.85 : 500;
   const padInputWidth = 600;
+  const padInputBottomOffset = 42;
   const containerGap = isPhone ? 24 : 36;
   const scanBorderRadius = isPhone ? 20 : 34;
   const inputBorderRadius = 24;
   // Pad 模式不再展示 ChatHeader，因此不需要预留 Header 高度。
   const scanTopMargin = isTablet ? 10 : CHAT_HEADER_HEIGHT + 10;
+  const effectiveKeyboardInset = shouldApplyKeyboardInset ? keyboardInset : 0;
+  const padInputOccupiedHeight =
+    loadApp.inputHeight + padInputBottomOffset + effectiveKeyboardInset;
 
   // Pad 端输入框常驻展示，Phone 端保持原有“按钮切换输入框”交互。
   const showInputField = isTablet || (inputExpanded && !cameraActive);
@@ -395,11 +399,20 @@ const LoadApp = () => {
           contentContainerStyle={[
             styles.scrollContent,
             styles.padScrollContent,
-            { paddingBottom: shouldApplyKeyboardInset ? keyboardInset : 0 },
+            {
+              paddingBottom: padInputOccupiedHeight,
+            },
           ]}
           keyboardShouldPersistTaps='handled'
         >
-          <View style={[styles.LoadAppContainer, { gap: containerGap }]}>
+          <View
+            style={[
+              styles.LoadAppContainer,
+              {
+                gap: containerGap,
+              },
+            ]}
+          >
             {/* camera scan qrcode */}
             <View
               style={[
@@ -408,7 +421,7 @@ const LoadApp = () => {
                   width: scanSize,
                   height: scanSize,
                   borderRadius: scanBorderRadius,
-                  marginTop: scanTopMargin,
+                  marginTop: isTablet ? 0 : scanTopMargin,
                 },
               ]}
             >
@@ -440,7 +453,7 @@ const LoadApp = () => {
             {
               width: padInputWidth,
               borderRadius: inputBorderRadius,
-              bottom: 42 + (shouldApplyKeyboardInset ? keyboardInset : 0),
+              bottom: padInputBottomOffset + effectiveKeyboardInset,
             },
           ],
         )}
