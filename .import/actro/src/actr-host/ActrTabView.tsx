@@ -16,6 +16,7 @@ import Animated, {
   useAnimatedStyle,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 
 import { logger } from '../logger';
 import { installConsoleInterceptor } from '../devtools-console';
@@ -74,6 +75,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   onEngineChange,
 }) => {
   const { top: topInsetRaw } = useSafeAreaInsets();
+  const { t } = useTranslation();
   const gate = evaluateTabGate(tab);
 
 
@@ -515,7 +517,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             leftDisabled={!appId}
             leftActive={panelVisible}
             showLeftButton={Boolean(appId)}
-            appName={appId ? appName : '添加应用'}
+            appName={appId ? appName : t('actr.app.addApp')}
             includeSafeTopInset={false}
           />
         )}

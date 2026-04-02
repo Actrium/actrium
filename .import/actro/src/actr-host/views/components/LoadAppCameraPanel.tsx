@@ -19,6 +19,7 @@ import { TabEvents } from '../../../native-bridge/tab/TabEvents';
 import { AppText } from '../../../../src/components';
 import { GlobalAlert } from '../../../../src/components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
+import { HOST_SHADOWS } from '../../../../src/actr-host/styles/shadows';
 
 type LoadAppCameraPanelProps = {
   tabId: string;
@@ -299,14 +300,15 @@ const styles = StyleSheet.create({
   openCameraBtn: {
     height: Platform.OS === 'android' ? 44 : 48,
     paddingHorizontal: Platform.OS === 'android' ? 28 : 32,
-    backgroundColor: '#34A8FB',
+    backgroundColor: '#fff',
     borderRadius: Platform.OS === 'android' ? 22 : 24,
     alignItems: 'center',
     justifyContent: 'center',
+    ...HOST_SHADOWS.headerButton,
   },
   openCameraBtnText: {
     ...getTypographyStyle('scanActionLabel'),
-    color: '#fff',
+    color: '#000',
   },
   cameraContainer: {
     flex: 1,

@@ -29,7 +29,7 @@ import { Icon } from '../components/Icon';
 import { LoadAppCameraPanel } from './components/LoadAppCameraPanel';
 import { GlobalAlert } from '../../../src/components';
 import { CHAT_HEADER_HEIGHT } from '../constants';
-import { isTablet } from '../../utils/device';
+import { isPhone, isTablet } from '../../utils/device';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useNetworkPermission } from '../hooks/useNetworkPermission';
 import { BookmarkRepository } from '../../repository/BookmarkRepository';
@@ -39,8 +39,6 @@ import { getTypographyStyle, loadApp, spacing } from '../../theme/tokens';
 // 在短时间窗口内抑制同一 URL 的重复加载，
 // 典型场景是权限弹窗前后扫码回调抖动导致重复触发。
 const RESOLVE_DEDUP_MS = 3000;
-// 上游重复触发时，避免“应用不存在”弹窗连续轰炸用户。
-const ALERT_DEDUP_MS = 2000;
 // 扫码命中后给相机关闭一个很短的提交窗口，
 // 再弹错误提示，避免相机收起和弹框挂载抢同一帧导致观感卡顿。
 const INVALID_SCAN_ALERT_DELAY_MS = 150;
@@ -93,17 +91,12 @@ const LoadApp = () => {
     lastResolvedUrl: null as string | null,
     // 记录最近一次完成加载的时间戳，用于 3 秒去重窗口判断
     lastResolvedAt: 0,
-    // 记录最近一次"应用不存在"弹窗时间，防止 2 秒内重复弹窗轰炸用户
-    // 场景：如果上游重复触发，避免连续多个错误弹窗
-    lastNotFoundAlertAt: 0,
   });
   const inputRef = useRef<TextInput>(null);
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
   const { width: screenWidth } = useWindowDimensions();
   const { ensureNetworkPermission } = useNetworkPermission();
 
-  // 响应式尺寸：手机端使用屏幕宽度的 85%，iPad 端保持 500
-  const isPhone = screenWidth < 600;
   // 中文注释：Android 宿主已经通过 windowSoftInputMode 处理键盘上移，
   // Pad 端不要再额外叠加 RN 的 keyboardInset，否则扫码区和输入框会被重复抬高。
   const shouldApplyKeyboardInset = !(Platform.OS === 'android' && !isPhone);
@@ -179,15 +172,7 @@ const LoadApp = () => {
           }
 
           if (initResult.reason === 'APP_NOT_FOUND') {
-            const nowForAlert = Date.now();
-            // 避免”应用不存在”弹窗连续轰炸用户。
-            if (
-              nowForAlert - dedupeStateRef.current.lastNotFoundAlertAt >=
-              ALERT_DEDUP_MS
-            ) {
-              GlobalAlert.alert(t('actr.app.notExist'));
-              dedupeStateRef.current.lastNotFoundAlertAt = nowForAlert;
-            }
+            GlobalAlert.alert(t('actr.app.notExist'));
           } else {
             GlobalAlert.alert(
               t('actr.app.loadFailed'),
@@ -248,7 +233,8 @@ const LoadApp = () => {
       return;
     }
     // 防止同一个 appUrl 重复初始化
-    if (dedupeStateRef.current.lastAutoResolvedUrl === tabCtx.tab.appUrl) return;
+    if (dedupeStateRef.current.lastAutoResolvedUrl === tabCtx.tab.appUrl)
+      return;
 
     const presetAppUrl = tabCtx.tab.appUrl;
 
