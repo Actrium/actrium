@@ -16,6 +16,7 @@ import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import { SwipeRemoveActionRow } from '../components/SwipeRemoveActionRow';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
+import { isAndroid } from '../../../src/utils/device';
 
 type TFlatBookmarkItem = TBookmarkItem & {
   isLastInGroup: boolean;
@@ -108,13 +109,17 @@ export default function BookmarksPhoneView({
       <View style={styles.container}>
         <View style={headerStyle}>
           <AppText
-            style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+            style={[
+              styles.headerTitle,
+              isAndroid ? { marginTop: 4 } : {},
+              Platform.OS === 'android' && styles.androidTitleSpacing,
+            ]}
           >
             AskAway
           </AppText>
         </View>
         <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#34A8FB" />
+          <ActivityIndicator size='large' color='#34A8FB' />
           <AppText style={styles.centerText}>{t('common.loading')}</AppText>
         </View>
       </View>
@@ -126,7 +131,11 @@ export default function BookmarksPhoneView({
       <View style={styles.container}>
         <View style={headerStyle}>
           <AppText
-            style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+            style={[
+              styles.headerTitle,
+              isAndroid ? { marginTop: 4 } : {},
+              Platform.OS === 'android' && styles.androidTitleSpacing,
+            ]}
           >
             AskAway
           </AppText>
@@ -134,7 +143,9 @@ export default function BookmarksPhoneView({
         <View style={styles.centerContainer}>
           <AppText style={styles.errorText}>{error}</AppText>
           <TouchableOpacity style={styles.retryButton} onPress={loadBookmarks}>
-            <AppText style={styles.retryButtonText}>{t('common.retry')}</AppText>
+            <AppText style={styles.retryButtonText}>
+              {t('common.retry')}
+            </AppText>
           </TouchableOpacity>
         </View>
       </View>
@@ -146,14 +157,20 @@ export default function BookmarksPhoneView({
       <View style={styles.container}>
         <View style={headerStyle}>
           <AppText
-            style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+            style={[
+              styles.headerTitle,
+              isAndroid ? { marginTop: 4 } : {},
+              Platform.OS === 'android' && styles.androidTitleSpacing,
+            ]}
           >
             AskAway
           </AppText>
         </View>
         <View style={styles.centerContainer}>
           <AppText style={styles.emptyText}>{t('actr.bookmark.empty')}</AppText>
-          <AppText style={styles.emptySubText}>{t('actr.bookmark.emptyHint')}</AppText>
+          <AppText style={styles.emptySubText}>
+            {t('actr.bookmark.emptyHint')}
+          </AppText>
         </View>
       </View>
     );
@@ -163,7 +180,11 @@ export default function BookmarksPhoneView({
     <View style={styles.container}>
       <View style={headerStyle}>
         <AppText
-          style={[styles.headerTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+          style={[
+            styles.headerTitle,
+            isAndroid ? { marginTop: 4 } : {},
+            Platform.OS === 'android' && styles.androidTitleSpacing,
+          ]}
         >
           AskAway
         </AppText>

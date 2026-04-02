@@ -1,10 +1,21 @@
-import { Platform, TextStyle } from 'react-native';
+import { TextStyle } from 'react-native';
 
 /**
- * 统一平台判断。
- * 这里不在业务层到处写 Platform.OS，避免平台差异分散在页面里。
+ * token 生效平台。
+ * 这里把“视觉 token 用哪套值”从运行平台里拆出来，避免为了临时统一视觉而到处改三元表达式。
+ * 当前先让 Android 和 iOS 都走 iOS 体系，后续如果要恢复 Android，只需要改这里。
  */
-const isAndroid = Platform.OS === 'android';
+type TokenPlatform = 'ios' | 'android';
+
+const tokenPlatform: TokenPlatform = 'ios';
+
+/**
+ * 按 token 平台挑选值。
+ * 调用方传入同一语义在 iOS / Android 下各自的标定值，统一由这里决定最终生效哪一个。
+ */
+function selectTokenValue<T>(values: { ios: T; android: T }): T {
+  return values[tokenPlatform];
+}
 
 /**
  * 间距 token。
@@ -13,14 +24,14 @@ const isAndroid = Platform.OS === 'android';
  */
 export const spacing = {
   xxxs: 2,
-  xxs: isAndroid ? 2 : 4,
-  xs: isAndroid ? 4 : 6,
-  sm: isAndroid ? 6 : 8,
-  md: isAndroid ? 10 : 12,
-  lg: isAndroid ? 14 : 16,
-  xl: isAndroid ? 18 : 20,
-  xxl: isAndroid ? 22 : 24,
-  xxxl: isAndroid ? 30 : 32,
+  xxs: selectTokenValue({ ios: 4, android: 2 }),
+  xs: selectTokenValue({ ios: 6, android: 4 }),
+  sm: selectTokenValue({ ios: 8, android: 6 }),
+  md: selectTokenValue({ ios: 12, android: 10 }),
+  lg: selectTokenValue({ ios: 16, android: 14 }),
+  xl: selectTokenValue({ ios: 20, android: 18 }),
+  xxl: selectTokenValue({ ios: 24, android: 22 }),
+  xxxl: selectTokenValue({ ios: 32, android: 30 }),
 } as const;
 
 /**
@@ -75,9 +86,9 @@ export const iconSize = {
  * Android 图标视觉上更“满”，这里默认比 iOS 收一档。
  */
 export const hostIconGlyphSize = {
-  sm: isAndroid ? 12 : 16,
-  md: isAndroid ? 16 : 20,
-  lg: isAndroid ? 20 : 24,
+  sm: selectTokenValue({ ios: 16, android: 12 }),
+  md: selectTokenValue({ ios: 20, android: 16 }),
+  lg: selectTokenValue({ ios: 24, android: 20 }),
 } as const;
 
 /**
@@ -85,11 +96,11 @@ export const hostIconGlyphSize = {
  * 输入框、按钮、工具栏这类交互控件，优先走统一高度体系。
  */
 export const controlHeight = {
-  xs: isAndroid ? 26 : 28,
-  sm: isAndroid ? 30 : 32,
-  md: isAndroid ? 34 : 36,
-  lg: isAndroid ? 42 : 44,
-  xl: isAndroid ? 50 : 52,
+  xs: selectTokenValue({ ios: 28, android: 26 }),
+  sm: selectTokenValue({ ios: 32, android: 30 }),
+  md: selectTokenValue({ ios: 36, android: 34 }),
+  lg: selectTokenValue({ ios: 44, android: 42 }),
+  xl: selectTokenValue({ ios: 52, android: 50 }),
 } as const;
 
 /**
@@ -97,8 +108,8 @@ export const controlHeight = {
  * Android 保持更紧凑，避免同一数值下看起来比 iOS 大一号。
  */
 export const hostIconButtonSize = {
-  md: isAndroid ? 39 : 44,
-  lg: isAndroid ? 43 : 48,
+  md: selectTokenValue({ ios: 44, android: 39 }),
+  lg: selectTokenValue({ ios: 48, android: 43 }),
 } as const;
 
 /**
@@ -107,23 +118,23 @@ export const hostIconButtonSize = {
  */
 export const inputArea = {
   // 输入框容器最小高度
-  minHeight: isAndroid ? 41 : 48,
+  minHeight: selectTokenValue({ ios: 48, android: 41 }),
   // 输入框内小型图标按钮容器尺寸（加号、麦克风、清除等）
-  smallButtonSize: isAndroid ? 28 : 32,
+  smallButtonSize: selectTokenValue({ ios: 32, android: 28 }),
   // 输入框内小型图标尺寸
-  smallIconSize: isAndroid ? 18 : 20,
+  smallIconSize: selectTokenValue({ ios: 20, android: 18 }),
   // 输入框内中型图标尺寸（链接、语音、键盘等）
-  mediumIconSize: isAndroid ? 20 : 22,
+  mediumIconSize: selectTokenValue({ ios: 22, android: 20 }),
   // 输入框内大型图标尺寸（语音按钮等）
-  largeIconSize: isAndroid ? 22 : 24,
+  largeIconSize: selectTokenValue({ ios: 24, android: 22 }),
   // 输入框外侧圆形按钮尺寸（退出、发送等）
-  sideButtonSize: isAndroid ? 41 : 48,
+  sideButtonSize: selectTokenValue({ ios: 48, android: 41 }),
   // 输入框外侧圆形按钮内图标尺寸
-  sideButtonIconSize: isAndroid ? 18 : 20,
+  sideButtonIconSize: selectTokenValue({ ios: 20, android: 18 }),
   // 取消编辑按钮内图标尺寸
-  cancelIconSize: isAndroid ? 14 : 16,
+  cancelIconSize: selectTokenValue({ ios: 16, android: 14 }),
   // 输入框圆角
-  borderRadius: isAndroid ? 20 : 24,
+  borderRadius: selectTokenValue({ ios: 24, android: 20 }),
 } as const;
 
 /**
@@ -132,7 +143,7 @@ export const inputArea = {
  */
 export const attachmentPreview = {
   // 附件卡片右上角删除按钮尺寸
-  removeButtonSize: isAndroid ? 22 : 24,
+  removeButtonSize: selectTokenValue({ ios: 24, android: 22 }),
 } as const;
 
 /**
@@ -141,9 +152,9 @@ export const attachmentPreview = {
  */
 export const longPressMenu = {
   // 长按菜单容器宽度
-  width: isAndroid ? 198 : 228,
+  width: selectTokenValue({ ios: 228, android: 198 }),
   // 长按菜单容器内边距
-  padding: isAndroid ? 8 : 10,
+  padding: selectTokenValue({ ios: 10, android: 8 }),
 } as const;
 
 /**
@@ -152,9 +163,9 @@ export const longPressMenu = {
  */
 export const dropdownMenu = {
   // 下拉菜单默认预估宽度
-  defaultEstimatedWidth: isAndroid ? 208 : 228,
+  defaultEstimatedWidth: selectTokenValue({ ios: 228, android: 208 }),
   // 下拉菜单容器内边距
-  padding: isAndroid ? 8 : 10,
+  padding: selectTokenValue({ ios: 10, android: 8 }),
 } as const;
 
 /**
@@ -163,9 +174,9 @@ export const dropdownMenu = {
  */
 export const chatBubbleToolbar = {
   // 工具栏圆形按钮容器尺寸
-  buttonSize: isAndroid ? 32 : 34,
+  buttonSize: selectTokenValue({ ios: 34, android: 32 }),
   // 工具栏圆形按钮图标尺寸
-  iconSize: isAndroid ? 14 : 16,
+  iconSize: selectTokenValue({ ios: 16, android: 14 }),
 } as const;
 
 /**
@@ -174,15 +185,15 @@ export const chatBubbleToolbar = {
  */
 export const loadApp = {
   // 切换到输入框模式的圆形按钮尺寸
-  inputToggleButtonSize: isAndroid ? 41 : 48,
+  inputToggleButtonSize: selectTokenValue({ ios: 48, android: 41 }),
   // 切换按钮内键盘图标尺寸
-  inputToggleIconSize: isAndroid ? 21 : 24,
+  inputToggleIconSize: selectTokenValue({ ios: 24, android: 21 }),
   // URL 输入框高度
-  inputHeight: isAndroid ? 42 : 48,
+  inputHeight: selectTokenValue({ ios: 48, android: 42 }),
   // URL 输入框内文字与 placeholder 使用的排版档位
   inputTypographyVariant: 'urlInput',
   // URL 输入框左侧键盘图标尺寸
-  inputPrefixIconSize: isAndroid ? 22 : 24,
+  inputPrefixIconSize: selectTokenValue({ ios: 24, android: 22 }),
 } as const;
 
 /**
@@ -191,7 +202,7 @@ export const loadApp = {
  */
 export const attachmentActionMenu = {
   // 添加附件菜单宽度
-  width: isAndroid ? 208 : 228,
+  width: selectTokenValue({ ios: 228, android: 208 }),
   // 菜单内容区左右内边距
   contentPaddingHorizontal: spacing.sm,
   // 菜单内容区顶部内边距
@@ -199,9 +210,9 @@ export const attachmentActionMenu = {
   // 菜单内容区底部内边距
   contentPaddingBottom: spacing.xs,
   // 菜单项左右内边距
-  itemPaddingHorizontal: isAndroid ? 8 : 10,
+  itemPaddingHorizontal: selectTokenValue({ ios: 10, android: 8 }),
   // 菜单项上下内边距
-  itemPaddingVertical: isAndroid ? 8 : 10,
+  itemPaddingVertical: selectTokenValue({ ios: 10, android: 8 }),
 } as const;
 
 /**
@@ -210,7 +221,7 @@ export const attachmentActionMenu = {
  */
 export const extensionPanel = {
   // Phone 模式下侧滑面板相对于基准宽度的展开比例
-  phoneWidthRatio: isAndroid ? 0.66 : 0.8,
+  phoneWidthRatio: selectTokenValue({ ios: 0.8, android: 0.66 }),
 } as const;
 
 /**
@@ -219,29 +230,29 @@ export const extensionPanel = {
  */
 export const globalSearch = {
   // 搜索输入框高度
-  inputHeight: isAndroid ? 42 : 48,
+  inputHeight: selectTokenValue({ ios: 48, android: 42 }),
   // 搜索输入框与 placeholder 使用的排版档位
   inputTypographyVariant: 'searchInput',
   // 输入框左侧搜索图标尺寸
-  inputPrefixIconSize: isAndroid ? 16 : 18,
+  inputPrefixIconSize: selectTokenValue({ ios: 18, android: 16 }),
   // 输入框内清除按钮容器尺寸
-  clearButtonSize: isAndroid ? 30 : 32,
+  clearButtonSize: selectTokenValue({ ios: 32, android: 30 }),
   // 输入框内清除按钮图标尺寸
-  clearButtonIconSize: isAndroid ? 17 : 19,
+  clearButtonIconSize: selectTokenValue({ ios: 19, android: 17 }),
   // 右侧独立关闭按钮尺寸
-  closeButtonSize: isAndroid ? 42 : 48,
+  closeButtonSize: selectTokenValue({ ios: 48, android: 42 }),
   // 右侧独立关闭按钮图标尺寸
-  closeButtonIconSize: isAndroid ? 14 : 16,
+  closeButtonIconSize: selectTokenValue({ ios: 16, android: 14 }),
   // 搜索框与关闭按钮之间的间距
   searchRowGap: spacing.md,
   // 搜索输入框左右内边距
   inputPaddingHorizontal: spacing.md,
   // 左侧搜索图标距离输入框边缘的间距
-  inputPrefixMarginLeft: isAndroid ? 10 : 11,
+  inputPrefixMarginLeft: selectTokenValue({ ios: 11, android: 10 }),
   // 清除按钮右侧间距
   clearButtonMarginRight: spacing.xs,
   // 结果列表内容区内边距
-  resultsListPadding: isAndroid ? 18 : 20,
+  resultsListPadding: selectTokenValue({ ios: 20, android: 18 }),
   // 分组之间的垂直间距
   groupSpacing: spacing.lg,
   // 分组标题底部间距
@@ -249,13 +260,13 @@ export const globalSearch = {
   // 分组标题左侧微调间距
   groupTitleMarginLeft: spacing.xxs,
   // 结果项左右内边距
-  resultItemPaddingHorizontal: isAndroid ? 14 : 16,
+  resultItemPaddingHorizontal: selectTokenValue({ ios: 16, android: 14 }),
   // 结果名称与图标的间距
-  resultItemTextGap: isAndroid ? 10 : 11,
+  resultItemTextGap: selectTokenValue({ ios: 11, android: 10 }),
   // 结果项分隔线左侧缩进
-  resultDividerInsetLeft: isAndroid ? 56 : 60,
+  resultDividerInsetLeft: selectTokenValue({ ios: 60, android: 56 }),
   // 无结果态上下内边距
-  emptyStatePaddingVertical: isAndroid ? 36 : 40,
+  emptyStatePaddingVertical: selectTokenValue({ ios: 40, android: 36 }),
   // 无结果说明顶部间距
   emptyStateDescriptionMarginTop: spacing.sm,
   // 分组标题排版档位
@@ -274,11 +285,11 @@ export const globalSearch = {
  */
 export const deleteActionBar = {
   // 取消/删除按钮最小宽度
-  buttonMinWidth: isAndroid ? 112 : 120,
+  buttonMinWidth: selectTokenValue({ ios: 120, android: 112 }),
   // 按钮左右内边距
-  buttonPaddingHorizontal: isAndroid ? 28 : 32,
+  buttonPaddingHorizontal: selectTokenValue({ ios: 32, android: 28 }),
   // 按钮上下内边距
-  buttonPaddingVertical: isAndroid ? 10 : 12,
+  buttonPaddingVertical: selectTokenValue({ ios: 12, android: 10 }),
   // 按钮文案排版档位
   buttonTypographyVariant: 'scanActionLabel',
 } as const;
@@ -289,13 +300,13 @@ export const deleteActionBar = {
  */
 export const scrollToBottomButton = {
   // 按钮容器尺寸
-  size: isAndroid ? 36 : 40,
+  size: selectTokenValue({ ios: 40, android: 36 }),
   // 按钮内部箭头文案排版档位
   labelTypographyVariant: 'actionLabel',
   // Phone 端按钮距离底部的默认偏移
-  bottomOffset: isAndroid ? 70 : 90,
+  bottomOffset: selectTokenValue({ ios: 90, android: 70 }),
   // Pad 端按钮距离底部的默认偏移
-  bottomOffsetPad: isAndroid ? 148 : 160,
+  bottomOffsetPad: selectTokenValue({ ios: 160, android: 148 }),
 } as const;
 
 /**
@@ -697,7 +708,10 @@ const androidTypography: Record<TypographyVariant, TypographyToken> = {
  * 统一导出的文本 token。
  * 业务层只关心语义，不关心当前平台选的是哪套值。
  */
-export const typography = isAndroid ? androidTypography : iosTypography;
+export const typography = selectTokenValue({
+  ios: iosTypography,
+  android: androidTypography,
+});
 
 /**
  * 颜色 token。
