@@ -23,6 +23,7 @@ import { isPhone } from '../../utils/device';
 import { AppText } from '../../components';
 import { getTypographyStyle, spacing } from '../../theme/tokens';
 import { HOST_SHADOWS } from '../styles/shadows';
+import { useUserStore } from '../store/useUserStore';
 
 interface Category {
   id: string;
@@ -67,6 +68,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   const targetMsg = useMessageStore((state) =>
     tabId && messageId ? state.messageById[tabId]?.[messageId] : undefined,
   );
+  const user = useUserStore(state => state.userInfo?.user)
 
   const animValue = React.useRef(new Animated.Value(0)).current;
 
@@ -103,10 +105,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
 
   const handleSubmit = async () => {
     if (selectedIds.size === 0) {
-      GlobalAlert.alert(
-        t('common.hint'),
-        t('actr.chat.selectCategoryTip') || '请至少选择一个举报分类',
-      );
+      GlobalAlert.alert(t('common.hint'), t('actr.chat.selectCategoryTip'));
       return;
     }
 
@@ -122,7 +121,10 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
         contextPayload.push({
           role: 'user',
           message_id: targetMsg.message_id,
-          content: targetMsg.question_type === 'text' ? targetMsg.question_content : '语音消息',
+          content:
+            targetMsg.question_type === 'text'
+              ? targetMsg.question_content
+              : '语音消息',
           created_at: dayjs(targetMsg.question_time).format(
             'YYYY-MM-DD HH:mm:ss',
           ),
@@ -131,7 +133,10 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
         contextPayload.push({
           role: 'assistant',
           message_id: targetMsg.message_id,
-          content: targetMsg.answer_type === 'text' ? targetMsg.answer_content : '语音消息',
+          content:
+            targetMsg.answer_type === 'text'
+              ? targetMsg.answer_content
+              : '语音消息',
           created_at: dayjs(targetMsg.answer_time).format(
             'YYYY-MM-DD HH:mm:ss',
           ),
@@ -140,7 +145,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
 
       const res = await submitFeedback({
         app_id: appId || '',
-        user_id: '占位',
+        user_id: user?.cn || '',
         type: selectedTypes,
         note: details,
         context: contextPayload,
