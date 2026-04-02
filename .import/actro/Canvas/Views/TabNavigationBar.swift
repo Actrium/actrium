@@ -322,13 +322,11 @@ private struct TabItemView: View {
     let tabHeight: CGFloat
     let onSelect: () -> Void
     let onClose: () -> Void
-    
-    @State private var isCloseHovered = false
-    
+        
     var body: some View {
         HStack(spacing: 8) {
             // 标签标题
-            Text(tab.title)
+            Text(tab.title.isEmpty ? "新页签" : tab.title)
                 .font(.system(size: 13))
                 .foregroundColor(isActive ? .primary : .secondary)
                 .lineLimit(1)
@@ -337,18 +335,14 @@ private struct TabItemView: View {
             
             // 关闭按钮
             Button(action: onClose) {
-                Image(systemName: isCloseHovered ? "xmark.circle.fill" : "xmark")
+                Image(systemName: "xmark")
                     .font(.system(size: 12))
-                    .foregroundColor(isCloseHovered ? .white : .secondary)
+                    .foregroundColor(isActive ? .primary : .secondary)
             }
             .buttonStyle(.plain)
-            .opacity(isActive || isHovered ? 1 : 0)
-            .onHover { hovering in
-                isCloseHovered = hovering
-            }
         }
         .padding(.horizontal, 12)
-                .frame(width: width, height: tabHeight) // 高度与 tabHeight 一致，填满导航栏
+        .frame(width: width, height: tabHeight) // 高度与 tabHeight 一致，填满导航栏
         .background(
             // 使用 UnevenRoundedRectangle 实现顶部圆角 14pt，底部无圆角
             UnevenRoundedRectangle(
