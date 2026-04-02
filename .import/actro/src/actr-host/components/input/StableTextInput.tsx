@@ -16,7 +16,7 @@ import { useInputStore } from '../../store/useInputStore';
 interface StableTextInputProps {
   tabId: string;
   hasAttachments: boolean;
-  isSendOnEnter: boolean;
+  isEnterForNewLine: boolean;
   handleSendRef: React.MutableRefObject<() => void>;
   mobileMode?: boolean;
   onFocus?: () => void;
@@ -32,7 +32,7 @@ interface StableTextInputProps {
 export const StableTextInput = React.memo(function StableTextInput({
   tabId,
   hasAttachments,
-  isSendOnEnter,
+  isEnterForNewLine,
   handleSendRef,
   mobileMode = false,
   onFocus,
@@ -204,9 +204,10 @@ export const StableTextInput = React.memo(function StableTextInput({
   );
 
   const shouldShowPlaceholder = isEmpty;
-  const enterKeyHint = isSendOnEnter ? 'send' : 'enter';
-  const returnKeyType = isSendOnEnter ? 'send' : 'default';
-  const submitBehavior = isSendOnEnter ? 'blurAndSubmit' : 'newline';
+  // 中文注释：键盘动作语义跟随“是否回车换行”，确保状态名、按钮高亮和真实输入行为一致。
+  const enterKeyHint = isEnterForNewLine ? 'enter' : 'send';
+  const returnKeyType = isEnterForNewLine ? 'default' : 'send';
+  const submitBehavior = isEnterForNewLine ? 'newline' : 'blurAndSubmit';
 
   return (
     <View style={styles.container}>
@@ -240,9 +241,9 @@ export const StableTextInput = React.memo(function StableTextInput({
         enterKeyHint={enterKeyHint}
         returnKeyType={returnKeyType}
         submitBehavior={submitBehavior}
-        blurOnSubmit={isSendOnEnter}
+        blurOnSubmit={!isEnterForNewLine}
         onSubmitEditing={() => {
-          if (isSendOnEnter) {
+          if (!isEnterForNewLine) {
             handleSendRef.current();
           }
         }}

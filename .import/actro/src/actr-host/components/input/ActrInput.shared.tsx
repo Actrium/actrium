@@ -65,8 +65,8 @@ export default function ActrInput({
     setIsWebSearchActive,
     isLocationActive,
     setIsLocationActive,
-    isSendOnEnter,
-    setIsSendOnEnter,
+    isEnterForNewLine,
+    setIsEnterForNewLine,
     showSearchEntry,
     showLocationEntry,
     showNewlineEntry,
@@ -161,8 +161,8 @@ export default function ActrInput({
           setIsWebSearchActive={setIsWebSearchActive}
           isLocationActive={isLocationActive}
           setIsLocationActive={setIsLocationActive}
-          isSendOnEnter={isSendOnEnter}
-          setIsSendOnEnter={setIsSendOnEnter}
+          isEnterForNewLine={isEnterForNewLine}
+          setIsEnterForNewLine={setIsEnterForNewLine}
           takePhoto={takePhoto}
           pickImage={pickImage}
           pickDocument={pickDocument}
@@ -192,7 +192,7 @@ export default function ActrInput({
             <StableTextInput
               tabId={tab.id}
               hasAttachments={attachments.length > 0}
-              isSendOnEnter={isSendOnEnter}
+              isEnterForNewLine={isEnterForNewLine}
               handleSendRef={handleSendRef}
               desktopInputStyle={styles.input}
               mobileInputStyle={styles.mobileInputText}

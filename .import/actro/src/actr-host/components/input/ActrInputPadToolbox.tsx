@@ -27,8 +27,8 @@ interface ActrInputPadToolboxProps {
   onPickLocation: () => void;
   isWebSearchActive: boolean;
   setIsWebSearchActive: (active: boolean) => void;
-  isSendOnEnter: boolean;
-  setIsSendOnEnter: (active: boolean) => void;
+  isEnterForNewLine: boolean;
+  setIsEnterForNewLine: (active: boolean) => void;
   isLocationActive: boolean;
   setIsLocationActive: (active: boolean) => void;
   onSend: () => void;
@@ -50,8 +50,8 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
   onPickLocation,
   isWebSearchActive,
   setIsWebSearchActive,
-  isSendOnEnter,
-  setIsSendOnEnter,
+  isEnterForNewLine,
+  setIsEnterForNewLine,
   isLocationActive,
   setIsLocationActive,
   onSend,
@@ -253,9 +253,9 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                 )}
                 {showNewlineEntry && (
                   <DropdownMenuItem
-                    isActive={isSendOnEnter}
+                    isActive={isEnterForNewLine}
                     onPress={() => {
-                      setIsSendOnEnter(!isSendOnEnter);
+                      setIsEnterForNewLine(!isEnterForNewLine);
                       close();
                     }}
                   >
@@ -263,12 +263,12 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                       <Icon
                         type="enter"
                         size={16}
-                        color={isSendOnEnter ? '#34A8FB' : '#333333'}
+                        color={isEnterForNewLine ? '#34A8FB' : '#333333'}
                         />
                       </View>
                     <View style={styles.moreMenuTextBlock}>
-                      <DropdownMenuText>{t('actr.input.sendKeySettings')}</DropdownMenuText>
-                      <DropdownMenuSubText>{t('actr.input.enterToSendMessage')}</DropdownMenuSubText>
+                      <DropdownMenuText>{t('actr.input.enterToNewLine')}</DropdownMenuText>
+                      <DropdownMenuSubText>{t('actr.input.enterToNewLineTip')}</DropdownMenuSubText>
                     </View>
                   </DropdownMenuItem>
                 )}
