@@ -127,7 +127,7 @@ struct UnifiedCanvasView: View {
                 #if os(macOS)
                 Color(nsColor: NSColor(white: 0.1, alpha: 0.95))
                 #elseif os(iOS)
-                Color(uiColor: UIColor(white: 0.1, alpha: 0.95))
+                Color.black
                 #endif
 
                 // 统一渲染 Canvas（Overview 和 Focus 共用同一个视图，通过 transform 动画切换）
