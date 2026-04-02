@@ -556,14 +556,10 @@ export default function ChatBubble({
                             styles.attachmentImage,
                             item.aspect_ratio
                               ? { aspectRatio: item.aspect_ratio }
-                              : null,
+                            : null,
                           ]}
                           resizeMode='cover'
                         />
-                        <View style={styles.locationTag}>
-                          <Icon type='geolocation' size={12} color='#fff' />
-                          <AppText style={styles.locationTagText}>{t('actr.attachment.locationTag')}</AppText>
-                        </View>
                       </>
                     ) : (
                       <View style={styles.locationPlaceholder}>
@@ -991,22 +987,6 @@ const styles = StyleSheet.create({
     ...getTypographyStyle('footnote'),
     color: '#999',
     textAlign: 'left',
-  },
-  locationTag: {
-    position: 'absolute',
-    bottom: 4,
-    right: 12,
-    backgroundColor: 'rgba(52, 168, 251, 0.8)',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  locationTagText: {
-    color: '#fff',
-    ...getTypographyStyle('caption2'),
   },
   locationPlaceholder: {
     width: 100,
