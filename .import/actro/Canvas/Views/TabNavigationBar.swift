@@ -192,7 +192,7 @@ private struct OverviewNavigationBar: View {
             .buttonStyle(.plain)
         }
         .frame(height: height)
-        .background(Color(white: 0.15))
+        .background(Color.black)
     }
 }
 
