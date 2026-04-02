@@ -45,8 +45,8 @@ interface ActrInputMobileViewProps {
   setIsWebSearchActive: (active: boolean) => void;
   isLocationActive: boolean;
   setIsLocationActive: (active: boolean) => void;
-  isSendOnEnter: boolean;
-  setIsSendOnEnter: (active: boolean) => void;
+  isEnterForNewLine: boolean;
+  setIsEnterForNewLine: (active: boolean) => void;
   takePhoto: () => void;
   pickImage: () => void;
   pickDocument: () => void;
@@ -83,8 +83,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     setIsWebSearchActive,
     isLocationActive,
     setIsLocationActive,
-    isSendOnEnter,
-    setIsSendOnEnter,
+    isEnterForNewLine,
+    setIsEnterForNewLine,
     takePhoto,
     pickImage,
     pickDocument,
@@ -447,19 +447,19 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                           <TouchableOpacity
                             style={[
                               styles.mobileMenuItem,
-                              !isSendOnEnter && styles.mobileMenuItemActive,
+                              isEnterForNewLine && styles.mobileMenuItemActive,
                             ]}
                             onPress={() => {
-                              setIsSendOnEnter(!isSendOnEnter);
+                              setIsEnterForNewLine(!isEnterForNewLine);
                               close();
                             }}
                           >
                             <View style={styles.mobileMenuItemIcon}>
                               <Icon
                                 type='enter'
-                                active={!isSendOnEnter}
+                                active={isEnterForNewLine}
                                 size={inputArea.smallIconSize}
-                                color={!isSendOnEnter ? '#34A8FB' : '#2C2C2C'}
+                                color={isEnterForNewLine ? '#34A8FB' : '#2C2C2C'}
                               />
                             </View>
                             <View style={styles.mobileMenuTextBlock}>
@@ -512,7 +512,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                     <StableTextInput
                       tabId={tab.id}
                       hasAttachments={attachments.length > 0}
-                      isSendOnEnter={isSendOnEnter}
+                      isEnterForNewLine={isEnterForNewLine}
                       handleSendRef={handleSendRef}
                       mobileMode={true}
                       editable={!shouldEnableInputHoldToTalk}
@@ -623,7 +623,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
               )}
 
               {/* send 按钮 - 聚焦 + 开启回车换行时显示 */}
-              {isInputFocused && !isSendOnEnter && (
+              {isInputFocused && isEnterForNewLine && (
                 <HostIconButton
                   iconType='send'
                   size={inputArea.sideButtonSize}
