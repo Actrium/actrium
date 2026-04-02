@@ -1198,34 +1198,30 @@ private struct TabCardView: View {
         let content = ZStack {
             // 底层背景 - 使用 Tab 的随机背景颜色
             Color(hslString: tab.backgroundColor)
-
+            
             // 每个 Tab 都有独立的 RCTRootView - 实现真正的缩放
             // 关键修复：使用 overlay 而非 frame+scaleEffect 组合
             // 原来的方式 scaleEffect 后用 frame 对齐会有问题，因为 SwiftUI 使用原始尺寸计算位置
             // 新方式：用固定尺寸的容器，overlay 放置缩放后的内容
-            Color.clear
-                .frame(width: cardContentSize.width, height: cardContentSize.height)
-                .overlay(alignment: .topLeading) {
-                    SingleTabRootView(
-                        tab: tab,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
-                        containerSize: CGSize(
-                            width: max(rnRenderSize.width, 1),
-                            height: max(rnRenderSize.height, 1)
-                        )
-                    )
-                    .frame(
-                        width: max(rnRenderSize.width, 1),
-                        height: max(rnRenderSize.height, 1)
-                    )
-                    .scaleEffect(rnScaleFactor, anchor: .topLeading)
-                }
-                .clipped()
+            SingleTabRootView(
+                tab: tab,
+                viewModel: viewModel,
+                historyVM: historyVM,
+                bookmarkVM: bookmarkVM,
+                containerSize: CGSize(
+                    width: max(rnRenderSize.width, 1),
+                    height: max(rnRenderSize.height, 1)
+                )
+            )
+            .frame(
+                width: max(rnRenderSize.width, 1),
+                height: max(rnRenderSize.height, 1)
+            )
+            .scaleEffect(rnScaleFactor, anchor: .center)
         }
-        .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
+            .frame(maxWidth: cardContentSize.width, maxHeight: cardContentSize.height)
+            .contentShape(Rectangle())
+            .clipped()
 
         if isFocused {
             content
@@ -1234,6 +1230,16 @@ private struct TabCardView: View {
                 onSelect()
             }
         }
+    }
+}
+
+extension Color {
+    static var random: Color {
+        Color(
+            red: Double.random(in: 0...1),
+            green: Double.random(in: 0...1),
+            blue: Double.random(in: 0...1)
+        )
     }
 }
 
