@@ -517,7 +517,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             leftDisabled={!appId}
             leftActive={panelVisible}
             showLeftButton={Boolean(appId)}
-            appName={appId ? appName : t('actr.app.addApp')}
+            appName={appId ? appName : t('actr.app.newTab')}
             includeSafeTopInset={false}
           />
         )}
