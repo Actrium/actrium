@@ -119,26 +119,23 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
       const contextPayload: FeedbackContext[] = [];
 
       if (targetMsg) {
-        if (targetMsg.question_content) {
-          contextPayload.push({
-            role: 'user',
-            message_id: targetMsg.message_id,
-            content: targetMsg.question_content,
-            created_at: dayjs(targetMsg.question_time).format(
-              'YYYY-MM-DD HH:mm:ss',
-            ),
-          });
-        }
-        if (targetMsg.answer_content) {
-          contextPayload.push({
-            role: 'assistant',
-            message_id: targetMsg.message_id,
-            content: targetMsg.answer_content,
-            created_at: dayjs(targetMsg.answer_time).format(
-              'YYYY-MM-DD HH:mm:ss',
-            ),
-          });
-        }
+        contextPayload.push({
+          role: 'user',
+          message_id: targetMsg.message_id,
+          content: targetMsg.question_type === 'text' ? targetMsg.question_content : '语音消息',
+          created_at: dayjs(targetMsg.question_time).format(
+            'YYYY-MM-DD HH:mm:ss',
+          ),
+        });
+
+        contextPayload.push({
+          role: 'assistant',
+          message_id: targetMsg.message_id,
+          content: targetMsg.answer_type === 'text' ? targetMsg.answer_content : '语音消息',
+          created_at: dayjs(targetMsg.answer_time).format(
+            'YYYY-MM-DD HH:mm:ss',
+          ),
+        });
       }
 
       const res = await submitFeedback({
