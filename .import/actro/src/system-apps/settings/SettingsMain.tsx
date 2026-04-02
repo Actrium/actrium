@@ -14,6 +14,7 @@ import { AppText } from '../../components';
 import { getTypographyStyle, spacing } from '../../theme/tokens';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
+import { isAndroid } from '../../../src/utils/device';
 
 interface SettingsMainProps {
   onAccountPress: () => void;
@@ -59,7 +60,9 @@ export const SettingsMain = ({
     >
       {/* Page Title */}
       <AppText
-        style={[styles.pageTitle, Platform.OS === 'android' && styles.androidTitleSpacing]}
+        style={[styles.pageTitle, 
+          isAndroid ? {marginTop: 4} : {},
+          Platform.OS === 'android' && styles.androidTitleSpacing]}
       >
         AskAway
       </AppText>
