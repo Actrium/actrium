@@ -7,6 +7,7 @@ import {
   GestureResponderEvent,
   PanResponderGestureState,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../Icon';
@@ -75,7 +76,6 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
   const [internalIsCancelling, setInternalIsCancelling] = React.useState(false);
   const isCancellingRef = React.useRef(false);
 
-  // 使用 Ref 追踪最新的回调函数，确保 PanResponder 实例永远不需要重建
   const callbacks = React.useRef({
     onVoiceStart,
     onVoiceChangeState,
@@ -146,8 +146,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
             <>
               <DropdownMenuItem
                 onPress={() => {
-                  onPickCamera();
-                  close();
+                  close(onPickCamera);
                 }}
               >
                 <View style={{ width: 28, alignItems: 'center' }}>
@@ -157,8 +156,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onPress={() => {
-                  onPickImage();
-                  close();
+                  close(onPickImage);
                 }}
               >
                 <View style={{ width: 28, alignItems: 'center' }}>
@@ -168,8 +166,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onPress={() => {
-                  onPickFile();
-                  close();
+                  close(onPickFile);
                 }}
               >
                 <View style={{ width: 28, alignItems: 'center' }}>
@@ -221,8 +218,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                 {!showInlineLocationButton && (
                   <DropdownMenuItem
                     onPress={() => {
-                      onPickLocation();
-                      close();
+                      close(onPickLocation);
                     }}
                   >
                     <View style={{ width: 18, alignItems: 'center' }}>
