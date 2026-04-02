@@ -36,6 +36,13 @@ import { BookmarkRepository } from '../../repository/BookmarkRepository';
 import { AppText } from '../../components';
 import { getTypographyStyle, loadApp, spacing } from '../../theme/tokens';
 
+type LoadRequestSource = 'preset' | 'scan' | 'input';
+
+type LoadRequest = {
+  url: string;
+  source: LoadRequestSource;
+};
+
 // 在短时间窗口内抑制同一 URL 的重复加载，
 // 典型场景是权限弹窗前后扫码回调抖动导致重复触发。
 const RESOLVE_DEDUP_MS = 3000;
@@ -76,16 +83,13 @@ const LoadApp = () => {
   const [cameraActive, setCameraActive] = useState(false);
   const [inputExpanded, setInputExpanded] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
-  const [isPresetAppUrlLoading, setIsPresetAppUrlLoading] = useState(
-    Boolean(tabCtx.tab.appUrl),
-  );
+  const [loadRequest, setLoadRequest] = useState<LoadRequest | null>(null);
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const isResolvingRef = useRef(false);
-  const pendingResolveUrlRef = useRef<string | null>(null);
   // 去重状态集合：防止各种场景下的重复加载和重复弹窗
   const dedupeStateRef = useRef({
-    // 记录已自动加载过的 appUrl（来自收藏恢复），防止 useEffect 重复执行时再次加载
-    lastAutoResolvedUrl: null as string | null,
+    // 记录已投递过的预设 appUrl，防止 useEffect 重复执行时再次触发同一轮自动恢复
+    lastPresetQueuedUrl: null as string | null,
     // 记录最近一次完成加载的 URL，配合 lastResolvedAt 实现 3 秒内去重
     // 场景：权限弹窗前后可能触发重复回调，或用户快速重复扫同一个码
     lastResolvedUrl: null as string | null,
@@ -110,6 +114,7 @@ const LoadApp = () => {
 
   // Pad 端输入框常驻展示，Phone 端保持原有“按钮切换输入框”交互。
   const showInputField = isTablet || (inputExpanded && !cameraActive);
+  const showLoading = loadRequest != null || isResolving;
 
   useEffect(() => {
     // 中文注释：Pad 端输入框常驻展示，但进入页面时不再主动抢焦点，仅保留 Phone 端展开输入框后的自动聚焦。
@@ -132,21 +137,7 @@ const LoadApp = () => {
   );
 
   const handleResolveUrl = useCallback(
-    async (rawUrl: string) => {
-      const url = rawUrl.trim();
-      if (!url) return;
-      const now = Date.now();
-
-      // 保持 single-flight 语义：已有加载进行中时，不再发起新的加载。
-      if (isResolvingRef.current) return;
-      // 短时间内抑制同一 URL 的重复加载，防止权限弹窗前后回调抖动。
-      if (
-        dedupeStateRef.current.lastResolvedUrl === url &&
-        now - dedupeStateRef.current.lastResolvedAt < RESOLVE_DEDUP_MS
-      ) {
-        return;
-      }
-
+    async (url: string) => {
       const appId = extractAppIdFromUrl(url);
       if (!appId) {
         console.error('扫描到的二维码无效:', url);
@@ -156,8 +147,6 @@ const LoadApp = () => {
         return;
       }
 
-      isResolvingRef.current = true;
-      setIsResolving(true);
       try {
         const initResult = await AppSessionService.initSession(
           tabCtx.tab.id,
@@ -189,80 +178,78 @@ const LoadApp = () => {
       } finally {
         dedupeStateRef.current.lastResolvedUrl = url;
         dedupeStateRef.current.lastResolvedAt = Date.now();
-        isResolvingRef.current = false;
-        setIsResolving(false);
       }
     },
     [setTabIdMap, t, tabCtx.tab.id],
   );
 
-  const enqueueResolveUrl = useCallback(
-    async (rawUrl: string) => {
+  const enqueueLoadRequest = useCallback(
+    async (rawUrl: string, source: LoadRequestSource) => {
       const url = rawUrl.trim();
       if (!url) return;
+      const now = Date.now();
 
-      // 首次自动打开收藏 / 扫码时，系统权限弹窗可能还没处理完。
-      // 这里先缓存 URL，等权限结果明确后再继续，避免 getAppInfo 抢跑后直接报网络错误。
-      pendingResolveUrlRef.current = url;
+      // 中文注释：继续保留原来的 single-flight 语义，
+      // 已有加载进行中时，不允许新的扫码/输入/预设恢复插队。
+      if (isResolvingRef.current) return;
 
-      const granted = await ensureNetworkPermission();
-      if (!granted) {
-        pendingResolveUrlRef.current = null;
-        GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));
+      // 中文注释：统一入口后仍保留原有短时间同 URL 去重，
+      // 防止权限弹窗前后、扫码回调抖动或用户快速重复提交触发重复初始化。
+      if (
+        dedupeStateRef.current.lastResolvedUrl === url &&
+        now - dedupeStateRef.current.lastResolvedAt < RESOLVE_DEDUP_MS
+      ) {
         return;
       }
 
-      const nextUrl = pendingResolveUrlRef.current;
-      pendingResolveUrlRef.current = null;
-      if (!nextUrl) return;
+      isResolvingRef.current = true;
+      setIsResolving(true);
+      setLoadRequest({ url, source });
 
-      await handleResolveUrl(nextUrl);
+      try {
+        const granted = await ensureNetworkPermission();
+        if (!granted) {
+          GlobalAlert.alert(t('actr.app.loadFailed'), t('actr.app.retryLater'));
+          return;
+        }
+
+        await handleResolveUrl(url);
+
+        if (source === 'preset') {
+          const appId = extractAppIdFromUrl(url);
+          if (!appId) return;
+
+          try {
+            const bookmark = await BookmarkRepository.getBookmarkByAppId(appId);
+            if (bookmark) {
+              await setTabBookmarkStatus(tabCtx.tab.id, true);
+            }
+          } catch (error) {
+            console.error('[LoadApp] Failed to check bookmark status:', error);
+          }
+        }
+      } finally {
+        isResolvingRef.current = false;
+        setIsResolving(false);
+        setLoadRequest(null);
+      }
     },
-    [ensureNetworkPermission, handleResolveUrl, t],
+    [ensureNetworkPermission, handleResolveUrl, t, tabCtx.tab.id],
   );
-
-  // 使用 ref 保存最新的 enqueueResolveUrl，避免 useEffect 因函数重新创建而重复执行
-  const enqueueResolveUrlRef = useRef(enqueueResolveUrl);
-  useEffect(() => {
-    enqueueResolveUrlRef.current = enqueueResolveUrl;
-  }, [enqueueResolveUrl]);
 
   useEffect(() => {
     if (!tabCtx.tab.appUrl) {
-      setIsPresetAppUrlLoading(false);
       return;
     }
-    // 防止同一个 appUrl 重复初始化
-    if (dedupeStateRef.current.lastAutoResolvedUrl === tabCtx.tab.appUrl)
-      return;
+    const presetAppUrl = tabCtx.tab.appUrl.trim();
+    if (!presetAppUrl) return;
 
-    const presetAppUrl = tabCtx.tab.appUrl;
+    // 中文注释：预设 appUrl 属于宿主恢复语义，只需要对同一值投递一次；
+    // 后续真正的加载去重仍由统一的请求入口和完成态时间窗负责。
+    if (dedupeStateRef.current.lastPresetQueuedUrl === presetAppUrl) return;
 
-    // 预设 appUrl 说明宿主已经明确要恢复目标应用，
-    // 这里先切到加载态，避免用户短暂看到扫码页再跳走。
-    setIsPresetAppUrlLoading(true);
-    // 标记已处理，防止 effect 重复执行
-    dedupeStateRef.current.lastAutoResolvedUrl = presetAppUrl;
-    void enqueueResolveUrlRef.current(presetAppUrl).finally(async () => {
-      // 这里只关闭当前这轮预设 URL 对应的加载态，
-      // 避免旧请求回收时把新一轮 appUrl 恢复流程的 loading 提前关掉。
-      if (dedupeStateRef.current.lastAutoResolvedUrl === presetAppUrl) {
-        setIsPresetAppUrlLoading(false);
-      }
-
-      // 校验应用是否在收藏表中，再设置收藏状态
-      const appId = extractAppIdFromUrl(presetAppUrl);
-      if (appId) {
-        try {
-          const bookmark = await BookmarkRepository.getBookmarkByAppId(appId);
-          if (bookmark) {
-            await setTabBookmarkStatus(tabCtx.tab.id, true);
-          }
-        } catch (error) {
-          console.error('[LoadApp] Failed to check bookmark status:', error);
-        }
-      }
-    });
+    dedupeStateRef.current.lastPresetQueuedUrl = presetAppUrl;
+    void enqueueLoadRequest(presetAppUrl, 'preset');
   }, [tabCtx.tab.appUrl, tabCtx.tab.id]);
 
   const handleLoadWithUrl = (
@@ -271,7 +258,7 @@ const LoadApp = () => {
     const url = e.nativeEvent.text;
     if (!url) return;
 
-    void enqueueResolveUrl(url);
+    void enqueueLoadRequest(url, 'input');
   };
 
   const handleScannedUrl = useCallback(
@@ -293,10 +280,10 @@ const LoadApp = () => {
       // 合法二维码仍然等相机关闭和扫码层收起完成一帧后再继续，
       // 避免真正的初始化重活堵住相机收起动画。
       InteractionManager.runAfterInteractions(() => {
-        void enqueueResolveUrl(url);
+        void enqueueLoadRequest(url, 'scan');
       });
     },
-    [enqueueResolveUrl, t],
+    [enqueueLoadRequest, t],
   );
 
   const renderInput = (
@@ -336,7 +323,7 @@ const LoadApp = () => {
             placeholderTextColor='#999'
             onSubmitEditing={handleLoadWithUrl}
             blurOnSubmit={true}
-            editable={!isResolving}
+            editable={!showLoading}
             onFocus={() => {
               if (cameraActive) {
                 setCameraActive(false);
@@ -349,7 +336,7 @@ const LoadApp = () => {
   };
 
   if (isPhone) {
-    if (isPresetAppUrlLoading) {
+    if (showLoading) {
       return <View style={styles.phoneContainer}>{renderLoadingView()}</View>;
     }
 
@@ -396,7 +383,7 @@ const LoadApp = () => {
     );
   }
 
-  if (isPresetAppUrlLoading) {
+  if (showLoading) {
     return <View style={styles.padContainer}>{renderLoadingView()}</View>;
   }
 
