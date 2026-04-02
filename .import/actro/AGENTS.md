@@ -78,8 +78,3 @@ Subsystem/src/
 - `actr-host` 新增顶部 Header/导航条时，先判断外层是否已做 `top` 偏移，再决定 `includeSafeTopInset`，避免双重安全区。
 - `system-apps` 新增页面时，不要默认复用 `ChatHeader` 语义；需在页面内明确选择“固定顶部留白”或“基于 `useSafeAreaInsets().top` 动态留白”，并保持同类系统页一致。
 
-
-# AI 修改遵循
-
-1. 必要的处理要加上注释（中文）
-2. 注意功能化，模块化，逻辑复用
