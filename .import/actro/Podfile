@@ -40,6 +40,7 @@ target 'Canvas' do
   pod 'RNDeviceInfo', :path => 'Subsystem/node_modules/react-native-device-info'
   pod 'react-native-get-random-values', :path => 'Subsystem/node_modules/react-native-get-random-values'
   pod 'react-native-webview', :path => 'Subsystem/node_modules/react-native-webview'
+  pod 'react-native-view-shot', :path => 'Subsystem/node_modules/react-native-view-shot'
   pod 'RNGestureHandler', :path => 'Subsystem/node_modules/react-native-gesture-handler'
   pod 'RNReanimated', :path => 'Subsystem/node_modules/react-native-reanimated'
   pod 'RNSVG', :path => 'Subsystem/node_modules/react-native-svg'
