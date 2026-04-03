@@ -60,6 +60,7 @@ type ActrTabViewProps = {
   isActive: boolean;
   isLeftPanelVisible: boolean;
   containerWidth?: number;
+  containerHeight?: number;
   onEngineChange?: (tabId: string, engine: Engine | null) => void;
   onContractViolation?: (tabId: string, violation: ContractViolation) => void;
 };
@@ -71,6 +72,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   isActive,
   isLeftPanelVisible,
   containerWidth: propsContainerWidth,
+  containerHeight: propsContainerHeight,
   onContractViolation,
   onEngineChange,
 }) => {
@@ -396,8 +398,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     isTablet && styles.threeColumnPad,
   ];
   const sheetTopOffset = topInsetRaw;
-
-  const main = React.useMemo(() => <Main />, []);
+  
+  const main = React.useMemo(
+    () => <Main />,
+    [propsContainerWidth, propsContainerHeight],
+  );
 
   // 中间对话区域的动画样式（跟随 centerAnimValue 偏移）
   const centerAnimStyle = useAnimatedStyle(() => ({

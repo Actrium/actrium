@@ -1122,6 +1122,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
                 isActive={isActive}
                 isLeftPanelVisible={isLeftPanelVisible}
                 containerWidth={containerWidth}
+                containerHeight={containerHeight}
                 onContractViolation={recordContractViolation}
                 onEngineChange={handleEngineChange}
               />
