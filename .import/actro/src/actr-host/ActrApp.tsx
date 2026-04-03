@@ -75,6 +75,7 @@ import ActrTabView from './ActrTabView';
 import { ContainerEvents } from '../native-bridge';
 import { LAYOUT } from './constants';
 import { evaluateTabGate, extractBoxModelFromStyle } from './utils';
+import { isAndroid } from '../../src/utils/device';
 
 // 模块级别的 props 缓存
 let cachedValidProps: ActrProps | null = null;
@@ -125,17 +126,19 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   }, [propsContainerWidth, propsContainerHeight]);
 
   useEffect(() => {
-    if (Platform.OS !== 'android') {
+    if (!isAndroid) {
       return;
     }
     // 中文注释：Android 先吃首屏 props，后续完全以宿主尺寸变更事件为准，
     // 避免宿主 RootView 改变后 RN 仍停留在旧宽度。
-    return ContainerEvents.onContainerSizeChange(
+    const unScribe = ContainerEvents.onContainerSizeChange(
       ({ containerWidth, containerHeight }) => {
+        console.log('收到容器尺寸变化', containerWidth, containerHeight);
         hasReceivedContainerSizeEventRef.current = true;
         setAndroidContainerSize({ containerWidth, containerHeight });
       },
     );
+    return unScribe;
   }, []);
 
   const containerWidth =
