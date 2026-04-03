@@ -36,12 +36,11 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
         Log.e("ActiveAdapter", "onBindViewHolder")
         val item = items[position]
         holder.bind(item, onItemClick, onDeleteClick)
+        holder.binding.ivDel.visibility = View.VISIBLE
         if (item.id == currentId) {
             holder.binding.root.setBackgroundResource(R.drawable.tablet_tab_bg_selected)
-            holder.binding.ivDel.visibility = View.VISIBLE
         } else {
             holder.binding.root.setBackgroundResource(R.drawable.tablet_tab_bg_normal)
-            holder.binding.ivDel.visibility = View.GONE
         }
     }
 
@@ -53,7 +52,11 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
             onItemClick: ((ActiveModel) -> Unit)?,
             onDeleteClick: ((ActiveModel) -> Unit)?
         ) {
-            binding.tvAppName.text = item.name
+            if(item.name.isEmpty()){
+                binding.tvAppName.text = "新页签"
+            }else{
+                binding.tvAppName.text = item.name
+            }
             binding.ivDel.setOnClickListener { onDeleteClick?.invoke(item) }
             binding.root.setOnClickListener { onItemClick?.invoke(item) }
         }
