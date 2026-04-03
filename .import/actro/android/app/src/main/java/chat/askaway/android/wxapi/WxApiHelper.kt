@@ -44,10 +44,18 @@ class WxApiHelper private constructor(context: Context) {
     }
 
     fun login() {
+        if (!api.isWXAppInstalled) {
+            postAuthErr("未安装微信")
+            return
+        }
+
         val req = SendAuth.Req()
         req.scope = "snsapi_userinfo"
         req.state = "askaway_login"
-        api.sendReq(req)
+
+        if (!api.sendReq(req)) {
+            postAuthErr("拉起微信登录失败")
+        }
     }
 
     /** Post the received auth code to the SharedFlow for observers to collect. */
