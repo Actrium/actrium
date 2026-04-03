@@ -169,6 +169,15 @@ class TabletViewModel : ViewModel() {
         }
     }
 
+    fun changeSize(width: Int, height:Int) {
+        EventBus.getDefault().post(
+            NativeModuleEvent(
+                NativeModuleEvent.EVENT_CONTAINER_SIZE_CHANGE,
+                mapOf("containerWidth" to width, "containerHeight" to height)
+            )
+        )
+    }
+
     fun showSet() {
         _tabletUseCase.value = _tabletUseCase.value?.copy(showPageType = ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS)
     }
