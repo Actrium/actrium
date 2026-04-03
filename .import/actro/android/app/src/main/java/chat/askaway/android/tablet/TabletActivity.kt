@@ -6,6 +6,7 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -303,6 +304,18 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     }
 
     private fun changeMode(mode: PageMode) {
+        // 设置 flTitle 的底部 margin
+        val params = binding.flTitle.layoutParams as? LinearLayout.LayoutParams
+        if (params != null) {
+            val marginBottom = if (mode == PageMode.GRID) {
+                (16 * resources.displayMetrics.density).toInt()
+            } else {
+                0
+            }
+            params.bottomMargin = marginBottom
+            binding.flTitle.layoutParams = params
+        }
+
         if (mode == PageMode.TAB) {
             // TAB 模式
             binding.llTitleTab.isVisible = true
