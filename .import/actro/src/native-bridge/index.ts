@@ -10,3 +10,7 @@ export type { LoginType, LoginResultEvent } from './login';
 // Extension
 export { ExtensionEvents } from './extension';
 export type { ExtensionPanelVisibleChangeEvent } from './extension';
+
+// Container
+export { ContainerEvents } from './container';
+export type { ContainerSizeChangeEvent } from './container';

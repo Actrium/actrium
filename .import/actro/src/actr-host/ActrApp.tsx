@@ -20,6 +20,7 @@ import {
   findNodeHandle,
   UIManager,
   DeviceEventEmitter,
+  Platform,
 } from 'react-native';
 import { useUnreadStore } from './store/useUnreadStore';
 import { AppText } from '../components';
@@ -71,6 +72,7 @@ import { createContractViolationCollector } from 'askit/contracts';
 import type { ActrProps, TabConfig } from './types';
 import { DevToolsBridge } from './libs/devTools';
 import ActrTabView from './ActrTabView';
+import { ContainerEvents } from '../native-bridge';
 import { LAYOUT } from './constants';
 import { evaluateTabGate, extractBoxModelFromStyle } from './utils';
 
@@ -94,8 +96,8 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     tabs = [],
     currentTabId,
     isLeftPanelVisible = false,
-    containerWidth,
-    containerHeight,
+    containerWidth: propsContainerWidth,
+    containerHeight: propsContainerHeight,
   } = effectiveProps || {};
 
   if (!tabs.length) {
@@ -103,6 +105,47 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   }
 
   const activeTabId = currentTabId ?? tabs[0]!.id;
+  const hasReceivedContainerSizeEventRef = useRef(false);
+  const [androidContainerSize, setAndroidContainerSize] = useState(() => ({
+    containerWidth: propsContainerWidth,
+    containerHeight: propsContainerHeight,
+  }));
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+    if (hasReceivedContainerSizeEventRef.current) {
+      return;
+    }
+    setAndroidContainerSize({
+      containerWidth: propsContainerWidth,
+      containerHeight: propsContainerHeight,
+    });
+  }, [propsContainerWidth, propsContainerHeight]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+    // 中文注释：Android 先吃首屏 props，后续完全以宿主尺寸变更事件为准，
+    // 避免宿主 RootView 改变后 RN 仍停留在旧宽度。
+    return ContainerEvents.onContainerSizeChange(
+      ({ containerWidth, containerHeight }) => {
+        hasReceivedContainerSizeEventRef.current = true;
+        setAndroidContainerSize({ containerWidth, containerHeight });
+      },
+    );
+  }, []);
+
+  const containerWidth =
+    Platform.OS === 'android'
+      ? androidContainerSize.containerWidth
+      : propsContainerWidth;
+  const containerHeight =
+    Platform.OS === 'android'
+      ? androidContainerSize.containerHeight
+      : propsContainerHeight;
 
   const monitorTabs = React.useMemo(
     () =>
