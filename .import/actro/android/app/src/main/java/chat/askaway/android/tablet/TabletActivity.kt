@@ -60,6 +60,15 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         contentAdapter = TabletContentAdapter(reactViewMap)
         binding.rvContent.adapter = contentAdapter
 
+        binding.flContent.addOnLayoutChangeListener { v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            Log.e("TabletActivity", "addOnLayoutChangeListener")
+            viewModel.changeSize(right - left, bottom - top)
+            // 判断尺寸是否变化
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                // 尺寸发生变化
+            }
+        }
+
         // 获取容器尺寸
         binding.rvContent.post {
             contentAdapter.containerWidth = binding.rvContent.width
