@@ -78,3 +78,13 @@ Subsystem/src/
 - `actr-host` 新增顶部 Header/导航条时，先判断外层是否已做 `top` 偏移，再决定 `includeSafeTopInset`，避免双重安全区。
 - `system-apps` 新增页面时，不要默认复用 `ChatHeader` 语义；需在页面内明确选择“固定顶部留白”或“基于 `useSafeAreaInsets().top` 动态留白”，并保持同类系统页一致。
 
+
+### 关于键盘
+
+
+| 平台 | Native 处理 | RN 处理 |
+| :--- | :--- | :--- |
+| iOS Phone | 无 | KeyboardStickyView 吸附输入框 + useReanimatedKeyboardAnimation 实时压缩内容区（跟手动画） |
+| iOS Pad | 无 | keyboardInset 静态偏移（事件驱动，键盘弹完后跳变） |
+| Android Phone | 宿主 Native windowSoftInputMode 推起整个视图 | 不叠加额外偏移 |
+| Android Pad | 宿主 Native windowSoftInputMode 推起整个视图 | 完全零干预 |
