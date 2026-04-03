@@ -9,6 +9,9 @@ struct TabNavigationBar: View {
     @State private var draggedTabId: UUID?
     @State private var showSettings: Bool = false
     
+    @State private var windowSize: CGSize = .zero
+    @State private var isFullscreen = true
+    
     private let tabHeight: CGFloat = 44
     private let maxTabWidth: CGFloat = 240
     private let minTabWidth: CGFloat = 120
@@ -19,45 +22,71 @@ struct TabNavigationBar: View {
         }
         return false
     }
-    
+        
     var body: some View {
-        ZStack {
-            if isInOverviewMode {
-                // Overview 模式的导航栏
-                OverviewNavigationBar(
-                    viewModel: viewModel,
-                    onBack: {toggleOverviewMode()},
-                    height: tabHeight, openSettings: { showSettings = true }
-                )
-            } else {
-                // Focus 模式的导航栏（标签页列表）
-                FocusModeNavigationBar(
-                    viewModel: viewModel,
-                    hoveredTabId: $hoveredTabId,
-                    tabHeight: tabHeight,
-                    calculateTabWidth: calculateTabWidth,
-                    toggleOverviewMode: toggleOverviewMode,
-                    openSettings: { showSettings = true }
-                )
+        GeometryReader { geometry in
+            ZStack {
+                if isInOverviewMode {
+                    // Overview 模式的导航栏
+                    OverviewNavigationBar(
+                        viewModel: viewModel,
+                        isFullscreen: isFullscreen,
+                        onBack: {toggleOverviewMode()},
+                        height: tabHeight, openSettings: { showSettings = true }
+                    )
+                } else {
+                    // Focus 模式的导航栏（标签页列表）
+                    FocusModeNavigationBar(
+                        viewModel: viewModel,
+                        hoveredTabId: $hoveredTabId,
+                        isFullscreen: isFullscreen,
+                        tabHeight: tabHeight,
+                        calculateTabWidth: calculateTabWidth,
+                        toggleOverviewMode: toggleOverviewMode,
+                        openSettings: { showSettings = true }
+                    )
+                }
+            }
+            .background(
+                WindowAccessor { window in
+                    let screenBounds = window.screen.bounds
+                        let windowBounds = window.bounds
+
+                        isFullscreen =
+                            abs(screenBounds.width - windowBounds.width) < 1 &&
+                            abs(screenBounds.height - windowBounds.height) < 1
+
+                }
+            )
+            .sheet(isPresented: $showSettings) {
+                SettingsView(systemType: .settings, viewModel: viewModel)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openTabFromRN)) { notification in
+                guard let userInfo = notification.userInfo,
+                      let systemAppTypeStr = userInfo["systemAppType"] as? String,
+                      let systemTabType = SystemTabType(rawValue: systemAppTypeStr) else { return }
+                let additionalProps = userInfo["additionalProps"] as? [String: Any]
+                showSettings = true
+                withAnimation {
+                    let _ = viewModel.openSystemTab(
+                        systemTabType,
+                        additionalProps: additionalProps,
+                        replaceAdditionalProps: additionalProps != nil
+                    )
+                }
+            }
+            .onAppear {
+                updateWindowState(size: geometry.size)
+            }
+            .onChange(of: geometry.size) { _, newSize in
+                updateWindowState(size: newSize)
             }
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(systemType: .settings, viewModel: viewModel)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openTabFromRN)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let systemAppTypeStr = userInfo["systemAppType"] as? String,
-                  let systemTabType = SystemTabType(rawValue: systemAppTypeStr) else { return }
-            let additionalProps = userInfo["additionalProps"] as? [String: Any]
-            showSettings = true
-            withAnimation {
-                let _ = viewModel.openSystemTab(
-                    systemTabType,
-                    additionalProps: additionalProps,
-                    replaceAdditionalProps: additionalProps != nil
-                )
-            }
-        }
+        .frame(height: tabHeight)
+    }
+    
+    private func updateWindowState(size: CGSize) {
+        windowSize = size
     }
     
     private func calculateTabWidth() -> CGFloat {
@@ -91,6 +120,7 @@ struct TabNavigationBar: View {
 /// Overview 模式的导航栏（中间改为“活跃”，图标在上文字在下，选中使用 accentColor，未选中使用 gray）
 private struct OverviewNavigationBar: View {
     @ObservedObject var viewModel: BrowserViewModel
+    var isFullscreen: Bool
     let onBack: () -> Void
     let height: CGFloat
     let openSettings: () -> Void
@@ -191,6 +221,7 @@ private struct OverviewNavigationBar: View {
             }
             .buttonStyle(.plain)
         }
+        .padding(.leading, isFullscreen ? 0 : 65)
         .frame(height: height)
         .background(Color.black)
     }
@@ -200,6 +231,7 @@ private struct OverviewNavigationBar: View {
 private struct FocusModeNavigationBar: View {
     @ObservedObject var viewModel: BrowserViewModel
     @Binding var hoveredTabId: UUID?
+    var isFullscreen: Bool
     let tabHeight: CGFloat
     let calculateTabWidth: () -> CGFloat
     let toggleOverviewMode: () -> Void
@@ -261,6 +293,7 @@ private struct FocusModeNavigationBar: View {
                     .frame(maxWidth: .infinity)
                 }
             }
+            .padding(.leading, isFullscreen ? 0 : 65)
             .background(Color(hex: "#D1D1D6"))
             
             if needsScrolling {
