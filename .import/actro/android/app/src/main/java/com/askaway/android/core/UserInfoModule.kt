@@ -63,7 +63,9 @@ class UserInfoModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
                 Log.e("UserInfoModule", "[$instanceId] Collected auth err: $err")
                 if (!err.isNullOrEmpty()) {
                     val params = Arguments.createMap().apply {
-                        putString("error", err)
+                        putString("type", "wechat")
+                        putBoolean("error", true)
+                        putString("message", err)
                     }
                     if (reactContext.hasActiveReactInstance()) {
                         sendEvent("onLoginResult", params)
