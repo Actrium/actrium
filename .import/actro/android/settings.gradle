@@ -30,3 +30,6 @@ project(':rill-sandbox-native').projectDir = file('../../rill/native/platform/an
 
 include ':react-native-safe-area-context'
 project(':react-native-safe-area-context').projectDir = file('../node_modules/react-native-safe-area-context/android')
+
+include ':react-native-view-shot'
+project(':react-native-view-shot').projectDir = file('../node_modules/react-native-view-shot/android')
