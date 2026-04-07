@@ -31,6 +31,7 @@ import com.askaway.android.core.ReactNativeBundle
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
 import com.askaway.android.utils.adjustKeyboard
+import chat.askaway.android.utils.TabBundleUtils
 
 class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
 
@@ -50,7 +51,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         super.onCreate(savedInstanceState)
         binding = ActivityTabletBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        viewModel = TabletViewModel()
+        viewModel = TabletViewModel(applicationContext)
         // 初始化顶部应用列表 adapter
         adapter = ActiveAdapter()
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
@@ -181,6 +182,14 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         lifecycleScope.launchWhenStarted {
             viewModel.tabletUseCase.collect { useCase ->
                 if (useCase != null) {
+                    for(item in useCase.appList){
+                        if (reactViewMap[item.id] == null) {
+                            // 创建新的 ReactRootView
+                            val bundle = TabBundleUtils.genBundle(item, useCase.appList, viewModel.containerHeight, viewModel.containerWidth)
+                            val targetView = createReactRootView("canvas-kotlin", bundle)
+                            reactViewMap[item.id] = targetView
+                        }
+                    }
                     // 为当前 app 创建 ReactRootView（如果还没有）
                     useCase.currentApp?.let { bundle ->
                         Log.e("TabletActivity", "bundle:${bundle}")
@@ -191,14 +200,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                                 val targetView = createReactRootView("canvas-kotlin", bundle)
                                 reactViewMap[currentTabId] = targetView
                                 Log.d("TabletActivity", "Created new ReactRootView for $currentTabId ${bundle}")
-                            } else {
-                                // 更新已存在的 ReactRootView 的属性
-//                                try {
-//                                    reactViewMap[currentTabId]?.setAppProperties(bundle)
-//                                    Log.d("TabletActivity", "Updated ReactRootView properties for $currentTabId")
-//                                } catch (e: Exception) {
-//                                    Log.e("TabletActivity", "Error updating ReactRootView properties", e)
-//                                }
                             }
                         }
                     }
@@ -226,6 +227,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                                 binding.rvContent.scrollToPosition(currentIndex)
                             }
                         }
+                    }
+                    if(useCase.autoCreate){
+                        binding.ivAdd.performClick()
+                        viewModel.cancelCreate()
                     }
 
                     // 切换模式
@@ -265,10 +270,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.ivAdd.setOnClickListener {
             viewModel.addApp()
         }
-        binding.ivAdd.postDelayed(300L) {
-            binding.ivAdd.performClick()
-        }
-
         // 设置按钮点击事件
         binding.ivSet.setOnClickListener {
             viewModel.showSet()
@@ -299,6 +300,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         super.onPause()
         val application = application as MainApplication
         application.reactNativeHost.reactInstanceManager.onHostPause(this)
+        viewModel.saveActiveListToDatabase()
     }
 
     override fun onResume() {
