@@ -61,7 +61,39 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.rvContent.adapter = contentAdapter
 
         binding.flContent.addOnLayoutChangeListener { v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-            viewModel.changeSize((right - left).pxToDp().toInt(), (bottom - top).pxToDp().toInt())
+            val newWidth = right - left
+            val newHeight = bottom - top
+            val oldWidth = oldRight - oldLeft
+            val oldHeight = oldBottom - oldTop
+            if(newWidth == oldWidth&&newHeight ==oldHeight) return@addOnLayoutChangeListener
+            viewModel.changeSize(newWidth.pxToDp().toInt(), newHeight.pxToDp().toInt())
+
+            // 更新容器尺寸
+            if (newWidth > 0 && newHeight > 0) {
+                Log.e("TabletActivity", "newWidth:${newWidth}, newHeight:${newHeight}")
+                contentAdapter.containerWidth = newWidth
+                contentAdapter.containerHeight = newHeight
+                viewModel.containerWidth = newWidth.pxToDp().toInt()
+                viewModel.containerHeight = newHeight.pxToDp().toInt()
+
+                // 如果当前是 Grid 模式，更新 aspectRatio
+                if (contentAdapter.isGridMode) {
+                    val newAspectRatio = newWidth.toFloat() / newHeight.toFloat()
+
+                    // 更新 GridLayoutManager
+                    gridLayoutManager?.updateAspectRatio(newAspectRatio)
+
+                    // 重新创建 GridItemDecoration
+                    gridItemDecoration?.let {
+                        binding.rvContent.removeItemDecoration(it)
+                    }
+                    gridItemDecoration = GridItemDecoration(newAspectRatio)
+                    binding.rvContent.addItemDecoration(gridItemDecoration!!)
+
+                    // 刷新布局，这会触发 adapter 的 bind 方法重新计算 scale
+                    contentAdapter.notifyDataSetChanged()
+                }
+            }
         }
 
         // 获取容器尺寸
