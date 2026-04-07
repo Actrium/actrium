@@ -50,11 +50,17 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   // 当弹窗打开时，尝试获取当前位置
   React.useEffect(() => {
     if (visible) {
+      // 中文注释：每次重新打开弹窗都重置当前实例的地图状态，确保不同 tab 的新实例不会沿用旧 region。
+      setMapRegion(null);
+      currentRegionRef.current = null;
       if (Platform.OS === 'android') {
         handleAndroidLocation();
       } else {
         handleInitialLocation();
       }
+    } else {
+      setMapRegion(null);
+      currentRegionRef.current = null;
     }
   }, [visible]);
 
@@ -143,33 +149,12 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       return;
     }
 
-    const status = await new Promise<'granted' | 'denied'>((resolve) => {
-      geolocation.requestAuthorization(
-        () => resolve('granted'),
-        () => resolve('denied'),
-      );
-    });
-    if (status !== 'granted') {
-      GlobalAlert.alert(
-        t('actr.input.locationPermissionTitle'),
-        t('actr.input.locationPermissionMsg'),
-        [
-          {
-            text: t('common.cancel'),
-            style: 'cancel',
-            onPress: () => onClose(),
-          },
-          {
-            text: t('actr.voice.goToSettings'),
-            onPress: () => {
-              Linking.openSettings();
-              onClose();
-            },
-          },
-        ],
-      );
-      return;
-    }
+    // 中文注释：iOS 已授权后再次调用 requestAuthorization 不保证继续回调；
+    // 这里不能 await 它，否则新 tab 的首次打开可能一直卡住，后续 getCurrentPosition 根本不会执行。
+    geolocation.requestAuthorization(
+      () => {},
+      () => {},
+    );
 
     geolocation.getCurrentPosition(
       (position) => {
@@ -184,6 +169,28 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       },
       (error) => {
         console.warn('[Geolocation] Error:', error);
+        if ((error as { code?: number }).code === 1) {
+          GlobalAlert.alert(
+            t('actr.input.locationPermissionTitle'),
+            t('actr.input.locationPermissionMsg'),
+            [
+              {
+                text: t('common.cancel'),
+                style: 'cancel',
+                onPress: () => onClose(),
+              },
+              {
+                text: t('actr.voice.goToSettings'),
+                onPress: () => {
+                  Linking.openSettings();
+                  onClose();
+                },
+              },
+            ],
+          );
+          return;
+        }
+
         const fallbackRegion = {
           latitude: 39.9042,
           longitude: 116.4074,
