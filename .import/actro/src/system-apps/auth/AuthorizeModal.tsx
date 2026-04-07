@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { AuthorizeContent } from './AuthorizeContent';
 import { useAppStore } from '../../actr-host/store/useAppStore';
 import { useAuthorize } from '../../hooks/auth';
-import { HostIconButton } from '../../actr-host/components/HostIconButton';
+import { HostIconButton } from '../../components';
 import { getHostLayoutTokens } from '../../utils/layout';
 import { AppText } from '../../components';
 import { getTypographyStyle } from '../../theme/tokens';

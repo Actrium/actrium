@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useUserStore } from '../../actr-host/store/useUserStore';
-import { Icon } from '../../actr-host/components/Icon';
+import { Icon } from '../../components';
 
 type ThemeVariant = 'light' | 'dark';
 

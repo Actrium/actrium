@@ -2,7 +2,7 @@ import { launchCamera, launchImageLibrary, Asset } from 'react-native-image-pick
 import i18n from '../i18n';
 import type { DocumentPickerResponse } from '@react-native-documents/picker';
 import { Alert, Platform } from 'react-native';
-import { GlobalAlert } from '../../src/components';
+import { GlobalAlert } from '../components';
 
 export class AttachmentService {
   private static loadDocumentPicker() {

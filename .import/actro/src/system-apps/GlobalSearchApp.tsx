@@ -21,9 +21,7 @@ import {
   Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { Icon } from '../actr-host/components/Icon';
-import { HostIconButton } from '../actr-host/components/HostIconButton';
-import SafeBottomView from '../actr-host/components/SafeBottomView';
+import { Icon, HostIconButton, SafeBottomView } from '../components';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../actr-host/styles/shadows';
 import { useAppStore } from '../actr-host/store/useAppStore';

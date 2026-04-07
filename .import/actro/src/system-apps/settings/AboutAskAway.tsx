@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { Icon } from '../../actr-host/components/Icon';
+import { Icon } from '../../components';
 import { AppText } from '../../components';
 import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import { SettingsBackHeader } from './SettingsBackHeader';

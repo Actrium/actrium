@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { HostIconButton } from '../../actr-host/components/HostIconButton';
+import { HostIconButton } from '../../components';
 import { AppText } from '../../components';
 import { getTypographyStyle, controlHeight } from '../../theme/tokens';
 

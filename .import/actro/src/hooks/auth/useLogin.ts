@@ -7,7 +7,7 @@ import { useAuthTaskStore } from '../../actr-host/store/useAuthTaskStore';
 import { AccountUserInfo } from '../../api/types';
 import { useTranslation } from 'react-i18next';
 import { LoginBridge } from '../../native-bridge';
-import { GlobalAlert } from '../../../src/components';
+import { GlobalAlert } from '../../components';
 
 export type LoginStep =
   | 'idle'

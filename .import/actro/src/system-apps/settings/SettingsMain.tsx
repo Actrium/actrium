@@ -9,12 +9,12 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Icon } from '../../actr-host/components/Icon';
+import { Icon } from '../../components';
 import { AppText } from '../../components';
 import { getTypographyStyle, spacing } from '../../theme/tokens';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
-import { isAndroid } from '../../../src/utils/device';
+import { isAndroid } from '../../utils/device';
 
 interface SettingsMainProps {
   onAccountPress: () => void;

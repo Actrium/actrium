@@ -8,7 +8,7 @@ import { useAuthTaskStore } from '../actr-host/store/useAuthTaskStore';
 import { AccountUserInfo } from '../api/types';
 import { actrLoader } from '../actr-host/utils';
 import { Utils } from '../utils/utils';
-import { updateTabInfo } from '../../src/native-bridge/tab/TabModule';
+import { updateTabInfo } from '../native-bridge/tab/TabModule';
 
 export type TInitSessionResult =
   | {

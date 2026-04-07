@@ -1,0 +1,847 @@
+import React from 'react';
+import {
+  Platform,
+  PanResponder,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { AppText } from '../../../components';
+import { AttachmentPreviewBar } from './AttachmentPreviewBar';
+import { HostIconButton } from '../../../components';
+import { Icon } from '../../../components';
+import type { ActrInputStyles } from './ActrInput.shared';
+import type { PanResponderInstance } from 'react-native';
+import { StableTextInput } from './StableTextInput';
+import { AuthGateOverlay } from './AuthGateOverlay';
+import { HOST_SHADOWS } from '../../styles/shadows';
+import { useUnreadStore } from '../../store/useUnreadStore';
+import { useTab } from '../../contexts/TabContext';
+import { exitFullscreen } from '../../../native-bridge';
+import SafeBottomView from '../../../components/SafeBottomView';
+import { DropdownMenu } from '../shared/DropdownMenu';
+import {
+  attachmentActionMenu,
+  getTypographyStyle,
+  spacing,
+  inputArea,
+  iconSize,
+} from '../../../theme/tokens';
+
+type ActrInputMobileSharedStyles = Pick<ActrInputStyles, 'input' | 'mobileInputText'>;
+
+interface ActrInputMobileViewProps {
+  appId: string;
+  sharedStyles: ActrInputMobileSharedStyles;
+  attachments: any[];
+  removeAttachment: (id: string) => void;
+  setShowMapModal: (visible: boolean) => void;
+  showSearchEntry: boolean;
+  showLocationEntry: boolean;
+  showNewlineEntry: boolean;
+  isWebSearchActive: boolean;
+  setIsWebSearchActive: (active: boolean) => void;
+  isLocationActive: boolean;
+  setIsLocationActive: (active: boolean) => void;
+  isEnterForNewLine: boolean;
+  setIsEnterForNewLine: (active: boolean) => void;
+  takePhoto: () => void;
+  pickImage: () => void;
+  pickDocument: () => void;
+  handleVoiceStart: () => Promise<void>;
+  handleVoiceChangeState: (isCancelling: boolean) => void;
+  handleVoiceEnd: (isCancelled: boolean) => Promise<void>;
+  isVoiceRecording: boolean;
+  isCancellingVoice: boolean;
+  metering: number;
+  inputText: string;
+  onClearInput: () => void;
+  handleSendRef: React.MutableRefObject<() => void>;
+  onAddBookmark?: () => void;
+  editingMessageId?: string | null;
+  handleCancelEdit?: () => void;
+  /** 输入框聚焦前的授权预检，未授权返回 false */
+  checkInputAuth?: () => Promise<boolean>;
+}
+
+export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
+  const { t } = useTranslation();
+  const { tab } = useTab();
+  const totalUnread = useUnreadStore((state) => state.totalUnread);
+  const {
+    sharedStyles,
+    appId,
+    attachments,
+    removeAttachment,
+    setShowMapModal,
+    showSearchEntry,
+    showLocationEntry,
+    showNewlineEntry,
+    isWebSearchActive,
+    setIsWebSearchActive,
+    isLocationActive,
+    setIsLocationActive,
+    isEnterForNewLine,
+    setIsEnterForNewLine,
+    takePhoto,
+    pickImage,
+    pickDocument,
+    handleVoiceStart,
+    handleVoiceChangeState,
+    handleVoiceEnd,
+    isVoiceRecording,
+    isCancellingVoice,
+    metering,
+    inputText,
+    onClearInput,
+    handleSendRef,
+    onAddBookmark,
+    editingMessageId,
+    handleCancelEdit,
+    checkInputAuth,
+  } = props;
+  const [mobileInputMode, setMobileInputMode] = React.useState<'text' | 'voice_hold'>(
+    'text',
+  );
+  const [isInputFocused, setIsInputFocused] = React.useState(false);
+  const mobileTextInputRef = React.useRef<TextInput | null>(null);
+  const attachmentActionLockRef = React.useRef(false);
+
+  const hasInputText = inputText.length > 0;
+  // mobile 状态机：
+  // text: 常规输入
+  // voice_hold: 整条输入区切为“长按讲话”模式
+  const shouldEnableInputHoldToTalk =
+    mobileInputMode === 'text' && !hasInputText && !isInputFocused;
+  const shouldShowVoiceSwitchButton =
+    mobileInputMode === 'text' && !hasInputText && !isInputFocused;
+
+  // 仅在显式切到 voice_hold 时展示语音面板。
+  // 默认文本态直接长按录音时，不在手势过程中切换布局，避免 responder 丢失 release/terminate。
+  const isVoiceSurfaceMode = mobileInputMode === 'voice_hold';
+
+  const onSwitchToVoiceHoldMode = React.useCallback(() => {
+    setMobileInputMode('voice_hold');
+    setIsInputFocused(false);
+    mobileTextInputRef.current?.blur();
+  }, []);
+
+  const onSwitchToTextMode = React.useCallback(() => {
+    setMobileInputMode('text');
+    setIsInputFocused(false);
+  }, []);
+
+  const onFocusTextInput = React.useCallback(() => {
+    setMobileInputMode('text');
+    setIsInputFocused(true);
+    setTimeout(() => {
+      mobileTextInputRef.current?.focus();
+    }, 0);
+  }, []);
+
+
+
+  const handleExitTab = React.useCallback(async () => {
+    try {
+      await exitFullscreen();
+    } catch (error) {
+      console.error('[ActrInputMobileView] Failed to add bookmark', error);
+    }
+  }, [appId, tab.id, onAddBookmark]);
+
+  React.useEffect(() => {
+    if (inputText.length > 0 && mobileInputMode !== 'text') {
+      setMobileInputMode('text');
+    }
+  }, [inputText.length, mobileInputMode]);
+
+  // 手势实例固定化：录音期间 metering/duration 高频更新时也不重建 responder，
+  // 只通过 ref 注入最新回调，避免 release/terminate 丢失。
+  const voiceCallbacksRef = React.useRef({
+    handleVoiceStart,
+    handleVoiceChangeState,
+    handleVoiceEnd,
+    onFocusTextInput,
+  });
+  React.useEffect(() => {
+    voiceCallbacksRef.current = {
+      handleVoiceStart,
+      handleVoiceChangeState,
+      handleVoiceEnd,
+      onFocusTextInput,
+    };
+  }, [handleVoiceChangeState, handleVoiceEnd, handleVoiceStart, onFocusTextInput]);
+
+  const createStableVoicePanResponder = React.useCallback(
+    (allowTapFocus: boolean): PanResponderInstance => {
+      const longPressThreshold = 180;
+      const cancelThreshold = 24;
+      const recoverThreshold = 10;
+      const tapMoveSlop = 8;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let longPressTriggered = false;
+      let isCancelling = false;
+      let latestDy = 0;
+      let latestDx = 0;
+      let startAt = 0;
+      let startPageY = 0;
+      let startPageX = 0;
+
+      const updateLatestOffset = (
+        evt: { nativeEvent?: { pageX?: number; pageY?: number } } | undefined,
+        gestureState: { dx: number; dy: number; moveX: number; moveY: number },
+      ) => {
+        if (startPageY !== 0 && gestureState.moveY !== 0) {
+          latestDy = gestureState.moveY - startPageY;
+        } else if (startPageY !== 0 && evt?.nativeEvent?.pageY != null) {
+          latestDy = evt.nativeEvent.pageY - startPageY;
+        } else {
+          latestDy = gestureState.dy;
+        }
+
+        if (startPageX !== 0 && gestureState.moveX !== 0) {
+          latestDx = gestureState.moveX - startPageX;
+        } else if (startPageX !== 0 && evt?.nativeEvent?.pageX != null) {
+          latestDx = evt.nativeEvent.pageX - startPageX;
+        } else {
+          latestDx = gestureState.dx;
+        }
+      };
+
+      const clearTimer = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      };
+
+      const finish = (isTerminated: boolean) => {
+        clearTimer();
+        if (longPressTriggered) {
+          const shouldCancel = isTerminated || isCancelling || latestDy < -cancelThreshold;
+          void voiceCallbacksRef.current.handleVoiceEnd(shouldCancel);
+          voiceCallbacksRef.current.handleVoiceChangeState(false);
+        } else if (allowTapFocus) {
+          const moved =
+            Math.abs(latestDy) > tapMoveSlop || Math.abs(latestDx) > tapMoveSlop;
+          const pressedFor = Date.now() - startAt;
+          const shouldFocus =
+            !isTerminated && !moved && pressedFor < longPressThreshold;
+          if (shouldFocus) {
+            voiceCallbacksRef.current.onFocusTextInput();
+          }
+        }
+        longPressTriggered = false;
+        isCancelling = false;
+        latestDy = 0;
+        latestDx = 0;
+        startAt = 0;
+      };
+
+      return PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (evt) => {
+          longPressTriggered = false;
+          isCancelling = false;
+          latestDy = 0;
+          latestDx = 0;
+          startAt = Date.now();
+          startPageY = evt.nativeEvent.pageY;
+          startPageX = evt.nativeEvent.pageX;
+          voiceCallbacksRef.current.handleVoiceChangeState(false);
+          timer = setTimeout(() => {
+            longPressTriggered = true;
+            const shouldCancelNow = latestDy < -cancelThreshold;
+            isCancelling = shouldCancelNow;
+            voiceCallbacksRef.current.handleVoiceChangeState(shouldCancelNow);
+            void voiceCallbacksRef.current.handleVoiceStart();
+          }, longPressThreshold);
+        },
+        onPanResponderMove: (evt, gestureState) => {
+          updateLatestOffset(evt, gestureState);
+          if (!longPressTriggered) return;
+          let nextCancelling = isCancelling;
+          if (!isCancelling && latestDy < -cancelThreshold) {
+            nextCancelling = true;
+          } else if (isCancelling && latestDy > -recoverThreshold) {
+            nextCancelling = false;
+          }
+          if (nextCancelling !== isCancelling) {
+            isCancelling = nextCancelling;
+            voiceCallbacksRef.current.handleVoiceChangeState(nextCancelling);
+          }
+        },
+        onPanResponderRelease: (evt, gestureState) => {
+          updateLatestOffset(evt, gestureState);
+          finish(false);
+        },
+        onPanResponderTerminate: (evt, gestureState) => {
+          updateLatestOffset(evt, gestureState);
+          finish(true);
+        },
+      });
+    },
+    [],
+  );
+
+  const inputHoldPanResponder = React.useMemo(
+    () => createStableVoicePanResponder(true),
+    [createStableVoicePanResponder],
+  );
+  const voiceHoldPanResponder = React.useMemo(
+    () => createStableVoicePanResponder(false),
+    [createStableVoicePanResponder],
+  );
+
+  const hasAttachments = attachments.length > 0;
+  const isEditing = !!editingMessageId;
+  const shouldShowExitTabButton = !isEditing && !isInputFocused;
+  const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
+
+  return (
+    <SafeBottomView style={styles.mobileSafeArea} minBottom={10}>
+      <View style={[styles.mobileContainer, { paddingHorizontal: 26 }]}>
+        <View style={styles.mobileInputRow}>
+          {/* 中文注释：Phone 端除独立退出 Tab 按钮外，其余输入操作区统一由授权门禁覆盖。 */}
+          <AuthGateOverlay
+            appId={appId}
+            checkInputAuth={checkInputAuth}
+            style={{ right: authOverlayRightInset }}
+          />
+
+          {/* 左侧取消编辑按钮 - 编辑状态时显示 */}
+          {isEditing && (
+            <HostIconButton
+              iconType='close'
+              size={inputArea.sideButtonSize}
+              iconSize={inputArea.cancelIconSize}
+              iconColor='#666'
+              onPress={handleCancelEdit}
+              style={styles.mobileReservedButton}
+            />
+          )}
+
+          <View style={styles.mobilePrimaryArea}>
+            {!isVoiceSurfaceMode ? (
+              <View style={[
+                styles.mobileInputPill,
+                hasAttachments && styles.mobileInputPillWithAttachment,
+              ]}>
+                  {hasAttachments && (
+                    <>
+                      <View style={styles.mobileAttachmentArea}>
+                        <AttachmentPreviewBar
+                          attachments={attachments}
+                          removeAttachment={removeAttachment}
+                          hideSeparator
+                        />
+                      </View>
+                      <View style={styles.mobileAttachmentDivider} />
+                    </>
+                  )}
+                <View style={styles.mobileInputInnerRow}>
+                  <DropdownMenu
+                    estimatedWidth={attachmentActionMenu.width}
+                    minWidth={attachmentActionMenu.width}
+                    anchorMode='start'
+                    trigger={
+                      <View style={styles.mobilePlusButton}>
+                        <Icon type='link' size={inputArea.smallIconSize} color='#404040' />
+                      </View>
+                    }
+                    onBeforeOpen={() => {
+                      setMobileInputMode('text');
+                      setIsInputFocused(false);
+                      mobileTextInputRef.current?.blur();
+                    }}
+                  >
+                    {(close) => (
+                      <View style={styles.mobileDropdownContent}>
+                        {showSearchEntry && (
+                          <TouchableOpacity
+                            style={[
+                              styles.mobileMenuItem,
+                              isWebSearchActive && styles.mobileMenuItemActive,
+                            ]}
+                            onPress={() => {
+                              setIsWebSearchActive(!isWebSearchActive);
+                              close();
+                            }}
+                          >
+                            <View style={styles.mobileMenuItemIcon}>
+                              <Icon
+                                type='network'
+                                active={isWebSearchActive}
+                                size={inputArea.smallIconSize}
+                                color={isWebSearchActive ? '#34A8FB' : '#2C2C2C'}
+                              />
+                            </View>
+                            <View style={styles.mobileMenuTextBlock}>
+                              <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
+                                {t('actr.input.webSearch')}
+                              </AppText>
+                              <AppText style={styles.mobileMenuSubtitle}>
+                                {t('actr.input.webSearchTip')}
+                              </AppText>
+                            </View>
+                          </TouchableOpacity>
+                        )}
+
+                        {showLocationEntry && (
+                          <TouchableOpacity
+                            style={[
+                              styles.mobileMenuItem,
+                              isLocationActive && styles.mobileMenuItemActive,
+                            ]}
+                            onPress={() => {
+                              setIsLocationActive(!isLocationActive);
+                              close();
+                            }}
+                          >
+                            <View style={styles.mobileMenuItemIcon}>
+                              <Icon
+                                type='share_position'
+                                active={isLocationActive}
+                                size={inputArea.smallIconSize}
+                                color={isLocationActive ? '#34A8FB' : '#2C2C2C'}
+                              />
+                            </View>
+                            <View style={styles.mobileMenuTextBlock}>
+                              <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
+                                {t('actr.input.shareLocation')}
+                              </AppText>
+                              <AppText style={styles.mobileMenuSubtitle}>
+                                {t('actr.input.shareLocationTip')}
+                              </AppText>
+                            </View>
+                          </TouchableOpacity>
+                        )}
+
+                        <TouchableOpacity
+                          style={styles.mobileMenuItem}
+                          onPress={() => {
+                            setShowMapModal(true);
+                            close();
+                          }}
+                        >
+                          <View style={styles.mobileMenuItemIcon}>
+                            <Icon type='geolocation' size={inputArea.mediumIconSize} color='#2C2C2C' />
+                          </View>
+                          <View style={styles.mobileMenuTextBlock}>
+                            <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
+                              {t('actr.input.location')}
+                            </AppText>
+                            <AppText style={styles.mobileMenuSubtitle}>{t('actr.input.sendLocation')}</AppText>
+                          </View>
+                        </TouchableOpacity>
+
+                        {showNewlineEntry ? <View style={styles.mobileMenuDivider} /> : null}
+
+                        {showNewlineEntry && (
+                          <TouchableOpacity
+                            style={[
+                              styles.mobileMenuItem,
+                              isEnterForNewLine && styles.mobileMenuItemActive,
+                            ]}
+                            onPress={() => {
+                              setIsEnterForNewLine(!isEnterForNewLine);
+                              close();
+                            }}
+                          >
+                            <View style={styles.mobileMenuItemIcon}>
+                              <Icon
+                                type='enter'
+                                active={isEnterForNewLine}
+                                size={inputArea.smallIconSize}
+                                color={isEnterForNewLine ? '#34A8FB' : '#2C2C2C'}
+                              />
+                            </View>
+                            <View style={styles.mobileMenuTextBlock}>
+                              <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
+                                {t('actr.input.enterToNewLine')}
+                              </AppText>
+                              <AppText style={styles.mobileMenuSubtitle}>
+                                {t('actr.input.enterToNewLineTip')}
+                              </AppText>
+                            </View>
+                          </TouchableOpacity>
+                        )}
+
+                        <View style={styles.mobileMenuDivider} />
+
+                        <View style={styles.mobileQuickActions}>
+                          <TouchableOpacity
+                            style={styles.mobileQuickAction}
+                            onPress={() => {
+                              close(takePhoto);
+                            }}
+                          >
+                            <Icon type='camera' size={inputArea.smallIconSize} />
+                            <AppText style={styles.mobileQuickActionText}>{t('actr.input.camera')}</AppText>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.mobileQuickAction}
+                            onPress={() => {
+                              close(pickImage);
+                            }}
+                          >
+                            <Icon type='image' size={inputArea.smallIconSize} />
+                            <AppText style={styles.mobileQuickActionText}>{t('actr.input.photos')}</AppText>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.mobileQuickAction}
+                            onPress={() => {
+                              close(pickDocument);
+                            }}
+                          >
+                            <Icon type='file' size={inputArea.smallIconSize} />
+                            <AppText style={styles.mobileQuickActionText}>{t('actr.input.files')}</AppText>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </DropdownMenu>
+
+                  <View style={styles.mobileTextInputWrap}>
+                    <StableTextInput
+                      tabId={tab.id}
+                      hasAttachments={attachments.length > 0}
+                      isEnterForNewLine={isEnterForNewLine}
+                      handleSendRef={handleSendRef}
+                      mobileMode={true}
+                      editable={!shouldEnableInputHoldToTalk}
+                      inputRefExternal={mobileTextInputRef}
+                      onFocus={() => {
+                        setMobileInputMode('text');
+                        setIsInputFocused(true);
+                      }}
+                      onBlur={() => setIsInputFocused(false)}
+                      desktopInputStyle={sharedStyles.input}
+                      mobileInputStyle={sharedStyles.mobileInputText}
+                    />
+                    {shouldEnableInputHoldToTalk && (
+                      // 空文本+未聚焦时，覆盖一层手势区：
+                      // 短按走聚焦输入，长按走录音。
+                      <View
+                        style={styles.mobileInputGestureOverlay}
+                        {...inputHoldPanResponder.panHandlers}
+                      />
+                    )}
+                  </View>
+
+                  {hasInputText ? (
+                    <TouchableOpacity
+                      style={styles.mobileMicButton}
+                      onPress={onClearInput}
+                    >
+                      <Icon type='input_clear' size={inputArea.mediumIconSize} color='#666' />
+                    </TouchableOpacity>
+                  ) : shouldShowVoiceSwitchButton ? (
+                    <TouchableOpacity
+                      style={styles.mobileMicButton}
+                      onPress={onSwitchToVoiceHoldMode}
+                    >
+                      <Icon type='audio' size={inputArea.largeIconSize} color='#666' />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.mobileMicButton} />
+                  )}
+                </View>
+              </View>
+            ) : (
+              <View style={[
+                styles.mobileVoiceSurface,
+                hasAttachments && styles.mobileVoiceSurfaceWithAttachment,
+              ]}>
+                {hasAttachments && (
+                  <>
+                    <View style={styles.mobileAttachmentArea}>
+                      <AttachmentPreviewBar
+                        attachments={attachments}
+                        removeAttachment={removeAttachment}
+                        hideSeparator
+                      />
+                    </View>
+                    <View style={styles.mobileAttachmentDivider} />
+                  </>
+                )}
+                <View style={styles.mobileVoiceInnerRow}>
+                  <View style={styles.mobileVoiceModeSpacer} />
+                  <View
+                    style={styles.mobileVoiceModeMain}
+                    {...voiceHoldPanResponder.panHandlers}
+                  >
+                     <AppText variant='menuLabel' style={styles.mobileVoiceHoldText}>
+                      {t('actr.input.holdToSpeak')}
+                    </AppText>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.mobileVoiceModeKeyboardButton}
+                    onPress={onSwitchToTextMode}
+                  >
+                    <Icon
+                      type='keyboard'
+                      size={inputArea.largeIconSize}
+                      color='#666666'
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+          </View>
+
+          {/* 右侧按钮 - 非编辑状态时显示 */}
+          {!isEditing && (
+            <>
+              {/* 退出按钮 - 未聚焦时显示 */}
+              {!isInputFocused && (
+                <HostIconButton
+                  iconType='tab_preview'
+                  size={inputArea.sideButtonSize}
+                  iconSize={inputArea.sideButtonIconSize}
+                  iconColor='#404040'
+                  onPress={handleExitTab}
+                  style={styles.mobileReservedButton}
+                >
+                  {/* 未读消息角标 */}
+                  {totalUnread > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <AppText style={styles.unreadBadgeText}>
+                        {totalUnread > 99 ? '99+' : totalUnread}
+                      </AppText>
+                    </View>
+                  )}
+                </HostIconButton>
+              )}
+
+              {/* send 按钮 - 聚焦 + 开启回车换行时显示 */}
+              {isInputFocused && isEnterForNewLine && (
+                <HostIconButton
+                  iconType='send'
+                  size={inputArea.sideButtonSize}
+                  iconSize={inputArea.sideButtonIconSize}
+                  iconColor={hasInputText ? '#000000' : '#666'}
+                  onPress={() => {
+                    if (hasInputText) {
+                      handleSendRef.current();
+                    }
+                  }}
+                  disabled={!hasInputText}
+                  style={styles.mobileReservedButton}
+                />
+              )}
+            </>
+          )}
+        </View>
+      </View>
+    </SafeBottomView>
+  );
+}
+
+const styles = StyleSheet.create({
+  mobileContainer: {
+    width: '100%',
+    paddingTop: spacing.xs,
+    // paddingBottom: 10,
+    backgroundColor: '#F2F2F6',
+  },
+  mobileSafeArea: {
+    width: '100%',
+    backgroundColor: '#F2F2F6',
+  },
+  mobileInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    width: '100%',
+    gap: 10,
+    position: 'relative',
+  },
+  mobilePrimaryArea: {
+    flex: 1,
+    minHeight: inputArea.minHeight,
+    position: 'relative',
+  },
+  mobileInputPill: {
+    minHeight: inputArea.minHeight,
+    borderRadius: inputArea.borderRadius,
+    backgroundColor: '#FFFFFF',
+    ...HOST_SHADOWS.inputPill,
+  },
+  mobileInputPillWithAttachment: {
+    borderRadius: 20,
+  },
+  mobileAttachmentArea: {
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  mobileAttachmentDivider: {
+    height: 1,
+    backgroundColor: '#EAEAEA',
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+  },
+  mobileInputInnerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  mobileVoiceSurface: {
+    minHeight: inputArea.minHeight,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    position: 'relative',
+    ...HOST_SHADOWS.inputPill,
+  },
+  mobileVoiceSurfaceWithAttachment: {
+    borderRadius: 20,
+  },
+  mobileVoiceInnerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  mobilePlusButton: {
+    width: inputArea.smallButtonSize,
+    height: inputArea.smallButtonSize,
+    borderRadius: inputArea.smallButtonSize / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileDropdownContent: {
+    width: attachmentActionMenu.width,
+    paddingHorizontal: attachmentActionMenu.contentPaddingHorizontal,
+    paddingTop: attachmentActionMenu.contentPaddingTop,
+    paddingBottom: attachmentActionMenu.contentPaddingBottom,
+  },
+  mobileMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: attachmentActionMenu.itemPaddingHorizontal,
+    paddingVertical: attachmentActionMenu.itemPaddingVertical,
+    marginVertical: 3,
+    borderRadius: 20,
+  },
+  mobileMenuItemActive: {
+    backgroundColor: '#EDEDED',
+  },
+  mobileMenuItemIcon: {
+    width: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileMenuTextBlock: {
+    flex: 1,
+  },
+  mobileMenuTitle: {
+    ...getTypographyStyle('menuLabel'),
+    color: '#333333',
+  },
+  mobileMenuSubtitle: {
+    ...getTypographyStyle('caption1'),
+    color: '#999999',
+    marginTop: spacing.xxxs,
+  },
+  mobileMenuDivider: {
+    height: 1,
+    backgroundColor: '#E0E0E0',
+    marginVertical: spacing.sm,
+    marginHorizontal: 10,
+  },
+  mobileQuickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxs,
+    alignItems: 'flex-start',
+  },
+  mobileQuickAction: {
+    width: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xxs,
+  },
+  mobileQuickActionText: {
+    ...getTypographyStyle('body'),
+    color: '#2C2C2C',
+    fontWeight: '500',
+  },
+  mobileTextInputWrap: {
+    flex: 1,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  mobileInputGestureOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: -4,
+    bottom: -4,
+    zIndex: 20,
+  },
+  mobileMicButton: {
+    width: inputArea.smallButtonSize,
+    height: inputArea.smallButtonSize,
+    borderRadius: inputArea.smallButtonSize / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileReservedButton: {
+    borderWidth: 1,
+    borderColor: '#ECECEF',
+    backgroundColor: '#FFFFFF',
+    ...HOST_SHADOWS.inputPill,
+  },
+  mobileVoiceModeSpacer: {
+    width: inputArea.smallButtonSize,
+    height: inputArea.smallButtonSize,
+  },
+  mobileVoiceModeMain: {
+    flex: 1,
+    height: inputArea.smallButtonSize,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileVoiceModeKeyboardButton: {
+    width: inputArea.smallButtonSize,
+    height: inputArea.smallButtonSize,
+    borderRadius: inputArea.smallButtonSize / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileVoiceHoldText: {
+    ...getTypographyStyle('menuLabel'),
+    color: '#333333',
+    fontWeight: '500',
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: -12,
+    right: -12,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#F2F2F6',
+  },
+  unreadBadgeText: {
+    color: '#FFFFFF',
+    ...getTypographyStyle('caption1'),
+    fontWeight: '600',
+  },
+});
