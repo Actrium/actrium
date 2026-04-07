@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Image, StyleSheet, TouchableOpacity } from 'react-native';
-import { Icon } from '../../actr-host/components/Icon';
+import { Icon } from '../../components';
 import { AppText } from '../../components';
 import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 

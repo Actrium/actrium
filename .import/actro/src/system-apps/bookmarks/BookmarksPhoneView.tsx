@@ -16,7 +16,7 @@ import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import { SwipeRemoveActionRow } from '../components/SwipeRemoveActionRow';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
-import { isAndroid } from '../../../src/utils/device';
+import { isAndroid } from '../../utils/device';
 
 type TFlatBookmarkItem = TBookmarkItem & {
   isLastInGroup: boolean;

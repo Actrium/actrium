@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { MyTouchableOpacity } from 'askit';
-import { GlobalAlert } from '../../src/components';
+import { GlobalAlert } from '../components';
 
 interface Tag {
   id: string;

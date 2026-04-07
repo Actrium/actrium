@@ -5,7 +5,7 @@ import { useUserStore } from '../../actr-host/store/useUserStore';
 import { useAuthTaskStore } from '../../actr-host/store/useAuthTaskStore';
 import { useTabIdMapStore } from '../../actr-host/store/useTabIdMapStore';
 import { useTranslation } from 'react-i18next';
-import { GlobalAlert } from '../../../src/components';
+import { GlobalAlert } from '../../components';
 
 export type AuthorizeStep = 'idle' | 'authorizing' | 'authorized' | 'failed';
 

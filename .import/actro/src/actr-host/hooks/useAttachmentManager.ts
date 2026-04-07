@@ -5,7 +5,7 @@ import { AttachmentService } from '../../services/AttachmentService';
 import { useInputStore, EMPTY_ATTACHMENTS } from '../store/useInputStore';
 import RNFS from 'react-native-fs';
 import { Utils } from '../../utils/utils';
-import { GlobalAlert } from '../../../src/components';
+import { GlobalAlert } from '../../components';
 
 export const useAttachmentManager = (tabId: string) => {
   const { t } = useTranslation();

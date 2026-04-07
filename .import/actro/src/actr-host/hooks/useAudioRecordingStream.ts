@@ -11,7 +11,7 @@ import {
   createAudioStream,
 } from '../utils/AudioStreamManager';
 import { useIntervalTimer } from '../../hooks';
-import { GlobalAlert } from '../../../src/components';
+import { GlobalAlert } from '../../components';
 
 export interface UseAudioRecordingStreamOptions {
   onAudioChunk: (chunk: Uint8Array) => void | Promise<void>;

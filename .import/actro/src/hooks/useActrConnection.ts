@@ -13,7 +13,7 @@ import { IAttachmentItem } from '../actr-host/types/attachment';
 import { Utils } from '../utils/utils';
 import { useMessageStore } from '../actr-host/store/useMessageStore';
 import { Progress } from '../repository/MessageRepository';
-import { GlobalAlert } from '../../src/components';
+import { GlobalAlert } from '../components';
 
 /**
  * useActrConnection Hook

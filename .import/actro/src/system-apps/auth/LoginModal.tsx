@@ -12,7 +12,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { LoginContent } from './LoginContent';
 import { useLoginFlow, LoginFlowMode } from '../../hooks/auth';
-import { HostIconButton } from '../../actr-host/components/HostIconButton';
+import { HostIconButton } from '../../components';
 import { getHostLayoutTokens } from '../../utils/layout';
 import type { AboutPageKey } from '../settings/aboutPages';
 import { AboutWebViewModal } from '../settings/AboutWebViewModal';

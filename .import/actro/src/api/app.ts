@@ -16,6 +16,7 @@ export const getAppInfo = async (appId: string) => {
       // @ts-ignore
       res.data!.language_contents[lang] = res.data.info[lang]
     }
+    res.data.allow_anonymous_access = true
   }
 
   return res

@@ -9,7 +9,7 @@ import Animated, {
 import ReanimatedSwipeable, {
   SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
-import { Icon } from '../../actr-host/components/Icon';
+import { Icon } from '../../components';
 
 type SwipeRemoveActionProps = {
   progress: SharedValue<number>;
