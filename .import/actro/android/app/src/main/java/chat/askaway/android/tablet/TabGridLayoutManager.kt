@@ -7,8 +7,15 @@ import kotlin.math.sqrt
 
 class TabGridLayoutManager(
     context: Context,
-    private val itemAspectRatio: Float = 16f / 9f
+    private var itemAspectRatio: Float = 16f / 9f
 ) : GridLayoutManager(context, 2) {
+
+    fun updateAspectRatio(newAspectRatio: Float) {
+        if (itemAspectRatio != newAspectRatio) {
+            itemAspectRatio = newAspectRatio
+            requestLayout()
+        }
+    }
 
     override fun onLayoutChildren(recycler: androidx.recyclerview.widget.RecyclerView.Recycler?, state: androidx.recyclerview.widget.RecyclerView.State?) {
         // 计算最佳列数
