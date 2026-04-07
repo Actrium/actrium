@@ -61,12 +61,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.rvContent.adapter = contentAdapter
 
         binding.flContent.addOnLayoutChangeListener { v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-            Log.e("TabletActivity", "addOnLayoutChangeListener")
-            viewModel.changeSize(right - left, bottom - top)
-            // 判断尺寸是否变化
-            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
-                // 尺寸发生变化
-            }
+            viewModel.changeSize((right - left).pxToDp().toInt(), (bottom - top).pxToDp().toInt())
         }
 
         // 获取容器尺寸
