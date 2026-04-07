@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.askaway.android.data.database.AppDatabase
 import chat.askaway.android.data.repository.ActiveRepository
+import chat.askaway.android.utils.TabBundleUtils
 import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.event.NativeModuleEvent
 import com.askaway.android.event.ReactModuleEvent
@@ -14,6 +15,7 @@ import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
 import com.askaway.android.utils.addMap
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -29,8 +31,8 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
     val tabletUseCase: StateFlow<TabletUseCase?> get() = _tabletUseCase
     private val appList = ArrayList<AppModel>()
 
-    var containerHeight = 1000
-    var containerWidth = 720
+    var containerHeight = 800
+    var containerWidth = 1000
     var currentDisplayModel = PageMode.TAB
     val pageBundle = Bundle()
     private var activeRepository: ActiveRepository? = null
@@ -48,10 +50,12 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
     private fun loadActiveListFromDatabase() {
         activeRepository?.let { repository ->
             viewModelScope.launch {
+                delay(300)
                 try {
                     val savedList = repository.loadActiveList()
                     if (savedList.isNotEmpty()) {
-                        _tabletUseCase.value = _tabletUseCase.value?.copy(appList = savedList)
+                        val bundle = TabBundleUtils.genBundle(savedList[0], savedList, containerHeight, containerWidth)
+                        _tabletUseCase.value = _tabletUseCase.value?.copy(appList = savedList, currentApp = bundle)
                         Log.d("MainViewModel", "Loaded ${savedList.size} items from database")
                     }else{
                         _tabletUseCase.value = _tabletUseCase.value?.copy(autoCreate = true)
@@ -148,11 +152,12 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
     }
 
     fun changeActiveModel(id: String) {
-        Log.e("TabletViewModel", "changeActiveModel")
+        Log.e("TabletViewModel", "changeActiveModel:${id}")
+        val appList = _tabletUseCase.value?.appList?:emptyList()
         val index = appList.indexOfFirst { it.id == id }
         if (index != -1) {
             val activeModel = appList[index]
-            val bundle = activeModel.genReactNativeBundle(appList, containerHeight, containerWidth)
+            val bundle = TabBundleUtils.genBundle(activeModel, appList,  containerHeight, containerWidth)
             _tabletUseCase.value = _tabletUseCase.value?.copy(
                 currentApp = bundle
             )
@@ -169,20 +174,21 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
     }
 
     fun removeActiveModel(id: String) {
+        val appList = (_tabletUseCase.value?.appList?:emptyList()).toMutableList()
         val index = appList.indexOfFirst { it.id == id }
         if (index != -1) {
             appList.removeAt(index)
             if (appList.isNotEmpty()) {
                 val newIndex = maxOf(0, index - 1)
                 val activeModel = appList[newIndex]
-                val bundle = activeModel.genReactNativeBundle(appList, containerHeight, containerWidth)
+                val bundle = TabBundleUtils.genBundle(activeModel, appList, containerHeight, containerWidth)
                 _tabletUseCase.value = _tabletUseCase.value?.copy(
-                    appList = _tabletUseCase.value!!.appList.filter { it.id != id },
+                    appList = appList,
                     currentApp = bundle
                 )
             } else {
                 _tabletUseCase.value = _tabletUseCase.value?.copy(
-                    appList = _tabletUseCase.value!!.appList.filter { it.id != id },
+                    appList = appList,
                     currentApp = null
                 )
             }
@@ -340,5 +346,25 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
         if (EventBus.getDefault().isRegistered(this)) {
             EventBus.getDefault().unregister(this)
         }
+    }
+
+    fun enterFullScreen() {
+        val tabId = _tabletUseCase.value?.currentApp?.getString("currentTabId") ?: return
+        EventBus.getDefault().post(
+            NativeModuleEvent(
+                NativeModuleEvent.EVENT_TAB_ENTERED_FULLSCREEN,
+                mapOf("tabId" to tabId)
+            )
+        )
+    }
+
+    fun exitFullScreen() {
+        val tabId = _tabletUseCase.value?.currentApp?.getString("currentTabId") ?: return
+        EventBus.getDefault().post(
+            NativeModuleEvent(
+                NativeModuleEvent.EVENT_TAB_EXITED_FULLSCREEN,
+                mapOf("tabId" to tabId)
+            )
+        )
     }
 }
