@@ -13,7 +13,6 @@ import {
   View,
   ViewStyle,
   ScrollView,
-  useWindowDimensions,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useTabIdMapStore } from '../../store/useTabIdMapStore';
@@ -82,6 +81,7 @@ const LoadApp = () => {
   const [inputExpanded, setInputExpanded] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
   const [loadRequest, setLoadRequest] = useState<LoadRequest | null>(null);
+  const [padContainerWidth, setPadContainerWidth] = useState(0);
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const isResolvingRef = useRef(false);
   // 去重状态集合：防止各种场景下的重复加载和重复弹窗
@@ -96,14 +96,13 @@ const LoadApp = () => {
   });
   const inputRef = useRef<TextInput>(null);
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
-  const { width: screenWidth } = useWindowDimensions();
   const { ensureNetworkPermission } = useNetworkPermission();
 
   // 中文注释：Android 宿主已经通过 windowSoftInputMode 处理键盘上移，
   // Pad 端不要再额外叠加 RN 的 keyboardInset，否则扫码区和输入框会被重复抬高。
   const shouldApplyKeyboardInset = !(Platform.OS === 'android' && !isPhone);
-  const scanSize = isPhone ? screenWidth * 0.85 : 500;
-  const padInputWidth = 600;
+  const scanMaxSize = 500;
+  const padInputMaxWidth = 600;
   const padInputBottomOffset = 42;
   const containerGap = isPhone ? 24 : 36;
   const scanBorderRadius = isPhone ? 20 : 34;
@@ -113,6 +112,8 @@ const LoadApp = () => {
   const effectiveKeyboardInset = shouldApplyKeyboardInset ? keyboardInset : 0;
   const padInputOccupiedHeight =
     loadApp.inputHeight + padInputBottomOffset + effectiveKeyboardInset;
+  const padScanSize =
+    padContainerWidth > 0 ? Math.min(padContainerWidth * 0.9, scanMaxSize) : scanMaxSize;
 
   // Pad 端输入框常驻展示，Phone 端保持原有“按钮切换输入框”交互。
   const showInputField = isTablet || (inputExpanded && !cameraActive);
@@ -391,7 +392,17 @@ const LoadApp = () => {
 
   return (
     <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-      <View style={styles.padContainer}>
+      <View
+        style={styles.padContainer}
+        onLayout={(event) => {
+          const { width } = event.nativeEvent.layout;
+          if (width !== padContainerWidth) {
+            // 中文注释：扫码区需要显式使用同一个数值作为宽高，
+            // 这里读取 Pad 可用宽度后再计算 90% 宽度，避免仅靠 aspectRatio 时被其它布局链路拉成长方形。
+            setPadContainerWidth(width);
+          }
+        }}
+      >
         {/* Pad 端扫码区保持主体居中，输入框改为底部独立定位，避免受整体居中布局影响。 */}
         <ScrollView
           contentContainerStyle={[
@@ -416,8 +427,8 @@ const LoadApp = () => {
               style={[
                 styles.scanArea,
                 {
-                  width: scanSize,
-                  height: scanSize,
+                  width: padScanSize,
+                  height: padScanSize,
                   borderRadius: scanBorderRadius,
                   marginTop: isTablet ? 0 : scanTopMargin,
                 },
@@ -441,20 +452,30 @@ const LoadApp = () => {
           </View>
         </ScrollView>
 
-        {renderInput(
-          [
-            styles.padInput,
-            { width: padInputWidth, borderRadius: inputBorderRadius },
-          ],
-          [
-            styles.padInputContainer,
-            {
-              width: padInputWidth,
-              borderRadius: inputBorderRadius,
-              bottom: padInputBottomOffset + effectiveKeyboardInset,
-            },
-          ],
-        )}
+        <View
+          style={[
+            styles.padInputDock,
+            { bottom: padInputBottomOffset + effectiveKeyboardInset },
+          ]}
+        >
+          {renderInput(
+            [
+              styles.padInput,
+              {
+                width: '100%',
+                borderRadius: inputBorderRadius,
+              },
+            ],
+            [
+              styles.padInputContainer,
+              {
+                width: '90%',
+                maxWidth: padInputMaxWidth,
+                borderRadius: inputBorderRadius,
+              },
+            ],
+          )}
+        </View>
       </View>
     </TouchableWithoutFeedback>
   );
@@ -538,12 +559,17 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     ...getTypographyStyle(loadApp.inputTypographyVariant),
   },
-  padInputContainer: {
+  padInputDock: {
     position: 'absolute',
-    left: '50%',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  padInputContainer: {
+    // 中文注释：外层 Dock 负责绝对定位和水平居中，
+    // 输入框容器只保留自身宽度约束，避免绝对定位和百分比宽度互相干扰。
     height: loadApp.inputHeight,
     backgroundColor: '#fff',
-    marginLeft: -300,
     // width / borderRadius 由动态样式控制
     ...HOST_SHADOWS.inputPill,
   },
