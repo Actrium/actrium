@@ -66,7 +66,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             val newHeight = bottom - top
             val oldWidth = oldRight - oldLeft
             val oldHeight = oldBottom - oldTop
-            if(newWidth == oldWidth&&newHeight ==oldHeight) return@addOnLayoutChangeListener
+            if (newWidth == oldWidth && newHeight == oldHeight) return@addOnLayoutChangeListener
             viewModel.changeSize(newWidth.pxToDp().toInt(), newHeight.pxToDp().toInt())
 
             // 更新容器尺寸
@@ -182,10 +182,15 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         lifecycleScope.launchWhenStarted {
             viewModel.tabletUseCase.collect { useCase ->
                 if (useCase != null) {
-                    for(item in useCase.appList){
+                    for (item in useCase.appList) {
                         if (reactViewMap[item.id] == null) {
                             // 创建新的 ReactRootView
-                            val bundle = TabBundleUtils.genBundle(item, useCase.appList, viewModel.containerHeight, viewModel.containerWidth)
+                            val bundle = TabBundleUtils.genBundle(
+                                item,
+                                useCase.appList,
+                                viewModel.containerHeight,
+                                viewModel.containerWidth
+                            )
                             val targetView = createReactRootView("canvas-kotlin", bundle)
                             reactViewMap[item.id] = targetView
                         }
@@ -228,7 +233,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                             }
                         }
                     }
-                    if(useCase.autoCreate){
+                    if (useCase.autoCreate) {
                         binding.ivAdd.performClick()
                         viewModel.cancelCreate()
                     }
@@ -355,11 +360,13 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         }
 
         if (mode == PageMode.TAB) {
+            viewModel.enterFullScreen()
             // TAB 模式
             binding.llTitleTab.isVisible = true
             binding.rvContent.isVisible = true
             binding.rlTitleGrid.isVisible = false
             binding.llSearch.isVisible = false
+
 
             // 移除 Grid 的 ItemDecoration
             gridItemDecoration?.let {
@@ -377,6 +384,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             // 强制刷新以重置 item 高度
             contentAdapter.notifyDataSetChanged()
         } else {
+            viewModel.exitFullScreen()
             // GRID 模式
             binding.rlTitleGrid.isVisible = true
             binding.llSearch.isVisible = true
