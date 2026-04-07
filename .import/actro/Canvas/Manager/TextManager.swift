@@ -405,6 +405,7 @@ enum TextKey: String {
     case imagelimit
     case location
     case locationDescription
+    case goback
 }
 
 // MARK: - 场景文案结构体
@@ -918,6 +919,7 @@ struct StartActive {
     func imagelimit() -> String { return TextManager.shared.text(.imagelimit) }
     func location() -> String { return TextManager.shared.text(.location) }
     func locationDescription() -> String { return TextManager.shared.text(.locationDescription) }
+    func goback() -> String { return TextManager.shared.text(.goback) }
 }
 
 // MARK: - SwiftUI文本扩展
