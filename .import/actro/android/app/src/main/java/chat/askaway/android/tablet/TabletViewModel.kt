@@ -1,8 +1,12 @@
 package chat.askaway.android.tablet
 
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import chat.askaway.android.data.database.AppDatabase
+import chat.askaway.android.data.repository.ActiveRepository
 import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.event.NativeModuleEvent
 import com.askaway.android.event.ReactModuleEvent
@@ -12,13 +16,14 @@ import com.askaway.android.model.AppModel
 import com.askaway.android.utils.addMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
 import java.util.UUID
 
 
-class TabletViewModel : ViewModel() {
+class TabletViewModel(val applicationContext: Context) : ViewModel() {
 
     private val _tabletUseCase = MutableStateFlow<TabletUseCase?>(null)
     val tabletUseCase: StateFlow<TabletUseCase?> get() = _tabletUseCase
@@ -28,11 +33,50 @@ class TabletViewModel : ViewModel() {
     var containerWidth = 720
     var currentDisplayModel = PageMode.TAB
     val pageBundle = Bundle()
+    private var activeRepository: ActiveRepository? = null
 
     init {
         _tabletUseCase.value = TabletUseCase()
         if (!EventBus.getDefault().isRegistered(this)) {
             EventBus.getDefault().register(this)
+        }
+        val database = AppDatabase.getDatabase(applicationContext)
+        activeRepository = ActiveRepository(database.activeDao())
+        loadActiveListFromDatabase()
+    }
+
+    private fun loadActiveListFromDatabase() {
+        activeRepository?.let { repository ->
+            viewModelScope.launch {
+                try {
+                    val savedList = repository.loadActiveList()
+                    if (savedList.isNotEmpty()) {
+                        _tabletUseCase.value = _tabletUseCase.value?.copy(appList = savedList)
+                        Log.d("MainViewModel", "Loaded ${savedList.size} items from database")
+                    }else{
+                        _tabletUseCase.value = _tabletUseCase.value?.copy(autoCreate = true)
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Error loading active list from database", e)
+                }
+            }
+        }
+    }
+
+    fun cancelCreate(){
+        _tabletUseCase.value = _tabletUseCase.value?.copy(autoCreate = false)
+    }
+
+    fun saveActiveListToDatabase() {
+        activeRepository?.let { repository ->
+            viewModelScope.launch {
+                try {
+                    repository.saveActiveList(_tabletUseCase.value!!.appList.toList())
+                    Log.d("MainViewModel", "Saved items to database")
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Error saving active list to database", e)
+                }
+            }
         }
     }
 

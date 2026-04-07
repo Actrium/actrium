@@ -7,7 +7,8 @@ data class TabletUseCase(
     val appList: List<ActiveModel> = emptyList(),
     val currentApp: Bundle? = null,
     val pageMode: PageMode = PageMode.TAB,
-    val showPageType: String = ""
+    val showPageType: String = "",
+    val autoCreate:Boolean = false,
 )
 
 /**
