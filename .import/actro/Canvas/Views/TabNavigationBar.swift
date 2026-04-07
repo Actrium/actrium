@@ -137,7 +137,7 @@ private struct OverviewNavigationBar: View {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 20, weight: .regular))
-                    Text("返回")
+                    Text(TM.active.goback())
                         .font(.system(size: 20, weight: .regular))
                 }
                 .foregroundColor(.white)
@@ -176,7 +176,7 @@ private struct OverviewNavigationBar: View {
                             VStack(spacing: 4) {
                                 Image(systemName: "rectangle.grid.1x2.fill")
                                     .font(.system(size: 14))
-                                Text("活跃")
+                                Text(TM.active.activity())
                                     .font(.system(size: 8))
                             }
                             .frame(width: segmentWidth, height: segmentHeight)
@@ -193,7 +193,7 @@ private struct OverviewNavigationBar: View {
                             VStack(spacing: 4) {
                                 Image(systemName: "book.fill")
                                     .font(.system(size: 14))
-                                Text("书签")
+                                Text(TM.active.bookmarks())
                                     .font(.system(size: 8))
                             }
                             .frame(width: segmentWidth, height: segmentHeight)

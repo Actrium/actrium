@@ -193,7 +193,7 @@ struct UnifiedCanvasView: View {
 
                                 ZStack(alignment: .leading) {
                                     if searchTabsText.isEmpty {
-                                        Text("搜索应用...")
+                                        Text("\(TM.active.search())...")
                                             .foregroundColor(.gray)
                                             .font(.system(size: 15))
                                     }
