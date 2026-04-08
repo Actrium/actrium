@@ -199,9 +199,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             // 不再在这里 finish，由 updateData 回调判断
         }
 
-        binding.ivAdd.post {
-//            binding.ivAdd.performClick()
-        }
+        binding.ivAdd.postDelayed({
+            if (viewModel.isActiveListEmpty()) {
+                binding.ivAdd.performClick()
+            }
+        }, 500)
+
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
