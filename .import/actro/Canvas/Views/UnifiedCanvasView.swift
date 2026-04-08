@@ -177,59 +177,6 @@ struct UnifiedCanvasView: View {
                         }
                     }
                 )
-                
-                // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
-                if case .overview = viewModel.canvasMode {
-                    VStack {
-                        Spacer()
-                        
-                        HStack {
-                            Spacer()
-                            
-                            HStack(spacing: 12) {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundColor(.gray)
-                                    .font(.system(size: 16))
-
-                                ZStack(alignment: .leading) {
-                                    if searchTabsText.isEmpty {
-                                        Text("\(TM.active.search())...")
-                                            .foregroundColor(.gray)
-                                            .font(.system(size: 15))
-                                    }
-                                    TextField("", text: $searchTabsText)
-                                        .textFieldStyle(.plain)
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.primary)
-                                        .focused($isSearchTabsFocused)
-                                        .disabled(true)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .frame(maxWidth: 600)
-                            #if os(macOS)
-                            .background(Color(nsColor: NSColor(white: 0.2, alpha: 0.95)))
-                            #elseif os(iOS)
-                            .background(Color(uiColor: UIColor(white: 0.2, alpha: 0.95)))
-                            #endif
-                            .cornerRadius(24)
-                            .onTapGesture {
-                                viewModel.openSystemTab(.globalSearch, additionalProps: nil, replaceAdditionalProps: true)
-                                viewModel.currentSystemTabType = .globalSearch
-                            }
-                            .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
-                                // RN 请求退出搜索页
-                                withAnimation {
-                                    viewModel.currentSystemTabType = nil
-                                }
-                            }
-                            
-                            Spacer()
-                        }
-                        .padding(.bottom, 30)
-                    }
-                }
 
                 // Glass View 覆盖层处理拖拽（透明层，hitTest 返回 nil 让点击穿透）
                 GlassViewOnlyRepresentable(
