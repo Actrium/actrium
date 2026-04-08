@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -27,6 +28,7 @@ import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.facebook.react.uimanager.PixelUtil.pxToDp
+import com.facebook.react.uimanager.PixelUtil.dpToPx
 import com.askaway.android.core.ReactNativeBundle
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
@@ -244,7 +246,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         binding.ivAdd.performClick()
                         viewModel.cancelCreate()
                     }
-                    Log.e("TabletActivity", "pageMode:${useCase.pageMode} currentDisplayModel:${viewModel.currentDisplayModel} ")
+                    Log.e(
+                        "TabletActivity",
+                        "pageMode:${useCase.pageMode} currentDisplayModel:${viewModel.currentDisplayModel} "
+                    )
                     // 切换模式
                     if (useCase.pageMode != viewModel.currentDisplayModel) {
                         changeMode(useCase.pageMode)
@@ -355,15 +360,20 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     private fun changeMode(mode: PageMode) {
         // 设置 flTitle 的底部 margin
-        val params = binding.flTitle.layoutParams as? LinearLayout.LayoutParams
+        val params = binding.rvContent.layoutParams as? ViewGroup.MarginLayoutParams
         if (params != null) {
-            val marginBottom = if (mode == PageMode.GRID) {
+            val marginTop = if (mode == PageMode.GRID) {
                 (16 * resources.displayMetrics.density).toInt()
             } else {
                 0
             }
-            params.bottomMargin = marginBottom
-            binding.flTitle.layoutParams = params
+//            val marginHorizontal = viewModel.containerWidth.dpToPx()*0.1
+            val marginHorizontal =
+                if (mode == PageMode.GRID) viewModel.containerWidth * resources.displayMetrics.density * 0.1 else 0
+            params.topMargin = marginTop
+            params.leftMargin = marginHorizontal.toInt()
+            params.rightMargin = marginHorizontal.toInt()
+            binding.rvContent.layoutParams = params
         }
 
         if (mode == PageMode.TAB) {
