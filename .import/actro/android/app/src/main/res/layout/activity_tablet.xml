@@ -168,6 +168,11 @@
                 android:layout_gravity="center"
                 android:visibility="gone" />
 
+            <FrameLayout
+                android:id="@+id/flBookmark"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
             <LinearLayout
                 android:id="@+id/llSearch"
                 android:layout_width="match_parent"
@@ -196,11 +201,6 @@
                     android:textColor="#FFF"
                     android:textSize="18sp" />
             </LinearLayout>
-
-            <FrameLayout
-                android:id="@+id/flBookmark"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent" />
         </FrameLayout>
     </LinearLayout>
 
