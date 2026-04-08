@@ -13,7 +13,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import chat.askaway.android.core.ActrManager
 
-class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+class ActrBridge(val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
     companion object {
         private var instance: ActrBridge? = null
@@ -70,7 +70,7 @@ class ActrBridge(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
         }
         GlobalScope.launch {
             try {
-                actrManager.initialize(tabId, actorType, path)
+                actrManager.initialize(reactContext, tabId, actorType, path)
                 val result: WritableMap = Arguments.createMap()
                 result.putString("status", "connected")
                 promise.resolve(result)

@@ -156,11 +156,11 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             showReactNativeView(view)
             // 遍历 flRNContent 的子 view，将 tag == activeModel.id 的 view bringToFront
             var hasCreate = false
+            Params.currentTabId = activeModel.id
             for (i in 0 until binding.flRNContent.childCount) {
                 val child = binding.flRNContent.getChildAt(i)
                 if (child.tag == activeModel.id) {
                     hasCreate = true
-                    Params.currentTabId = activeModel.id
                     child.bringToFront()
                     binding.flRNContent.invalidate()
                     break
