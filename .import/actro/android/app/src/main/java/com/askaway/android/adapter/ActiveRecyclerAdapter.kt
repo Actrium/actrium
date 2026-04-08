@@ -42,15 +42,22 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
             onMarkClick: ((ActiveModel) -> Unit)?
         ) {
             binding.tvAppName.text = item.name
+
+            // 统一使用 Coil 加载，让它自动处理视图复用
             if (item.icon.isEmpty()) {
-                binding.ivAppIcon.setImageResource(R.drawable.app_default)
+                binding.ivAppIcon.load(R.drawable.app_default)
             } else {
-                binding.ivAppIcon.load(item.icon)
+                binding.ivAppIcon.load(item.icon) {
+                    placeholder(R.drawable.app_default)
+                    error(R.drawable.app_default)
+                }
             }
             // Load screenshot from local path if available
             if (item.screenshot.isNotEmpty()) {
+                binding.ivScreenshot.isVisible = true
                 binding.ivScreenshot.load(java.io.File(item.screenshot))
             } else {
+                binding.ivScreenshot.isVisible = false
                 binding.ivScreenshot.setImageDrawable(null) // Clear if no screenshot
             }
             binding.ivMark.isVisible = item.name.isNotEmpty()
