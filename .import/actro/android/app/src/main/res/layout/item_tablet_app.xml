@@ -1,24 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="240dp"
     android:layout_height="54dp"
-    android:layout_gravity="bottom"
+    android:layout_marginHorizontal="1dp"
     android:background="@drawable/tablet_tab_bg_normal"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingHorizontal="8dp">
+    android:paddingHorizontal="1dp"
+    android:paddingTop="1dp">
 
-    <TextView
-        android:id="@+id/tvAppName"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="8dp"
-        android:layout_weight="1" />
+    <LinearLayout
+        android:id="@+id/llContent"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="bottom"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp">
 
-    <ImageView
-        android:id="@+id/ivDel"
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:padding="8dp"
-        android:src="@drawable/ic_close" />
-</LinearLayout>
+        <TextView
+            android:id="@+id/tvAppName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="8dp"
+            android:layout_weight="1" />
+
+        <ImageView
+            android:id="@+id/ivDel"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="8dp"
+            android:src="@drawable/ic_close" />
+    </LinearLayout>
+</FrameLayout>
