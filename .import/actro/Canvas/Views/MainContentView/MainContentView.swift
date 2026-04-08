@@ -8,17 +8,15 @@ import UIKit
 struct MainContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
     @Binding var isTabOverviewVisible: Bool
     @State private var isRightPanelVisible: Bool = true
     @State private var addressInputText: String = ""
     @State private var isAddressBarEditing: Bool = false
     @State private var isAddressBarFirstResponder: Bool = false
 
-    init(viewModel: BrowserViewModel, historyVM: HistoryViewModel, bookmarkVM: BookmarkViewModel, isTabOverviewVisible: Binding<Bool>) {
+    init(viewModel: BrowserViewModel, historyVM: HistoryViewModel, isTabOverviewVisible: Binding<Bool>) {
         self.viewModel = viewModel
         self.historyVM = historyVM
-        self.bookmarkVM = bookmarkVM
         _isTabOverviewVisible = isTabOverviewVisible
     }
 
@@ -28,7 +26,6 @@ struct MainContentView: View {
             TabContentView(
                 viewModel: viewModel,
                 historyVM: historyVM,
-                bookmarkVM: bookmarkVM,
                 isLeftPanelVisible: isLeftPanelVisible,
                 isRightPanelVisible: isRightPanelVisible
             )
@@ -113,10 +110,6 @@ struct MainContentView: View {
             }
         }
     }
-}
-
-#Preview {
-    MainContentView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel(), isTabOverviewVisible: .constant(false))
 }
 
 // MARK: - Address Bar Container
@@ -227,7 +220,6 @@ private func endEditing() {
 struct TabContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
     let isLeftPanelVisible: Bool
     let isRightPanelVisible: Bool
     @State private var reactCoordinator: ReactNativeRootRepresentable.Coordinator?
@@ -238,7 +230,6 @@ struct TabContentView: View {
             ReactNativeTabHostView(
                 viewModel: viewModel,
                 historyVM: historyVM,
-                bookmarkVM: bookmarkVM,
                 isLeftPanelVisible: isLeftPanelVisible,
                 isRightPanelVisible: isRightPanelVisible,
                 containerSize: geometry.size,

@@ -24,7 +24,6 @@ import UniformTypeIdentifiers
 struct UnifiedCanvasView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
 
     // Mode is stored in viewModel.canvasMode to survive view recreation
     // (e.g., when DevTools layout changes from docked to detached)
@@ -146,7 +145,6 @@ struct UnifiedCanvasView: View {
                     viewportSize: safeViewportSize,
                     viewModel: viewModel,
                     historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
                     onSelectTab: { tabId in
                         switchToFocus(tabId: tabId)
                     },
@@ -228,21 +226,9 @@ struct UnifiedCanvasView: View {
                                 inputText: $addressInputText,
                                 isEditing: $isAddressBarEditing,
                                 isFirstResponder: $isAddressBarFirstResponder,
-                                isBookmarked: viewModel.currentTab.map { bookmarkVM.isBookmarked(tab: $0) } ?? false,
                                 toggleLeftPanel: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         viewModel.toggleLeftPanelForCurrentTab()
-                                    }
-                                },
-                                toggleBookmark: {
-                                    if let tab = viewModel.currentTab {
-                                        if bookmarkVM.isBookmarked(tab: tab) {
-                                            // Already bookmarked - open edit sheet
-                                            showingBookmarkSheet = true
-                                        } else {
-                                            // Not bookmarked - show add sheet
-                                            showingBookmarkSheet = true
-                                        }
                                     }
                                 },
                                 refreshAction: {
@@ -331,16 +317,6 @@ struct UnifiedCanvasView: View {
                 NSEvent.removeMonitor(monitor)
             }
             #endif
-        }
-        .sheet(isPresented: $showingBookmarkSheet) {
-            if let tab = viewModel.currentTab {
-                let existingBookmark = bookmarkVM.getBookmark(for: tab)
-                BookmarkEditSheet(
-                    viewModel: bookmarkVM,
-                    tab: existingBookmark == nil ? tab : nil,
-                    existingBookmark: existingBookmark
-                )
-            }
         }
     }
 
@@ -576,7 +552,6 @@ private struct CanvasView: View {
     // 新增：用于创建 SingleTabRootView
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel?
-    var bookmarkVM: BookmarkViewModel?
     let onSelectTab: (UUID) -> Void
     let onSwapPositions: (UUID?, UUID?) -> Void
     let onNewTab: () -> Void
@@ -643,7 +618,6 @@ private struct CanvasView: View {
                         isSwapping: isSwapping,
                         viewModel: viewModel,
                         historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
                         viewportSize: viewportSize,
                         onSelect: { onSelectTab(tab.id) },
                         onClose: { onCloseTab(tab.id) }
@@ -775,9 +749,7 @@ private struct AddressBarContainer: View {
     @Binding var inputText: String
     @Binding var isEditing: Bool
     @Binding var isFirstResponder: Bool
-    var isBookmarked: Bool
     var toggleLeftPanel: () -> Void
-    var toggleBookmark: () -> Void
     var refreshAction: () -> Void
 
     private let placeholder = "Search from bookmark or enter app id"
@@ -823,14 +795,6 @@ private struct AddressBarContainer: View {
                                 }
                             }
                         }
-
-                    // Star button for bookmarking
-                    Button(action: toggleBookmark) {
-                        Image(systemName: isBookmarked ? "star.fill" : "star")
-                            .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
-                    }
-                    .buttonStyle(.borderless)
-                    .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
 
                     Button(action: refreshAction) {
                         Image(systemName: "arrow.clockwise")
@@ -1025,7 +989,6 @@ private struct TabCardView: View {
     // 新增：用于创建 SingleTabRootView
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel?
-    var bookmarkVM: BookmarkViewModel?
     let viewportSize: CGSize  // 视口尺寸，用于 RN 渲染
     let onSelect: () -> Void
     let onClose: () -> Void
@@ -1151,7 +1114,6 @@ private struct TabCardView: View {
                 tab: tab,
                 viewModel: viewModel,
                 historyVM: historyVM,
-                bookmarkVM: bookmarkVM,
                 containerSize: CGSize(
                     width: max(rnRenderSize.width, 1),
                     height: max(rnRenderSize.height, 1)
@@ -1287,5 +1249,5 @@ private struct NewTabCardView: View {
 }
 
 #Preview {
-    UnifiedCanvasView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel())
+    UnifiedCanvasView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel())
 }

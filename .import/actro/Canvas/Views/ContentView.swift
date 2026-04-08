@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var windowState: WindowStateManager = .shared
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isACTRDropTarget: Bool = false
@@ -15,7 +14,7 @@ struct ContentView: View {
     var body: some View {
         Group {
             if UIDevice.current.userInterfaceIdiom == .phone {
-                PhoneMainView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                PhoneMainView(viewModel: viewModel, historyVM: historyVM)
             } else {
                 ZStack {
                     // 浏览器风格的布局
@@ -25,9 +24,9 @@ struct ContentView: View {
                         
                         // 内容区域：根据 systemTabType 判断是否渲染系统页签
                         ZStack {
-                            UnifiedCanvasView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                            UnifiedCanvasView(viewModel: viewModel, historyVM: historyVM)
                             if let systemType = viewModel.currentSystemTabType {
-                                SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+                                SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM)
                             }
                             // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
                             if case .overview = viewModel.canvasMode, viewModel.currentSystemTabType != .globalSearch {
@@ -79,27 +78,6 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $loginManager.showLoginSheet) {
-            HStack {
-                switch loginManager.currentLoginSheetType {
-                case .login:
-                    LoginSheet()
-                        .presentationDetents([.height(341)])
-                        .interactiveDismissDisabled()
-                case .loginAuth:
-                    LoginAuthorSheet()
-                        .presentationDetents([.height(367)])
-                        .interactiveDismissDisabled()
-                case .loginView:
-                    LoginView(detent: .constant(.large))
-                        .presentationDetents([.large])
-                        .interactiveDismissDisabled()
-                        .ignoresSafeArea()
-                case .none:
-                    EmptyView()
-                }
-            }
-        }
     }
 }
 
@@ -142,5 +120,5 @@ struct SearchBar: View {
 }
 
 #Preview {
-    ContentView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel())
+    ContentView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel())
 }

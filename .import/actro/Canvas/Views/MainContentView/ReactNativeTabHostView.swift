@@ -8,7 +8,6 @@ private let logger = AppLogger.reactNative
 struct ReactNativeTabHostView: View {
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel?
-    var bookmarkVM: BookmarkViewModel?
     let isLeftPanelVisible: Bool
     let isRightPanelVisible: Bool
     let containerSize: CGSize  // 仅用于调试日志和初始 frame 提示
@@ -18,7 +17,6 @@ struct ReactNativeTabHostView: View {
         ReactNativeRootRepresentable(
             viewModel: viewModel,
             historyVM: historyVM,
-            bookmarkVM: bookmarkVM,
             tabs: viewModel.tabs,
             currentTabId: viewModel.currentTabId,
             isLeftPanelVisible: isLeftPanelVisible,
@@ -32,7 +30,6 @@ struct ReactNativeTabHostView: View {
 struct ReactNativeRootRepresentable: UIViewRepresentable {
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel?
-    var bookmarkVM: BookmarkViewModel?
     let tabs: [Tab]
     let currentTabId: UUID?
     let isLeftPanelVisible: Bool
@@ -174,22 +171,7 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
                         }
                     }
                 case .bookmarks:
-                    if let bookmarkVM = bookmarkVM {
-                        dict["bookmarks"] = bookmarkVM.bookmarks.map { bookmark in
-                            var bookmarkDict: [String: Any] = [
-                                "id": bookmark.id.uuidString,
-                                "title": bookmark.title,
-                                "createdAt": bookmark.createdAt.timeIntervalSince1970 * 1000
-                            ]
-                            if let url = bookmark.appURL {
-                                bookmarkDict["appURL"] = url.absoluteString
-                            }
-                            if let lastUsedAt = bookmark.lastUsedAt {
-                                bookmarkDict["lastUsed"] = lastUsedAt.timeIntervalSince1970 * 1000
-                            }
-                            return bookmarkDict
-                        }
-                    }
+                    break
                 case .login:
                     // Login tab currently doesn't need extra data from native,
                     // context info (clientId) is handled via JS store using tabId.
