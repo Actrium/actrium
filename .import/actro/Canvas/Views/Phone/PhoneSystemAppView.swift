@@ -6,7 +6,6 @@ struct PhoneSystemAppView: View {
     let systemType: SystemTabType
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel
-    var bookmarkVM: BookmarkViewModel
     var onSelect: (Tab) -> Void
     
     @State private var systemTab: Tab?
@@ -21,7 +20,6 @@ struct PhoneSystemAppView: View {
                         tab: tab,
                         viewModel: viewModel,
                         historyVM: historyVM,
-                        bookmarkVM: bookmarkVM,
                         containerSize: geometry.size
                     )
                 }
@@ -55,10 +53,5 @@ struct PhoneSystemAppView: View {
         // 获取系统标签页（不会加入到 tabs 数组）
         let tab = viewModel.openSystemTab(systemType)
         systemTab = tab
-        
-        // 确保 bookmarkVM 数据已加载
-        if systemType == .bookmarks {
-            bookmarkVM.loadAll()
-        }
     }
 }

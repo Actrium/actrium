@@ -21,12 +21,11 @@ struct BrowserWindowView: View {
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var viewModel = BrowserViewModel()
     @ObservedObject var historyVM: HistoryViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
     
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ContentView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+        ContentView(viewModel: viewModel, historyVM: historyVM)
             .environmentObject(themeManager)
             .focusedSceneValue(\.browserViewModel, viewModel)
             .onChange(of: colorScheme, { oldValue, newValue in
@@ -53,13 +52,6 @@ struct BrowserWindowView: View {
                         viewModel.importACTRPackage(from: url)
                     }
                 }
-
-                // Mark bookmark as used if we can find it
-                if let bookmarkId = userInfo["bookmarkId"] as? String,
-                   let uuid = UUID(uuidString: bookmarkId),
-                   let bookmark = bookmarkVM.bookmarks.first(where: { $0.id == uuid }) {
-                    bookmarkVM.markAsUsed(bookmark)
-                }
             }
             // Handle history item open from RN
             .onReceive(NotificationCenter.default.publisher(for: .openHistoryItemFromRN)) { notification in
@@ -75,13 +67,6 @@ struct BrowserWindowView: View {
                         viewModel.importACTRPackage(from: url)
                     }
                 }
-            }
-            // Handle bookmark delete from RN
-            .onReceive(NotificationCenter.default.publisher(for: .deleteBookmarkFromRN)) { notification in
-                guard let userInfo = notification.userInfo,
-                      let bookmarkId = userInfo["bookmarkId"] as? String,
-                      let uuid = UUID(uuidString: bookmarkId) else { return }
-                bookmarkVM.removeBookmark(id: uuid)
             }
             // Handle history item delete from RN
             .onReceive(NotificationCenter.default.publisher(for: .deleteHistoryItemFromRN)) { notification in
@@ -194,7 +179,6 @@ struct CanvasApp: App {
 
     // Shared view models for history/bookmarks (global across all windows)
     @StateObject private var historyVM = HistoryViewModel()
-    @StateObject private var bookmarkVM = BookmarkViewModel()
     @StateObject private var windowState = WindowStateManager.shared
     @Environment(\.openWindow) private var openWindow
 
@@ -215,7 +199,7 @@ struct CanvasApp: App {
     var body: some Scene {
         // Main window group - each window gets its own BrowserViewModel
         WindowGroup(id: "browser") {
-            BrowserWindowView(historyVM: historyVM, bookmarkVM: bookmarkVM)
+            BrowserWindowView(historyVM: historyVM)
                 .onReceive(NotificationCenter.default.publisher(for: .openNewWindowWithGroup)) { _ in
                     openWindow(id: "browser")
                 }
@@ -260,34 +244,6 @@ struct CanvasApp: App {
                     historyVM.clearHistory()
                 }
                 .disabled(historyVM.recentItems.isEmpty)
-            }
-
-            // Bookmarks menu
-            CommandMenu("Bookmarks") {
-                Button("Add Bookmark...") {
-                    // TODO: Show bookmark sheet for current tab
-                }
-                .keyboardShortcut("d", modifiers: .command)
-                .disabled(focusedViewModel == nil)
-
-                Button("Show All Bookmarks") {
-                    focusedViewModel?.openSystemTab(.bookmarks)
-                }
-                .keyboardShortcut("b", modifiers: [.command, .option])
-                .disabled(focusedViewModel == nil)
-
-                Divider()
-
-                if bookmarkVM.bookmarks.isEmpty {
-                    Text("No Bookmarks")
-                        .foregroundColor(.secondary)
-                } else {
-                    ForEach(bookmarkVM.bookmarks.prefix(10)) { bookmark in
-                        Button(bookmark.title) {
-                            openBookmark(bookmark)
-                        }
-                    }
-                }
             }
             
             // Help menu
@@ -375,18 +331,6 @@ struct CanvasApp: App {
         if let url = item.appURL {
             vm.importACTRPackage(from: url)
             historyVM.recordVisit(item: item)
-        }
-    }
-
-    private func openBookmark(_ bookmark: Bookmark) {
-        guard let vm = focusedViewModel else { return }
-        if let url = bookmark.appURL {
-            vm.importACTRPackage(from: url)
-            bookmarkVM.markAsUsed(bookmark)
-            // Also record in history
-            if let tab = vm.currentTab {
-                historyVM.recordVisit(tab: tab)
-            }
         }
     }
 }

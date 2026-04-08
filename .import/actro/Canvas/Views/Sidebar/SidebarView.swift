@@ -4,7 +4,6 @@ import Combine
 
 struct SidebarView: View {
     @ObservedObject var viewModel: BrowserViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var windowState: WindowStateManager = .shared
 
@@ -31,9 +30,6 @@ struct SidebarView: View {
                 // User section
                 UserSectionView()
             }
-        }
-        .onAppear {
-            bookmarkVM.loadAll()
         }
     }
 }
@@ -406,5 +402,5 @@ class UserManager: ObservableObject {
 }
 
 #Preview {
-    SidebarView(viewModel: BrowserViewModel(), bookmarkVM: BookmarkViewModel(), historyVM: HistoryViewModel())
+    SidebarView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel())
 }

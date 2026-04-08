@@ -4,7 +4,6 @@ import Kingfisher
 struct PhoneTabListView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
     var animation: Namespace.ID
     var onSelect: (Tab) -> Void
     
@@ -41,7 +40,6 @@ struct PhoneTabListView: View {
                             tab: tab,
                             viewModel: viewModel,
                             historyVM: historyVM,
-                            bookmarkVM: bookmarkVM,
                             animation: animation,
                             onSelect: {
                                 // 立即切换 ID，确保 UI 响应（蓝色边框）
@@ -75,7 +73,6 @@ struct PhoneTabCardView: View {
     let tab: Tab
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel
-    var bookmarkVM: BookmarkViewModel
     var animation: Namespace.ID
     let onSelect: () -> Void
     let onClose: () -> Void
@@ -202,7 +199,6 @@ struct PhoneBrowserView: View {
     let tab: Tab
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel
-    var bookmarkVM: BookmarkViewModel
     
     var body: some View {
         GeometryReader { geometry in
@@ -210,7 +206,6 @@ struct PhoneBrowserView: View {
                 tab: tab,
                 viewModel: viewModel,
                 historyVM: historyVM,
-                bookmarkVM: bookmarkVM,
                 containerSize: geometry.size
             )
             .id(tab.id)

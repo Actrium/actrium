@@ -141,7 +141,6 @@ class UserInfoModule: RCTEventEmitter {
                     DispatchQueue.main.async {
                         LoginManager.shared.setupConfig(appUrl)
                         LoginManager.shared.setAuthContext(authContext)
-                        LoginManager.shared.showLogin(.login)
                     }
                     return
                 }
@@ -189,7 +188,6 @@ class UserInfoModule: RCTEventEmitter {
                     // 触发授权弹窗
                     DispatchQueue.main.async {
                         LoginManager.shared.setAuthContext(authContext)
-                        LoginManager.shared.showLogin(.loginAuth)
                     }
                 }
             }
@@ -216,7 +214,6 @@ class UserInfoModule: RCTEventEmitter {
             }
             // 设置授权上下文，登录成功后会自动进行授权
             LoginManager.shared.setAuthContext(authContext)
-            LoginManager.shared.showLogin(.login)
         }
     }
     

@@ -15,21 +15,12 @@ enum LoginResult {
     case cancelled
 }
 
-enum LoginSheetType {
-    case none
-    case login
-    case loginAuth
-    case loginView
-}
-
 private let logger = AppLogger.app
 
 class LoginManager: ObservableObject {
     static let shared = LoginManager()
     
     @Published var isLoggedIn: Bool = false
-    @Published var showLoginSheet: Bool = false
-    @Published var currentLoginSheetType: LoginSheetType = .none
     @Published var currentUser: UserDetailData?
     @Published var loginType: LoginType?
     
@@ -212,19 +203,6 @@ class LoginManager: ObservableObject {
         }.resume()
     }
     
-    // MARK: - UI 控制方法
-    func showLogin(_ type: LoginSheetType) {
-        currentLoginSheetType = type
-        if type != .none {
-            showLoginSheet = true
-        }
-    }
-    
-    func hideAllLoginViews() {
-        showLoginSheet = false
-        currentLoginSheetType = .none
-    }
-    
     // MARK: - 私有方法
     private func mapUrlToA1(_ path: String) -> A1Environment {
         guard let url = URL(string: path),
@@ -360,15 +338,8 @@ class LoginManager: ObservableObject {
             }
             let consistent = self.isAppUserConsistent(appId: appId)
             logger.debug("检查 appId:\(appId) 的用户与全局用户一致性: \(consistent)")
-            if !consistent {
-                DispatchQueue.main.async {
-                    // 标记需要授权（UI 层可展示授权弹窗或页）
-                    self.showLogin(.loginAuth)
-                }
-            }
         }
     }
-
 
     /// 从本地加载当前 appId 的用户（不设置 global currentUser），用于必要时比较或展示
     func loadSavedUser() {

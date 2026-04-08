@@ -20,7 +20,6 @@ class AppleLoginManager: NSObject {
         
         let authorizationController = ASAuthorizationController(authorizationRequests: [request])
         authorizationController.delegate = self
-        authorizationController.presentationContextProvider = self
         authorizationController.performRequests()
     }
     
@@ -89,16 +88,5 @@ extension AppleLoginManager: ASAuthorizationControllerDelegate {
         ]
         
         NotificationCenter.default.post(name: .appleLoginResult, object: result)
-    }
-}
-
-// MARK: - ASAuthorizationControllerPresentationContextProviding
-extension AppleLoginManager: ASAuthorizationControllerPresentationContextProviding {
-    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first else {
-            return UIWindow()
-        }
-        return window
     }
 }

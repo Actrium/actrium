@@ -3,7 +3,6 @@ import SwiftUI
 struct PhoneMainView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-    @ObservedObject var bookmarkVM: BookmarkViewModel
     
     @State private var selectedTab: PhoneTab = .tabs
     @State private var fullscreenTab: Tab?
@@ -26,7 +25,6 @@ struct PhoneMainView: View {
                     systemType: .bookmarks,
                     viewModel: viewModel,
                     historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
                     onSelect: { tab in
                         fullscreenTab = tab
                     }
@@ -34,7 +32,7 @@ struct PhoneMainView: View {
             }
             
             SwiftUI.Tab(TM.active.activity(), systemImage: "rectangle.grid.1x2.fill", value: PhoneTab.tabs) {
-                PhoneTabListView(viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM, animation: animation, onSelect: { tab in
+                PhoneTabListView(viewModel: viewModel, historyVM: historyVM, animation: animation, onSelect: { tab in
                     fullscreenTab = tab
                 })
             }
@@ -45,7 +43,6 @@ struct PhoneMainView: View {
                     systemType: .settings,
                     viewModel: viewModel,
                     historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
                     onSelect: { tab in
                         fullscreenTab = tab
                     }
@@ -58,7 +55,6 @@ struct PhoneMainView: View {
                     systemType: .globalSearch,
                     viewModel: viewModel,
                     historyVM: historyVM,
-                    bookmarkVM: bookmarkVM,
                     onSelect: { tab in
                         fullscreenTab = tab
                     }
@@ -142,7 +138,7 @@ struct PhoneMainView: View {
             }
         }
         .sheet(item: $fullscreenTab) { tab in
-            PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
+            PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM)
                 .interactiveDismissDisabled(true)
                 .ignoresSafeArea()
                 .asNavigationTransition(id: tab.id, in: animation)
