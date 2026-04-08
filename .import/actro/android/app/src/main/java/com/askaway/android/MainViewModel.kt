@@ -298,4 +298,6 @@ class MainViewModel(
             )
         )
     }
+
+    fun isActiveListEmpty(): Boolean = _activeModelList.isEmpty()
 }
