@@ -18,6 +18,7 @@ import { Icon } from '../../../components';
 import { submitFeedback, FeedbackContext } from '../../../api/feedback';
 import { useMessageStore } from '../../store/useMessageStore';
 import dayjs from 'dayjs';
+import { GlobalAlertModal } from '../../../components/GlobalAlertModal';
 import { GlobalAlert } from '../../../components';
 import { isPhone } from '../../../utils/device';
 import { AppText } from '../../../components';
@@ -70,6 +71,8 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   );
   const user = useUserStore(state => state.userInfo?.user)
 
+  const [showCategoryTip, setShowCategoryTip] = React.useState(false);
+
   const animValue = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -105,7 +108,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
 
   const handleSubmit = async () => {
     if (selectedIds.size === 0) {
-      GlobalAlert.alert(t('common.hint'), t('actr.chat.selectCategoryTip'));
+      setShowCategoryTip(true);
       return;
     }
 
@@ -338,152 +341,25 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
       animationType='fade'
       onRequestClose={handleClose}
     >
-      <KeyboardAvoidingView behavior='padding' style={{ flex: 1 }}>
-        <TouchableWithoutFeedback onPress={handleClose}>
-          <View style={[styles.backdrop, isPhone && styles.backdropPhone]}>
-            <TouchableWithoutFeedback>
-              <Animated.View
-                style={[
-                  styles.container,
-                  isPhone && styles.containerPhone,
-                  {
-                    transform: [{ translateY }],
-                  },
-                ]}
-              >
-                <ScrollView
-                  bounces={false}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={[
-                    styles.scrollContent,
-                    isPhone && styles.scrollContentPhone,
-                  ]}
-                  keyboardShouldPersistTaps='handled'
-                >
-                  <View style={[styles.header, isPhone && styles.headerPhone]}>
-                    <AppText
-                      style={[styles.title, isPhone && styles.titlePhone]}
-                    >
-                      {t('actr.chat.feedbackTitle')}
-                    </AppText>
-                    {!isPhone && (
-                      <TouchableOpacity
-                        onPress={handleClose}
-                        style={styles.closeButton}
-                      >
-                        <Icon type='close' size={20} color='#999' />
-                      </TouchableOpacity>
-                    )}
-                  </View>
+      {shouldUseKeyboardAvoidingView ? (
+        <KeyboardAvoidingView behavior='padding' style={{ flex: 1 }}>
+          {modalContent}
+        </KeyboardAvoidingView>
+      ) : (
+        <View style={{ flex: 1 }}>
+          {modalContent}
+        </View>
+      )}
 
-                  <View style={styles.section}>
-                    <View style={[styles.grid, isPhone && styles.gridPhone]}>
-                      {CATEGORIES.map((cat) => {
-                        const isSelected = selectedIds.has(cat.id);
-                        return (
-                          <Pressable
-                            key={cat.id}
-                            onPress={() => toggleCategory(cat.id)}
-                            style={[
-                              styles.tag,
-                              isPhone && styles.tagPhone,
-                              isPhone && { width: undefined },
-                              isSelected && styles.tagSelected,
-                              isSelected && isPhone && styles.tagSelectedPhone,
-                            ]}
-                          >
-                            <AppText
-                              style={[
-                                styles.tagText,
-                                isPhone && styles.tagTextPhone,
-                                isSelected && styles.tagTextSelected,
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {t(cat.key as any)}
-                            </AppText>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-
-                  <View style={styles.section}>
-                    <View
-                      style={[
-                        styles.feedbackInputWrapper,
-                        isPhone && styles.feedbackInputWrapperPhone,
-                      ]}
-                    >
-                      <TextInput
-                        style={[styles.input, isPhone && styles.inputPhone]}
-                        placeholder={t('actr.chat.feedbackPlaceholder')}
-                        placeholderTextColor='#999'
-                        multiline
-                        numberOfLines={4}
-                        value={details}
-                        onChangeText={setDetails}
-                        textAlignVertical='top'
-                      />
-                    </View>
-                  </View>
-
-                  {status === 'error' && (
-                    <AppText style={styles.errorText}>
-                      {t('actr.chat.feedbackFailed')}
-                    </AppText>
-                  )}
-
-                  <View style={[styles.footer, isPhone && styles.footerPhone]}>
-                    <TouchableOpacity
-                      style={[
-                        styles.button,
-                        styles.cancelButton,
-                        isPhone && styles.buttonPhone,
-                        isPhone && styles.cancelButtonPhone,
-                      ]}
-                      onPress={handleClose}
-                    >
-                      <AppText
-                        style={[
-                          styles.cancelButtonText,
-                          isPhone && styles.cancelButtonTextPhone,
-                        ]}
-                      >
-                        {t('common.cancel')}
-                      </AppText>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.button,
-                        styles.submitButton,
-                        isPhone && styles.buttonPhone,
-                        isPhone && styles.submitButtonPhone,
-                        status === 'submitting' && styles.buttonDisabled,
-                      ]}
-                      onPress={handleSubmit}
-                      disabled={status === 'submitting'}
-                    >
-                      {status === 'submitting' ? (
-                        <ActivityIndicator color='#fff' size='small' />
-                      ) : (
-                        <AppText
-                          style={[
-                            styles.submitButtonText,
-                            isPhone && styles.submitButtonTextPhone,
-                          ]}
-                        >
-                          {t('actr.chat.submit')}
-                        </AppText>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                </ScrollView>
-              </Animated.View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </KeyboardAvoidingView>
+      <GlobalAlertModal
+        visible={showCategoryTip}
+        title={t('common.hint')}
+        message={t('actr.chat.selectCategoryTip')}
+        onClose={() => setShowCategoryTip(false)}
+        buttons={[
+          { text: t('common.ok') || '确定', onPress: () => setShowCategoryTip(false) },
+        ]}
+      />
     </Modal>
   );
 };

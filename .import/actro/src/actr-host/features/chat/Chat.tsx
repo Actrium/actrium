@@ -28,6 +28,7 @@ import {
 import { useMessageStore } from '../../store/useMessageStore';
 import { useAppStore } from '../../store/useAppStore';
 import ChatBubble from './ChatBubble';
+import { FeedbackFormModal } from './FeedbackFormModal';
 import { Toast, ToastRef } from '../shared/Toast';
 import ChatEmpty from './ChatEmpty';
 import { useTabIdMapStore } from '../../store/useTabIdMapStore';
@@ -75,6 +76,7 @@ interface MessageRowProps {
   ) => void;
   handleEdit: (msg: IMessage) => void;
   handleCopy: (text: string) => void;
+  handleFeedback?: (msgId: string) => void;
 }
 
 const MessageRow = React.memo(function MessageRow({
@@ -88,6 +90,7 @@ const MessageRow = React.memo(function MessageRow({
   toggleSelection,
   handleEdit,
   handleCopy,
+  handleFeedback,
 }: MessageRowProps) {
   const { t } = useTranslation();
   const item = useMessageStore(
@@ -138,6 +141,7 @@ const MessageRow = React.memo(function MessageRow({
                     : undefined
                 }
                 onCopy={() => handleCopy(item.question_content)}
+                onFeedback={() => handleFeedback?.(item.message_id)}
                 msgId={item.message_id}
                 tabId={tabId}
                 appId={appId}
@@ -178,6 +182,7 @@ const MessageRow = React.memo(function MessageRow({
                     ? () => handleCopy(item.question_content)
                     : undefined
                 }
+                onFeedback={() => handleFeedback?.(item.message_id)}
                 selectionKey={`${item.message_id}:question`}
                 isSelected={selectedParts.has('question')}
                 onToggleSelection={() =>
@@ -210,6 +215,7 @@ const MessageRow = React.memo(function MessageRow({
                   ? () => handleCopy(item.answer_content)
                   : undefined
               }
+              onFeedback={() => handleFeedback?.(item.message_id)}
               selectionKey={`${item.message_id}:answer`}
               isSelected={selectedParts.has('answer')}
               onToggleSelection={() =>
@@ -278,6 +284,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const [hasMore, setHasMore] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showLoadMoreHeader, setShowLoadMoreHeader] = useState(false);
+  const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
   const { keyboardInset, isKeyboardVisible, dismissKeyboard } =
     useKeyboardInset();
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
@@ -545,6 +552,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           toggleSelection={toggleSelection}
           handleEdit={handleEdit}
           handleCopy={handleCopy}
+          handleFeedback={setFeedbackMessageId}
         />
       );
     },
@@ -715,6 +723,14 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           />
         </View>
       )}
+
+      <FeedbackFormModal
+        visible={!!feedbackMessageId}
+        onClose={() => setFeedbackMessageId(null)}
+        tabId={tab.id}
+        appId={appId}
+        messageId={feedbackMessageId || undefined}
+      />
 
       <Toast ref={toastRef} />
     </View>
