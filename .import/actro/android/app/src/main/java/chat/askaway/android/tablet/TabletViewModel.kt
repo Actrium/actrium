@@ -117,7 +117,7 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
         val tabId = params["tabId"] as? String
         val title = params["title"] as? String
         val icon = params["icon"] as? String
-        val url = params["url"] as? String
+        val url = params["appUrl"] as? String
         if (tabId != null) {
             _tabletUseCase.value?.let { useCase ->
                 val appList = useCase.appList.toMutableList()
