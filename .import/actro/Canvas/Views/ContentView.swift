@@ -29,9 +29,18 @@ struct ContentView: View {
                             if let systemType = viewModel.currentSystemTabType {
                                 SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM, bookmarkVM: bookmarkVM)
                             }
+                            // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
+                            if case .overview = viewModel.canvasMode, viewModel.currentSystemTabType != .globalSearch {
+                                SearchBar(viewModel: viewModel)
+                            }
                         }
                         .ignoresSafeArea()
                         .background(Color.black)
+                        .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
+                            withAnimation {
+                                viewModel.currentSystemTabType = nil
+                            }
+                        }
                     }
                     // 顶层兜底：拖入 .actr 或目录时创建新标签
                     .dropDestination(for: URL.self) { urls, location in
@@ -94,6 +103,43 @@ struct ContentView: View {
     }
 }
 
+struct SearchBar: View {
+    @ObservedObject var viewModel: BrowserViewModel
+    
+    var body: some View {
+        VStack {
+            Spacer()
+            
+            HStack {
+                Spacer()
+                
+                HStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.gray)
+                        .font(.system(size: 16))
+                    
+                    Text("\(TM.active.search())...")
+                        .foregroundColor(.gray)
+                        .font(.system(size: 15))
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .frame(maxWidth: 600)
+                .background(Color(uiColor: UIColor(white: 0.2, alpha: 0.95)))
+                .cornerRadius(24)
+                .onTapGesture {
+                    viewModel.openSystemTab(.globalSearch, additionalProps: nil, replaceAdditionalProps: true)
+                    viewModel.currentSystemTabType = .globalSearch
+                }
+                
+                Spacer()
+            }
+            .padding(.bottom, 30)
+        }
+    }
+}
 
 #Preview {
     ContentView(viewModel: BrowserViewModel(), historyVM: HistoryViewModel(), bookmarkVM: BookmarkViewModel())
