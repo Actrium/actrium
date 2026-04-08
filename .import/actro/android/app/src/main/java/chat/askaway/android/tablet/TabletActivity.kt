@@ -124,6 +124,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             }
             // 移除当前 item
             viewModel.removeActiveModel(it.id)
+            // 如果 reactViewMap 为空，则切换为 Grid 模式
+            if (reactViewMap.isEmpty()) {
+                viewModel.changeDisplayMode(PageMode.GRID)
+            }
         }
 
         // 内容区域的点击事件
@@ -174,8 +178,11 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.ivHome.setOnClickListener { viewModel.changeDisplayMode(PageMode.GRID) }
         binding.ivAppMenu.setOnClickListener { viewModel.toggleMenu() }
         binding.tvBack.setOnClickListener {
-            viewModel.hideBookmark()
-            viewModel.changeDisplayMode(PageMode.TAB)
+            Log.e("TableActivity", "tvBackClick:${reactViewMap.size}")
+            if (reactViewMap.isNotEmpty()) {
+                viewModel.hideBookmark()
+                viewModel.changeDisplayMode(PageMode.TAB)
+            }
         }
 
         // 监听 StateFlow 并更新 Adapter
@@ -237,7 +244,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         binding.ivAdd.performClick()
                         viewModel.cancelCreate()
                     }
-
+                    Log.e("TabletActivity", "pageMode:${useCase.pageMode} currentDisplayModel:${viewModel.currentDisplayModel} ")
                     // 切换模式
                     if (useCase.pageMode != viewModel.currentDisplayModel) {
                         changeMode(useCase.pageMode)
