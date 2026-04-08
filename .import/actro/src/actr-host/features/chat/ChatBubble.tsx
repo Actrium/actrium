@@ -64,6 +64,7 @@ interface ChatBubbleProps {
   attachments?: string;
   onEdit?: () => void;
   onCopy?: () => void;
+  onFeedback?: () => void;
   isLatest?: boolean;
   msgId?: string;
   tabId?: string;
@@ -83,6 +84,7 @@ export default function ChatBubble({
   attachments,
   onEdit,
   onCopy,
+  onFeedback,
   isLatest = false,
   msgId,
   tabId,
@@ -108,7 +110,6 @@ export default function ChatBubble({
   const enterSelectionMode = useMessageStore((s) => s.enterSelectionMode);
 
   const [isCopied, setIsCopied] = React.useState(false);
-  const [showFeedbackModal, setShowFeedbackModal] = React.useState(false);
   const [showMoreMenu, setShowMoreMenu] = React.useState(false);
   const [moreMenuPosition, setMoreMenuPosition] = React.useState<{
     top: number;
@@ -685,8 +686,9 @@ export default function ChatBubble({
               <>
                 <DropdownMenuItem
                   onPress={() => {
-                    close();
-                    setShowFeedbackModal(true);
+                    close(() => {
+                      onFeedback?.();
+                    });
                   }}
                 >
                   <Icon type='suggest' size={16} />
@@ -708,13 +710,6 @@ export default function ChatBubble({
           </DropdownMenu>
         </View>
       )}
-      <FeedbackFormModal
-        visible={showFeedbackModal}
-        onClose={() => setShowFeedbackModal(false)}
-        tabId={tabId}
-        appId={appId}
-        messageId={msgId}
-      />
       <Modal visible={showMoreMenu} transparent animationType='fade'>
         <TouchableWithoutFeedback
           onPress={() => {
@@ -742,7 +737,7 @@ export default function ChatBubble({
                 onPress={() => {
                   setShowMoreMenu(false);
                   setMoreMenuPosition(null);
-                  setTimeout(() => setShowFeedbackModal(true), 100);
+                  setTimeout(() => onFeedback?.(), 100);
                 }}
               >
                 <Icon type='suggest' size={16} />
