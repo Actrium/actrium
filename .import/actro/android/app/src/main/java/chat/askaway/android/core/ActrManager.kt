@@ -1,29 +1,29 @@
 package chat.askaway.android.core
 
+import android.content.Context
 import android.util.Base64
 import android.util.Log
-import com.facebook.soloader.LogUtil
-import io.actor_rtc.actr.ContextBridge
-import io.actor_rtc.actr.RpcEnvelopeBridge
-import io.actor_rtc.actr.WorkloadBridge
-import io.actr.datastreamapp.MyUnifiedHandler
-import io.actr.datastreamapp.UnifiedWorkload
-import io.actor_rtc.actr.dsl.createActrSystem
-import io.actor_rtc.actr.ActrRefWrapper
-import io.actor_rtc.actr.PayloadType
-import ask.Ask.UsrPromptRequest
-import data_stream_app.Local.TextMessage
-import io.actor_rtc.actr.ActrType
-import java.util.UUID
-import com.google.protobuf.ByteString
 import ask.Ask.AttachRequest
 import ask.Ask.AttachResponse
-import ask.Ask.AttachmentType
 import ask.Ask.Location
+import com.facebook.soloader.LogUtil
+import com.google.protobuf.ByteString
 import data_stream_app.Local.StartVoiceMessage
 import data_stream_app.Local.StartVoiceMessageResponse
+import data_stream_app.Local.TextMessage
 import data_stream_app.Local.VoiceChunkMessage
 import data_stream_app.Local.VoiceChunkMessageResponse
+import io.actor_rtc.actr.ActrRefWrapper
+import io.actor_rtc.actr.ActrType
+import io.actor_rtc.actr.PayloadType
+import io.actor_rtc.actr.dsl.NetworkMonitor
+import io.actor_rtc.actr.dsl.createActrSystem
+import io.actr.datastreamapp.MyUnifiedHandler
+import io.actr.datastreamapp.UnifiedWorkload
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import java.util.UUID
 
 class ActrManager {
 
@@ -40,31 +40,30 @@ class ActrManager {
 
     private val clients = mutableMapOf<String, ActrRefWrapper>()
     private val handles = mutableMapOf<String, MyUnifiedHandler>()
+    private val networkMonitors = mutableMapOf<String, NetworkMonitor>()
 
-    suspend fun initialize(tabId: String, actorType: String, path: String) {
+    suspend fun initialize(context: Context, tabId: String, actorType: String, path: String) {
         LogUtil.e("ActrManager", "RTC initialized__${path}")
         val clientSystem = createActrSystem(path)
-        Log.e("ActrManager", "init_____1")
         val handler = MyUnifiedHandler()
-        Log.e("ActrManager", "init_____2")
         val clientWorkload = UnifiedWorkload(handler)
-        Log.e("ActrManager", "init_____3")
         val clientNode = clientSystem.attach(clientWorkload)
-        Log.e("ActrManager", "init_____4")
+        val scope = CoroutineScope(Job() + Dispatchers.Main)
+        val networkMonitor = NetworkMonitor.create(context, scope, { clientSystem }, { msg ->
+            Log.e("ActrManager", "networkMonitor:${msg}")
+        })
         val clientRef = clientNode.start()
-        Log.e("ActrManager", "init_____5")
         val parts = actorType.split("+")
-        Log.e("ActrManager", "init_____6")
         val manufacturer = parts[0]
-        Log.e("ActrManager", "init_____7")
         val name = parts[1]
         Log.e("ActrManager", "manufacturer:${manufacturer} name:${name}")
         val serverType = ActrType(manufacturer, name)
-        Log.e("ActrManager", "init_____8")
         val serverActorIds = clientRef.discover(serverType, 1u)
         handler.setServerActId(serverActorIds[0])
         clients[tabId] = clientRef
         handles[tabId] = handler
+        networkMonitors[tabId] = networkMonitor
+        networkMonitor.startMonitoring()
     }
 
     suspend fun sendTextMessage(
@@ -244,6 +243,8 @@ class ActrManager {
         clients[tabId]?.shutdown()
         clients.remove(tabId)
         handles.remove(tabId)
+        networkMonitors[tabId]?.stopMonitoring()
+        networkMonitors.remove(tabId)
     }
 
     fun hasClient(tabId: String): Boolean {
