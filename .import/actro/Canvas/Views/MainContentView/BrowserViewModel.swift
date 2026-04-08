@@ -476,8 +476,8 @@ class BrowserViewModel: ObservableObject {
         )
         
         if tabs.isEmpty, UIDevice.current.userInterfaceIdiom != .phone {
-            logger.debug("🚪 关闭最后一个标签页，应用即将退出")
-            exit(0)
+            logger.debug("🚪 关闭最后一个标签页，切换到 OverView 模式")
+            canvasMode =  .overview
         }
     }
 
