@@ -116,6 +116,21 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     }
   }, []);
 
+  // Android 上 onDismiss 不触发，需要在 visible=false 时手动清理并执行 pending callback
+  React.useEffect(() => {
+    if (Platform.OS !== 'android' || isOpen) {
+      return;
+    }
+    setTriggerRect(null);
+    if (pendingActionRef.current) {
+      const action = pendingActionRef.current;
+      pendingActionRef.current = null;
+      // 延迟执行，确保 Modal 关闭后再触发（如相机/文件选择器）
+      const timer = setTimeout(action, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
+
   const measureTrigger = React.useCallback((openWhenMeasured = true) => {
     triggerRef.current?.measureInWindow((x, y, measuredWidth, measuredHeight) => {
       if (measuredWidth <= 0 || measuredHeight <= 0) {

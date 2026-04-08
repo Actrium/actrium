@@ -88,3 +88,8 @@ Subsystem/src/
 | iOS Pad | 无 | keyboardInset 静态偏移（事件驱动，键盘弹完后跳变） |
 | Android Phone | 宿主 Native windowSoftInputMode 推起整个视图 | 不叠加额外偏移 |
 | Android Pad | 宿主 Native windowSoftInputMode 推起整个视图 | 完全零干预 |
+
+
+### 重要
+
+1. 所有改动要考虑 iOS 和 Android 的兼容
