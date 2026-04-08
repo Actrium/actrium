@@ -16,6 +16,7 @@ import data_stream_app.Local.VoiceChunkMessageResponse
 import io.actor_rtc.actr.ActrRefWrapper
 import io.actor_rtc.actr.ActrType
 import io.actor_rtc.actr.PayloadType
+import io.actor_rtc.actr.dsl.ActrSystem
 import io.actor_rtc.actr.dsl.NetworkMonitor
 import io.actor_rtc.actr.dsl.createActrSystem
 import io.actr.datastreamapp.MyUnifiedHandler
@@ -40,16 +41,18 @@ class ActrManager {
 
     private val clients = mutableMapOf<String, ActrRefWrapper>()
     private val handles = mutableMapOf<String, MyUnifiedHandler>()
+    private val clientSystems = mutableMapOf<String, ActrSystem>()
     private val networkMonitors = mutableMapOf<String, NetworkMonitor>()
 
     suspend fun initialize(context: Context, tabId: String, actorType: String, path: String) {
         LogUtil.e("ActrManager", "RTC initialized__${path}")
         val clientSystem = createActrSystem(path)
+        clientSystems[tabId] = clientSystem
         val handler = MyUnifiedHandler()
         val clientWorkload = UnifiedWorkload(handler)
         val clientNode = clientSystem.attach(clientWorkload)
         val scope = CoroutineScope(Job() + Dispatchers.Main)
-        val networkMonitor = NetworkMonitor.create(context, scope, { clientSystem }, { msg ->
+        val networkMonitor = NetworkMonitor.create(context, scope, { clientSystems[tabId] }, { msg ->
             Log.e("ActrManager", "networkMonitor:${msg}")
         })
         val clientRef = clientNode.start()
@@ -240,11 +243,13 @@ class ActrManager {
     }
 
     fun shutdown(tabId: String) {
+        Log.e("ActrManager", "shutdown  ${tabId}")
+        networkMonitors[tabId]?.stopMonitoring()
+        networkMonitors.remove(tabId)
+        clientSystems.remove(tabId)
         clients[tabId]?.shutdown()
         clients.remove(tabId)
         handles.remove(tabId)
-        networkMonitors[tabId]?.stopMonitoring()
-        networkMonitors.remove(tabId)
     }
 
     fun hasClient(tabId: String): Boolean {
