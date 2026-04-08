@@ -96,6 +96,17 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     // 刷新布局，这会触发 adapter 的 bind 方法重新计算 scale
                     contentAdapter.notifyDataSetChanged()
                 }
+                // 新增：同步设置 rvContent 的 marginBottom
+                val params = binding.rvContent.layoutParams as? ViewGroup.MarginLayoutParams
+                if (params != null) {
+                    val marginBottom = if (contentAdapter.isGridMode) {
+                        (16 * resources.displayMetrics.density).toInt()
+                    } else {
+                        0
+                    }
+                    params.bottomMargin = marginBottom
+                    binding.rvContent.layoutParams = params
+                }
             }
         }
 
