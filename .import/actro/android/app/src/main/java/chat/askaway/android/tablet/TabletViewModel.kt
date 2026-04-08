@@ -193,11 +193,10 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
                 )
             }
         }
-
-        Log.e("TabletViewModel", "removeActiveModel ${id}")
     }
 
     fun changeDisplayMode(mode: PageMode) {
+        Log.e("TabletViewModel", "changeDisplayMode ${mode}")
         _tabletUseCase.value = _tabletUseCase.value?.copy(pageMode = mode)
     }
 
