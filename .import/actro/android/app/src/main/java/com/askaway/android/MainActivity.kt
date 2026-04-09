@@ -210,6 +210,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 launch {
                     viewModel.currentReactNativeStatus.collect {
                         val currentTabId = it.getString("currentTabId")
+                        Log.e("MainActivity", "currentTabId:${currentTabId}")
                         var found = false
                         for (i in 0 until binding.flRNContent.childCount) {
                             val child = binding.flRNContent.getChildAt(i)

@@ -110,14 +110,11 @@ class MainViewModel(
                     Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId")
                     val hasActive = tabId != null && _activeModelList.any { it.id == tabId }
                     if (hasActive) {
-                        val appModel = Params.appList.find { it.id == tabId }
+                        val appModel = _activeModelList.find { it.id == tabId }
+                        Log.e("MainViewModel", "Received EVENT_OPEN_TAB appModel: $appModel")
                         appModel?.let {
                             _currentReactNativeStatus.tryEmit(
-                                it.genReactNativeBundle(
-                                    Params.appList,
-                                    containerHeight,
-                                    containerWidth
-                                )
+                                TabBundleUtils.genBundle(it, _activeModelList.toList(),containerHeight, containerWidth )
                             )
                         }
                     } else {
@@ -176,6 +173,18 @@ class MainViewModel(
                         _activeList.tryEmit(_activeModelList.toList())
                     }
                 }
+            }
+            ReactModuleEvent.EVENT_GET_ALL_TABS -> {
+                val tabs = com.facebook.react.bridge.Arguments.createArray()
+                _activeModelList.forEach { model ->
+                    val map = com.facebook.react.bridge.Arguments.createMap()
+                    map.putString("tabId", model.id)
+                    map.putString("title", model.name)
+                    map.putString("icon", model.icon)
+                    map.putString("appUrl", model.url)
+                    tabs.pushMap(map)
+                }
+                event.promise?.resolve(tabs)
             }
         }
     }
