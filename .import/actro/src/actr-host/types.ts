@@ -2,13 +2,9 @@
 export type SystemAppType =
   | 'history'
   | 'bookmarks'
-  | 'login'
   | 'settings'
   | 'bookmarkTags'
   | 'globalSearch';
-
-// System app types (in tab) eg: pad tab
-export type TabSystemAppType = 'login'
 
 // History item passed from native
 export type HistoryItemData = {
@@ -89,6 +85,4 @@ export type TabRouterProps = ActrProps & {
   appUrl?: string;
   // Native-transparent payload for system app deep-links/actions
   systemAppPayload?: Record<string, unknown>;
-  // System app type (in tab)
-  tabSystemAppType?: TabSystemAppType;
 };

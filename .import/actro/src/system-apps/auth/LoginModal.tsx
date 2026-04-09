@@ -258,7 +258,8 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   successText: {
-    fontSize: 48,
+    fontSize: 40,
+    lineHeight: 40,
     color: '#52C41A',
   },
 });

@@ -8,14 +8,10 @@ import type { IMessage } from '../../../../repository/MessageRepository';
 import { useActrConnection } from '../../../../hooks/useActrConnection';
 import type { TActrMessageResponse, TLocation } from '../../../../libs/actr';
 import { useAuth, type AuthStatus } from '../../../../hooks/auth';
-import { useAuthTaskStore } from '../../../store/useAuthTaskStore';
 import { Utils } from '../../../../utils/utils';
 import { useUnreadStore } from '../../../store/useUnreadStore';
 import { getNetworkStatusForSend } from '../../../hooks/networkStatus';
-import {
-  getCurrentFullscreenTab,
-  openTab,
-} from '../../../../native-bridge/tab/TabModule';
+import { getCurrentFullscreenTab } from '../../../../native-bridge/tab/TabModule';
 import {
   cleanupVoiceMessageFile,
   saveVoiceMessageWav,
@@ -28,7 +24,6 @@ interface UseActrMessageFlowParams {
   inputText: string;
   editingMessageId: string | null;
   attachments: IAttachmentItem[];
-  isTablet: boolean;
   showTopToast?: (message: string) => void;
 }
 
@@ -80,7 +75,6 @@ export function useActrMessageFlow(
     inputText,
     editingMessageId,
     attachments,
-    isTablet,
     showTopToast,
   } =
     params;
@@ -119,22 +113,9 @@ export function useActrMessageFlow(
       }
 
       if (status === 'not_logged_in') {
-        if (isTablet) {
-          openTab?.({ tabSystemAppType: 'login' })
-            .then(({ tabId: newTabId }: { tabId: string }) => {
-              if (newTabId) {
-                useAuthTaskStore
-                  .getState()
-                  .regTask(newTabId, { clientId, appId, sourceTabId: tabId });
-              }
-            })
-            .catch((err: any) => {
-              console.error('[ActrInput] Failed to open login tab:', err);
-            });
-        } else {
-          setAuthParams({ clientId, appId });
-          setShowLoginModal(true);
-        }
+        // 中文注释：Pad 和 Phone 统一使用当前页登录弹窗，不再跳转登录 tab。
+        setAuthParams({ clientId, appId });
+        setShowLoginModal(true);
         return false;
       }
 
@@ -145,7 +126,7 @@ export function useActrMessageFlow(
 
       return false;
     },
-    [appId, isTablet],
+    [appId],
   );
 
   /**
