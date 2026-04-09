@@ -379,7 +379,7 @@ private struct TabItemView: View {
     var body: some View {
         HStack(spacing: 8) {
             // 标签标题
-            Text(tab.title.isEmpty ? "新页签" : tab.title)
+            Text(tab.title.isEmpty ? TM.active.blackTab() : tab.title)
                 .font(.system(size: 13))
                 .foregroundColor(isActive ? .primary : .secondary)
                 .lineLimit(1)

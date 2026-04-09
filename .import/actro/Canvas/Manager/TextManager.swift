@@ -49,6 +49,7 @@ enum TextKey: String {
     case bookmarks
     case search
     case goback
+    case blackTab
 }
 
 // MARK: - 场景文案结构体
@@ -67,6 +68,7 @@ struct StartActive {
     func bookmarks() -> String { return TextManager.shared.text(.bookmarks) }
     func search() -> String { return TextManager.shared.text(.search) }
     func goback() -> String { return TextManager.shared.text(.goback) }
+    func blackTab() -> String { return TextManager.shared.text(.blackTab) }
 }
 
 // MARK: - SwiftUI文本扩展
