@@ -1,0 +1,8 @@
+<resources>
+    <string name="tab_active">Actividad</string>
+    <string name="tab_bookmark">Marcadores</string>
+    <string name="tab_set">Preferencias</string>
+    <string name="search">Buscar...</string>
+    <string name="goback">Volver</string>
+    <string name="blank_tab">Nueva pestaña</string>
+</resources>

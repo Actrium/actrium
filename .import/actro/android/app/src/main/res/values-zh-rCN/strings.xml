@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">Askaway</string>
     <string name="tab_active">活跃</string>
     <string name="tab_bookmark">书签</string>
     <string name="tab_set">偏好设置</string>
+    <string name="search">搜索...</string>
+    <string name="goback">返回</string>
+    <string name="blank_tab">新页签</string>
 </resources>
