@@ -93,19 +93,18 @@ struct SearchBar: View {
                 
                 HStack(spacing: 12) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundColor(.gray)
-                        .font(.system(size: 16))
+                        .foregroundColor(Color(hex: "#999"))
+                        .font(.system(size: 18))
                     
                     Text("\(TM.active.search())...")
-                        .foregroundColor(.gray)
-                        .font(.system(size: 15))
+                        .foregroundColor(Color(hex: "#999"))
                     
                     Spacer()
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .frame(maxWidth: 600)
-                .background(Color(uiColor: UIColor(white: 0.2, alpha: 0.95)))
+                .padding(.horizontal, 11)
+                .frame(maxWidth: 500)
+                .frame(height: 48)
+                .background(Color.white)
                 .cornerRadius(24)
                 .onTapGesture {
                     viewModel.openSystemTab(.globalSearch, additionalProps: nil, replaceAdditionalProps: true)
@@ -114,7 +113,7 @@ struct SearchBar: View {
                 
                 Spacer()
             }
-            .padding(.bottom, 30)
+            .padding(.bottom, 18)
         }
     }
 }
