@@ -296,21 +296,19 @@ private struct FocusModeNavigationBar: View {
             .padding(.leading, isFullscreen ? 0 : 65)
             .background(Color(hex: "#D1D1D6"))
             
-            if needsScrolling {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.clear,
-                        Color(hex: "#D1D1D6")
-                    ]),
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 100)
-                .allowsHitTesting(false)
-            }
-            
             HStack(spacing: 0) {
                 if needsScrolling {
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.clear,
+                            Color(hex: "#D1D1D6")
+                        ]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 50)
+                    .allowsHitTesting(false)
+                    
                     // 新建标签按钮（固定在右侧）
                     Button(action: {
                         let newTab = viewModel.addNewTab(focus: false)
@@ -322,7 +320,7 @@ private struct FocusModeNavigationBar: View {
                             .frame(width: tabHeight, height: tabHeight)
                     }
                     .buttonStyle(.plain)
-                    .background(Color(hex: "#D1D1D6").opacity(0.001))
+                    .background(Color(hex: "#D1D1D6"))
                 }
                 
                 // 右侧：设置按钮
@@ -335,7 +333,7 @@ private struct FocusModeNavigationBar: View {
                         .frame(width: 44, height: tabHeight)
                 }
                 .buttonStyle(.plain)
-                .background(Color(hex: "#D1D1D6").opacity(0.001))
+                .background(Color(hex: "#D1D1D6"))
             }
         }
         .frame(height: tabHeight)
