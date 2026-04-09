@@ -126,6 +126,7 @@ struct PhoneMainView: View {
                let tabId = UUID(uuidString: tabIdString),
                let tab = viewModel.tabs.first(where: { $0.id == tabId }) {
                 fullscreenTab = tab
+                selectedTab = .tabs
             }
         }
         .onAppear {
