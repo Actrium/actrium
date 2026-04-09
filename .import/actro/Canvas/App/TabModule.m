@@ -37,4 +37,7 @@ RCT_EXTERN_METHOD(updateTabInfo:(NSDictionary *)options
 RCT_EXTERN_METHOD(getCurrentFullscreenTab:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(getAllTabs:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
 @end
