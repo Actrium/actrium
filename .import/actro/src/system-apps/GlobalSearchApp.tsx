@@ -24,15 +24,18 @@ import { useTranslation } from 'react-i18next';
 import { Icon, HostIconButton, SafeBottomView } from '../components';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { HOST_SHADOWS } from '../actr-host/styles/shadows';
-import { useAppStore } from '../actr-host/store/useAppStore';
-import { useTabIdMapStore } from '../actr-host/store/useTabIdMapStore';
 import { useUserStore } from '../actr-host/store/useUserStore';
 import { getTypographyStyle, globalSearch } from '../theme/tokens';
 import {
   BookmarkRepository,
   TBookmarkItem,
 } from '../repository/BookmarkRepository';
-import { openTab, exitSearch } from '../native-bridge/tab/TabModule';
+import {
+  openTab,
+  exitSearch,
+  getAllTabs,
+  TabSummary,
+} from '../native-bridge/tab/TabModule';
 
 // 搜索结果类型
 type SearchResultType = 'active' | 'bookmark' | 'setting';
@@ -202,12 +205,11 @@ export default function GlobalSearchApp() {
   const { t, i18n } = useTranslation();
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState(''); // 回车后才更新
+  const [allTabs, setAllTabs] = useState<TabSummary[]>([]);
   const [bookmarks, setBookmarks] = useState<TBookmarkItem[]>([]);
   const inputRef = useRef<TextInput>(null);
   const { keyboardInset, isKeyboardVisible, dismissKeyboard } = useKeyboardInset();
   const { width: screenWidth } = useWindowDimensions();
-  const apps = useAppStore((s) => s.apps);
-  const tabIdMap = useTabIdMapStore((s) => s.tabIdMap);
   const userInfo = useUserStore((s) => s.userInfo);
   const isLoggedIn = !!userInfo;
   const searchLocale = resolveSearchLocale(i18n.resolvedLanguage || i18n.language);
@@ -235,6 +237,14 @@ export default function GlobalSearchApp() {
     BookmarkRepository.getBookmarksHierarchy().then((groups) => {
       const allItems = groups.flatMap((g) => g.items);
       setBookmarks(allItems);
+    });
+  }, []);
+
+  useEffect(() => {
+    // 中文注释：活跃应用搜索改为基于页面打开时的 tab 快照做本地过滤，
+    // 避免每次提交搜索都跨桥拉取一次，保持交互和书签搜索一致。
+    getAllTabs().then((tabs) => {
+      setAllTabs(tabs);
     });
   }, []);
 
@@ -355,19 +365,16 @@ export default function GlobalSearchApp() {
     const q = searchQuery.toLowerCase();
 
     // 1. 搜索活跃应用
-    const activeResults: SearchResultItem[] = Object.values(apps)
-      .filter((app) => app.instance_name?.toLowerCase().includes(q))
-      .map((app) => {
-        const tabId = Object.keys(tabIdMap).find(
-          (key) => tabIdMap[key] === app.app_id,
-        );
+    const activeResults: SearchResultItem[] = allTabs
+      .filter((tab) => tab.title?.toLowerCase().includes(q))
+      .map((tab) => {
         return {
-          id: `active-${app.app_id}`,
+          id: `active-${tab.tabId}`,
           type: 'active' as const,
-          name: app.instance_name,
-          logo: app.info?.logo,
-          appId: app.app_id,
-          tabId,
+          name: tab.title,
+          logo: tab.icon,
+          tabId: tab.tabId,
+          url: tab.appUrl,
         };
       });
 
@@ -415,7 +422,7 @@ export default function GlobalSearchApp() {
     }
 
     return groups;
-  }, [searchQuery, apps, bookmarks, searchableSettings, t, tabIdMap]);
+  }, [searchQuery, allTabs, bookmarks, searchableSettings, t]);
 
   // 回车触发搜索
   const handleSubmit = useCallback(() => {
@@ -450,7 +457,7 @@ export default function GlobalSearchApp() {
       // 应用类型
       openTab({
         tabId: item.tabId ?? '',
-        appUrl: item.url || item.appId || '',
+        appUrl: item.url || '',
       });
       exitSearch();
     }

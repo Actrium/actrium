@@ -2,6 +2,13 @@ import { NativeModules } from 'react-native';
 
 const { TabModule } = NativeModules;
 
+export interface TabSummary {
+  tabId: string;
+  title: string;
+  icon: string;
+  appUrl: string;
+}
+
 // 打开 tab（for phone）
 export const openTab = async (data: {
   tabId?: string;
@@ -78,6 +85,16 @@ export const getCurrentFullscreenTab = async (): Promise<string> => {
     console.error(e);
   }
   return '';
+};
+
+// 获取当前所有 tab 的基础信息
+export const getAllTabs = async (): Promise<TabSummary[]> => {
+  try {
+    return TabModule.getAllTabs();
+  } catch (e) {
+    console.error(e);
+  }
+  return [];
 };
 
 // 设置 tab 收藏状态
