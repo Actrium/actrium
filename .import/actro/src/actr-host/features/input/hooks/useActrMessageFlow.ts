@@ -157,6 +157,7 @@ export function useActrMessageFlow(
         tabId,
         currentMsg.message_id,
         {
+          answer_type: 'text',
           answer_time: Date.now(),
           answer_content: newContent,
           progress: isFinished ? 2 : 1,
