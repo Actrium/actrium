@@ -53,7 +53,7 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
             onDeleteClick: ((ActiveModel) -> Unit)?
         ) {
             if (item.name.isEmpty()) {
-                binding.tvAppName.text = "新页签"
+                binding.tvAppName.setText(R.string.blank_tab)
             } else {
                 binding.tvAppName.text = item.name
             }
