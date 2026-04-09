@@ -52,7 +52,7 @@ struct MainContentView: View {
                         Spacer(minLength: 0)
                         
                         AddressBarContainer(
-                            titleText: .constant(viewModel.currentTab?.title ?? "New Tab"),
+                            titleText: .constant(viewModel.currentTab?.title ?? TM.active.blackTab()),
                             inputText: $addressInputText,
                             isEditing: $isAddressBarEditing,
                             isFirstResponder: $isAddressBarFirstResponder,

@@ -222,7 +222,7 @@ struct UnifiedCanvasView: View {
                                 .frame(width: addressBarContainerWidth, height: 28)
                         } else {
                             AddressBarContainer(
-                                titleText: .constant(viewModel.currentTab?.title ?? "New Tab"),
+                                titleText: .constant(viewModel.currentTab?.title ?? TM.active.blackTab()),
                                 inputText: $addressInputText,
                                 isEditing: $isAddressBarEditing,
                                 isFirstResponder: $isAddressBarFirstResponder,
@@ -1040,7 +1040,7 @@ private struct TabCardView: View {
             .buttonStyle(.plain)
 
             // 标题
-            Text(tab.title.isEmpty ? "New Tab" : tab.title)
+            Text(tab.title.isEmpty ? TM.active.blackTab() : tab.title)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.white.opacity(0.9))
                 .lineLimit(1)
@@ -1168,7 +1168,7 @@ private struct TabDragPreviewView: View {
                     .font(.system(size: 14))
                     .foregroundColor(.white.opacity(0.6))
 
-                Text(tab.title.isEmpty ? "New Tab" : tab.title)
+                Text(tab.title.isEmpty ? TM.active.blackTab() : tab.title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.white.opacity(0.9))
                     .lineLimit(1)
