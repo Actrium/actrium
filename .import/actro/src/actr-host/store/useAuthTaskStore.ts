@@ -1,40 +1,23 @@
 import { create } from 'zustand';
 
-interface AuthTask {
-  clientId: string;
-  appId: string;
-  sourceTabId?: string;
-}
-
 export type AppAuthorizationStatus =
   | 'unknown'
   | 'authorized'
   | 'not_authorized';
 
 interface AuthTaskState {
-  // Key 为 tabId
-  tasks: Record<string, AuthTask>;
   // 以 appId 为 key，缓存授权状态；缺省视为 unknown
   alreadyAuthorizedAppIds: Record<string, AppAuthorizationStatus>;
   addAuthorizedAppId: (appId: string) => void;
   addUnauthorizedAppId: (appId: string) => void;
   getAppAuthorizationStatus: (appId: string) => AppAuthorizationStatus;
   clearAuthorizationCache: () => void;
-  regTask: (
-    tabId: string,
-    data: { clientId: string; appId: string; sourceTabId?: string },
-  ) => void;
-  getTask: (tabId: string) => AuthTask | undefined;
-  clearTask: (tabId: string) => void;
 }
 
 /**
- * 用于管理授权任务的 Store
- * 当从某个插件发起登录/授权请求时，将上下文信息（clientId）存入此 Store
- * LoginApp 启动后根据当前的 tabId 提取对应的 clientId
+ * 用于管理应用授权状态缓存。
  */
 export const useAuthTaskStore = create<AuthTaskState>((set, get) => ({
-  tasks: {},
   alreadyAuthorizedAppIds: {},
   addAuthorizedAppId: (appId) =>
     set((state) => {
@@ -61,16 +44,4 @@ export const useAuthTaskStore = create<AuthTaskState>((set, get) => ({
     set(() => ({
       alreadyAuthorizedAppIds: {},
     })),
-  regTask: (tabId, { clientId, appId, sourceTabId }) => {
-    set((state) => ({
-      tasks: { ...state.tasks, [tabId]: { clientId, appId, sourceTabId } },
-    }));
-  },
-  getTask: (tabId) => get().tasks[tabId],
-  clearTask: (tabId) =>
-    set((state) => {
-      const newTasks = { ...state.tasks };
-      delete newTasks[tabId];
-      return { tasks: newTasks };
-    }),
 }));

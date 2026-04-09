@@ -94,7 +94,6 @@ export default function ActrInput({
     inputText,
     editingMessageId,
     attachments,
-    isTablet: layoutTokens.isTablet,
     showTopToast,
   });
 
@@ -224,7 +223,7 @@ export default function ActrInput({
         }}
       />
 
-      {isMobileVariant && showLoginModal && authParams && (
+      {showLoginModal && authParams && (
         <LoginModal
           visible
           onClose={handleLoginModalClose}
