@@ -12,13 +12,14 @@ export class AppRepository {
 
       const sql = `
         INSERT OR REPLACE INTO apps 
-        (app_id, app_name, full_description, full_title, logo, url, details, last_opened) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (app_id, app_name, instance_name, full_description, full_title, logo, url, details, last_opened) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       await db.executeSql(sql, [
         appInfo.app_id,
         appInfo.app_name,
+        appInfo.instance_name,
         langContent?.description || '',
         langContent?.title || '',
         appInfo.info?.logo || '',

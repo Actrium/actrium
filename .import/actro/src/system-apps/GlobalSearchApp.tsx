@@ -356,7 +356,7 @@ export default function GlobalSearchApp() {
 
     // 1. 搜索活跃应用
     const activeResults: SearchResultItem[] = Object.values(apps)
-      .filter((app) => app.app_name?.toLowerCase().includes(q))
+      .filter((app) => app.instance_name?.toLowerCase().includes(q))
       .map((app) => {
         const tabId = Object.keys(tabIdMap).find(
           (key) => tabIdMap[key] === app.app_id,
@@ -364,7 +364,7 @@ export default function GlobalSearchApp() {
         return {
           id: `active-${app.app_id}`,
           type: 'active' as const,
-          name: app.app_name,
+          name: app.instance_name,
           logo: app.info?.logo,
           appId: app.app_id,
           tabId,
@@ -373,11 +373,11 @@ export default function GlobalSearchApp() {
 
     // 2. 搜索收藏
     const bookmarkResults: SearchResultItem[] = bookmarks
-      .filter((b) => b.app_name?.toLowerCase().includes(q))
+      .filter((b) => b.instance_name?.toLowerCase().includes(q))
       .map((b) => ({
         id: `bookmark-${b.id}`,
         type: 'bookmark' as const,
-        name: b.app_name || '',
+        name: b.instance_name || '',
         logo: b.logo || undefined,
         appId: b.app_id,
         url: b.url || undefined,

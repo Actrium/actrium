@@ -91,8 +91,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const guestLoadingStatus = useAppStore((state) =>
     appId ? state.guestLoadingStatus[appId] : undefined,
   );
-  const appName = useAppStore((state) =>
-    appId ? state.apps[appId]?.app_name : undefined,
+  const instanceName = useAppStore((state) =>
+    appId ? state.apps[appId]?.instance_name : undefined,
   );
 
   // Engine 状态（按 tab 维度隔离）
@@ -522,7 +522,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
             leftDisabled={!appId}
             leftActive={panelVisible}
             showLeftButton={Boolean(appId)}
-            appName={appId ? appName : t('actr.app.newTab')}
+            instanceName={appId ? instanceName : t('actr.app.newTab')}
             includeSafeTopInset={false}
           />
         )}

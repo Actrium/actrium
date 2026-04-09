@@ -94,7 +94,7 @@ export default function BookmarksPhoneView({
             <Image source={{ uri: item.logo! }} style={styles.listItemLogo} />
 
             <AppText style={styles.listItemName} numberOfLines={1}>
-              {item.app_name}
+              {item.instance_name}
             </AppText>
           </TouchableOpacity>
         </SwipeRemoveActionRow>
