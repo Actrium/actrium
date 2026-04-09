@@ -15,6 +15,7 @@ export interface AppInfo {
   app_id: string;
   manifest_version: string; // 配置文件版本
   app_name: string; // 应用名称
+  instance_name: string; // 实例名称
 
   actr_url: string; // guest cdn url
   actr_hash_code: string; // guest sha1 code

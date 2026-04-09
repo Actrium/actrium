@@ -42,7 +42,7 @@ export default function ChatEmpty() {
             variant={layoutTokens.isTablet ? 'emptyTitle' : 'emptyTitleCompact'}
             style={styles.appName}
           >
-            {appInfo?.app_name}
+            {appInfo?.instance_name}
           </AppText>
           <AppText style={styles.tabTitle}>
             <Text style={styles.tabTitleBold}>{appInfoByLang?.welcome_text}</Text>

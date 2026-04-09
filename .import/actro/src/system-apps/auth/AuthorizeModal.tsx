@@ -101,7 +101,7 @@ export const AuthorizeModal = ({
                       />
                     )}
                     <AppText style={styles.headerTitle} numberOfLines={1}>
-                      {appInfo?.app_name || t('actr.app.officialService')}
+                      {appInfo?.instance_name || t('actr.app.officialService')}
                     </AppText>
                   </View>
                   <HostIconButton
@@ -121,7 +121,7 @@ export const AuthorizeModal = ({
                   <AuthorizeContent
                     variant='light'
                     appLogo={appInfo?.info?.logo}
-                    appName={appInfo?.app_name}
+                    appName={appInfo?.instance_name}
                     loading={loading}
                     onAuthorize={handleAuthorize}
                     onReject={onClose}

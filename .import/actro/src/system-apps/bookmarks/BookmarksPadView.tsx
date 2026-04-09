@@ -34,7 +34,7 @@ export default function BookmarksPadView({
   const { width } = useWindowDimensions();
   const flatBookmarks = React.useMemo(
     () =>
-      groups.flatMap((group) => group.items).filter((item) => Boolean(item.app_name)),
+      groups.flatMap((group) => group.items).filter((item) => Boolean(item.instance_name)),
     [groups],
   );
   const cardWidth = React.useMemo(() => {
@@ -106,7 +106,7 @@ export default function BookmarksPadView({
               <View style={styles.cardInner}>
                 <Image source={{ uri: item.logo! }} style={styles.cardLogo} />
                 <AppText style={styles.cardTitle} numberOfLines={1}>
-                  {item.app_name}
+                  {item.instance_name}
                 </AppText>
                 <Pressable
                   hitSlop={8}

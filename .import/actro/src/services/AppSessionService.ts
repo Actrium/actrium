@@ -52,9 +52,6 @@ export class AppSessionService {
       // 1. 获取并保存 App 信息
       const appRes = await getAppInfo(appId);
 
-      // TODO 临时处理
-      // appRes.data!.actr_url = 'https://rs1.solution9.net/test/actr.actr';
-
       // 这里是首跳请求，权限未决或链路异常都会先落到 success=false。
       // 如果误判成 APP_NOT_FOUND，UI 会把时序问题说成“应用不存在”，语义是错的。
       if (!appRes?.success) {
@@ -80,7 +77,7 @@ export class AppSessionService {
       // 更新 native 处 tab 信息
       void updateTabInfo({
         tabId: tabId,
-        title: appRes.data.app_name,
+        title: appRes.data.instance_name,
         icon: appRes.data.info?.logo || '',
         appUrl: appRes.data.url || '',
       })

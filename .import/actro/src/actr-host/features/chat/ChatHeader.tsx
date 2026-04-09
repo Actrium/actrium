@@ -15,7 +15,7 @@ interface ChatHeaderProps {
   leftDisabled?: boolean;
   leftActive?: boolean;
   showLeftButton?: boolean;
-  appName?: string;
+  instanceName?: string;
   appId?: string;
   includeSafeTopInset?: boolean;
 }
@@ -27,7 +27,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     leftDisabled = false,
     leftActive = false,
     showLeftButton = true,
-    appName,
+    instanceName,
     appId,
     includeSafeTopInset = true,
   }) => {
@@ -75,9 +75,9 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
           <View style={styles.headerButtonPlaceholder} />
         )}
         <View style={styles.titleContainer}>
-          {appName && (
-            <AppText style={styles.appName} numberOfLines={1}>
-              {appName}
+          {instanceName && (
+            <AppText style={styles.instanceName} numberOfLines={1}>
+              {instanceName}
             </AppText>
           )}
           {/* 只有插件会话态才展示网络状态，和右侧 history 按钮保持同一语义边界。 */}
@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  appName: {
+  instanceName: {
     ...getTypographyStyle('bodyInput'),
     fontWeight: '600',
     color: '#0a0a0a',
