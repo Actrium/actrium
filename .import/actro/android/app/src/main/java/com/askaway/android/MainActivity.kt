@@ -229,6 +229,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                         Params.currentTabId = currentTabId
                         showReactNativeView()
                         viewModel.enterFullScreen(currentTabId)
+                        binding.navActivity.isChecked = true
                     }
                 }
                 launch {
