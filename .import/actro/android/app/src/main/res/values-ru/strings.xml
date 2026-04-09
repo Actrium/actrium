@@ -1,0 +1,9 @@
+<resources>
+    <string name="tab_active">Активность</string>
+    <string name="tab_bookmark">Закладки</string>
+    <string name="tab_set">Настройки</string>
+    <string name="search">Поиск...</string>
+    <string name="goback">Назад</string>
+    <string name="blank_tab">Новая вкладка</string>
+</resources>
+

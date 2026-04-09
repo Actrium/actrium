@@ -3,4 +3,7 @@
     <string name="tab_bookmark">Bookmarks</string>
     <string name="tab_active">Activity</string>
     <string name="tab_set">Preferences</string>
+    <string name="search">Search...</string>
+    <string name="goback">Back</string>
+    <string name="blank_tab">New Tab</string>
 </resources>
