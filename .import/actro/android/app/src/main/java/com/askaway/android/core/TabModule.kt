@@ -153,4 +153,13 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
             )
         )
     }
+
+    @ReactMethod
+    fun getAllTabs(promise: Promise){
+        Log.e("TabModule", "getAllTabs")
+        EventBus.getDefault().post(
+            ReactModuleEvent(
+                ReactModuleEvent.EVENT_GET_ALL_TABS, emptyMap(), promise)
+        )
+    }
 }
