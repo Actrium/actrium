@@ -293,6 +293,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const isNearBottomRef = useRef(true);
   const previousMessageCountRef = useRef(messageIds.length);
   const forceScrollToBottomUntilRef = useRef(0);
+  const firstMessageIdRef = useRef<string | undefined>(messageIds[0]);
 
   // 正序列表下通过 scrollToEnd 回到底部。
   const scrollToBottom = useCallback(() => {
@@ -462,15 +463,22 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   useEffect(() => {
     const previousCount = previousMessageCountRef.current;
     if (messageIds.length > previousCount) {
-      // 新消息插入后的短时间窗口内，允许后续 loading/异步内容继续把列表推到底。
-      forceScrollToBottomUntilRef.current = Date.now() + 1200;
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToEnd({ animated: false });
-      });
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: false });
-      }, 120);
+      // 通过比较第一条消息 ID 判断是否为历史消息加载：
+      // 历史消息插入到头部时 messageIds[0] 会变化，此时不应滚底，
+      // 由 maintainVisibleContentPosition 保持当前位置。
+      const isHistoryLoad = messageIds[0] !== firstMessageIdRef.current;
+      if (!isHistoryLoad) {
+        // 新消息插入后的短时间窗口内，允许后续 loading/异步内容继续把列表推到底。
+        forceScrollToBottomUntilRef.current = Date.now() + 1200;
+        requestAnimationFrame(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        });
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        }, 120);
+      }
     }
+    firstMessageIdRef.current = messageIds[0];
     previousMessageCountRef.current = messageIds.length;
   }, [messageIds.length]);
 
