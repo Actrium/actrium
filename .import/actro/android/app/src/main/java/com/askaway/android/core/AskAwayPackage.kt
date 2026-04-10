@@ -7,7 +7,12 @@ import com.facebook.react.uimanager.ViewManager
 
 class AskAwayPackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-        return listOf(ActrBridge(reactContext), TabModule(reactContext), UserInfoModule(reactContext))
+        return listOf(
+            ActrBridge(reactContext),
+            TabModule(reactContext),
+            UserInfoModule(reactContext),
+            EmailModule(reactContext),
+        )
     }
 
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<in Nothing, in Nothing>> {
