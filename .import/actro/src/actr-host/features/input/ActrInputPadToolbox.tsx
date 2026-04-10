@@ -75,6 +75,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
 
   const [internalIsCancelling, setInternalIsCancelling] = React.useState(false);
   const isCancellingRef = React.useRef(false);
+  const lastVoiceStartRef = React.useRef(0);
 
   const callbacks = React.useRef({
     onVoiceStart,
@@ -95,6 +96,9 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
         onMoveShouldSetPanResponderCapture: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
+          const now = Date.now();
+          if (now - lastVoiceStartRef.current < 1000) return;
+          lastVoiceStartRef.current = now;
           isCancellingRef.current = false;
           setInternalIsCancelling(false);
           callbacks.current.onVoiceStart?.();
