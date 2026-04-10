@@ -196,6 +196,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 viewModel.hideBookmark()
                 viewModel.changeDisplayMode(PageMode.TAB)
             }
+            binding.navActivity.isChecked = true
         }
 
         // 监听 StateFlow 并更新 Adapter
