@@ -44,15 +44,20 @@ class ActrManager {
     private val clientSystems = mutableMapOf<String, ActrSystem>()
     private val networkMonitors = mutableMapOf<String, NetworkMonitor>()
 
+    private val networkEventHandles = mutableMapOf<String, io.actor_rtc.actr.dsl.NetworkEventHandle>()
+
     suspend fun initialize(context: Context, tabId: String, actorType: String, path: String) {
         LogUtil.e("ActrManager", "RTC initialized__${path}")
         val clientSystem = createActrSystem(path)
         clientSystems[tabId] = clientSystem
+        // createNetworkEventHandle() must be called BEFORE attach(), because attach() consumes the ActrSystem
+        val networkEventHandle = clientSystem.createNetworkEventHandle()
+        networkEventHandles[tabId] = networkEventHandle
         val handler = MyUnifiedHandler()
         val clientWorkload = UnifiedWorkload(handler)
         val clientNode = clientSystem.attach(clientWorkload)
         val scope = CoroutineScope(Job() + Dispatchers.Main)
-        val networkMonitor = NetworkMonitor.create(context, scope, { clientSystems[tabId] }, { msg ->
+        val networkMonitor = NetworkMonitor.createWithHandle(context, scope, { networkEventHandles[tabId] }, { msg ->
             Log.e("ActrManager", "networkMonitor:${msg}")
         })
         val clientRef = clientNode.start()
@@ -106,7 +111,7 @@ class ActrManager {
             "data_stream_app.AskLocalService.SendText",
             PayloadType.RPC_RELIABLE,
             request.toByteArray(),
-            20000L
+            30000L
         )
     }
 
@@ -190,7 +195,7 @@ class ActrManager {
             "data_stream_app.AskLocalService.StartSendVoice",
             PayloadType.RPC_RELIABLE,
             request.toByteArray(),
-            20000L
+            30000L
         )
 
         val response = StartVoiceMessageResponse.parseFrom(responseBytes)
@@ -232,7 +237,7 @@ class ActrManager {
             "data_stream_app.AskLocalService.SendVoiceChunk",
             PayloadType.RPC_RELIABLE,
             request.toByteArray(),
-            20000L
+            30000L
         )
 
         val response = VoiceChunkMessageResponse.parseFrom(responseBytes)
@@ -246,6 +251,7 @@ class ActrManager {
         Log.e("ActrManager", "shutdown  ${tabId}")
         networkMonitors[tabId]?.stopMonitoring()
         networkMonitors.remove(tabId)
+        networkEventHandles.remove(tabId)
         clientSystems.remove(tabId)
         clients[tabId]?.shutdown()
         clients.remove(tabId)
