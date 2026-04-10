@@ -1,18 +1,36 @@
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { TFunction } from 'i18next';
 import { AuthRepository } from '../../repository/AuthRepository';
 import { CURRENT_ENV } from '../../api/auth';
 import { GlobalAlert } from '../../components';
 import { authApi } from '../../api/auth';
+import { EmailBridge } from '../../native-bridge';
 
 export const createFeedbackAction = ({ t }: { t: TFunction }) => {
-  return () => {
+  return async () => {
     const feedbackLabel = t('actr.settings.feedback').trim();
     const aboutAskAwayLabel = t('actr.settings.aboutAskAway').trim();
     const subjectText = `#${feedbackLabel} ${aboutAskAwayLabel} #`;
+
+    if (Platform.OS === 'android') {
+      // Android 优先用原生 Intent 传递主题和收件人，
+      // 避免 Linking.openURL(mailto) 走 ACTION_VIEW 时被不同邮件客户端不一致地解析。
+      // 若原生模块不可用或设备无邮件 App，则降级走 mailto 链接。
+      try {
+        await EmailBridge.composeEmail({
+          to: ['support@askaway.chat'],
+          subject: subjectText,
+        });
+        return;
+      } catch (e) {
+        console.error(e)
+        // 降级到 mailto
+      }
+    }
+
     const subject = encodeURIComponent(subjectText);
     const mailto = `mailto:support@askaway.chat?subject=${subject}`;
-    Linking.openURL(mailto);
+    await Linking.openURL(mailto);
   };
 };
 

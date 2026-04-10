@@ -14,3 +14,6 @@ export type { ExtensionPanelVisibleChangeEvent } from './extension';
 // Container
 export { ContainerEvents } from './container';
 export type { ContainerSizeChangeEvent } from './container';
+
+// Email
+export { EmailBridge } from './email';
