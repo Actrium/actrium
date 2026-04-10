@@ -157,13 +157,13 @@ export function useActrVoiceController(
 
       console.log('[ActrInput] 1s 阈值到达，开始发送积压切片');
       void drainQueue();
-    } catch (e) {
+    } catch (e: any) {
       console.error('[Voice] onThresholdReached failed:', e);
       isStartingRef.current = false;
       setVoiceRecording(false);
       stopRecording();
       chunkQueueRef.current = [];
-      GlobalAlert.alert(t('actr.voice.recordingFailed'), t('actr.voice.voiceSessionFailed'));
+      GlobalAlert.alert(t('actr.voice.recordingFailed'), t('actr.voice.voiceSessionFailed') + e.message);
     }
   }, [
     drainQueue,
