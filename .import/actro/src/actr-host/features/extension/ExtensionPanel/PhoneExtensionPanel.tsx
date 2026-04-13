@@ -9,6 +9,8 @@ import Animated, {
 import { LAYOUT, CHAT_HEADER_HEIGHT } from '../../../constants';
 import type { PhoneExtensionPanelProps } from './types';
 import { extensionPanel } from '../../../../theme/tokens';
+import { useColors } from '../../../../theme/useColors';
+import type { ColorTokens } from '../../../../theme/colors';
 
 /** 收尾动画时长 */
 const ANIM_DURATION = 250;
@@ -16,28 +18,31 @@ const ANIM_DURATION = 250;
 /**
  * 骨架屏组件 - 内容加载前的占位
  */
-const SkeletonPlaceholder: React.FC = () => (
-  <View style={styles.skeletonContainer}>
-    <View style={styles.skeletonHeader}>
-      <View style={[styles.skeletonBlock, { width: 120, height: 24 }]} />
+const SkeletonPlaceholder: React.FC<{ colors: ColorTokens }> = ({ colors }) => {
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <View style={styles.skeletonContainer}>
+      <View style={styles.skeletonHeader}>
+        <View style={[styles.skeletonBlock, { width: 120, height: 24 }]} />
+      </View>
+      <View style={styles.skeletonContent}>
+        <View
+          style={[
+            styles.skeletonBlock,
+            { width: '100%', height: 60, marginBottom: 12 },
+          ]}
+        />
+        <View
+          style={[
+            styles.skeletonBlock,
+            { width: '80%', height: 40, marginBottom: 12 },
+          ]}
+        />
+        <View style={[styles.skeletonBlock, { width: '90%', height: 40 }]} />
+      </View>
     </View>
-    <View style={styles.skeletonContent}>
-      <View
-        style={[
-          styles.skeletonBlock,
-          { width: '100%', height: 60, marginBottom: 12 },
-        ]}
-      />
-      <View
-        style={[
-          styles.skeletonBlock,
-          { width: '80%', height: 40, marginBottom: 12 },
-        ]}
-      />
-      <View style={[styles.skeletonBlock, { width: '90%', height: 40 }]} />
-    </View>
-  </View>
-);
+  );
+};
 
 /**
  * Phone 扩展面板
@@ -53,6 +58,9 @@ const PhoneExtensionPanel: React.FC<PhoneExtensionPanelProps> = ({
   slideAnim,
   isGesturing,
 }) => {
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
+
   // 面板最大滑动距离
   const maxSlide = width * extensionPanel.phoneWidthRatio;
 
@@ -113,21 +121,21 @@ const PhoneExtensionPanel: React.FC<PhoneExtensionPanelProps> = ({
       ]}
     >
       <View style={styles.borderRight} />
-      {content || <SkeletonPlaceholder />}
+      {content || <SkeletonPlaceholder colors={colors} />}
     </Animated.View>
   );
 };
 
 export default PhoneExtensionPanel;
 
-// ─── 样式 ───────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   panel: {
     position: 'absolute',
     left: 0,
     height: '100%',
     flexShrink: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.extensionPanelBg,
+    overflow: 'hidden',
   },
   borderRight: {
     position: 'absolute',
@@ -135,11 +143,11 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1,
-    backgroundColor: LAYOUT.BORDER_COLOR,
+    backgroundColor: colors.extensionPanelBorder,
   },
   skeletonContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.extensionPanelSkeletonBg,
     paddingTop: 80,
   },
   skeletonHeader: {
@@ -150,7 +158,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   skeletonBlock: {
-    backgroundColor: '#e7e7e7',
+    backgroundColor: colors.extensionPanelSkeletonBlock,
     borderRadius: 8,
   },
 });

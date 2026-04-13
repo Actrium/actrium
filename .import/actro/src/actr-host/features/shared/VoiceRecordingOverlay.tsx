@@ -4,6 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useTranslation } from 'react-i18next';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
 
 interface VoiceRecordingOverlayProps {
   isCancelling: boolean;
@@ -13,12 +14,13 @@ interface VoiceRecordingOverlayProps {
 export const VoiceRecordingOverlay: React.FC<VoiceRecordingOverlayProps> = ({ isCancelling, metering = 0 }) => {
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
+  const colors = useColors();
   const isPhone = width < 768;
-  const baseColor = isCancelling ? '#F2A4A4' : '#58A6F4';
+  const baseColor = isCancelling ? colors.voiceCancelBaseColor : colors.voiceBaseColor;
   const instructionText = isCancelling ? t('actr.voice.releasedToCancel') : t('actr.voice.releasedToSend');
-
-  const transColor = isCancelling ? 'rgba(242, 164, 164, 0)' : 'rgba(88, 166, 244, 0)';
-  const textColor = isCancelling ? '#FF684E' : '#FFF';
+  const transColor = isCancelling ? colors.voiceCancelTransColor : colors.voiceTransColor;
+  const textColor = isCancelling ? colors.voiceCancelTextColor : colors.voiceTextColor;
+  const rectBgColor = isCancelling ? colors.voiceCancelRectBgColor : colors.voiceRectBgColor;
 
   // 50 rectangles logic
   const rectCount = isPhone ? 36 : 50;
@@ -49,7 +51,7 @@ export const VoiceRecordingOverlay: React.FC<VoiceRecordingOverlayProps> = ({ is
               ? 1 
               : 1 - (distanceFromCenter / maxDistance) * 0.5;
             
-            const rectBgColor = isCancelling ? '#EB4C46' : '#FFF';
+            const rectBg = rectBgColor;
 
             // Calculate Dynamic Height (Scheme A)
             // minHeight=6, maxDelta=30 -> height range [6, 36] based on volume & weight
@@ -60,8 +62,8 @@ export const VoiceRecordingOverlay: React.FC<VoiceRecordingOverlayProps> = ({ is
                 key={index}
                 style={[
                   styles.rect,
-                  { 
-                    backgroundColor: rectBgColor,
+                  {
+                    backgroundColor: rectBg,
                     opacity: opacity,
                     marginHorizontal: 1,
                     height: dynamicHeight,
@@ -97,7 +99,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   text: {
-    color: '#FFF',
     ...getTypographyStyle('body'),
     fontWeight: '500',
   },

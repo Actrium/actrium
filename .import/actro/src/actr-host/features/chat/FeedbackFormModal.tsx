@@ -17,14 +17,15 @@ import { useTranslation } from 'react-i18next';
 import { Icon } from '../../../components';
 import { submitFeedback, FeedbackContext } from '../../../api/feedback';
 import { useMessageStore } from '../../store/useMessageStore';
+import { useColors } from '../../../theme/useColors';
 import dayjs from 'dayjs';
 import { GlobalAlertModal } from '../../../components/GlobalAlertModal';
-import { GlobalAlert } from '../../../components';
 import { isPhone } from '../../../utils/device';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { useUserStore } from '../../store/useUserStore';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface Category {
   id: string;
@@ -59,17 +60,17 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   messageId,
 }) => {
   const { t } = useTranslation();
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState('');
-  const [status, setStatus] = useState<
-    'idle' | 'submitting' | 'success' | 'error'
-  >('idle');
+  const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
 
   const targetMsg = useMessageStore((state) =>
     tabId && messageId ? state.messageById[tabId]?.[messageId] : undefined,
   );
-  const user = useUserStore(state => state.userInfo?.user)
+  const user = useUserStore((state) => state.userInfo?.user);
 
   const [showCategoryTip, setShowCategoryTip] = React.useState(false);
 
@@ -125,24 +126,16 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
           role: 'user',
           message_id: targetMsg.message_id,
           content:
-            targetMsg.question_type === 'text'
-              ? targetMsg.question_content
-              : '语音消息',
-          created_at: dayjs(targetMsg.question_time).format(
-            'YYYY-MM-DD HH:mm:ss',
-          ),
+            targetMsg.question_type === 'text' ? targetMsg.question_content : '语音消息',
+          created_at: dayjs(targetMsg.question_time).format('YYYY-MM-DD HH:mm:ss'),
         });
 
         contextPayload.push({
           role: 'assistant',
           message_id: targetMsg.message_id,
           content:
-            targetMsg.answer_type === 'text'
-              ? targetMsg.answer_content
-              : '语音消息',
-          created_at: dayjs(targetMsg.answer_time).format(
-            'YYYY-MM-DD HH:mm:ss',
-          ),
+            targetMsg.answer_type === 'text' ? targetMsg.answer_content : '语音消息',
+          created_at: dayjs(targetMsg.answer_time).format('YYYY-MM-DD HH:mm:ss'),
         });
       }
 
@@ -182,9 +175,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
             style={[
               styles.container,
               isPhone && styles.containerPhone,
-              {
-                transform: [{ translateY }],
-              },
+              { transform: [{ translateY }] },
             ]}
           >
             <ScrollView
@@ -201,11 +192,8 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   {t('actr.chat.feedbackTitle')}
                 </AppText>
                 {!isPhone && (
-                  <TouchableOpacity
-                    onPress={handleClose}
-                    style={styles.closeButton}
-                  >
-                    <Icon type='close' size={20} color='#999' />
+                  <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                    <Icon type='close' size={20} color={colors.textTertiary} />
                   </TouchableOpacity>
                 )}
               </View>
@@ -252,7 +240,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   <TextInput
                     style={[styles.input, isPhone && styles.inputPhone]}
                     placeholder={t('actr.chat.feedbackPlaceholder')}
-                    placeholderTextColor='#999'
+                    placeholderTextColor={colors.textTertiary}
                     multiline
                     numberOfLines={4}
                     value={details}
@@ -263,9 +251,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
               </View>
 
               {status === 'error' && (
-                <AppText style={styles.errorText}>
-                  {t('actr.chat.feedbackFailed')}
-                </AppText>
+                <AppText style={styles.errorText}>{t('actr.chat.feedbackFailed')}</AppText>
               )}
 
               <View style={[styles.footer, isPhone && styles.footerPhone]}>
@@ -279,10 +265,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   onPress={handleClose}
                 >
                   <AppText
-                    style={[
-                      styles.cancelButtonText,
-                      isPhone && styles.cancelButtonTextPhone,
-                    ]}
+                    style={[styles.cancelButtonText, isPhone && styles.cancelButtonTextPhone]}
                   >
                     {t('common.cancel')}
                   </AppText>
@@ -299,13 +282,10 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   disabled={status === 'submitting'}
                 >
                   {status === 'submitting' ? (
-                    <ActivityIndicator color='#fff' size='small' />
+                    <ActivityIndicator color={colors.textInverse} size='small' />
                   ) : (
                     <AppText
-                      style={[
-                        styles.submitButtonText,
-                        isPhone && styles.submitButtonTextPhone,
-                      ]}
+                      style={[styles.submitButtonText, isPhone && styles.submitButtonTextPhone]}
                     >
                       {t('actr.chat.submit')}
                     </AppText>
@@ -324,10 +304,8 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
       <Modal visible={visible} transparent animationType='fade'>
         <View style={[styles.backdrop, isPhone && styles.backdropPhone]}>
           <View style={styles.successContainer}>
-            <Icon type='copy' size={40} color='#34C759' />
-            <AppText style={styles.successText}>
-              {t('actr.chat.feedbackSuccess')}
-            </AppText>
+            <Icon type='copy' size={40} color={colors.successIcon} />
+            <AppText style={styles.successText}>{t('actr.chat.feedbackSuccess')}</AppText>
           </View>
         </View>
       </Modal>
@@ -346,9 +324,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
           {modalContent}
         </KeyboardAvoidingView>
       ) : (
-        <View style={{ flex: 1 }}>
-          {modalContent}
-        </View>
+        <View style={{ flex: 1 }}>{modalContent}</View>
       )}
 
       <GlobalAlertModal
@@ -364,10 +340,10 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: colors.bgOverlay,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 40,
@@ -378,7 +354,7 @@ const styles = StyleSheet.create({
   container: {
     width: '90%',
     maxWidth: 500,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgSurface,
     borderRadius: 34,
     overflow: 'hidden',
     ...HOST_SHADOWS.modalSurface,
@@ -393,7 +369,6 @@ const styles = StyleSheet.create({
   scrollContentPhone: {
     padding: 14,
   },
-
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -406,11 +381,11 @@ const styles = StyleSheet.create({
   title: {
     ...getTypographyStyle('title2'),
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: colors.textModalTitle,
   },
   titlePhone: {
     ...getTypographyStyle('title3'),
-    color: '#292929',
+    color: colors.textModalTitlePhone,
     marginTop: 8,
     marginLeft: 8,
     marginRight: 8,
@@ -433,7 +408,7 @@ const styles = StyleSheet.create({
   tag: {
     width: '48.5%',
     height: 48,
-    backgroundColor: '#F5F5F7',
+    backgroundColor: colors.bgTag,
     borderRadius: 34,
     justifyContent: 'center',
     alignItems: 'center',
@@ -447,26 +422,26 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   tagSelected: {
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.bgTagSelected,
     borderColor: 'transparent',
   },
   tagSelectedPhone: {
-    backgroundColor: '#34A8FB',
+    backgroundColor: colors.bgTagSelectedPhone,
   },
   tagText: {
     ...getTypographyStyle('body'),
-    color: '#48484A',
     fontWeight: '500',
+    color: colors.textSecondary,
   },
   tagTextPhone: {
     fontSize: 15,
   },
   tagTextSelected: {
-    color: '#fff',
+    color: colors.textInverse,
   },
   input: {
     ...getTypographyStyle('editorInputCompact'),
-    color: '#333',
+    color: colors.textInput,
     minHeight: 120,
     textAlignVertical: 'top',
     padding: 0,
@@ -476,17 +451,16 @@ const styles = StyleSheet.create({
     minHeight: 71,
   },
   feedbackInputWrapper: {
-    backgroundColor: '#F5F5F7',
+    backgroundColor: colors.bgInput,
     borderRadius: 34,
     paddingHorizontal: 13,
     paddingTop: 18,
     paddingBottom: 9,
   },
   feedbackInputWrapperPhone: {
-    backgroundColor: '#E3E3E3',
+    backgroundColor: colors.bgInputPhone,
     borderRadius: 26,
   },
-
   footer: {
     flexDirection: 'row',
     gap: 16,
@@ -508,29 +482,29 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   cancelButton: {
-    backgroundColor: '#F2F2F7',
+    backgroundColor: colors.bgCancelButton,
   },
   cancelButtonPhone: {
-    backgroundColor: '#D9D9D9',
+    backgroundColor: colors.bgCancelButtonPhone,
   },
   cancelButtonText: {
     ...getTypographyStyle('bodyInput'),
     fontWeight: '600',
-    color: '#48484A',
+    color: colors.textCancelButton,
   },
   cancelButtonTextPhone: {
     fontSize: 15,
   },
   submitButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.bgSubmitButton,
   },
   submitButtonPhone: {
-    backgroundColor: '#34A8FB',
+    backgroundColor: colors.bgSubmitButtonPhone,
   },
   submitButtonText: {
     ...getTypographyStyle('bodyInput'),
     fontWeight: '600',
-    color: '#fff',
+    color: colors.textInverse,
   },
   submitButtonTextPhone: {
     fontSize: 15,
@@ -539,7 +513,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   successContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgSurface,
     padding: 40,
     borderRadius: 24,
     alignItems: 'center',
@@ -547,11 +521,11 @@ const styles = StyleSheet.create({
   },
   successText: {
     ...getTypographyStyle('statusTitle'),
-    color: '#1A1A1A',
+    color: colors.textModalTitle,
   },
   errorText: {
-    color: '#FF3B30',
     ...getTypographyStyle('body'),
+    color: colors.danger,
     marginBottom: spacing.lg,
     textAlign: 'center',
   },

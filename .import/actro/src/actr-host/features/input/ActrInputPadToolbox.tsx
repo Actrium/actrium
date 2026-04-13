@@ -19,6 +19,8 @@ import {
   DropdownMenuSubText,
   DropdownMenuText,
 } from '../shared/DropdownMenu';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface ActrInputPadToolboxProps {
   onPickCamera: () => void;
@@ -66,6 +68,8 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
   onVoiceEnd,
 }) => {
   const { t } = useTranslation();
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
   const isPhone = width < 768;
   const isCompact = width < 390;
@@ -154,7 +158,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                 }}
               >
                 <View style={{ width: 28, alignItems: 'center' }}>
-                  <Icon type="camera" size={20} color="#333333" />
+                  <Icon type="camera" size={20} color={colors.textIconPrimary} />
                 </View>
                 <DropdownMenuText>{t('actr.input.camera')}</DropdownMenuText>
               </DropdownMenuItem>
@@ -164,7 +168,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                 }}
               >
                 <View style={{ width: 28, alignItems: 'center' }}>
-                  <Icon type="image" size={20} color="#333333" />
+                  <Icon type="image" size={20} color={colors.textIconPrimary} />
                 </View>
                 <DropdownMenuText>{t('actr.input.photos')}</DropdownMenuText>
               </DropdownMenuItem>
@@ -174,7 +178,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                 }}
               >
                 <View style={{ width: 28, alignItems: 'center' }}>
-                  <Icon type="file" size={20} color="#333333" />
+                  <Icon type="file" size={20} color={colors.textIconPrimary} />
                 </View>
                 <DropdownMenuText>{t('actr.input.files')}</DropdownMenuText>
               </DropdownMenuItem>
@@ -193,7 +197,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
           >
             <Icon
               type='network'
-              color={isWebSearchActive ? '#34A8FB' : undefined}
+              color={isWebSearchActive ? colors.accentBlue : undefined}
             />
             {!isCompact && <AppText style={styles.actionPillText}>{t('actr.input.webSearch')}</AppText>}
           </TouchableOpacity>
@@ -226,7 +230,11 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                     }}
                   >
                     <View style={{ width: 18, alignItems: 'center' }}>
-                      <Icon type="geolocation" size={18} color="#333333" />
+                      <Icon
+                        type="geolocation"
+                        size={18}
+                        color={colors.textIconPrimary}
+                        />
                     </View>
                     <View style={styles.moreMenuTextBlock}>
                       <DropdownMenuText>{t('actr.input.location')}</DropdownMenuText>
@@ -246,7 +254,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                       <Icon
                         type="geolocation"
                         size={18}
-                        color={isLocationActive ? '#34A8FB' : '#333333'}
+                        color={isLocationActive ? colors.accentBlue : colors.textIconPrimary}
                         />
                       </View>
                     <View style={styles.moreMenuTextBlock}>
@@ -267,7 +275,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
                       <Icon
                         type="enter"
                         size={16}
-                        color={isEnterForNewLine ? '#34A8FB' : '#333333'}
+                        color={isEnterForNewLine ? colors.accentBlue : colors.textIconPrimary}
                         />
                       </View>
                     <View style={styles.moreMenuTextBlock}>
@@ -292,14 +300,14 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
           </View>
         )}
         <TouchableOpacity style={styles.sendButton} onPress={onSend}>
-          <Icon type="send" size={16} color="#fff" />
+          <Icon type="send" size={16} color={colors.textInverse} />
         </TouchableOpacity>
       </View>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -326,7 +334,7 @@ const styles = StyleSheet.create({
     height: 34,
     paddingHorizontal: 14,
     borderRadius: 34,
-    backgroundColor: '#7676801F',
+    backgroundColor: colors.bgActionButton,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -336,28 +344,28 @@ const styles = StyleSheet.create({
     height: 36,
     paddingHorizontal: 12,
     borderRadius: 34,
-    backgroundColor: '#7676801F',
+    backgroundColor: colors.bgActionButton,
     gap: 6,
   },
   actionPillPhone: {
     paddingHorizontal: 10,
   },
   actionPillActive: {
-    backgroundColor: '#D1D1D6',
+    backgroundColor: colors.bgActionButtonActive,
   },
   moreMenuTextBlock: {
     alignSelf: 'flex-start',
   },
   actionPillText: {
     ...getTypographyStyle('body'),
-    color: '#333333',
+    color: colors.textIconPrimary,
     fontWeight: '400',
   },
   audioSwitch: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#7676801F',
+    backgroundColor: colors.bgActionButton,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
@@ -366,7 +374,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#34A8FB',
+    backgroundColor: colors.accentBlue,
     justifyContent: 'center',
     alignItems: 'center',
   },

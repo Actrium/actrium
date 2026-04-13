@@ -15,6 +15,8 @@ import {
   spacing,
 } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface MenuOption {
   label: string;
@@ -36,6 +38,8 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   disabled,
   onPress,
 }) => {
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const [visible, setVisible] = useState(false);
   const [menuLayout, setMenuLayout] = useState<LayoutRectangle | null>(null);
   const [pressLocation, setPressLocation] = useState<{ x: number; y: number } | null>(null);
@@ -188,14 +192,14 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.1)', // 极淡的遮罩，突出菜单
+    backgroundColor: 'rgba(0,0,0,0.1)',
   },
   menuContainer: {
     position: 'absolute',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgSurface,
     borderRadius: 34,
     padding: longPressMenu.padding,
     gap: spacing.xxs,
@@ -210,11 +214,11 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   menuItemPressed: {
-    backgroundColor: '#F2F2F7',
+    backgroundColor: colors.bgMenuItemPressed,
   },
   menuText: {
     ...getTypographyStyle('longPressMenuLabel'),
-    color: '#333333',
+    color: colors.textMenuLabel,
     fontWeight: '500',
   },
 });

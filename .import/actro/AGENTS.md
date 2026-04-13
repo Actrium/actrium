@@ -93,3 +93,9 @@ Subsystem/src/
 ### 重要
 
 1. 所有改动要考虑 iOS 和 Android 的兼容
+2. 深色浅色模式兼容方式
+
+```js
+  const makeStyles = (colors: ColorTokens) => StyleSheet.create({ ... })
+  const styles = useMemo(() => makeStyles(colors), [colors])
+```

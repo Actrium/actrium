@@ -10,35 +10,11 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { Icon } from '../../components';
+import { useColors } from '../../theme/useColors';
+import type { ColorTokens } from '../../theme/colors';
 
 type ThemeVariant = 'light' | 'dark';
 
-const themeColors = {
-  light: {
-    title: '#333',
-    tip: '#252525',
-    appName: '#333',
-    loadingIndicator: '#1C69FF',
-    loadingText: '#666',
-    authButtonBg: '#34A8FB',
-    authButtonText: '#fff',
-    rejectButtonBg: '#78788029',
-    rejectButtonBorder: 'transparent',
-    rejectButtonText: '#333',
-  },
-  dark: {
-    title: '#fff',
-    tip: '#ccc',
-    appName: '#fff',
-    loadingIndicator: '#fff',
-    loadingText: '#fff',
-    authButtonBg: '#1C69FF',
-    authButtonText: '#fff',
-    rejectButtonBg: 'rgba(255, 255, 255, 0.15)',
-    rejectButtonBorder: 'rgba(255, 255, 255, 0.1)',
-    rejectButtonText: '#fff',
-  },
-};
 
 interface AuthorizeContentProps {
   variant?: ThemeVariant;
@@ -71,7 +47,20 @@ export const AuthorizeContent = ({
   showAppInfo = true,
 }: AuthorizeContentProps) => {
   const { t } = useTranslation();
-  const colors = themeColors[variant];
+  const sysColors = useColors();
+  const colors = {
+    title: sysColors.authTitle,
+    tip: sysColors.authTip,
+    appName: sysColors.authAppName,
+    loadingIndicator: sysColors.authLoadingIndicator,
+    loadingText: sysColors.authLoadingText,
+    authButtonBg: sysColors.authPrimaryButtonBg,
+    authButtonText: sysColors.authPrimaryButtonText,
+    rejectButtonBg: sysColors.authRejectButtonBg,
+    rejectButtonBorder: sysColors.authRejectButtonBorder,
+    rejectButtonText: sysColors.authRejectButtonText,
+  };
+  const styles = React.useMemo(() => makeStyles(sysColors), [sysColors]);
   const userInfo = useUserStore((state) => state.userInfo);
 
   const {
@@ -163,7 +152,7 @@ export const AuthorizeContent = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   container: {
     width: '100%',
     alignItems: 'center',
@@ -203,7 +192,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 34,
     fontSize: 17,
-    color: '#000000',
+    color: colors.textPrimary,
     alignSelf: 'flex-start',
   },
   profileList: {
@@ -214,7 +203,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 52,
     borderRadius: 26,
-    backgroundColor: '#78788029',
+    backgroundColor: colors.authProfileBg,
     paddingHorizontal: 24,
     flexDirection: 'row',
     alignItems: 'center',
@@ -233,7 +222,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#597EF70D',
+    backgroundColor: colors.authProfileIconBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
@@ -241,7 +230,7 @@ const styles = StyleSheet.create({
   profileName: {
     flex: 1,
     fontSize: 16,
-    color: '#000000',
+    color: colors.authProfileName,
   },
   buttonRow: {
     width: '100%',

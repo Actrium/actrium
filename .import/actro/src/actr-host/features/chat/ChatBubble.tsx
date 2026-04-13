@@ -23,6 +23,8 @@ import {
   longPressMenu,
   typography,
 } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 import { LongPressMenu } from '../shared/LongPressMenu';
 import { WaveForm } from '../shared/WaveForm';
@@ -94,6 +96,8 @@ export default function ChatBubble({
   onToggleSelection,
 }: ChatBubbleProps) {
   const { t } = useTranslation();
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const isQuestion = type === 'question';
   const isSmall = size === 'small';
   const parsedVoicePayload = React.useMemo(
@@ -336,8 +340,8 @@ export default function ChatBubble({
             enterSelectionMode(msgId, tabId, defaultPart);
           }
         },
-        icon: <Icon type='delete' size={16} color='#FF3B30' />,
-        textColor: '#FF3B30', // 红色
+        icon: <Icon type='delete' size={16} color={colors.danger} />,
+        textColor: colors.danger,
       });
     }
     return options;
@@ -353,6 +357,7 @@ export default function ChatBubble({
     enterSelectionMode,
     attachments,
     content,
+    colors,
   ]);
 
   const parsedAttachments = React.useMemo(() => {
@@ -371,11 +376,11 @@ export default function ChatBubble({
     : typography.messageBody;
   const markdownTextStyle = React.useMemo(
     () => ({
-      color: '#252525',
+      color: colors.textHeading,
       fontSize: messageTypography.fontSize,
       lineHeight: messageTypography.lineHeight,
     }),
-    [messageTypography.fontSize, messageTypography.lineHeight],
+    [colors.textHeading, messageTypography.fontSize, messageTypography.lineHeight],
   );
   const markdownParagraphStyle = React.useMemo(
     () => ({
@@ -386,42 +391,14 @@ export default function ChatBubble({
   );
   const markdownHeadingStyles = React.useMemo(
     () => ({
-      h1: {
-        ...getTypographyStyle('title2'),
-        color: '#252525',
-        marginBottom: 12,
-      },
-      h2: {
-        ...getTypographyStyle('title3'),
-        color: '#252525',
-        marginBottom: 10,
-      },
-      h3: {
-        ...getTypographyStyle('bodyInput'),
-        color: '#252525',
-        fontWeight: '600',
-        marginBottom: 8,
-      },
-      h4: {
-        ...getTypographyStyle('bodyInput'),
-        color: '#252525',
-        fontWeight: '600',
-        marginBottom: 6,
-      },
-      h5: {
-        ...getTypographyStyle('subhead'),
-        color: '#252525',
-        fontWeight: '600',
-        marginBottom: 4,
-      },
-      h6: {
-        ...getTypographyStyle('footnote'),
-        color: '#252525',
-        fontWeight: '600',
-        marginBottom: 4,
-      },
+      h1: { ...getTypographyStyle('title2'), color: colors.textHeading, marginBottom: 12 },
+      h2: { ...getTypographyStyle('title3'), color: colors.textHeading, marginBottom: 10 },
+      h3: { ...getTypographyStyle('bodyInput'), color: colors.textHeading, fontWeight: '600', marginBottom: 8 },
+      h4: { ...getTypographyStyle('bodyInput'), color: colors.textHeading, fontWeight: '600', marginBottom: 6 },
+      h5: { ...getTypographyStyle('subhead'), color: colors.textHeading, fontWeight: '600', marginBottom: 4 },
+      h6: { ...getTypographyStyle('footnote'), color: colors.textHeading, fontWeight: '600', marginBottom: 4 },
     }),
-    [],
+    [colors.textHeading],
   );
   const markdownSupramarkStyles = React.useMemo(
     () =>
@@ -586,7 +563,7 @@ export default function ChatBubble({
           ]}
         >
           <View style={styles.voiceBubbleMain}>
-            <Icon type='voice' size={18} color='#333' />
+            <Icon type='voice' size={18} color={colors.textMenuLabel} />
             <Text
               style={styles.voiceDurationText}
             >
@@ -702,8 +679,8 @@ export default function ChatBubble({
                     close();
                   }}
                 >
-                  <Icon type='delete' size={16} color='#FF3B30' />
-                  <DropdownMenuText color='#FF3B30'>{t('common.delete')}</DropdownMenuText>
+                  <Icon type='delete' size={16} color={colors.danger} />
+                  <DropdownMenuText color={colors.danger}>{t('common.delete')}</DropdownMenuText>
                 </DropdownMenuItem>
               </>
             )}
@@ -814,26 +791,26 @@ export default function ChatBubble({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   toolbarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 12,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
+    borderTopColor: colors.borderToolbarTop,
     gap: 10,
   },
   toolbarButton: {
     width: chatBubbleToolbar.buttonSize,
     height: chatBubbleToolbar.buttonSize,
     borderRadius: chatBubbleToolbar.buttonSize / 2,
-    backgroundColor: '#EAEAEA',
+    backgroundColor: colors.bgToolbarButton,
     alignItems: 'center',
     justifyContent: 'center',
   },
   toolbarButtonPlaying: {
-    backgroundColor: '#e6f4ff',
+    backgroundColor: colors.bgToolbarButtonPlaying,
   },
   loadingBorder: {
     position: 'absolute',
@@ -842,10 +819,9 @@ const styles = StyleSheet.create({
     borderRadius: chatBubbleToolbar.buttonSize / 2,
     borderWidth: 2,
     borderColor: 'transparent',
-    borderTopColor: '#34a8fb',
-    borderRightColor: '#34a8fb',
+    borderTopColor: colors.accentBlue,
+    borderRightColor: colors.accentBlue,
   },
-  // 基础包装容器（控制左右对齐）
   questionWrapper: {
     alignItems: 'flex-end',
     marginBottom: 12,
@@ -855,16 +831,15 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     width: '100%',
   },
-  // 气泡基础样式
   questionBubble: {
-    backgroundColor: '#E6E9F6',
+    backgroundColor: colors.bgBubbleQuestion,
     paddingHorizontal: 15,
     paddingVertical: 14,
     borderRadius: 20,
-    minWidth: 44, // 确保单个字时也有足够宽度
+    minWidth: 44,
   },
   answerBubble: {
-    backgroundColor: '#F9F9FB',
+    backgroundColor: colors.bgBubbleAnswer,
     paddingHorizontal: 15,
     paddingVertical: 14,
     borderRadius: 20,
@@ -889,24 +864,20 @@ const styles = StyleSheet.create({
   voiceDurationText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#252525',
+    color: colors.textHeading,
   },
   voiceHintText: {
     ...getTypographyStyle('footnote'),
-    color: '#666',
+    color: colors.textSecondary,
   },
-  // 文本基础样式
   questionText: {
-    color: '#252525',
+    color: colors.textHeading,
     ...getTypographyStyle('messageBody'),
   },
   answerText: {
-    color: '#252525',
+    color: colors.textHeading,
     ...getTypographyStyle('messageBody'),
   },
-  // -------------------------
-  // 小尺寸变体 (用于书签预览)
-  // -------------------------
   smallQuestionBubble: {
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -950,16 +921,16 @@ const styles = StyleSheet.create({
     maxHeight: 82,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#ACACAC',
-    backgroundColor: '#E5E5EA',
+    borderColor: colors.borderFileBlock,
+    backgroundColor: colors.bgFileBlock,
   },
   attachmentFileBlock: {
     width: 156,
     maxHeight: 82,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#ACACAC',
-    backgroundColor: '#E5E5EA',
+    borderColor: colors.borderFileBlock,
+    backgroundColor: colors.bgFileBlock,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
@@ -968,7 +939,7 @@ const styles = StyleSheet.create({
   },
   attachmentFileName: {
     fontSize: 15,
-    color: '#000000',
+    color: colors.textPrimary,
     fontWeight: 'bold',
     textAlign: 'left',
   },
@@ -980,23 +951,23 @@ const styles = StyleSheet.create({
   },
   attachmentFileType: {
     ...getTypographyStyle('footnote'),
-    color: '#999',
+    color: colors.textTertiary,
     textAlign: 'left',
   },
   locationPlaceholder: {
     width: 100,
     height: 80,
-    backgroundColor: '#F0F8FF',
+    backgroundColor: colors.bgFileBlock,
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#34A8FB',
+    borderColor: colors.borderFileBlock,
     paddingHorizontal: 6,
   },
   locationPlaceholderText: {
     fontSize: 9,
-    color: '#34A8FB',
+    color: colors.accentBlue,
     marginTop: 4,
     textAlign: 'center',
   },
@@ -1010,9 +981,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.1)',
   },
-
   moreMenuContainer: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgSurface,
     borderRadius: 34,
     padding: 10,
     width: 228,
@@ -1028,11 +998,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   moreMenuItemPressed: {
-    backgroundColor: '#F2F2F7',
+    backgroundColor: colors.bgMenuItemPressed,
   },
   moreMenuText: {
     ...getTypographyStyle('title3'),
-    color: '#333333',
+    color: colors.textMenuLabel,
     fontWeight: '500',
   },
 });

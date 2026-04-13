@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Icon } from './Icon';
 import { hostIconButtonSize, hostIconGlyphSize } from '../theme/tokens';
+import { useColors } from '../theme/useColors';
 
 interface HostIconButtonProps {
   iconType?: string;
@@ -45,10 +46,10 @@ export const HostIconButton: React.FC<HostIconButtonProps> = React.memo(
     size = hostIconButtonSize.md,
     borderRadius = size / 2,
     iconSize = hostIconGlyphSize.sm,
-    iconColor = '#0a0a0a',
-    activeIconColor = '#FFFFFF',
-    backgroundColor = '#DFDFE1',
-    activeBackgroundColor = '#0088FF',
+    iconColor,
+    activeIconColor,
+    backgroundColor,
+    activeBackgroundColor,
     wrapperStyle,
     style,
     iconStyle,
@@ -60,6 +61,12 @@ export const HostIconButton: React.FC<HostIconButtonProps> = React.memo(
     hitSlop,
     children,
   }) => {
+    const colors = useColors();
+    const finalIconColor = iconColor ?? colors.iconHostIconButton;
+    const finalActiveIconColor = activeIconColor ?? colors.iconHostIconButtonActive;
+    const finalBackgroundColor = backgroundColor ?? colors.bgHostIconButton;
+    const finalActiveBackgroundColor = activeBackgroundColor ?? colors.bgHostIconButtonActive;
+
     const scale = React.useRef(new Animated.Value(1)).current;
     const opacity = React.useRef(new Animated.Value(1)).current;
 
@@ -97,7 +104,7 @@ export const HostIconButton: React.FC<HostIconButtonProps> = React.memo(
               width: size,
               height: size,
               borderRadius,
-              backgroundColor: active ? activeBackgroundColor : backgroundColor,
+              backgroundColor: active ? finalActiveBackgroundColor : finalBackgroundColor,
             },
             disabled && styles.disabled,
             style,
@@ -119,7 +126,7 @@ export const HostIconButton: React.FC<HostIconButtonProps> = React.memo(
               <Icon
                 type={iconType}
                 size={iconSize}
-                color={active ? activeIconColor : iconColor}
+                color={active ? finalActiveIconColor : finalIconColor}
                 style={iconStyle}
                 disableTint={disableTint}
               />

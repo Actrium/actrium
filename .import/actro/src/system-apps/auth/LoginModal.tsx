@@ -18,6 +18,8 @@ import type { AboutPageKey } from '../settings/aboutPages';
 import { AboutWebViewModal } from '../settings/AboutWebViewModal';
 import { AppText } from '../../components';
 import { getTypographyStyle } from '../../theme/tokens';
+import { useColors } from '../../theme/useColors';
+import type { ColorTokens } from '../../theme/colors';
 
 interface LoginModalProps {
   visible: boolean;
@@ -39,6 +41,8 @@ export const LoginModal = ({
 }: LoginModalProps) => {
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
   const { step } = useLoginFlow({
     mode,
@@ -85,7 +89,7 @@ export const LoginModal = ({
     if (step === 'checking' || step === 'logging_in') {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1C69FF" />
+          <ActivityIndicator size="large" color={colors.authLoadingIndicator} />
           <AppText style={styles.loadingText}>{t('actr.auth.loggingIn')}</AppText>
         </View>
       );
@@ -94,7 +98,7 @@ export const LoginModal = ({
     if (step === 'authorizing') {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1C69FF" />
+          <ActivityIndicator size="large" color={colors.authLoadingIndicator} />
           <AppText style={styles.loadingText}>{t('actr.auth.authorizing')}</AppText>
         </View>
       );
@@ -149,6 +153,7 @@ export const LoginModal = ({
                 imageStyle={styles.modalBgImage}
                 resizeMode="cover"
               />
+              <View style={[styles.modalBg, styles.darkBg]} />
               <View style={styles.modalContentWrapper}>
                 <View style={styles.header}>
                   <AppText style={styles.title}>{t('actr.auth.login') + ' AskAway'}</AppText>
@@ -156,8 +161,8 @@ export const LoginModal = ({
                     iconType='close'
                     size={44}
                     iconSize={20}
-                    iconColor='#666'
-                    backgroundColor='#F0F0F0'
+                    iconColor={colors.authModalLoginCloseIcon}
+                    backgroundColor={colors.authModalLoginCloseBg}
                     wrapperStyle={styles.closeButton}
                     onPress={onClose}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -191,7 +196,7 @@ export const LoginModal = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -200,7 +205,7 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: '95%',
-    backgroundColor: 'rgba(203, 214, 253, 1)',
+    backgroundColor: colors.authModalLoginBg,
     borderRadius: 33,
     overflow: 'hidden',
     position: 'relative',
@@ -210,6 +215,9 @@ const styles = StyleSheet.create({
   },
   modalBgImage: {
     borderRadius: 33,
+  },
+  darkBg: {
+    backgroundColor: colors.authDarkBg,
   },
   modalContentWrapper: {
     paddingTop: 16,
@@ -227,7 +235,7 @@ const styles = StyleSheet.create({
   },
   title: {
     ...getTypographyStyle('title3'),
-    color: '#333333',
+    color: colors.authModalLoginTitle,
   },
   logoRow: {
     width: '100%',
@@ -240,7 +248,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#F0F0F0',
+    backgroundColor: colors.authModalLoginCloseBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -255,11 +263,11 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     ...getTypographyStyle('body'),
-    color: '#666',
+    color: colors.authLoadingText,
   },
   successText: {
     fontSize: 40,
     lineHeight: 40,
-    color: '#52C41A',
+    color: colors.authModalLoginSuccessText,
   },
 });

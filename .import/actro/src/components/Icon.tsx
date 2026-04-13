@@ -1,6 +1,7 @@
 import React from 'react';
 import { Image, StyleSheet } from 'react-native';
 import { hostIconGlyphSize } from '../theme/tokens';
+import { useColors } from '../theme/useColors';
 
 const IconSources: Record<string, any> = {
   extension_menu: require('../assets/icons/extension_menu.png'),
@@ -58,10 +59,12 @@ export const Icon: React.FC<IconProps> = React.memo(
     type,
     active = false,
     size = hostIconGlyphSize.sm,
-    color = '#0a0a0a',
+    color,
     style,
     disableTint = false,
   }) => {
+    const colors = useColors();
+    const finalColor = color ?? colors.iconDefault;
     const activeType = `${type}_active`;
     const activeSource = IconSources[activeType];
     const source = active ? activeSource || IconSources[type] : IconSources[type];
@@ -75,7 +78,7 @@ export const Icon: React.FC<IconProps> = React.memo(
           {
             height: size,
             width: size,
-            tintColor: shouldApplyTint ? color : undefined,
+            tintColor: shouldApplyTint ? finalColor : undefined,
           },
           style,
         ]}

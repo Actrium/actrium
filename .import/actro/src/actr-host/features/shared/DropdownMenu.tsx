@@ -15,6 +15,8 @@ import {
 import { AppText } from '../../../components';
 import { dropdownMenu, getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 type AnchorMode = 'center' | 'start' | 'end';
 type VerticalPlacement = 'auto' | 'top' | 'bottom';
@@ -87,6 +89,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   placement = 'auto',
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
+  const colors = useColors();
   const [triggerRect, setTriggerRect] = React.useState<TriggerRect | null>(null);
   const [menuSize, setMenuSize] = React.useState({
     width: estimatedWidth,
@@ -103,9 +106,14 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
       pendingActionRef.current = callback;
     }
     menuOpacity.stopAnimation();
-    menuOpacity.setValue(0);
-    setIsOpen(false);
-    setIsMeasured(false);
+    Animated.timing(menuOpacity, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      setIsOpen(false);
+      setIsMeasured(false);
+    });
   }, [menuOpacity]);
 
   const handleModalDismiss = React.useCallback(() => {
@@ -305,8 +313,16 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
           <TouchableWithoutFeedback onPress={() => close()}>
             <View style={styles.modalBackdrop}>
               <Animated.View
+                pointerEvents='none'
+                style={[
+                  StyleSheet.absoluteFill,
+                  { backgroundColor: 'rgba(0,0,0,0.1)', opacity: isMeasured ? menuOpacity : 0 },
+                ]}
+              />
+              <Animated.View
                 style={[
                   styles.dropdown,
+                  { backgroundColor: colors.bgSurface },
                   {
                     top: menuPosition.top,
                     left: menuPosition.left,
@@ -352,6 +368,7 @@ export const DropdownMenuItem: React.FC<{
   children: React.ReactNode;
   isActive?: boolean;
 }> = ({ onPress, children, isActive }) => {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}
@@ -359,9 +376,9 @@ export const DropdownMenuItem: React.FC<{
         styles.dropdownItem,
         {
           backgroundColor: isActive
-            ? '#D1D1D6'
+            ? colors.bgActionButtonActive
             : pressed
-            ? '#F2F2F7'
+            ? colors.bgMenuItemPressed
             : 'transparent',
         },
       ]}
@@ -375,8 +392,9 @@ export const DropdownMenuText: React.FC<{
   children: string;
   color?: string;
 }> = ({ children, color }) => {
+  const colors = useColors();
   return (
-    <AppText variant='menuLabel' style={[styles.dropdownText, color && { color }]}>
+    <AppText variant='menuLabel' style={[styles.dropdownText, { color: color ?? colors.textMenuLabel }]}>
       {children}
     </AppText>
   );
@@ -385,8 +403,9 @@ export const DropdownMenuText: React.FC<{
 export const DropdownMenuSubText: React.FC<{
   children: string;
 }> = ({ children }) => {
+  const colors = useColors();
   return (
-    <AppText variant='caption1' style={styles.dropdownSubText}>
+    <AppText variant='caption1' style={[styles.dropdownSubText, { color: colors.textTertiary }]}>
       {children}
     </AppText>
   );
@@ -395,11 +414,9 @@ export const DropdownMenuSubText: React.FC<{
 const styles = StyleSheet.create({
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'transparent',
   },
   dropdown: {
     position: 'absolute',
-    backgroundColor: '#FFFFFF',
     borderRadius: 34,
     padding: dropdownMenu.padding,
     gap: spacing.sm,
@@ -421,13 +438,11 @@ const styles = StyleSheet.create({
   },
   dropdownText: {
     ...getTypographyStyle('menuLabel'),
-    color: '#333333',
     fontWeight: '500',
     flexShrink: 1,
   },
   dropdownSubText: {
     ...getTypographyStyle('caption1'),
-    color: '#999999',
     marginTop: spacing.xxxs,
     fontWeight: '400',
     flexShrink: 1,

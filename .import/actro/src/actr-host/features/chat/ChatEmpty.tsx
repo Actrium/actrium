@@ -14,6 +14,8 @@ import { useTabIdMapStore } from '../../store/useTabIdMapStore';
 import { getHostLayoutTokens } from '../../../utils/layout';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 export default function ChatEmpty() {
   const { width } = useWindowDimensions();
@@ -25,18 +27,12 @@ export default function ChatEmpty() {
   const appInfoByLang = useMemo(() => {
     return appInfo?.language_contents['zh-Hans'];
   }, [appInfo?.app_id]);
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
 
   return (
-    <TouchableWithoutFeedback
-      onPress={Keyboard.dismiss}
-      accessible={false}
-    >
-      <View
-        style={[
-          styles.centerContent,
-          { maxWidth: layoutTokens.contentMaxWidth },
-        ]}
-      >
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <View style={[styles.centerContent, { maxWidth: layoutTokens.contentMaxWidth }]}>
         <View style={styles.logoContainer}>
           <AppText
             variant={layoutTokens.isTablet ? 'emptyTitle' : 'emptyTitleCompact'}
@@ -53,7 +49,7 @@ export default function ChatEmpty() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   centerContent: {
     flex: 1,
     width: '100%',
@@ -65,12 +61,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   appName: {
-    color: '#1e2939',
+    color: colors.textAppName,
   },
   tabTitle: {
-    color: '#364153',
     marginTop: spacing.lg,
     ...getTypographyStyle('body'),
+    color: colors.textWelcome,
   },
   tabTitleBold: {
     fontWeight: '600',
