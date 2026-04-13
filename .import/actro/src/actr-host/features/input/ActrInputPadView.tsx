@@ -65,6 +65,7 @@ export default function ActrInputPadView(props: ActrInputPadViewProps) {
           paddingTop: layoutTokens.isTablet ? 8 : 8,
           paddingBottom: layoutTokens.inputVerticalPadding,
           maxWidth: layoutTokens.contentMaxWidth,
+          backgroundColor: colors.bgInputPadPill,
         },
       ]}
     >
@@ -76,6 +77,7 @@ export default function ActrInputPadView(props: ActrInputPadViewProps) {
             paddingHorizontal: layoutTokens.isTablet ? 13 : 11,
             paddingTop: layoutTokens.isTablet ? 16 : 14,
             paddingBottom: layoutTokens.isTablet ? 12 : 9,
+            backgroundColor: colors.bgInputPill
           },
         ]}
       >

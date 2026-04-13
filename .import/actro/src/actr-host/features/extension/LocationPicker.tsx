@@ -18,6 +18,8 @@ import { GlobalAlert } from '../../../components';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface LocationPickerProps {
   visible: boolean;
@@ -35,6 +37,8 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   onSelect,
 }) => {
   const { t } = useTranslation();
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const [mapRegion, setMapRegion] = useState<Region | null>(null);
   const mapShotRef = useRef<ViewShot>(null);
   const currentRegionRef = useRef<Region | null>(null);
@@ -302,17 +306,17 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: colors.bgOverlay,
     justifyContent: 'center',
     alignItems: 'center',
   },
   mapModalContent: {
     width: 400,
     height: 400,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgSurface,
     borderRadius: 34,
     overflow: 'hidden',
     ...HOST_SHADOWS.mapSurface,
@@ -341,7 +345,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   confirmButton: {
-    backgroundColor: '#34A8FB',
+    backgroundColor: colors.accentBlue,
     width: 140,
     height: 48,
     borderRadius: 34,
@@ -350,7 +354,7 @@ const styles = StyleSheet.create({
     ...HOST_SHADOWS.mapActionButton,
   },
   confirmButtonText: {
-    color: '#fff',
+    color: colors.textInverse,
     ...getTypographyStyle('bodyInput'),
     fontWeight: 'bold',
   },

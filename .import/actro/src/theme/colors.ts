@@ -47,6 +47,7 @@ export interface ColorTokens {
   bgInput: string;
   bgInputPhone: string;
   bgInputPill: string;
+  bgInputPadPill: string;
   bgInputMobile: string;
   bgTag: string;
   bgTagSelected: string;
@@ -192,6 +193,7 @@ export const lightColors: ColorTokens = {
   bgInput: '#F5F5F7',
   bgInputPhone: '#E3E3E3',
   bgInputPill: '#FFFFFF',
+  bgInputPadPill: '#fff',
   bgInputMobile: '#F2F2F6',
   bgTag: '#F5F5F7',
   bgTagSelected: '#007AFF',
@@ -350,6 +352,7 @@ export const darkColors: ColorTokens = {
   bgInput: '#F5F5F7',
   bgInputPhone: '#4A4A4A',
   bgInputPill: '#6A6A6A',
+  bgInputPadPill: '#3A3A3C',
   bgInputMobile: '#3A3A3C',
   bgTag: '#7676801F',
   bgTagSelected: '#34A8FB',
@@ -363,8 +366,8 @@ export const darkColors: ColorTokens = {
   bgMenuDivider: '#414141',
   bgToolbarButton: '#414141',
   bgToolbarButtonPlaying: '#e6f4ff',
-  bgActionButton: '#7676801F',
-  bgActionButtonActive: '#3A3A3C',
+  bgActionButton: '#414141',
+  bgActionButtonActive: '#4E4E52',
   bgAttachment: '#E5E5EA',
   bgAttachmentItem: '#f5f5f5',
   bgFileBlock: '#2C2C2E',
