@@ -17,6 +17,7 @@ import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import { SwipeRemoveActionRow } from '../components/SwipeRemoveActionRow';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
 import { isAndroid } from '../../utils/device';
+import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
 
 type TFlatBookmarkItem = TBookmarkItem & {
   isLastInGroup: boolean;
@@ -44,6 +45,30 @@ export default function BookmarksPhoneView({
   const headerStyle = React.useMemo(
     () => [styles.header, { paddingTop: insets.top + 8 }],
     [insets.top],
+  );
+
+  const headerNode = (
+    <React.Fragment>
+      {Platform.OS === 'ios' && PhoneNavigationBar ? (
+        <PhoneNavigationBar
+          title='AskAway'
+          showLargeTitle={true}
+          style={{ width: '100%', height: insets.top + 66 }}
+        />
+      ) : (
+        <View style={headerStyle}>
+          <AppText
+            style={[
+              styles.headerTitle,
+              isAndroid ? { marginTop: 4 } : {},
+              Platform.OS === 'android' && styles.androidTitleSpacing,
+            ]}
+          >
+            AskAway
+          </AppText>
+        </View>
+      )}
+    </React.Fragment>
   );
 
   const flatBookmarks = React.useMemo<TFlatBookmarkItem[]>(
@@ -107,17 +132,7 @@ export default function BookmarksPhoneView({
   if (isLoading) {
     return (
       <View style={styles.container}>
-        <View style={headerStyle}>
-          <AppText
-            style={[
-              styles.headerTitle,
-              isAndroid ? { marginTop: 4 } : {},
-              Platform.OS === 'android' && styles.androidTitleSpacing,
-            ]}
-          >
-            AskAway
-          </AppText>
-        </View>
+        {headerNode}
         <View style={styles.centerContainer}>
           <ActivityIndicator size='large' color='#34A8FB' />
           <AppText style={styles.centerText}>{t('common.loading')}</AppText>
@@ -129,17 +144,7 @@ export default function BookmarksPhoneView({
   if (error) {
     return (
       <View style={styles.container}>
-        <View style={headerStyle}>
-          <AppText
-            style={[
-              styles.headerTitle,
-              isAndroid ? { marginTop: 4 } : {},
-              Platform.OS === 'android' && styles.androidTitleSpacing,
-            ]}
-          >
-            AskAway
-          </AppText>
-        </View>
+        {headerNode}
         <View style={styles.centerContainer}>
           <AppText style={styles.errorText}>{error}</AppText>
           <TouchableOpacity style={styles.retryButton} onPress={loadBookmarks}>
@@ -155,17 +160,7 @@ export default function BookmarksPhoneView({
   if (!hasBookmarks) {
     return (
       <View style={styles.container}>
-        <View style={headerStyle}>
-          <AppText
-            style={[
-              styles.headerTitle,
-              isAndroid ? { marginTop: 4 } : {},
-              Platform.OS === 'android' && styles.androidTitleSpacing,
-            ]}
-          >
-            AskAway
-          </AppText>
-        </View>
+        {headerNode}
         <View style={styles.centerContainer}>
           <AppText style={styles.emptyText}>{t('actr.bookmark.empty')}</AppText>
           <AppText style={styles.emptySubText}>
@@ -178,17 +173,7 @@ export default function BookmarksPhoneView({
 
   return (
     <View style={styles.container}>
-      <View style={headerStyle}>
-        <AppText
-          style={[
-            styles.headerTitle,
-            isAndroid ? { marginTop: 4 } : {},
-            Platform.OS === 'android' && styles.androidTitleSpacing,
-          ]}
-        >
-          AskAway
-        </AppText>
-      </View>
+      {headerNode}
 
       <FlatList
         style={styles.content}
@@ -236,7 +221,7 @@ const styles = StyleSheet.create({
   listItemGroupTop: {
     borderTopLeftRadius: 13,
     borderTopRightRadius: 13,
-    marginTop: 12,
+    marginTop: 24,
   },
   listItemGroupBottom: {
     borderBottomLeftRadius: 13,

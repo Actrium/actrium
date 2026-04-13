@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   Platform,
   ScrollView,
@@ -15,6 +14,7 @@ import { getTypographyStyle, spacing } from '../../theme/tokens';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
 import { isAndroid } from '../../utils/device';
+import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
 
 interface SettingsMainProps {
   onAccountPress: () => void;
@@ -39,92 +39,117 @@ export const SettingsMain = ({
   const insets = useSafeAreaInsets();
   const userInfo = useUserStore((state) => state.userInfo);
   const isLoggedIn = !!userInfo;
-  // 中文注释：顶部留白拆成「安全区高度 + 固定设计留白」，
-  // 用来验证 settings 主页是否能拿到宿主传入的真实顶部 safe-area。
-  const scrollContentStyle = React.useMemo(
-    () => [
-      styles.scrollContent,
-      {
-        paddingTop: insets.top + 8,
-        paddingHorizontal: isTablet ? 40 : 16,
-      },
-    ],
-    [insets.top, isTablet],
-  );
 
   return (
-    <ScrollView
-      style={styles.content}
-      contentContainerStyle={scrollContentStyle}
-      showsVerticalScrollIndicator={false}
+    <View
+      style={[
+        styles.container,
+        isAndroid
+          ? {
+              paddingTop: insets.top + 8,
+            }
+          : {},
+      ]}
     >
       {/* Page Title */}
-      <AppText
-        style={[styles.pageTitle, 
-          isAndroid ? {marginTop: 4} : {},
-          Platform.OS === 'android' && styles.androidTitleSpacing]}
+      {Platform.OS === 'ios' && PhoneNavigationBar ? (
+        <PhoneNavigationBar
+          title='AskAway'
+          showLargeTitle={true}
+          style={{ width: '100%', height: insets.top + 66 }}
+        />
+      ) : (
+        <AppText
+          style={[
+            styles.pageTitle,
+            isAndroid ? { marginTop: 4 } : {},
+            Platform.OS === 'android' && styles.androidTitleSpacing,
+            { paddingHorizontal: isTablet ? 40 : 16 },
+          ]}
+        >
+          AskAway
+        </AppText>
+      )}
+
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingHorizontal: isTablet ? 40 : 16 },
+        ]}
+        showsVerticalScrollIndicator={false}
       >
-        AskAway
-      </AppText>
+        {/* Account Section */}
+        <TouchableOpacity
+          style={styles.accountCard}
+          activeOpacity={0.8}
+          onPress={isLoggedIn ? onAccountPress : onLoginPress}
+        >
+          <Image
+            source={
+              isLoggedIn &&
+              userInfo.user.avatar &&
+              userInfo.user.avatar !== 'none'
+                ? { uri: userInfo.user.avatar }
+                : require('../../assets/login/avatar_default.png')
+            }
+            style={styles.avatar}
+          />
+          <View style={styles.accountInfo}>
+            <AppText
+              style={styles.accountName}
+              numberOfLines={1}
+              ellipsizeMode='tail'
+            >
+              {isLoggedIn
+                ? userInfo.user.display_name || t('actr.settings.account')
+                : t('actr.auth.login')}
+            </AppText>
+          </View>
+          <Icon type='next' size={16} color='#fff' />
+        </TouchableOpacity>
 
-      {/* Account Section */}
-      <TouchableOpacity
-        style={styles.accountCard}
-        activeOpacity={0.8}
-        onPress={isLoggedIn ? onAccountPress : onLoginPress}
-      >
-        <Image
-          source={
-            isLoggedIn && userInfo.user.avatar && userInfo.user.avatar !== 'none'
-              ? { uri: userInfo.user.avatar }
-              : require('../../assets/login/avatar_default.png')
-          }
-          style={styles.avatar}
-        />
-        <View style={styles.accountInfo}>
-          <AppText style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
-            {isLoggedIn ? (userInfo.user.display_name || t('actr.settings.account')) : t('actr.auth.login')}
-          </AppText>
-        </View>
-        <Icon type='next' size={16} color='#fff' />
-      </TouchableOpacity>
-
-      {/* Settings Groups */}
-      <View style={styles.groupCard}>
-        <SettingsItem
-          icon='feedback'
-          label={t('actr.settings.feedback')}
-          onPress={onFeedbackPress}
-        />
-        <View style={styles.itemDivider} />
-        <SettingsItem
-          icon='askaway_gery'
-          label={t('actr.settings.aboutAskAway')}
-          value={appVersionText}
-          onPress={onAboutPress}
-        />
-      </View>
-
-      {/* Logout Section - 仅登录后显示 */}
-      {isLoggedIn && (
-        <View style={styles.logoutCard}>
+        {/* Settings Groups */}
+        <View style={styles.groupCard}>
           <SettingsItem
-            icon='logout'
-            iconColor='#FF383C'
-            label={t('actr.settings.logout')}
-            showChevron={false}
-            destructive={true}
-            onPress={onLogout}
+            icon='feedback'
+            label={t('actr.settings.feedback')}
+            onPress={onFeedbackPress}
+          />
+          <View style={styles.itemDivider} />
+          <SettingsItem
+            icon='askaway_gery'
+            label={t('actr.settings.aboutAskAway')}
+            value={appVersionText}
+            onPress={onAboutPress}
           />
         </View>
-      )}
-    </ScrollView>
+
+        {/* Logout Section - 仅登录后显示 */}
+        {isLoggedIn && (
+          <View style={styles.logoutCard}>
+            <SettingsItem
+              icon='logout'
+              iconColor='#FF383C'
+              label={t('actr.settings.logout')}
+              showChevron={false}
+              destructive={true}
+              onPress={onLogout}
+            />
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
   content: {
     flex: 1,
+    marginTop: 24,
   },
   scrollContent: {
     paddingBottom: 40,
