@@ -557,6 +557,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     paddingRight: 34,
     height: loadApp.inputHeight,
     paddingVertical: 0,
+    color: colors.textSecondary,
     ...getTypographyStyle(loadApp.inputTypographyVariant),
   },
   padInputDock: {
@@ -567,7 +568,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   },
   padInputContainer: {
     height: loadApp.inputHeight,
-    backgroundColor: colors.bgScanArea,
+    backgroundColor: colors.bgLoadDark,
     ...HOST_SHADOWS.inputPill,
   },
   phoneInputContainer: {

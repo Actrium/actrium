@@ -135,7 +135,7 @@ export default function ActrInput({
         styles.rootContainer,
         {
           paddingBottom: layoutTokens.inputBottomPadding,
-          backgroundColor: isMobileVariant ? colors.bgInputMobile : colors.bgInputPill,
+          backgroundColor: isMobileVariant ? colors.bgInputMobile : colors.bgInputMobile,
         },
       ]}
     >
@@ -260,7 +260,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     alignSelf: 'center',
   },
   inputWrapper: {
-    backgroundColor: colors.bgInputPill,
+    backgroundColor: colors.bgInputPadPill,
     borderRadius: 20,
     paddingHorizontal: 13,
     paddingTop: 18,

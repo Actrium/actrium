@@ -235,6 +235,9 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
                   style={[
                     styles.feedbackInputWrapper,
                     isPhone && styles.feedbackInputWrapperPhone,
+                    {
+                      backgroundColor: colors.bgInputPhone,
+                    }
                   ]}
                 >
                   <TextInput
