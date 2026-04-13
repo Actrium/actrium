@@ -15,6 +15,8 @@ import { useActrMessageFlow } from './hooks/useActrMessageFlow';
 import { LoginModal, AuthorizeModal } from '../../../system-apps/auth';
 import { getTypographyStyle } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 const { NativeLogger } = NativeModules;
 
@@ -34,6 +36,8 @@ export default function ActrInput({
   const layoutTokens = React.useMemo(() => getHostLayoutTokens(width), [width]);
   const isMobileVariant =
     variant != null ? variant === 'mobile' : !layoutTokens.isTablet;
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
 
   const inputText = useInputStore((state) => state.inputs[tab.id]?.text || '');
   const editingMessageId = useInputStore(
@@ -131,7 +135,7 @@ export default function ActrInput({
         styles.rootContainer,
         {
           paddingBottom: layoutTokens.inputBottomPadding,
-          backgroundColor: isMobileVariant ? '#F2F2F6' : '#fff',
+          backgroundColor: isMobileVariant ? colors.bgInputMobile : colors.bgInputPill,
         },
       ]}
     >
@@ -243,10 +247,9 @@ export default function ActrInput({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   rootContainer: {
-    backgroundColor: '#fff',
-    width: '100%', // 确保绝对全宽
+    width: '100%',
   },
   container: {
     paddingHorizontal: 16,
@@ -257,21 +260,20 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   inputWrapper: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgInputPill,
     borderRadius: 20,
     paddingHorizontal: 13,
     paddingTop: 18,
     paddingBottom: 9,
-    // 移除边框，保留纯阴影
     ...HOST_SHADOWS.inputPill,
   },
   input: {
     ...getTypographyStyle('editorInput'),
-    color: '#333',
+    color: colors.textInput,
     minHeight: 24,
     textAlignVertical: 'top',
     padding: 0,
-    marginBottom: 0, // 移动到底部容器
+    marginBottom: 0,
   },
   inputRow: {
     flexDirection: 'row',
@@ -286,7 +288,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgInputPill,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
@@ -294,10 +296,10 @@ const styles = StyleSheet.create({
   },
   mobileInputText: {
     ...getTypographyStyle('editorInputCompact'),
-    color: '#333',
+    color: colors.textInput,
     padding: 0,
     textAlignVertical: 'top',
   },
 });
 
-export type ActrInputStyles = typeof styles;
+export type ActrInputStyles = ReturnType<typeof makeStyles>;

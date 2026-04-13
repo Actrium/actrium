@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
+import { useColors } from '../../../theme/useColors';
 
 interface CheckboxProps {
   checked: boolean;
@@ -12,6 +13,7 @@ export const Checkbox: React.FC<CheckboxProps> = ({
   onPress,
   size = 20,
 }) => {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}
@@ -33,8 +35,8 @@ export const Checkbox: React.FC<CheckboxProps> = ({
             height: size,
             borderRadius: size / 2,
             borderWidth: checked ? 0 : 2,
-            backgroundColor: checked ? '#34A8FB' : 'transparent',
-            borderColor: checked ? '#34A8FB' : '#D9D9D9',
+            backgroundColor: checked ? colors.accentBlue : 'transparent',
+            borderColor: checked ? colors.accentBlue : colors.borderCheckboxUnchecked,
           },
         ]}
       />

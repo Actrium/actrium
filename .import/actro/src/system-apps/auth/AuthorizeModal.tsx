@@ -15,6 +15,8 @@ import { HostIconButton } from '../../components';
 import { getHostLayoutTokens } from '../../utils/layout';
 import { AppText } from '../../components';
 import { getTypographyStyle } from '../../theme/tokens';
+import { useColors } from '../../theme/useColors';
+import type { ColorTokens } from '../../theme/colors';
 
 interface AuthorizeModalProps {
   visible: boolean;
@@ -31,6 +33,8 @@ export const AuthorizeModal = ({
 }: AuthorizeModalProps) => {
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
   const appInfo = useAppStore((state) => state.apps[appId]);
 
@@ -108,8 +112,8 @@ export const AuthorizeModal = ({
                     iconType='close'
                     size={44}
                     iconSize={20}
-                    iconColor='#666'
-                    backgroundColor='#78788029'
+                    iconColor={colors.authModalAuthorizeCloseIcon}
+                    backgroundColor={colors.authModalAuthorizeCloseBg}
                     wrapperStyle={styles.closeButton}
                     onPress={onClose}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -138,7 +142,7 @@ export const AuthorizeModal = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -147,7 +151,7 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: '95%',
-    backgroundColor: '#E8E8E9',
+    backgroundColor: colors.authModalAuthorizeBg,
     borderRadius: 33,
     overflow: 'hidden',
   },
@@ -180,11 +184,11 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
   },
   headerLogoPlaceholder: {
-    backgroundColor: '#E5E5E5',
+    backgroundColor: colors.authModalAuthorizePlaceholder,
   },
   headerTitle: {
     ...getTypographyStyle('title3'),
-    color: '#333333',
+    color: colors.authModalAuthorizeTitle,
     flexShrink: 1,
   },
   closeButton: {
@@ -193,7 +197,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#78788029',
+    backgroundColor: colors.authModalAuthorizeCloseBg,
     alignItems: 'center',
     justifyContent: 'center',
   },

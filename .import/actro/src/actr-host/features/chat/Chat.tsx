@@ -57,6 +57,8 @@ import {
   scrollToBottomButton,
   spacing,
 } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
@@ -77,6 +79,7 @@ interface MessageRowProps {
   handleEdit: (msg: IMessage) => void;
   handleCopy: (text: string) => void;
   handleFeedback?: (msgId: string) => void;
+  styles: ReturnType<typeof makeStyles>;
 }
 
 const MessageRow = React.memo(function MessageRow({
@@ -91,6 +94,7 @@ const MessageRow = React.memo(function MessageRow({
   handleEdit,
   handleCopy,
   handleFeedback,
+  styles,
 }: MessageRowProps) {
   const { t } = useTranslation();
   const item = useMessageStore(
@@ -227,7 +231,7 @@ const MessageRow = React.memo(function MessageRow({
           (item.progress === Progress.pending ||
             item.progress === Progress.processing) ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size='small' color='#999' />
+            <ActivityIndicator size='small' color={styles.loadingIndicatorColor} />
             <AppText style={styles.loadingText}>{t('actr.chat.thinking')}</AppText>
           </View>
         ) : null}
@@ -250,6 +254,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const { width } = useWindowDimensions();
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const messageIds = useMessageStore(
     useCallback(
@@ -561,6 +567,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           handleEdit={handleEdit}
           handleCopy={handleCopy}
           handleFeedback={setFeedbackMessageId}
+          styles={styles}
         />
       );
     },
@@ -574,6 +581,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       toggleSelection,
       handleEdit,
       handleCopy,
+      styles,
     ],
   );
 
@@ -582,21 +590,15 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     return (
       <View style={{ paddingVertical: 20 }}>
         {isLoadingMore ? (
-          <ActivityIndicator size='small' color='#999' />
+          <ActivityIndicator size='small' color={colors.textTertiary} />
         ) : (
-          <AppText
-            style={{
-              textAlign: 'center',
-              color: '#999',
-              ...getTypographyStyle('footnote'),
-            }}
-          >
+          <AppText style={styles.loadMoreText}>
             {t('actr.chat.loadMore')}
           </AppText>
         )}
       </View>
     );
-  }, [isLoadingMore, showLoadMoreHeader, t]);
+  }, [isLoadingMore, showLoadMoreHeader, t, colors, styles]);
 
   // 计算选中的数量
   const selectedCount = useMemo(() => {
@@ -641,12 +643,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   }, [tab.id, deleteSelectedMessages, exitSelectionMode, t]);
 
   return (
-    <View
-      style={[
-        styles.mainContainer,
-        { backgroundColor: layoutTokens.isTablet ? '#ffffff' : '#F2F2F6' },
-      ]}
-    >
+    <View style={styles.mainContainer}>
       <Reanimated.View style={[styles.contentArea, contentAreaAnimatedStyle]}>
         {hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore ? (
           <View style={{ flex: 1 }}>
@@ -707,7 +704,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         style={[
           styles.inputContainer,
           {
-            backgroundColor: layoutTokens.isTablet ? '#fff' : '#F2F2F6',
+            backgroundColor: layoutTokens.isTablet ? colors.bgChatTablet : colors.bgChatPage,
             marginTop: layoutTokens.isTablet ? 8 : 0,
             marginBottom: shouldApplyKeyboardInset ? keyboardInset : 0,
           },
@@ -745,93 +742,99 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    // 移除 paddingBottom，由内部组件处理
-  },
-  contentArea: {
-    flex: 1,
-    width: '100%',
-  },
-  inputContainer: {
-    width: '100%',
-    backgroundColor: '#fff',
-  },
-  inputInner: {
-    width: '100%', // 移除 maxWidth，让 ActrInput 容器占满全宽
-  },
-  scrollToBottomContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: scrollToBottomButton.bottomOffset,
-    alignItems: 'center',
-    zIndex: 99,
-    pointerEvents: 'box-none',
-  },
-  scrollToBottomContainerPad: {
-    bottom: scrollToBottomButton.bottomOffsetPad,
-  },
-  chatScrollView: {
-    flex: 1,
-    width: '100%', // 确保滚动条在窗口最边缘
-  },
-  chatContent: {
-    width: '100%',
-    alignItems: 'stretch', // 允许子项宽度自动扩展，然后由子项自己的 alignSelf: 'center' 处理居中
-  },
-  listHeader: {
-    paddingBottom: spacing.xl,
-  },
-  messageListWrapper: {
-    width: '100%',
-    alignSelf: 'center', // 确保在 FlatList 内部居中
-  },
-  messageGroup: {
-    width: '100%',
-    marginBottom: spacing.md,
-  },
-  messageGroupWithCheckbox: {
-    paddingLeft: 30, // 为复选框留出空间
-  },
-  bubbleWithCheckbox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    position: 'relative',
-    marginBottom: spacing.xxs,
-    width: '100%',
-  },
-  questionBubbleWrapper: {
-    flex: 1,
-    alignItems: 'flex-end',
-    minWidth: 0, // 允许 flex 子元素收缩
-  },
-  checkboxContainer: {
-    position: 'absolute',
-    left: -30,
-    top: 14, // 与气泡框第一行的 paddingVertical 对齐
-    zIndex: 10,
-  },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xxs,
-  },
-  loadingText: {
-    marginLeft: spacing.sm,
-    ...getTypographyStyle('body'),
-    color: '#999',
-  },
-  deleteButtonContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1001,
-    pointerEvents: 'box-none',
-  },
+const makeStyles = (colors: ColorTokens) => ({
+  loadingIndicatorColor: colors.textTertiary,
+  ...StyleSheet.create({
+    mainContainer: {
+      flex: 1,
+      backgroundColor: colors.bgChatPage,
+    },
+    contentArea: {
+      flex: 1,
+      width: '100%',
+    },
+    inputContainer: {
+      width: '100%',
+    },
+    inputInner: {
+      width: '100%',
+    },
+    scrollToBottomContainer: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: scrollToBottomButton.bottomOffset,
+      alignItems: 'center',
+      zIndex: 99,
+      pointerEvents: 'box-none',
+    },
+    scrollToBottomContainerPad: {
+      bottom: scrollToBottomButton.bottomOffsetPad,
+    },
+    chatScrollView: {
+      flex: 1,
+      width: '100%',
+    },
+    chatContent: {
+      width: '100%',
+      alignItems: 'stretch',
+    },
+    listHeader: {
+      paddingBottom: spacing.xl,
+    },
+    loadMoreText: {
+      textAlign: 'center',
+      color: colors.textTertiary,
+      ...getTypographyStyle('footnote'),
+    },
+    messageListWrapper: {
+      width: '100%',
+      alignSelf: 'center',
+    },
+    messageGroup: {
+      width: '100%',
+      marginBottom: spacing.md,
+    },
+    messageGroupWithCheckbox: {
+      paddingLeft: 30,
+    },
+    bubbleWithCheckbox: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      position: 'relative',
+      marginBottom: spacing.xxs,
+      width: '100%',
+    },
+    questionBubbleWrapper: {
+      flex: 1,
+      alignItems: 'flex-end',
+      minWidth: 0,
+    },
+    checkboxContainer: {
+      position: 'absolute',
+      left: -30,
+      top: 14,
+      zIndex: 10,
+    },
+    loadingContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.xxs,
+    },
+    loadingText: {
+      marginLeft: spacing.sm,
+      ...getTypographyStyle('body'),
+      color: colors.textTertiary,
+    },
+    deleteButtonContainer: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1001,
+      pointerEvents: 'box-none',
+    },
+  }),
 });

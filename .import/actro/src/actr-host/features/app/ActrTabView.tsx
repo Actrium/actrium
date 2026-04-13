@@ -51,6 +51,8 @@ import { isTablet, isAndroid, isPhone } from '../../../utils/device';
 import { useExtensionPanelVisibility } from '../../hooks/useExtensionPanelVisibility';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -79,6 +81,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const { top: topInsetRaw } = useSafeAreaInsets();
   const { t } = useTranslation();
   const gate = evaluateTabGate(tab);
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
 
 
   // 🆕 通过 tab.id 获取 appId
@@ -411,87 +415,31 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   if (isActive && gate.status === 'blocked') {
     return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 16,
-          backgroundColor: '#1a1a1a',
-        }}
-      >
-        <AppText
-          style={{
-            color: '#ff6b6b',
-            ...getTypographyStyle('statusTitle'),
-            marginBottom: spacing.md,
-          }}
-        >
-          已阻止运行
-        </AppText>
-        <Text style={{ color: '#ddd', fontSize: 13, textAlign: 'center' }}>
+      <View style={styles.stateContainer}>
+        <AppText style={styles.errorText}>已阻止运行</AppText>
+        <Text style={styles.errorDetail}>
           {gate.blockedReason ?? '不满足宿主 contract/权限策略'}
         </Text>
       </View>
     );
   }
 
-  // 加载中（仅显示当前 active 的 tab）
   if (isActive && isLoading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: '#0a0a0a',
-        }}
-      >
-        <ActivityIndicator size='large' color='#007AFF' />
-        <AppText
-          style={{
-            color: '#888',
-            ...getTypographyStyle('body'),
-            marginTop: spacing.lg,
-          }}
-        >
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size='large' color={colors.brandPrimary} />
+        <AppText style={styles.loadingText}>
           初始化 Single Engine (usePanels mode)...
         </AppText>
       </View>
     );
   }
 
-  // 加载错误
   if (isActive && loadError) {
     return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 16,
-          backgroundColor: '#1a1a1a',
-        }}
-      >
-        <AppText
-          style={{
-            color: '#ff6b6b',
-            ...getTypographyStyle('statusTitle'),
-            marginBottom: spacing.md,
-          }}
-        >
-          Engine 初始化失败
-        </AppText>
-        <Text
-          style={{
-            color: '#ccc',
-            fontSize: 14,
-            textAlign: 'center',
-            marginBottom: 8,
-          }}
-        >
-          {loadError.message}
-        </Text>
+      <View style={styles.stateContainer}>
+        <AppText style={styles.errorText}>Engine 初始化失败</AppText>
+        <Text style={styles.errorDetail}>{loadError.message}</Text>
       </View>
     );
   }
@@ -562,15 +510,15 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
 export default ActrTabView;
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   threeColumn: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#ffffff',
-    minWidth: 0, // 允许内部列在窗口缩小时收缩
+    backgroundColor: colors.bgColumn,
+    minWidth: 0,
   },
   threeColumnAndroidPhone: {
-    overflow: 'hidden', // 防止横向滚动条
+    overflow: 'hidden',
     borderTopLeftRadius: 38,
     borderTopRightRadius: 38,
   },
@@ -580,21 +528,20 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
-    backgroundColor: '#000'
+    backgroundColor: colors.bgScreen,
   },
   leftPanel: {
     borderRightWidth: 1,
     borderRightColor: LAYOUT.BORDER_COLOR,
     flexShrink: 1,
-    minWidth: LAYOUT.LEFT_PANEL_MIN_WIDTH, // 最小宽度，允许 Yoga 自动收缩
+    minWidth: LAYOUT.LEFT_PANEL_MIN_WIDTH,
   },
   centerColumn: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.bgColumn,
     minWidth: LAYOUT.CENTER_MIN_WIDTH,
     justifyContent: 'space-between',
   },
-  // 扩展面板打开时覆盖在对话区域上的透明遮罩，点击可关闭面板
   dismissOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 10,
@@ -605,17 +552,35 @@ const styles = StyleSheet.create({
   },
   empty: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: colors.bgEmpty,
   },
-  loading: {
+  stateContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1a1a2a',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: colors.bgBlocked,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgLoading,
+  },
+  errorText: {
+    color: colors.textError,
+    ...getTypographyStyle('statusTitle'),
+    marginBottom: spacing.md,
+  },
+  errorDetail: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
   },
   loadingText: {
-    color: '#888',
+    color: colors.textLoading,
     ...getTypographyStyle('body'),
+    marginTop: spacing.lg,
   },
   tabHost: {
     flex: 1,

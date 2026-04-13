@@ -10,6 +10,8 @@ import {
   type AlertButton,
   type AlertOptions,
 } from 'react-native';
+import { useColors } from '../theme/useColors';
+import type { ColorTokens } from '../theme/colors';
 
 export type GlobalAlertModalButton = AlertButton & {
   variant?: 'primary';
@@ -41,6 +43,9 @@ export const GlobalAlertModal: React.FC<GlobalAlertModalProps> = ({
   const dialogOpacity = React.useRef(new Animated.Value(0)).current;
   const dialogScale = React.useRef(new Animated.Value(1.08)).current;
   const isClosingRef = React.useRef(false);
+
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
 
   React.useEffect(() => {
     if (!visible) {
@@ -170,7 +175,7 @@ export const GlobalAlertModal: React.FC<GlobalAlertModalProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   host: {
     flex: 1,
   },
@@ -193,14 +198,14 @@ const styles = StyleSheet.create({
   dialog: {
     width: 300,
     borderRadius: 36,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgSurface,
     padding: 14,
   },
   title: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '700',
-    color: '#000000',
+    color: colors.textModalTitle,
     textAlign: 'left',
     paddingLeft: 8,
     paddingTop: 8,
@@ -210,7 +215,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 17,
     lineHeight: 22,
-    color: '#000000',
+    color: colors.textPrimary,
     textAlign: 'left',
     paddingBottom: 14,
   },
@@ -228,7 +233,7 @@ const styles = StyleSheet.create({
   button: {
     height: 48,
     borderRadius: 26,
-    backgroundColor: '#d5d5da',
+    backgroundColor: colors.bgCancelButtonPhone,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
@@ -237,7 +242,7 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   buttonPrimary: {
-    backgroundColor: '#1677FF',
+    backgroundColor: colors.brandPrimary,
   },
   buttonFull: {
     width: '100%',
@@ -248,16 +253,16 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 17,
     lineHeight: 22,
-    color: '#101010',
+    color: colors.textPrimary,
   },
   buttonTextPrimary: {
-    color: '#FFFFFF',
+    color: colors.textInverse,
     fontWeight: '600',
   },
   buttonTextCancel: {
     fontWeight: '600',
   },
   buttonTextDestructive: {
-    color: '#ff3b30',
+    color: colors.danger,
   },
 });

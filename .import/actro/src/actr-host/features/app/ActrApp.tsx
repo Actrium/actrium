@@ -25,6 +25,8 @@ import {
 import { useUnreadStore } from '../../store/useUnreadStore';
 import { AppText } from '../../../components';
 import { getTypographyStyle, radius, spacing } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 // Import RN's Inspector API for accurate view hit testing
 // This uses React's internal renderer to find views at a point
@@ -101,8 +103,11 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     containerHeight: propsContainerHeight,
   } = effectiveProps || {};
 
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
+
   if (!tabs.length) {
-    return <View style={{ flex: 1, backgroundColor: '#111' }} />;
+    return <View style={styles.empty} />;
   }
 
   const activeTabId = currentTabId ?? tabs[0]!.id;
@@ -1191,13 +1196,17 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   tabHost: {
     flex: 1,
     position: 'relative',
   },
   contentContainer: {
     flex: 1,
+  },
+  empty: {
+    flex: 1,
+    backgroundColor: colors.bgEmpty,
   },
   inspectOverlay: {
     position: 'absolute',
@@ -1207,6 +1216,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
+  // DevTools inspect overlay 使用固定蓝色，不参与主题切换
   highlightOverlay: {
     position: 'absolute',
     borderWidth: 2,

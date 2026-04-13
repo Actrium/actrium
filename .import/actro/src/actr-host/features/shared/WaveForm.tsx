@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, Animated, Easing } from 'react-native';
+import { useColors } from '../../../theme/useColors';
 
 interface WaveFormProps {
   color?: string;
@@ -8,10 +9,12 @@ interface WaveFormProps {
 }
 
 export const WaveForm: React.FC<WaveFormProps> = ({
-  color = '#34a8fb',
+  color,
   size = { width: 24, height: 18 },
   barCount = 5,
 }) => {
+  const colors = useColors();
+  const resolvedColor = color ?? colors.accentBlue;
   // 生成初始高度
   const initialValues = [0.4, 0.7, 0.5, 0.8, 0.4];
   const animations = React.useRef(
@@ -55,7 +58,7 @@ export const WaveForm: React.FC<WaveFormProps> = ({
           style={[
             styles.waveBar,
             {
-              backgroundColor: color,
+              backgroundColor: resolvedColor,
               height: anim.interpolate({
                 inputRange: [0, 1],
                 outputRange: ['15%', '85%'],

@@ -19,6 +19,8 @@ import { TabEvents } from '../../../native-bridge/tab/TabEvents';
 import { AppText, GlobalAlert } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 type LoadAppCameraPanelProps = {
   tabId: string;
@@ -38,6 +40,8 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   onScanUrl,
 }) => {
   const { t } = useTranslation();
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const [requesting, setRequesting] = useState(false);
   const [scanContainerHeight, setScanContainerHeight] = useState(0);
   const scanAnimationHeight = 72;
@@ -206,7 +210,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
         <View style={styles.centerContent}>
           {requesting ? (
             <>
-              <ActivityIndicator size='large' color='#34A8FB' />
+              <ActivityIndicator size='large' color={colors.accentBlue} />
               <AppText variant='helperText' style={styles.infoText}>
                 {t('actr.app.requestCameraPermission')}
               </AppText>
@@ -281,7 +285,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   rootContainer: {
     flex: 1,
   },
@@ -293,13 +297,13 @@ const styles = StyleSheet.create({
   },
   infoText: {
     ...getTypographyStyle('helperText'),
-    color: '#666',
+    color: colors.textSecondary,
     textAlign: 'center',
   },
   openCameraBtn: {
     height: Platform.OS === 'android' ? 44 : 48,
     paddingHorizontal: Platform.OS === 'android' ? 28 : 32,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgLoadDark,
     borderRadius: Platform.OS === 'android' ? 22 : 24,
     alignItems: 'center',
     justifyContent: 'center',
@@ -307,7 +311,7 @@ const styles = StyleSheet.create({
   },
   openCameraBtnText: {
     ...getTypographyStyle('scanActionLabel'),
-    color: '#000',
+    color: colors.textOpenCameraBtn,
   },
   cameraContainer: {
     flex: 1,

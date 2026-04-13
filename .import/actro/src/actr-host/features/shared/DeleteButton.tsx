@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { AppText } from '../../../components';
 import { deleteActionBar, getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface DeleteButtonProps {
   selectedCount: number;
@@ -18,13 +20,20 @@ export const DeleteButton: React.FC<DeleteButtonProps> = ({
   onCancel,
 }) => {
   const { t } = useTranslation();
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
+  const gradientColors = React.useMemo(() => [
+    colors.bgDeleteGradientStart,
+    colors.bgDeleteGradientMid,
+    colors.bgDeleteGradientEnd,
+  ], [colors]);
 
   return (
     <>
-      {/* 白色渐变背景遮罩 */}
+      {/* 渐变背景遮罩 */}
       <View style={styles.overlay} pointerEvents="box-none">
         <LinearGradient
-          colors={['rgba(255, 255, 255, 0)', 'rgba(255, 255, 255, 0.7)', 'rgba(255, 255, 255, 1)']}
+          colors={gradientColors}
           locations={[0, 0.5, 1]}
           style={styles.gradient}
         />
@@ -57,7 +66,7 @@ export const DeleteButton: React.FC<DeleteButtonProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   overlay: {
     position: 'absolute',
     bottom: -130,
@@ -81,7 +90,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   cancelButton: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgSurface,
     paddingHorizontal: deleteActionBar.buttonPaddingHorizontal,
     paddingVertical: deleteActionBar.buttonPaddingVertical,
     borderRadius: 24,
@@ -91,11 +100,11 @@ const styles = StyleSheet.create({
     ...HOST_SHADOWS.inputPill,
   },
   cancelButtonText: {
-    color: '#333333',
+    color: colors.textIconPrimary,
     ...getTypographyStyle(deleteActionBar.buttonTypographyVariant),
   },
   button: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: colors.danger,
     paddingHorizontal: deleteActionBar.buttonPaddingHorizontal,
     paddingVertical: deleteActionBar.buttonPaddingVertical,
     borderRadius: 24,
@@ -108,7 +117,7 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: colors.textInverse,
     ...getTypographyStyle(deleteActionBar.buttonTypographyVariant),
   },
 });

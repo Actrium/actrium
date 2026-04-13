@@ -6,6 +6,8 @@ import {
   scrollToBottomButton,
 } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface ScrollToBottomButtonProps {
   visible: boolean;
@@ -16,6 +18,8 @@ export const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
   visible,
   onPress,
 }) => {
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const opacity = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -43,7 +47,7 @@ export const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   container: {
     alignSelf: 'center',
   },
@@ -51,7 +55,7 @@ const styles = StyleSheet.create({
     width: scrollToBottomButton.size,
     height: scrollToBottomButton.size,
     borderRadius: scrollToBottomButton.size / 2,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgToBottom,
     alignItems: 'center',
     justifyContent: 'center',
     ...HOST_SHADOWS.floatingButton,
@@ -62,7 +66,7 @@ const styles = StyleSheet.create({
   },
   arrow: {
     ...getTypographyStyle(scrollToBottomButton.labelTypographyVariant),
-    color: '#666',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
 });

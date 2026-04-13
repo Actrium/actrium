@@ -32,6 +32,8 @@ import { useNetworkPermission } from '../../hooks/useNetworkPermission';
 import { BookmarkRepository } from '../../../repository/BookmarkRepository';
 import { AppText } from '../../../components';
 import { getTypographyStyle, loadApp, spacing } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 type LoadRequestSource = 'preset' | 'scan' | 'input';
 
@@ -76,6 +78,8 @@ const extractAlertMessage = (message?: string) => {
 
 const LoadApp = () => {
   const { t } = useTranslation();
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const tabCtx = useTab();
   const [cameraActive, setCameraActive] = useState(false);
   const [inputExpanded, setInputExpanded] = useState(false);
@@ -132,7 +136,7 @@ const LoadApp = () => {
 
   const renderLoadingView = () => (
     <View style={styles.loadingContainer}>
-      <ActivityIndicator size='large' color='#007AFF' />
+      <ActivityIndicator size='large' color={colors.brandPrimary} />
       <AppText variant='statusBody' style={styles.loadingText}>
         {t('actr.app.loading')}
       </AppText>
@@ -299,8 +303,8 @@ const LoadApp = () => {
           iconType='keyboard'
           size={loadApp.inputToggleButtonSize}
           iconSize={loadApp.inputToggleIconSize}
-          disableTint
           style={styles.inputToggleBtn}
+          iconColor={colors.textSecondary}
           activeOpacity={0.8}
           onPress={() => {
             setCameraActive(false);
@@ -315,7 +319,7 @@ const LoadApp = () => {
         <Icon
           type='keyboard'
           size={loadApp.inputPrefixIconSize}
-          disableTint
+          color={colors.textSecondary}
           style={styles.inputPrefix}
         />
         <TouchableWithoutFeedback>
@@ -323,7 +327,7 @@ const LoadApp = () => {
             ref={inputRef}
             style={inputStyle}
             placeholder={t('actr.app.inputUrl')}
-            placeholderTextColor='#999'
+            placeholderTextColor={colors.textTertiary}
             onSubmitEditing={handleLoadWithUrl}
             blurOnSubmit={true}
             editable={!showLoading}
@@ -483,19 +487,19 @@ const LoadApp = () => {
 
 export default LoadApp;
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
   phoneContainer: {
     flex: 1,
     width: '100%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgScanArea,
   },
   padContainer: {
     flex: 1,
     width: '100%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgScanArea,
   },
   padScrollContent: {
     paddingBottom: 120,
@@ -504,11 +508,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgScanArea,
   },
   loadingText: {
     marginTop: spacing.md,
-    color: '#666',
+    color: colors.textSecondary,
     ...getTypographyStyle('statusBody'),
   },
   phoneScanSection: {
@@ -519,16 +523,15 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     overflow: 'hidden',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgScanArea,
   },
   phoneInputDock: {
     width: '100%',
     marginTop: 24,
-    // paddingBottom: 12,
   },
   phoneInputSafeArea: {
     width: '100%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgScanArea,
   },
   phoneInputSection: {
     width: '100%',
@@ -543,15 +546,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'column',
-    // gap 由动态样式控制
   },
   scanArea: {
-    // width / height / borderRadius 由动态样式控制
     overflow: 'hidden',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgScanArea,
     ...HOST_SHADOWS.softSurface,
   },
-  // Pad 端输入框为常显模式，单独维护尺寸，避免影响 Phone 端 Dock 输入样式。
   padInput: {
     paddingLeft: 39,
     paddingRight: 34,
@@ -566,18 +566,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   padInputContainer: {
-    // 中文注释：外层 Dock 负责绝对定位和水平居中，
-    // 输入框容器只保留自身宽度约束，避免绝对定位和百分比宽度互相干扰。
     height: loadApp.inputHeight,
-    backgroundColor: '#fff',
-    // width / borderRadius 由动态样式控制
+    backgroundColor: colors.bgScanArea,
     ...HOST_SHADOWS.inputPill,
   },
   phoneInputContainer: {
     position: 'relative',
     width: '100%',
     height: loadApp.inputHeight,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgLoadDark,
     borderRadius: 24,
     ...HOST_SHADOWS.inputPill,
   },
@@ -588,6 +585,7 @@ const styles = StyleSheet.create({
     paddingLeft: 39,
     paddingRight: 34,
     paddingVertical: 0,
+    color: colors.textSecondary,
     ...getTypographyStyle(loadApp.inputTypographyVariant),
   },
   inputPrefix: {
@@ -600,7 +598,7 @@ const styles = StyleSheet.create({
     width: loadApp.inputToggleButtonSize,
     height: loadApp.inputToggleButtonSize,
     borderRadius: loadApp.inputToggleButtonSize / 2,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgLoadDark,
     alignItems: 'center',
     justifyContent: 'center',
     ...HOST_SHADOWS.inputPill,

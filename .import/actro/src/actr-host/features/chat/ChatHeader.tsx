@@ -8,6 +8,8 @@ import { CHAT_HEADER_HEIGHT } from '../../constants';
 import { useNetworkStatus } from '../../hooks/networkStatus';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface ChatHeaderProps {
   onLeftPress: () => void;
@@ -38,6 +40,9 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     const { showOfflineHint } = useNetworkStatus();
     const [showCloseButton, setShowCloseButton] = React.useState(false);
 
+    const colors = useColors();
+    const styles = React.useMemo(() => makeStyles(colors), [colors]);
+
     React.useEffect(() => {
       if (hasAppId) {
         setShowCloseButton(false);
@@ -58,7 +63,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
         ]}
       >
         <LinearGradient
-          colors={['#F2F2F6', '#F2F2F6', 'rgba(242, 242, 246, 0)']}
+          colors={styles.gradientColors}
           locations={[0, 0.7, 1]}
           style={StyleSheet.absoluteFill}
         />
@@ -69,7 +74,9 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             onPress={onLeftPress}
             disabled={leftDisabled}
             active={leftActive}
-            style={styles.headerButton}
+            activeBackgroundColor={colors.bgChatHeaderBtn}
+            iconColor={colors.textSecondary}
+            activeIconColor={colors.textInverse}
           />
         ) : (
           <View style={styles.headerButtonPlaceholder} />
@@ -82,7 +89,9 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
           )}
           {/* 只有插件会话态才展示网络状态，和右侧 history 按钮保持同一语义边界。 */}
           {hasAppId && showOfflineHint ? (
-            <AppText style={styles.networkErrorText}>{t('common.networkError')}</AppText>
+            <AppText style={styles.networkErrorText}>
+              {t('common.networkError')}
+            </AppText>
           ) : null}
         </View>
         {hasAppId ? (
@@ -91,11 +100,13 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             iconSize={22}
             onPress={() => {}}
             style={styles.headerButton}
+            iconColor={colors.textSecondary}
           />
         ) : showCloseButton ? (
           <HostIconButton
             iconType='close'
             iconSize={16}
+            iconColor={colors.textSecondary}
             onPress={onRightPress}
             style={styles.headerButton}
           />
@@ -107,41 +118,48 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
   },
 );
 
-const styles = StyleSheet.create({
-  header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    zIndex: 10,
-  },
-  headerButton: {
-    // ...HOST_SHADOWS.headerButton,
-  },
-  headerButtonPlaceholder: {
-    width: 44,
-    height: 44,
-  },
-  titleContainer: {
-    flex: 1,
-    marginHorizontal: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  instanceName: {
-    ...getTypographyStyle('bodyInput'),
-    fontWeight: '600',
-    color: '#0a0a0a',
-    textAlign: 'center',
-    maxWidth: '100%',
-  },
-  networkErrorText: {
-    marginTop: 2,
-    ...getTypographyStyle('caption1'),
-    color: '#FF3B30',
-  },
+const makeStyles = (colors: ColorTokens) => ({
+  gradientColors: [
+    colors.bgHeader,
+    colors.bgHeader,
+    colors.bgHeaderGradientEnd,
+  ] as string[],
+  ...StyleSheet.create({
+    header: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      zIndex: 10,
+    },
+    headerButton: {
+      // backgroundColor: colors.bgLoadDark,
+    },
+    headerButtonPlaceholder: {
+      width: 44,
+      height: 44,
+    },
+    titleContainer: {
+      flex: 1,
+      marginHorizontal: spacing.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    instanceName: {
+      ...getTypographyStyle('bodyInput'),
+      fontWeight: '600',
+      color: colors.textPrimary,
+      textAlign: 'center',
+      maxWidth: '100%',
+    },
+    networkErrorText: {
+      marginTop: 2,
+      ...getTypographyStyle('caption1'),
+      color: colors.danger,
+    },
+  }),
 });

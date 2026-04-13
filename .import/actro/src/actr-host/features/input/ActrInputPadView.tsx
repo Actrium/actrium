@@ -5,6 +5,7 @@ import { Icon } from '../../../components';
 import { ActrInputPadToolbox } from './ActrInputPadToolbox';
 import { AuthGateOverlay } from './AuthGateOverlay';
 import type { ActrInputStyles } from './ActrInput.shared';
+import { useColors } from '../../../theme/useColors';
 
 interface ActrInputPadViewProps {
   styles: ActrInputStyles;
@@ -31,6 +32,7 @@ interface ActrInputPadViewProps {
 }
 
 export default function ActrInputPadView(props: ActrInputPadViewProps) {
+  const colors = useColors();
   const {
     styles,
     layoutTokens,
@@ -104,7 +106,7 @@ export default function ActrInputPadView(props: ActrInputPadViewProps) {
                 { left: layoutTokens.isTablet ? -55 : -45 },
               ]}
             >
-              <Icon type='close' size={16} color='#999' />
+              <Icon type='close' size={16} color={colors.textTertiary} />
             </Pressable>
           )}
           <View style={{ flex: 1 }}>

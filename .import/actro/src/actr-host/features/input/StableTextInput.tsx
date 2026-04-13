@@ -12,6 +12,8 @@ import { useTranslation } from 'react-i18next';
 import { AppText } from '../../../components';
 import { getTypographyStyle, inputTextBaseStyle, typography } from '../../../theme/tokens';
 import { useInputStore } from '../../store/useInputStore';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface StableTextInputProps {
   tabId: string;
@@ -45,6 +47,8 @@ export const StableTextInput = React.memo(function StableTextInput({
   autoGrowLineHeight,
 }: StableTextInputProps) {
   const { t } = useTranslation();
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const MOBILE_LINE_HEIGHT = typography.editorInputCompact.lineHeight;
   const MOBILE_MAX_LINES = 5;
   const MOBILE_MIN_HEIGHT = MOBILE_LINE_HEIGHT;
@@ -254,7 +258,7 @@ export const StableTextInput = React.memo(function StableTextInput({
   );
 });
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   container: {
     position: 'relative',
     width: '100%',
@@ -269,7 +273,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   placeholderText: {
-    color: '#999',
+    color: colors.textPlaceholader,
     ...getTypographyStyle('editorInputCompact'),
   },
 });

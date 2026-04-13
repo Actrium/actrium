@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { LoginBridge, LoginType } from '../../native-bridge';
 import { GlobalAlertModal } from '../../components';
+import { useColors } from '../../theme/useColors';
 
 type ThemeVariant = 'light' | 'dark';
 
@@ -33,26 +34,6 @@ interface LoginContentProps {
   };
 }
 
-const themeColors = {
-  light: {
-    tagline: '#000000',
-    buttonBg: '#FFFFFF',
-    buttonBorder: '#E5E5E5',
-    buttonText: '#333',
-    iconTint: '#000',
-    policyText: '#999',
-    linkText: '#1C69FF',
-  },
-  dark: {
-    tagline: '#fff',
-    buttonBg: 'rgba(255, 255, 255, 0.15)',
-    buttonBorder: 'rgba(255, 255, 255, 0.1)',
-    buttonText: '#fff',
-    iconTint: '#fff',
-    policyText: 'rgba(255, 255, 255, 0.8)',
-    linkText: '#1C69FF',
-  },
-};
 
 export const LoginContent = ({
   variant = 'light',
@@ -66,9 +47,19 @@ export const LoginContent = ({
   spacing = {},
 }: LoginContentProps) => {
   const { t } = useTranslation();
+  const sysColors = useColors();
+  const colors = {
+    tagline: sysColors.authTagline,
+    buttonBg: sysColors.authButtonBg,
+    buttonBorder: sysColors.authButtonBorder,
+    buttonText: sysColors.authButtonText,
+    iconTint: sysColors.authIconTint,
+    policyText: sysColors.authPolicyText,
+    linkText: sysColors.authLinkText,
+  };
+
   const [innerAgreePolicy, setInnerAgreePolicy] = useState(false);
   const [pendingLoginType, setPendingLoginType] = useState<LoginType | null>(null);
-  const colors = themeColors[variant];
   const resolvedAgreePolicy = useMemo(
     () => agreePolicy ?? innerAgreePolicy,
     [agreePolicy, innerAgreePolicy],

@@ -16,6 +16,8 @@ import {
   getTypographyStyle,
   spacing,
 } from '../../../theme/tokens';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 interface AttachmentPreviewBarProps {
   attachments: IAttachmentItem[];
@@ -28,6 +30,9 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
   removeAttachment,
   hideSeparator = false,
 }) => {
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
+
   if (attachments.length === 0) return null;
 
   const getImagePreviewWidth = (item: IAttachmentItem): number => {
@@ -128,7 +133,7 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
                   </>
                 ) : (
                   <View style={styles.locationPlaceholder}>
-                    <Icon type='geolocation' size={24} color='#34A8FB' />
+                    <Icon type='geolocation' size={24} color={colors.accentBlue} />
                     <AppText style={styles.locationText}>
                       {item.latitude?.toFixed(4)}, {item.longitude?.toFixed(4)}
                     </AppText>
@@ -142,7 +147,7 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
                     {getDisplayFileName(item)}
                   </AppText>
                   <View style={styles.fileMetaRow}>
-                    <Icon type='file' size={12} color='#34A8FB' />
+                    <Icon type='file' size={12} color={colors.accentBlue} />
                     <AppText style={styles.fileType}>{getDisplayFileType(item)}</AppText>
                   </View>
                 </View>
@@ -162,7 +167,7 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   attachmentScroll: {
     marginBottom: spacing.md,
   },
@@ -178,7 +183,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   imageAttachmentItem: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bgAttachmentItem,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -190,22 +195,22 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     height: '100%',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bgAttachmentItem,
   },
   previewImageContain: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bgAttachmentItem,
   },
   fileBlock: {
     width: 156,
     height: '100%',
-    backgroundColor: '#F7F7F7',
+    backgroundColor: colors.bgFileBlock,
     borderRadius: 10,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: '#E8E8E8',
+    borderColor: colors.borderFileBlock,
   },
   locationContainer: {
     height: '100%',
@@ -213,17 +218,17 @@ const styles = StyleSheet.create({
   locationPlaceholder: {
     width: 120,
     height: '100%',
-    backgroundColor: '#F0F8FF',
+    backgroundColor: colors.bgLocationPlaceholder,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#34A8FB',
+    borderColor: colors.accentBlue,
     paddingHorizontal: spacing.sm,
   },
   locationText: {
     ...getTypographyStyle('caption1'),
-    color: '#34A8FB',
+    color: colors.accentBlue,
     marginTop: spacing.xs,
     textAlign: 'center',
   },
@@ -233,7 +238,7 @@ const styles = StyleSheet.create({
   },
   fileName: {
     ...getTypographyStyle('body'),
-    color: '#333',
+    color: colors.textIconPrimary,
     fontWeight: '500',
     textAlign: 'left',
   },
@@ -244,7 +249,7 @@ const styles = StyleSheet.create({
   },
   fileType: {
     ...getTypographyStyle('footnote'),
-    color: '#999',
+    color: colors.textTertiary,
     textAlign: 'left',
   },
   removeButton: {
@@ -254,19 +259,19 @@ const styles = StyleSheet.create({
     width: attachmentPreview.removeButtonSize,
     height: attachmentPreview.removeButtonSize,
     borderRadius: attachmentPreview.removeButtonSize / 2,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.bgRemoveButton,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
   },
   removeButtonText: {
-    color: '#fff',
+    color: colors.textInverse,
     fontSize: 18,
     fontWeight: 'bold',
   },
   separator: {
     height: 1,
-    backgroundColor: '#EAEAEA',
+    backgroundColor: colors.bgToolbarButton,
     width: '100%',
     marginBottom: spacing.lg,
   },

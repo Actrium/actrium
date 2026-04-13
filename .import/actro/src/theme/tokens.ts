@@ -714,30 +714,6 @@ export const typography = selectTokenValue({
 });
 
 /**
- * 颜色 token。
- * 如果你现在主要目标是收口尺寸，也建议顺手把常用颜色一起语义化，
- * 否则后面还是会出现大量 #333 / #666 / #999 散落的问题。
- */
-export const colors = {
-  textPrimary: '#222222',
-  textSecondary: '#666666',
-  textTertiary: '#999999',
-  textInverse: '#FFFFFF',
-
-  bgPage: '#F7F7F7',
-  bgCard: '#FFFFFF',
-  bgOverlay: 'rgba(0, 0, 0, 0.4)',
-
-  borderPrimary: '#E6E6E6',
-  borderSecondary: '#F0F0F0',
-
-  brandPrimary: '#1677FF',
-  danger: '#E5484D',
-  success: '#2BA471',
-  warning: '#F5A623',
-} as const;
-
-/**
  * 文本样式辅助函数。
  * 用于把语义 token 转成 RN TextStyle，避免每个地方手动拆字段。
  */
@@ -761,7 +737,6 @@ export function getTypographyStyle(
  * 这类平台差异不要散落在业务页里，统一由文本基础样式处理。
  */
 export const textBaseStyle: TextStyle = {
-  color: colors.textPrimary,
   includeFontPadding: false,
 };
 

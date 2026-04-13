@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Easing } from 'react-native';
 import type { TabletExtensionPanelProps } from './types';
+import { useColors } from '../../../../theme/useColors';
+import type { ColorTokens } from '../../../../theme/colors';
 
 /**
  * Tablet 扩展面板
@@ -14,6 +16,9 @@ const TabletExtensionPanel: React.FC<TabletExtensionPanelProps> = ({
   width,
   centerAnimValue,
 }) => {
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
+
   // 面板滑动动画值（RN Animated，仅控制自身位移）
   const slideAnim = useRef(
     new Animated.Value(visible && content ? 0 : width),
@@ -67,12 +72,13 @@ const TabletExtensionPanel: React.FC<TabletExtensionPanelProps> = ({
 
 export default TabletExtensionPanel;
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   panel: {
     position: 'absolute',
     right: 0,
     height: '100%',
     flexShrink: 1,
     zIndex: 10, // 覆盖在上层
+    backgroundColor: colors.extensionPanelBg,
   },
 });

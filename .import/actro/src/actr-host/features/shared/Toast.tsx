@@ -8,12 +8,16 @@ import { View, StyleSheet, Animated } from 'react-native';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { useColors } from '../../../theme/useColors';
+import type { ColorTokens } from '../../../theme/colors';
 
 export interface ToastRef {
   show: (message: string) => void;
 }
 
 export const Toast = forwardRef<ToastRef, {}>((_, ref) => {
+  const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const [message, setMessage] = useState('');
   const [visible, setVisible] = useState(false);
   const opacity = useState(new Animated.Value(0))[0];
@@ -49,7 +53,7 @@ export const Toast = forwardRef<ToastRef, {}>((_, ref) => {
   );
 });
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   container: {
     position: 'absolute',
     left: 0,
@@ -60,14 +64,14 @@ const styles = StyleSheet.create({
     zIndex: 9999,
   },
   bubble: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgToast,
     paddingHorizontal: spacing.xxl,
     paddingVertical: spacing.md,
     borderRadius: 24,
     ...HOST_SHADOWS.floatingButton,
   },
   text: {
-    color: '#333333',
+    color: colors.textIconPrimary,
     ...getTypographyStyle('subhead'),
     fontWeight: '600',
   },
