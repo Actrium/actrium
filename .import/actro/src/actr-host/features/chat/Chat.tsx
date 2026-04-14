@@ -753,6 +753,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         visible={!!shareMessage}
         message={shareMessage}
         appName={appInfo?.instance_name || appInfo?.app_name}
+        appUrl={appInfo?.url}
         onClose={() => setShareMessage(null)}
         onSaved={() => {
           toastRef.current?.show(t('actr.chat.shareSaveSuccess'));

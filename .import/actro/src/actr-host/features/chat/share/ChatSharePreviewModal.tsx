@@ -12,6 +12,8 @@ import {
 import ViewShot from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { useTranslation } from 'react-i18next';
+import QRCode from 'qrcode';
+import { TextEncoder as PolyfillTextEncoder } from 'text-encoding';
 
 import type { IMessage } from '../../../../repository/MessageRepository';
 import { AppText, GlobalAlert, HostIconButton } from '../../../../components';
@@ -28,14 +30,24 @@ interface ChatSharePreviewModalProps {
   visible: boolean;
   message: IMessage | null;
   appName?: string;
+  appUrl?: string;
   onClose: () => void;
   onSaved?: () => void;
 }
+
+interface ShareQrMatrix {
+  size: number;
+  data: number[];
+}
+
+const SHARE_QR_QUIET_ZONE_MODULES = 4;
+const SHARE_QR_TARGET_SIZE = 88;
 
 export default function ChatSharePreviewModal({
   visible,
   message,
   appName,
+  appUrl,
   onClose,
   onSaved,
 }: ChatSharePreviewModalProps) {
@@ -53,6 +65,9 @@ export default function ChatSharePreviewModal({
   const [previewAspectRatio, setPreviewAspectRatio] = React.useState<
     number | null
   >(null);
+  const [shareQrMatrix, setShareQrMatrix] = React.useState<ShareQrMatrix | null>(
+    null,
+  );
 
   React.useEffect(() => {
     if (!visible) {
@@ -62,6 +77,7 @@ export default function ChatSharePreviewModal({
       setIsSaving(false);
       setCardLayoutReady(false);
       setCaptureAttempt(0);
+      setShareQrMatrix(null);
     }
   }, [visible]);
 
@@ -182,6 +198,83 @@ export default function ChatSharePreviewModal({
     previewAspectRatio && previewAspectRatio > 0
       ? Math.min(previewHeight, previewWidth / previewAspectRatio)
       : previewHeight;
+  // 中文注释：二维码内容只接受明确存在的 URL，空字符串不参与渲染，避免生成无意义二维码。
+  const shareQrValue = React.useMemo(() => {
+    const nextUrl = appUrl?.trim();
+    return nextUrl ? nextUrl : null;
+  }, [appUrl]);
+  const shareQrRender = React.useMemo(() => {
+    if (!shareQrMatrix) return null;
+
+    const totalModules =
+      shareQrMatrix.size + SHARE_QR_QUIET_ZONE_MODULES * 2;
+    // 中文注释：二维码模块必须尽量落在整数像素上，避免截图后出现半像素插值导致扫码失败。
+    const moduleSize = Math.max(
+      2,
+      Math.floor(SHARE_QR_TARGET_SIZE / totalModules),
+    );
+    const gridSize = totalModules * moduleSize;
+    const cells: number[] = [];
+
+    for (let row = 0; row < totalModules; row += 1) {
+      for (let col = 0; col < totalModules; col += 1) {
+        const sourceRow = row - SHARE_QR_QUIET_ZONE_MODULES;
+        const sourceCol = col - SHARE_QR_QUIET_ZONE_MODULES;
+        const isQuietZone =
+          sourceRow < 0 ||
+          sourceCol < 0 ||
+          sourceRow >= shareQrMatrix.size ||
+          sourceCol >= shareQrMatrix.size;
+
+        if (isQuietZone) {
+          cells.push(0);
+          continue;
+        }
+
+        cells.push(
+          shareQrMatrix.data[sourceRow * shareQrMatrix.size + sourceCol] ?? 0,
+        );
+      }
+    }
+
+    return {
+      moduleSize,
+      gridSize,
+      totalModules,
+      cells,
+    };
+  }, [shareQrMatrix]);
+
+  React.useEffect(() => {
+    if (!visible) return;
+
+    if (!shareQrValue) {
+      setShareQrMatrix(null);
+      return;
+    }
+
+    try {
+      // 中文注释：React Native 运行时默认不保证存在 TextEncoder，这里在二维码生成前按需补齐，避免影响其它模块初始化顺序。
+      if (typeof global.TextEncoder === 'undefined') {
+        global.TextEncoder = PolyfillTextEncoder as typeof TextEncoder;
+      }
+      // 中文注释：直接生成二维码矩阵并用普通 View 绘制，避免依赖浏览器 canvas 或额外原生 SVG 组件。
+      const qrCode = QRCode.create(shareQrValue, {
+        // 中文注释：分享图场景优先保证二维码尺寸可读，使用较低纠错级别换取更小矩阵密度。
+        errorCorrectionLevel: 'L',
+      });
+      setShareQrMatrix({
+        size: qrCode.modules.size,
+        data: Array.from(qrCode.modules.data),
+      });
+    } catch (error) {
+      console.error(
+        '[ChatSharePreviewModal] Failed to generate share QR code:',
+        error,
+      );
+      setShareQrMatrix(null);
+    }
+  }, [shareQrValue, visible]);
 
   if (!visible) {
     return null;
@@ -317,17 +410,38 @@ export default function ChatSharePreviewModal({
                     </AppText>
                   </View>
                   <View style={styles.captureFooterLogoBox}>
-                    <HostIconButton
-                      iconType='askaway_gery'
-                      size={42}
-                      iconSize={32}
-                      iconColor={colors.textSecondary}
-                      backgroundColor='transparent'
-                      onPress={undefined}
-                      disableTint
-                      enablePressScale={false}
-                      activeOpacity={1}
-                    />
+                    {shareQrRender ? (
+                      <View style={styles.captureQrContainer}>
+                        <View
+                          style={[
+                            styles.captureQrGrid,
+                            {
+                              width: shareQrRender.gridSize,
+                              height: shareQrRender.gridSize,
+                            },
+                          ]}
+                        >
+                          {shareQrRender.cells.map((cell, index) => (
+                            <View
+                              key={index}
+                              style={[
+                                styles.captureQrCell,
+                                {
+                                  width: shareQrRender.moduleSize,
+                                  height: shareQrRender.moduleSize,
+                                  backgroundColor:
+                                    cell === 1 ? '#111111' : '#FFFFFF',
+                                },
+                              ]}
+                            />
+                          ))}
+                        </View>
+                      </View>
+                    ) : (
+                      <AppText style={styles.captureFooterFallbackText}>
+                        URL
+                      </AppText>
+                    )}
                   </View>
                 </View>
               </View>
@@ -434,14 +548,14 @@ const makeStyles = (colors: ColorTokens) =>
       width: '100%',
       paddingHorizontal: 16,
       paddingTop: 24,
-      paddingBottom: 124,
+      paddingBottom: 144,
     },
     captureFooter: {
       position: 'absolute',
       left: 0,
       right: 0,
       bottom: 0,
-      height: 100,
+      height: 120,
       paddingTop: 0,
       paddingBottom: 0,
       paddingHorizontal: 16,
@@ -461,7 +575,7 @@ const makeStyles = (colors: ColorTokens) =>
     captureFooterTextBlock: {
       flex: 1,
       height: '100%',
-      paddingRight: 12,
+      paddingRight: 16,
       justifyContent: 'center',
     },
     captureFooterTitle: {
@@ -474,13 +588,33 @@ const makeStyles = (colors: ColorTokens) =>
       ...getTypographyStyle('footnote'),
     },
     captureFooterLogoBox: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      borderWidth: 1.5,
-      borderColor: '#111111',
+      width: 100,
+      height: 100,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
+      backgroundColor: '#FFFFFF',
+    },
+    captureQrContainer: {
+      width: '100%',
+      height: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#FFFFFF',
+    },
+    captureQrGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      backgroundColor: '#FFFFFF',
+    },
+    captureQrCell: {
+      minWidth: 1,
+      minHeight: 1,
+    },
+    captureFooterFallbackText: {
+      color: '#8E8E93',
+      ...getTypographyStyle('caption1'),
+      fontWeight: '600',
     },
   });
