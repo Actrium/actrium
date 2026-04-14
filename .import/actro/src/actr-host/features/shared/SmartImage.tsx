@@ -16,7 +16,8 @@ export const SmartImage: React.FC<SmartImageProps> = ({
   style,
   ...props
 }) => {
-  const [useLocal, setUseLocal] = useState(true);
+  const hasLocalUrl = Boolean(localUrl);
+  const [useLocal, setUseLocal] = useState(hasLocalUrl);
 
   // 对本地路径进行编码处理，防止空格等字符导致加载失败
   const encodedLocalUrl = localUrl
@@ -26,8 +27,10 @@ export const SmartImage: React.FC<SmartImageProps> = ({
     : undefined;
 
   // 如果没有 cdnUrl，或者已经标记为使用本地，则直接用本地
-  const source: ImageSourcePropType =
-    !cdnUrl || useLocal ? { uri: encodedLocalUrl } : { uri: cdnUrl };
+  // 中文注释：只有本地路径真实存在时才优先走本地，否则直接走 CDN，避免生成 `{ uri: undefined }` 导致图片完全不加载。
+  const source: ImageSourcePropType = useLocal && encodedLocalUrl
+    ? { uri: encodedLocalUrl }
+    : { uri: cdnUrl };
 
   return (
     <Image
@@ -35,6 +38,7 @@ export const SmartImage: React.FC<SmartImageProps> = ({
       source={source}
       style={style}
       onError={(e) => {
+        props.onError?.(e);
         const errorMsg = e.nativeEvent.error;
         console.warn('[SmartImage] Failed to load image:', {
           source,
@@ -44,7 +48,7 @@ export const SmartImage: React.FC<SmartImageProps> = ({
           cdnUrl,
         });
 
-        if (!useLocal && localUrl) {
+        if (!useLocal && hasLocalUrl) {
           console.log('[SmartImage] CDN load failed, falling back to local');
           setUseLocal(true);
         }

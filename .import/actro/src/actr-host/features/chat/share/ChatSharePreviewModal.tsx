@@ -40,6 +40,13 @@ interface ShareQrMatrix {
   data: number[];
 }
 
+interface ShareAttachmentLike {
+  id?: string;
+  attachment_type?: 'image' | 'file' | 'location';
+  local_url?: string;
+  cdn_url?: string;
+}
+
 const SHARE_QR_QUIET_ZONE_MODULES = 4;
 const SHARE_QR_TARGET_SIZE = 88;
 
@@ -68,6 +75,45 @@ export default function ChatSharePreviewModal({
   const [shareQrMatrix, setShareQrMatrix] = React.useState<ShareQrMatrix | null>(
     null,
   );
+  const [attachmentImageReadyCount, setAttachmentImageReadyCount] = React.useState(0);
+  const settledAttachmentKeysRef = React.useRef<Set<string>>(new Set());
+
+  const expectedAttachmentImageKeys = React.useMemo(() => {
+    if (!message?.attachments) return [];
+
+    try {
+      const parsed = JSON.parse(message.attachments) as ShareAttachmentLike[];
+      return parsed
+        .filter((item) => {
+          if (
+            item?.attachment_type !== 'image' &&
+            item?.attachment_type !== 'location'
+          ) {
+            return false;
+          }
+          return Boolean(item.local_url || item.cdn_url);
+        })
+        .map((item, index) => item.id || `${item.attachment_type}-${index}`);
+    } catch (error) {
+      console.error(
+        '[ChatSharePreviewModal] Failed to parse attachments for share preview:',
+        error,
+      );
+      return [];
+    }
+  }, [message?.attachments]);
+  const expectedAttachmentImageCount = expectedAttachmentImageKeys.length;
+
+  const handleAttachmentImageSettled = React.useCallback(
+    (attachmentKey: string) => {
+      if (!attachmentKey || settledAttachmentKeysRef.current.has(attachmentKey)) {
+        return;
+      }
+      settledAttachmentKeysRef.current.add(attachmentKey);
+      setAttachmentImageReadyCount(settledAttachmentKeysRef.current.size);
+    },
+    [],
+  );
 
   React.useEffect(() => {
     if (!visible) {
@@ -78,11 +124,19 @@ export default function ChatSharePreviewModal({
       setCardLayoutReady(false);
       setCaptureAttempt(0);
       setShareQrMatrix(null);
+      setAttachmentImageReadyCount(0);
+      settledAttachmentKeysRef.current.clear();
     }
   }, [visible]);
 
   React.useEffect(() => {
+    settledAttachmentKeysRef.current.clear();
+    setAttachmentImageReadyCount(0);
+  }, [message?.message_id, message?.attachments]);
+
+  React.useEffect(() => {
     if (!visible || !message || !cardLayoutReady) return;
+    if (attachmentImageReadyCount < expectedAttachmentImageCount) return;
 
     let cancelled = false;
 
@@ -136,7 +190,16 @@ export default function ChatSharePreviewModal({
     return () => {
       cancelled = true;
     };
-  }, [cardLayoutReady, captureAttempt, message, onClose, t, visible]);
+  }, [
+    attachmentImageReadyCount,
+    cardLayoutReady,
+    captureAttempt,
+    expectedAttachmentImageCount,
+    message,
+    onClose,
+    t,
+    visible,
+  ]);
 
   const ensureAndroidPhotoPermission = React.useCallback(async () => {
     if (Platform.OS !== 'android') return true;
@@ -382,6 +445,7 @@ export default function ChatSharePreviewModal({
                     <ChatShareBubble
                       type='question'
                       attachments={message.attachments}
+                      onAttachmentImageSettled={handleAttachmentImageSettled}
                     />
                   ) : null}
                   {message?.question_content || message?.question_voice_payload ? (
