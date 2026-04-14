@@ -25,6 +25,7 @@ interface ChatShareBubbleProps {
   voicePayload?: string;
   type: 'question' | 'answer';
   attachments?: string;
+  onAttachmentImageSettled?: (attachmentKey: string) => void;
 }
 
 export default function ChatShareBubble({
@@ -32,6 +33,7 @@ export default function ChatShareBubble({
   voicePayload,
   type,
   attachments,
+  onAttachmentImageSettled,
 }: ChatShareBubbleProps) {
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
@@ -188,13 +190,20 @@ export default function ChatShareBubble({
                 ];
 
                 if (item.attachment_type === 'image') {
+                  const attachmentKey = item.id || `image-${index}`;
                   return (
                     <SmartImage
-                      key={`share-image-${index}`}
+                      key={`share-image-${attachmentKey}`}
                       cdnUrl={item.cdn_url}
                       localUrl={item.local_url}
                       style={[styles.attachmentImage, itemStyle]}
                       resizeMode='cover'
+                      onLoadEnd={() => {
+                        onAttachmentImageSettled?.(attachmentKey);
+                      }}
+                      onError={() => {
+                        onAttachmentImageSettled?.(attachmentKey);
+                      }}
                     />
                   );
                 }
@@ -228,9 +237,10 @@ export default function ChatShareBubble({
                 }
 
                 if (item.attachment_type === 'location') {
+                  const attachmentKey = item.id || `location-${index}`;
                   return (
                     <View
-                      key={`share-location-${index}`}
+                      key={`share-location-${attachmentKey}`}
                       style={[styles.locationWrapper, !isLast && { marginRight: 8 }]}
                     >
                       {item.local_url || item.cdn_url ? (
@@ -242,6 +252,12 @@ export default function ChatShareBubble({
                             item.aspect_ratio ? { aspectRatio: item.aspect_ratio } : null,
                           ]}
                           resizeMode='cover'
+                          onLoadEnd={() => {
+                            onAttachmentImageSettled?.(attachmentKey);
+                          }}
+                          onError={() => {
+                            onAttachmentImageSettled?.(attachmentKey);
+                          }}
                         />
                       ) : (
                         <View style={styles.locationPlaceholder}>
