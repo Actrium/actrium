@@ -6,7 +6,7 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Dimensions,
-  LayoutRectangle,
+  GestureResponderEvent,
 } from 'react-native';
 import { AppText } from '../../../components';
 import {
@@ -17,6 +17,7 @@ import {
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface MenuOption {
   label: string;
@@ -39,17 +40,18 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   onPress,
 }) => {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const [visible, setVisible] = useState(false);
-  const [menuLayout, setMenuLayout] = useState<LayoutRectangle | null>(null);
   const [pressLocation, setPressLocation] = useState<{ x: number; y: number } | null>(null);
+  const [menuSize, setMenuSize] = useState({ width: longPressMenu.width, height: 0 });
   const triggerRef = useRef<View>(null);
   const pressLocationRef = useRef<{ x: number; y: number } | null>(null);
 
-  const handlePressIn = (event: any) => {
+  const handlePressIn = (event: GestureResponderEvent) => {
     if (disabled) return;
-    
-    // 捕获触摸位置
+
+    // 中文注释：优先记录手指落点，后续菜单以这个锚点定位，而不是依赖整个气泡的位置。
     const nativeEvent = event?.nativeEvent;
     if (nativeEvent) {
       if (nativeEvent.pageX !== undefined && nativeEvent.pageY !== undefined) {
@@ -72,47 +74,56 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   const handleLongPress = () => {
     if (disabled) return;
 
-    // 获取触发器在屏幕间的位置
+    // 中文注释：长按成立后再测量触发区域，作为没有落点数据时的回退锚点。
     triggerRef.current?.measureInWindow((x, y, width, height) => {
-      setMenuLayout({ x, y, width, height });
-      if (pressLocationRef.current) {
-        setPressLocation(pressLocationRef.current);
-      }
+      setPressLocation(
+        pressLocationRef.current ?? {
+          x: x + width / 2,
+          y: y + height / 2,
+        },
+      );
+      setMenuSize((prev) => ({ ...prev, height: 0 }));
       setVisible(true);
     });
   };
 
-  const close = () => setVisible(false);
+  const close = () => {
+    setVisible(false);
+    setPressLocation(null);
+    pressLocationRef.current = null;
+  };
 
   const renderMenu = () => {
-    if (!menuLayout) return null;
+    if (!pressLocation) return null;
 
     const screenHeight = Dimensions.get('window').height;
     const screenWidth = Dimensions.get('window').width;
+    const horizontalMargin = 20;
+    const verticalMargin = 12;
+    const anchorOffset = 8;
+    const topBoundary = Math.max(insets.top + verticalMargin, verticalMargin);
+    const bottomBoundary = screenHeight - Math.max(insets.bottom + verticalMargin, verticalMargin);
 
-    // 确定菜单显示在气泡上方还是下方
     const menuWidth = longPressMenu.width;
-    const isAbove = menuLayout.y > screenHeight / 2;
+    const estimatedMenuHeight =
+      longPressMenu.padding * 2 + options.length * (spacing.md * 2 + 24) + Math.max(0, options.length - 1) * spacing.xxs;
+    const menuHeight = menuSize.height || estimatedMenuHeight;
 
-    // 计算位置
-    const top = isAbove
-      ? menuLayout.y - (options.length * 48 + 20) // 简略估算高度 (12+12+24=48 per item)
-      : menuLayout.y + menuLayout.height + 8;
+    // 中文注释：菜单优先贴近手指下方；下方空间不足时切到上方，并在最终结果上做屏幕边界钳制。
+    const belowTop = pressLocation.y + anchorOffset;
+    const aboveTop = pressLocation.y - menuHeight - anchorOffset;
+    const canFitBelow = belowTop + menuHeight <= bottomBoundary;
+    const canFitAbove = aboveTop >= topBoundary;
+    const preferredTop = canFitBelow || !canFitAbove ? belowTop : aboveTop;
+    const maxTop = Math.max(topBoundary, bottomBoundary - menuHeight);
+    const top = Math.min(Math.max(preferredTop, topBoundary), maxTop);
 
-    // 左右对齐逻辑：如果有长按位置，使用长按位置；否则使用气泡框中心
-    let left: number;
-    if (pressLocation) {
-      // 使用长按位置，菜单中心对齐到长按位置
-      left = pressLocation.x - menuWidth / 2;
-    } else {
-      // 回退到气泡框中心
-      left = menuLayout.x + menuLayout.width / 2 - menuWidth / 2;
-    }
-    
-    // 边界检查
-    if (left + menuWidth > screenWidth - 20)
-      left = screenWidth - menuWidth - 20;
-    if (left < 20) left = 20;
+    // 中文注释：横向仍以手指位置居中，但必须保证整个菜单留在屏幕可见区域内。
+    const left = Math.min(
+      Math.max(pressLocation.x - menuWidth / 2, horizontalMargin),
+      screenWidth - horizontalMargin - menuWidth,
+    );
+    const menuOpacity = menuSize.height > 0 ? 1 : 0;
 
     return (
       <Modal
@@ -127,11 +138,21 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
               style={[
                 styles.menuContainer,
                 {
-                  top: Math.max(20, top),
+                  top,
                   left,
                   width: menuWidth,
+                  opacity: menuOpacity,
                 },
               ]}
+              onLayout={(event) => {
+                const { width, height } = event.nativeEvent.layout;
+                if (
+                  Math.abs(width - menuSize.width) > 1 ||
+                  Math.abs(height - menuSize.height) > 1
+                ) {
+                  setMenuSize({ width, height });
+                }
+              }}
             >
               {options.map((option, index) => (
                 <Pressable
@@ -142,7 +163,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
                   ]}
                   onPress={() => {
                     option.onPress({
-                      top: Math.max(20, top),
+                      top,
                       left,
                       width: menuWidth,
                     });
