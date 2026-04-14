@@ -76,10 +76,28 @@ export const StableTextInput = React.memo(function StableTextInput({
   const [isEmpty, setIsEmpty] = useState(initialText.length === 0);
   const setInputText = useInputStore((state) => state.setInputText);
 
+  const syncNativeText = useCallback(
+    (text: string) => {
+      if (!inputRef.current) return;
+
+      if (text.length === 0) {
+        // 中文注释：multiline 输入框在部分机型上只调 clear 仍可能残留旧内容，这里补一次原生 text 同步。
+        inputRef.current.clear();
+        inputRef.current.setNativeProps({ text: '' });
+        return;
+      }
+
+      inputRef.current.setNativeProps({ text });
+    },
+    [],
+  );
+
   // 不订阅组件重渲染：仅同步 ref，避免输入中被父级 render 打断。
   React.useEffect(() => {
-    localTextRef.current = useInputStore.getState().inputs[tabId]?.text ?? '';
-  }, [tabId]);
+    const text = useInputStore.getState().inputs[tabId]?.text ?? '';
+    localTextRef.current = text;
+    syncNativeText(text);
+  }, [syncNativeText, tabId]);
 
   React.useEffect(() => {
     const unsubscribe = useInputStore.subscribe((state) => {
@@ -102,15 +120,19 @@ export const StableTextInput = React.memo(function StableTextInput({
               prev === DESKTOP_MIN_HEIGHT ? prev : DESKTOP_MIN_HEIGHT,
             );
           }
-          // Android multiline 对 setNativeProps({ text: '' }) 有时不稳定，clear() 更可靠。
-          inputRef.current?.clear();
-        } else {
-          inputRef.current?.setNativeProps({ text });
         }
+        syncNativeText(text);
       }
     });
     return unsubscribe;
-  }, [tabId]);
+  }, [
+    DESKTOP_MIN_HEIGHT,
+    MOBILE_MIN_HEIGHT,
+    autoGrowEnabled,
+    mobileMode,
+    syncNativeText,
+    tabId,
+  ]);
 
   React.useEffect(() => {
     if (!inputRefExternal) return;
@@ -121,6 +143,12 @@ export const StableTextInput = React.memo(function StableTextInput({
       }
     };
   }, [inputRefExternal]);
+
+  React.useEffect(() => {
+    // 中文注释：首次挂载时，如果前一次同步发生在原生 TextInput ref 尚未就绪之前，
+    // 那次 setNativeProps 会被跳过；这里在 ref 建立后补做一次同步，确保显示文本与 store 一致。
+    syncNativeText(localTextRef.current);
+  }, [syncNativeText]);
 
   const handleChangeText = useCallback(
     (text: string) => {
