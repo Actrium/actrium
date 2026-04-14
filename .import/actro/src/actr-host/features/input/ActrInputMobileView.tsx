@@ -430,8 +430,9 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                         <TouchableOpacity
                           style={styles.mobileMenuItem}
                           onPress={() => {
-                            setShowMapModal(true);
-                            close();
+                            close(() => {
+                              setShowMapModal(true);
+                            });
                           }}
                         >
                           <View style={styles.mobileMenuItemIcon}>
