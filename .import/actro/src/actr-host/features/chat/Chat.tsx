@@ -59,6 +59,7 @@ import {
 } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import ChatSharePreviewModal from './share/ChatSharePreviewModal';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
@@ -79,6 +80,7 @@ interface MessageRowProps {
   handleEdit: (msg: IMessage) => void;
   handleCopy: (text: string) => void;
   handleFeedback?: (msgId: string) => void;
+  handleShare?: (msg: IMessage) => void;
   styles: ReturnType<typeof makeStyles>;
 }
 
@@ -94,6 +96,7 @@ const MessageRow = React.memo(function MessageRow({
   handleEdit,
   handleCopy,
   handleFeedback,
+  handleShare,
   styles,
 }: MessageRowProps) {
   const { t } = useTranslation();
@@ -187,6 +190,11 @@ const MessageRow = React.memo(function MessageRow({
                     : undefined
                 }
                 onFeedback={() => handleFeedback?.(item.message_id)}
+                onShare={
+                  item.answer_content || item.answer_type === 'voice'
+                    ? () => handleShare?.(item)
+                    : undefined
+                }
                 selectionKey={`${item.message_id}:question`}
                 isSelected={selectedParts.has('question')}
                 onToggleSelection={() =>
@@ -220,6 +228,7 @@ const MessageRow = React.memo(function MessageRow({
                   : undefined
               }
               onFeedback={() => handleFeedback?.(item.message_id)}
+              onShare={() => handleShare?.(item)}
               selectionKey={`${item.message_id}:answer`}
               isSelected={selectedParts.has('answer')}
               onToggleSelection={() =>
@@ -291,6 +300,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showLoadMoreHeader, setShowLoadMoreHeader] = useState(false);
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
+  const [shareMessage, setShareMessage] = useState<IMessage | null>(null);
   const { keyboardInset, isKeyboardVisible, dismissKeyboard } =
     useKeyboardInset();
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
@@ -567,6 +577,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           handleEdit={handleEdit}
           handleCopy={handleCopy}
           handleFeedback={setFeedbackMessageId}
+          handleShare={setShareMessage}
           styles={styles}
         />
       );
@@ -581,6 +592,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       toggleSelection,
       handleEdit,
       handleCopy,
+      setShareMessage,
       styles,
     ],
   );
@@ -735,6 +747,16 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         tabId={tab.id}
         appId={appId}
         messageId={feedbackMessageId || undefined}
+      />
+
+      <ChatSharePreviewModal
+        visible={!!shareMessage}
+        message={shareMessage}
+        appName={appInfo?.instance_name || appInfo?.app_name}
+        onClose={() => setShareMessage(null)}
+        onSaved={() => {
+          toastRef.current?.show(t('actr.chat.shareSaveSuccess'));
+        }}
       />
 
       <Toast ref={toastRef} />

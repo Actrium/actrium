@@ -40,6 +40,7 @@ const IconSources: Record<string, any> = {
   history: require('../assets/icons/history.png'),
   remove_star: require('../assets/icons/remove_star.png'),
   location_pin: require('../assets/icons/location_pin.png'),
+  share: require('../assets/icons/share.png'),
 };
 
 interface IconProps {

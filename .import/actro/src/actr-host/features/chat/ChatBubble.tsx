@@ -67,6 +67,7 @@ interface ChatBubbleProps {
   onEdit?: () => void;
   onCopy?: () => void;
   onFeedback?: () => void;
+  onShare?: () => void;
   isLatest?: boolean;
   msgId?: string;
   tabId?: string;
@@ -87,6 +88,7 @@ export default function ChatBubble({
   onEdit,
   onCopy,
   onFeedback,
+  onShare,
   isLatest = false,
   msgId,
   tabId,
@@ -305,6 +307,13 @@ export default function ChatBubble({
         icon: <Icon type='copy' size={16} />,
       });
     }
+    if (onShare && (isQuestion || !isLatest)) {
+      options.push({
+        label: t('actr.chat.share'),
+        onPress: onShare,
+        icon: <Icon type='share' size={16} />,
+      });
+    }
     if (!isSmall && !isQuestion) {
       options.push({
         label: t('actr.chat.readAloud'),
@@ -350,6 +359,8 @@ export default function ChatBubble({
     isQuestion,
     onEdit,
     onCopy,
+    onShare,
+    isLatest,
     isSmall,
     handleReadAloud,
     msgId,
@@ -661,6 +672,18 @@ export default function ChatBubble({
           >
             {(close) => (
               <>
+                {onShare ? (
+                  <DropdownMenuItem
+                    onPress={() => {
+                      close(() => {
+                        onShare();
+                      });
+                    }}
+                  >
+                    <Icon type='share' size={16} />
+                    <DropdownMenuText>{t('actr.chat.share')}</DropdownMenuText>
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                   onPress={() => {
                     close(() => {
@@ -770,7 +793,7 @@ export default function ChatBubble({
               const shouldShowMenu =
                 !selectionMode &&
                 menuOptions.length > 0 &&
-                (!isLatest || isQuestion) &&
+                (isQuestion || !isLatest) &&
                 !hasAttachments;
               if (shouldShowMenu) {
                 return (
