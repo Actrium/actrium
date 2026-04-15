@@ -1,0 +1,9 @@
+<resources>
+    <string name="tab_active">Activité</string>
+    <string name="tab_bookmark">Favoris</string>
+    <string name="tab_set">Préférences</string>
+    <string name="search">Rechercher...</string>
+    <string name="goback">Retour</string>
+    <string name="blank_tab">Nouvel onglet</string>
+</resources>
+

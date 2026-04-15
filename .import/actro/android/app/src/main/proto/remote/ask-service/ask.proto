@@ -1,0 +1,62 @@
+syntax = "proto3";
+package ask;
+
+// Service definition
+service AskService {
+  // Submit a prompt and get a reply
+  rpc Prompt(UsrPromptRequest) returns (AssistantReply);
+  // Upload an attachment
+  rpc Attach(AttachRequest) returns (AttachResponse);
+}
+
+// Prompt and reply message definitions
+message UsrPromptRequest {
+  string question_id = 1; // Unique question identifier
+  string session_id = 2; // Session ID for tracking
+  string text = 3; // Text question (if applicable)
+  string voice_stream_id = 4; // Voice question stream ID (if applicable)
+  Location location = 5; // Optional location context
+  repeated string attachment_ids = 6; // Optional attachment IDs
+  string text_response_stream_id = 7; // Text response stream ID (if applicable)
+  string voice_response_stream_id = 8; // Voice response stream ID (if applicable)
+}
+
+message AssistantReply {
+  string question_id = 1; // ID for the answer stream
+  string session_id = 2; // Session ID for tracking
+  string text = 3; // Text answer (if applicable)
+  int32 status_code = 4;
+  string error_message = 5;
+}
+
+// Predefined attachment types
+enum AttachmentType {
+  ATTACHMENT_TYPE_UNKNOWN = 0;
+  IMAGE = 1;
+  DOCUMENT = 2;
+  AUDIO = 3;
+  VIDEO = 4;
+  OTHER = 99;
+}
+// Attachment upload request
+message AttachRequest {
+  string id = 1; // Attachment unique identifier
+  string filename = 2; // Original filename
+  AttachmentType type = 3; // Attachment type
+  bytes data = 4; // Raw file bytes
+}
+
+// Attachment upload response
+message AttachResponse {
+  string id = 1; // Attachment ID (matches request id)
+  int32 status_code = 2; // Status code (0 means success)
+  string error_message = 3; // Error message (if any)
+}
+
+// Shared location type
+message Location {
+  double latitude = 1; // Latitude
+  double longitude = 2; // Longitude
+  string address = 3; // Optional: Address description
+  string place_name = 4; // Optional: Place name
+}
