@@ -112,10 +112,10 @@ android {
     }
     signingConfigs {
         debug {
-            storeFile file('../AskAway.jks')
-            storePassword 'AskAway2025'
-            keyAlias 'askaway'
-            keyPassword 'AskAway2025'
+            storeFile file('../debug.jks')
+            storePassword 'debug2026'
+            keyAlias 'debug'
+            keyPassword 'debug2026'
         }
     }
     buildTypes {
