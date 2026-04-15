@@ -1,0 +1,9 @@
+<resources>
+    <string name="tab_active">활동</string>
+    <string name="tab_bookmark">즐겨찾기</string>
+    <string name="tab_set">환경설정</string>
+    <string name="search">검색...</string>
+    <string name="goback">뒤로</string>
+    <string name="blank_tab">새 탭</string>
+</resources>
+

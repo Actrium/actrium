@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="nav_bg">#6A6A6A</color>
+    <color name="nav_indicator">#7C7C7C</color>
+    <color name="labels_vibrant_controls_primary">#FFFFFF</color>
+    <color name="gray5">#2C2C2E</color>
+    <color name="active_item_bg">#3A3A3C</color>
+    <color name="icon_1">#ECECED</color>
+    <color name="title_text">#ECECED</color>
+    <color name="splash_bg">#000000</color>
+</resources>
+
