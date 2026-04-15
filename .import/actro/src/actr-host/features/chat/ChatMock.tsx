@@ -18,117 +18,117 @@ import { getTypographyStyle, spacing } from '../../../theme/tokens';
 
 const TEMP_MOCK_APP_ID = '__temp_supramark_mock_app__';
 
-const TEMP_SUPRAMARK_MOCK_MESSAGES: IMessage[] = [
-//   {
-//     message_id: 'temp-mock-weather',
-//     app_id: TEMP_MOCK_APP_ID,
-//     session_id: 'temp-mock-session',
-//     is_preset: 0,
-//     question_time: 1710000000000,
-//     question_content: '天气',
-//     answer_time: 1710000001000,
-//     answer_content: `:::weather yaml
-// location: Beijing
-// units: metric
-// :::`,
-//     attachments: '',
-//     is_edited: 0,
-//     is_read: 1,
-//     progress: Progress.completed,
-//   },
-//   {
-//     message_id: 'temp-mock-admonition',
-//     app_id: TEMP_MOCK_APP_ID,
-//     session_id: 'temp-mock-session',
-//     is_preset: 0,
-//     question_time: 1710000002000,
-//     question_content: '提示框',
-//     answer_time: 1710000003000,
-//     answer_content: `# 提示框示例
+const TEMP_SUPRAMARK_MOCK_MESSAGES: any[] = [
+  {
+    message_id: 'temp-mock-weather',
+    app_id: TEMP_MOCK_APP_ID,
+    session_id: 'temp-mock-session',
+    is_preset: 0,
+    question_time: 1710000000000,
+    question_content: '天气',
+    answer_time: 1710000001000,
+    answer_content: `:::weather yaml
+location: Beijing
+units: metric
+:::`,
+    attachments: '',
+    is_edited: 0,
+    is_read: 1,
+    progress: Progress.completed,
+  },
+  {
+    message_id: 'temp-mock-admonition',
+    app_id: TEMP_MOCK_APP_ID,
+    session_id: 'temp-mock-session',
+    is_preset: 0,
+    question_time: 1710000002000,
+    question_content: '提示框',
+    answer_time: 1710000003000,
+    answer_content: `# 提示框示例
 
-// ::: note 提示
-// 这是一个普通提示框，用于展示一般性说明。
-// :::
+::: note 提示
+这是一个普通提示框，用于展示一般性说明。
+:::
 
-// ::: warning 警告
-// 请勿在生产环境中直接使用测试密钥。
-// :::`,
-//     attachments: '',
-//     is_edited: 0,
-//     is_read: 1,
-//     progress: Progress.completed,
-//   },
-//   {
-//     message_id: 'temp-mock-gfm',
-//     app_id: TEMP_MOCK_APP_ID,
-//     session_id: 'temp-mock-session',
-//     is_preset: 0,
-//     question_time: 1710000004000,
-//     question_content: 'GFM',
-//     answer_time: 1710000005000,
-//     answer_content: `# GFM 功能示例
+::: warning 警告
+请勿在生产环境中直接使用测试密钥。
+:::`,
+    attachments: '',
+    is_edited: 0,
+    is_read: 1,
+    progress: Progress.completed,
+  },
+  {
+    message_id: 'temp-mock-gfm',
+    app_id: TEMP_MOCK_APP_ID,
+    session_id: 'temp-mock-session',
+    is_preset: 0,
+    question_time: 1710000004000,
+    question_content: 'GFM',
+    answer_time: 1710000005000,
+    answer_content: `# GFM 功能示例
 
-// ## 删除线
+## 删除线
 
-// 使用 \`~~文本~~\` 语法来创建~~删除线~~效果。
+使用 \`~~文本~~\` 语法来创建~~删除线~~效果。
 
-// 例如：这是一段~~错误的~~正确的文本。
+例如：这是一段~~错误的~~正确的文本。
 
-// ## 任务列表
+## 任务列表
 
-// 使用 \`- [ ]\` 和 \`- [x]\` 来创建任务列表：
+使用 \`- [ ]\` 和 \`- [x]\` 来创建任务列表：
 
-// - [x] 已完成的任务
-// - [ ] 未完成的任务
-// - [x] 另一个已完成的任务
-// - [ ] 待办事项
+- [x] 已完成的任务
+- [ ] 未完成的任务
+- [x] 另一个已完成的任务
+- [ ] 待办事项
 
-// ## 组合使用
+## 组合使用
 
-// 你可以将删除线与其他格式组合使用：
+你可以将删除线与其他格式组合使用：
 
-// - **粗体**和~~删除线~~
-// - *斜体*和~~删除线~~
-// - \`代码\`和~~删除线~~
+- **粗体**和~~删除线~~
+- *斜体*和~~删除线~~
+- \`代码\`和~~删除线~~
 
-// ~~**整段粗体删除线**~~
+~~**整段粗体删除线**~~
 
-// ## 表格
+## 表格
 
-// 使用 GFM 表格语法创建表格，支持列对齐：
+使用 GFM 表格语法创建表格，支持列对齐：
 
-// | 功能 | 状态 | 说明 |
-// | --- | :---: | ---: |
-// | 删除线 | ✅ | 使用 \`~~\` 语法 |
-// | 任务列表 | ✅ | 使用 \`[ ]\` 和 \`[x]\` |
-// | 表格 | ✅ | 标准 GFM 表格 |
-// | 对齐方式 | ✅ | 左对齐、居中、右对齐 |`,
-//     attachments: '',
-//     is_edited: 0,
-//     is_read: 1,
-//     progress: Progress.completed,
-//   },
-//   {
-//     message_id: 'temp-mock-emoji',
-//     app_id: TEMP_MOCK_APP_ID,
-//     session_id: 'temp-mock-session',
-//     is_preset: 0,
-//     question_time: 1710000006000,
-//     question_content: 'Emoji',
-//     answer_time: 1710000007000,
-//     answer_content: `# Emoji 示例
+| 功能 | 状态 | 说明 |
+| --- | :---: | ---: |
+| 删除线 | ✅ | 使用 \`~~\` 语法 |
+| 任务列表 | ✅ | 使用 \`[ ]\` 和 \`[x]\` |
+| 表格 | ✅ | 标准 GFM 表格 |
+| 对齐方式 | ✅ | 左对齐、居中、右对齐 |`,
+    attachments: '',
+    is_edited: 0,
+    is_read: 1,
+    progress: Progress.completed,
+  },
+  {
+    message_id: 'temp-mock-emoji',
+    app_id: TEMP_MOCK_APP_ID,
+    session_id: 'temp-mock-session',
+    is_preset: 0,
+    question_time: 1710000006000,
+    question_content: 'Emoji',
+    answer_time: 1710000007000,
+    answer_content: `# Emoji 示例
 
-// 支持 GitHub 风格短代码：
+支持 GitHub 风格短代码：
 
-// - :smile: :joy: :wink:
-// - :rocket: :tada: :warning:
+- :smile: :joy: :wink:
+- :rocket: :tada: :warning:
 
-// 也可以直接输入原生 Emoji 😄🚀🎉。`,
-//     attachments: '',
-//     is_edited: 0,
-//     is_read: 1,
-//     progress: Progress.completed,
-//   },
+也可以直接输入原生 Emoji 😄🚀🎉。`,
+    attachments: '',
+    is_edited: 0,
+    is_read: 1,
+    progress: Progress.completed,
+  },
 {
     message_id: 'temp-mock-dot',
     app_id: TEMP_MOCK_APP_ID,
