@@ -61,7 +61,7 @@
             android:layout_marginStart="11dp"
             android:layout_weight="1"
             android:text="App Name"
-            android:textColor="@color/icon_1"
+            android:textColor="@color/title_text"
             android:textSize="17sp" />
 
         <!-- 标记图标 -->
