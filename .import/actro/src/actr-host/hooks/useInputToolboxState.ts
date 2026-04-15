@@ -4,7 +4,7 @@ import { useAppStore } from '../store/useAppStore';
 export const useInputToolboxState = (appId: string) => {
   const [isWebSearchActive, setIsWebSearchActive] = useState(false);
   const [isLocationActive, setIsLocationActive] = useState(false);
-  const [isSendOnEnter, setIsSendOnEnter] = useState(true);
+  const [isEnterForNewLine, setIsEnterForNewLine] = useState(false);
 
   const app = useAppStore((state) => state.apps[appId]);
 
@@ -15,15 +15,15 @@ export const useInputToolboxState = (appId: string) => {
 
   const toggleWebSearch = () => setIsWebSearchActive((prev) => !prev);
   const toggleLocation = () => setIsLocationActive((prev) => !prev);
-  const toggleSendOnEnter = () => setIsSendOnEnter((prev) => !prev);
+  const toggleEnterForNewLine = () => setIsEnterForNewLine((prev) => !prev);
 
   const toolboxProps = {
     isWebSearchActive,
     setIsWebSearchActive,
     isLocationActive,
     setIsLocationActive,
-    isSendOnEnter,
-    setIsSendOnEnter,
+    isEnterForNewLine,
+    setIsEnterForNewLine,
     showSearchEntry,
     showLocationEntry,
     showNewlineEntry,
@@ -35,6 +35,6 @@ export const useInputToolboxState = (appId: string) => {
     toolboxProps,
     toggleWebSearch,
     toggleLocation,
-    toggleSendOnEnter,
+    toggleEnterForNewLine,
   };
 };

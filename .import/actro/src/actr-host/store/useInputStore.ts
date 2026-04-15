@@ -5,69 +5,69 @@ const EMPTY_ATTACHMENTS: IAttachmentItem[] = [];
 const EMPTY_INPUT = { text: '', attachments: EMPTY_ATTACHMENTS, editingMessageId: null as string | null };
 
 interface InputState {
-  // key is appId
+  // key is tabId
   inputs: Record<string, {
     text: string; // 输入文本
     attachments: IAttachmentItem[]; // 附件
     editingMessageId: string | null; // 编辑的消息ID
   }>;
-  setInputText: (appId: string, text: string) => void;
-  setAttachments: (appId: string, attachments: IAttachmentItem[]) => void;
-  setEditingMessageId: (appId: string, messageId: string | null) => void;
-  updateAttachment: (appId: string, attachmentId: string, updates: Partial<IAttachmentItem>) => void;
-  clearInput: (appId: string) => void;
+  setInputText: (tabId: string, text: string) => void;
+  setAttachments: (tabId: string, attachments: IAttachmentItem[]) => void;
+  setEditingMessageId: (tabId: string, messageId: string | null) => void;
+  updateAttachment: (tabId: string, attachmentId: string, updates: Partial<IAttachmentItem>) => void;
+  clearInput: (tabId: string) => void;
 }
 
 export const useInputStore = create<InputState>((set) => ({
   inputs: {},
-  setInputText: (appId, text) =>
+  setInputText: (tabId, text) =>
     set((state) => ({
       inputs: {
         ...state.inputs,
-        [appId]: {
-          ...(state.inputs[appId] || EMPTY_INPUT),
+        [tabId]: {
+          ...(state.inputs[tabId] || EMPTY_INPUT),
           text,
         },
       },
     })),
-  setAttachments: (appId, attachments) =>
+  setAttachments: (tabId, attachments) =>
     set((state) => ({
       inputs: {
         ...state.inputs,
-        [appId]: {
-          ...(state.inputs[appId] || EMPTY_INPUT),
+        [tabId]: {
+          ...(state.inputs[tabId] || EMPTY_INPUT),
           attachments: attachments || EMPTY_ATTACHMENTS,
         },
       },
     })),
-  setEditingMessageId: (appId, messageId) =>
+  setEditingMessageId: (tabId, messageId) =>
     set((state) => ({
       inputs: {
         ...state.inputs,
-        [appId]: {
-          ...(state.inputs[appId] || EMPTY_INPUT),
+        [tabId]: {
+          ...(state.inputs[tabId] || EMPTY_INPUT),
           editingMessageId: messageId,
         },
       },
     })),
-  updateAttachment: (appId, attachmentId, updates) =>
+  updateAttachment: (tabId, attachmentId, updates) =>
     set((state) => {
-      const current = state.inputs[appId] || EMPTY_INPUT;
+      const current = state.inputs[tabId] || EMPTY_INPUT;
       const nextAttachments = current.attachments.map((item) =>
         item.id === attachmentId ? { ...item, ...updates } : item,
       );
       return {
         inputs: {
           ...state.inputs,
-          [appId]: { ...current, attachments: nextAttachments },
+          [tabId]: { ...current, attachments: nextAttachments },
         },
       };
     }),
-  clearInput: (appId) =>
+  clearInput: (tabId) =>
     set((state) => ({
       inputs: {
         ...state.inputs,
-        [appId]: EMPTY_INPUT,
+        [tabId]: EMPTY_INPUT,
       },
     })),
 }));

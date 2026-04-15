@@ -3,13 +3,15 @@ import { db } from '../libs/Sqlite';
 // 1. 书签项类型：对应 bookmark_items 表 + apps 表的关联字段
 export type TBookmarkItem = {
   id: number;
-  category_id: number;
+  category_id: number | null;
   app_id: string;
   created_at: number;
   sort_order: number;
   // 以下是 JOIN apps 表后得到的字段
   app_name: string | null; // 对应 apps.app_name
+  instance_name: string | null; // 对应 apps.instance_name
   logo: string | null; // 对应 apps.logo
+  url: string | null;  // 对应 apps.url
   last_question: string | null; // 最近一条消息的提问
   last_answer: string | null; // 最近一条消息的回答
 };
@@ -25,6 +27,7 @@ export type TBookmarkGroup = {
 export class BookmarkRepository {
   /**
    * 获取所有书签层级 (分类 + 书签项)
+   * 包含未分类的书签（category_id 为 null）
    */
   static async getBookmarksHierarchy(): Promise<TBookmarkGroup[]> {
     try {
@@ -39,14 +42,16 @@ export class BookmarkRepository {
 
       // 2. 获取所有书签项 (严格匹配 TBookmarkItem 字段)
       const items = await db.selectAll<TBookmarkItem>(
-        `SELECT 
-          bi.id, 
-          bi.category_id, 
+        `SELECT
+          bi.id,
+          bi.category_id,
           bi.app_id,
           bi.created_at,
           bi.sort_order,
           a.app_name,
+          a.instance_name,
           a.logo,
+          a.url,
           (SELECT question_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_question,
           (SELECT answer_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_answer
          FROM bookmark_items bi
@@ -55,10 +60,23 @@ export class BookmarkRepository {
       );
 
       // 3. 组装嵌套结构
-      return categories.map((cat) => ({
+      const result = categories.map((cat) => ({
         ...cat,
         items: items.filter((item) => item.category_id === cat.id),
       }));
+
+      // 4. 添加未分类的书签作为一个特殊分组（如果有）
+      const uncategorizedItems = items.filter((item) => item.category_id === null);
+      if (uncategorizedItems.length > 0) {
+        result.push({
+          id: -1, // 特殊 ID 表示未分类
+          title: '未分类',
+          sort_order: 999999,
+          items: uncategorizedItems,
+        });
+      }
+
+      return result;
     } catch (error) {
       console.error(
         '[BookmarkRepository] Failed to fetch bookmarks hierarchy',
@@ -103,26 +121,66 @@ export class BookmarkRepository {
 
   /**
    * 添加一个书签
+   * category_id 可选，为空时表示未分类
    */
   static async addBookmark({
-    category_id,
     app_id,
+    category_id,
     sort_order = 0,
   }: {
-    category_id: number;
     app_id: string;
+    category_id?: number | null;
     sort_order?: number;
   }) {
     return await db.executeSql(
       'INSERT INTO bookmark_items (category_id, app_id, sort_order) VALUES (?, ?, ?)',
-      [category_id, app_id, sort_order]
+      [category_id ?? null, app_id, sort_order]
     );
   }
 
   /**
-   * 删除一个书签
+   * 删除一个书签（按主键）
    */
-  static async removeBookmark(id: number) {
+  static async removeBookmarkById(id: number) {
     return await db.executeSql('DELETE FROM bookmark_items WHERE id = ?', [id]);
+  }
+
+  /**
+   * 按 app_id 删除书签
+   */
+  static async removeBookmarkByAppId(appId: string) {
+    return await db.executeSql('DELETE FROM bookmark_items WHERE app_id = ?', [appId]);
+  }
+
+  /**
+   * 根据 app_id 查询收藏项
+   */
+  static async getBookmarkByAppId(appId: string): Promise<TBookmarkItem | null> {
+    try {
+      const rows = await db.selectAll<TBookmarkItem>(
+        `SELECT
+          bi.id,
+          bi.category_id,
+          bi.app_id,
+          bi.created_at,
+          bi.sort_order,
+          a.app_name,
+          a.instance_name,
+          a.logo,
+          a.url,
+          (SELECT question_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_question,
+          (SELECT answer_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_answer
+         FROM bookmark_items bi
+         LEFT JOIN apps a ON bi.app_id = a.app_id
+         WHERE bi.app_id = ?
+         ORDER BY bi.sort_order ASC, bi.id ASC
+         LIMIT 1`,
+        [appId],
+      );
+      return rows[0] ?? null;
+    } catch (error) {
+      console.error('[BookmarkRepository] Failed to get bookmark by appId', error);
+      return null;
+    }
   }
 }

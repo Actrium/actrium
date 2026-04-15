@@ -1,5 +1,10 @@
 // System app types (built-in apps like chrome:// pages)
-export type SystemAppType = 'history' | 'bookmarks' | 'login';
+export type SystemAppType =
+  | 'history'
+  | 'bookmarks'
+  | 'settings'
+  | 'bookmarkTags'
+  | 'globalSearch';
 
 // History item passed from native
 export type HistoryItemData = {
@@ -52,6 +57,8 @@ export type TabConfig = {
   historyItems?: HistoryItemData[];
   historyGroups?: HistoryGroupData[];
   bookmarks?: BookmarkData[];
+  // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
+  appUrl?: string;
 };
 
 export type ActrProps = {
@@ -68,8 +75,14 @@ export type ActrProps = {
 export type TabRouterProps = ActrProps & {
   // Single tab mode - each RootView renders one tab
   singleTabMode?: boolean;
-  tab?: TabConfig;  // Single tab when singleTabMode is true
+  tab?: TabConfig; // Single tab when singleTabMode is true
   // Native 传递的容器尺寸（确保窗口缩小时 RN 能感知）
   containerWidth?: number;
   containerHeight?: number;
+
+  // FIXME 这些应该放到 tab 里面？
+  // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
+  appUrl?: string;
+  // Native-transparent payload for system app deep-links/actions
+  systemAppPayload?: Record<string, unknown>;
 };
