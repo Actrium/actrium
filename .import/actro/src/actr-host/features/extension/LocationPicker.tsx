@@ -216,7 +216,8 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
 
     try {
       // 直接截图整个地图容器，让地图和悬浮图钉一起进入快照，避免原生 Marker 干扰底图标识
-      const snapshot = await mapShotRef.current.capture();
+
+      const snapshot = await mapShotRef.current.capture?.();
       if (!snapshot) {
         throw new Error('Location view snapshot is empty');
       }

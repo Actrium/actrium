@@ -264,7 +264,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
 
     let refCount = 0;
     let viewTagCount = 0;
-    allRefs.forEach((ref, nodeId) => {
+    allRefs.forEach((ref: React.RefObject<unknown>, nodeId: number) => {
       if (!ref.current) {
         return;
       }
