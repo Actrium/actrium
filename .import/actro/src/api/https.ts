@@ -38,6 +38,22 @@ export const http = {
 
     return transformResponse<T>(res);
   },
+
+  async delete<T>(
+    url: string,
+    body?: any,
+    headers?: any
+  ): Promise<IBusinessResult<T>> {
+    const res = await HostHttpHandler.handleRequest<any>({
+      requestId: '',
+      url,
+      method: 'DELETE',
+      body,
+      headers,
+    });
+
+    return transformResponse<T>(res);
+  },
 };
 
 /**

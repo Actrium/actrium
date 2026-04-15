@@ -1,10 +1,12 @@
 /**
  * DevTools Console Interceptor
  *
- * Hooks into global console methods to forward logs to NativeLogger,
- * which then displays them in the DevTools Console panel.
+ * Hooks into global console methods to forward logs to:
+ * 1. Remote log server (actr dev, 跨平台)
+ * 2. NativeLogger (iOS/macOS Xcode 控制台)
  */
 import { NativeModules } from 'react-native';
+import { sendRemoteLog } from './remote-log';
 
 type NativeLoggerModule = {
   log?: (message: string) => void;
@@ -54,41 +56,41 @@ export function installConsoleInterceptor(): void {
   // Hook console.log
   console.log = (...args: unknown[]) => {
     originalConsole.log(...args);
-    if (nativeLogger?.log) {
-      nativeLogger.log(formatArgs(args));
-    }
+    const msg = formatArgs(args);
+    sendRemoteLog('log', msg);
+    // nativeLogger?.log?.(msg);
   };
 
   // Hook console.warn
   console.warn = (...args: unknown[]) => {
     originalConsole.warn(...args);
-    if (nativeLogger?.warn) {
-      nativeLogger.warn(formatArgs(args));
-    }
+    const msg = formatArgs(args);
+    sendRemoteLog('warn', msg);
+    // nativeLogger?.warn?.(msg);
   };
 
   // Hook console.error
   console.error = (...args: unknown[]) => {
     originalConsole.error(...args);
-    if (nativeLogger?.error) {
-      nativeLogger.error(formatArgs(args));
-    }
+    const msg = formatArgs(args);
+    sendRemoteLog('error', msg);
+    // nativeLogger?.error?.(msg);
   };
 
   // Hook console.debug (forward to log)
   console.debug = (...args: unknown[]) => {
     originalConsole.debug(...args);
-    if (nativeLogger?.log) {
-      nativeLogger.log(`[debug] ${formatArgs(args)}`);
-    }
+    const msg = `[debug] ${formatArgs(args)}`;
+    sendRemoteLog('log', msg);
+    // nativeLogger?.log?.(msg);
   };
 
   // Hook console.info (forward to log)
   console.info = (...args: unknown[]) => {
     originalConsole.info(...args);
-    if (nativeLogger?.log) {
-      nativeLogger.log(formatArgs(args));
-    }
+    const msg = formatArgs(args);
+    sendRemoteLog('log', msg);
+    // nativeLogger?.log?.(msg);
   };
 
   // Log that interceptor is installed

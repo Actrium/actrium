@@ -1,5 +1,7 @@
 {
   "common": {
+    "reject": "拒绝",
+    "allow": "允许",
     "loading": "加载中...",
     "error": "出错了",
     "noData": "暂无数据",
@@ -14,7 +16,11 @@
     "success": "成功",
     "tip": "提示",
     "save": "保存",
-    "and": "和"
+    "and": "和",
+    "retry": "重试",
+    "unknownError": "未知错误",
+    "networkError": "网络连接失败",
+    "networkCheckInfo": "网络错误，请检查网络连接"
   },
   "actr": {
     "appTitle": "Askaway Subsystem",
@@ -83,6 +89,17 @@
       "feedbackTitle": "反馈与举报",
       "feedbackPlaceholder": "输入文字描述（选填）",
       "feedbackFailed": "提交失败，请重试",
+      "share": "分享",
+      "sharePreview": "分享预览",
+      "shareGenerating": "正在生成分享图...",
+      "shareGenerateFailed": "生成分享图失败，请重试",
+      "shareSaveToAlbum": "保存到相册",
+      "shareSaveSuccess": "已保存到相册",
+      "shareSaveFailed": "保存失败，请重试",
+      "shareSavePermissionDenied": "没有相册权限，无法保存图片",
+      "shareFooter": "来自 AskAway 的一问一答",
+      "shareAiFooter": "本答案由 AI 生成",
+      "shareAiDisclaimer": "内容仅供参考，请仔细甄别",
       "submit": "提交",
       "locationInfo": "位置信息",
       "readAloud": "朗读",
@@ -108,7 +125,20 @@
       "clearHistory": "清除历史记录...",
       "itemsCount": "{{count}} 条记录",
       "tabsCount_one": "{{count}} 个标签页",
-      "tabsCount_other": "{{count}} 个标签页"
+      "tabsCount_other": "{{count}} 个标签页",
+      "noResult": "没有找到关于“{{query}}”的结果"
+    },
+    "search": {
+      "active": "活跃",
+      "bookmarks": "书签",
+      "settings": "设置",
+      "inputHint": "输入关键词后按回车搜索",
+      "noResults": "无搜索结果",
+      "placeholder": "搜索...",
+      "resultsIn": "搜索结果",
+      "recent": "最近搜索",
+      "emptyStateTitle": "无结果",
+      "emptyStateDescription": "无结果。请尝试新搜索词。"
     },
     "app": {
       "mockTitle1": "成游景由成约？什么改善怎么样，送合由周打事组?",
@@ -118,11 +148,16 @@
       "mockTitle5": "关于景区历史文化背景的深度讲解建议与推荐路线。",
       "notExist": "应用不存在",
       "loadFailed": "加载失败",
+      "invalidUrl": "二维码或链接无效",
       "networkRetry": "请检查网络后重试",
       "retryLater": "请稍后重试",
+      "cameraPermissionDeniedTitle": "没有相机权限",
+      "cameraPermissionDeniedMessage": "请在系统设置中开启相机权限后再试",
+      "cameraInitFailedTitle": "相机初始化失败",
       "requestCameraPermission": "正在申请相机权限...",
       "openCameraScan": "打开相机扫码",
       "initCamera": "正在初始化相机...",
+      "loading": "加载中...",
       "inputUrl": "请输入 URL",
       "blockedTitle": "已阻止运行",
       "blockedReason": "不满足宿主 contract/权限策略",
@@ -134,6 +169,7 @@
       "reference": "参考资料",
       "noHistory": "暂无对话记录",
       "searchAppPlaceholder": "搜索应用...",
+      "newTab": "新页签",
       "guide": "景区指南",
       "realtime": "实时动态",
       "parentChild": "亲子游玩",
@@ -141,11 +177,13 @@
       "officialService": "AskAway 官方客服"
     },
     "auth": {
+      "authDetailTip": "用户标识、昵称、头像、邮箱。若所选登录方式支持邮箱（如 Apple、Google），也将获取邮箱地址。",
       "serviceInitFailed": "服务初始化失败",
       "login": "登录",
-      "loginTip": "登录后可同步数据并体验更多 AI 功能",
+      "loginTip": "你可以通过以下方式登录",
       "wechatLogin": "微信登录",
       "appleLogin": "通过 Apple 登录",
+      "googleLogin": "通过 Google 登录",
       "readAndAgree": "我已阅读并同意",
       "userAgreement": "《用户协议》",
       "privacyPolicy": "《隐私政策》",
@@ -153,10 +191,16 @@
       "agreePolicyDetail": "勾选同意《用户协议》和《隐私政策》后即可登录。",
       "agreeAndLogin": "同意并登录",
       "authorizing": "正在授权...",
+      "loggingIn": "登录中...",
       "authTitle": "应用授权",
-      "authTip": "该应用申请获取以下权限：",
+      "authTip": "希望访问你的信息，用于提供个性化服务",
       "agreeAuth": "同意授权",
-      "logoutHint": "登录失效，请重新登录"
+      "logoutHint": "登录失效，请重新登录",
+      "loginFailed": "登录失败",
+      "loginError": "登录出错",
+      "activationFailed": "激活失败",
+      "authorizationFailed": "授权失败",
+      "authorizationError": "授权出错"
     },
     "attachment": {
       "overwriteConfirm": "已添加内容，继续将覆盖当前内容。",
@@ -165,7 +209,39 @@
       "fileSizeLimit": "单个文件不超过 10 MB",
       "unsupportedType": "不支持的文件类型",
       "limitPartial": "已达到 6 个上限，仅添加了前 {{count}} 个附件",
-      "locationTag": "位置"
+      "locationTag": "位置",
+      "cameraError": "打开相机失败",
+      "galleryError": "打开相册失败",
+      "fileError": "选择文件出错"
+    },
+    "bookmark": {
+      "all": "全部",
+      "defaultCategory": "默认分类",
+      "loadError": "加载书签失败",
+      "empty": "暂无书签",
+      "emptyHint": "收藏的应用会显示在这里"
+    },
+    "bookmarkTags": {
+      "deleteTitle": "删除标签",
+      "deleteMessage": "确定要删除这个标签吗？",
+      "enterTagName": "输入标签名称...",
+      "addNewTag": "添加新标签..."
+    },
+    "settings": {
+      "title": "设置",
+      "feedback": "吐个槽",
+      "logout": "退出登录",
+      "nickname": "昵称",
+      "email": "邮箱",
+      "deleteAccount": "删除账号",
+      "deleteAccountConfirm": "确认删除账号？此操作不可撤销，账号数据将被永久清除。",
+      "logoutAccount": "退出账号",
+      "aboutAskAway": "关于 AskAway",
+      "userAgreement": "用户协议",
+      "privacyPolicy": "隐私政策",
+      "icp": "ICP 备案",
+      "account": "账号",
+      "feedbackSubject": "#吐个槽关于"
     }
   }
 }

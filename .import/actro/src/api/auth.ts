@@ -9,7 +9,7 @@ export const ENVS = {
   prod: 'https://account.askaway.chat',
 };
 
-export const CURRENT_ENV: keyof typeof ENVS = 'beta';
+export const CURRENT_ENV: keyof typeof ENVS = 'prod';
 export const BASE_URL = ENVS[CURRENT_ENV];
 
 export const authApi = {
@@ -48,6 +48,14 @@ export const authApi = {
     }),
 
   /**
+   * 通过 Google 的 id_token 获取登录凭证
+   */
+  loginWithGoogle: (idToken: string) =>
+    http.post<string>(`${BASE_URL}/sso/providers/google/session`, {
+      id_token: idToken,
+    }),
+
+  /**
    * 用户点击授权后请求临时授权码
    */
   authorize: (clientId: string, loginHint: string, token: string) =>
@@ -66,6 +74,12 @@ export const authApi = {
   getIsAuthorized: (params: { appId: string; userId: string }) => {
     return http.get(`${CONSOLE_BASE}/api/access_control/${params.appId}/${params.userId}`);
   },
+
+  /**
+   * 注销账号
+   */
+  deleteAccount: (sessionToken: string) =>
+    http.delete<string>(`${BASE_URL}/sso/account`, { session_token: sessionToken }, { 'x-a1-authorization': `Bearer ${sessionToken}` }),
 
   /**
    * 使用临时授权码进行授权

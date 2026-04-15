@@ -1,135 +1,256 @@
 import { create } from 'zustand';
 import { IMessage } from '../../repository/MessageRepository';
 import { MessageRepository } from '../../repository/MessageRepository';
+import { cleanupVoiceMessageFile } from '../utils/VoiceMessageStorage';
 
 type MessagePart = 'attachments' | 'question' | 'answer';
 
 interface MessageState {
-  // Key is appId
-  messages: Record<string, IMessage[]>;
-  setMessages: (appId: string, msgs: IMessage[]) => void;
-  // 新消息加到开头（inverted 列表最下方）
-  addMessage: (appId: string, msg: IMessage) => void;
-  // 加载更多（旧消息）加到末尾（inverted 列表最上方）
-  appendOldMessages: (appId: string, msgs: IMessage[]) => void;
-  updateMessage: (appId: string, messageId: string, updates: Partial<IMessage>, persist?: boolean) => void;
-  deleteMessage: (appId: string, messageId: string) => void;
-  cleanMessage: (appId: string) => void;
+  // Key is tabId
+  messageIds: Record<string, string[]>;
+  messageById: Record<string, Record<string, IMessage>>;
+  getMessage: (tabId: string, messageId: string) => IMessage | undefined;
+  setMessages: (tabId: string, msgs: IMessage[]) => void;
+  // 正序列表：新消息追加到末尾
+  addMessage: (tabId: string, msg: IMessage) => void;
+  // 正序列表：加载更多旧消息时追加到开头
+  appendOldMessages: (tabId: string, msgs: IMessage[]) => void;
+  updateMessage: (
+    tabId: string,
+    messageId: string,
+    updates: Partial<IMessage>,
+    persist?: boolean,
+  ) => void;
+  deleteMessage: (tabId: string, messageId: string) => void;
+  cleanMessage: (tabId: string) => void;
   // 选择模式相关 删除时使用
   selectionMode: boolean;
   selectedItems: Record<string, Set<MessagePart>>;
-  enterSelectionMode: (messageId: string, appId?: string, defaultPart?: MessagePart) => void;
+  enterSelectionMode: (
+    messageId: string,
+    tabId?: string,
+    defaultPart?: MessagePart,
+  ) => void;
   toggleSelection: (messageId: string, part: MessagePart) => void;
   exitSelectionMode: () => void;
-  deleteSelectedMessages: (appId: string) => Promise<void>;
+  deleteSelectedMessages: (tabId: string) => Promise<void>;
 }
 
+const buildMessageIndex = (msgs: IMessage[]) => {
+  const sortedMsgs = [...msgs].sort((a, b) => {
+    if (a.question_time !== b.question_time) {
+      return a.question_time - b.question_time;
+    }
+    return a.message_id.localeCompare(b.message_id);
+  });
+  const ids: string[] = [];
+  const byId: Record<string, IMessage> = {};
+
+  for (const msg of sortedMsgs) {
+    if (!msg?.message_id) continue;
+    const id = msg.message_id;
+    if (!byId[id]) {
+      ids.push(id);
+    }
+    byId[id] = msg;
+  }
+
+  return { ids, byId };
+};
+
+const cleanupMessageVoiceFiles = async (
+  message?: Pick<IMessage, 'question_voice_payload' | 'answer_voice_payload'>,
+) => {
+  if (!message) return;
+
+  // 中文注释：消息删除或局部删除时，统一在这里回收提问/回答对应的本地语音文件，避免不同入口遗漏。
+  if (message.question_voice_payload) {
+    await cleanupVoiceMessageFile(message.question_voice_payload);
+  }
+  if (message.answer_voice_payload) {
+    await cleanupVoiceMessageFile(message.answer_voice_payload);
+  }
+};
+
 export const useMessageStore = create<MessageState>((set, get) => ({
-  messages: {},
+  messageIds: {},
+  messageById: {},
   selectionMode: false,
   selectedItems: {},
-  setMessages: (appId, msgs) =>
+  getMessage: (tabId, messageId) => get().messageById[tabId]?.[messageId],
+  setMessages: (tabId, msgs) => {
+    const { ids, byId } = buildMessageIndex(msgs);
     set((state) => ({
-      messages: { ...state.messages, [appId]: msgs },
-    })),
-  addMessage: (appId, msg) => {
-    set((state) => ({
-      messages: {
-        ...state.messages,
-        [appId]: [msg, ...(state.messages[appId] || [])],
-      },
+      messageIds: { ...state.messageIds, [tabId]: ids },
+      messageById: { ...state.messageById, [tabId]: byId },
     }));
+  },
+  addMessage: (tabId, msg) => {
+    set((state) => {
+      const currentIds = state.messageIds[tabId] || [];
+      const currentById = state.messageById[tabId] || {};
+      const exists = !!currentById[msg.message_id];
+
+      return {
+        messageIds: {
+          ...state.messageIds,
+          [tabId]: exists ? currentIds : [...currentIds, msg.message_id],
+        },
+        messageById: {
+          ...state.messageById,
+          [tabId]: {
+            ...currentById,
+            [msg.message_id]: msg,
+          },
+        },
+      };
+    });
+
     // 异步持久化
     MessageRepository.saveMessage(msg).catch((e) =>
       console.error('[useMessageStore] Failed to save added message:', e),
     );
   },
-  appendOldMessages: (appId, msgs) =>
-    set((state) => ({
-      messages: {
-        ...state.messages,
-        [appId]: [...(state.messages[appId] || []), ...msgs],
-      },
-    })),
-  updateMessage: (appId, messageId, updates, persist = false) => {
+  appendOldMessages: (tabId, msgs) =>
     set((state) => {
-      const currentMessages = state.messages[appId] || [];
-      const updatedMessages = currentMessages.map((m) =>
-        m.message_id === messageId ? { ...m, ...updates } : m,
-      );
-
-      // 如果需要持久化，找到更新后的完整对象
-      if (persist) {
-        const updatedMsg = updatedMessages.find((m) => m.message_id === messageId);
-        if (updatedMsg) {
-          MessageRepository.saveMessage(updatedMsg).catch((e) =>
-            console.error('[useMessageStore] Failed to update message in DB:', e),
-          );
+      const currentIds = state.messageIds[tabId] || [];
+      const currentById = state.messageById[tabId] || {};
+      const prependIds: string[] = [];
+      const nextById = { ...currentById };
+      const sortedMsgs = [...msgs].sort((a, b) => {
+        if (a.question_time !== b.question_time) {
+          return a.question_time - b.question_time;
         }
+        return a.message_id.localeCompare(b.message_id);
+      });
+
+      for (const msg of sortedMsgs) {
+        if (!msg?.message_id) continue;
+        const id = msg.message_id;
+        if (!nextById[id]) {
+          prependIds.push(id);
+        }
+        nextById[id] = msg;
       }
 
       return {
-        messages: {
-          ...state.messages,
-          [appId]: updatedMessages,
+        messageIds: {
+          ...state.messageIds,
+          [tabId]: [...prependIds, ...currentIds],
+        },
+        messageById: {
+          ...state.messageById,
+          [tabId]: nextById,
+        },
+      };
+    }),
+  updateMessage: (tabId, messageId, updates, persist = false) => {
+    let persistedMsg: IMessage | undefined;
+
+    set((state) => {
+      const currentById = state.messageById[tabId] || {};
+      const currentMsg = currentById[messageId];
+      if (!currentMsg) return state;
+
+      const updatedMsg = { ...currentMsg, ...updates };
+      persistedMsg = updatedMsg;
+
+      return {
+        messageById: {
+          ...state.messageById,
+          [tabId]: {
+            ...currentById,
+            [messageId]: updatedMsg,
+          },
         },
       };
     });
+
+    if (persist && persistedMsg) {
+      MessageRepository.saveMessage(persistedMsg).catch((e) =>
+        console.error('[useMessageStore] Failed to update message in DB:', e),
+      );
+    }
   },
-  deleteMessage: (appId, messageId) => {
-    set((state) => ({
-      messages: {
-        ...state.messages,
-        [appId]: (state.messages[appId] || []).filter(
-          (m) => m.message_id !== messageId,
-        ),
-      },
-    }));
+  deleteMessage: (tabId, messageId) => {
+    let deletedMessage: IMessage | undefined;
+
+    set((state) => {
+      const currentIds = state.messageIds[tabId] || [];
+      const currentById = state.messageById[tabId] || {};
+      if (!currentById[messageId]) return state;
+      deletedMessage = currentById[messageId];
+
+      const nextById = { ...currentById };
+      delete nextById[messageId];
+
+      return {
+        messageIds: {
+          ...state.messageIds,
+          [tabId]: currentIds.filter((id) => id !== messageId),
+        },
+        messageById: {
+          ...state.messageById,
+          [tabId]: nextById,
+        },
+      };
+    });
+
+    void cleanupMessageVoiceFiles(deletedMessage);
+
     // 异步持久化
     MessageRepository.deleteMessage(messageId).catch((e) =>
       console.error('[useMessageStore] Failed to delete message from DB:', e),
     );
   },
-  cleanMessage: (appId) =>
+  cleanMessage: (tabId) =>
     set((state) => {
-      const newMessages = { ...state.messages };
-      delete newMessages[appId];
-      return { messages: newMessages };
+      const newMessageIds = { ...state.messageIds };
+      const newMessageById = { ...state.messageById };
+      delete newMessageIds[tabId];
+      delete newMessageById[tabId];
+      return { messageIds: newMessageIds, messageById: newMessageById };
     }),
-  enterSelectionMode: (messageId: string, appId?: string, defaultPart?: MessagePart) => {
+  enterSelectionMode: (
+    messageId: string,
+    tabId?: string,
+    defaultPart?: MessagePart,
+  ) => {
     const state = get();
-    
-    // 如果没有提供 appId，尝试从所有消息中查找
+
+    // 如果没有提供 tabId，尝试从所有消息中查找
     let message: IMessage | undefined;
-    if (appId) {
-      message = state.messages[appId]?.find((m) => m.message_id === messageId);
+    if (tabId) {
+      message = state.messageById[tabId]?.[messageId];
     } else {
-      // 遍历所有 appId 查找消息
-      for (const msgs of Object.values(state.messages)) {
-        message = msgs.find((m) => m.message_id === messageId);
+      for (const byId of Object.values(state.messageById)) {
+        message = byId[messageId];
         if (message) break;
       }
     }
-    
+
     if (!message) return;
 
     const selectedParts = new Set<MessagePart>();
-    
+
     // 如果指定了默认部分，只选中该部分；否则选中所有部分
     if (defaultPart) {
-      // 验证该部分是否存在
       if (defaultPart === 'attachments' && message.attachments) {
         selectedParts.add('attachments');
-      } else if (defaultPart === 'question' && message.question_content) {
+      } else if (
+        defaultPart === 'question' &&
+        (message.question_content || message.question_type === 'voice')
+      ) {
         selectedParts.add('question');
-      } else if (defaultPart === 'answer' && message.answer_content) {
+      } else if (defaultPart === 'answer' && (message.answer_content || message.answer_type === 'voice')) {
         selectedParts.add('answer');
       }
     } else {
-      // 默认选中所有部分
       if (message.attachments) selectedParts.add('attachments');
-      if (message.question_content) selectedParts.add('question');
-      if (message.answer_content) selectedParts.add('answer');
+      if (message.question_content || message.question_type === 'voice') {
+        selectedParts.add('question');
+      }
+      if (message.answer_content || message.answer_type === 'voice') selectedParts.add('answer');
     }
 
     set({
@@ -143,7 +264,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((state) => {
       const currentSet = state.selectedItems[messageId] || new Set<MessagePart>();
       const newSet = new Set(currentSet);
-      
+
       if (newSet.has(part)) {
         newSet.delete(part);
       } else {
@@ -164,39 +285,44 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       selectedItems: {},
     });
   },
-  deleteSelectedMessages: async (appId: string) => {
+  deleteSelectedMessages: async (tabId: string) => {
     const state = get();
     const selectedItems = state.selectedItems;
-    const messages = state.messages[appId] || [];
+    const byId = state.messageById[tabId] || {};
 
     // 收集需要删除的消息和需要更新的消息
     const messagesToDelete: string[] = [];
-    const messagesToUpdate: Array<{ messageId: string; updates: Partial<IMessage> }> = [];
+    const messagesToUpdate: Array<{
+      messageId: string;
+      updates: Partial<IMessage>;
+    }> = [];
 
     for (const [messageId, parts] of Object.entries(selectedItems)) {
-      const message = messages.find((m) => m.message_id === messageId);
+      const message = byId[messageId];
       if (!message) continue;
 
       // 检查是否所有部分都被选中
       const allParts = new Set<MessagePart>();
       if (message.attachments) allParts.add('attachments');
-      if (message.question_content) allParts.add('question');
-      if (message.answer_content) allParts.add('answer');
+      if (message.question_content || message.question_type === 'voice') {
+        allParts.add('question');
+      }
+      if (message.answer_content || message.answer_type === 'voice') allParts.add('answer');
 
       if (parts.size === allParts.size && parts.size > 0) {
-        // 删除整条消息
         messagesToDelete.push(messageId);
       } else {
-        // 部分删除，重置对应字段
         const updates: Partial<IMessage> = {};
         if (parts.has('attachments')) {
           updates.attachments = undefined;
         }
         if (parts.has('question')) {
           updates.question_content = '';
+          updates.question_voice_payload = undefined;
         }
         if (parts.has('answer')) {
           updates.answer_content = '';
+          updates.answer_voice_payload = undefined;
         }
         if (Object.keys(updates).length > 0) {
           messagesToUpdate.push({ messageId, updates });
@@ -205,27 +331,31 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
 
     // 批量更新 store（一次性更新，减少重新渲染）
-    set((state) => {
-      const currentMessages = state.messages[appId] || [];
-      
-      // 删除整条消息
-      const filteredMessages = currentMessages.filter(
-        (m) => !messagesToDelete.includes(m.message_id)
-      );
-      
-      // 更新部分删除的消息
-      const updatedMessages = filteredMessages.map((m) => {
-        const updateItem = messagesToUpdate.find((item) => item.messageId === m.message_id);
-        if (updateItem) {
-          return { ...m, ...updateItem.updates };
+    set((innerState) => {
+      const currentIds = innerState.messageIds[tabId] || [];
+      const currentById = innerState.messageById[tabId] || {};
+
+      const nextById = { ...currentById };
+
+      for (const messageId of messagesToDelete) {
+        delete nextById[messageId];
+      }
+
+      for (const { messageId, updates } of messagesToUpdate) {
+        const msg = nextById[messageId];
+        if (msg) {
+          nextById[messageId] = { ...msg, ...updates };
         }
-        return m;
-      });
+      }
 
       return {
-        messages: {
-          ...state.messages,
-          [appId]: updatedMessages,
+        messageIds: {
+          ...innerState.messageIds,
+          [tabId]: currentIds.filter((id) => !messagesToDelete.includes(id)),
+        },
+        messageById: {
+          ...innerState.messageById,
+          [tabId]: nextById,
         },
         selectionMode: false,
         selectedItems: {},
@@ -236,6 +366,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     Promise.all([
       ...messagesToDelete.map(async (messageId) => {
         try {
+          await cleanupMessageVoiceFiles(byId[messageId]);
           await MessageRepository.deleteMessage(messageId);
         } catch (error) {
           console.error('[useMessageStore] Failed to delete message from DB:', error);
@@ -243,8 +374,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       }),
       ...messagesToUpdate.map(async ({ messageId, updates }) => {
         try {
-          const message = messages.find((m) => m.message_id === messageId);
+          const message = byId[messageId];
           if (message) {
+            if (updates.question_voice_payload === undefined && message.question_voice_payload) {
+              await cleanupVoiceMessageFile(message.question_voice_payload);
+            }
+            if (updates.answer_voice_payload === undefined && message.answer_voice_payload) {
+              await cleanupVoiceMessageFile(message.answer_voice_payload);
+            }
             await MessageRepository.saveMessage({ ...message, ...updates });
           }
         } catch (error) {

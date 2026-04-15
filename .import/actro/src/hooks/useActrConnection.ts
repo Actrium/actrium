@@ -1,20 +1,19 @@
 import { useEffect, useMemo } from 'react';
 import RNFS from 'react-native-fs';
-import { ConnectionManager } from '../native-bridge/ActrConnection';
-import { AppInfo } from '../api/types';
 import {
+  ActrConnectionManager,
   generateActrToml,
   generateActrLockToml,
-} from '../native-bridge/ActrConfigUtils';
-import { IAttachmentItem } from '../actr-host/types/attachment';
-import {
   AttachmentType,
   TActrMessageResponse,
   TLocation,
-} from '../native-bridge/ActrConnection.type';
+} from '../libs/actr';
+import { AppInfo } from '../api/types';
+import { IAttachmentItem } from '../actr-host/types/attachment';
 import { Utils } from '../utils/utils';
-import { useAppStore } from '../actr-host/store/useAppStore';
-import { Alert } from 'react-native';
+import { useMessageStore } from '../actr-host/store/useMessageStore';
+import { Progress } from '../repository/MessageRepository';
+import { GlobalAlert } from '../components';
 
 /**
  * useActrConnection Hook
@@ -50,10 +49,11 @@ export function useActrConnection({
   const connection = useMemo(() => {
     if (!appId || !config?.server_actor_type) return null;
 
-    return ConnectionManager.getOrCreate({
+    return ActrConnectionManager.getOrCreate({
       appId,
       tabId,
       actorType: `${config?.server_actor_type?.manufacturer}+${config?.server_actor_type?.name}`,
+      // actorType: 'bot+bot-service'
     });
   }, [appId, config]);
 
@@ -152,23 +152,32 @@ export function useActrConnection({
   }) => {
     if (!connection) return;
 
-    const attachmentIds = attachments?.length
-      ? await uploadAttachment(attachments)
-      : [];
-
-    const reqMessage = {
-      messageId: message_id, // message_id
-      sessionId: session_id, // session_id
-      text: message, // Text question (if applicable)
-      location: location, // Optional location context
-      attachmentIds: attachmentIds, // Optional: Attachment IDs
-    };
-
     try {
+      const attachmentIds = attachments?.length
+        ? await uploadAttachment(attachments)
+        : [];
+
+      const reqMessage = {
+        messageId: message_id, // message_id
+        sessionId: session_id, // session_id
+        text: message, // Text question (if applicable)
+        location: location, // Optional location context
+        attachmentIds: attachmentIds, // Optional: Attachment IDs
+      };
+
       const res = await connection.sendMessage(reqMessage);
       return res;
     } catch (e: any) {
-      Alert.alert('Failed to send message', e.message || e);
+      useMessageStore.getState().updateMessage(
+        tabId,
+        message_id,
+        {
+          progress: Progress.failed,
+          answer_time: Date.now(),
+        },
+        true,
+      );
+      GlobalAlert.alert('Failed to send message', e.message || e);
       return null;
     }
   };

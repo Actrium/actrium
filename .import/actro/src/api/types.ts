@@ -15,6 +15,7 @@ export interface AppInfo {
   app_id: string;
   manifest_version: string; // 配置文件版本
   app_name: string; // 应用名称
+  instance_name: string; // 实例名称
 
   actr_url: string; // guest cdn url
   actr_hash_code: string; // guest sha1 code
@@ -87,6 +88,7 @@ export interface AppInfo {
   creator_id_transfer: string; // 创建人、租户姓名
   created_at: string; // 创建时间
   updated_at: string; // 最后更新时间
+  url?: string; // 应用加载来源地址 (扫码或手动输入的 URL)
 }
 
 export interface AuthAppInfo {

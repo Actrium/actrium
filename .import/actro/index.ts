@@ -27,41 +27,40 @@ log.debug('console.assert type (after guard): ' + typeof console.assert);
 import { initDatabase } from './src/libs/Sqlite.init';
 initDatabase();
 
+import 'react-native-gesture-handler';
 import 'react-native-get-random-values';
+import NetInfo from '@react-native-community/netinfo';
 
 import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';
+const PromiseRejectionTracking = require('promise/setimmediate/rejection-tracking');
+
+// iOS 默认原生 reachability 在 Wi-Fi 断网场景下事件不稳定，这里统一切到 NetInfo 自己的可达性探测。
+NetInfo.configure({
+  useNativeReachability: false,
+  // Wi-Fi 接口还在但外网断掉时，NetInfo 只能靠主动探测发现异常。
+  // 默认 60 秒长轮询太慢，这里压到 3 秒，避免顶部网络状态长时间不更新。
+  reachabilityLongTimeout: 3 * 1000,
+  reachabilityShortTimeout: 3 * 1000,
+  reachabilityRequestTimeout: 3 * 1000,
+});
 
 // 🔴 统一日志工具 - 输出到:
-// 1. 远程日志服务器 (node log-server.js, 端口 9999)
-// 2. Xcode 原生控制台 (通过 NativeLogger)
+// 1. 远程日志服务器 (actr log server, 跨平台)
+// 2. 原生控制台 (通过 NativeLogger, 仅 iOS/macOS)
+// 尽早安装 console 拦截器，确保后续所有 console.xxx 都能转发到远程 log server
+import { installConsoleInterceptor } from './src/devtools-console';
+installConsoleInterceptor();
+
 const NativeLogger = NativeModules.NativeLogger;
-const LOG_SERVER = 'http://localhost:9999/log';
 
 const sendLog = (level: string, msg: string) => {
-  // 发送到远程日志服务器（注意：某些 runtime/离线 bundle 场景下 `fetch` 可能不存在，必须保护）
+  // 远程日志转发由 devtools-console.ts 的 console 拦截器统一处理，
+  // 这里通过 console 输出，拦截器会自动转发到远程 log server。
   try {
-    const fetchFn = (globalThis as any).fetch as unknown;
-    if (typeof fetchFn === 'function') {
-      (fetchFn as any)(LOG_SERVER, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level, msg }),
-      })?.catch?.(() => {}); // 静默失败
-    }
-  } catch {
-    // ignore
-  }
-
-  // 同时输出到 Xcode
-  try {
-    if (level === 'error') {
-      NativeLogger?.error?.(msg);
-    } else if (level === 'warn') {
-      NativeLogger?.warn?.(msg);
-    } else {
-      NativeLogger?.log?.(msg);
-    }
+    if (level === 'error') console.error(msg);
+    else if (level === 'warn') console.warn(msg);
+    else console.log(msg);
   } catch {
     // ignore
   }
@@ -70,6 +69,21 @@ const sendLog = (level: string, msg: string) => {
 const nlog = (msg: string) => sendLog('log', msg);
 const nwarn = (msg: string) => sendLog('warn', msg);
 const nerror = (msg: string) => sendLog('error', msg);
+
+// 统一捕获未处理的 Promise 拒绝，避免异步错误只在运行时静默丢失。
+PromiseRejectionTracking.enable({
+  allRejections: true,
+  onUnhandled: (id: number, error: unknown) => {
+    const errorText =
+      error instanceof Error
+        ? `${error.message}\n${error.stack ?? ''}`
+        : String(error);
+    nerror(`🔴 [UNHANDLED PROMISE] id=${id}\n${errorText}`);
+  },
+  onHandled: (id: number) => {
+    nwarn(`🟡 [PROMISE HANDLED LATE] id=${id}`);
+  },
+});
 
 nlog('📱 Bundle 开始执行');
 nlog('📦 NativeModules keys: ' + Object.keys(NativeModules || {}).slice(0, 15).join(', '));
@@ -231,3 +245,6 @@ try {
 }
 
 nlog('🏁 Bundle 执行完毕，等待 runApplication...');
+
+
+export default Component
