@@ -1,5 +1,7 @@
 # canvas-kotlin
 
+添加了ai工作流
+
 ### 运行
 
 ```bash
