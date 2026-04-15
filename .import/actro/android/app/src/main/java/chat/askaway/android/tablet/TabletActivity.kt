@@ -188,7 +188,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 updateAddButtonPosition()
             }
         })
-        binding.ivHome.setOnClickListener { viewModel.changeDisplayMode(PageMode.GRID) }
+        binding.ivHome.setOnClickListener {
+            binding.navActivity.isChecked = true
+            viewModel.changeDisplayMode(PageMode.GRID)
+        }
         binding.ivAppMenu.setOnClickListener { viewModel.toggleMenu() }
         binding.tvBack.setOnClickListener {
             Log.e("TableActivity", "tvBackClick:${reactViewMap.size}")
@@ -196,7 +199,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 viewModel.hideBookmark()
                 viewModel.changeDisplayMode(PageMode.TAB)
             }
-            binding.navActivity.isChecked = true
         }
 
         // 监听 StateFlow 并更新 Adapter
@@ -395,7 +397,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             binding.rvContent.isVisible = true
             binding.rlTitleGrid.isVisible = false
             binding.llSearch.isVisible = false
-
 
             // 移除 Grid 的 ItemDecoration
             gridItemDecoration?.let {
@@ -602,6 +603,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     }
 
     private fun showBookmark(sourceBundle: Bundle? = null) {
+        Log.e("TabletActivity", "showBookmark")
         if (binding.flBookmark.isVisible) return
         binding.flBookmark.isVisible = true
         binding.flBookmark.removeAllViews()
@@ -615,6 +617,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     }
 
     private fun hideBookmark() {
+        Log.e("TabletActivity", "hideBookmark")
         binding.flBookmark.isVisible = false
     }
 

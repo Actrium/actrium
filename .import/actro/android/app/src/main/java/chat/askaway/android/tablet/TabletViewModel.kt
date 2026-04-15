@@ -136,18 +136,27 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
     fun addApp(params: Map<String, Any?>? = null) {
         Log.e("TabletViewModel", "addApp:${params}")
         val tabModel = AppModel(id = UUID.randomUUID().toString())
+        var appUrl = ""
+        var mode = _tabletUseCase.value?.pageMode?:PageMode.TAB
+        if(params!=null && params.keys.contains("appUrl")){
+            appUrl= params["appUrl"] as? String?:""
+            mode = PageMode.TAB
+        }
         appList.add(tabModel)
         val activeModel = ActiveModel(
             id = tabModel.id,
             name = "",
             icon = "",
-            screenshot = ""
+            screenshot = "",
+            url= appUrl
         )
         val bundle = tabModel.genReactNativeBundle(appList, containerHeight, containerWidth)
         bundle.addMap(params)
+        hideBookmark()
         _tabletUseCase.value = _tabletUseCase.value!!.copy(
             appList = _tabletUseCase.value!!.appList + activeModel,
-            currentApp = bundle
+            currentApp = bundle,
+            pageMode = mode
         )
     }
 
