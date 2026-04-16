@@ -25,6 +25,22 @@ export type TInitSessionResult =
  * 处理应用会话的初始化、用户信息同步和权限校验等逻辑
  */
 export class AppSessionService {
+  private static isAppNotFoundResponse(response: {
+    code?: number;
+    message?: string;
+    data?: unknown;
+  }): boolean {
+    if (response.code === 10010) {
+      return true;
+    }
+
+    const message = response.message?.toLowerCase() || '';
+    return (
+      message.includes('app not found') ||
+      message.includes('应用不存在')
+    );
+  }
+
   /**
    * 初始化应用会话
    * 包含：获取 App 信息、同步用户信息、校验授权状态
@@ -52,8 +68,18 @@ export class AppSessionService {
       // 1. 获取并保存 App 信息
       const appRes = await getAppInfo(appId);
 
-      // 这里是首跳请求，权限未决或链路异常都会先落到 success=false。
-      // 如果误判成 APP_NOT_FOUND，UI 会把时序问题说成“应用不存在”，语义是错的。
+      // 中文注释：后端会把“应用不存在”放在业务错误码里返回，
+      // 这类响应虽然 success=false，但语义不是网络错误，需要先单独识别。
+      if (AppSessionService.isAppNotFoundResponse(appRes)) {
+        return {
+          ok: false,
+          reason: 'APP_NOT_FOUND',
+          message: appRes?.message,
+        };
+      }
+
+      // 中文注释：剩余的 success=false 才按链路失败处理，
+      // 例如网络异常、HTTP 非 2xx、权限链路未决等场景。
       if (!appRes?.success) {
         return {
           ok: false,
