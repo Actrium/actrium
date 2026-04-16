@@ -50,7 +50,7 @@ export const StableTextInput = React.memo(function StableTextInput({
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const MOBILE_LINE_HEIGHT = typography.editorInputCompact.lineHeight;
-  const MOBILE_MAX_LINES = 5;
+  const MOBILE_MAX_LINES = 10;
   const MOBILE_MIN_HEIGHT = MOBILE_LINE_HEIGHT;
   const MOBILE_MAX_HEIGHT = MOBILE_LINE_HEIGHT * MOBILE_MAX_LINES;
   const autoGrowEnabled =
