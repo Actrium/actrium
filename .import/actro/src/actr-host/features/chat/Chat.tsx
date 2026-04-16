@@ -46,7 +46,11 @@ import { GlobalAlert } from '../../../components';
 import TemporarySupramarkMockChat from './ChatMock';
 import { CHAT_HEADER_HEIGHT } from '../../constants';
 import { BookmarkRepository } from '../../../repository/BookmarkRepository';
-import { setTabBookmarkStatus } from '../../../native-bridge/tab/TabModule';
+import { AppRepository } from '../../../repository/AppRepository';
+import {
+  setTabBookmarkStatus,
+  updateTabInfo,
+} from '../../../native-bridge/tab/TabModule';
 import {
   KeyboardStickyView,
   useReanimatedKeyboardAnimation,
@@ -285,6 +289,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   );
 
   const appInfo = useAppStore((state) => state.apps[appId]);
+  const setAppInfo = useAppStore((state) => state.setAppInfo);
   const removeTabIdMap = useTabIdMapStore((state) => state.removeTabIdMap);
   const setStoreText = useInputStore((state) => state.setInputText);
   const clearInput = useInputStore((state) => state.clearInput);
@@ -345,8 +350,36 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
 
   const loadAppInfo = useCallback(async () => {
     if (!appId || appInfo) return;
-    await AppSessionService.initSession(tab.id, appId);
-  }, [appId, appInfo, tab.id]);
+
+    const initResult = await AppSessionService.initSession(tab.id, appId);
+    if (initResult.ok) return;
+
+    // 中文注释：带 preset appUrl 进入 Chat 时，优先尊重线上结果；
+    // 只有接口失败后，才允许回落到 SQLite 里的旧应用信息继续恢复历史会话。
+    if (!tab.appUrl) {
+      return;
+    }
+
+    const localAppInfo = await AppRepository.getApp(appId);
+    if (!localAppInfo) {
+      return;
+    }
+
+    // 中文注释：DB 里的 url 可能是旧值，恢复旧会话时要优先保留当前 tab 透传的 appUrl，
+    // 保证后续分享、tab 信息和宿主恢复语义仍然对应本次打开的地址。
+    const resolvedAppInfo = {
+      ...localAppInfo,
+      url: tab.appUrl || localAppInfo.url,
+    };
+
+    setAppInfo(appId, resolvedAppInfo);
+    void updateTabInfo({
+      tabId: tab.id,
+      title: resolvedAppInfo.instance_name,
+      icon: resolvedAppInfo.info?.logo || '',
+      appUrl: resolvedAppInfo.url || '',
+    });
+  }, [appId, appInfo, setAppInfo, tab.appUrl, tab.id]);
 
   const syncInitialBookmarkStatus = useCallback(async () => {
     if (!appId) return;
@@ -354,9 +387,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     try {
       // 首次进入聊天页时，按 appId 回查收藏表并同步当前 tab 的原生收藏态。
       const bookmarkItem = await BookmarkRepository.getBookmarkByAppId(appId);
-      if (!bookmarkItem) return;
-
-      await setTabBookmarkStatus(tab.id, true);
+      
+      await setTabBookmarkStatus(tab.id, !!bookmarkItem);
     } catch (error) {
       console.error('[Chat] Failed to sync initial bookmark status:', error);
     }

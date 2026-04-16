@@ -30,6 +30,8 @@ import { isPhone, isTablet } from '../../../utils/device';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useNetworkPermission } from '../../hooks/useNetworkPermission';
 import { BookmarkRepository } from '../../../repository/BookmarkRepository';
+import { MessageRepository } from '../../../repository/MessageRepository';
+import { useMessageStore } from '../../store/useMessageStore';
 import { AppText } from '../../../components';
 import { getTypographyStyle, loadApp, spacing } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
@@ -100,6 +102,7 @@ const LoadApp = () => {
   });
   const inputRef = useRef<TextInput>(null);
   const setTabIdMap = useTabIdMapStore((state) => state.setTabIdMap);
+  const cleanMessage = useMessageStore((state) => state.cleanMessage);
   const { ensureNetworkPermission } = useNetworkPermission();
 
   // 中文注释：Android 宿主已经通过 windowSoftInputMode 处理键盘上移，
@@ -144,7 +147,7 @@ const LoadApp = () => {
   );
 
   const handleResolveUrl = useCallback(
-    async (url: string) => {
+    async (url: string, source: LoadRequestSource) => {
       const appId = extractAppIdFromUrl(url);
       if (!appId) {
         console.error('扫描到的二维码无效:', url);
@@ -161,6 +164,26 @@ const LoadApp = () => {
           url,
         );
         if (!initResult.ok) {
+          // 中文注释：只有宿主透传的 preset appUrl 才允许走“历史会话兜回 Chat”；
+          // 手输和扫码仍保持现有语义，避免把真实无效地址误恢复成旧会话。
+          if (source === 'preset' && initResult.reason === 'APP_NOT_FOUND') {
+            const hasHistory = await MessageRepository.hasMessagesByTabIdAndAppId(
+              tabCtx.tab.id,
+              appId,
+            );
+
+            if (hasHistory) {
+              GlobalAlert.alert(t('actr.app.notExist'));
+              setTabIdMap(tabCtx.tab.id, appId, url);
+              return;
+            }
+
+            // 中文注释：预设恢复失败且当前 tab 没有对应历史消息时，
+            // 说明这个 tab 上残留的数据已经不再可信，需要同时清掉内存和 SQLite。
+            cleanMessage(tabCtx.tab.id);
+            await MessageRepository.deleteMessagesByTabId(tabCtx.tab.id);
+          }
+
           const alertMessage = extractAlertMessage(initResult.message);
           if (alertMessage) {
             GlobalAlert.alert(undefined, alertMessage);
@@ -187,7 +210,7 @@ const LoadApp = () => {
         dedupeStateRef.current.lastResolvedAt = Date.now();
       }
     },
-    [setTabIdMap, t, tabCtx.tab.id],
+    [cleanMessage, setTabIdMap, t, tabCtx.tab.id],
   );
 
   const enqueueLoadRequest = useCallback(
@@ -220,7 +243,7 @@ const LoadApp = () => {
           return;
         }
 
-        await handleResolveUrl(url);
+        await handleResolveUrl(url, source);
 
         if (source === 'preset') {
           const appId = extractAppIdFromUrl(url);

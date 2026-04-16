@@ -65,6 +65,28 @@ export class MessageRepository {
   }
 
   /**
+   * 检查指定 tab + app 是否存在历史消息
+   */
+  static async hasMessagesByTabIdAndAppId(
+    tabId: string,
+    appId: string,
+  ): Promise<boolean> {
+    try {
+      const rows = await db.selectAll<{ count: number }>(
+        'SELECT COUNT(*) as count FROM app_chat_history WHERE tab_id = ? AND app_id = ?',
+        [tabId, appId],
+      );
+      return (rows[0]?.count || 0) > 0;
+    } catch (error) {
+      console.error(
+        '[MessageRepository] Failed to check messages by tabId and appId',
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
    * 插入或更新消息
    */
   static async saveMessage(msg: IMessage) {
@@ -100,6 +122,15 @@ export class MessageRepository {
   static async deleteMessage(message_id: string) {
     return await db.executeSql('DELETE FROM app_chat_history WHERE message_id = ?', [
       message_id,
+    ]);
+  }
+
+  /**
+   * 删除指定 Tab 的全部消息
+   */
+  static async deleteMessagesByTabId(tabId: string) {
+    return await db.executeSql('DELETE FROM app_chat_history WHERE tab_id = ?', [
+      tabId,
     ]);
   }
 
