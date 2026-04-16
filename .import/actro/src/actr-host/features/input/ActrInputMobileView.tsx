@@ -697,6 +697,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     alignItems: 'flex-end',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
+    gap: 10,
   },
   mobileVoiceSurface: {
     minHeight: inputArea.minHeight,
