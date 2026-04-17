@@ -306,7 +306,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
       void currentEngine;
       void currentAdapter;
     };
-  }, [isActive, tab.id, tab.unifiedScript]);
+  }, [isActive, tab.id, tab.unifiedScript, engine]);
 
   // 加载 unified bundle（每个 tab 的 Engine 各加载一次）
   React.useEffect(() => {
@@ -446,7 +446,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   const tabContent = (
     <View style={styles.screen}>
-      <View style={[threeColumnStyle, { marginTop: sheetTopOffset }]}>
+      <View style={[threeColumnStyle, { marginTop: sheetTopOffset}]}>
         {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
         {/* {isLeftPanelVisible && (
           <View
