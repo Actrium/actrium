@@ -32,7 +32,7 @@ struct PhoneTabListView: View {
             
             ScrollView {
                 // 顶部间距：适应自定义导航栏
-                Color.clear.frame(height: 140)
+                Color.clear.frame(height: 144)
                 
                 LazyVStack(spacing: 16) {
                     ForEach(viewModel.tabs) { tab in
