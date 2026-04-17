@@ -169,7 +169,7 @@ struct PhoneTabCardView: View {
                     }) {
                         Image(systemName: "star.circle.fill")
                             .font(.system(size: 20))
-                            .foregroundColor(tab.isBookmarked ? Color(hex: "#EAC15B") : Color(hex: "#404040"))
+                            .foregroundColor(tab.isBookmarked ? Color(hex: "#EAC15B") : Color(hex: "#9E9EA7"))
                             .frame(width: 36, height: 36)
                             .background(Circle().fill(Color.clear))
                     }
@@ -179,7 +179,7 @@ struct PhoneTabCardView: View {
                 Button(action: onClose) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundColor(Color(hex: "#404040"))
+                        .foregroundColor(Color(hex: "#9E9EA7"))
                         .frame(width: 36, height: 36)
                 }
             }
