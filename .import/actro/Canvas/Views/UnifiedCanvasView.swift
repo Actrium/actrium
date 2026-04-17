@@ -353,7 +353,7 @@ struct UnifiedCanvasView: View {
 
     // MARK: - Transform Calculations
 
-    /// Overview 模式变换：缩放画布以适应视口，居中显示
+    /// Overview 模式变换：缩放画布以适应视口，水平居中、顶端对齐
     private func calculateOverviewTransform(
         canvasSize: CGSize,
         viewportSize: CGSize
@@ -367,11 +367,10 @@ struct UnifiedCanvasView: View {
         let scaleY = viewportSize.height / canvasSize.height
         let scale = max(min(scaleX, scaleY, 1.0), 0.001)
 
-        // 居中
+        // 水平居中，顶端对齐
         let scaledWidth = canvasSize.width * scale
-        let scaledHeight = canvasSize.height * scale
         let offsetX = (viewportSize.width - scaledWidth) / 2
-        let offsetY = (viewportSize.height - scaledHeight) / 2
+        let offsetY: CGFloat = 0  // 顶端对齐，不添加垂直偏移
 
         guard offsetX.isFinite && offsetY.isFinite && scale.isFinite else {
             return (1.0, .zero)
