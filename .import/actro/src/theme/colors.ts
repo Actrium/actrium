@@ -218,7 +218,7 @@ export const lightColors: ColorTokens = {
   bgRemoveButton: 'rgba(0,0,0,0.5)',
   bgBubbleQuestion: '#E6E9F6',
   bgBubbleAnswer: '#F9F9FB',
-  bgScreen: '#fff',
+  bgScreen: '#000',
   bgColumn: '#F2F2F6',
   bgEmpty: '#fff',
   bgBlocked: '#fff',
