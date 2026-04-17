@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Animated,
   Platform,
   PanResponder,
   StyleSheet,
@@ -112,6 +113,9 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const [isInputFocused, setIsInputFocused] = React.useState(false);
   const mobileTextInputRef = React.useRef<TextInput | null>(null);
   const attachmentActionLockRef = React.useRef(false);
+  const webSearchIconTranslateY = React.useRef(new Animated.Value(0)).current;
+  const locationIconTranslateY = React.useRef(new Animated.Value(0)).current;
+  const enterIconTranslateY = React.useRef(new Animated.Value(0)).current;
 
   const hasInputText = inputText.length > 0;
   // mobile 状态机：
@@ -144,6 +148,57 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
       mobileTextInputRef.current?.focus();
     }, 0);
   }, []);
+
+  const playMenuIconBounce = React.useCallback((translateY: Animated.Value) => {
+    translateY.stopAnimation();
+    translateY.setValue(0);
+    // 中文注释：利用菜单关闭前的延迟窗口，让图标先轻微上跳再回落，保证反馈在菜单消失前可见。
+    Animated.sequence([
+      Animated.timing(translateY, {
+        toValue: -7,
+        duration: 70,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 2.5,
+        duration: 55,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 45,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  const handleDelayedToggleMenuAction = React.useCallback(
+    (
+      toggle: () => void,
+      translateY: Animated.Value,
+      close: (callback?: () => void, options?: { delayMs?: number }) => void,
+    ) => {
+      toggle();
+      playMenuIconBounce(translateY);
+      close(undefined, { delayMs: 200 });
+    },
+    [playMenuIconBounce],
+  );
+
+  const renderBouncingMenuIcon = React.useCallback(
+    (
+      type: string,
+      active: boolean,
+      color: string,
+      size: number,
+      translateY: Animated.Value,
+    ) => (
+      <Animated.View style={{ transform: [{ translateY }] }}>
+        <Icon type={type} active={active} size={size} color={color} />
+      </Animated.View>
+    ),
+    [],
+  );
 
 
 
@@ -374,17 +429,21 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               isWebSearchActive && styles.mobileMenuItemActive,
                             ]}
                             onPress={() => {
-                              setIsWebSearchActive(!isWebSearchActive);
-                              close();
+                              handleDelayedToggleMenuAction(
+                                () => setIsWebSearchActive(!isWebSearchActive),
+                                webSearchIconTranslateY,
+                                close,
+                              );
                             }}
                           >
                             <View style={styles.mobileMenuItemIcon}>
-                              <Icon
-                                type='network'
-                                active={isWebSearchActive}
-                                size={inputArea.smallIconSize}
-                                color={isWebSearchActive ? colors.accentBlue : colors.textIconDark}
-                              />
+                              {renderBouncingMenuIcon(
+                                'network',
+                                isWebSearchActive,
+                                isWebSearchActive ? colors.accentBlue : colors.textIconDark,
+                                inputArea.smallIconSize,
+                                webSearchIconTranslateY,
+                              )}
                             </View>
                             <View style={styles.mobileMenuTextBlock}>
                               <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
@@ -404,17 +463,21 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               isLocationActive && styles.mobileMenuItemActive,
                             ]}
                             onPress={() => {
-                              setIsLocationActive(!isLocationActive);
-                              close();
+                              handleDelayedToggleMenuAction(
+                                () => setIsLocationActive(!isLocationActive),
+                                locationIconTranslateY,
+                                close,
+                              );
                             }}
                           >
                             <View style={styles.mobileMenuItemIcon}>
-                              <Icon
-                                type='share_position'
-                                active={isLocationActive}
-                                size={inputArea.smallIconSize}
-                                color={isLocationActive ? colors.accentBlue : colors.textIconDark}
-                              />
+                              {renderBouncingMenuIcon(
+                                'share_position',
+                                isLocationActive,
+                                isLocationActive ? colors.accentBlue : colors.textIconDark,
+                                inputArea.smallIconSize,
+                                locationIconTranslateY,
+                              )}
                             </View>
                             <View style={styles.mobileMenuTextBlock}>
                               <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
@@ -455,17 +518,21 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                               isEnterForNewLine && styles.mobileMenuItemActive,
                             ]}
                             onPress={() => {
-                              setIsEnterForNewLine(!isEnterForNewLine);
-                              close();
+                              handleDelayedToggleMenuAction(
+                                () => setIsEnterForNewLine(!isEnterForNewLine),
+                                enterIconTranslateY,
+                                close,
+                              );
                             }}
                           >
                             <View style={styles.mobileMenuItemIcon}>
-                              <Icon
-                                type='enter'
-                                active={isEnterForNewLine}
-                                size={inputArea.smallIconSize}
-                                color={isEnterForNewLine ? colors.accentBlue : colors.textIconDark}
-                              />
+                              {renderBouncingMenuIcon(
+                                'enter',
+                                isEnterForNewLine,
+                                isEnterForNewLine ? colors.accentBlue : colors.textIconDark,
+                                inputArea.smallIconSize,
+                                enterIconTranslateY,
+                              )}
                             </View>
                             <View style={styles.mobileMenuTextBlock}>
                               <AppText variant='menuLabel' style={styles.mobileMenuTitle}>
