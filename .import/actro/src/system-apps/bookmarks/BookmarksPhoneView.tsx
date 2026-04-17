@@ -249,28 +249,29 @@ const styles = StyleSheet.create({
   listItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.lg,
     height: controlHeight.xl,
     backgroundColor: '#1a1a1a',
   },
   listItemDivider: {
     height: 1,
     backgroundColor: '#2C2C2E',
-    marginLeft: 64,
+    // 中文注释：分隔线起点跟 settings 菜单项保持一致，需要避开左侧图标和文本起始前的间距。
+    marginLeft: 55,
     marginRight: spacing.md,
   },
   listItemLogo: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: '#2a2a2a',
   },
   listItemName: {
     flex: 1,
     ...getTypographyStyle('title3'),
     color: '#fff',
-    marginLeft: spacing.md,
-    fontWeight: '500',
+    marginLeft: 17,
+    fontWeight: '400',
   },
   centerContainer: {
     flex: 1,
