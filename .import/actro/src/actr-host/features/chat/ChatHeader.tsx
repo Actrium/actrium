@@ -75,8 +75,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             disabled={leftDisabled}
             active={leftActive}
             activeBackgroundColor={colors.bgChatHeaderBtn}
-            iconColor={colors.textSecondary}
-            activeIconColor={colors.textInverse}
+            iconColor={colors.iconChatHeader}
+            activeIconColor={colors.iconChatHeader}
           />
         ) : (
           <View style={styles.headerButtonPlaceholder} />
@@ -100,13 +100,13 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             iconSize={22}
             onPress={() => {}}
             style={styles.headerButton}
-            iconColor={colors.textSecondary}
+            iconColor={colors.iconChatHeader}
           />
         ) : showCloseButton ? (
           <HostIconButton
             iconType='close'
             iconSize={16}
-            iconColor={colors.textSecondary}
+            iconColor={colors.iconChatHeader}
             onPress={onRightPress}
             style={styles.headerButton}
           />
