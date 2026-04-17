@@ -120,6 +120,9 @@ export default function ChatBubble({
   const isVoiceQuestion = isQuestion && !!parsedVoicePayload;
   const isVoiceAnswer = !isQuestion && !!parsedVoicePayload;
   const isVoiceBubble = !!parsedVoicePayload;
+  const bubbleFrameStyle = isQuestion
+    ? styles.questionBubbleFrame
+    : styles.answerBubbleFrame;
 
   const { activePlayback, setActivePlayback, updatePlaybackStatus, clearPlayback } =
     useVoicePlaybackStore();
@@ -787,13 +790,7 @@ export default function ChatBubble({
         containerStyle,
       ]}
     >
-      <View
-        style={{
-          width: hasAttachments ? '100%' : undefined,
-          maxWidth: '100%',
-          alignSelf: isQuestion ? 'flex-end' : 'flex-start',
-        }}
-      >
+      <View style={bubbleFrameStyle}>
         {hasAttachments ? (
           // 中文注释：附件气泡不再包外层 Pressable，避免与内部横向 ScrollView 竞争 responder。
           <View>
@@ -870,6 +867,14 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   answerWrapper: {
     alignItems: 'flex-start',
     width: '100%',
+  },
+  questionBubbleFrame: {
+    maxWidth: 316,
+    alignSelf: 'flex-end',
+  },
+  answerBubbleFrame: {
+    maxWidth: '100%',
+    alignSelf: 'flex-start',
   },
   questionBubble: {
     backgroundColor: colors.bgBubbleQuestion,
