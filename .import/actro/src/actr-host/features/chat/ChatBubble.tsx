@@ -651,7 +651,7 @@ export default function ChatBubble({
             hitSlop={8}
           >
             <Icon
-              type={isCopied ? 'more' : 'copy'}
+              type={isCopied ? 'success' : 'copy'}
               size={chatBubbleToolbar.iconSize}
             />
           </Pressable>
