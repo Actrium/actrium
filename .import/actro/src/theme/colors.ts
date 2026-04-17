@@ -26,6 +26,7 @@ export interface ColorTokens {
   textIconDark: string;
   textIconStrong: string;
   iconDefault: string;
+  iconChatHeader: string;
 
   // HostIconButton
   iconHostIconButton: string;
@@ -173,6 +174,7 @@ export const lightColors: ColorTokens = {
   textIconDark: '#2C2C2C',
   textIconStrong: '#404040',
   iconDefault: '#0a0a0a',
+  iconChatHeader: '#333333',
   iconHostIconButton: '#0a0a0a',
   iconHostIconButtonActive: '#FFFFFF',
   textPlaceholader: '#d9d9d9',
@@ -315,6 +317,7 @@ export const darkColors: ColorTokens = {
   textIconDark: '#fff',
   textIconStrong: '#fff',
   iconDefault: '#fff',
+  iconChatHeader: '#fff',
 
   iconHostIconButton: '#78788052',
   iconHostIconButtonActive: '#78788052',

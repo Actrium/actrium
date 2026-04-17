@@ -342,7 +342,7 @@ export default function ChatBubble({
           setMoreMenuPosition(position);
           setTimeout(() => setShowMoreMenu(true), 300);
         },
-        icon: <Icon type='menu_more' size={16} />,
+        icon: <Icon type='more' size={16} />,
       });
     }
 
