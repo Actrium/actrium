@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Platform,
   View,
   ScrollView,
   StyleSheet,
@@ -7,6 +8,8 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import LinearGradient from 'react-native-linear-gradient';
 import { AppText } from '../../components';
 import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import { useUserStore } from '../../actr-host/store/useUserStore';
@@ -26,87 +29,126 @@ export const AccountDetail = ({
   isTablet,
 }: AccountDetailProps) => {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const userInfo = useUserStore((state) => state.userInfo);
+  const isIOS = Platform.OS === 'ios';
+  const headerHeight = isIOS ? insets.top + 56 : 0;
+  const headerPaddingTop = isIOS ? insets.top + 12 : 0;
+  const contentTopPadding = isIOS ? insets.top + 66 + 24 : 60;
 
   return (
-    <ScrollView
-      style={styles.content}
-      contentContainerStyle={[
-        styles.scrollContent,
-        {
-          paddingHorizontal: isTablet ? 40 : 16,
-        },
-      ]}
-      showsVerticalScrollIndicator={false}
-    >
-      <SettingsBackHeader onBack={onBack} />
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={[
+          styles.scrollContent,
+          // 中文注释：头部可视高度调整为 44 后，正文顶部仍保持原来的视觉起点，不跟着一起上移。
+          { paddingTop: contentTopPadding },
+          {
+            paddingHorizontal: isTablet ? 40 : 16,
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+        scrollIndicatorInsets={isIOS ? { top: insets.top + 66 } : undefined}
+      >
+        {!isIOS ? <SettingsBackHeader onBack={onBack} /> : null}
 
-      {/* Avatar */}
-      <View style={styles.avatarContainer}>
-        <Image
-          source={
-            userInfo?.user.avatar && userInfo.user.avatar !== 'none'
-              ? { uri: userInfo.user.avatar }
-              : require('../../assets/login/avatar_default.png')
-          }
-          style={styles.largeAvatar}
-        />
-      </View>
-
-      {/* Account Info Card */}
-      <View style={styles.detailCard}>
-        <View style={styles.detailRow}>
-          <AppText style={styles.detailLabel}>{t('actr.settings.nickname')}</AppText>
-          <AppText style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
-            {userInfo?.user.display_name || userInfo?.user.cn || '-'}
-          </AppText>
+        {/* Avatar */}
+        <View style={styles.avatarContainer}>
+          <Image
+            source={
+              userInfo?.user.avatar && userInfo.user.avatar !== 'none'
+                ? { uri: userInfo.user.avatar }
+                : require('../../assets/login/avatar_default.png')
+            }
+            style={styles.largeAvatar}
+          />
         </View>
-        <View style={styles.divider} />
-        <View style={styles.detailRow}>
-          <AppText style={styles.detailLabel}>{t('actr.settings.email')}</AppText>
-          <AppText style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
-            {userInfo?.user.mail || '-'}
-          </AppText>
-        </View>
-      </View>
 
-      {/* Danger Zone */}
-      <View style={styles.dangerCard}>
-        <View style={styles.dangerRow}>
-          <TouchableOpacity
-            style={styles.dangerButton}
-            onPress={onDeleteAccount}
-            activeOpacity={0.7}
-          >
-            <AppText style={styles.destructiveText}>
-              {t('actr.settings.deleteAccount')}
+        {/* Account Info Card */}
+        <View style={styles.detailCard}>
+          <View style={styles.detailRow}>
+            <AppText style={styles.detailLabel}>{t('actr.settings.nickname')}</AppText>
+            <AppText style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
+              {userInfo?.user.display_name || userInfo?.user.cn || '-'}
             </AppText>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.divider} />
-        <View style={styles.dangerRow}>
-          <TouchableOpacity
-            style={styles.dangerButton}
-            onPress={onLogout}
-            activeOpacity={0.7}
-          >
-            <AppText style={styles.destructiveText}>
-              {t('actr.settings.logoutAccount')}
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.detailRow}>
+            <AppText style={styles.detailLabel}>{t('actr.settings.email')}</AppText>
+            <AppText style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">
+              {userInfo?.user.mail || '-'}
             </AppText>
-          </TouchableOpacity>
+          </View>
         </View>
-      </View>
-    </ScrollView>
+
+        {/* Danger Zone */}
+        <View style={styles.dangerCard}>
+          <View style={styles.dangerRow}>
+            <TouchableOpacity
+              style={styles.dangerButton}
+              onPress={onDeleteAccount}
+              activeOpacity={0.7}
+            >
+              <AppText style={styles.destructiveText}>
+                {t('actr.settings.deleteAccount')}
+              </AppText>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.dangerRow}>
+            <TouchableOpacity
+              style={styles.dangerButton}
+              onPress={onLogout}
+              activeOpacity={0.7}
+            >
+              <AppText style={styles.destructiveText}>
+                {t('actr.settings.logoutAccount')}
+              </AppText>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+
+      {isIOS ? (
+        <LinearGradient
+          style={[
+            styles.iosHeader,
+            styles.headerOverlay,
+            { height: headerHeight, paddingTop: headerPaddingTop },
+          ]}
+          colors={['rgba(0, 0, 0, 1)', 'rgba(0, 0, 0, 0)']}
+          start={{ x: 0.5, y: 0.45 }}
+          end={{ x: 0.5, y: 1 }}
+        >
+          <SettingsBackHeader onBack={onBack} marginBottom={0} />
+        </LinearGradient>
+      ) : null}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
   content: {
     flex: 1,
   },
   scrollContent: {
     paddingTop: 60,
     paddingBottom: 40,
+  },
+  iosHeader: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  headerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
   },
   avatarContainer: {
     alignItems: 'center',

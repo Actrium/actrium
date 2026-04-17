@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { SettingsBackHeader } from './SettingsBackHeader';
 import { AboutPageKey, getAboutPageUrl } from './aboutPages';
@@ -13,6 +14,10 @@ interface AboutWebViewPageProps {
 
 export const AboutWebViewPage = ({ page, onBack }: AboutWebViewPageProps) => {
   const { i18n } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const isIOS = Platform.OS === 'ios';
+  const headerHeight = isIOS ? insets.top + 56 : 0;
+  const headerPaddingTop = isIOS ? insets.top + 12 : 0;
 
   const pageUrl = useMemo(() => {
     return getAboutPageUrl(page, i18n.language || 'zh-Hans');
@@ -20,15 +25,23 @@ export const AboutWebViewPage = ({ page, onBack }: AboutWebViewPageProps) => {
 
   return (
     <View style={styles.container}>
-      {/* 中文注释：当前项目的 safe-area shim 固定返回 0，这里与系统页其余页面保持一致，使用固定 60 顶部留白。 */}
-      <View
-        style={{
-          ...styles.header,
-          ...(isAndroid ? { height: 84, paddingTop: 10 } : {}),
-        }}
-      >
-        <SettingsBackHeader onBack={onBack} marginBottom={0} />
-      </View>
+      {isIOS ? (
+        <View
+          style={[styles.iosHeader, { height: headerHeight, paddingTop: headerPaddingTop }]}
+        >
+          <SettingsBackHeader onBack={onBack} marginBottom={0} />
+        </View>
+      ) : (
+        // 中文注释：Android 继续沿用原来的固定头部高度，先只按 iOS 标准调整二级页。
+        <View
+          style={{
+            ...styles.header,
+            ...(isAndroid ? { height: 84, paddingTop: 10 } : {}),
+          }}
+        >
+          <SettingsBackHeader onBack={onBack} marginBottom={0} />
+        </View>
+      )}
       <WebView
         source={{ uri: pageUrl }}
         style={styles.webview}
@@ -50,6 +63,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
+  },
+  iosHeader: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
   },
   webview: {
     flex: 1,

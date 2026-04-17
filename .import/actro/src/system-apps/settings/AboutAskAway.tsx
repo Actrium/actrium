@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Platform,
   View,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import LinearGradient from 'react-native-linear-gradient';
 import { Icon } from '../../components';
 import { AppText } from '../../components';
 import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
@@ -24,7 +27,12 @@ interface AboutAskAwayProps {
 
 export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProps) => {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const [activePage, setActivePage] = useState<AboutPageKey | null>(null);
+  const isIOS = Platform.OS === 'ios';
+  const headerHeight = isIOS ? insets.top + 56 : 0;
+  const headerPaddingTop = isIOS ? insets.top + 12 : 0;
+  const contentTopPadding = isIOS ? insets.top + 66 + 24 : 60;
 
   useEffect(() => {
     setActivePage(initialPage || null);
@@ -36,13 +44,22 @@ export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProp
         style={styles.content}
         contentContainerStyle={[
           styles.scrollContent,
+          // 中文注释：头部可视高度调整为 44 后，正文顶部仍保持原来的视觉起点，不跟着一起上移。
+          { paddingTop: contentTopPadding },
           {
             paddingHorizontal: isTablet ? 40 : 16,
           },
         ]}
         showsVerticalScrollIndicator={false}
+        scrollIndicatorInsets={isIOS ? { top: insets.top + 66 } : undefined}
       >
-        <SettingsBackHeader onBack={onBack} title={t('actr.settings.aboutAskAway')} marginBottom={24} />
+        {!isIOS ? (
+          <SettingsBackHeader
+            onBack={onBack}
+            title={t('actr.settings.aboutAskAway')}
+            marginBottom={24}
+          />
+        ) : null}
 
         <View style={styles.groupCard}>
           <AboutItem
@@ -66,6 +83,25 @@ export const AboutAskAway = ({ onBack, isTablet, initialPage }: AboutAskAwayProp
           />
         </View>
       </ScrollView>
+
+      {isIOS ? (
+        <LinearGradient
+          style={[
+            styles.iosHeader,
+            styles.headerOverlay,
+            { height: headerHeight, paddingTop: headerPaddingTop },
+          ]}
+          colors={['rgba(0, 0, 0, 1)', 'rgba(0, 0, 0, 0)']}
+          start={{ x: 0.5, y: 0.45 }}
+          end={{ x: 0.5, y: 1 }}
+        >
+          <SettingsBackHeader
+            onBack={onBack}
+            title={t('actr.settings.aboutAskAway')}
+            marginBottom={0}
+          />
+        </LinearGradient>
+      ) : null}
 
       <AboutWebViewModal
         visible={!!activePage}
@@ -100,6 +136,17 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: 60,
     paddingBottom: 40,
+  },
+  iosHeader: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  headerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
   },
   groupCard: {
     backgroundColor: '#1C1C1E',
