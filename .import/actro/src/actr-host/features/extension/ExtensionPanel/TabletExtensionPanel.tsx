@@ -79,6 +79,6 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     height: '100%',
     flexShrink: 1,
     zIndex: 10, // 覆盖在上层
-    backgroundColor: colors.extensionPanelBg,
+    backgroundColor: colors.bgChatTablet,
   },
 });
