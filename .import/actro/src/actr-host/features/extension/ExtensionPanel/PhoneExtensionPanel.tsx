@@ -134,7 +134,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     left: 0,
     height: '100%',
     flexShrink: 1,
-    backgroundColor: colors.extensionPanelBg,
+    backgroundColor: colors.bgChatPage,
     overflow: 'hidden',
   },
   borderRight: {
@@ -143,11 +143,11 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1,
-    backgroundColor: colors.extensionPanelBorder,
+    backgroundColor: '#DADADE',
   },
   skeletonContainer: {
     flex: 1,
-    backgroundColor: colors.extensionPanelSkeletonBg,
+    backgroundColor: colors.bgChatPage,
     paddingTop: 80,
   },
   skeletonHeader: {
