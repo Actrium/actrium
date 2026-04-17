@@ -223,6 +223,8 @@ export default function GlobalSearchApp() {
   const resultsAreaSize = isPhone ? 'auto' : 500;
   const containerGap = isPhone ? 24 : 36;
   const inputBorderRadius = 24;
+  const resultsHorizontalPadding = isPhone ? 16 : 40;
+  const resultsCardRadius = 26;
 
   // 自动聚焦输入框
   useEffect(() => {
@@ -588,7 +590,10 @@ export default function GlobalSearchApp() {
           {/* 搜索结果列表 */}
           <ScrollView
             style={styles.content}
-            contentContainerStyle={styles.phoneScrollContent}
+            contentContainerStyle={[
+              styles.phoneScrollContent,
+              { paddingHorizontal: resultsHorizontalPadding },
+            ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps='handled'
           >
@@ -627,7 +632,13 @@ export default function GlobalSearchApp() {
           <View
             style={[
               styles.resultsArea,
-              { width: inputWidth, height: resultsAreaSize },
+              {
+                // 中文注释：搜索结果列表横向边距对齐 settings 一级页，
+                // Phone 用 16，Pad 用 40，不再额外缩成 500 宽。
+                width: Math.max(screenWidth - resultsHorizontalPadding * 2, 0),
+                height: resultsAreaSize,
+                borderRadius: resultsCardRadius,
+              },
             ]}
           >
             <ScrollView
@@ -669,7 +680,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   phoneScrollContent: {
-    paddingHorizontal: 26,
     paddingTop: 60,
     paddingBottom: 100,
   },
@@ -686,7 +696,7 @@ const styles = StyleSheet.create({
   resultsArea: {
     overflow: 'hidden',
     backgroundColor: 'transparent',
-    borderRadius: 34,
+    borderRadius: 26,
   },
   resultsHeader: {
     paddingHorizontal: 20,
@@ -701,7 +711,8 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
   },
   resultsListContent: {
-    padding: globalSearch.resultsListPadding,
+    paddingTop: globalSearch.resultsListPadding,
+    paddingBottom: globalSearch.resultsListPadding,
   },
   groupContainer: {
     marginBottom: globalSearch.groupSpacing,
