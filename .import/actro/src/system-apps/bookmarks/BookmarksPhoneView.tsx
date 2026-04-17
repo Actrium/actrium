@@ -35,10 +35,15 @@ export default function BookmarksPhoneView({
 }: UseBookmarksPageResult) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const isIOSNativeNavigationBar = Platform.OS === 'ios' && !!PhoneNavigationBar;
   const [, setOpenedSwipeItemId] = React.useState<number | null>(null);
   const openedSwipeItemIdRef = React.useRef<number | null>(null);
   const swipeableRefs = React.useRef<Record<number, SwipeableMethods | null>>(
     {},
+  );
+  const navigationBarHeight = React.useMemo(
+    () => (isIOSNativeNavigationBar ? insets.top + 66 : 0),
+    [insets.top, isIOSNativeNavigationBar],
   );
   // 中文注释：这里单独给 bookmarks 头部接入顶部安全区，
   // 如果宿主提供的是全尺寸容器，就能直接反映到顶部留白里。
@@ -49,11 +54,11 @@ export default function BookmarksPhoneView({
 
   const headerNode = (
     <React.Fragment>
-      {Platform.OS === 'ios' && PhoneNavigationBar ? (
+      {isIOSNativeNavigationBar ? (
         <PhoneNavigationBar
           title='AskAway'
           showLargeTitle={true}
-          style={{ width: '100%', height: insets.top + 66 }}
+          style={[styles.headerOverlay, { height: navigationBarHeight }]}
         />
       ) : (
         <View style={headerStyle}>
@@ -177,8 +182,14 @@ export default function BookmarksPhoneView({
 
       <FlatList
         style={styles.content}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isIOSNativeNavigationBar ? { paddingTop: navigationBarHeight } : null,
+        ]}
         showsVerticalScrollIndicator={false}
+        scrollIndicatorInsets={
+          isIOSNativeNavigationBar ? { top: navigationBarHeight } : undefined
+        }
         data={flatBookmarks}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderBookmarkItem}
@@ -198,6 +209,14 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xxl,
+  },
+  headerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    width: '100%',
+    zIndex: 10,
   },
   headerTitle: {
     ...getTypographyStyle('pageTitle'),

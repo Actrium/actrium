@@ -39,6 +39,8 @@ export const SettingsMain = ({
   const insets = useSafeAreaInsets();
   const userInfo = useUserStore((state) => state.userInfo);
   const isLoggedIn = !!userInfo;
+  const isIOSNativeNavigationBar = Platform.OS === 'ios' && !!PhoneNavigationBar;
+  const navigationBarHeight = isIOSNativeNavigationBar ? insets.top + 66 : 0;
 
   return (
     <View
@@ -52,11 +54,11 @@ export const SettingsMain = ({
       ]}
     >
       {/* Page Title */}
-      {Platform.OS === 'ios' && PhoneNavigationBar ? (
+      {isIOSNativeNavigationBar ? (
         <PhoneNavigationBar
           title='AskAway'
           showLargeTitle={true}
-          style={{ width: '100%', height: insets.top + 66 }}
+          style={[styles.headerOverlay, { height: navigationBarHeight }]}
         />
       ) : (
         <AppText
@@ -75,9 +77,14 @@ export const SettingsMain = ({
         style={styles.content}
         contentContainerStyle={[
           styles.scrollContent,
+          // 中文注释：iOS 原生导航条改为覆盖层后，需要把首屏可读区的顶部留白转移到滚动内容内部。
+          { paddingTop: isIOSNativeNavigationBar ? navigationBarHeight + 24 : 0 },
           { paddingHorizontal: isTablet ? 40 : 16 },
         ]}
         showsVerticalScrollIndicator={false}
+        scrollIndicatorInsets={
+          isIOSNativeNavigationBar ? { top: navigationBarHeight } : undefined
+        }
       >
         {/* Account Section */}
         <TouchableOpacity
@@ -147,9 +154,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  headerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    width: '100%',
+    zIndex: 10,
+  },
   content: {
     flex: 1,
-    marginTop: 24,
   },
   scrollContent: {
     paddingBottom: 40,
