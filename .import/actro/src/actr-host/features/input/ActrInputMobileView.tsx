@@ -22,7 +22,7 @@ import { useUnreadStore } from '../../store/useUnreadStore';
 import { useTab } from '../../contexts/TabContext';
 import { exitFullscreen } from '../../../native-bridge';
 import SafeBottomView from '../../../components/SafeBottomView';
-import { DropdownMenu } from '../shared/DropdownMenu';
+import MobileAttachmentMenu from './MobileAttachmentMenu';
 import {
   attachmentActionMenu,
   getTypographyStyle,
@@ -111,7 +111,15 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     'text',
   );
   const [isInputFocused, setIsInputFocused] = React.useState(false);
+  const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = React.useState(false);
+  const [attachmentMenuAnchorRect, setAttachmentMenuAnchorRect] = React.useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const mobileTextInputRef = React.useRef<TextInput | null>(null);
+  const mobileInputPillRef = React.useRef<View | null>(null);
   const attachmentActionLockRef = React.useRef(false);
   const webSearchIconTranslateY = React.useRef(new Animated.Value(0)).current;
   const locationIconTranslateY = React.useRef(new Animated.Value(0)).current;
@@ -185,6 +193,30 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     [playMenuIconBounce],
   );
 
+  const closeAttachmentMenu = React.useCallback(() => {
+    setIsAttachmentMenuOpen(false);
+  }, []);
+
+  const openAttachmentMenu = React.useCallback(() => {
+    if (attachmentActionLockRef.current) {
+      return;
+    }
+    attachmentActionLockRef.current = true;
+    setMobileInputMode('text');
+    setIsInputFocused(false);
+    mobileTextInputRef.current?.blur();
+
+    // 中文注释：菜单位置需要基于整块输入胶囊测量，而不是左侧按钮自身，否则无法满足“左对齐输入区域”的要求。
+    mobileInputPillRef.current?.measureInWindow((x, y, width, height) => {
+      attachmentActionLockRef.current = false;
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      setAttachmentMenuAnchorRect({ x, y, width, height });
+      setIsAttachmentMenuOpen(true);
+    });
+  }, []);
+
   const renderBouncingMenuIcon = React.useCallback(
     (
       type: string,
@@ -215,6 +247,12 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
       setMobileInputMode('text');
     }
   }, [inputText.length, mobileInputMode]);
+
+  React.useEffect(() => {
+    if (isVoiceSurfaceMode && isAttachmentMenuOpen) {
+      setIsAttachmentMenuOpen(false);
+    }
+  }, [isAttachmentMenuOpen, isVoiceSurfaceMode]);
 
   // 手势实例固定化：录音期间 metering/duration 高频更新时也不重建 responder，
   // 只通过 ref 注入最新回调，避免 release/terminate 丢失。
@@ -388,10 +426,14 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
           <View style={styles.mobilePrimaryArea}>
             {!isVoiceSurfaceMode ? (
-              <View style={[
-                styles.mobileInputPill,
-                hasAttachments && styles.mobileInputPillWithAttachment,
-              ]}>
+              <View
+                ref={mobileInputPillRef}
+                collapsable={false}
+                style={[
+                  styles.mobileInputPill,
+                  hasAttachments && styles.mobileInputPillWithAttachment,
+                ]}
+              >
                   {hasAttachments && (
                     <>
                       <View style={styles.mobileAttachmentArea}>
@@ -405,20 +447,19 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                     </>
                   )}
                 <View style={styles.mobileInputInnerRow}>
-                  <DropdownMenu
-                    estimatedWidth={attachmentActionMenu.width}
-                    minWidth={attachmentActionMenu.width}
-                    anchorMode='start'
-                    trigger={
-                      <View style={styles.mobilePlusButton}>
-                        <Icon type='link' size={inputArea.smallIconSize} color={colors.textIconStrong} />
-                      </View>
-                    }
-                    onBeforeOpen={() => {
-                      setMobileInputMode('text');
-                      setIsInputFocused(false);
-                      mobileTextInputRef.current?.blur();
-                    }}
+                  <TouchableOpacity
+                    style={styles.mobilePlusButton}
+                    activeOpacity={0.7}
+                    onPress={openAttachmentMenu}
+                  >
+                    <Icon type='link' size={inputArea.smallIconSize} color={colors.textIconStrong} />
+                  </TouchableOpacity>
+
+                  <MobileAttachmentMenu
+                    visible={isAttachmentMenuOpen}
+                    anchorRect={attachmentMenuAnchorRect}
+                    width={attachmentActionMenu.width}
+                    onRequestClose={closeAttachmentMenu}
                   >
                     {(close) => (
                       <View style={styles.mobileDropdownContent}>
@@ -578,7 +619,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                         </View>
                       </View>
                     )}
-                  </DropdownMenu>
+                  </MobileAttachmentMenu>
 
                   <View style={styles.mobileTextInputWrap}>
                     <StableTextInput
