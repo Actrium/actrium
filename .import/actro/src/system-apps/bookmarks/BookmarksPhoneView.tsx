@@ -238,13 +238,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   listItemGroupTop: {
-    borderTopLeftRadius: 13,
-    borderTopRightRadius: 13,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
     marginTop: 24,
   },
   listItemGroupBottom: {
-    borderBottomLeftRadius: 13,
-    borderBottomRightRadius: 13,
+    borderBottomLeftRadius: 26,
+    borderBottomRightRadius: 26,
   },
   listItem: {
     flexDirection: 'row',
@@ -255,9 +255,9 @@ const styles = StyleSheet.create({
   },
   listItemDivider: {
     height: 1,
-    width: '80%',
-    backgroundColor: '#000',
-    alignSelf: 'center',
+    backgroundColor: '#2C2C2E',
+    marginLeft: 64,
+    marginRight: spacing.md,
   },
   listItemLogo: {
     width: 32,
