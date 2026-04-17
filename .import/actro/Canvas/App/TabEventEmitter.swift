@@ -30,7 +30,8 @@ public class TabEventEmitter: RCTEventEmitter {
             "onTabsReordered",
             "onTabEnteredFullscreen",
             "onTabExitedFullscreen",
-            "onTabBookmarkChanged"
+            "onTabBookmarkChanged",
+            "onSearchInputChanged"
         ]
     }
     
@@ -102,6 +103,14 @@ public class TabEventEmitter: RCTEventEmitter {
             self,
             selector: #selector(handleTabBookmarkChanged(_:)),
             name: .tabBookmarkChangedFromNative,
+            object: nil
+        )
+
+        // Search input changed
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSearchInputChanged(_:)),
+            name: .searchInputChangedFromNative,
             object: nil
         )
     }
@@ -254,15 +263,31 @@ public class TabEventEmitter: RCTEventEmitter {
             logger.warning("[TabEventEmitter] Invalid tabBookmarkChanged notification")
             return
         }
-        
+
         let event: [String: Any] = [
             "tabId": tabId,
             "isBookmarked": isBookmarked,
             "timestamp": Date().timeIntervalSince1970 * 1000
         ]
-        
+
         logger.debug("[TabEventEmitter] Sending onTabBookmarkChanged: \(tabId), isBookmarked: \(isBookmarked)")
         sendEvent(withName: "onTabBookmarkChanged", body: event)
+    }
+
+    @objc private func handleSearchInputChanged(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let inputText = userInfo["inputText"] as? String else {
+            logger.warning("[TabEventEmitter] Invalid searchInputChanged notification")
+            return
+        }
+
+        let event: [String: Any] = [
+            "inputText": inputText,
+            "timestamp": Date().timeIntervalSince1970 * 1000
+        ]
+
+        logger.debug("[TabEventEmitter] Sending onSearchInputChanged: \(inputText)")
+        sendEvent(withName: "onSearchInputChanged", body: event)
     }
 }
 
@@ -277,4 +302,5 @@ extension Notification.Name {
     static let tabEnteredFullscreenFromNative = Notification.Name("tabEnteredFullscreenFromNative")
     static let tabExitedFullscreenFromNative = Notification.Name("tabExitedFullscreenFromNative")
     static let tabBookmarkChangedFromNative = Notification.Name("tabBookmarkChangedFromNative")
+    static let searchInputChangedFromNative = Notification.Name("searchInputChangedFromNative")
 }
