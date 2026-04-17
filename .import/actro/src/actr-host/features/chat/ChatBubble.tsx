@@ -60,6 +60,8 @@ interface ChatBubbleProps {
   content?: string;
   voicePayload?: string;
   type: 'question' | 'answer';
+  isLoading?: boolean;
+  progress?: number;
   size?: 'small' | 'normal';
   numberOfLines?: number;
   containerStyle?: ViewStyle;
@@ -81,6 +83,8 @@ export default function ChatBubble({
   content,
   voicePayload,
   type,
+  isLoading = false,
+  progress,
   size = 'normal',
   numberOfLines,
   containerStyle,
@@ -102,6 +106,13 @@ export default function ChatBubble({
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const isQuestion = type === 'question';
   const isSmall = size === 'small';
+  const shouldShowLoadingBubble = !isQuestion && isLoading && !content && !voicePayload;
+  const shouldShowLatestAnswerToolbar =
+    !isQuestion &&
+    isLatest &&
+    !isSmall &&
+    !shouldShowLoadingBubble &&
+    (progress === 2 || progress === 3);
   const parsedVoicePayload = React.useMemo(
     () => parseVoicePayload(voicePayload),
     [voicePayload],
@@ -566,7 +577,13 @@ export default function ChatBubble({
           </ScrollView>
         </View>
       )}
-      {isVoiceBubble && parsedVoicePayload ? (
+      {shouldShowLoadingBubble ? (
+        // 中文注释：等待回答中的占位态也走 answer 气泡本体，保证 icon 和文案始终落在同一气泡结构里。
+        <View style={styles.loadingBubbleContent}>
+          <ActivityIndicator size='small' color={colors.textHeading} />
+          <AppText style={styles.loadingText}>{t('actr.chat.thinking')}</AppText>
+        </View>
+      ) : isVoiceBubble && parsedVoicePayload ? (
         <View
           style={[
             styles.voiceBubbleCard,
@@ -613,7 +630,7 @@ export default function ChatBubble({
         )
       ) : null}
 
-      {!isQuestion && isLatest && !isSmall && (
+      {!isQuestion && shouldShowLatestAnswerToolbar && (
         <View style={styles.toolbarContainer}>
           <Pressable
             style={[
@@ -867,6 +884,16 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 20,
     minWidth: 44,
+  },
+  loadingBubbleContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 20,
+  },
+  loadingText: {
+    marginLeft: 8,
+    color: colors.textHeading,
+    ...getTypographyStyle('messageBody'),
   },
   voiceBubbleCard: {
     minWidth: 120,

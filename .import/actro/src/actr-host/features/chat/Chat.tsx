@@ -208,7 +208,11 @@ const MessageRow = React.memo(function MessageRow({
             </View>
           </View>
         ) : null}
-        {item.answer_content || item.answer_type === 'voice' ? (
+        {item.answer_content ||
+        item.answer_type === 'voice' ||
+        (isLatest &&
+          (item.progress === Progress.pending ||
+            item.progress === Progress.processing)) ? (
           <View style={styles.bubbleWithCheckbox}>
             {selectionMode && (
               <View style={styles.checkboxContainer}>
@@ -225,6 +229,12 @@ const MessageRow = React.memo(function MessageRow({
               appId={appId}
               content={item.answer_content}
               voicePayload={item.answer_voice_payload}
+              isLoading={
+                isLatest &&
+                (item.progress === Progress.pending ||
+                  item.progress === Progress.processing)
+              }
+              progress={item.progress}
               isLatest={isLatest}
               onCopy={
                 item.answer_type !== 'voice'
@@ -239,13 +249,6 @@ const MessageRow = React.memo(function MessageRow({
                 toggleSelection(item.message_id, 'answer')
               }
             />
-          </View>
-        ) : isLatest &&
-          (item.progress === Progress.pending ||
-            item.progress === Progress.processing) ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size='small' color={styles.loadingIndicatorColor} />
-            <AppText style={styles.loadingText}>{t('actr.chat.thinking')}</AppText>
           </View>
         ) : null}
       </View>
@@ -798,7 +801,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
 }
 
 const makeStyles = (colors: ColorTokens) => ({
-  loadingIndicatorColor: colors.textTertiary,
   ...StyleSheet.create({
     mainContainer: {
       flex: 1,
@@ -870,17 +872,6 @@ const makeStyles = (colors: ColorTokens) => ({
       left: -30,
       top: 14,
       zIndex: 10,
-    },
-    loadingContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: spacing.md,
-      paddingHorizontal: spacing.xxs,
-    },
-    loadingText: {
-      marginLeft: spacing.sm,
-      ...getTypographyStyle('body'),
-      color: colors.textTertiary,
     },
     deleteButtonContainer: {
       position: 'absolute',
