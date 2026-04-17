@@ -29,7 +29,9 @@ const MENU_FADE_IN_DURATION = 300;
 
 interface DropdownMenuProps {
   trigger: React.ReactNode;
-  children: React.ReactNode | ((close: (callback?: () => void) => void) => React.ReactNode);
+  children:
+    | React.ReactNode
+    | ((close: (callback?: () => void, options?: { delayMs?: number }) => void) => React.ReactNode);
   triggerType?: 'press' | 'longPress';
   disabled?: boolean;
   onBeforeOpen?: () => void;
@@ -100,8 +102,16 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   const rafRef = React.useRef<number | null>(null);
   const menuOpacity = React.useRef(new Animated.Value(0)).current;
   const pendingActionRef = React.useRef<(() => void) | null>(null);
+  const closeDelayTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const close = React.useCallback((callback?: () => void) => {
+  const clearCloseDelayTimer = React.useCallback(() => {
+    if (closeDelayTimerRef.current) {
+      clearTimeout(closeDelayTimerRef.current);
+      closeDelayTimerRef.current = null;
+    }
+  }, []);
+
+  const closeImmediately = React.useCallback((callback?: () => void) => {
     if (typeof callback === 'function') {
       pendingActionRef.current = callback;
     }
@@ -115,6 +125,23 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
       setIsMeasured(false);
     });
   }, [menuOpacity]);
+
+  const close = React.useCallback(
+    (callback?: () => void, options?: { delayMs?: number }) => {
+      const delayMs = options?.delayMs ?? 0;
+      clearCloseDelayTimer();
+      if (delayMs <= 0) {
+        closeImmediately(callback);
+        return;
+      }
+      // 中文注释：仅对显式指定的菜单项延迟收起，避免影响点外部或其他操作项的即时关闭行为。
+      closeDelayTimerRef.current = setTimeout(() => {
+        closeDelayTimerRef.current = null;
+        closeImmediately(callback);
+      }, delayMs);
+    },
+    [clearCloseDelayTimer, closeImmediately],
+  );
 
   const handleModalDismiss = React.useCallback(() => {
     setTriggerRect(null);
@@ -138,6 +165,12 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
+
+  React.useEffect(() => {
+    return () => {
+      clearCloseDelayTimer();
+    };
+  }, [clearCloseDelayTimer]);
 
   const measureTrigger = React.useCallback((openWhenMeasured = true) => {
     triggerRef.current?.measureInWindow((x, y, measuredWidth, measuredHeight) => {
