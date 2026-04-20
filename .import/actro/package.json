@@ -1,6 +1,6 @@
 {
   "name": "graphviz-anywhere",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Graphviz for native runtimes and the web",
   "private": true,
   "type": "module",
