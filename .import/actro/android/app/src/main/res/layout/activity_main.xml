@@ -185,14 +185,27 @@
                 android:layout_height="match_parent"
                 android:orientation="horizontal">
 
-                <ImageView
-                    android:id="@+id/ivNav"
+                <FrameLayout
+                    android:id="@+id/flNavButton"
                     android:layout_width="62dp"
                     android:layout_height="62dp"
-                    android:background="@drawable/bottom_nav_bg"
-                    android:padding="20dp"
-                    android:src="@drawable/ic_search"
-                    app:tint="@color/labels_vibrant_controls_primary" />
+                    android:background="@drawable/bottom_nav_bg">
+
+                    <RadioButton
+                        android:id="@+id/ivNav"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:button="@null"
+                        android:checked="false"
+                        android:drawableTop="@drawable/nav_activity_selector"
+                        android:drawablePadding="4dp"
+                        android:drawableTint="@color/nav_text_selector"
+                        android:gravity="center"
+                        android:text="@string/tab_active"
+                        android:textColor="@color/nav_text_selector"
+                        android:textSize="10sp" />
+                </FrameLayout>
 
                 <View
                     android:layout_width="0dp"
@@ -217,6 +230,7 @@
                     <EditText
                         android:id="@+id/etSearch"
                         android:layout_width="0dp"
+                        android:hint="@string/search"
                         android:paddingStart="8dp"
                         android:layout_height="62dp"
                         android:layout_weight="1"
@@ -228,6 +242,7 @@
                         android:layout_height="20dp"
                         android:layout_marginEnd="16dp"
                         android:src="@drawable/ic_delete"
+                        android:visibility="gone"
                         app:tint="#000" />
                 </LinearLayout>
             </LinearLayout>

@@ -151,7 +151,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             showSearch()
         }
 
-        binding.ivNav.setOnClickListener {
+        binding.flNavButton.setOnClickListener {
             exitSearchMode()
             hideSearch()
         }
@@ -424,16 +424,30 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         originalSearchWidth = binding.ivSearch.width
         originalNavWidth = (binding.rgNavigation.parent as View).width
 
-        // 根据当前选中的 RadioButton 设置对应的图标
+        // 根据当前选中的 RadioButton 设置对应的图标和文字
         val checkedId = binding.rgNavigation.checkedRadioButtonId
+
+        // 设置图标
         val iconRes = when (checkedId) {
             R.id.navTag -> R.drawable.nav_tag_selector
             R.id.navActivity -> R.drawable.nav_activity_selector
             R.id.navSettings -> R.drawable.nav_settings_selector
             else -> R.drawable.nav_activity_selector
         }
-        binding.ivNav.setImageResource(iconRes)
-        binding.ivNav.imageTintList = ContextCompat.getColorStateList(this, R.color.nav_text_selector)
+
+        // 设置文字
+        val textRes = when (checkedId) {
+            R.id.navTag -> R.string.tab_bookmark
+            R.id.navActivity -> R.string.tab_active
+            R.id.navSettings -> R.string.tab_set
+            else -> R.string.tab_active
+        }
+
+        // 使用 setCompoundDrawablesRelativeWithIntrinsicBounds 并保持 padding
+        binding.ivNav.setCompoundDrawablesRelativeWithIntrinsicBounds(0, iconRes, 0, 0)
+        binding.ivNav.compoundDrawablePadding = (4 * resources.displayMetrics.density).toInt()
+        binding.ivNav.setText(textRes)
+        binding.ivNav.isChecked = false
 
         // 显示 llSearchMode
         binding.llSearchMode.visibility = View.VISIBLE
@@ -446,9 +460,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         val searchStartWidth = originalSearchWidth
         val searchEndWidth = binding.llEdit.width
 
-        // rgNavigation 缩小到 ivNav 的宽度
+        // rgNavigation 缩小到 flNavButton 的宽度
         val navStartWidth = originalNavWidth
-        val navEndWidth = binding.ivNav.width
+        val navEndWidth = binding.flNavButton.width
 
         ValueAnimator.ofFloat(0f, 1f).apply {
             this.duration = duration
