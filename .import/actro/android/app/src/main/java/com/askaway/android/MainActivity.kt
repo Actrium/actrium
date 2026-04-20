@@ -131,6 +131,21 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             showReactNativeView()
         }
 
+        // 搜索框内容变化时，控制删除按钮显示与隐藏
+        binding.etSearch.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                binding.ivDel.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
+            }
+            override fun afterTextChanged(s: android.text.Editable?) {
+                viewModel.changeInputText(s.toString())
+            }
+        })
+        // 删除按钮点击清空搜索框内容
+        binding.ivDel.setOnClickListener {
+            binding.etSearch.text.clear()
+        }
+
         binding.ivSearch.setOnClickListener {
             enterSearchMode()
             showSearch()

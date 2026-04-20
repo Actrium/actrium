@@ -309,4 +309,13 @@ class MainViewModel(
     }
 
     fun isActiveListEmpty(): Boolean = _activeModelList.isEmpty()
+
+    fun changeInputText(text:String){
+        EventBus.getDefault().post(
+            NativeModuleEvent(
+                NativeModuleEvent.EVENT_SEARCH_INPUT_CHANGED,
+                mapOf("inputText" to text, "timestamp" to System.currentTimeMillis())
+            )
+        )
+    }
 }
