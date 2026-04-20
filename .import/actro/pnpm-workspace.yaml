@@ -1,5 +1,6 @@
 packages:
   - 'packages/core'
+  - 'packages/cli'
   - 'packages/renderers/*'
   - 'packages/features/*'
   - 'packages/features/*/*'
