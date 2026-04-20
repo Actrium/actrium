@@ -219,7 +219,14 @@
       "defaultCategory": "Default Category",
       "loadError": "Failed to load bookmarks",
       "empty": "No bookmarks",
-      "emptyHint": "Bookmarked apps will appear here"
+      "emptyHint": "Bookmarked apps will appear here",
+      "openInNewTab": "Open in New Tab",
+      "copyUrl": "Copy App URL",
+      "copySuccess": "Copied",
+      "copyFailed": "Copy failed",
+      "remove": "Remove Bookmark",
+      "removeTitle": "Remove Bookmark",
+      "removeMessage": "Are you sure you want to remove this bookmark?"
     },
     "bookmarkTags": {
       "deleteTitle": "Delete Tag",

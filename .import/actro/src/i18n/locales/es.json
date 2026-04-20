@@ -219,7 +219,14 @@
       "defaultCategory": "Categoría predeterminada",
       "loadError": "Error al cargar marcadores",
       "empty": "Sin marcadores",
-      "emptyHint": "Las aplicaciones favoritas aparecerán aquí"
+      "emptyHint": "Las aplicaciones favoritas aparecerán aquí",
+      "openInNewTab": "Abrir en nueva pestaña",
+      "copyUrl": "Copiar URL de la app",
+      "copySuccess": "Copiado",
+      "copyFailed": "Error al copiar",
+      "remove": "Eliminar marcador",
+      "removeTitle": "Eliminar marcador",
+      "removeMessage": "¿Estás seguro de que quieres eliminar este marcador?"
     },
     "bookmarkTags": {
       "deleteTitle": "Eliminar etiqueta",
