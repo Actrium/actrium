@@ -34,7 +34,7 @@ struct ChromeStyleTabView: View {
             switch mode {
             case .overview:
                 ChromeTabOverviewView(
-                    tabs: viewModel.tabs,
+                    tabs: viewModel.tabsSortedBySlotPosition().map { $0.tab },
                     viewModel: viewModel,
                     historyVM: historyVM,
                     onSelectTab: { tabId in
@@ -79,6 +79,7 @@ struct ChromeStyleTabView: View {
                 mode = .focus(tabId: tabId)
             }
         }
+        .environment(\.colorScheme, .dark)
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             switch newValue {
             case .overview:
@@ -206,20 +207,30 @@ struct ChromeTabCollectionView: UIViewRepresentable {
             let itemProvider = NSItemProvider(object: tab.id.uuidString as NSString)
             let dragItem = UIDragItem(itemProvider: itemProvider)
             dragItem.localObject = tab
-            
-            // 设置拖拽预览，添加圆角
+
+            // 设置拖拽预览，添加圆角并去除白边
             if let cell = collectionView.cellForItem(at: indexPath) {
-                let preview = UIDragPreview(view: cell)
-                preview.parameters.backgroundColor = .clear
-                // 添加圆角
+                // 先保存原背景色
+                let originalCellBackgroundColor = cell.backgroundColor
+                let originalContentViewBackgroundColor = cell.contentView.backgroundColor
+
+                // 临时设置为透明
+                cell.backgroundColor = .clear
+                cell.contentView.backgroundColor = .clear
+
+                // 添加圆角和透明背景
                 let previewParameters = UIDragPreviewParameters()
                 previewParameters.visiblePath = UIBezierPath(roundedRect: cell.bounds, cornerRadius: 16)
                 previewParameters.backgroundColor = .clear
+
                 dragItem.previewProvider = {
+                    // 恢复原背景色
+                    cell.backgroundColor = originalCellBackgroundColor
+                    cell.contentView.backgroundColor = originalContentViewBackgroundColor
                     return UIDragPreview(view: cell, parameters: previewParameters)
                 }
             }
-            
+
             return [dragItem]
         }
 
@@ -247,7 +258,27 @@ struct ChromeTabCollectionView: UIViewRepresentable {
             let sourceTab = tabs[sourceIndexPath.item]
             let destinationTab = tabs[destinationIndexPath.item]
 
+            // 交换 slot 位置
             viewModel.swapSlotPositions(tabId1: sourceTab.id, tabId2: destinationTab.id)
+
+            // 更新本地 tabs 数组顺序用于 UI 显示
+            var updatedTabs = tabs
+            updatedTabs.remove(at: sourceIndexPath.item)
+            updatedTabs.insert(sourceTab, at: destinationIndexPath.item)
+            self.tabs = updatedTabs
+
+            // 发送通知给 RN 侧，通知 tabs 顺序已改变
+            let tabIds = updatedTabs.map { $0.id.uuidString }
+            NotificationCenter.default.post(
+                name: .tabsReorderedFromNative,
+                object: nil,
+                userInfo: ["tabIds": tabIds]
+            )
+
+            // 刷新 collectionView
+            collectionView.performBatchUpdates {
+                collectionView.moveItem(at: sourceIndexPath, to: destinationIndexPath)
+            }
         }
     }
 }
@@ -258,8 +289,14 @@ class ChromeTabGridLayout: UICollectionViewFlowLayout {
     private let interItemSpacing: CGFloat = 16
     private let lineSpacing: CGFloat = 20
     private let minColumns: Int = 2  // 最少显示2列
-    private let maxColumns: Int = 4  // 最多显示4列
     private let sideInset: CGFloat = 16  // 左右边距
+
+    // 根据横竖屏返回最大列数
+    private var maxColumns: Int {
+        guard let collectionView = collectionView else { return 3 }
+        let isLandscape = collectionView.bounds.width > collectionView.bounds.height
+        return isLandscape ? 4 : 3
+    }
 
     override func prepare() {
         super.prepare()
@@ -356,11 +393,11 @@ class ChromeTabCell: UICollectionViewCell {
     }
 
     private func setupViews() {
-        contentView.layer.cornerRadius = 16
         contentView.clipsToBounds = true
         contentView.backgroundColor = UIColor(white: 0.15, alpha: 1.0)
         contentView.layer.borderWidth = 1
         contentView.layer.borderColor = UIColor.white.withAlphaComponent(0.1).cgColor
+        contentView.layer.cornerRadius = 16
 
         // Thumbnail view (content area)
         thumbnailView.translatesAutoresizingMaskIntoConstraints = false
@@ -447,6 +484,8 @@ class ChromeTabCell: UICollectionViewCell {
         // Set background color
         if let bgColor = Color(hslString: tab.backgroundColor).uiColor {
             thumbnailView.backgroundColor = bgColor
+        } else {
+            thumbnailView.backgroundColor = .white
         }
 
         // Set icon
@@ -460,8 +499,10 @@ class ChromeTabCell: UICollectionViewCell {
         // Set snapshot if available
         if let snapshot = viewModel.tabSnapshots[tab.id] {
             snapshotImageView.image = snapshot
+            snapshotImageView.isHidden = false
         } else {
             snapshotImageView.image = nil
+            snapshotImageView.isHidden = true
         }
     }
 
@@ -530,33 +571,20 @@ struct ChromeTabFocusView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                if let tab = tab {
-                    // Main content
-                    SingleTabRootView(
-                        tab: tab,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        containerSize: CGSize(
-                            width: max(geometry.size.width, 1),
-                            height: max(geometry.size.height, 1)
-                        )
+            if let tab = tab {
+                // Main content
+                SingleTabRootView(
+                    tab: tab,
+                    viewModel: viewModel,
+                    historyVM: historyVM,
+                    containerSize: CGSize(
+                        width: max(geometry.size.width, 1),
+                        height: max(geometry.size.height, 1)
                     )
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .ignoresSafeArea()
-
-                    // Top toolbar
-                    VStack {
-                        ChromeFocusToolbar(
-                            tab: tab,
-                            viewModel: viewModel,
-                            onBackToOverview: onBackToOverview
-                        )
-                        Spacer()
-                    }
-                }
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .ignoresSafeArea()
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .ignoresSafeArea()
     }
