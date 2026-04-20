@@ -197,13 +197,14 @@
                         android:layout_height="wrap_content"
                         android:layout_gravity="center"
                         android:button="@null"
+                        android:clickable="false"
                         android:checked="false"
                         android:drawableTop="@drawable/nav_activity_selector"
                         android:drawablePadding="4dp"
-                        android:drawableTint="@color/nav_text_selector"
+                        android:drawableTint="@color/labels_vibrant_controls_primary"
                         android:gravity="center"
                         android:text="@string/tab_active"
-                        android:textColor="@color/nav_text_selector"
+                        android:textColor="@color/labels_vibrant_controls_primary"
                         android:textSize="10sp" />
                 </FrameLayout>
 

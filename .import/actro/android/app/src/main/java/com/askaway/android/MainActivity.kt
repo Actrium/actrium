@@ -444,10 +444,16 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         }
 
         // 使用 setCompoundDrawablesRelativeWithIntrinsicBounds 并保持 padding
-        binding.ivNav.setCompoundDrawablesRelativeWithIntrinsicBounds(0, iconRes, 0, 0)
+//        binding.ivNav.setCompoundDrawablesRelativeWithIntrinsicBounds(0, iconRes, 0, 0)
         binding.ivNav.compoundDrawablePadding = (4 * resources.displayMetrics.density).toInt()
         binding.ivNav.setText(textRes)
         binding.ivNav.isChecked = false
+
+        // 设置 ivNav 的 drawable tint 颜色为 labels_vibrant_controls_primary（RadioButton用setButtonDrawable和setCompoundDrawables）
+        val topDrawable = ContextCompat.getDrawable(this, iconRes)
+        topDrawable?.setTint(ContextCompat.getColor(this, R.color.labels_vibrant_controls_primary))
+        binding.ivNav.setCompoundDrawablesWithIntrinsicBounds(null, topDrawable, null, null)
+        binding.ivNav.setTextColor(ContextCompat.getColor(this, R.color.labels_vibrant_controls_primary))
 
         // 显示 llSearchMode
         binding.llSearchMode.visibility = View.VISIBLE
