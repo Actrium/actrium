@@ -54,7 +54,7 @@ export default function BookmarksPhoneView({
 
   const headerNode = (
     <React.Fragment>
-      {isIOSNativeNavigationBar ? (
+      {isIOSNativeNavigationBar && PhoneNavigationBar ? (
         <PhoneNavigationBar
           title='AskAway'
           showLargeTitle={true}
