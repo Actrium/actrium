@@ -812,6 +812,7 @@ const makeStyles = (colors: ColorTokens) => ({
     },
     inputContainer: {
       width: '100%',
+      zIndex: 100,
     },
     inputInner: {
       width: '100%',
