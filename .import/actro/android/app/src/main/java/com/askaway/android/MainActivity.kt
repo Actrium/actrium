@@ -1,6 +1,9 @@
 package com.askaway.android
 
 import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
+import android.animation.AnimatorListenerAdapter
+import android.animation.Animator
 import android.graphics.Color
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -62,6 +65,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private var permissionListener: PermissionListener? = null
     private lateinit var activeRecyclerAdapter: com.askaway.android.adapter.ActiveRecyclerAdapter
     private var currentSourceView: View? = null
+    private var isSearchMode = false
+    private var originalSearchWidth = 0
+    private var originalNavWidth = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -126,7 +132,13 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         }
 
         binding.ivSearch.setOnClickListener {
+            enterSearchMode()
             showSearch()
+        }
+
+        binding.ivNav.setOnClickListener {
+            exitSearchMode()
+            hideSearch()
         }
 
         // 设置导航栏选择监听器
@@ -383,6 +395,139 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             // 如果 View 需要重试（例如尺寸未就绪），重置状态并稍后重试
             isReactNativeVisible = false
             showReactNativeView(sourceView)
+        }
+    }
+
+    /**
+     * 进入搜索模式
+     */
+    private fun enterSearchMode() {
+        if (isSearchMode) return
+        isSearchMode = true
+
+        // 保存原始宽度
+        originalSearchWidth = binding.ivSearch.width
+        originalNavWidth = (binding.rgNavigation.parent as View).width
+
+        // 根据当前选中的 RadioButton 设置对应的图标
+        val checkedId = binding.rgNavigation.checkedRadioButtonId
+        val iconRes = when (checkedId) {
+            R.id.navTag -> R.drawable.nav_tag_selector
+            R.id.navActivity -> R.drawable.nav_activity_selector
+            R.id.navSettings -> R.drawable.nav_settings_selector
+            else -> R.drawable.nav_activity_selector
+        }
+        binding.ivNav.setImageResource(iconRes)
+        binding.ivNav.imageTintList = ContextCompat.getColorStateList(this, R.color.nav_text_selector)
+
+        // 显示 llSearchMode
+        binding.llSearchMode.visibility = View.VISIBLE
+        binding.llSearchMode.alpha = 0f
+
+        // 创建动画
+        val duration = 300L
+
+        // ivSearch 放大到 llEdit 的宽度
+        val searchStartWidth = originalSearchWidth
+        val searchEndWidth = binding.llEdit.width
+
+        // rgNavigation 缩小到 ivNav 的宽度
+        val navStartWidth = originalNavWidth
+        val navEndWidth = binding.ivNav.width
+
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = duration
+            interpolator = DecelerateInterpolator()
+
+            addUpdateListener { animator ->
+                val fraction = animator.animatedValue as Float
+
+                // ivSearch 宽度变化
+                val currentSearchWidth = (searchStartWidth + (searchEndWidth - searchStartWidth) * fraction).toInt()
+                binding.ivSearch.layoutParams = binding.ivSearch.layoutParams.apply {
+                    width = currentSearchWidth
+                }
+
+                // rgNavigation 父容器宽度变化
+                (binding.rgNavigation.parent as? View)?.let { navParent ->
+                    navParent.layoutParams = navParent.layoutParams.apply {
+                        width = (navStartWidth + (navEndWidth - navStartWidth) * fraction).toInt()
+                    }
+                }
+
+                // llSearchMode 透明度变化
+                binding.llSearchMode.alpha = fraction
+
+                // llNav 透明度变化
+                binding.llNav.alpha = 1f - fraction
+            }
+
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    binding.llNav.visibility = View.GONE
+                }
+            })
+
+            start()
+        }
+    }
+
+    /**
+     * 退出搜索模式
+     */
+    private fun exitSearchMode() {
+        if (!isSearchMode) return
+        isSearchMode = false
+
+        // 显示 llNav
+        binding.llNav.visibility = View.VISIBLE
+        binding.llNav.alpha = 0f
+
+        // 创建动画
+        val duration = 300L
+
+        // ivSearch 从当前宽度缩小回原始大小
+        val searchStartWidth = binding.ivSearch.width
+        val searchEndWidth = originalSearchWidth
+
+        // rgNavigation 从当前宽度放大回原始大小
+        val navStartWidth = (binding.rgNavigation.parent as View).width
+        val navEndWidth = originalNavWidth
+
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = duration
+            interpolator = DecelerateInterpolator()
+
+            addUpdateListener { animator ->
+                val fraction = animator.animatedValue as Float
+
+                // ivSearch 宽度变化
+                val currentSearchWidth = (searchStartWidth + (searchEndWidth - searchStartWidth) * fraction).toInt()
+                binding.ivSearch.layoutParams = binding.ivSearch.layoutParams.apply {
+                    width = currentSearchWidth
+                }
+
+                // rgNavigation 父容器宽度变化
+                (binding.rgNavigation.parent as? View)?.let { navParent ->
+                    navParent.layoutParams = navParent.layoutParams.apply {
+                        width = (navStartWidth + (navEndWidth - navStartWidth) * fraction).toInt()
+                    }
+                }
+
+                // llNav 透明度变化
+                binding.llNav.alpha = fraction
+
+                // llSearchMode 透明度变化
+                binding.llSearchMode.alpha = 1f - fraction
+            }
+
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    binding.llSearchMode.visibility = View.GONE
+                }
+            })
+
+            start()
         }
     }
 
