@@ -54,7 +54,7 @@ export const SettingsMain = ({
       ]}
     >
       {/* Page Title */}
-      {isIOSNativeNavigationBar ? (
+      {isIOSNativeNavigationBar && PhoneNavigationBar ? (
         <PhoneNavigationBar
           title='AskAway'
           showLargeTitle={true}
