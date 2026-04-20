@@ -9,7 +9,6 @@
 //
 
 import SwiftUI
-#if os(iOS)
 import UIKit
 import Kingfisher
 
@@ -144,9 +143,7 @@ struct ChromeTabCollectionView: UIViewRepresentable {
         collectionView.dataSource = context.coordinator
         collectionView.register(ChromeTabCell.self, forCellWithReuseIdentifier: "ChromeTabCell")
         collectionView.register(ChromeNewTabCell.self, forCellWithReuseIdentifier: "ChromeNewTabCell")
-        // 只设置顶部和底部的 contentInset，左右边距由 layout 的 sectionInset 管理
         collectionView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-        // 禁用横向滚动
         collectionView.alwaysBounceHorizontal = false
         collectionView.showsHorizontalScrollIndicator = false
         collectionView.dragInteractionEnabled = true
@@ -173,7 +170,7 @@ struct ChromeTabCollectionView: UIViewRepresentable {
         }
 
         func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-            return tabs.count + 1 // +1 for new tab button
+            return tabs.count + 1
         }
 
         func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -199,8 +196,6 @@ struct ChromeTabCollectionView: UIViewRepresentable {
             }
         }
 
-        // MARK: Drag & Drop
-
         func collectionView(_ collectionView: UICollectionView, itemsForBeginning session: UIDragSession, at indexPath: IndexPath) -> [UIDragItem] {
             guard indexPath.item < tabs.count else { return [] }
             let tab = tabs[indexPath.item]
@@ -208,29 +203,20 @@ struct ChromeTabCollectionView: UIViewRepresentable {
             let dragItem = UIDragItem(itemProvider: itemProvider)
             dragItem.localObject = tab
 
-            // 设置拖拽预览，添加圆角并去除白边
             if let cell = collectionView.cellForItem(at: indexPath) {
-                // 先保存原背景色
                 let originalCellBackgroundColor = cell.backgroundColor
                 let originalContentViewBackgroundColor = cell.contentView.backgroundColor
-
-                // 临时设置为透明
                 cell.backgroundColor = .clear
                 cell.contentView.backgroundColor = .clear
-
-                // 添加圆角和透明背景
                 let previewParameters = UIDragPreviewParameters()
                 previewParameters.visiblePath = UIBezierPath(roundedRect: cell.bounds, cornerRadius: 16)
                 previewParameters.backgroundColor = .clear
-
                 dragItem.previewProvider = {
-                    // 恢复原背景色
                     cell.backgroundColor = originalCellBackgroundColor
                     cell.contentView.backgroundColor = originalContentViewBackgroundColor
                     return UIDragPreview(view: cell, parameters: previewParameters)
                 }
             }
-
             return [dragItem]
         }
 
@@ -239,7 +225,6 @@ struct ChromeTabCollectionView: UIViewRepresentable {
         }
 
         func collectionView(_ collectionView: UICollectionView, dropSessionDidUpdate session: UIDropSession, withDestinationIndexPath destinationIndexPath: IndexPath?) -> UICollectionViewDropProposal {
-            // 如果目标是最后一个item（New Tab按钮），禁止drop
             if let destinationIndexPath = destinationIndexPath, destinationIndexPath.item >= tabs.count {
                 return UICollectionViewDropProposal(operation: .forbidden)
             }
@@ -254,28 +239,19 @@ struct ChromeTabCollectionView: UIViewRepresentable {
                   destinationIndexPath.item < tabs.count else {
                 return
             }
-
             let sourceTab = tabs[sourceIndexPath.item]
             let destinationTab = tabs[destinationIndexPath.item]
-
-            // 交换 slot 位置
             viewModel.swapSlotPositions(tabId1: sourceTab.id, tabId2: destinationTab.id)
-
-            // 更新本地 tabs 数组顺序用于 UI 显示
             var updatedTabs = tabs
             updatedTabs.remove(at: sourceIndexPath.item)
             updatedTabs.insert(sourceTab, at: destinationIndexPath.item)
             self.tabs = updatedTabs
-
-            // 发送通知给 RN 侧，通知 tabs 顺序已改变
             let tabIds = updatedTabs.map { $0.id.uuidString }
             NotificationCenter.default.post(
                 name: .tabsReorderedFromNative,
                 object: nil,
                 userInfo: ["tabIds": tabIds]
             )
-
-            // 刷新 collectionView
             collectionView.performBatchUpdates {
                 collectionView.moveItem(at: sourceIndexPath, to: destinationIndexPath)
             }
@@ -288,10 +264,9 @@ class ChromeTabGridLayout: UICollectionViewFlowLayout {
     private let cardAspectRatio: CGFloat = 3.0 / 4.0
     private let interItemSpacing: CGFloat = 16
     private let lineSpacing: CGFloat = 20
-    private let minColumns: Int = 2  // 最少显示2列
-    private let sideInset: CGFloat = 16  // 左右边距
+    private let minColumns: Int = 2
+    private let sideInset: CGFloat = 16
 
-    // 根据横竖屏返回最大列数
     private var maxColumns: Int {
         guard let collectionView = collectionView else { return 3 }
         let isLandscape = collectionView.bounds.width > collectionView.bounds.height
@@ -316,7 +291,6 @@ class ChromeTabGridLayout: UICollectionViewFlowLayout {
     private func updateLayout() {
         let cardWidth = calculateCardWidth()
         let cardHeight = cardWidth / cardAspectRatio
-
         itemSize = CGSize(width: cardWidth, height: cardHeight)
         minimumInteritemSpacing = interItemSpacing
         minimumLineSpacing = lineSpacing
@@ -325,39 +299,24 @@ class ChromeTabGridLayout: UICollectionViewFlowLayout {
 
     private func calculateNumberOfColumns() -> Int {
         guard let collectionView = collectionView else { return minColumns }
-        
-        // 获取实际可用宽度：collectionView 宽度 - contentInset - sectionInset
         let totalWidth = collectionView.bounds.width
         let contentInset = collectionView.contentInset.left + collectionView.contentInset.right
         let availableWidth = totalWidth - contentInset - sideInset * 2
-        
-        // 尝试从最大列数开始，找到合适的列数
         for columns in stride(from: maxColumns, through: minColumns, by: -1) {
-            // 计算该列数下的卡片宽度
-            // availableWidth = cardWidth * columns + spacing * (columns - 1)
-            // cardWidth = (availableWidth - spacing * (columns - 1)) / columns
             let cardWidth = (availableWidth - interItemSpacing * CGFloat(columns - 1)) / CGFloat(columns)
-            
-            // 如果卡片宽度合理（>= 140pt），则使用该列数
             if cardWidth >= 140 {
                 return columns
             }
         }
-        
-        // 默认返回最小列数
         return minColumns
     }
 
     private func calculateCardWidth() -> CGFloat {
         guard let collectionView = collectionView else { return 190 }
         let columns = calculateNumberOfColumns()
-        
-        // 获取实际可用宽度
         let totalWidth = collectionView.bounds.width
         let contentInset = collectionView.contentInset.left + collectionView.contentInset.right
         let availableWidth = totalWidth - contentInset - sideInset * 2
-
-        // (可用宽度 - 间距总和) / 列数
         return (availableWidth - CGFloat(columns - 1) * interItemSpacing) / CGFloat(columns)
     }
 
@@ -377,11 +336,15 @@ class ChromeTabCell: UICollectionViewCell {
     private let titleBarView = UIView()
     private let titleLabel = UILabel()
     private let iconView = UIImageView()
-    private let closeButton = UIButton(type: .system)
+    private let iconContainerView = UIView()
+    let closeButton = UIButton(type: .system)
+    let bookmarkButton = UIButton(type: .system)
     private let snapshotImageView = UIImageView()
 
     private var tab: Tab?
     private weak var viewModel: BrowserViewModel?
+
+    private let iconWidth: CGFloat = 32.0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -399,79 +362,90 @@ class ChromeTabCell: UICollectionViewCell {
         contentView.layer.borderColor = UIColor.white.withAlphaComponent(0.1).cgColor
         contentView.layer.cornerRadius = 16
 
-        // Thumbnail view (content area)
         thumbnailView.translatesAutoresizingMaskIntoConstraints = false
         thumbnailView.clipsToBounds = true
         contentView.addSubview(thumbnailView)
 
-        // Snapshot image view
         snapshotImageView.translatesAutoresizingMaskIntoConstraints = false
         snapshotImageView.contentMode = .scaleAspectFill
         snapshotImageView.clipsToBounds = true
         thumbnailView.addSubview(snapshotImageView)
 
-        // Title bar
         titleBarView.translatesAutoresizingMaskIntoConstraints = false
         titleBarView.backgroundColor = UIColor(white: 0.9, alpha: 1.0)
         contentView.addSubview(titleBarView)
 
-        // Icon
+        iconContainerView.translatesAutoresizingMaskIntoConstraints = false
+        iconContainerView.clipsToBounds = true
+        iconContainerView.layer.cornerRadius = iconWidth / 2
+        titleBarView.addSubview(iconContainerView)
+
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.contentMode = .scaleAspectFit
         iconView.tintColor = .white
-        iconView.layer.cornerRadius = 12
         iconView.clipsToBounds = true
-        titleBarView.addSubview(iconView)
+        iconView.layer.cornerRadius = iconWidth / 2
+        iconContainerView.addSubview(iconView)
 
-        // Title label
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        titleLabel.textColor = UIColor(white: 0.25, alpha: 1.0)
+        titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        titleLabel.textColor = UIColor(Color(hex: "#404040"))
         titleLabel.lineBreakMode = .byTruncatingTail
         titleBarView.addSubview(titleLabel)
 
-        // Close button
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
-        closeButton.tintColor = UIColor(white: 0.6, alpha: 1.0)
+        closeButton.tintColor = UIColor(Color(hex: "#9E9EA7"))
         closeButton.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
+        closeButton.isUserInteractionEnabled = true
         titleBarView.addSubview(closeButton)
 
+        bookmarkButton.translatesAutoresizingMaskIntoConstraints = false
+        bookmarkButton.setImage(UIImage(systemName: "star.circle.fill"), for: .normal)
+        bookmarkButton.tintColor = UIColor(Color(hex: "#9E9EA7"))
+        bookmarkButton.addTarget(self, action: #selector(bookmarkButtonTapped), for: .touchUpInside)
+        bookmarkButton.isUserInteractionEnabled = true
+        titleBarView.addSubview(bookmarkButton)
+
         NSLayoutConstraint.activate([
-            // Thumbnail
             thumbnailView.topAnchor.constraint(equalTo: contentView.topAnchor),
             thumbnailView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             thumbnailView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 
-            // Title bar
             titleBarView.topAnchor.constraint(equalTo: thumbnailView.bottomAnchor),
             titleBarView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             titleBarView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             titleBarView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            titleBarView.heightAnchor.constraint(equalToConstant: 48),
+            titleBarView.heightAnchor.constraint(equalToConstant: 56),
 
-            // Snapshot
             snapshotImageView.topAnchor.constraint(equalTo: thumbnailView.topAnchor),
             snapshotImageView.leadingAnchor.constraint(equalTo: thumbnailView.leadingAnchor),
             snapshotImageView.trailingAnchor.constraint(equalTo: thumbnailView.trailingAnchor),
             snapshotImageView.bottomAnchor.constraint(equalTo: thumbnailView.bottomAnchor),
 
-            // Icon
-            iconView.leadingAnchor.constraint(equalTo: titleBarView.leadingAnchor, constant: 10),
-            iconView.centerYAnchor.constraint(equalTo: titleBarView.centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 24),
-            iconView.heightAnchor.constraint(equalToConstant: 24),
+            iconContainerView.leadingAnchor.constraint(equalTo: titleBarView.leadingAnchor, constant: 14),
+            iconContainerView.centerYAnchor.constraint(equalTo: titleBarView.centerYAnchor),
+            iconContainerView.widthAnchor.constraint(equalToConstant: iconWidth),
+            iconContainerView.heightAnchor.constraint(equalToConstant: iconWidth),
 
-            // Title
-            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
-            titleLabel.centerYAnchor.constraint(equalTo: titleBarView.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+            iconView.centerXAnchor.constraint(equalTo: iconContainerView.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: iconContainerView.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: iconWidth),
+            iconView.heightAnchor.constraint(equalToConstant: iconWidth),
 
-            // Close button
             closeButton.trailingAnchor.constraint(equalTo: titleBarView.trailingAnchor, constant: -8),
             closeButton.centerYAnchor.constraint(equalTo: titleBarView.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 28),
-            closeButton.heightAnchor.constraint(equalToConstant: 28),
+            closeButton.widthAnchor.constraint(equalToConstant: 36),
+            closeButton.heightAnchor.constraint(equalToConstant: 36),
+
+            bookmarkButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+            bookmarkButton.centerYAnchor.constraint(equalTo: titleBarView.centerYAnchor),
+            bookmarkButton.widthAnchor.constraint(equalToConstant: 36),
+            bookmarkButton.heightAnchor.constraint(equalToConstant: 36),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconContainerView.trailingAnchor, constant: 12),
+            titleLabel.centerYAnchor.constraint(equalTo: titleBarView.centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: bookmarkButton.leadingAnchor, constant: -8)
         ])
     }
 
@@ -479,24 +453,33 @@ class ChromeTabCell: UICollectionViewCell {
         self.tab = tab
         self.viewModel = viewModel
 
-        titleLabel.text = tab.title.isEmpty ? "Untitled" : tab.title
+        titleLabel.text = (tab.title.isEmpty || tab.title == "counterapp") ? "" : tab.title
 
-        // Set background color
         if let bgColor = Color(hslString: tab.backgroundColor).uiColor {
+            iconContainerView.backgroundColor = bgColor
             thumbnailView.backgroundColor = bgColor
         } else {
+            iconContainerView.backgroundColor = .white
             thumbnailView.backgroundColor = .white
         }
 
-        // Set icon
         if let iconURLString = tab.icon, let iconURL = URL(string: iconURLString) {
             iconView.kf.setImage(with: iconURL)
         } else {
-            iconView.image = UIImage(systemName: "app.dashed")
-            iconView.tintColor = .white
+            iconView.image = UIImage(systemName: "plus.viewfinder")
+            iconView.tintColor = .white.withAlphaComponent(0.9)
         }
 
-        // Set snapshot if available
+        if tab.title.isEmpty || tab.title == "counterapp" {
+            bookmarkButton.isHidden = true
+        } else {
+            bookmarkButton.isHidden = false
+            bookmarkButton.tintColor = tab.isBookmarked ? UIColor(Color(hex: "#EAC15B")) : UIColor(Color(hex: "#9E9EA7"))
+        }
+
+        titleBarView.bringSubviewToFront(closeButton)
+        titleBarView.bringSubviewToFront(bookmarkButton)
+
         if let snapshot = viewModel.tabSnapshots[tab.id] {
             snapshotImageView.image = snapshot
             snapshotImageView.isHidden = false
@@ -508,6 +491,24 @@ class ChromeTabCell: UICollectionViewCell {
 
     @objc private func closeButtonTapped() {
         onClose?()
+    }
+
+    @objc private func bookmarkButtonTapped() {
+        guard let tab = tab, let viewModel = viewModel else { return }
+        let newBookmarkStatus = !tab.isBookmarked
+        if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+            viewModel.tabs[index].isBookmarked = newBookmarkStatus
+            viewModel.saveTabs()
+        }
+        bookmarkButton.tintColor = newBookmarkStatus ? UIColor(Color(hex: "#EAC15B")) : UIColor(Color(hex:"#9E9EA7"))
+        NotificationCenter.default.post(
+            name: .tabBookmarkChangedFromNative,
+            object: nil,
+            userInfo: [
+                "tabId": tab.id.uuidString,
+                "isBookmarked": newBookmarkStatus
+            ]
+        )
     }
 }
 
@@ -572,7 +573,6 @@ struct ChromeTabFocusView: View {
     var body: some View {
         GeometryReader { geometry in
             if let tab = tab {
-                // Main content
                 SingleTabRootView(
                     tab: tab,
                     viewModel: viewModel,
@@ -590,85 +590,6 @@ struct ChromeTabFocusView: View {
     }
 }
 
-// MARK: - Focus Toolbar
-struct ChromeFocusToolbar: View {
-    let tab: Tab
-    @ObservedObject var viewModel: BrowserViewModel
-    let onBackToOverview: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            // Back to overview button
-            Button(action: onBackToOverview) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
-
-            // Simple title bar
-            HStack(spacing: 10) {
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        viewModel.toggleLeftPanelForCurrentTab()
-                    }
-                }) {
-                    Image(systemName: "list.bullet")
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.plain)
-
-                Text(tab.title.isEmpty ? "Blank Page" : tab.title)
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-
-                Button(action: {
-                    viewModel.reloadCurrentTab()
-                }) {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, minHeight: 28)
-            .background(Color.white.opacity(0.1))
-            .cornerRadius(14)
-
-            // Share button (placeholder)
-            Button(action: {}) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
-
-            // New tab button
-            Button(action: {
-                _ = viewModel.addNewTab(focus: true)
-            }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-    }
-}
-
 // MARK: - Color Helpers
 extension Color {
     var uiColor: UIColor? {
@@ -682,5 +603,3 @@ extension Color {
         )
     }
 }
-
-#endif
