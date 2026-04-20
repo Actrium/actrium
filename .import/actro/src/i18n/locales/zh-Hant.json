@@ -219,7 +219,14 @@
       "defaultCategory": "默認分類",
       "loadError": "載入書籤失敗",
       "empty": "暫無書籤",
-      "emptyHint": "收藏的應用會顯示在這裡"
+      "emptyHint": "收藏的應用會顯示在這裡",
+      "openInNewTab": "新分頁開啟",
+      "copyUrl": "複製應用 URL",
+      "copySuccess": "已複製",
+      "copyFailed": "複製失敗",
+      "remove": "刪除書籤",
+      "removeTitle": "刪除書籤",
+      "removeMessage": "確定要刪除這個書籤嗎？"
     },
     "bookmarkTags": {
       "deleteTitle": "刪除標籤",

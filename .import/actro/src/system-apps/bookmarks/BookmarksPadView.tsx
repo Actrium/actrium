@@ -9,9 +9,17 @@ import {
   Pressable,
   useWindowDimensions,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useTranslation } from 'react-i18next';
-import { AppText } from '../../components';
-import { getTypographyStyle, spacing, radius } from '../../theme/tokens';
+import { AppText, Icon, GlobalAlertModal } from '../../components';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuText,
+} from '../../actr-host/features/shared/DropdownMenu';
+import { Toast, type ToastRef } from '../../actr-host/features/shared/Toast';
+import { getTypographyStyle, spacing, radius, longPressMenu } from '../../theme/tokens';
+import { useColors } from '../../theme/useColors';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
 
@@ -30,8 +38,11 @@ export default function BookmarksPadView({
   openBookmark,
   removeBookmark,
 }: UseBookmarksPageResult) {
+  const colors = useColors();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
+  const toastRef = React.useRef<ToastRef>(null);
+  const [pendingDeleteItem, setPendingDeleteItem] = React.useState<TBookmarkItem | null>(null);
   const flatBookmarks = React.useMemo(
     () =>
       groups.flatMap((group) => group.items).filter((item) => Boolean(item.instance_name)),
@@ -51,6 +62,19 @@ export default function BookmarksPadView({
       await removeBookmark(item);
     },
     [removeBookmark],
+  );
+
+  const handleCopyUrl = React.useCallback(
+    (item: TBookmarkItem) => {
+      try {
+        Clipboard.setString(item.url || item.app_id);
+        toastRef.current?.show(t('actr.bookmark.copySuccess'));
+      } catch (e) {
+        console.error('Failed to copy URL', e);
+        toastRef.current?.show(t('actr.bookmark.copyFailed'));
+      }
+    },
+    [t],
   );
 
   if (isLoading) {
@@ -90,6 +114,18 @@ export default function BookmarksPadView({
 
   return (
     <View style={styles.container}>
+      <Toast ref={toastRef} />
+      <GlobalAlertModal
+        visible={pendingDeleteItem !== null}
+        title={t('actr.bookmark.removeTitle')}
+        message={t('actr.bookmark.removeMessage')}
+        buttons={[
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('actr.bookmark.remove'), style: 'destructive', onPress: () => handleRemoveBookmark(pendingDeleteItem!) },
+        ]}
+        options={{ cancelable: true }}
+        onClose={() => setPendingDeleteItem(null)}
+      />
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.scrollContent}
@@ -103,22 +139,60 @@ export default function BookmarksPadView({
               activeOpacity={0.8}
               onPress={() => openBookmark(item)}
             >
-              <View style={styles.cardInner}>
-                <Image source={{ uri: item.logo! }} style={styles.cardLogo} />
-                <AppText style={styles.cardTitle} numberOfLines={1}>
-                  {item.instance_name}
-                </AppText>
-                <Pressable
-                  hitSlop={8}
-                  style={styles.removeButton}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    handleRemoveBookmark(item);
-                  }}
-                >
-                  <AppText style={styles.removeButtonText}>×</AppText>
-                </Pressable>
-              </View>
+              <DropdownMenu
+                width={longPressMenu.width}
+                estimatedWidth={longPressMenu.width}
+                anchorMode='end'
+                trigger={
+                  <View style={styles.cardInner}>
+                    <Image source={{ uri: item.logo! }} style={styles.cardLogo} />
+                    <AppText style={styles.cardTitle} numberOfLines={1}>
+                      {item.instance_name}
+                    </AppText>
+                    <Pressable
+                      hitSlop={8}
+                      style={styles.removeButton}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        setPendingDeleteItem(item);
+                      }}
+                    >
+                      <Icon type="close" size={16} style={styles.removeButtonIcon} />
+                    </Pressable>
+                  </View>
+                }
+                triggerType='longPress'
+              >
+                {(close) => (
+                  <>
+                    <DropdownMenuItem
+                      onPress={() => {
+                        close(() => openBookmark(item));
+                      }}
+                    >
+                      <Icon type='enter' size={16} />
+                      <DropdownMenuText>{t('actr.bookmark.openInNewTab')}</DropdownMenuText>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onPress={() => {
+                        handleCopyUrl(item);
+                        close();
+                      }}
+                    >
+                      <Icon type='copy' size={16} />
+                      <DropdownMenuText>{t('actr.bookmark.copyUrl')}</DropdownMenuText>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onPress={() => {
+                        close(() => setPendingDeleteItem(item));
+                      }}
+                    >
+                      <Icon type='delete' size={16} color={colors.danger} />
+                      <DropdownMenuText color={colors.danger}>{t('actr.bookmark.remove')}</DropdownMenuText>
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenu>
             </TouchableOpacity>
           ))}
         </View>
@@ -174,16 +248,14 @@ const styles = StyleSheet.create({
   removeButton: {
     position: 'absolute',
     top: 18,
-    right: 10,
+    right: 13,
     width: 20,
     height: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  removeButtonText: {
-    color: '#F2F2F7',
-    fontSize: 18,
-    lineHeight: 20,
+  removeButtonIcon: {
+    tintColor: '#F2F2F7',
   },
   centerContainer: {
     flex: 1,
