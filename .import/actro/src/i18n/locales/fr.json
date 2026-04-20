@@ -219,7 +219,14 @@
       "defaultCategory": "Catégorie par défaut",
       "loadError": "Échec du chargement des favoris",
       "empty": "Aucun favori",
-      "emptyHint": "Les applications favorites s'afficheront ici"
+      "emptyHint": "Les applications favorites s'afficheront ici",
+      "openInNewTab": "Ouvrir dans un nouvel onglet",
+      "copyUrl": "Copier l'URL de l'appli",
+      "copySuccess": "Copié",
+      "copyFailed": "Échec de la copie",
+      "remove": "Supprimer le favori",
+      "removeTitle": "Supprimer le favori",
+      "removeMessage": "Voulez-vous vraiment supprimer ce favori ?"
     },
     "bookmarkTags": {
       "deleteTitle": "Supprimer le tag",
