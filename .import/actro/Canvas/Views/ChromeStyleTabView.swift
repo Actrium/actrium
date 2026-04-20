@@ -52,6 +52,7 @@ struct ChromeStyleTabView: View {
                         }
                     }
                 )
+                .padding(.top, 24)
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
 
             case .focus(let tabId):
