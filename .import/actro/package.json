@@ -13,7 +13,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "patch-package",
     "supramark:link": "yarn link @supramark/core @supramark/diagram-engine @supramark/feature-admonition @supramark/feature-core-markdown @supramark/feature-definition-list @supramark/feature-diagram-dot @supramark/feature-diagram-echarts @supramark/feature-diagram-mermaid @supramark/feature-diagram-plantuml @supramark/feature-diagram-vega-lite @supramark/feature-emoji @supramark/feature-footnote @supramark/feature-gfm @supramark/feature-math @supramark/feature-weather @supramark/rn @supramark/web-diagram",
-    "supramark:unlink": "yarn unlink @supramark/core @supramark/diagram-engine @supramark/feature-admonition @supramark/feature-core-markdown @supramark/feature-definition-list @supramark/feature-diagram-dot @supramark/feature-diagram-echarts @supramark/feature-diagram-mermaid @supramark/feature-diagram-plantuml @supramark/feature-diagram-vega-lite @supramark/feature-emoji @supramark/feature-footnote @supramark/feature-gfm @supramark/feature-math @supramark/feature-weather @supramark/rn @supramark/web-diagram"
+    "supramark:unlink": "yarn unlink @supramark/core @supramark/diagram-engine @supramark/feature-admonition @supramark/feature-core-markdown @supramark/feature-definition-list @supramark/feature-diagram-dot @supramark/feature-diagram-echarts @supramark/feature-diagram-mermaid @supramark/feature-diagram-plantuml @supramark/feature-diagram-vega-lite @supramark/feature-emoji @supramark/feature-footnote @supramark/feature-gfm @supramark/feature-math @supramark/feature-weather @supramark/rn @supramark/web-diagram",
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
@@ -114,6 +115,7 @@
     "@types/react": "19.0.0",
     "@types/react-native-sqlite-storage": "^6.0.5",
     "@types/text-encoding": "^0.0.40",
+    "husky": "^9.1.7",
     "patch-package": "^8.0.0",
     "typescript": "^5.9.3"
   }
