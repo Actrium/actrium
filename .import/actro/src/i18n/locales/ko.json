@@ -219,7 +219,14 @@
       "defaultCategory": "기본 카테고리",
       "loadError": "북마크 로드 실패",
       "empty": "북마크 없음",
-      "emptyHint": "즐겨찾기한 앱이 여기에 표시됩니다"
+      "emptyHint": "즐겨찾기한 앱이 여기에 표시됩니다",
+      "openInNewTab": "새 탭에서 열기",
+      "copyUrl": "앱 URL 복사",
+      "copySuccess": "복사됨",
+      "copyFailed": "복사 실패",
+      "remove": "북마크 삭제",
+      "removeTitle": "북마크 삭제",
+      "removeMessage": "이 북마크를 삭제하시겠습니까?"
     },
     "bookmarkTags": {
       "deleteTitle": "태그 삭제",

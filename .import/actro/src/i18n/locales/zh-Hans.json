@@ -219,7 +219,14 @@
       "defaultCategory": "默认分类",
       "loadError": "加载书签失败",
       "empty": "暂无书签",
-      "emptyHint": "收藏的应用会显示在这里"
+      "emptyHint": "收藏的应用会显示在这里",
+      "openInNewTab": "新页签打开",
+      "copyUrl": "复制应用 URL",
+      "copySuccess": "已复制",
+      "copyFailed": "复制失败",
+      "remove": "删除书签",
+      "removeTitle": "删除书签",
+      "removeMessage": "确定要删除这个书签吗？"
     },
     "bookmarkTags": {
       "deleteTitle": "删除标签",

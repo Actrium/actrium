@@ -219,7 +219,14 @@
       "defaultCategory": "デフォルトカテゴリ",
       "loadError": "ブックマークの読み込みに失敗しました",
       "empty": "ブックマークなし",
-      "emptyHint": "お気に入りのアプリがここに表示されます"
+      "emptyHint": "お気に入りのアプリがここに表示されます",
+      "openInNewTab": "新しいタブで開く",
+      "copyUrl": "アプリのURLをコピー",
+      "copySuccess": "コピーしました",
+      "copyFailed": "コピーに失敗しました",
+      "remove": "ブックマークを削除",
+      "removeTitle": "ブックマークを削除",
+      "removeMessage": "このブックマークを削除してもよろしいですか？"
     },
     "bookmarkTags": {
       "deleteTitle": "タグを削除",
