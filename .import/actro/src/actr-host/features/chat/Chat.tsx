@@ -760,12 +760,12 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         <View style={styles.inputInner}>{input}</View>
       </KeyboardStickyView>
 
-      {/* 删除按钮 - 绝对定位在输入框中心 */}
+      {/* 删除按钮 - 底部 footer 布局，参考 ChatSharePreviewModal */}
       {selectionMode && (
         <View
           style={[
             styles.deleteButtonContainer,
-            { bottom: layoutTokens.deleteButtonBottom },
+            { bottom: 0 },
           ]}
         >
           <DeleteButton
