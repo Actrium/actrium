@@ -51,5 +51,10 @@
     "output": "workspace:*",
     "react": "19.1.0",
     "react-native": "0.81.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "@kookyleo/d2-lib-web": "file:/Users/example-dev-2/Projects/example-app-1/d2-little/packages/web"
+    }
   }
 }
