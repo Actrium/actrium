@@ -1,5 +1,4 @@
 import {
-  Platform,
   ScrollView,
   StyleSheet,
   Image,
@@ -13,7 +12,6 @@ import { AppText } from '../../components';
 import { getTypographyStyle, spacing } from '../../theme/tokens';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
-import { isAndroid } from '../../utils/device';
 import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
 
 interface SettingsMainProps {
@@ -39,51 +37,31 @@ export const SettingsMain = ({
   const insets = useSafeAreaInsets();
   const userInfo = useUserStore((state) => state.userInfo);
   const isLoggedIn = !!userInfo;
-  const isIOSNativeNavigationBar = Platform.OS === 'ios' && !!PhoneNavigationBar;
-  const navigationBarHeight = isIOSNativeNavigationBar ? insets.top + 66 : 0;
+  const hasNativeNavigationBar = !!PhoneNavigationBar;
+  const navigationBarHeight = hasNativeNavigationBar ? insets.top + 66 : 0;
 
   return (
-    <View
-      style={[
-        styles.container,
-        isAndroid
-          ? {
-              paddingTop: insets.top + 8,
-            }
-          : {},
-      ]}
-    >
+    <View style={styles.container}>
       {/* Page Title */}
-      {isIOSNativeNavigationBar && PhoneNavigationBar ? (
+      {hasNativeNavigationBar ? (
         <PhoneNavigationBar
           title='AskAway'
           showLargeTitle={true}
           style={[styles.headerOverlay, { height: navigationBarHeight }]}
         />
-      ) : (
-        <AppText
-          style={[
-            styles.pageTitle,
-            isAndroid ? { marginTop: 4 } : {},
-            Platform.OS === 'android' && styles.androidTitleSpacing,
-            { paddingHorizontal: isTablet ? 40 : 16 },
-          ]}
-        >
-          AskAway
-        </AppText>
-      )}
+      ) : null}
 
       <ScrollView
         style={styles.content}
         contentContainerStyle={[
           styles.scrollContent,
           // 中文注释：iOS 原生导航条改为覆盖层后，需要把首屏可读区的顶部留白转移到滚动内容内部。
-          { paddingTop: isIOSNativeNavigationBar ? navigationBarHeight + 24 : 0 },
+          { paddingTop: hasNativeNavigationBar ? navigationBarHeight + 24 : 0 },
           { paddingHorizontal: isTablet ? 40 : 16 },
         ]}
         showsVerticalScrollIndicator={false}
         scrollIndicatorInsets={
-          isIOSNativeNavigationBar ? { top: navigationBarHeight } : undefined
+          hasNativeNavigationBar ? { top: navigationBarHeight } : undefined
         }
       >
         {/* Account Section */}
@@ -167,15 +145,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 40,
-  },
-  pageTitle: {
-    ...getTypographyStyle('pageTitle'),
-    color: '#FFFFFF',
-    marginBottom: 24,
-  },
-  androidTitleSpacing: {
-    // 中文注释：仅 Android 追加字间距，对齐原生宿主标题的观感。
-    letterSpacing: 0.3,
   },
   accountCard: {
     flexDirection: 'row',

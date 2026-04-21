@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Image,
   ActivityIndicator,
-  Platform,
   TouchableOpacity,
 } from 'react-native';
 import { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -16,7 +15,6 @@ import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import { SwipeRemoveActionRow } from '../components/SwipeRemoveActionRow';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
-import { isAndroid } from '../../utils/device';
 import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
 
 type TFlatBookmarkItem = TBookmarkItem & {
@@ -35,46 +33,24 @@ export default function BookmarksPhoneView({
 }: UseBookmarksPageResult) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const isIOSNativeNavigationBar = Platform.OS === 'ios' && !!PhoneNavigationBar;
+  const hasNativeNavigationBar = !!PhoneNavigationBar;
   const [, setOpenedSwipeItemId] = React.useState<number | null>(null);
   const openedSwipeItemIdRef = React.useRef<number | null>(null);
   const swipeableRefs = React.useRef<Record<number, SwipeableMethods | null>>(
     {},
   );
   const navigationBarHeight = React.useMemo(
-    () => (isIOSNativeNavigationBar ? insets.top + 66 : 0),
-    [insets.top, isIOSNativeNavigationBar],
-  );
-  // 中文注释：这里单独给 bookmarks 头部接入顶部安全区，
-  // 如果宿主提供的是全尺寸容器，就能直接反映到顶部留白里。
-  const headerStyle = React.useMemo(
-    () => [styles.header, { paddingTop: insets.top + 8 }],
-    [insets.top],
+    () => (hasNativeNavigationBar ? insets.top + 66 : 0),
+    [insets.top, hasNativeNavigationBar],
   );
 
-  const headerNode = (
-    <React.Fragment>
-      {isIOSNativeNavigationBar && PhoneNavigationBar ? (
-        <PhoneNavigationBar
-          title='AskAway'
-          showLargeTitle={true}
-          style={[styles.headerOverlay, { height: navigationBarHeight }]}
-        />
-      ) : (
-        <View style={headerStyle}>
-          <AppText
-            style={[
-              styles.headerTitle,
-              isAndroid ? { marginTop: 4 } : {},
-              Platform.OS === 'android' && styles.androidTitleSpacing,
-            ]}
-          >
-            AskAway
-          </AppText>
-        </View>
-      )}
-    </React.Fragment>
-  );
+  const headerNode = hasNativeNavigationBar ? (
+    <PhoneNavigationBar
+      title='AskAway'
+      showLargeTitle={true}
+      style={[styles.headerOverlay, { height: navigationBarHeight }]}
+    />
+  ) : null;
 
   const flatBookmarks = React.useMemo<TFlatBookmarkItem[]>(
     () =>
@@ -184,11 +160,11 @@ export default function BookmarksPhoneView({
         style={styles.content}
         contentContainerStyle={[
           styles.scrollContent,
-          isIOSNativeNavigationBar ? { paddingTop: navigationBarHeight } : null,
+          hasNativeNavigationBar ? { paddingTop: navigationBarHeight } : null,
         ]}
         showsVerticalScrollIndicator={false}
         scrollIndicatorInsets={
-          isIOSNativeNavigationBar ? { top: navigationBarHeight } : undefined
+          hasNativeNavigationBar ? { top: navigationBarHeight } : undefined
         }
         data={flatBookmarks}
         keyExtractor={(item) => String(item.id)}
@@ -206,10 +182,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxl,
-  },
   headerOverlay: {
     position: 'absolute',
     top: 0,
@@ -217,14 +189,6 @@ const styles = StyleSheet.create({
     right: 0,
     width: '100%',
     zIndex: 10,
-  },
-  headerTitle: {
-    ...getTypographyStyle('pageTitle'),
-    color: '#fff',
-  },
-  androidTitleSpacing: {
-    // 中文注释：仅 Android 追加字间距，对齐原生宿主标题的观感。
-    letterSpacing: 0.3,
   },
   content: {
     flex: 1,

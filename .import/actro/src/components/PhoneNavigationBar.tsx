@@ -1,4 +1,4 @@
-import { Platform, requireNativeComponent } from 'react-native';
+import { requireNativeComponent } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 
 export interface PhoneNavigationBarProps {
@@ -8,7 +8,6 @@ export interface PhoneNavigationBarProps {
   style?: StyleProp<ViewStyle>;
 }
 
+// 中文注释：iOS 和 Android 均使用原生导出的 PhoneNavigationBarView
 export const PhoneNavigationBar =
-  Platform.OS === 'ios'
-    ? requireNativeComponent<PhoneNavigationBarProps>('PhoneNavigationBarView')
-    : null;
+  requireNativeComponent<PhoneNavigationBarProps>('PhoneNavigationBarView');
