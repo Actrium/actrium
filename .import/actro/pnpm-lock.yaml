@@ -178,7 +178,7 @@ importers:
     dependencies:
       '@kookyleo/plantuml-little-web':
         specifier: ^1.2026.2-3
-        version: 1.2026.2-3
+        version: 1.2026.2-3(@kookyleo/graphviz-anywhere-web@0.1.7)
       '@supramark/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -353,11 +353,14 @@ importers:
   packages/engines:
     dependencies:
       '@kookyleo/graphviz-anywhere-rn':
-        specifier: ^0.1.3
-        version: 0.1.3(react-native@0.81.5(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.9.3))(@types/react@19.2.7)(react@19.2.3))(react@19.2.3)
+        specifier: ^0.1.7
+        version: 0.1.7(react-native@0.81.5(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.9.3))(@types/react@19.2.7)(react@19.2.3))(react@19.2.3)
       '@kookyleo/graphviz-anywhere-web':
-        specifier: ^0.1.3
-        version: 0.1.3
+        specifier: ^0.1.7
+        version: 0.1.7
+      '@kookyleo/plantuml-little-web':
+        specifier: ^1.2026.2-3
+        version: 1.2026.2-3(@kookyleo/graphviz-anywhere-web@0.1.7)
       beautiful-mermaid:
         specifier: ^1.1.3
         version: 1.1.3
@@ -1716,8 +1719,21 @@ packages:
       react-native-windows:
         optional: true
 
-  '@kookyleo/graphviz-anywhere-web@0.1.3':
-    resolution: {integrity: sha512-UgxDsH8lxfM6ZOgkP1jbfRNpPhZl4peN3WWEFczySoVfKQoEAR/VCjaURJ/Ugdcw9+5s0pB3NogiZ6XwPYNLww==}
+  '@kookyleo/graphviz-anywhere-rn@0.1.7':
+    resolution: {integrity: sha512-0mqhm3u5f7bKofcn8xJPIzLlI34HpTWaptkZuwRxFl0k51xS1MICx2fWQEoST9ShSXtwYRtZ7ghjOFp2bmopug==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-native: '>=0.71.0'
+      react-native-macos: '>=0.71.0'
+      react-native-windows: '>=0.71.0'
+    peerDependenciesMeta:
+      react-native-macos:
+        optional: true
+      react-native-windows:
+        optional: true
+
+  '@kookyleo/graphviz-anywhere-web@0.1.7':
+    resolution: {integrity: sha512-5/yZIzfm7BbSkLd0UROVoV7haUbVX/QBcMRPk95vDL00T42FTKNx5fELfulSgZygj6pY7JOhFoE8LtOxb012Jg==}
 
   '@kookyleo/plantuml-little-web@1.2026.2-3':
     resolution: {integrity: sha512-BKwhOhQD+ZtBOnzWlAcMrd0Y1itSeAyCCqXoSR9qQhS1BwbJel47N06NGkBMJzITqDviSRdrqFE4g6BCCjLHOA==}
@@ -8110,9 +8126,16 @@ snapshots:
       react: 19.2.3
       react-native: 0.81.5(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.9.3))(@types/react@19.2.7)(react@19.2.3)
 
-  '@kookyleo/graphviz-anywhere-web@0.1.3': {}
+  '@kookyleo/graphviz-anywhere-rn@0.1.7(react-native@0.81.5(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.9.3))(@types/react@19.2.7)(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      react: 19.2.3
+      react-native: 0.81.5(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.9.3))(@types/react@19.2.7)(react@19.2.3)
 
-  '@kookyleo/plantuml-little-web@1.2026.2-3': {}
+  '@kookyleo/graphviz-anywhere-web@0.1.7': {}
+
+  '@kookyleo/plantuml-little-web@1.2026.2-3(@kookyleo/graphviz-anywhere-web@0.1.7)':
+    optionalDependencies:
+      '@kookyleo/graphviz-anywhere-web': 0.1.7
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
