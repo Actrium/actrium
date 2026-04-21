@@ -567,7 +567,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     }
 
     /**
-     * 从右侧显示搜索视图
+     * 从底部显示搜索视图
      */
     private fun showSearch(sourceBundle: Bundle? = null) {
         if (isSearchVisible) return
@@ -582,8 +582,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         val targetView = createReactRootView("canvas-kotlin", bundle)
         binding.flSearch.addView(targetView)
 
-        // 初始位置在屏幕右侧
-        binding.flSearch.translationX = binding.flSearch.width.toFloat()
+        // 初始位置在屏幕底部
+        binding.flSearch.translationY = binding.flSearch.height.toFloat()
         binding.flSearch.visibility = View.VISIBLE
         // 为 flSearch 添加 WindowInsets 监听，处理键盘问题
         binding.flSearch.adjustKeyboard()
@@ -592,8 +592,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             binding.flSearch.requestApplyInsets()
         }
 
-        // 创建从右侧滑入的动画
-        ObjectAnimator.ofFloat(binding.flSearch, "translationX", binding.flSearch.width.toFloat(), 0f).apply {
+        // 创建从底部滑入的动画
+        ObjectAnimator.ofFloat(binding.flSearch, "translationY", binding.flSearch.height.toFloat(), 0f).apply {
             duration = 300
             interpolator = DecelerateInterpolator()
             start()
@@ -601,13 +601,13 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     }
 
     /**
-     * 隐藏搜索视图到右侧
+     * 隐藏搜索视图到底部
      */
     private fun hideSearch() {
         if (!isSearchVisible) return
 
-        // 创建滑出到右侧的动画
-        ObjectAnimator.ofFloat(binding.flSearch, "translationX", 0f, binding.flSearch.width.toFloat()).apply {
+        // 创建滑出到底部的动画
+        ObjectAnimator.ofFloat(binding.flSearch, "translationY", 0f, binding.flSearch.height.toFloat()).apply {
             duration = 300
             interpolator = DecelerateInterpolator()
             start()
