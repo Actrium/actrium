@@ -47,3 +47,6 @@ ios/*.xcodeproj/xcuserdata
 # Android
 android/app/build/
 android/.gradle/
+
+# Local tool state
+.claude/
