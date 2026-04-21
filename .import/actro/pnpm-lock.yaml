@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  '@kookyleo/d2-lib-web': file:/Users/leo/XData/Starbucks/kookyleo/d2-little/packages/web
-
 importers:
 
   .:
@@ -180,8 +177,8 @@ importers:
   examples/react-web-csr:
     dependencies:
       '@kookyleo/d2-lib-web':
-        specifier: file:/Users/leo/XData/Starbucks/kookyleo/d2-little/packages/web
-        version: file:../d2-little/packages/web
+        specifier: ^0.7.1
+        version: 0.7.1
       '@kookyleo/plantuml-little-web':
         specifier: ^1.2026.2-3
         version: 1.2026.2-3(@kookyleo/graphviz-anywhere-web@0.1.7)
@@ -362,8 +359,8 @@ importers:
   packages/engines:
     dependencies:
       '@kookyleo/d2-lib-web':
-        specifier: file:/Users/leo/XData/Starbucks/kookyleo/d2-little/packages/web
-        version: file:../d2-little/packages/web
+        specifier: ^0.7.1
+        version: 0.7.1
       '@kookyleo/graphviz-anywhere-rn':
         specifier: ^0.1.7
         version: 0.1.7(react-native@0.81.5(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.9.3))(@types/react@19.2.7)(react@19.2.3))(react@19.2.3)
@@ -1731,8 +1728,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@kookyleo/d2-lib-web@file:../d2-little/packages/web':
-    resolution: {directory: ../d2-little/packages/web, type: directory}
+  '@kookyleo/d2-lib-web@0.7.1':
+    resolution: {integrity: sha512-aZ/dsHzbtTQB88Kc1Lp/do35Jp3UjF4/MH8jqKgrCsdvABvBjhkTpv3CeaRxutyIJoF7dScf3kiL/ylBR7qusA==}
 
   '@kookyleo/graphviz-anywhere-rn@0.1.3':
     resolution: {integrity: sha512-GQlTSaK9JXad9RppdfM3qX4xQb6VmeIj55BERlDSIW0U3hudkfoA2RivwOY7qkaOUh9iTvILftQkUAb9cACeyQ==}
@@ -8144,7 +8141,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@kookyleo/d2-lib-web@file:../d2-little/packages/web': {}
+  '@kookyleo/d2-lib-web@0.7.1': {}
 
   '@kookyleo/graphviz-anywhere-rn@0.1.3(react-native@0.81.5(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.3.3))(@types/react@18.2.79)(react@18.2.0))(react@18.2.0)':
     dependencies:
