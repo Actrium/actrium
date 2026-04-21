@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { useColors } from '../../../theme/useColors';
+import { Icon } from '../../../components';
 
 interface CheckboxProps {
   checked: boolean;
@@ -39,7 +40,11 @@ export const Checkbox: React.FC<CheckboxProps> = ({
             borderColor: checked ? colors.accentBlue : colors.borderCheckboxUnchecked,
           },
         ]}
-      />
+      >
+        {checked && (
+          <Icon type='success' size={size * 0.5} color='white' />
+        )}
+      </View>
     </Pressable>
   );
 };
