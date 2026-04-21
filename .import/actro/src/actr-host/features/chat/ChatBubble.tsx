@@ -321,7 +321,7 @@ export default function ChatBubble({
         icon: <Icon type='copy' size={16} />,
       });
     }
-    if (onShare && (isQuestion || !isLatest)) {
+    if (onShare) {
       options.push({
         label: t('actr.chat.share'),
         onPress: onShare,
@@ -807,7 +807,6 @@ export default function ChatBubble({
               const shouldShowMenu =
                 !selectionMode &&
                 menuOptions.length > 0 &&
-                (isQuestion || !isLatest) &&
                 !hasAttachments;
               if (shouldShowMenu) {
                 return (
