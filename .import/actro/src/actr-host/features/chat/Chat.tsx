@@ -6,6 +6,7 @@ import React, {
   useRef,
 } from 'react';
 import {
+  Animated,
   View,
   Text,
   StyleSheet,
@@ -55,7 +56,9 @@ import {
   KeyboardStickyView,
   useReanimatedKeyboardAnimation,
 } from 'react-native-keyboard-controller';
-import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import Reanimated, {
+  useAnimatedStyle,
+} from 'react-native-reanimated';
 import {
   getTypographyStyle,
   scrollToBottomButton,
@@ -88,6 +91,9 @@ interface MessageRowProps {
   styles: ReturnType<typeof makeStyles>;
 }
 
+const CHECKBOX_OFFSET = 30;
+const SELECTION_ANIMATION_DURATION = 200;
+
 const MessageRow = React.memo(function MessageRow({
   tabId,
   appId,
@@ -111,6 +117,32 @@ const MessageRow = React.memo(function MessageRow({
     ),
   );
 
+  // 中文注释：选择模式的过渡动画，paddingLeft 控制气泡宽度缩减，translateX + opacity 控制多选框滑入。
+  // 使用 RN Animated 替代 reanimated，避免 React.memo 内 useSharedValue 触发 useInsertionEffect 报错。
+  const selectionProgress = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.timing(selectionProgress, {
+      toValue: selectionMode ? 1 : 0,
+      duration: SELECTION_ANIMATION_DURATION,
+      useNativeDriver: false,
+    });
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [selectionMode]);
+
+  const paddingLeftAnimated = selectionProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, CHECKBOX_OFFSET],
+  });
+
+  const translateXAnimated = selectionProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-CHECKBOX_OFFSET, 0],
+  });
+
   if (!item) return null;
 
   return (
@@ -123,24 +155,19 @@ const MessageRow = React.memo(function MessageRow({
         },
       ]}
     >
-      <View
-        style={[
-          styles.messageGroup,
-          selectionMode && styles.messageGroupWithCheckbox,
-        ]}
+      <Animated.View
+        style={[styles.messageGroup, { paddingLeft: paddingLeftAnimated }]}
       >
         {item.attachments && (
           <View style={styles.bubbleWithCheckbox}>
-            {selectionMode && (
-              <View style={styles.checkboxContainer}>
-                <Checkbox
-                  checked={selectedParts.has('attachments')}
-                  onPress={() =>
-                    toggleSelection(item.message_id, 'attachments')
-                  }
-                />
-              </View>
-            )}
+            <Animated.View style={[styles.checkboxContainer, { transform: [{ translateX: translateXAnimated }], opacity: selectionProgress }]}>
+              <Checkbox
+                checked={selectedParts.has('attachments')}
+                onPress={() =>
+                  toggleSelection(item.message_id, 'attachments')
+                }
+              />
+            </Animated.View>
             <View style={styles.questionBubbleWrapper}>
               <ChatBubble
                 type='question'
@@ -167,14 +194,12 @@ const MessageRow = React.memo(function MessageRow({
         )}
         {item.question_content || item.question_type === 'voice' ? (
           <View style={styles.bubbleWithCheckbox}>
-            {selectionMode && (
-              <View style={styles.checkboxContainer}>
-                <Checkbox
-                  checked={selectedParts.has('question')}
-                  onPress={() => toggleSelection(item.message_id, 'question')}
-                />
-              </View>
-            )}
+            <Animated.View style={[styles.checkboxContainer, { transform: [{ translateX: translateXAnimated }], opacity: selectionProgress }]}>
+              <Checkbox
+                checked={selectedParts.has('question')}
+                onPress={() => toggleSelection(item.message_id, 'question')}
+              />
+            </Animated.View>
             <View style={styles.questionBubbleWrapper}>
               <ChatBubble
                 type='question'
@@ -214,14 +239,12 @@ const MessageRow = React.memo(function MessageRow({
           (item.progress === Progress.pending ||
             item.progress === Progress.processing)) ? (
           <View style={styles.bubbleWithCheckbox}>
-            {selectionMode && (
-              <View style={styles.checkboxContainer}>
-                <Checkbox
-                  checked={selectedParts.has('answer')}
-                  onPress={() => toggleSelection(item.message_id, 'answer')}
-                />
-              </View>
-            )}
+            <Animated.View style={[styles.checkboxContainer, { transform: [{ translateX: translateXAnimated }], opacity: selectionProgress }]}>
+              <Checkbox
+                checked={selectedParts.has('answer')}
+                onPress={() => toggleSelection(item.message_id, 'answer')}
+              />
+            </Animated.View>
             <ChatBubble
               type='answer'
               msgId={item.message_id}
@@ -251,7 +274,7 @@ const MessageRow = React.memo(function MessageRow({
             />
           </View>
         ) : null}
-      </View>
+      </Animated.View>
     </View>
   );
 });
@@ -852,9 +875,6 @@ const makeStyles = (colors: ColorTokens) => ({
     messageGroup: {
       width: '100%',
       marginBottom: spacing.md,
-    },
-    messageGroupWithCheckbox: {
-      paddingLeft: 30,
     },
     bubbleWithCheckbox: {
       flexDirection: 'row',
