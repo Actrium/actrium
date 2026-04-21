@@ -18,9 +18,13 @@ class PhoneNavigationBarView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : LinearLayout(context, attrs, defStyleAttr) {
 
+    private val titleContainer: LinearLayout
     private val titleTextView: TextView
+    private val subtitleTextView: TextView
     private val addButton: ImageView
     var onAddClickListener: (() -> Unit)? = null
+
+    private var showLargeTitle: Boolean = true
 
     init {
         orientation = HORIZONTAL
@@ -35,6 +39,15 @@ class PhoneNavigationBarView @JvmOverloads constructor(
         val paddingBottom = (20 * resources.displayMetrics.density).toInt()
         setPadding(paddingHorizontal, paddingTop, paddingHorizontal, paddingBottom)
 
+        // 创建标题容器（垂直布局，用于放置标题和副标题）
+        titleContainer = LinearLayout(context).apply {
+            layoutParams = LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT
+            )
+            orientation = VERTICAL
+        }
+
         // 创建标题 TextView
         titleTextView = TextView(context).apply {
             layoutParams = LayoutParams(
@@ -45,7 +58,22 @@ class PhoneNavigationBarView @JvmOverloads constructor(
             setTextColor(context.getColor(android.R.color.white))
             textSize = 34.2f
         }
-        addView(titleTextView)
+        titleContainer.addView(titleTextView)
+
+        // 创建副标题 TextView
+        subtitleTextView = TextView(context).apply {
+            layoutParams = LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT
+            )
+            setTextColor(context.getColor(android.R.color.white))
+            textSize = 14f
+            alpha = 0.7f
+            visibility = View.GONE
+        }
+        titleContainer.addView(subtitleTextView)
+
+        addView(titleContainer)
 
         // 创建占位 View
         val spacer = View(context).apply {
@@ -81,6 +109,32 @@ class PhoneNavigationBarView @JvmOverloads constructor(
      */
     fun getTitle(): String {
         return titleTextView.text.toString()
+    }
+
+    /**
+     * 设置副标题文字
+     */
+    fun setSubtitle(subtitle: String?) {
+        if (subtitle.isNullOrEmpty()) {
+            subtitleTextView.visibility = View.GONE
+        } else {
+            subtitleTextView.text = subtitle
+            subtitleTextView.visibility = View.VISIBLE
+        }
+    }
+
+    /**
+     * 设置是否显示大标题
+     */
+    fun setShowLargeTitle(show: Boolean) {
+        showLargeTitle = show
+        if (show) {
+            // 大标题模式：34.2sp
+            titleTextView.textSize = 34.2f
+        } else {
+            // 小标题模式：17sp
+            titleTextView.textSize = 17f
+        }
     }
 
     /**
