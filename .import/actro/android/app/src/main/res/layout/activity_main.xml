@@ -44,7 +44,7 @@
                     android:layout_height="wrap_content"
                     android:text="AskAway"
                     android:textColor="@android:color/white"
-                    android:textSize="34.2sp" />
+                    android:textSize="34sp" />
 
                 <View
                     android:layout_width="0dp"
