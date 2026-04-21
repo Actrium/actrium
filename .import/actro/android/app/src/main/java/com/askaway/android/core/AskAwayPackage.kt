@@ -15,7 +15,9 @@ class AskAwayPackage : ReactPackage {
         )
     }
 
-    override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<in Nothing, in Nothing>> {
-        return emptyList()
+    override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
+        return listOf(
+            PhoneNavigationBarViewManager(reactContext)
+        )
     }
 }
