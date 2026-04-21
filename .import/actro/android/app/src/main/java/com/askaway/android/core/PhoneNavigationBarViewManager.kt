@@ -49,6 +49,22 @@ class PhoneNavigationBarViewManager(
     }
 
     /**
+     * 设置副标题文字
+     */
+    @ReactProp(name = "subtitle")
+    fun setSubtitle(view: PhoneNavigationBarView, subtitle: String?) {
+        view.setSubtitle(subtitle)
+    }
+
+    /**
+     * 设置是否显示大标题
+     */
+    @ReactProp(name = "showLargeTitle", defaultBoolean = true)
+    fun setShowLargeTitle(view: PhoneNavigationBarView, show: Boolean) {
+        view.setShowLargeTitle(show)
+    }
+
+    /**
      * 设置添加按钮的可见性
      */
     @ReactProp(name = "showAddButton", defaultBoolean = true)
