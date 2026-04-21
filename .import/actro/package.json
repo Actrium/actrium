@@ -51,5 +51,10 @@
     "output": "workspace:*",
     "react": "19.1.0",
     "react-native": "0.81.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "@kookyleo/d2-lib-web": "file:/Users/leo/XData/Starbucks/kookyleo/d2-little/packages/web"
+    }
   }
 }
