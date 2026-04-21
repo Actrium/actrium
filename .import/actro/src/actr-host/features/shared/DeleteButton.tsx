@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import LinearGradient from 'react-native-linear-gradient';
 import { AppText, HostIconButton } from '../../../components';
 import { getTypographyStyle, inputArea, spacing } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
@@ -23,6 +24,10 @@ export const DeleteButton: React.FC<DeleteButtonProps> = ({
 
   return (
     <View style={styles.footer}>
+      <LinearGradient
+        colors={['rgba(255,255,255,.1)', colors.bgSurface]}
+        style={styles.footerGradient}
+      />
       <View style={styles.footerRow}>
         <Pressable
           style={({ pressed }) => [
@@ -60,7 +65,9 @@ const makeStyles = (colors: ColorTokens) =>
       width: '100%',
       paddingLeft: spacing.xl,
       paddingRight: spacing.xl,
-      backgroundColor: colors.bgChatPage,
+    },
+    footerGradient: {
+      ...StyleSheet.absoluteFillObject,
     },
     footerRow: {
       width: '100%',
