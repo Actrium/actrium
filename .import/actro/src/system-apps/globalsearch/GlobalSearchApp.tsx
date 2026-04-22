@@ -10,28 +10,27 @@ import React, {
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
   Image,
   useWindowDimensions,
   TouchableOpacity,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { Icon } from '../components';
-import { useUserStore } from '../actr-host/store/useUserStore';
-import { getTypographyStyle, globalSearch } from '../theme/tokens';
+import { Icon } from '../../components';
+import { useUserStore } from '../../actr-host/store/useUserStore';
+import { getTypographyStyle, globalSearch } from '../../theme/tokens';
 import {
   BookmarkRepository,
   TBookmarkItem,
-} from '../repository/BookmarkRepository';
-import { GlobalSearchEvents } from '../native-bridge/globalsearch';
+} from '../../repository/BookmarkRepository';
 import {
   openTab,
   getAllTabs,
   TabSummary,
-} from '../native-bridge/tab/TabModule';
+} from '../../native-bridge/tab/TabModule';
+import GlobalSearchPad from './GlobalSearchPad';
+import GlobalSearchPhone from './GlobalSearchPhone';
 
-// 搜索结果类型
 type SearchResultType = 'active' | 'bookmark' | 'setting';
 type SettingsPage = 'main' | 'accountDetail' | 'aboutAskAway';
 type SettingsAboutPage = 'aboutApp' | 'userAgreement' | 'privacyPolicy' | 'icp';
@@ -42,12 +41,10 @@ interface SearchResultItem {
   type: SearchResultType;
   name: string;
   searchKeywords?: string[];
-  // 应用类型
   logo?: string;
   appId?: string;
   tabId?: string;
   url?: string;
-  // 设置类型
   icon?: string;
   action?: () => void;
 }
@@ -211,7 +208,6 @@ export default function GlobalSearchApp() {
   const resultsHorizontalPadding = isPhone ? 16 : 40;
   const resultsCardRadius = 26;
 
-  // 加载书签数据
   useEffect(() => {
     BookmarkRepository.getBookmarksHierarchy().then((groups) => {
       const allItems = groups.flatMap((g) => g.items);
@@ -227,17 +223,6 @@ export default function GlobalSearchApp() {
     });
   }, []);
 
-  useEffect(() => {
-    // 中文注释：宿主已接管全局搜索输入框，RN 页面只消费桥接事件里的输入文本，
-    // 这样 iOS/Android 都能复用同一套搜索结果渲染，不再维护本地输入态。
-    const unsubscribe = GlobalSearchEvents.onSearchInputChanged((event) => {
-      setSearchQuery(event.inputText ?? '');
-    });
-
-    return unsubscribe;
-  }, []);
-
-  // 可搜索的设置项
   const openSettingsWithDeepLink = useCallback(
     (
       page: SettingsPage,
@@ -256,9 +241,11 @@ export default function GlobalSearchApp() {
     },
     [],
   );
+
   const handleOpenSettings = useCallback(() => {
     openSettingsWithDeepLink('main');
   }, [openSettingsWithDeepLink]);
+
   const handleOpenAbout = useCallback(
     (aboutPage: SettingsAboutPage = 'aboutApp') => {
       openSettingsWithDeepLink('aboutAskAway', aboutPage);
@@ -348,26 +335,21 @@ export default function GlobalSearchApp() {
     localizedSearchCopy,
   ]);
 
-  // 搜索结果
   const searchResults: SearchResultGroup[] = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
 
-    // 1. 搜索活跃应用
     const activeResults: SearchResultItem[] = allTabs
       .filter((tab) => tab.title?.toLowerCase().includes(q))
-      .map((tab) => {
-        return {
-          id: `active-${tab.tabId}`,
-          type: 'active' as const,
-          name: tab.title,
-          logo: tab.icon,
-          tabId: tab.tabId,
-          url: tab.appUrl,
-        };
-      });
+      .map((tab) => ({
+        id: `active-${tab.tabId}`,
+        type: 'active' as const,
+        name: tab.title,
+        logo: tab.icon,
+        tabId: tab.tabId,
+        url: tab.appUrl,
+      }));
 
-    // 2. 搜索收藏
     const bookmarkResults: SearchResultItem[] = bookmarks
       .filter((b) => b.instance_name?.toLowerCase().includes(q))
       .map((b) => ({
@@ -379,7 +361,6 @@ export default function GlobalSearchApp() {
         url: b.url || undefined,
       }));
 
-    // 3. 搜索设置
     const settingResults = searchableSettings.filter((s) => {
       if (s.name.toLowerCase().includes(q)) return true;
       return (s.searchKeywords || []).some((keyword) =>
@@ -413,20 +394,18 @@ export default function GlobalSearchApp() {
     return groups;
   }, [searchQuery, allTabs, bookmarks, searchableSettings, t]);
 
-  // 点击搜索结果项
   const handleItemPress = useCallback((item: SearchResultItem) => {
     if (item.type === 'setting') {
       item.action?.();
-    } else {
-      // 应用类型
-      openTab({
-        tabId: item.tabId ?? '',
-        appUrl: item.url || '',
-      });
+      return;
     }
+
+    openTab({
+      tabId: item.tabId ?? '',
+      appUrl: item.url || '',
+    });
   }, []);
 
-  // 渲染搜索结果项
   const renderResultItem = (item: SearchResultItem, isLast: boolean) => {
     if (item.type === 'setting') {
       return (
@@ -444,7 +423,7 @@ export default function GlobalSearchApp() {
         </React.Fragment>
       );
     }
-    // 应用类型（active/bookmark）
+
     return (
       <React.Fragment key={item.id}>
         <TouchableOpacity
@@ -465,8 +444,7 @@ export default function GlobalSearchApp() {
     );
   };
 
-  // 渲染搜索结果列表
-  const renderResults = () => {
+  const renderResults = useCallback(() => {
     if (!searchQuery.trim()) {
       return null;
     }
@@ -496,102 +474,31 @@ export default function GlobalSearchApp() {
         ))}
       </>
     );
-  };
+  }, [searchQuery, searchResults, t]);
 
   if (isPhone) {
     return (
-      <View style={styles.phoneContainer}>
-        <ScrollView
-          style={styles.content}
-          contentContainerStyle={[
-            styles.phoneScrollContent,
-            { paddingHorizontal: resultsHorizontalPadding },
-          ]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps='handled'
-        >
-          {renderResults()}
-        </ScrollView>
-      </View>
+      <GlobalSearchPhone
+        renderResults={renderResults}
+        resultsHorizontalPadding={resultsHorizontalPadding}
+        onSearchQueryChange={setSearchQuery}
+      />
     );
   }
 
-  // iPad 布局
   return (
-    <ScrollView
-      contentContainerStyle={styles.scrollContent}
-      keyboardShouldPersistTaps='handled'
-    >
-      <View style={styles.GlobalSearchContainer}>
-        <View
-          style={[
-            styles.resultsArea,
-            {
-              // 中文注释：搜索结果列表横向边距对齐 settings 一级页，
-              // Phone 用 16，Pad 用 40，不再额外缩成 500 宽。
-              width: Math.max(screenWidth - resultsHorizontalPadding * 2, 0),
-              height: resultsAreaSize,
-              borderRadius: resultsCardRadius,
-            },
-          ]}
-        >
-          <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={styles.resultsListContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {renderResults()}
-          </ScrollView>
-        </View>
-      </View>
-    </ScrollView>
+    <GlobalSearchPad
+      renderResults={renderResults}
+      screenWidth={screenWidth}
+      resultsHorizontalPadding={resultsHorizontalPadding}
+      resultsAreaSize={resultsAreaSize}
+      resultsCardRadius={resultsCardRadius}
+      onSearchQueryChange={setSearchQuery}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  phoneContainer: {
-    flex: 1,
-    width: '100%',
-    backgroundColor: '#000',
-  },
-  content: {
-    flex: 1,
-  },
-  phoneScrollContent: {
-    paddingTop: 60,
-    paddingBottom: 100,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  GlobalSearchContainer: {
-    flex: 1,
-    alignItems: 'center',
-    flexDirection: 'column',
-    paddingTop: 40,
-    paddingBottom: 16,
-  },
-  resultsArea: {
-    overflow: 'hidden',
-    backgroundColor: 'transparent',
-    borderRadius: 26,
-  },
-  resultsHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2C2C2E',
-  },
-  resultsHeaderTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#8E8E93',
-  },
-  resultsListContent: {
-    paddingTop: globalSearch.resultsListPadding,
-    paddingBottom: globalSearch.resultsListPadding,
-  },
   groupContainer: {
     marginBottom: globalSearch.groupSpacing,
   },
