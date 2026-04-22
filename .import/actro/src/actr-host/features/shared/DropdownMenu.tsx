@@ -12,12 +12,12 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
 import { AppText } from '../../../components';
 import { dropdownMenu, getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import { triggerHaptic } from '../../utils/haptics';
 
 type AnchorMode = 'center' | 'start' | 'end';
 type VerticalPlacement = 'auto' | 'top' | 'bottom';
@@ -279,7 +279,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
       close();
       return;
     }
-    ReactNativeHapticFeedback.trigger('impactHeavy')
+    triggerHaptic('impactHeavy')
     onBeforeOpen?.();
     measureTrigger(true);
   }, [close, disabled, isOpen, measureTrigger, onBeforeOpen]);
