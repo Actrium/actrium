@@ -24,7 +24,7 @@ struct ContentView: View {
                         
                         // 内容区域：根据 systemTabType 判断是否渲染系统页签
                         ZStack {
-                            UnifiedCanvasView(viewModel: viewModel, historyVM: historyVM)
+                            ChromeStyleTabView(viewModel: viewModel, historyVM: historyVM)
                             if let systemType = viewModel.currentSystemTabType {
                                 SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM)
                             }

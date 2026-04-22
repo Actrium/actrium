@@ -3,10 +3,12 @@ import SwiftUI
 struct PhoneMainView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-    
+
     @State private var selectedTab: PhoneTab = .tabs
     @State private var fullscreenTab: Tab?
     @State private var skipManualSettingsResetOnce = false
+    @State private var searchText: String = ""
+    @FocusState private var isSearchFocused: Bool
     
     @Namespace private var animation
     
@@ -50,22 +52,33 @@ struct PhoneMainView: View {
             }
             
             // 搜索页：独立显示（不占用固定 tab 位置）
-            SwiftUI.Tab("搜索", systemImage: "magnifyingglass", value: PhoneTab.search, role: .search) {
-                PhoneSystemAppView(
-                    systemType: .globalSearch,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    onSelect: { tab in
-                        fullscreenTab = tab
-                    }
-                )
-                .toolbar(.hidden, for: .tabBar)
+            SwiftUI.Tab(TM.active.search(), systemImage: "magnifyingglass", value: PhoneTab.search, role: .search) {
+                NavigationStack {
+                    PhoneSystemAppView(
+                        systemType: .globalSearch,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        onSelect: { tab in
+                            fullscreenTab = tab
+                        }
+                    )
+                }
+                .searchable(text: $searchText)
+                .searchFocused($isSearchFocused)
+                .task {
+                    isSearchFocused = true
+                }
             }
         }
         .accentColor(.blue)
         .background(Color.black)
         .environment(\.colorScheme, .dark)
         .onChange(of: selectedTab) { oldValue, newValue in
+            // 离开搜索页时，清空搜索框文本
+            if oldValue == .search {
+                searchText = ""
+                isSearchFocused = false
+            }
             // 切换到系统页签时，刷新系统页签
             switch newValue {
             case .bookmarks:
@@ -159,6 +172,16 @@ struct PhoneMainView: View {
         }
         .onChange(of: fullscreenTab?.id) { oldValue, newValue in
             viewModel.fullscreenTabId = newValue
+        }
+        .onChange(of: searchText) { _, newText in
+            // 搜索框内容变化时，实时发送通知给 RN 侧
+            NotificationCenter.default.post(
+                name: .searchInputChangedFromNative,
+                object: nil,
+                userInfo: [
+                    "inputText": newText
+                ]
+            )
         }
     }
 

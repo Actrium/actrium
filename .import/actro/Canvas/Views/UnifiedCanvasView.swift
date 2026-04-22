@@ -1,4 +1,5 @@
 import SwiftUI
+import Kingfisher
 
 private let logger = AppLogger.ui
 #if os(macOS)
@@ -352,7 +353,7 @@ struct UnifiedCanvasView: View {
 
     // MARK: - Transform Calculations
 
-    /// Overview 模式变换：缩放画布以适应视口，居中显示
+    /// Overview 模式变换：缩放画布以适应视口，水平居中、顶端对齐
     private func calculateOverviewTransform(
         canvasSize: CGSize,
         viewportSize: CGSize
@@ -366,11 +367,10 @@ struct UnifiedCanvasView: View {
         let scaleY = viewportSize.height / canvasSize.height
         let scale = max(min(scaleX, scaleY, 1.0), 0.001)
 
-        // 居中
+        // 水平居中，顶端对齐
         let scaledWidth = canvasSize.width * scale
-        let scaledHeight = canvasSize.height * scale
         let offsetX = (viewportSize.width - scaledWidth) / 2
-        let offsetY = (viewportSize.height - scaledHeight) / 2
+        let offsetY: CGFloat = 0  // 顶端对齐，不添加垂直偏移
 
         guard offsetX.isFinite && offsetY.isFinite && scale.isFinite else {
             return (1.0, .zero)
@@ -429,18 +429,18 @@ struct UnifiedCanvasView: View {
 
     // MARK: - Grid Layout Calculations
 
-    /// 悬浮标题栏高度（Overview 模式下显示在卡片上方）
-    private let floatingTitleBarHeight: CGFloat = 24
+    /// 底部服务条高度（Overview 模式下显示在卡片底部）
+    private let floatingTitleBarHeight: CGFloat = 56
 
     /// 计算间距（卡片之间）和垂直边距
     /// - 间距 = windowWidth / (卡片数 × 7)，下限 16px
-    /// - 垂直间距 = 水平间距 + 悬浮标题栏高度（为标题栏留出空间）
-    /// - 垂直边距 = 间距 × 1.25 + 悬浮标题栏高度
+    /// - 垂直间距 = 水平间距（底部服务条在卡片内部，不需要额外空间）
+    /// - 垂直边距 = 间距 × 1.25
     private func calculateSpacing(windowWidth: CGFloat, totalCards: Int) -> (hSpacing: CGFloat, vSpacing: CGFloat, verticalMargin: CGFloat) {
         let effectiveCards = max(totalCards, 4)
         let baseSpacing = max(16, windowWidth / (CGFloat(effectiveCards) * 7))
-        let vSpacing = baseSpacing + floatingTitleBarHeight  // 纵向间距包含标题栏高度
-        let verticalMargin = baseSpacing * 1.25 + floatingTitleBarHeight  // 顶部边距也要留空间给第一行标题栏
+        let vSpacing = baseSpacing  // 纵向间距不需要额外高度
+        let verticalMargin = baseSpacing * 1.25  // 顶部边距
         return (baseSpacing, vSpacing, verticalMargin)
     }
 
@@ -993,26 +993,30 @@ private struct TabCardView: View {
     let onSelect: () -> Void
     let onClose: () -> Void
 
-    // 悬浮标题栏高度（固定值，Overview 模式下显示在卡片上方）
-    private let floatingTitleBarHeight: CGFloat = 24
+    // 底部服务条高度（固定值，Overview 模式下显示在卡片底部）
+    private let floatingTitleBarHeight: CGFloat = 56
+    private let iconWidth: CGFloat = 32
 
     @ViewBuilder
     var body: some View {
-        // 使用 ZStack 允许标题栏悬浮在卡片上方
-        let base = ZStack(alignment: .top) {
-            // 卡片主体（纯内容）
+        // 使用 ZStack 允许服务条在卡片底部
+        let base = ZStack(alignment: .bottom) {
+            // 卡片主体（纯内容 + 底部服务条）
             // 圆角仅 Overview 模式显示，Focus 模式不要圆角
-            contentView
-                .frame(width: cardWidth, height: cardHeight)
-                .cornerRadius(isFocused ? 0 : 10)
-                .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
+            VStack(spacing: 0) {
+                // 内容预览区
+                contentView
+                    .frame(width: cardWidth, height: cardHeight - floatingTitleBarHeight)
 
-            // 悬浮标题栏 - 仅 Overview 模式显示（Focus 模式隐藏）
-            if !isFocused {
-                floatingTitleBarView
-                    .frame(width: cardWidth, height: floatingTitleBarHeight)
-                    .offset(y: -floatingTitleBarHeight - 4)  // 悬浮在卡片上方，留 4px 间隙
+                // 底部服务条 - 仅 Overview 模式显示（Focus 模式隐藏）
+                if !isFocused {
+                    floatingTitleBarView
+                        .frame(width: cardWidth, height: floatingTitleBarHeight)
+                }
             }
+            .frame(width: cardWidth, height: cardHeight)
+            .cornerRadius(isFocused ? 0 : 22)
+            .shadow(color: isFocused ? .clear : Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         }
         // hover 时半透明，交换过程中淡入到完全不透明
         .opacity({
@@ -1028,36 +1032,62 @@ private struct TabCardView: View {
         base
     }
 
-    // 悬浮标题栏视图（简化版，仅包含标题和关闭按钮）
+    // 底部服务条视图（参考 PhoneTabListView 中的布局）
     private var floatingTitleBarView: some View {
-        HStack(spacing: 8) {
-            // 关闭按钮
-            Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.6))
+        HStack(alignment: .center, spacing: 12) {
+            // 应用图标
+            ZStack(alignment: .topTrailing) {
+                Circle()
+                    .fill(Color(hslString: tab.backgroundColor))
+                    .frame(width: iconWidth, height: iconWidth)
+                    .overlay {
+                        if let icon = tab.icon, let url = URL(string: icon) {
+                            KFImage(url)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: iconWidth, height: iconWidth)
+                                .cornerRadius(iconWidth/2)
+                        } else {
+                            Image(systemName: "plus.viewfinder")
+                                .font(.system(size: 14))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    }
+
+                // 未读消息小红点
+                if tab.hasUnreadMessage {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 10, height: 10)
+                        .overlay(
+                            Circle()
+                                .stroke(Color(.systemBackground), lineWidth: 2)
+                        )
+                        .offset(x: 2, y: -2)
+                }
             }
-            .buttonStyle(.plain)
+            .frame(width: iconWidth, height: iconWidth)
 
             // 标题
-            Text(tab.title.isEmpty ? TM.active.blackTab() : tab.title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.9))
+            Text(tab.title != "counterapp" ? tab.title : "")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Color(hex: "#404040"))
                 .lineLimit(1)
 
             Spacer()
-            
+
             // 收藏星（标题为空时隐藏）
-            if !tab.title.isEmpty {
+            if !tab.title.isEmpty, tab.title != "counterapp" {
                 Button(action: {
                     // 切换收藏状态并发送通知给 RN
                     let newBookmarkStatus = !tab.isBookmarked
-                    
+
                     // 立即更新本地状态（UI 响应）
                     if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
                         viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                        viewModel.saveTabs() // 持久化变更
                     }
-                    
+
                     // 发送通知给 RN 侧处理实际的收藏逻辑
                     NotificationCenter.default.post(
                         name: .tabBookmarkChangedFromNative,
@@ -1070,13 +1100,23 @@ private struct TabCardView: View {
                 }) {
                     Image(systemName: "star.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundColor(tab.isBookmarked ? Color(hex: "#EAC15B") : Color(hex: "#404040"))
+                        .foregroundColor(tab.isBookmarked ? Color(hex: "#EAC15B") : Color(hex: "#9E9EA7"))
                         .frame(width: 36, height: 36)
                         .background(Circle().fill(Color.clear))
                 }
             }
+
+            // 关闭按钮
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(Color(hex: "#9E9EA7"))
+                    .frame(width: 36, height: 36)
+            }
         }
-        .padding(.horizontal, 8)
+        .frame(height: floatingTitleBarHeight)
+        .padding(.horizontal, 14)
+        .background(Color(hex: "#E5E5EA"))
     }
 
     // 卡片内容区域尺寸（现在等于完整卡片尺寸，因为标题栏悬浮在外部）
@@ -1145,40 +1185,48 @@ private struct TabDragPreviewView: View {
     let tab: Tab
     let cardWidth: CGFloat
     let cardHeight: CGFloat
-    private let floatingTitleBarHeight: CGFloat = 24
+    private let floatingTitleBarHeight: CGFloat = 56
+    private let iconWidth: CGFloat = 32
 
     var body: some View {
-        ZStack(alignment: .top) {
+        VStack(spacing: 0) {
             ZStack {
                 Color(hslString: tab.backgroundColor)
                 Image(systemName: "globe")
                     .font(.system(size: 32))
                     .foregroundColor(.white.opacity(0.3))
             }
-            .frame(width: cardWidth, height: cardHeight)
-            .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
+            .frame(width: cardWidth, height: cardHeight - floatingTitleBarHeight)
 
-            HStack(spacing: 8) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.6))
+            HStack(alignment: .center, spacing: 12) {
+                // 应用图标
+                ZStack(alignment: .topTrailing) {
+                    Circle()
+                        .fill(Color(hslString: tab.backgroundColor))
+                        .frame(width: iconWidth, height: iconWidth)
+                        .overlay {
+                            Image(systemName: "plus.viewfinder")
+                                .font(.system(size: 14))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                }
+                .frame(width: iconWidth, height: iconWidth)
 
-                Text(tab.title.isEmpty ? TM.active.blackTab() : tab.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
+                // 标题
+                Text(tab.title != "counterapp" ? tab.title : "")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Color(hex: "#404040"))
                     .lineLimit(1)
 
                 Spacer()
             }
-            .padding(.horizontal, 8)
-            .frame(width: cardWidth, height: floatingTitleBarHeight)
-            .offset(y: -floatingTitleBarHeight - 4)
+            .frame(height: floatingTitleBarHeight)
+            .padding(.horizontal, 14)
+            .background(Color(hex: "#E5E5EA"))
         }
+        .frame(width: cardWidth, height: cardHeight)
+        .cornerRadius(22)
+        .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
     }
 }
 

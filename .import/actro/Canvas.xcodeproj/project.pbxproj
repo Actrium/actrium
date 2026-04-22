@@ -405,7 +405,7 @@
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Canvas/Canvas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 107;
+				CURRENT_PROJECT_VERSION = 108;
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_DEBUG_DYLIB = YES;
@@ -515,7 +515,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
-				MARKETING_VERSION = 1.28.1;
+				MARKETING_VERSION = 1.28.2;
 				OTHER_CFLAGS = (
 					"$(inherited)",
 					"-fmodule-map-file=\"${PODS_ROOT}/Headers/Public/DoubleConversion/DoubleConversion.modulemap\"",
@@ -585,7 +585,7 @@
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = Canvas/Canvas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 107;
+				CURRENT_PROJECT_VERSION = 108;
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_DEBUG_DYLIB = YES;
@@ -695,7 +695,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
-				MARKETING_VERSION = 1.28.1;
+				MARKETING_VERSION = 1.28.2;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ios;
 				PRODUCT_NAME = AskAway;
 				REGISTER_APP_GROUPS = YES;
@@ -754,7 +754,7 @@
 		};
 		E57012CB2F20D8BD0033B7CE /* XCRemoteSwiftPackageReference "a1-sdk-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "git@github.com:authick/a1-sdk-swift.git";
+			repositoryURL = "https://github.com/authick/a1-sdk-swift.git";
 			requirement = {
 				branch = dev;
 				kind = branch;
@@ -778,7 +778,7 @@
 		};
 		E5B2BCCA2F73CED900DA3C37 /* XCRemoteSwiftPackageReference "actr-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "git@github.com:actor-rtc/actr-swift.git";
+			repositoryURL = "https://github.com/actor-rtc/actr-swift.git";
 			requirement = {
 				kind = exactVersion;
 				version = 0.1.29;

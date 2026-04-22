@@ -131,22 +131,37 @@ private struct OverviewNavigationBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // 左侧：返回按钮（文字与图标为白色）
-            Button(action: onBack) {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .regular))
-                    Text(TM.active.goback())
-                        .font(.system(size: 20, weight: .regular))
+        ZStack(alignment: .center) {
+            HStack(spacing: 0) {
+                // 左侧：返回按钮（文字与图标为白色）
+                Button(action: onBack) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 20, weight: .regular))
+                        Text(TM.active.goback())
+                            .font(.system(size: 20, weight: .regular))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 18)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 18)
+                .buttonStyle(.plain)
+                
+                Spacer()
+                
+                // 右侧：仅显示设置图标（白色）
+                Button(action: {
+                    openSettings()
+                }) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 21.5)
+                        .frame(height: height)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-
-            Spacer()
-
+            .padding(.leading, isFullscreen ? 0 : 65)
+            
             // 中间：活跃 / 书签 切换（SwitchButton 风格）
             // 图标在上、文字在下；选中使用 accentColor，未选中使用 gray；高亮背景在选中项下平滑移动
             GeometryReader { geo in
@@ -206,22 +221,7 @@ private struct OverviewNavigationBar: View {
                 .frame(width: totalWidth, height: height)
             }
             .frame(width: 144, height: height)
-
-            Spacer()
-
-            // 右侧：仅显示设置图标（白色）
-            Button(action: {
-                openSettings()
-            }) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 21.5)
-                    .frame(height: height)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(.leading, isFullscreen ? 0 : 65)
         .frame(height: height)
         .background(Color.black)
     }

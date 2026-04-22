@@ -1,10 +1,10 @@
 {
-  "originHash" : "6056622b0189ed2feac053a503d42527b01aab7ff3686f835cdd33a9463663ed",
+  "originHash" : "ca02842b10f3b871da5a63c41fb0bcae4e2d17944a2f61f6fa51fa442f5fd9d1",
   "pins" : [
     {
       "identity" : "a1-sdk-swift",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:authick/a1-sdk-swift.git",
+      "location" : "https://github.com/authick/a1-sdk-swift.git",
       "state" : {
         "branch" : "dev",
         "revision" : "265aa9edceaab137e5b3f27cd9288aaf7c0eacc7"
@@ -22,7 +22,7 @@
     {
       "identity" : "actr-swift",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:actor-rtc/actr-swift.git",
+      "location" : "https://github.com/actor-rtc/actr-swift.git",
       "state" : {
         "revision" : "06749b2822fcb04605e9daf8419a1cd7cc4bf0ef",
         "version" : "0.1.29"
@@ -33,8 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Alamofire/Alamofire.git",
       "state" : {
-        "revision" : "7be73f6c2b5cd90e40798b06ebd5da8f9f79cf88",
-        "version" : "5.11.0"
+        "revision" : "e938f8c66708e7352fc7e3512647fa54255b267a",
+        "version" : "5.11.2"
       }
     },
     {

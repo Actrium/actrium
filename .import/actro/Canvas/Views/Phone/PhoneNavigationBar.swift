@@ -73,10 +73,10 @@ struct PhoneNavigationBar<LeftItems: View, RightItems: View>: View {
         .background(
             LinearGradient(
                 gradient: Gradient(colors: [Color.black.opacity(1.0), Color.black.opacity(0.0)]),
-                startPoint: UnitPoint(x: 0.5, y: 0.55),
+                startPoint: UnitPoint(x: 0.5, y: 0.45),
                 endPoint: .bottom
             )
-            .mask(Rectangle().opacity(0.95))
+            .mask(Rectangle().opacity(1.0))
         )
         .ignoresSafeArea(edges: .top)
     }
