@@ -110,6 +110,8 @@ android {
 //            }
 //        }
     }
+    def isCI = System.getenv("CI") == "true"
+
     signingConfigs {
         debug {
             storeFile file('../debug.jks')
@@ -117,15 +119,26 @@ android {
             keyAlias 'debug'
             keyPassword 'debug2026'
         }
+        release {
+            if (isCI) {
+                storeFile file(System.getenv("KEYSTORE_PATH") ?: '../release.jks')
+                storePassword System.getenv("KEYSTORE_PASSWORD") ?: ''
+                keyAlias System.getenv("KEY_ALIAS") ?: ''
+                keyPassword System.getenv("KEY_PASSWORD") ?: ''
+            } else {
+                storeFile file('../debug.jks')
+                storePassword 'debug2026'
+                keyAlias 'debug'
+                keyPassword 'debug2026'
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
