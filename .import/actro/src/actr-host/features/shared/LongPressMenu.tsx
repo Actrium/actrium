@@ -18,6 +18,7 @@ import { HOST_SHADOWS } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
 
 interface MenuOption {
   label: string;
@@ -74,7 +75,8 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   const handleLongPress = () => {
     if (disabled) return;
 
-    // 中文注释：长按成立后再测量触发区域，作为没有落点数据时的回退锚点。
+    ReactNativeHapticFeedback.trigger('impactHeavy')
+
     triggerRef.current?.measureInWindow((x, y, width, height) => {
       setPressLocation(
         pressLocationRef.current ?? {
@@ -99,7 +101,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     const screenHeight = Dimensions.get('window').height;
     const screenWidth = Dimensions.get('window').width;
     const horizontalMargin = 20;
-    const verticalMargin = 12;
+    const verticalMargin = 20;
     const anchorOffset = 8;
     const topBoundary = Math.max(insets.top + verticalMargin, verticalMargin);
     const bottomBoundary = screenHeight - Math.max(insets.bottom + verticalMargin, verticalMargin);
