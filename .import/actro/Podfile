@@ -41,10 +41,12 @@ target 'Canvas' do
   pod 'react-native-get-random-values', :path => 'Subsystem/node_modules/react-native-get-random-values'
   pod 'react-native-webview', :path => 'Subsystem/node_modules/react-native-webview'
   pod 'react-native-view-shot', :path => 'Subsystem/node_modules/react-native-view-shot'
+  pod 'react-native-cameraroll', :path => 'Subsystem/node_modules/@react-native-camera-roll/camera-roll'
   pod 'RNGestureHandler', :path => 'Subsystem/node_modules/react-native-gesture-handler'
   pod 'RNReanimated', :path => 'Subsystem/node_modules/react-native-reanimated'
   pod 'RNSVG', :path => 'Subsystem/node_modules/react-native-svg'
   pod 'react-native-keyboard-controller', :path => 'Subsystem/node_modules/react-native-keyboard-controller'
+  pod 'RNReactNativeHapticFeedback', :path => 'Subsystem/node_modules/react-native-haptic-feedback'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 微信 SDK
