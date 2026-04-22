@@ -7,7 +7,6 @@ struct ContentView: View {
     @ObservedObject var windowState: WindowStateManager = .shared
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isACTRDropTarget: Bool = false
-    @State private var showAllTabs: Bool = false
     
     @StateObject private var loginManager = LoginManager.shared
 
@@ -17,28 +16,22 @@ struct ContentView: View {
                 PhoneMainView(viewModel: viewModel, historyVM: historyVM)
             } else {
                 ZStack {
-                    // 浏览器风格的布局
-                    VStack(spacing: 0) {
-                        // 顶部导航栏
-                        TabNavigationBar(viewModel: viewModel, showAllTabs: $showAllTabs)
-                        
-                        // 内容区域：根据 systemTabType 判断是否渲染系统页签
-                        ZStack {
-                            ChromeStyleTabView(viewModel: viewModel, historyVM: historyVM)
-                            if let systemType = viewModel.currentSystemTabType {
-                                SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM)
-                            }
-                            // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
-                            if case .overview = viewModel.canvasMode, viewModel.currentSystemTabType != .globalSearch {
-                                SearchBar(viewModel: viewModel)
-                            }
+                    // 内容区域
+                    ZStack {
+                        ChromeStyleTabView(viewModel: viewModel, historyVM: historyVM)
+                        if let systemType = viewModel.currentSystemTabType {
+                            SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM)
+                                .padding(.top, 44)
                         }
-                        .ignoresSafeArea()
-                        .background(Color.black)
-                        .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
-                            withAnimation {
-                                viewModel.currentSystemTabType = nil
-                            }
+                        // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
+                        if case .overview = viewModel.canvasMode, viewModel.currentSystemTabType != .globalSearch {
+                            SearchBar(viewModel: viewModel)
+                        }
+                    }
+                    .background(Color.black)
+                    .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
+                        withAnimation {
+                            viewModel.currentSystemTabType = nil
                         }
                     }
                     // 顶层兜底：拖入 .actr 或目录时创建新标签
