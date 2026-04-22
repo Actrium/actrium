@@ -14,7 +14,6 @@ import {
   Alert,
 
 } from 'react-native';
-import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
 import { Icon } from '../../../components';
 import { useTranslation } from 'react-i18next';
 import { SmartImage } from '../shared/SmartImage';
@@ -41,6 +40,7 @@ import {
 } from '../shared/DropdownMenu';
 import { useMessageStore } from '../../store/useMessageStore';
 import { HOST_SHADOWS } from '../../styles/shadows';
+import { triggerHaptic } from '../../utils/haptics';
 
 import { Animated, Easing } from 'react-native';
 import { FeedbackFormModal } from './FeedbackFormModal';
@@ -343,7 +343,7 @@ export default function ChatBubble({
         onPress: (position: any) => {
           setMoreMenuPosition(position);
           setTimeout(() => {
-            ReactNativeHapticFeedback.trigger('impactHeavy')
+            triggerHaptic('impactHeavy')
             setShowMoreMenu(true);
           }, 300);
         },
