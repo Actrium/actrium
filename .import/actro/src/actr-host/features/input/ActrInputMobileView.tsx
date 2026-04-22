@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
 import { useTranslation } from 'react-i18next';
 import { AppText } from '../../../components';
 import { AttachmentPreviewBar } from './AttachmentPreviewBar';
@@ -354,6 +355,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
           voiceCallbacksRef.current.handleVoiceChangeState(false);
           timer = setTimeout(() => {
             longPressTriggered = true;
+            ReactNativeHapticFeedback.trigger('impactHeavy');
             const shouldCancelNow = latestDy < -cancelThreshold;
             isCancelling = shouldCancelNow;
             voiceCallbacksRef.current.handleVoiceChangeState(shouldCancelNow);
@@ -371,6 +373,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
           }
           if (nextCancelling !== isCancelling) {
             isCancelling = nextCancelling;
+            if (nextCancelling) ReactNativeHapticFeedback.trigger('impactHeavy');
             voiceCallbacksRef.current.handleVoiceChangeState(nextCancelling);
           }
         },
