@@ -9,10 +9,7 @@ export type SearchInputChangedEvent = {
 
 type Unsubscribe = () => void;
 
-function getEventEmitter(): NativeEventEmitter | null {
-  if (!TabEventEmitter) {
-    return null;
-  }
+function getEventEmitter(): NativeEventEmitter {
   return new NativeEventEmitter(TabEventEmitter);
 }
 
@@ -22,11 +19,8 @@ export const GlobalSearchEvents = {
     callback: (event: SearchInputChangedEvent) => void,
   ): Unsubscribe => {
     const eventEmitter = getEventEmitter();
-    if (!eventEmitter) {
-      return () => {};
-    }
 
-    const subscription = eventEmitter.addListener(
+    const subscription = eventEmitter!.addListener(
       'onSearchInputChanged',
       callback,
     );
