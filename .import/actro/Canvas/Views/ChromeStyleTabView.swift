@@ -54,6 +54,7 @@ struct ChromeStyleTabView: View {
                         }
                     )
                     .padding(.top, 24)
+                    .environment(\.colorScheme, .dark)
 
                 case .focus(let tabId):
                     ChromeTabFocusView(
@@ -81,7 +82,6 @@ struct ChromeStyleTabView: View {
                 mode = .focus(tabId: tabId)
             }
         }
-        .environment(\.colorScheme, .dark)
         .onChange(of: viewModel.canvasMode) { oldValue, newValue in
             switch newValue {
             case .overview:
