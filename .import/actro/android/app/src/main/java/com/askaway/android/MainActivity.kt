@@ -49,6 +49,8 @@ import com.askaway.android.utils.adjustKeyboard
 import com.askaway.android.utils.getStatusBarHeight
 import com.askaway.android.utils.screenshot
 import com.askaway.android.utils.ViewAnimationHelper
+import android.content.Context
+import android.view.inputmethod.InputMethodManager
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
     private lateinit var binding: ActivityMainBinding
@@ -148,12 +150,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         }
 
         binding.ivSearch.setOnClickListener {
-            enterSearchMode()
             showSearch()
         }
 
         binding.flNavButton.setOnClickListener {
-            exitSearchMode()
             hideSearch()
         }
 
@@ -526,7 +526,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         val searchStartWidth = binding.ivSearch.width
         val searchEndWidth = originalSearchWidth
 
-        // rgNavigation 从当前宽度放大回原始大小
+        //rgNavigation 从当前宽度放大回原始大小
         val navStartWidth = (binding.rgNavigation.parent as View).width
         val navEndWidth = originalNavWidth
 
@@ -574,7 +574,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         if (isSearchVisible) return
 
         isSearchVisible = true
-
+        enterSearchMode()
         // 移除 flSearch 中的所有子组件
         binding.flSearch.removeAllViews()
 
@@ -594,6 +594,19 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             binding.flSearch.requestApplyInsets()
         }
 
+        // Ensure the search EditText gets focus and the keyboard is shown.
+        // Post to the view queue so that focus/keyboard request happens after layout/visibility changes.
+        binding.etSearch.post {
+            try {
+                binding.etSearch.isFocusableInTouchMode = true
+                binding.etSearch.requestFocus()
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(binding.etSearch, InputMethodManager.SHOW_IMPLICIT)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to show keyboard for etSearch", e)
+            }
+        }
+
         // 创建从底部滑入的动画
         ObjectAnimator.ofFloat(binding.flSearch, "translationY", binding.flSearch.height.toFloat(), 0f).apply {
             duration = 300
@@ -607,6 +620,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
      */
     private fun hideSearch() {
         if (!isSearchVisible) return
+        exitSearchMode()
+
+        // 收起键盘
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        binding.etSearch.clearFocus()
+        imm.hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
 
         // 创建滑出到底部的动画
         ObjectAnimator.ofFloat(binding.flSearch, "translationY", 0f, binding.flSearch.height.toFloat()).apply {
