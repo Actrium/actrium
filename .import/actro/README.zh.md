@@ -30,6 +30,10 @@ mermaid-little 读取 `.mmd` 源文本，输出 `.svg` —— 与 Mermaid 功能
 
 本项目是 [Mermaid](https://mermaid.js.org/) 的独立 Rust 重新实现，原作者为 Knut Sveidqvist。我们对 Mermaid 团队在 diagram-as-code 领域的贡献深表敬意。所有规范性内容以上游为标准。
 
+布局后端使用 [`dagre-rs`](https://github.com/kookyleo/dagre-rs)——dagre.js 的完整 Rust port。字体度量管线（`src/font_data.rs`、`src/font_metrics.rs`）vendor 自姊妹项目 [plantuml-little](https://github.com/kookyleo/plantuml-little)——两个项目共用同一张 DejaVu Sans glyph advance 表，保证两处输出的 byte-exact 一致。
+
+同时感谢社区已有的 Rust mermaid port 作为 prior art：[mermaid-rs-renderer (mmdr)](https://github.com/1jehuang/mermaid-rs-renderer)、[selkie](https://github.com/btucker/selkie)、[mmdflux](https://github.com/kevinswiber/mmdflux)。mermaid-little 选的 trade-off 点不同（先追求与上游 byte-exact 一致，再谈性能），但具体 diagram 卡壳时我们会参考他们的源码实现，参考时会在相关 commit message 里明确声明。
+
 ## 许可证
 
 MIT，与上游 Mermaid 一致。参见 [LICENSE](LICENSE)。

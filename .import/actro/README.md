@@ -43,6 +43,22 @@ deeply appreciate the Mermaid team's work in making diagram-as-code
 accessible to everyone. All specification-level behavior follows the
 upstream standard.
 
+The layout backend is [`dagre-rs`](https://github.com/kookyleo/dagre-rs),
+a complete Rust port of dagre.js. The font metric pipeline
+(`src/font_data.rs`, `src/font_metrics.rs`) is vendored from the sister
+project [plantuml-little](https://github.com/kookyleo/plantuml-little) —
+the same DejaVu Sans glyph advance tables anchor both projects, which
+keeps byte-exact output consistent across the two codebases.
+
+Thanks also to the prior-art community Rust mermaid ports —
+[mermaid-rs-renderer (mmdr)](https://github.com/1jehuang/mermaid-rs-renderer),
+[selkie](https://github.com/btucker/selkie),
+[mmdflux](https://github.com/kevinswiber/mmdflux) — for charting this
+design space. mermaid-little aims at a different point of the tradeoff
+(byte-exact parity with upstream first, performance second) but we
+expect to consult their source when stuck on specific diagram types
+and will cite such references in commit messages.
+
 ## License
 
 MIT, same as upstream Mermaid. See [LICENSE](LICENSE).
