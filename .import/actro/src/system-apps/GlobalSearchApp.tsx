@@ -3,7 +3,6 @@
  */
 import React, {
   useState,
-  useRef,
   useEffect,
   useMemo,
   useCallback,
@@ -11,28 +10,23 @@ import React, {
 import {
   View,
   Text,
-  TextInput,
   ScrollView,
   StyleSheet,
   Image,
-  TouchableWithoutFeedback,
   useWindowDimensions,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { Icon, HostIconButton, SafeBottomView } from '../components';
-import { useKeyboardInset } from '../hooks/useKeyboardInset';
-import { HOST_SHADOWS } from '../actr-host/styles/shadows';
+import { Icon } from '../components';
 import { useUserStore } from '../actr-host/store/useUserStore';
 import { getTypographyStyle, globalSearch } from '../theme/tokens';
 import {
   BookmarkRepository,
   TBookmarkItem,
 } from '../repository/BookmarkRepository';
+import { GlobalSearchEvents } from '../native-bridge/globalsearch';
 import {
   openTab,
-  exitSearch,
   getAllTabs,
   TabSummary,
 } from '../native-bridge/tab/TabModule';
@@ -203,12 +197,9 @@ function resolveSearchLocale(language?: string): SearchLocale {
 
 export default function GlobalSearchApp() {
   const { t, i18n } = useTranslation();
-  const [inputText, setInputText] = useState('');
-  const [searchQuery, setSearchQuery] = useState(''); // 回车后才更新
+  const [searchQuery, setSearchQuery] = useState('');
   const [allTabs, setAllTabs] = useState<TabSummary[]>([]);
   const [bookmarks, setBookmarks] = useState<TBookmarkItem[]>([]);
-  const inputRef = useRef<TextInput>(null);
-  const { keyboardInset, isKeyboardVisible, dismissKeyboard } = useKeyboardInset();
   const { width: screenWidth } = useWindowDimensions();
   const userInfo = useUserStore((s) => s.userInfo);
   const isLoggedIn = !!userInfo;
@@ -216,23 +207,9 @@ export default function GlobalSearchApp() {
   const localizedSearchCopy = LOCALIZED_SETTING_SEARCH_COPY[searchLocale];
 
   const isPhone = screenWidth < 600;
-  // 中文注释：Android 的 Phone/Pad 都交给宿主处理键盘抬升，
-  // GlobalSearch 仅在 iOS Pad 追加 RN 的 keyboardInset，避免 Android 端重复位移。
-  const shouldApplyKeyboardInset = Platform.OS === 'ios' && !isPhone;
-  const inputWidth = isPhone ? screenWidth * 0.85 : 500;
   const resultsAreaSize = isPhone ? 'auto' : 500;
-  const containerGap = isPhone ? 24 : 36;
-  const inputBorderRadius = 24;
   const resultsHorizontalPadding = isPhone ? 16 : 40;
   const resultsCardRadius = 26;
-
-  // 自动聚焦输入框
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      inputRef.current?.focus();
-    }, 200);
-    return () => clearTimeout(timer);
-  }, []);
 
   // 加载书签数据
   useEffect(() => {
@@ -248,6 +225,16 @@ export default function GlobalSearchApp() {
     getAllTabs().then((tabs) => {
       setAllTabs(tabs);
     });
+  }, []);
+
+  useEffect(() => {
+    // 中文注释：宿主已接管全局搜索输入框，RN 页面只消费桥接事件里的输入文本，
+    // 这样 iOS/Android 都能复用同一套搜索结果渲染，不再维护本地输入态。
+    const unsubscribe = GlobalSearchEvents.onSearchInputChanged((event) => {
+      setSearchQuery(event.inputText ?? '');
+    });
+
+    return unsubscribe;
   }, []);
 
   // 可搜索的设置项
@@ -426,31 +413,6 @@ export default function GlobalSearchApp() {
     return groups;
   }, [searchQuery, allTabs, bookmarks, searchableSettings, t]);
 
-  // 回车触发搜索
-  const handleSubmit = useCallback(() => {
-    setSearchQuery(inputText.trim());
-    dismissKeyboard();
-  }, [inputText, dismissKeyboard]);
-
-  const handleClearSearch = useCallback(() => {
-    setInputText('');
-    setSearchQuery('');
-  }, []);
-
-  const handleCloseSearch = useCallback(() => {
-    dismissKeyboard();
-
-    // 键盘和页面退出同帧触发时，Native 往往会直接执行关闭，导致键盘来不及先收起。
-    if (isKeyboardVisible) {
-      setTimeout(() => {
-        exitSearch();
-      }, 180);
-      return;
-    }
-
-    exitSearch();
-  }, [dismissKeyboard, isKeyboardVisible]);
-
   // 点击搜索结果项
   const handleItemPress = useCallback((item: SearchResultItem) => {
     if (item.type === 'setting') {
@@ -461,7 +423,6 @@ export default function GlobalSearchApp() {
         tabId: item.tabId ?? '',
         appUrl: item.url || '',
       });
-      exitSearch();
     }
   }, []);
 
@@ -537,136 +498,53 @@ export default function GlobalSearchApp() {
     );
   };
 
-  const renderSearchInput = (inputStyle: any, containerStyle: any) => (
-    <View style={styles.searchRow}>
-      <View style={containerStyle}>
-        <Icon
-          type='search'
-          size={globalSearch.inputPrefixIconSize}
-          color='#999'
-          style={styles.inputPrefixIcon}
-        />
-        <TextInput
-          ref={inputRef}
-          style={inputStyle}
-          placeholder={t('actr.search.placeholder')}
-          placeholderTextColor='#999'
-          value={inputText}
-          onChangeText={setInputText}
-          onSubmitEditing={handleSubmit}
-          returnKeyType='search'
-          autoFocus={true}
-          clearButtonMode='never'
-          keyboardAppearance='dark'
-        />
-        {inputText.length > 0 && (
-          <HostIconButton
-            iconType='input_clear'
-            size={globalSearch.clearButtonSize}
-            iconSize={globalSearch.clearButtonIconSize}
-            iconColor='#666'
-            backgroundColor='transparent'
-            style={styles.clearButton}
-            onPress={handleClearSearch}
-          />
-        )}
-      </View>
-      <HostIconButton
-        iconType='close'
-        size={globalSearch.closeButtonSize}
-        iconSize={globalSearch.closeButtonIconSize}
-        iconColor='#404040'
-        backgroundColor='#FFF'
-        style={styles.standaloneCloseButton}
-        onPress={handleCloseSearch}
-      />
-    </View>
-  );
-
   if (isPhone) {
     return (
-      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-        <View style={styles.phoneContainer}>
-          {/* 搜索结果列表 */}
-          <ScrollView
-            style={styles.content}
-            contentContainerStyle={[
-              styles.phoneScrollContent,
-              { paddingHorizontal: resultsHorizontalPadding },
-            ]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps='handled'
-          >
-            {renderResults()}
-          </ScrollView>
-
-          {/* 底部输入框 */}
-          <View style={styles.phoneInputDock}>
-            <SafeBottomView style={styles.phoneInputSafeArea} minBottom={10}>
-              <View style={styles.phoneInputSection}>
-                {renderSearchInput(styles.phoneInput, [
-                  styles.phoneInputContainer,
-                ])}
-              </View>
-              {/* Phone: 键盘避让已由 SwiftUI（PhoneSystemAppView）在 Native 层处理，
-                   通过缩小 RCTRootView.frame 实现上移，无需 RN 层重复添加 keyboardInset 偏移 */}
-            </SafeBottomView>
-          </View>
-        </View>
-      </TouchableWithoutFeedback>
+      <View style={styles.phoneContainer}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={[
+            styles.phoneScrollContent,
+            { paddingHorizontal: resultsHorizontalPadding },
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps='handled'
+        >
+          {renderResults()}
+        </ScrollView>
+      </View>
     );
   }
 
   // iPad 布局
   return (
-    <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: shouldApplyKeyboardInset ? keyboardInset : 0 },
-        ]}
-        keyboardShouldPersistTaps='handled'
-      >
-        <View style={[styles.GlobalSearchContainer, { gap: containerGap }]}>
-          {/* 结果区域 */}
-          <View
-            style={[
-              styles.resultsArea,
-              {
-                // 中文注释：搜索结果列表横向边距对齐 settings 一级页，
-                // Phone 用 16，Pad 用 40，不再额外缩成 500 宽。
-                width: Math.max(screenWidth - resultsHorizontalPadding * 2, 0),
-                height: resultsAreaSize,
-                borderRadius: resultsCardRadius,
-              },
-            ]}
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      keyboardShouldPersistTaps='handled'
+    >
+      <View style={styles.GlobalSearchContainer}>
+        <View
+          style={[
+            styles.resultsArea,
+            {
+              // 中文注释：搜索结果列表横向边距对齐 settings 一级页，
+              // Phone 用 16，Pad 用 40，不再额外缩成 500 宽。
+              width: Math.max(screenWidth - resultsHorizontalPadding * 2, 0),
+              height: resultsAreaSize,
+              borderRadius: resultsCardRadius,
+            },
+          ]}
+        >
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.resultsListContent}
+            showsVerticalScrollIndicator={false}
           >
-            <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={styles.resultsListContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {renderResults()}
-            </ScrollView>
-          </View>
-
-          {/* 中文注释：Pad 端输入区单独占一个底部锚点容器，
-              通过 marginTop: 'auto' 把输入框稳定压到页面底部，避免继续跟随整体内容垂直居中。 */}
-          <View style={[styles.padInputSection, { width: inputWidth }]}>
-            {renderSearchInput(
-              [
-                styles.input,
-                { borderRadius: inputBorderRadius },
-              ],
-              [
-                styles.inputContainer,
-                { borderRadius: inputBorderRadius, backgroundColor: '#FFF' },
-              ],
-            )}
-          </View>
+            {renderResults()}
+          </ScrollView>
         </View>
-      </ScrollView>
-    </TouchableWithoutFeedback>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -767,88 +645,5 @@ const styles = StyleSheet.create({
     ...getTypographyStyle(globalSearch.emptyDescriptionTypographyVariant),
     color: '#8E8E93',
     textAlign: 'center',
-  },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: globalSearch.searchRowGap,
-    width: '100%',
-  },
-  inputContainer: {
-    flex: 1,
-    position: 'relative',
-    height: globalSearch.inputHeight,
-    backgroundColor: '#FFF',
-    ...HOST_SHADOWS.inputPill,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  input: {
-    flex: 1,
-    paddingHorizontal: globalSearch.inputPaddingHorizontal,
-    height: globalSearch.inputHeight,
-    paddingVertical: 0,
-    ...getTypographyStyle(globalSearch.inputTypographyVariant),
-    color: '#000',
-  },
-  phoneInputDock: {
-    width: '100%',
-    paddingBottom: 10,
-  },
-  phoneInputSafeArea: {
-    width: '100%',
-    backgroundColor: '#000',
-  },
-  phoneInputSection: {
-    width: '100%',
-    alignItems: 'stretch',
-    justifyContent: 'flex-end',
-    paddingTop: 6,
-    paddingHorizontal: 26,
-    paddingBottom: 10,
-  },
-  padInputSection: {
-    width: '100%',
-    marginTop: 'auto',
-  },
-  phoneInputContainer: {
-    flex: 1,
-    position: 'relative',
-    height: globalSearch.inputHeight,
-    backgroundColor: '#FFF',
-    borderRadius: 24,
-    ...HOST_SHADOWS.inputPill,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  phoneInput: {
-    flex: 1,
-    height: globalSearch.inputHeight,
-    borderRadius: 24,
-    paddingHorizontal: globalSearch.inputPaddingHorizontal,
-    paddingVertical: 0,
-    ...getTypographyStyle(globalSearch.inputTypographyVariant),
-    color: '#000',
-  },
-  inputPrefixIcon: {
-    marginLeft: globalSearch.inputPrefixMarginLeft,
-  },
-  clearButton: {
-    width: globalSearch.clearButtonSize,
-    height: globalSearch.clearButtonSize,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: globalSearch.clearButtonMarginRight,
-  },
-  standaloneCloseButton: {
-    width: globalSearch.closeButtonSize,
-    height: globalSearch.closeButtonSize,
-    borderRadius: globalSearch.closeButtonSize / 2,
-    borderWidth: 1,
-    borderColor: '#ECECEF',
-    backgroundColor: '#FFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...HOST_SHADOWS.inputPill,
   },
 });
