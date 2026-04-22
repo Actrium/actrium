@@ -12,7 +12,9 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   Alert,
+
 } from 'react-native';
+import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
 import { Icon } from '../../../components';
 import { useTranslation } from 'react-i18next';
 import { SmartImage } from '../shared/SmartImage';
@@ -340,7 +342,10 @@ export default function ChatBubble({
         label: t('common.more'),
         onPress: (position: any) => {
           setMoreMenuPosition(position);
-          setTimeout(() => setShowMoreMenu(true), 300);
+          setTimeout(() => {
+            ReactNativeHapticFeedback.trigger('impactHeavy')
+            setShowMoreMenu(true);
+          }, 300);
         },
         icon: <Icon type='more' size={16} />,
       });

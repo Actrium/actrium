@@ -12,6 +12,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
+import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
 import { AppText } from '../../../components';
 import { dropdownMenu, getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
@@ -23,8 +24,8 @@ type VerticalPlacement = 'auto' | 'top' | 'bottom';
 
 const DEFAULT_ESTIMATED_WIDTH = dropdownMenu.defaultEstimatedWidth;
 const DEFAULT_ESTIMATED_HEIGHT = 120;
-const DEFAULT_HORIZONTAL_MARGIN = 16;
-const DEFAULT_VERTICAL_MARGIN = 12;
+const DEFAULT_HORIZONTAL_MARGIN = 20;
+const DEFAULT_VERTICAL_MARGIN = 20;
 const MENU_FADE_IN_DURATION = 300;
 
 interface DropdownMenuProps {
@@ -278,6 +279,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
       close();
       return;
     }
+    ReactNativeHapticFeedback.trigger('impactHeavy')
     onBeforeOpen?.();
     measureTrigger(true);
   }, [close, disabled, isOpen, measureTrigger, onBeforeOpen]);
