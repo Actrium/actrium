@@ -238,6 +238,8 @@
                         android:paddingStart="8dp"
                         android:layout_height="62dp"
                         android:layout_weight="1"
+                        android:singleLine="true"
+                        android:imeOptions="actionSearch"
                         android:background="@android:color/transparent" />
 
                     <ImageView
