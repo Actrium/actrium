@@ -400,13 +400,18 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const isEditing = !!editingMessageId;
 
   // 进入编辑模式时自动聚焦输入框，唤起键盘和光标
+  // 退出编辑模式时自动失焦输入框
+  const prevEditingMessageIdRef = React.useRef(editingMessageId);
   React.useEffect(() => {
     if (editingMessageId) {
       setMobileInputMode('text');
       setTimeout(() => {
         mobileTextInputRef.current?.focus();
       }, 100);
+    } else if (prevEditingMessageIdRef.current) {
+      mobileTextInputRef.current?.blur();
     }
+    prevEditingMessageIdRef.current = editingMessageId;
   }, [editingMessageId]);
   const shouldShowExitTabButton = !isEditing && !isInputFocused;
   const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
