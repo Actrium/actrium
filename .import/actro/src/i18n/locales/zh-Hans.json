@@ -158,7 +158,7 @@
       "openCameraScan": "打开相机扫码",
       "initCamera": "正在初始化相机...",
       "loading": "加载中...",
-      "inputUrl": "请输入 URL",
+      "inputUrl": "请输入 AskAway 应用访问 URL",
       "blockedTitle": "已阻止运行",
       "blockedReason": "不满足宿主 contract/权限策略",
       "initEngine": "初始化 Single Engine (usePanels mode)...",
