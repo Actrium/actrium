@@ -135,7 +135,7 @@ export default function ActrInput({
         styles.rootContainer,
         {
           paddingBottom: layoutTokens.inputBottomPadding,
-          backgroundColor: isMobileVariant ? colors.bgInputMobile : colors.bgInputMobile,
+          // backgroundColor: isMobileVariant ? colors.bgInputMobile : colors.bgInputMobile,
         },
       ]}
     >
