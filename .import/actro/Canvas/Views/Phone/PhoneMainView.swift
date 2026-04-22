@@ -143,7 +143,7 @@ struct PhoneMainView: View {
         }
         .sheet(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM)
-                .interactiveDismissDisabled(true)
+                // .interactiveDismissDisabled(true)
                 .ignoresSafeArea()
                 .asNavigationTransition(id: tab.id, in: animation)
         }
