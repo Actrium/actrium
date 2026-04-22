@@ -330,7 +330,7 @@ export const darkColors: ColorTokens = {
   bgChatPage: '#3A3A3C',
   bgChatHeaderBtn: '#007AFF',
 
-  bgScanArea: '#383838', // 背景色
+  bgScanArea: '#3A3A3C', // 背景色
   bgLoadDark: '#78788052', // 相比黑色浅
 
   // hostIconBtn
