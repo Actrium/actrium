@@ -12,6 +12,7 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
+  Pressable,
   useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
@@ -323,6 +324,9 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const setEditingMessageId = useInputStore(
     (state) => state.setEditingMessageId,
   );
+  const editingMessageId = useInputStore(
+    (state) => state.inputs[tab.id]?.editingMessageId,
+  );
 
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasLoadedInitialMessages, setHasLoadedInitialMessages] =
@@ -598,6 +602,11 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     [tab.id, setStoreText, setStoreAttachments, setEditingMessageId],
   );
 
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(tab.id, null);
+    clearInput(tab.id);
+  }, [tab.id, setEditingMessageId, clearInput]);
+
   const input = useMemo(() => {
     return <ActrInput appId={appId} showTopToast={showTopToast} />;
   }, [appId, showTopToast]);
@@ -752,6 +761,14 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         )}
       </Reanimated.View>
 
+      {/* 编辑模式蒙版 - 点击退出编辑状态 */}
+      {!!editingMessageId && (
+        <Pressable
+          style={styles.editModeOverlay}
+          onPress={handleCancelEdit}
+        />
+      )}
+
       {/* 回到底部按钮 */}
       {!selectionMode && (
         <View
@@ -832,6 +849,15 @@ const makeStyles = (colors: ColorTokens) => ({
     contentArea: {
       flex: 1,
       width: '100%',
+    },
+    editModeOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'transparent',
+      zIndex: 50,
     },
     inputContainer: {
       width: '100%',

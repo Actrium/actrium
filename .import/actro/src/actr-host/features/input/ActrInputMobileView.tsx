@@ -401,6 +401,21 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
   const hasAttachments = attachments.length > 0;
   const isEditing = !!editingMessageId;
+
+  // 进入编辑模式时自动聚焦输入框，唤起键盘和光标
+  // 退出编辑模式时自动失焦输入框
+  const prevEditingMessageIdRef = React.useRef(editingMessageId);
+  React.useEffect(() => {
+    if (editingMessageId) {
+      setMobileInputMode('text');
+      setTimeout(() => {
+        mobileTextInputRef.current?.focus();
+      }, 100);
+    } else if (prevEditingMessageIdRef.current) {
+      mobileTextInputRef.current?.blur();
+    }
+    prevEditingMessageIdRef.current = editingMessageId;
+  }, [editingMessageId]);
   const shouldShowExitTabButton = !isEditing && !isInputFocused;
   const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
 
@@ -414,18 +429,6 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
             checkInputAuth={checkInputAuth}
             style={{ right: authOverlayRightInset }}
           />
-
-          {/* 左侧取消编辑按钮 - 编辑状态时显示 */}
-          {isEditing && (
-            <HostIconButton
-              iconType='close'
-              size={inputArea.sideButtonSize}
-              iconSize={inputArea.cancelIconSize}
-              iconColor={colors.textIconSecondary}
-              onPress={handleCancelEdit}
-              style={styles.mobileReservedButton}
-            />
-          )}
 
           <View style={styles.mobilePrimaryArea}>
             {!isVoiceSurfaceMode ? (
@@ -713,6 +716,18 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
             )}
 
           </View>
+
+          {/* 右侧取消编辑按钮 - 编辑状态时显示 */}
+          {isEditing && (
+            <HostIconButton
+              iconType='close'
+              size={inputArea.sideButtonSize}
+              iconSize={inputArea.cancelIconSize}
+              iconColor={colors.textIconSecondary}
+              onPress={handleCancelEdit}
+              style={styles.mobileReservedButton}
+            />
+          )}
 
           {/* 右侧按钮 - 非编辑状态时显示 */}
           {!isEditing && (
