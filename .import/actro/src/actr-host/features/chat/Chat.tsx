@@ -791,7 +791,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         style={[
           styles.inputContainer,
           {
-            backgroundColor: layoutTokens.isTablet ? colors.bgChatTablet : colors.bgChatPage,
+            // backgroundColor: layoutTokens.isTablet ? colors.bgChatTablet : colors.bgChatPage,
             marginTop: layoutTokens.isTablet ? 8 : 0,
             marginBottom: shouldApplyKeyboardInset ? keyboardInset : 0,
           },
