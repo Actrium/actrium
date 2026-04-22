@@ -7,8 +7,8 @@ import {
   GestureResponderEvent,
   PanResponderGestureState,
   useWindowDimensions,
-  Platform,
 } from 'react-native';
+import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../../components';
 import { AppText } from '../../../components';
@@ -105,6 +105,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
           lastVoiceStartRef.current = now;
           isCancellingRef.current = false;
           setInternalIsCancelling(false);
+          ReactNativeHapticFeedback.trigger('impactHeavy')
           callbacks.current.onVoiceStart?.();
         },
         onPanResponderMove: (_: GestureResponderEvent, gestureState: PanResponderGestureState) => {
@@ -120,6 +121,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
           if (nextIsCancelling !== isCancellingRef.current) {
             isCancellingRef.current = nextIsCancelling;
             setInternalIsCancelling(nextIsCancelling);
+            if (nextIsCancelling) ReactNativeHapticFeedback.trigger('impactHeavy');
             callbacks.current.onVoiceChangeState?.(nextIsCancelling);
           }
         },
