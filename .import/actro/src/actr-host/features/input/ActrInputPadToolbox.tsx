@@ -8,7 +8,6 @@ import {
   PanResponderGestureState,
   useWindowDimensions,
 } from 'react-native';
-import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../../components';
 import { AppText } from '../../../components';
@@ -21,6 +20,7 @@ import {
 } from '../shared/DropdownMenu';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import { triggerHaptic } from '../../utils/haptics';
 
 interface ActrInputPadToolboxProps {
   onPickCamera: () => void;
@@ -105,7 +105,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
           lastVoiceStartRef.current = now;
           isCancellingRef.current = false;
           setInternalIsCancelling(false);
-          ReactNativeHapticFeedback.trigger('impactHeavy')
+          triggerHaptic('impactHeavy')
           callbacks.current.onVoiceStart?.();
         },
         onPanResponderMove: (_: GestureResponderEvent, gestureState: PanResponderGestureState) => {
@@ -121,7 +121,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
           if (nextIsCancelling !== isCancellingRef.current) {
             isCancellingRef.current = nextIsCancelling;
             setInternalIsCancelling(nextIsCancelling);
-            if (nextIsCancelling) ReactNativeHapticFeedback.trigger('impactHeavy');
+            if (nextIsCancelling) triggerHaptic('impactHeavy');
             callbacks.current.onVoiceChangeState?.(nextIsCancelling);
           }
         },

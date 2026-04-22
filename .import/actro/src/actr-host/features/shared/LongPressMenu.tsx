@@ -18,7 +18,7 @@ import { HOST_SHADOWS } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import ReactNativeHapticFeedback from 'react-native-haptic-feedback'
+import { triggerHaptic } from '../../utils/haptics';
 
 interface MenuOption {
   label: string;
@@ -75,7 +75,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   const handleLongPress = () => {
     if (disabled) return;
 
-    ReactNativeHapticFeedback.trigger('impactHeavy')
+    triggerHaptic('impactHeavy')
 
     triggerRef.current?.measureInWindow((x, y, width, height) => {
       setPressLocation(
