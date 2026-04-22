@@ -49,6 +49,7 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
                 is String -> params.putString(key, value)
                 is Int -> params.putInt(key, value)
                 is Double -> params.putDouble(key, value)
+                is Long -> params.putLong(key, value)
             }
         }
         sendEvent(event.methodName, params)

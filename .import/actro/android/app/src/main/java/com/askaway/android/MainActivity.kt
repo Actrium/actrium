@@ -125,6 +125,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
         }
         binding.flReactNative.adjustKeyboard()
+        binding.flContent.adjustKeyboard()
 
         binding.ivAdd.setOnClickListener {
             viewModel.addApp()
@@ -579,6 +580,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
         // 加载搜索 React Native 视图
         val bundle = sourceBundle ?: ReactNativeBundle.getSearchBundle()
+        Log.e("MainActivity", "bundle:${bundle}")
         val targetView = createReactRootView("canvas-kotlin", bundle)
         binding.flSearch.addView(targetView)
 
