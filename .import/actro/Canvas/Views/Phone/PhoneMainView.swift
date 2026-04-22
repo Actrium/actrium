@@ -8,6 +8,7 @@ struct PhoneMainView: View {
     @State private var fullscreenTab: Tab?
     @State private var skipManualSettingsResetOnce = false
     @State private var searchText: String = ""
+    @FocusState private var isSearchFocused: Bool
     
     @Namespace private var animation
     
@@ -63,12 +64,21 @@ struct PhoneMainView: View {
                     )
                 }
                 .searchable(text: $searchText)
+                .searchFocused($isSearchFocused)
+                .task {
+                    isSearchFocused = true
+                }
             }
         }
         .accentColor(.blue)
         .background(Color.black)
         .environment(\.colorScheme, .dark)
         .onChange(of: selectedTab) { oldValue, newValue in
+            // 离开搜索页时，清空搜索框文本
+            if oldValue == .search {
+                searchText = ""
+                isSearchFocused = false
+            }
             // 切换到系统页签时，刷新系统页签
             switch newValue {
             case .bookmarks:
