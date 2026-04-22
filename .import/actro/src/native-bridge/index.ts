@@ -15,5 +15,9 @@ export type { ExtensionPanelVisibleChangeEvent } from './extension';
 export { ContainerEvents } from './container';
 export type { ContainerSizeChangeEvent } from './container';
 
+// Global Search
+export { GlobalSearchEvents } from './globalsearch';
+export type { SearchInputChangedEvent } from './globalsearch';
+
 // Email
 export { EmailBridge } from './email';
