@@ -27,8 +27,13 @@ type LoadAppCameraPanelProps = {
   cameraActive: boolean;
   onCameraActiveChange: (active: boolean) => void;
   onBeforeOpenCamera?: () => void;
+  onAfterOpenCameraPermissionDenied?: () => void;
   onAfterCameraPermissionGranted?: () => void | Promise<void>;
   onScanUrl: (url: string) => void;
+  /** 打开相机扫码按钮高度，默认 Android 44 / iOS 48 */
+  openCameraBtnHeight?: number;
+  /** 打开相机扫码按钮文本大小，默认跟随 scanActionLabel 排版 */
+  openCameraBtnFontSize?: number;
 };
 
 export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
@@ -36,8 +41,11 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   cameraActive,
   onCameraActiveChange,
   onBeforeOpenCamera,
+  onAfterOpenCameraPermissionDenied,
   onAfterCameraPermissionGranted,
   onScanUrl,
+  openCameraBtnHeight,
+  openCameraBtnFontSize,
 }) => {
   const { t } = useTranslation();
   const colors = useColors();
@@ -153,6 +161,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
 
       // 系统限制或用户明确拒绝后，引导到系统设置
       if (status === 'denied' || status === 'restricted') {
+        onAfterOpenCameraPermissionDenied?.();
         showCameraPermissionAlert();
         return;
       }
@@ -168,6 +177,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
         onCameraActiveChange(true);
       } else {
         console.error('[LoadAppCameraPanel] Camera permission denied:', status);
+        onAfterOpenCameraPermissionDenied?.();
         showCameraPermissionAlert();
       }
     } catch (e) {
@@ -180,6 +190,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
     device,
     isSupported,
     onAfterCameraPermissionGranted,
+    onAfterOpenCameraPermissionDenied,
     onBeforeOpenCamera,
     onCameraActiveChange,
     showCameraPermissionAlert,
@@ -217,11 +228,20 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
             </>
           ) : (
             <TouchableOpacity
-              style={styles.openCameraBtn}
+              style={[
+                styles.openCameraBtn,
+                openCameraBtnHeight != null ? { height: openCameraBtnHeight } : null,
+              ]}
               onPress={handleOpenCamera}
               activeOpacity={0.7}
             >
-              <AppText variant='scanActionLabel' style={styles.openCameraBtnText}>
+              <AppText
+                variant='scanActionLabel'
+                style={[
+                  styles.openCameraBtnText,
+                  openCameraBtnFontSize != null ? { fontSize: openCameraBtnFontSize } : null,
+                ]}
+              >
                 {t('actr.app.openCameraScan')}
               </AppText>
             </TouchableOpacity>
@@ -304,7 +324,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     height: Platform.OS === 'android' ? 44 : 48,
     paddingHorizontal: Platform.OS === 'android' ? 28 : 32,
     backgroundColor: colors.bgLoadDark,
-    borderRadius: Platform.OS === 'android' ? 22 : 24,
+    borderRadius: Platform.OS === 'android' ? 30 : 34,
     alignItems: 'center',
     justifyContent: 'center',
     ...HOST_SHADOWS.headerButton,

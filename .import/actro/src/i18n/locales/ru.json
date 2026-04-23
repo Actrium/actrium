@@ -158,7 +158,7 @@
       "openCameraScan": "Открыть камеру для сканирования",
       "initCamera": "Инициализация камеры...",
       "loading": "Загрузка...",
-      "inputUrl": "Введите URL",
+      "inputUrl": "Введите URL для доступа к приложению AskAway",
       "blockedTitle": "Запуск заблокирован",
       "blockedReason": "Не соответствует контракту хоста/политике разрешений",
       "initEngine": "Инициализация Single Engine (режим usePanels)...",
