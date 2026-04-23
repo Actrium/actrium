@@ -273,6 +273,7 @@ struct ChromeTabCardView: View {
                 .onTapGesture {
                     onSelect()
                 }
+                .layoutPriority(1)
 
             // Bottom title bar
             HStack(alignment: .center, spacing: 12) {
@@ -302,7 +303,7 @@ struct ChromeTabCardView: View {
                             .frame(width: 10, height: 10)
                             .overlay(
                                 Circle()
-                                    .stroke(Color(.systemBackground), lineWidth: 2)
+                                    .stroke(Color.black, lineWidth: 2)
                             )
                             .offset(x: 2, y: -2)
                     }
@@ -314,8 +315,10 @@ struct ChromeTabCardView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(hex: "#404040"))
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 // Bookmark button
                 if !tab.title.isEmpty && tab.title != "counterapp" {
@@ -344,16 +347,17 @@ struct ChromeTabCardView: View {
                         .frame(width: 36, height: 36)
                 }
             }
+            .frame(maxWidth: .infinity)
             .frame(height: 56)
             .padding(.horizontal, 14)
-            .background(Color(white: 0.9))
+            .background(Color.black)
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
-        .background(Color(white: 0.15))
+        .background(Color.black)
     }
 }
 
