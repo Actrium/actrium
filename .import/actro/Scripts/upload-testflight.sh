@@ -38,6 +38,13 @@ if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 fi
 
+# 颜色输出
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
 # 检查必需的配置
 if [ -z "$DEVELOPMENT_TEAM" ]; then
     echo -e "${RED}❌ 错误：DEVELOPMENT_TEAM 未配置${NC}"
@@ -49,13 +56,6 @@ if [ -z "$DEVELOPMENT_TEAM" ]; then
     echo "提示：可以从 Scripts/.config.example 复制模板"
     exit 1
 fi
-
-# 颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
 
 # ==============================================================================
 # 工具函数
@@ -106,11 +106,11 @@ check_command agvtool
 if ! command -v bun &> /dev/null; then
     log_warning "bun 未安装，正在自动安装..."
     curl -fsSL https://bun.com/install | bash
-    
+
     # 添加 bun 到当前 shell 的 PATH
     export BUN_INSTALL="$HOME/.bun"
     export PATH="$BUN_INSTALL/bin:$PATH"
-    
+
     # 验证安装
     if ! command -v bun &> /dev/null; then
         log_error "bun 安装失败，请手动安装: curl -fsSL https://bun.com/install | bash"
@@ -262,13 +262,12 @@ fi
 log_success "Archive 构建完成: $ARCHIVE_PATH"
 
 # ==============================================================================
-# 创建 ExportOptions.plist（如果不存在）
+# 生成 ExportOptions.plist（动态使用 DEVELOPMENT_TEAM）
 # ==============================================================================
 
-if [ ! -f "$EXPORT_OPTIONS_PATH" ]; then
-    log_step "创建 ExportOptions.plist"
-    
-    cat > "$EXPORT_OPTIONS_PATH" << 'EOF'
+log_step "生成 ExportOptions.plist"
+
+cat > "$EXPORT_OPTIONS_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -284,13 +283,14 @@ if [ ! -f "$EXPORT_OPTIONS_PATH" ]; then
     <key>signingStyle</key>
     <string>automatic</string>
     <key>teamID</key>
-    <string>YOUR_TEAM_ID</string>
+    <string>$DEVELOPMENT_TEAM</string>
+    <key>destination</key>
+    <string>export</string>
 </dict>
 </plist>
 EOF
-    
-    log_warning "已创建 ExportOptions.plist，请修改 YOUR_TEAM_ID 为你的 Team ID"
-fi
+
+log_success "ExportOptions.plist 已生成 (Team ID: $DEVELOPMENT_TEAM)"
 
 # ==============================================================================
 # 导出 IPA
@@ -302,13 +302,18 @@ xcodebuild -exportArchive \
     -archivePath "$ARCHIVE_PATH" \
     -exportPath "$EXPORT_PATH" \
     -exportOptionsPlist "$EXPORT_OPTIONS_PATH" \
+    -configuration "$CONFIGURATION" \
     -allowProvisioningUpdates
 
 IPA_PATH="$EXPORT_PATH/$PROJECT_NAME.ipa"
 
 if [ ! -f "$IPA_PATH" ]; then
-    log_error "IPA 导出失败"
-    exit 1
+    # 尝试查找其他命名的 IPA 文件
+    IPA_PATH=$(find "$EXPORT_PATH" -name "*.ipa" | head -n 1)
+    if [ -z "$IPA_PATH" ]; then
+        log_error "IPA 导出失败"
+        exit 1
+    fi
 fi
 
 IPA_SIZE=$(du -h "$IPA_PATH" | cut -f1)
@@ -318,79 +323,92 @@ log_success "IPA 导出完成: $IPA_PATH ($IPA_SIZE)"
 # 上传到 TestFlight
 # ==============================================================================
 
-# log_step "上传到 TestFlight"
+log_step "上传到 TestFlight"
 
-# log_info "开始上传 IPA..."
-# log_warning "上传可能需要几分钟，请耐心等待..."
+log_info "开始上传 IPA..."
+log_warning "上传可能需要几分钟，请耐心等待..."
 
-# # 检查是否有 API Key（推荐方式）
-# if [ -n "$APP_STORE_CONNECT_API_KEY_PATH" ] && [ -f "$APP_STORE_CONNECT_API_KEY_PATH" ]; then
-#     log_info "使用 App Store Connect API Key 上传"
-    
-#     xcrun altool --upload-app \
-#         -f "$IPA_PATH" \
-#         -t ios \
-#         --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
-#         --apiIssuer "$APP_STORE_CONNECT_API_ISSUER_ID" \
-#         | tee "$BUILD_DIR/upload.log"
-# else
-#     log_info "使用 Apple ID 上传"
-#     log_warning "建议配置 App Store Connect API Key 以避免交互式登录"
-    
-#     # 需要在 Keychain 中保存应用专用密码
-#     # 或者通过环境变量传入
-#     xcrun altool --upload-app \
-#         -f "$IPA_PATH" \
-#         -t ios \
-#         -u "$APPLE_ID" \
-#         -p "@keychain:AC_PASSWORD" \
-#         | tee "$BUILD_DIR/upload.log"
-# fi
+# 检查是否有 API Key（推荐方式）
+if [ -n "$APP_STORE_CONNECT_API_KEY_PATH" ] && [ -f "$APP_STORE_CONNECT_API_KEY_PATH" ] \
+   && [ -n "$APP_STORE_CONNECT_API_KEY_ID" ] && [ -n "$APP_STORE_CONNECT_API_ISSUER_ID" ]; then
+    log_info "使用 App Store Connect API Key 上传"
 
-# if [ $? -eq 0 ]; then
-#     log_success "上传成功！"
-# else
-#     log_error "上传失败，请查看日志: $BUILD_DIR/upload.log"
-#     exit 1
-# fi
+    xcrun altool --upload-app \
+        -f "$IPA_PATH" \
+        -t ios \
+        --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
+        --apiIssuer "$APP_STORE_CONNECT_API_ISSUER_ID" \
+        2>&1 | tee "$BUILD_DIR/upload.log"
 
-# # ==============================================================================
-# # 构建摘要
-# # ==============================================================================
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log_success "上传成功！"
+    else
+        log_error "上传失败，请查看日志: $BUILD_DIR/upload.log"
+        exit 1
+    fi
+elif [ -n "$APPLE_ID" ]; then
+    log_info "使用 Apple ID 上传"
+    log_warning "建议配置 App Store Connect API Key 以避免交互式登录"
 
-# log_step "构建摘要"
+    xcrun altool --upload-app \
+        -f "$IPA_PATH" \
+        -t ios \
+        -u "$APPLE_ID" \
+        -p "@keychain:AC_PASSWORD" \
+        2>&1 | tee "$BUILD_DIR/upload.log"
 
-# echo ""
-# echo "📦 应用名称: $PROJECT_NAME"
-# echo "🔢 版本号: $VERSION"
-# echo "🏗️  Build Number: $NEW_BUILD"
-# echo "📁 Archive: $ARCHIVE_PATH"
-# echo "📱 IPA: $IPA_PATH"
-# echo "💾 大小: $IPA_SIZE"
-# echo ""
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log_success "上传成功！"
+    else
+        log_error "上传失败，请查看日志: $BUILD_DIR/upload.log"
+        exit 1
+    fi
+else
+    log_warning "未配置 App Store Connect API Key 或 Apple ID，跳过上传"
+    log_info "请在 Scripts/.config 中配置："
+    log_info "  APP_STORE_CONNECT_API_KEY_PATH=\"/path/to/AuthKey.p8\""
+    log_info "  APP_STORE_CONNECT_API_KEY_ID=\"YOUR_KEY_ID\""
+    log_info "  APP_STORE_CONNECT_API_ISSUER_ID=\"YOUR_ISSUER_ID\""
+    log_info "IPA 文件保留在: $IPA_PATH"
+fi
 
-# log_success "🎉 构建并上传完成！"
-# log_info "请在 App Store Connect 中查看构建状态"
-# log_info "通常需要 5-15 分钟处理完成"
+# ==============================================================================
+# 构建摘要
+# ==============================================================================
 
-# # ==============================================================================
-# # Git 标签（可选）
-# # ==============================================================================
+log_step "构建摘要"
 
-# if [ "$GIT_TAG" = "true" ]; then
-#     log_step "创建 Git 标签"
-    
-#     TAG_NAME="v${VERSION}"
-#     git tag -a "$TAG_NAME" -m "Release $VERSION (Build $NEW_BUILD)"
-#     git push origin "$TAG_NAME"
-    
-#     log_success "Git 标签已创建: $TAG_NAME"
-# fi
+echo ""
+echo "📦 应用名称: $PROJECT_NAME"
+echo "🔢 版本号: $VERSION"
+echo "🏗️  Build Number: $NEW_BUILD"
+echo "📁 Archive: $ARCHIVE_PATH"
+echo "📱 IPA: $IPA_PATH"
+echo "💾 大小: $IPA_SIZE"
+echo ""
 
-# # ==============================================================================
-# # 完成
-# # ==============================================================================
+log_success "构建并上传完成！"
+log_info "请在 App Store Connect 中查看构建状态"
+log_info "通常需要 5-15 分钟处理完成"
 
-# echo ""
-# log_success "✨ 全部完成！"
-# echo ""
+# ==============================================================================
+# Git 标签（可选）
+# ==============================================================================
+
+if [ "$GIT_TAG" = "true" ]; then
+    log_step "创建 Git 标签"
+
+    TAG_NAME="v${VERSION}"
+    git tag -a "$TAG_NAME" -m "Release $VERSION (Build $NEW_BUILD)"
+    git push origin "$TAG_NAME"
+
+    log_success "Git 标签已创建: $TAG_NAME"
+fi
+
+# ==============================================================================
+# 完成
+# ==============================================================================
+
+echo ""
+log_success "全部完成！"
+echo ""
