@@ -8,8 +8,10 @@ for Android and iOS
 # iOS
 yarn dev
 
-#Android (in Teal)
+#Android (注意需要在 安卓宿主目录)
 yarn dev
 ```
+
+
 
 
