@@ -44,15 +44,25 @@ class TabModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
         Log.e("TabModule", "Received NativeModuleEvent: ${event.methodName} with params: ${event.params}")
         val params = Arguments.createMap()
         event.params.forEach { (key, value) ->
-            when (value) {
-                is Boolean -> params.putBoolean(key, value)
-                is String -> params.putString(key, value)
-                is Int -> params.putInt(key, value)
-                is Double -> params.putDouble(key, value)
-                is Long -> params.putLong(key, value)
-            }
+            putValue(params, key, value)
         }
         sendEvent(event.methodName, params)
+    }
+
+    private fun putValue(map: com.facebook.react.bridge.WritableMap, key: String, value: Any?) {
+        when (value) {
+            is Boolean -> map.putBoolean(key, value)
+            is String -> map.putString(key, value)
+            is Int -> map.putInt(key, value)
+            is Double -> map.putDouble(key, value)
+            is Long -> map.putLong(key, value)
+            is Map<*, *> -> {
+                val nestedMap = Arguments.createMap()
+                @Suppress("UNCHECKED_CAST")
+                (value as Map<String, Any?>).forEach { (k, v) -> putValue(nestedMap, k, v) }
+                map.putMap(key, nestedMap)
+            }
+        }
     }
 
     private fun sendEvent(eventName: String, params: WritableMap?) {

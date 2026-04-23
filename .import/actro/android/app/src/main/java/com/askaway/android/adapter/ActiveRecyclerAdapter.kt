@@ -34,6 +34,8 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
 
     override fun getItemCount(): Int = items.size
 
+    fun findPositionById(id: String): Int = items.indexOfFirst { it.id == id }
+
     class ActiveViewHolder(private val binding: ItemActiveBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(
             item: ActiveModel,

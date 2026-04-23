@@ -5,6 +5,7 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.graphics.Outline
+import android.graphics.Rect
 import android.util.Log
 import android.view.View
 import android.view.ViewOutlineProvider
@@ -132,6 +133,7 @@ object ViewAnimationHelper {
      * @param onAnimationEnd 动画结束后的回调
      */
     fun animateHide(targetView: View, sourceView: View?, onAnimationEnd: () -> Unit) {
+        Log.e("ViewAnimationHelper", "animateHide ${sourceView}  ${sourceView?.isAttachedToWindow}")
         if (sourceView != null && sourceView.isAttachedToWindow) {
             val sourceLoc = IntArray(2)
             sourceView.getLocationInWindow(sourceLoc)
@@ -220,7 +222,7 @@ object ViewAnimationHelper {
             )
             set.duration = 300
             set.interpolator = DecelerateInterpolator()
-            set.addListener(object : android.animation.AnimatorListenerAdapter() {
+            set.addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     onAnimationEnd()
                     // Reset
@@ -232,6 +234,82 @@ object ViewAnimationHelper {
             })
             set.start()
         }
+    }
+
+    /**
+     * 执行隐藏动画（基于目标 Rect 计算收起位置）
+     *
+     * @param targetView 需要隐藏的视图（如 flReactNative）
+     * @param targetRect 目标位置和尺寸（在 window 坐标系中）
+     * @param cornerRadiusDp 目标圆角（dp）
+     * @param onAnimationEnd 动画结束后的回调
+     */
+    fun animateHide(targetView: View, targetRect: Rect, cornerRadiusDp: Float, onAnimationEnd: () -> Unit) {
+        val targetLoc = IntArray(2)
+        targetView.getLocationInWindow(targetLoc)
+
+        val width = targetView.width
+        val height = targetView.height
+        val scale = targetRect.width().toFloat() / width
+
+        val endVisibleHeight = targetRect.height().toFloat() / scale
+        val verticalInset = (height - endVisibleHeight) / 2f
+
+        val baseEndY = (targetRect.top - targetLoc[1]).toFloat()
+        val endX = (targetRect.left - targetLoc[0]).toFloat()
+        val endY = baseEndY - verticalInset * scale
+
+        val cornerRadiusPx = cornerRadiusDp * targetView.resources.displayMetrics.density
+
+        val animOutlineProvider = object : ViewOutlineProvider() {
+            var clipTop = 0
+            var clipBottom = height
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, clipTop, view.width, clipBottom, cornerRadiusPx)
+            }
+        }
+        targetView.outlineProvider = animOutlineProvider
+        targetView.clipToOutline = true
+        targetView.clipBounds = null
+
+        val set = AnimatorSet()
+
+        val clipAnimator = ValueAnimator.ofFloat(0f, verticalInset)
+        clipAnimator.addUpdateListener { animation ->
+            val inset = animation.animatedValue as Float
+            animOutlineProvider.clipTop = inset.toInt()
+            animOutlineProvider.clipBottom = (height - inset).toInt()
+            targetView.invalidateOutline()
+        }
+
+        set.playTogether(
+            ObjectAnimator.ofFloat(targetView, "translationX", 0f, endX),
+            ObjectAnimator.ofFloat(targetView, "translationY", 0f, endY),
+            ObjectAnimator.ofFloat(targetView, "scaleX", 1f, scale),
+            ObjectAnimator.ofFloat(targetView, "scaleY", 1f, scale),
+            clipAnimator
+        )
+        set.duration = 180
+        set.interpolator = DecelerateInterpolator()
+        set.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                onAnimationEnd()
+                targetView.translationX = 0f
+                targetView.translationY = 0f
+                targetView.scaleX = 1f
+                targetView.scaleY = 1f
+                targetView.clipBounds = null
+                targetView.clipToOutline = false
+                targetView.outlineProvider = ViewOutlineProvider.BOUNDS
+                targetView.invalidateOutline()
+                targetView.pivotX = 0f
+                targetView.pivotY = 0f
+            }
+        })
+
+        targetView.pivotX = 0f
+        targetView.pivotY = 0f
+        set.start()
     }
 }
 

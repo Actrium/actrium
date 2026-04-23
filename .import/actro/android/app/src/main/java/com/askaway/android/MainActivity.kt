@@ -66,7 +66,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private var isLayoutComplete = false
     private var permissionListener: PermissionListener? = null
     private lateinit var activeRecyclerAdapter: com.askaway.android.adapter.ActiveRecyclerAdapter
-    private var currentSourceView: View? = null
     private var isSearchMode = false
     private var originalSearchWidth = 0
     private var originalNavWidth = 0
@@ -266,15 +265,27 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                         Log.e("MainActivity", "Received showPageType: $pageType with bundle: ${viewModel.pageBundle}")
                         when (pageType) {
                             ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_BOOKMARK -> {
-                                hideSearch()
-                                binding.navTag.isChecked = true
-                                showBookmark(viewModel.pageBundle)
+                                if (isSearchVisible) {
+                                    hideSearch {
+                                        binding.navTag.isChecked = true
+                                        showBookmark(viewModel.pageBundle)
+                                    }
+                                } else {
+                                    binding.navTag.isChecked = true
+                                    showBookmark(viewModel.pageBundle)
+                                }
                             }
 
                             ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SETTINGS -> {
-                                hideSearch()
-                                binding.navSettings.isChecked = true
-                                showSet(viewModel.pageBundle)
+                                if (isSearchVisible) {
+                                    hideSearch {
+                                        binding.navSettings.isChecked = true
+                                        showSet(viewModel.pageBundle)
+                                    }
+                                } else {
+                                    binding.navSettings.isChecked = true
+                                    showSet(viewModel.pageBundle)
+                                }
                             }
 
                             ReactNativeBundle.REACT_NATIVE_VIEW_TYPE_SEARCH -> {
@@ -358,11 +369,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flBookmark.visibility = View.VISIBLE
         binding.llActive.visibility = View.GONE
         binding.flSet.visibility = View.GONE
-        binding.flBookmark.removeAllViews()
+        val bundle = sourceBundle ?: ReactNativeBundle.getBookmarkBundle()
         if (binding.flBookmark.childCount == 0) {
-            val bundle = sourceBundle ?: ReactNativeBundle.getBookmarkBundle()
             val targetView = createReactRootView("canvas-kotlin", bundle)
             binding.flBookmark.addView(targetView)
+        } else {
+            viewModel.updateBookmark(bundle)
         }
         Log.d("MainActivity", "Show Bookmark")
     }
@@ -371,14 +383,16 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.flBookmark.visibility = View.GONE
         binding.llActive.visibility = View.GONE
         binding.flSet.visibility = View.VISIBLE
-        binding.flSet.removeAllViews()
+        val bundle = sourceBundle ?: ReactNativeBundle.getSetBundle()
         if (binding.flSet.childCount == 0) {
-            val bundle = sourceBundle ?: ReactNativeBundle.getSetBundle()
             val targetView = createReactRootView("canvas-kotlin", bundle)
             binding.flSet.addView(targetView)
+        } else  {
+            viewModel.updateSet(bundle)
         }
         Log.d("MainActivity", "Show Settings")
     }
+
 
     /**
      * 创建支持新架构的 ReactRootView
@@ -404,8 +418,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private fun showReactNativeView(sourceView: View? = null) {
         if (isReactNativeVisible) return
         isReactNativeVisible = true
-
-        currentSourceView = sourceView
 
         ViewAnimationHelper.animateShow(binding.flReactNative, sourceView) {
             // 如果 View 需要重试（例如尺寸未就绪），重置状态并稍后重试
@@ -511,7 +523,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     /**
      * 退出搜索模式
      */
-    private fun exitSearchMode() {
+    private fun exitSearchMode(onEnd: (() -> Unit)? = null) {
         if (!isSearchMode) return
         isSearchMode = false
 
@@ -560,6 +572,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     binding.llSearchMode.visibility = View.GONE
+                    onEnd?.invoke()
                 }
             })
 
@@ -575,6 +588,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
         isSearchVisible = true
         enterSearchMode()
+        // 清空搜索输入框
+        binding.etSearch.text.clear()
         // 移除 flSearch 中的所有子组件
         binding.flSearch.removeAllViews()
 
@@ -618,9 +633,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     /**
      * 隐藏搜索视图到底部
      */
-    private fun hideSearch() {
+    private fun hideSearch(onSearchHidden: (() -> Unit)? = null) {
         if (!isSearchVisible) return
-        exitSearchMode()
+        exitSearchMode {
+            alignIndicatorToSelectedButton(animate = false)
+            onSearchHidden?.invoke()
+        }
 
         // 收起键盘
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -658,11 +676,56 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             }
         }
 
-        ViewAnimationHelper.animateHide(binding.flReactNative, currentSourceView) {
-            binding.flReactNative.visibility = View.GONE
-            isReactNativeVisible = false
+        val targetRect = calculateItemRectByTabId(tabId)
+        if (targetRect != null) {
+            ViewAnimationHelper.animateHide(binding.flReactNative, targetRect, 26f) {
+                binding.flReactNative.visibility = View.GONE
+                isReactNativeVisible = false
+            }
+        } else {
+            ViewAnimationHelper.animateHide(binding.flReactNative, null as View?) {
+                binding.flReactNative.visibility = View.GONE
+                isReactNativeVisible = false
+            }
         }
-        currentSourceView = null
+    }
+
+    /**
+     * 通过 tabId 计算 recyApps 中对应 item 在 window 中的位置和尺寸
+     */
+    private fun calculateItemRectByTabId(tabId: String?): android.graphics.Rect? {
+        if (tabId.isNullOrEmpty()) return null
+        val position = activeRecyclerAdapter.findPositionById(tabId)
+        if (position == -1) return null
+
+        val recyApps = binding.recyApps
+        val density = resources.displayMetrics.density
+
+        // item 固定尺寸：高度 200dp，上下 margin 8dp，左右 margin 16dp
+        val itemHeightPx = (200 * density).toInt()
+        val itemMarginVPx = (8 * density).toInt()
+        val itemMarginHPx = (16 * density).toInt()
+        val itemWidthPx = recyApps.width - itemMarginHPx * 2
+
+        // 计算 item 在 recyApps 内部的 top 位置
+        // recyApps 有 paddingTop=80dp，item 间距为 itemMarginVPx*2
+        val paddingTopPx = recyApps.paddingTop
+        val itemTopInRecycler = paddingTopPx + position * (itemHeightPx + itemMarginVPx * 2) + itemMarginVPx
+        val itemLeftInRecycler = itemMarginHPx
+
+        // 考虑 RecyclerView 的滚动偏移
+        val scrollOffset = recyApps.computeVerticalScrollOffset()
+
+        // 将 recyApps 坐标转换为 window 坐标
+        val recyclerLoc = IntArray(2)
+        recyApps.getLocationInWindow(recyclerLoc)
+
+        val left = recyclerLoc[0] + itemLeftInRecycler
+        val top = recyclerLoc[1] + itemTopInRecycler - scrollOffset
+        val right = left + itemWidthPx
+        val bottom = top + itemHeightPx
+
+        return android.graphics.Rect(left, top, right, bottom)
     }
 
     override fun onPause() {
