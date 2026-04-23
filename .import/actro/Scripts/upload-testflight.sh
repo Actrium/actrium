@@ -102,23 +102,14 @@ check_command xcodebuild
 check_command xcrun
 check_command agvtool
 
-# 检查 bun 是否已安装
-if ! command -v bun &> /dev/null; then
-    log_warning "bun 未安装，正在自动安装..."
-    curl -fsSL https://bun.com/install | bash
-
-    # 添加 bun 到当前 shell 的 PATH
-    export BUN_INSTALL="$HOME/.bun"
-    export PATH="$BUN_INSTALL/bin:$PATH"
-
-    # 验证安装
-    if ! command -v bun &> /dev/null; then
-        log_error "bun 安装失败，请手动安装: curl -fsSL https://bun.com/install | bash"
-        exit 1
-    fi
-    log_success "bun 安装成功: $(bun --version)"
-else
+# 检查 npm 或 bun 是否已安装
+if command -v npm &> /dev/null; then
+    log_success "npm 已安装: $(npm --version)"
+elif command -v bun &> /dev/null; then
     log_success "bun 已安装: $(bun --version)"
+else
+    log_error "npm 和 bun 均未安装，请先安装其中之一"
+    exit 1
 fi
 
 # 检查是否在项目根目录
@@ -170,8 +161,13 @@ log_step "安装 React Native 依赖"
 
 cd "$PROJECT_ROOT/Subsystem"
 
-log_info "使用 bun 安装依赖..."
-bun install
+if command -v npm &> /dev/null; then
+    log_info "使用 npm 安装依赖..."
+    npm install
+elif command -v bun &> /dev/null; then
+    log_info "npm 未安装，使用 bun 安装依赖..."
+    bun install
+fi
 
 cd "$PROJECT_ROOT"
 
