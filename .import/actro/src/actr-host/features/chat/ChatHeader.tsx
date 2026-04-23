@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, useColorScheme } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -41,7 +41,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     const [showCloseButton, setShowCloseButton] = React.useState(false);
 
     const colors = useColors();
+    const colorScheme = useColorScheme();
     const styles = React.useMemo(() => makeStyles(colors), [colors]);
+    const headerButtonBackgroundColor =
+      colorScheme === 'dark' ? undefined : '#fff';
 
     React.useEffect(() => {
       if (hasAppId) {
@@ -74,9 +77,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             onPress={onLeftPress}
             disabled={leftDisabled}
             active={leftActive}
+            backgroundColor={headerButtonBackgroundColor}
             activeBackgroundColor={colors.bgChatHeaderBtn}
             iconColor={colors.iconChatHeader}
-            activeIconColor={colors.iconChatHeader}
+            activeIconColor='#fff'
           />
         ) : (
           <View style={styles.headerButtonPlaceholder} />
@@ -100,6 +104,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             iconSize={22}
             onPress={() => {}}
             style={styles.headerButton}
+            backgroundColor={headerButtonBackgroundColor}
             iconColor={colors.iconChatHeader}
           />
         ) : showCloseButton ? (
@@ -109,6 +114,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             iconColor={colors.iconChatHeader}
             onPress={onRightPress}
             style={styles.headerButton}
+            backgroundColor={headerButtonBackgroundColor}
           />
         ) : (
           <View style={styles.headerButtonPlaceholder} />
