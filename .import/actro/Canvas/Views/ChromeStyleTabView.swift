@@ -250,6 +250,8 @@ struct ChromeTabCardView: View {
     @ObservedObject var viewModel: BrowserViewModel
     let onSelect: () -> Void
     let onClose: () -> Void
+    
+    @EnvironmentObject private var theme: ThemeManager
 
     private let iconWidth: CGFloat = 32.0
 
@@ -303,7 +305,7 @@ struct ChromeTabCardView: View {
                             .frame(width: 10, height: 10)
                             .overlay(
                                 Circle()
-                                    .stroke(Color.black, lineWidth: 2)
+                                    .stroke(Color(.systemBackground), lineWidth: 2)
                             )
                             .offset(x: 2, y: -2)
                     }
@@ -350,7 +352,7 @@ struct ChromeTabCardView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 56)
             .padding(.horizontal, 14)
-            .background(Color.black)
+            .background(Color(hex: theme.isDarkMode ? "#000000" : "#E5E5EA"))
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -379,7 +381,7 @@ struct ChromeNewTabCardView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
-        .background(Color(white: 0.12))
+        .background(Color.black)
     }
 }
 
