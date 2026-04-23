@@ -318,4 +318,28 @@ class MainViewModel(
             )
         )
     }
+
+    fun updateBookmark(bundle: Bundle) {
+        EventBus.getDefault().post(
+            NativeModuleEvent(NativeModuleEvent.EVENT_UPDATE_BOOKMARK, bundleToMap(bundle))
+        )
+    }
+
+    fun updateSet(bundle: Bundle) {
+        EventBus.getDefault().post(
+            NativeModuleEvent(NativeModuleEvent.EVENT_UPDATE_SET, bundleToMap(bundle))
+        )
+    }
+
+    private fun bundleToMap(bundle: Bundle): Map<String, Any?> {
+        val map = mutableMapOf<String, Any?>()
+        for (key in bundle.keySet()) {
+            val value = bundle.get(key)
+            when (value) {
+                is Bundle -> map[key] = bundleToMap(value)
+                else -> map[key] = value
+            }
+        }
+        return map
+    }
 }
