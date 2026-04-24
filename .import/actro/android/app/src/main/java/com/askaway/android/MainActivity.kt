@@ -230,6 +230,11 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         binding.ivAdd.postDelayed({
             if (viewModel.isActiveListEmpty()) {
                 binding.ivAdd.performClick()
+            } else {
+                // 列表不为空时自动点击第一个 item
+                activeRecyclerAdapter.getItemAt(0)?.let { activeModel ->
+                    activeRecyclerAdapter.onItemClick?.invoke(activeModel, binding.recyApps)
+                }
             }
         }, 500)
 

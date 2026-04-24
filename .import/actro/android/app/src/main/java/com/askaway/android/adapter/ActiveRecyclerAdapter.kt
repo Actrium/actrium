@@ -36,6 +36,8 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
 
     fun findPositionById(id: String): Int = items.indexOfFirst { it.id == id }
 
+    fun getItemAt(position: Int): ActiveModel? = items.getOrNull(position)
+
     class ActiveViewHolder(private val binding: ItemActiveBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(
             item: ActiveModel,
