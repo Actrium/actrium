@@ -206,10 +206,13 @@ class BrowserViewModel: ObservableObject {
         }
     }
     
+    /// 待加入列表的新标签页（用于"先弹出 sheet，后显示在列表"的交互）
+    var pendingNewTab: Tab?
+
     @discardableResult
-    func addNewTab(focus: Bool = true) -> Tab {
+    func addNewTab(focus: Bool = true, deferAppend: Bool = false) -> Tab {
         logger.debug("🆕 开始创建新标签页...")
-        
+
         // 创建默认 RN 标签页（与应用启动时相同）
         let newTab = Tab(
             title: TM.active.blackTab(),
@@ -223,16 +226,23 @@ class BrowserViewModel: ObservableObject {
             // 这样即使 content 是 HTML，外面也会包裹住 ActrApp 的 RN 壳子（地址栏等）
             unifiedScript: "/* welcome page shell */"
         )
-        tabs.append(newTab)
-        currentTabId = newTab.id
-        tabSlotPositions[newTab.id] = tabs.count - 1
+
+        if deferAppend {
+            // 延迟加入列表：先只记录 pending，等 sheet 弹出后再 append
+            pendingNewTab = newTab
+            currentTabId = newTab.id
+        } else {
+            tabs.append(newTab)
+            tabSlotPositions[newTab.id] = tabs.count - 1
+            currentTabId = newTab.id
+        }
 
         // 根据调用者意图决定是否进入 Focus 模式（某些 UI 场景希望保持 Overview）
         if focus {
             canvasMode = .focus(tabId: newTab.id)
         }
 
-        logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
+        logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(deferAppend ? "pending" : "\(self.tabs.count - 1)")")
 
         // 发送通知到 RN
         var userInfo: [String: Any] = [
@@ -251,8 +261,19 @@ class BrowserViewModel: ObservableObject {
             userInfo: userInfo
         )
 
-        saveTabs()
+        if !deferAppend {
+            saveTabs()
+        }
         return newTab
+    }
+
+    /// 将 pending 的新标签页正式加入列表
+    func commitPendingNewTab() {
+        guard let pending = pendingNewTab else { return }
+        tabs.append(pending)
+        tabSlotPositions[pending.id] = tabs.count - 1
+        pendingNewTab = nil
+        saveTabs()
     }
 
     /// Save tab snapshot when set
