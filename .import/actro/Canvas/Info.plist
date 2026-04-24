@@ -21,5 +21,9 @@
 		<string>weixinULAPI</string>
 		<string>weixinURLParamsAPI</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>允许 Canvas 使用麦克风进行语音输入。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>允许 Canvas 使用语音识别将语音转换为文本。</string>
 </dict>
 </plist>
