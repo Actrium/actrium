@@ -163,9 +163,9 @@ private struct OverviewNavigationBar: View {
             .padding(.leading, isFullscreen ? 0 : 65)
             
             // 中间：活跃 / 书签 切换（SwitchButton 风格）
-            // 图标在上、文字在下；选中使用 accentColor，未选中使用 gray；高亮背景在选中项下平滑移动
+            // 仅文字；选中使用 accentColor，未选中使用 gray；高亮背景在选中项下平滑移动
             GeometryReader { geo in
-                let totalWidth = min(geo.size.width, 144)
+                let totalWidth = min(geo.size.width, 164)
                 let segmentHeight: CGFloat = height
                 let segmentCount: CGFloat = 2
                 let segmentWidth = totalWidth / segmentCount
@@ -188,14 +188,10 @@ private struct OverviewNavigationBar: View {
                             selectedTab = .active
                             viewModel.currentSystemTabType = nil
                         }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "rectangle.grid.1x2.fill")
-                                    .font(.system(size: 14))
-                                Text(TM.active.activity())
-                                    .font(.system(size: 8))
-                            }
-                            .frame(width: segmentWidth, height: segmentHeight)
-                            .foregroundColor(selectedTab == .active ? Color.accentColor : Color.gray)
+                            Text(TM.active.activity())
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: segmentWidth, height: segmentHeight)
+                                .foregroundColor(selectedTab == .active ? Color.accentColor : Color.gray)
                         }
                         .buttonStyle(.plain)
 
@@ -205,14 +201,10 @@ private struct OverviewNavigationBar: View {
                             viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
                             viewModel.currentSystemTabType = .bookmarks
                         }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "book.fill")
-                                    .font(.system(size: 14))
-                                Text(TM.active.bookmarks())
-                                    .font(.system(size: 8))
-                            }
-                            .frame(width: segmentWidth, height: segmentHeight)
-                            .foregroundColor(selectedTab == .bookmarks ? Color.accentColor : Color.gray)
+                            Text(TM.active.bookmarks())
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: segmentWidth, height: segmentHeight)
+                                .foregroundColor(selectedTab == .bookmarks ? Color.accentColor : Color.gray)
                         }
                         .buttonStyle(.plain)
                     }
@@ -220,7 +212,7 @@ private struct OverviewNavigationBar: View {
                 }
                 .frame(width: totalWidth, height: height)
             }
-            .frame(width: 144, height: height)
+            .frame(width: 164, height: height)
         }
         .frame(height: height)
         .background(Color.black)
