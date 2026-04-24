@@ -15,59 +15,58 @@ struct ContentView: View {
             if UIDevice.current.userInterfaceIdiom == .phone {
                 PhoneMainView(viewModel: viewModel, historyVM: historyVM)
             } else {
+                // 内容区域
                 ZStack {
-                    // 内容区域
-                    ZStack {
-                        ChromeStyleTabView(viewModel: viewModel, historyVM: historyVM)
-                        if let systemType = viewModel.currentSystemTabType {
-                            SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM)
-                                .padding(.top, 44)
-                        }
-                        // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
-                        if case .overview = viewModel.canvasMode, viewModel.currentSystemTabType != .globalSearch {
-                            SearchBar(viewModel: viewModel)
-                        }
+                    Color.black.ignoresSafeArea()
+                    ChromeStyleTabView(viewModel: viewModel, historyVM: historyVM)
+                    if let systemType = viewModel.currentSystemTabType {
+                        SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM)
+                            .padding(.top, 44)
                     }
-                    .background(Color.black)
-                    .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
-                        withAnimation {
-                            viewModel.currentSystemTabType = nil
-                        }
+                    // Search Tabs 搜索框 - 仅在 Overview 模式显示，固定在底部居中
+                    if case .overview = viewModel.canvasMode, viewModel.currentSystemTabType != .globalSearch {
+                        SearchBar(viewModel: viewModel)
                     }
-                    // 顶层兜底：拖入 .actr 或目录时创建新标签
-                    .dropDestination(for: URL.self) { urls, location in
-                        guard let url = urls.first else {
-                            return false
-                        }
-
-                        // Check if it's a .actr file or a directory with manifest.json
-                        var isDirectory: ObjCBool = false
-                        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-                            return false
-                        }
-
-                        if isDirectory.boolValue {
-                            // Directory - check if it has manifest.json
-                            let manifestPath = url.appendingPathComponent("manifest.json").path
-                            guard FileManager.default.fileExists(atPath: manifestPath) else {
-                                return false
-                            }
-                            Task { @MainActor in
-                                viewModel.loadFromDevDirectory(url)
-                            }
-                            return true
-                        } else if url.pathExtension.lowercased() == "actr" {
-                            // .actr file
-                            Task { @MainActor in
-                                viewModel.importACTRPackage(from: url)
-                            }
-                            return true
-                        }
-
+                }
+                .background(Color.black)
+                .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
+                    withAnimation {
+                        viewModel.currentSystemTabType = nil
+                    }
+                }
+                // 顶层兜底：拖入 .actr 或目录时创建新标签
+                .dropDestination(for: URL.self) { urls, location in
+                    guard let url = urls.first else {
                         return false
-                    } isTargeted: { isTargeted in
-                        isACTRDropTarget = isTargeted
                     }
+                    
+                    // Check if it's a .actr file or a directory with manifest.json
+                    var isDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+                        return false
+                    }
+                    
+                    if isDirectory.boolValue {
+                        // Directory - check if it has manifest.json
+                        let manifestPath = url.appendingPathComponent("manifest.json").path
+                        guard FileManager.default.fileExists(atPath: manifestPath) else {
+                            return false
+                        }
+                        Task { @MainActor in
+                            viewModel.loadFromDevDirectory(url)
+                        }
+                        return true
+                    } else if url.pathExtension.lowercased() == "actr" {
+                        // .actr file
+                        Task { @MainActor in
+                            viewModel.importACTRPackage(from: url)
+                        }
+                        return true
+                    }
+                    
+                    return false
+                } isTargeted: { isTargeted in
+                    isACTRDropTarget = isTargeted
                 }
             }
         }
