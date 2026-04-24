@@ -21,3 +21,6 @@ export type { SearchInputChangedEvent } from './globalsearch';
 
 // Email
 export { EmailBridge } from './email';
+
+// Speech
+export { setLanguage, feedAudio, stop } from './speech';
