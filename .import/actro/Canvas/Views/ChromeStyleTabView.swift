@@ -227,7 +227,7 @@ struct ChromeTabDragPreviewView: View {
                 }
                 .frame(width: iconWidth, height: iconWidth)
 
-                Text((tab.title.isEmpty || tab.title == "counterapp") ? "" : tab.title)
+                Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(hex: "#404040"))
                     .lineLimit(1)
@@ -313,7 +313,7 @@ struct ChromeTabCardView: View {
                 .frame(width: iconWidth, height: iconWidth)
 
                 // Title
-                Text((tab.title.isEmpty || tab.title == "counterapp") ? "" : tab.title)
+                Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(hex: "#404040"))
                     .lineLimit(1)
@@ -323,7 +323,7 @@ struct ChromeTabCardView: View {
                 Spacer(minLength: 0)
 
                 // Bookmark button
-                if !tab.title.isEmpty && tab.title != "counterapp" {
+                if tab.title != TM.active.blackTab() {
                     Button(action: {
                         NotificationCenter.default.post(
                             name: .tabBookmarkChangedFromNative,
