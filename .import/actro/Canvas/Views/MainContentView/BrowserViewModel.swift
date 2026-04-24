@@ -212,7 +212,7 @@ class BrowserViewModel: ObservableObject {
         
         // 创建默认 RN 标签页（与应用启动时相同）
         let newTab = Tab(
-            title: "",
+            title: TM.active.blackTab(),
             htmlContent: """
                 <!DOCTYPE html>
                 <html>

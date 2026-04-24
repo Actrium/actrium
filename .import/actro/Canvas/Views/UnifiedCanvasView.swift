@@ -1069,7 +1069,7 @@ private struct TabCardView: View {
             .frame(width: iconWidth, height: iconWidth)
 
             // 标题
-            Text(tab.title != "counterapp" ? tab.title : "")
+            Text(tab.title)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(Color(hex: "#404040"))
                 .lineLimit(1)
@@ -1077,7 +1077,7 @@ private struct TabCardView: View {
             Spacer()
 
             // 收藏星（标题为空时隐藏）
-            if !tab.title.isEmpty, tab.title != "counterapp" {
+            if tab.title != TM.active.blackTab() {
                 Button(action: {
                     // 切换收藏状态并发送通知给 RN
                     let newBookmarkStatus = !tab.isBookmarked
@@ -1213,7 +1213,7 @@ private struct TabDragPreviewView: View {
                 .frame(width: iconWidth, height: iconWidth)
 
                 // 标题
-                Text(tab.title != "counterapp" ? tab.title : "")
+                Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(hex: "#404040"))
                     .lineLimit(1)
