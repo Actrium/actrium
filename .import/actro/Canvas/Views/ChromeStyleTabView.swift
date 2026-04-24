@@ -72,6 +72,7 @@ struct ChromeStyleTabView: View {
                 focusedTab = nil
             }
         )
+        .ignoresSafeArea(.all, edges: .bottom)
         .interactiveDismissDisabled(true)
         .asNavigationTransition(id: tab.id, in: animation)
         .onAppear {
@@ -107,8 +108,9 @@ struct ChromeStyleTabView: View {
     }
 
     private func handleTabsCountChange() {
-        if let focused = focusedTab,
-           !viewModel.tabs.contains(where: { $0.id == focused.id }) {
+        // 关闭最后一个 tab 时，切换到 Overview
+        if viewModel.tabs.isEmpty {
+            viewModel.canvasMode = .overview
             focusedTab = nil
         }
     }
@@ -313,24 +315,26 @@ struct ChromeTabCardView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             // Content preview area
-            Rectangle()
-                .fill(Color(hslString: tab.backgroundColor).opacity(0.1))
-                .overlay(alignment: .topLeading) {
-                    if let snapshot = viewModel.tabSnapshots[tab.id] {
+            HStack {
+                if let snapshot = viewModel.tabSnapshots[tab.id] {
+                    GeometryReader { geo in
                         Image(uiImage: snapshot)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    } else {
-                        Color.white
+                            .frame(width: geo.size.width, height: geo.size.height)
                     }
+                } else {
+                    Color.white
                 }
-                .clipped()
-                .allowsHitTesting(false)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onSelect()
-                }
-                .layoutPriority(1)
+            }
+            .padding(.bottom, 56)
+            .clipped()
+            .allowsHitTesting(false)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSelect()
+            }
+            .layoutPriority(1)
 
             // Bottom title bar
             HStack(alignment: .center, spacing: 12) {
@@ -410,10 +414,6 @@ struct ChromeTabCardView: View {
             .background(Color(hex: theme.isDarkMode ? "#000000" : "#E5E5EA"))
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
         .background(Color.black)
     }
 }

@@ -212,7 +212,7 @@ struct PhoneMainView: View {
                 // 截取页面中部区域：宽度 = 页面宽度，高度 = 宽度 * 0.54
                 let screenWidth = window.bounds.width
                 let screenHeight = window.bounds.height
-                let cropHeight = screenWidth * 0.54
+                let cropHeight = screenWidth * 0.54 - 56
                 
                 // 垂直居中
                 let cropY = (screenHeight - cropHeight) / 2

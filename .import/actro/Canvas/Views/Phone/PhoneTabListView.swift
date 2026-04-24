@@ -84,23 +84,24 @@ struct PhoneTabCardView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             // 内容预览区
-            Rectangle()
-                .fill(Color(hslString: tab.backgroundColor).opacity(0.1))
-                .overlay(alignment: .topLeading) {
-                    if let snapshot = viewModel.tabSnapshots[tab.id] {
+            HStack {
+                if let snapshot = viewModel.tabSnapshots[tab.id] {
+                    GeometryReader { geo in
                         Image(uiImage: snapshot)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    } else {
-                        Color.white
+                            .frame(width: geo.size.width, height: geo.size.height - 56)
                     }
+                } else {
+                    Color.white
                 }
-                .clipped()
-                .allowsHitTesting(false)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onSelect()
-                }
+            }
+            .clipped()
+            .allowsHitTesting(false)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSelect()
+            }
             
             // 底部服务条
             HStack(alignment: .center, spacing: 12) {
