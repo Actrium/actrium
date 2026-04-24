@@ -192,6 +192,9 @@ struct ChromeTabOverviewView: View {
             let columns = calculateNumberOfColumns(availableWidth: availableWidth)
 
             ScrollView {
+                // 顶部间距：适应自定义导航栏
+                Color.clear.frame(height: 15)
+                
                 LazyVGrid(
                     columns: Array(repeating: GridItem(
                         .flexible(minimum: 140),
