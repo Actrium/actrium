@@ -86,12 +86,13 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             val imeBars = insets.getInsets(WindowInsetsCompat.Type.ime())
-            // 仅应用底部和左右的内边距，保留顶部不做处理，以实现内容延伸到状态栏
+            // 仅应用左右的内边距，保留顶部不做处理，以实现内容延伸到状态栏
             v.setPadding(systemBars.left, 0, systemBars.right, 0)
-            // 底部沉浸式判断：当 decorFitsSystemWindows=false 且导航栏 inset 为 0，说明内容已延伸到底部
-            val isBottomImmersive = navBars.bottom == 0
-            binding.llNav.updateLayoutParams<ViewGroup.MarginLayoutParams>  {
-                bottomMargin = navBars.bottom
+            // 键盘弹出时 IME inset 已包含虚拟按键高度（adjustKeyboard 会将其作为 padding），
+            // 此时不需要再给 flNavBar 额外加 margin，否则虚拟按键高度被重复计算导致间距过大
+            val isImeVisible = imeBars.bottom > 0
+            binding.flNavBar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = if (isImeVisible) 0 else navBars.bottom
             }
             insets
         }
