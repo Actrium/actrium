@@ -79,6 +79,7 @@
 
         <!-- 导航栏 -->
         <FrameLayout
+            android:id="@+id/flNavBar"
             android:layout_width="match_parent"
             android:layout_height="95dp"
             android:layout_gravity="bottom"
