@@ -4,102 +4,114 @@
 //
 //  Chrome-style tab grid view for iPad
 //  - Adaptive grid columns based on container width
-//  - Zoom transition between overview and focused modes
+//  - Zoom transition between overview and focused modes via .sheet
 //
 
 import SwiftUI
 import Kingfisher
 
-// MARK: - Display Mode
-enum ChromeTabMode {
-    case overview
-    case focus(tabId: UUID)
-}
-
 // MARK: - Chrome Style Tab View
 struct ChromeStyleTabView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-
-    @State private var mode: ChromeTabMode = .overview
+    
+    @State private var focusedTab: Tab?
     @Namespace private var animation
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                // Background
-                Color.black.ignoresSafeArea()
+        overviewView
+            .preferredColorScheme(.dark)
+            .fullScreenCover(item: $focusedTab) { tab in
+                focusSheetContent(tab: tab)
+                    .preferredColorScheme(.light)
+            }
+            .onAppear { syncFocusedTabWithCanvasMode() }
+            .onChange(of: viewModel.canvasMode) { oldValue, newValue in
+                handleCanvasModeChange(newValue)
+            }
+            .onChange(of: viewModel.tabs.count) { oldValue, newValue in
+                handleTabsCountChange()
+            }
+    }
 
-                switch mode {
-                case .overview:
-                    ChromeTabOverviewView(
-                        tabs: viewModel.tabsSortedBySlotPosition().map { $0.tab },
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        animation: animation,
-                        onSelectTab: { tabId in
-                            withAnimation(.spring(response: 0.35, dampingFraction: 1.0)) {
-                                mode = .focus(tabId: tabId)
-                                viewModel.currentTabId = tabId
-                                viewModel.canvasMode = .focus(tabId: tabId)
-                            }
-                        },
-                        onNewTab: {
-                            viewModel.addNewTab(focus: false)
-                        },
-                        onCloseTab: { tabId in
-                            withAnimation {
-                                viewModel.closeTab(id: tabId)
-                            }
-                        }
-                    )
-                    .padding(.top, 24)
-                    .environment(\.colorScheme, .dark)
-
-                case .focus(let tabId):
-                    ChromeTabFocusView(
-                        tabId: tabId,
-                        viewModel: viewModel,
-                        historyVM: historyVM,
-                        animation: animation,
-                        onBackToOverview: {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 1.0)) {
-                                mode = .overview
-                                viewModel.canvasMode = .overview
-                            }
-                        }
-                    )
-                    .asNavigationTransition(id: tabId, in: animation)
+    private var overviewView: some View {
+        ChromeTabOverviewView(
+            tabs: viewModel.tabsSortedBySlotPosition().map { $0.tab },
+            viewModel: viewModel,
+            historyVM: historyVM,
+            animation: animation,
+            onSelectTab: { tabId in
+                guard let tab = viewModel.tabs.first(where: { $0.id == tabId }) else { return }
+                viewModel.currentTabId = tabId
+                viewModel.canvasMode = .focus(tabId: tabId)
+                focusedTab = tab
+            },
+            onNewTab: {
+                let newTab = viewModel.addNewTab(deferAppend: true)
+                viewModel.currentTabId = newTab.id
+                viewModel.canvasMode = .focus(tabId: newTab.id)
+                focusedTab = newTab
+            },
+            onCloseTab: { tabId in
+                withAnimation {
+                    viewModel.closeTab(id: tabId)
                 }
             }
-        }
+        )
+        .background(Color.black)
+    }
+
+    private func focusSheetContent(tab: Tab) -> some View {
+        ChromeTabFocusView(
+            initialTabId: tab.id,
+            viewModel: viewModel,
+            historyVM: historyVM,
+            animation: animation,
+            onBackToOverview: {
+                viewModel.canvasMode = .overview
+                focusedTab = nil
+            }
+        )
+        .ignoresSafeArea(.all, edges: .bottom)
+        .interactiveDismissDisabled(true)
+        .asNavigationTransition(id: tab.id, in: animation)
         .onAppear {
-            // Sync with view model's canvas mode
-            switch viewModel.canvasMode {
-            case .overview:
-                mode = .overview
-            case .focus(let tabId):
-                mode = .focus(tabId: tabId)
+            // fullScreenCover 弹出后，将 pending 的新标签页正式加入列表显示
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                viewModel.commitPendingNewTab()
             }
         }
-        .onChange(of: viewModel.canvasMode) { oldValue, newValue in
-            switch newValue {
-            case .overview:
-                if case .overview = mode { return }
-                withAnimation(.spring(response: 0.35, dampingFraction: 1.0)) {
-                    mode = .overview
-                }
-            case .focus(let tabId):
-                if case .focus(tabId) = mode { return }
-                withAnimation(.spring(response: 0.35, dampingFraction: 1.0)) {
-                    mode = .focus(tabId: tabId)
+    }
+
+    private func syncFocusedTabWithCanvasMode() {
+        if case .focus(let tabId) = viewModel.canvasMode,
+           let tab = viewModel.tabs.first(where: { $0.id == tabId }) {
+            focusedTab = tab
+        }
+    }
+
+    private func handleCanvasModeChange(_ newValue: CanvasMode) {
+        switch newValue {
+        case .overview:
+            focusedTab = nil
+        case .focus(let tabId):
+            // 仅在从 overview 进入 focus 时设置 focusedTab（弹出 sheet）
+            // focus 内切换 tab 时不应更新 focusedTab，避免 sheet 收起再弹出
+            if focusedTab == nil {
+                // 优先从 tabs 列表查找，其次从 pendingNewTab 查找（新建 Tab 尚未加入列表时）
+                let tab = viewModel.tabs.first(where: { $0.id == tabId }) ?? viewModel.pendingNewTab
+                if let tab = tab, tab.id == tabId {
+                    focusedTab = tab
                 }
             }
         }
-        .onChange(of: viewModel.currentTabId) { oldValue, newValue in
-            if let tabId = newValue, case .focus = mode {
-                mode = .focus(tabId: tabId)
-            }
+    }
+
+    private func handleTabsCountChange() {
+        // 关闭最后一个 tab 时，切换到 Overview
+        if viewModel.tabs.isEmpty {
+            viewModel.canvasMode = .overview
+            focusedTab = nil
         }
     }
 }
@@ -116,6 +128,7 @@ struct ChromeTabOverviewView: View {
     let onCloseTab: (UUID) -> Void
 
     @State private var hoveringOverTabId: UUID?
+    @State private var showSettings: Bool = false
 
     private let cardAspectRatio: CGFloat = 3.0 / 4.0
     private let interItemSpacing: CGFloat = 16
@@ -135,11 +148,55 @@ struct ChromeTabOverviewView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            // 顶部导航栏
+            OverviewNavigationBar(
+                viewModel: viewModel,
+                onBack: {
+                    // 从 Overview 切换到当前选中的 Tab
+                    if let currentTabId = viewModel.currentTabId,
+                       let tab = viewModel.tabs.first(where: { $0.id == currentTabId }) {
+                        viewModel.canvasMode = .focus(tabId: tab.id)
+                    } else if let firstTab = viewModel.tabs.first {
+                        viewModel.currentTabId = firstTab.id
+                        viewModel.canvasMode = .focus(tabId: firstTab.id)
+                    }
+                },
+                openSettings: { showSettings = true }
+            )
+
+            // 卡片网格
+            cardGridView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(systemType: .settings, viewModel: viewModel)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openTabFromRN)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let systemAppTypeStr = userInfo["systemAppType"] as? String,
+                  let systemTabType = SystemTabType(rawValue: systemAppTypeStr) else { return }
+            let additionalProps = userInfo["additionalProps"] as? [String: Any]
+            showSettings = true
+            withAnimation {
+                let _ = viewModel.openSystemTab(
+                    systemTabType,
+                    additionalProps: additionalProps,
+                    replaceAdditionalProps: additionalProps != nil
+                )
+            }
+        }
+    }
+
+    private var cardGridView: some View {
         GeometryReader { geometry in
             let availableWidth = geometry.size.width - sideInset * 2
             let columns = calculateNumberOfColumns(availableWidth: availableWidth)
 
             ScrollView {
+                // 顶部间距：适应自定义导航栏
+                Color.clear.frame(height: 15)
+                
                 LazyVGrid(
                     columns: Array(repeating: GridItem(
                         .flexible(minimum: 140),
@@ -227,7 +284,7 @@ struct ChromeTabDragPreviewView: View {
                 }
                 .frame(width: iconWidth, height: iconWidth)
 
-                Text((tab.title.isEmpty || tab.title == "counterapp") ? "" : tab.title)
+                Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(hex: "#404040"))
                     .lineLimit(1)
@@ -250,29 +307,34 @@ struct ChromeTabCardView: View {
     @ObservedObject var viewModel: BrowserViewModel
     let onSelect: () -> Void
     let onClose: () -> Void
+    
+    @EnvironmentObject private var theme: ThemeManager
 
     private let iconWidth: CGFloat = 32.0
 
     var body: some View {
         ZStack(alignment: .bottom) {
             // Content preview area
-            Rectangle()
-                .fill(Color(hslString: tab.backgroundColor).opacity(0.1))
-                .overlay(alignment: .topLeading) {
-                    if let snapshot = viewModel.tabSnapshots[tab.id] {
+            HStack {
+                if let snapshot = viewModel.tabSnapshots[tab.id] {
+                    GeometryReader { geo in
                         Image(uiImage: snapshot)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    } else {
-                        Color.white
+                            .frame(width: geo.size.width, height: geo.size.height)
                     }
+                } else {
+                    Color.white
                 }
-                .clipped()
-                .allowsHitTesting(false)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onSelect()
-                }
+            }
+            .padding(.bottom, 56)
+            .clipped()
+            .allowsHitTesting(false)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSelect()
+            }
+            .layoutPriority(1)
 
             // Bottom title bar
             HStack(alignment: .center, spacing: 12) {
@@ -310,15 +372,17 @@ struct ChromeTabCardView: View {
                 .frame(width: iconWidth, height: iconWidth)
 
                 // Title
-                Text((tab.title.isEmpty || tab.title == "counterapp") ? "" : tab.title)
+                Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(hex: "#404040"))
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 // Bookmark button
-                if !tab.title.isEmpty && tab.title != "counterapp" {
+                if tab.title != TM.active.blackTab() {
                     Button(action: {
                         NotificationCenter.default.post(
                             name: .tabBookmarkChangedFromNative,
@@ -344,16 +408,13 @@ struct ChromeTabCardView: View {
                         .frame(width: 36, height: 36)
                 }
             }
+            .frame(maxWidth: .infinity)
             .frame(height: 56)
             .padding(.horizontal, 14)
-            .background(Color(white: 0.9))
+            .background(Color(hex: theme.isDarkMode ? "#000000" : "#E5E5EA"))
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-        .background(Color(white: 0.15))
+        .background(Color.black)
     }
 }
 
@@ -375,38 +436,73 @@ struct ChromeNewTabCardView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
-        .background(Color(white: 0.12))
+        .background(Color.black)
     }
 }
 
 // MARK: - Focus View (Single Tab)
 struct ChromeTabFocusView: View {
-    let tabId: UUID
+    let initialTabId: UUID
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
     var animation: Namespace.ID
     let onBackToOverview: () -> Void
 
-    var tab: Tab? {
-        viewModel.tabs.first { $0.id == tabId }
+    @State private var hoveredTabId: UUID?
+    @State private var viewWidth: CGFloat = UIScreen.main.bounds.width
+    private let tabHeight: CGFloat = 44
+    private let maxTabWidth: CGFloat = 240
+    private let minTabWidth: CGFloat = 120
+
+    /// 当前显示的 tab（跟随 viewModel.currentTabId 变化，实现 sheet 内切换 tab）
+    private var currentTab: Tab? {
+        if let tabId = viewModel.currentTabId {
+            return viewModel.tabs.first(where: { $0.id == tabId })
+        }
+        return viewModel.tabs.first(where: { $0.id == initialTabId })
+    }
+
+    private func calculateTabWidth() -> CGFloat {
+        let availableWidth = viewWidth - 44 - 44 - tabHeight
+        let tabCount = CGFloat(viewModel.tabs.count)
+        let calculatedWidth = availableWidth / max(tabCount, 1)
+        return min(max(calculatedWidth, minTabWidth), maxTabWidth)
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            if let tab = tab {
-                SingleTabRootView(
-                    tab: tab,
-                    viewModel: viewModel,
-                    historyVM: historyVM,
-                    containerSize: CGSize(
-                        width: max(geometry.size.width, 1),
-                        height: max(geometry.size.height, 1)
+        VStack(spacing: 0) {
+            // 顶部导航栏
+            FocusModeNavigationBar(
+                viewModel: viewModel,
+                hoveredTabId: $hoveredTabId,
+                tabHeight: tabHeight,
+                calculateTabWidth: calculateTabWidth,
+                availableWidth: viewWidth,
+                onBackToOverview: onBackToOverview
+            )
+
+            // 内容区域
+            GeometryReader { geometry in
+                if let tab = currentTab {
+                    SingleTabRootView(
+                        tab: tab,
+                        viewModel: viewModel,
+                        historyVM: historyVM,
+                        containerSize: CGSize(
+                            width: max(geometry.size.width, 1),
+                            height: max(geometry.size.height, 1)
+                        )
                     )
-                )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .ignoresSafeArea()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .id(tab.id)
+                    .onAppear {
+                        viewWidth = geometry.size.width
+                    }
+                    .onChange(of: geometry.size.width) { _, newWidth in
+                        viewWidth = newWidth
+                    }
+                }
             }
         }
-        .ignoresSafeArea()
     }
 }

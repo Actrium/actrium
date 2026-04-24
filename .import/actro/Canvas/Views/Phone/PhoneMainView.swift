@@ -156,6 +156,12 @@ struct PhoneMainView: View {
                 // .interactiveDismissDisabled(true)
                 .ignoresSafeArea()
                 .asNavigationTransition(id: tab.id, in: animation)
+                .onAppear {
+                    // sheet 弹出动画完成后，将 pending 的新标签页正式加入列表显示
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        viewModel.commitPendingNewTab()
+                    }
+                }
         }
         .onChange(of: viewModel.currentTabId) { oldValue, newValue in
             guard let newValue = newValue else {
@@ -206,7 +212,7 @@ struct PhoneMainView: View {
                 // 截取页面中部区域：宽度 = 页面宽度，高度 = 宽度 * 0.54
                 let screenWidth = window.bounds.width
                 let screenHeight = window.bounds.height
-                let cropHeight = screenWidth * 0.54
+                let cropHeight = screenWidth * 0.54 - 56
                 
                 // 垂直居中
                 let cropY = (screenHeight - cropHeight) / 2
