@@ -14,14 +14,16 @@ import Kingfisher
 struct ChromeStyleTabView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-
+    
     @State private var focusedTab: Tab?
     @Namespace private var animation
 
     var body: some View {
         overviewView
+            .preferredColorScheme(.dark)
             .fullScreenCover(item: $focusedTab) { tab in
                 focusSheetContent(tab: tab)
+                    .preferredColorScheme(.light)
             }
             .onAppear { syncFocusedTabWithCanvasMode() }
             .onChange(of: viewModel.canvasMode) { oldValue, newValue in
@@ -54,7 +56,6 @@ struct ChromeStyleTabView: View {
             }
         )
         .background(Color.black)
-        .environment(\.colorScheme, .dark)
     }
 
     private func focusSheetContent(tab: Tab) -> some View {
@@ -149,7 +150,6 @@ struct ChromeTabOverviewView: View {
                 },
                 openSettings: { showSettings = true }
             )
-            .environment(\.colorScheme, .dark)
 
             // 卡片网格
             cardGridView
