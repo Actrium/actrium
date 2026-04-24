@@ -47,6 +47,7 @@ target 'Canvas' do
   pod 'RNSVG', :path => 'Subsystem/node_modules/react-native-svg'
   pod 'react-native-keyboard-controller', :path => 'Subsystem/node_modules/react-native-keyboard-controller'
   pod 'RNReactNativeHapticFeedback', :path => 'Subsystem/node_modules/react-native-haptic-feedback'
+  pod 'ExpoSpeechRecognition', :path => 'Subsystem/node_modules/@boomsi/rn-speech-recognition/ios'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 微信 SDK
