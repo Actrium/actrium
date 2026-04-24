@@ -20,7 +20,7 @@ struct PhoneTabListView: View {
                         .frame(width: 44, height: 44)
                         .foregroundColor(.white)
                         .onTapGesture {
-                            let newTab = viewModel.addNewTab()
+                            let newTab = viewModel.addNewTab(deferAppend: true)
                             onSelect(newTab)
                         }
                 }

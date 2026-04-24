@@ -156,6 +156,12 @@ struct PhoneMainView: View {
                 // .interactiveDismissDisabled(true)
                 .ignoresSafeArea()
                 .asNavigationTransition(id: tab.id, in: animation)
+                .onAppear {
+                    // sheet 弹出动画完成后，将 pending 的新标签页正式加入列表显示
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        viewModel.commitPendingNewTab()
+                    }
+                }
         }
         .onChange(of: viewModel.currentTabId) { oldValue, newValue in
             guard let newValue = newValue else {
