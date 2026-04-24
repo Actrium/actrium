@@ -47,7 +47,10 @@ struct ChromeStyleTabView: View {
                 focusedTab = tab
             },
             onNewTab: {
-                viewModel.addNewTab(focus: false)
+                let newTab = viewModel.addNewTab(deferAppend: true)
+                viewModel.currentTabId = newTab.id
+                viewModel.canvasMode = .focus(tabId: newTab.id)
+                focusedTab = newTab
             },
             onCloseTab: { tabId in
                 withAnimation {
@@ -71,6 +74,12 @@ struct ChromeStyleTabView: View {
         )
         .interactiveDismissDisabled(true)
         .asNavigationTransition(id: tab.id, in: animation)
+        .onAppear {
+            // fullScreenCover 弹出后，将 pending 的新标签页正式加入列表显示
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                viewModel.commitPendingNewTab()
+            }
+        }
     }
 
     private func syncFocusedTabWithCanvasMode() {
@@ -87,9 +96,12 @@ struct ChromeStyleTabView: View {
         case .focus(let tabId):
             // 仅在从 overview 进入 focus 时设置 focusedTab（弹出 sheet）
             // focus 内切换 tab 时不应更新 focusedTab，避免 sheet 收起再弹出
-            if focusedTab == nil,
-               let tab = viewModel.tabs.first(where: { $0.id == tabId }) {
-                focusedTab = tab
+            if focusedTab == nil {
+                // 优先从 tabs 列表查找，其次从 pendingNewTab 查找（新建 Tab 尚未加入列表时）
+                let tab = viewModel.tabs.first(where: { $0.id == tabId }) ?? viewModel.pendingNewTab
+                if let tab = tab, tab.id == tabId {
+                    focusedTab = tab
+                }
             }
         }
     }
