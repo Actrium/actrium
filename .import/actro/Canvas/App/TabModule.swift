@@ -128,6 +128,7 @@ class TabModule: NSObject {
             // 切换到目标 tab
             viewModel.currentSystemTabType = nil
             viewModel.currentTabId = tab.id
+            viewModel.canvasMode = .focus(tabId: tab.id)
             
             #if os(iOS)
             if UIDevice.current.userInterfaceIdiom == .phone {
@@ -179,25 +180,28 @@ class TabModule: NSObject {
     @objc
     func exitFullscreen(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         logger.notice("[TabModule] exitFullscreen called")
-        
+
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom != .phone {
-            reject("UNSUPPORTED_DEVICE", "This method is only supported on iPhone", nil)
-            return
+        DispatchQueue.main.async {
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // iPhone：发送通知，让 PhoneMainView 退出全屏
+                NotificationCenter.default.post(
+                    name: .exitFullscreenFromRN,
+                    object: nil
+                )
+            } else {
+                // iPad：通过 viewModel 切换到 Overview 模式
+                guard let viewModel = BrowserViewModel.active else {
+                    reject("NO_VIEW_MODEL", "BrowserViewModel not available", nil)
+                    return
+                }
+                viewModel.canvasMode = .overview
+            }
+            resolve(true)
         }
         #else
         reject("UNSUPPORTED_PLATFORM", "This method is only supported on iOS", nil)
-        return
         #endif
-
-        DispatchQueue.main.async {
-            // 发送通知，让 PhoneMainView 退出全屏
-            NotificationCenter.default.post(
-                name: .exitFullscreenFromRN,
-                object: nil
-            )
-            resolve(true)
-        }
     }
     
     @objc
