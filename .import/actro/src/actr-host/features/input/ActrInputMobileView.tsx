@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Animated,
-  Platform,
   PanResponder,
   StyleSheet,
   TextInput,
@@ -97,9 +96,6 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     handleVoiceStart,
     handleVoiceChangeState,
     handleVoiceEnd,
-    isVoiceRecording,
-    isCancellingVoice,
-    metering,
     inputText,
     onClearInput,
     handleSendRef,
@@ -243,6 +239,17 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     }
   }, [appId, tab.id, onAddBookmark]);
 
+  const handleVoiceStartForMobile = React.useCallback(async () => {
+    await handleVoiceStart();
+  }, [handleVoiceStart]);
+
+  const handleVoiceEndForMobile = React.useCallback(
+    async (isCancelled: boolean) => {
+      await handleVoiceEnd(isCancelled);
+    },
+    [handleVoiceEnd],
+  );
+
   React.useEffect(() => {
     if (inputText.length > 0 && mobileInputMode !== 'text') {
       setMobileInputMode('text');
@@ -255,22 +262,27 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     }
   }, [isAttachmentMenuOpen, isVoiceSurfaceMode]);
 
-  // 手势实例固定化：录音期间 metering/duration 高频更新时也不重建 responder，
+  // 手势实例固定化：识别状态变化时也不重建 responder，
   // 只通过 ref 注入最新回调，避免 release/terminate 丢失。
   const voiceCallbacksRef = React.useRef({
-    handleVoiceStart,
+    handleVoiceStart: handleVoiceStartForMobile,
     handleVoiceChangeState,
-    handleVoiceEnd,
+    handleVoiceEnd: handleVoiceEndForMobile,
     onFocusTextInput,
   });
   React.useEffect(() => {
     voiceCallbacksRef.current = {
-      handleVoiceStart,
+      handleVoiceStart: handleVoiceStartForMobile,
       handleVoiceChangeState,
-      handleVoiceEnd,
+      handleVoiceEnd: handleVoiceEndForMobile,
       onFocusTextInput,
     };
-  }, [handleVoiceChangeState, handleVoiceEnd, handleVoiceStart, onFocusTextInput]);
+  }, [
+    handleVoiceChangeState,
+    handleVoiceEndForMobile,
+    handleVoiceStartForMobile,
+    onFocusTextInput,
+  ]);
 
   const createStableVoicePanResponder = React.useCallback(
     (allowTapFocus: boolean): PanResponderInstance => {
