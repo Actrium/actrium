@@ -12,6 +12,7 @@ class AskAwayPackage : ReactPackage {
             TabModule(reactContext),
             UserInfoModule(reactContext),
             EmailModule(reactContext),
+            AsrModule(reactContext),
         )
     }
 

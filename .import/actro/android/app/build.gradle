@@ -191,4 +191,6 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.0-beta01")
     implementation("androidx.room:room-ktx:2.8.0-beta01")
     ksp("androidx.room:room-compiler:2.8.0-beta01")
+    implementation 'com.alphacephei:vosk-android:0.3.75@aar'
+    implementation 'net.java.dev.jna:jna:5.14.0@aar'
 }
