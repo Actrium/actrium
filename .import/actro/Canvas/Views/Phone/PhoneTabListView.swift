@@ -20,7 +20,7 @@ struct PhoneTabListView: View {
                         .frame(width: 44, height: 44)
                         .foregroundColor(.white)
                         .onTapGesture {
-                            let newTab = viewModel.addNewTab()
+                            let newTab = viewModel.addNewTab(deferAppend: true)
                             onSelect(newTab)
                         }
                 }
@@ -32,7 +32,7 @@ struct PhoneTabListView: View {
             
             ScrollView {
                 // 顶部间距：适应自定义导航栏
-                Color.clear.frame(height: 144)
+                Color.clear.frame(height: UIApplication.shared.statusBarHeight + 66 + 26)
                 
                 LazyVStack(spacing: 16) {
                     ForEach(viewModel.tabs) { tab in
@@ -84,23 +84,24 @@ struct PhoneTabCardView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             // 内容预览区
-            Rectangle()
-                .fill(Color(hslString: tab.backgroundColor).opacity(0.1))
-                .overlay(alignment: .topLeading) {
-                    if let snapshot = viewModel.tabSnapshots[tab.id] {
+            HStack {
+                if let snapshot = viewModel.tabSnapshots[tab.id] {
+                    GeometryReader { geo in
                         Image(uiImage: snapshot)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    } else {
-                        Color.white
+                            .frame(width: geo.size.width, height: geo.size.height - 56)
                     }
+                } else {
+                    Color.white
                 }
-                .clipped()
-                .allowsHitTesting(false)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onSelect()
-                }
+            }
+            .clipped()
+            .allowsHitTesting(false)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSelect()
+            }
             
             // 底部服务条
             HStack(alignment: .center, spacing: 12) {
@@ -138,7 +139,7 @@ struct PhoneTabCardView: View {
                 .frame(width: iconWidth, height: iconWidth)
                 
                 // 标题
-                Text(tab.title != "counterapp" ? tab.title : "")
+                Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(hex: "#404040"))
                     .lineLimit(1)
@@ -146,7 +147,7 @@ struct PhoneTabCardView: View {
                 Spacer()
                 
                 // 收藏星（标题为空时隐藏）
-                if !tab.title.isEmpty, tab.title != "counterapp" {
+                if tab.title != TM.active.blackTab() {
                     Button(action: {
                         // 切换收藏状态并发送通知给 RN
                         let newBookmarkStatus = !tab.isBookmarked
