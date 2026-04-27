@@ -44,7 +44,6 @@ import { useAppStore } from '../../store/useAppStore';
 import { useTabIdMapStore } from '../../store/useTabIdMapStore';
 import ExtensionPanel from '../extension/ExtensionPanel';
 import { ChatHeader } from '../chat/ChatHeader';
-import { exitFullscreen } from '../../../native-bridge/tab/TabModule';
 import { useTabNativeEvents } from '../../hooks/useTabNativeEvents';
 import { useExtensionPanelGesture } from '../../hooks/useExtensionPanelGesture';
 import { isTablet, isAndroid, isPhone } from '../../../utils/device';
@@ -465,7 +464,6 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         {!isTablet && (
           <ChatHeader
             onLeftPress={togglePhonePanelVisible}
-            onRightPress={() => exitFullscreen()}
             appId={appId}
             leftDisabled={!appId}
             leftActive={panelVisible}
