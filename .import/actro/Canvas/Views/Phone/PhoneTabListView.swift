@@ -30,39 +30,49 @@ struct PhoneTabListView: View {
             .ignoresSafeArea(edges: .top)
             .zIndex(10)
             
-            ScrollView {
-                // 顶部间距：适应自定义导航栏
-                Color.clear.frame(height: UIApplication.shared.statusBarHeight + 66 + 26)
-                
-                LazyVStack(spacing: 16) {
-                    ForEach(viewModel.tabs) { tab in
-                        PhoneTabCardView(
-                            tab: tab,
-                            viewModel: viewModel,
-                            historyVM: historyVM,
-                            animation: animation,
-                            onSelect: {
-                                // 立即切换 ID，确保 UI 响应（蓝色边框）
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    viewModel.currentTabId = tab.id
+            ScrollViewReader { proxy in
+                ScrollView {
+                    // 顶部间距：适应自定义导航栏
+                    Color.clear.frame(height: UIApplication.shared.statusBarHeight + 66 + 26)
+
+                    LazyVStack(spacing: 16) {
+                        ForEach(viewModel.tabs) { tab in
+                            PhoneTabCardView(
+                                tab: tab,
+                                viewModel: viewModel,
+                                historyVM: historyVM,
+                                animation: animation,
+                                onSelect: {
+                                    // 立即切换 ID，确保 UI 响应（蓝色边框）
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        viewModel.currentTabId = tab.id
+                                    }
+                                    // 延迟一小会儿后进入全屏，让用户看到选中效果
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        onSelect(tab)
+                                    }
+                                },
+                                onClose: {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                        viewModel.closeTab(id: tab.id)
+                                    }
                                 }
-                                // 延迟一小会儿后进入全屏，让用户看到选中效果
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                    onSelect(tab)
-                                }
-                            },
-                            onClose: {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    viewModel.closeTab(id: tab.id)
-                                }
-                            }
-                        )
+                            )
+                            .id(tab.id)
+                        }
+                        Color.clear.frame(height: 80).id("bottomSpacer")
                     }
-                    Color.clear.frame(height: 80)
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
+                .ignoresSafeArea()
+                .onChange(of: viewModel.tabs.count) { oldCount, newCount in
+                    if newCount > oldCount {
+                        withAnimation {
+                            proxy.scrollTo("bottomSpacer", anchor: .bottom)
+                        }
+                    }
+                }
             }
-            .ignoresSafeArea()
         }
         .background(Color.black)
     }
