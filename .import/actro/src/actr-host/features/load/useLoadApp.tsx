@@ -341,7 +341,7 @@ export const useLoadApp = () => {
         <Icon
           type='keyboard'
           size={loadApp.inputPrefixIconSize}
-          color={colors.textSecondary}
+          color={colors.textIconStrong}
           style={sharedStyles.inputPrefix}
         />
         <TouchableWithoutFeedback>
@@ -353,6 +353,9 @@ export const useLoadApp = () => {
             placeholderTextColor={colors.textTertiary}
             onChangeText={setInputValue}
             onSubmitEditing={handleLoadWithUrl}
+            enterKeyHint='done'
+            returnKeyType='done'
+            returnKeyLabel='确认'
             blurOnSubmit={true}
             editable={!showLoading}
             onFocus={() => {
