@@ -127,6 +127,7 @@ struct ChromeTabOverviewView: View {
 
     @State private var hoveringOverTabId: UUID?
     @State private var showSettings: Bool = false
+    @State private var previousTabCount: Int = 0
 
     private let cardAspectRatio: CGFloat = 3.0 / 4.0
     private let interItemSpacing: CGFloat = 16
@@ -191,65 +192,76 @@ struct ChromeTabOverviewView: View {
             let availableWidth = geometry.size.width - sideInset * 2
             let columns = calculateNumberOfColumns(availableWidth: availableWidth)
 
-            ScrollView {
-                // 顶部间距：适应自定义导航栏
-                Color.clear.frame(height: 15)
-                
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(
-                        .flexible(minimum: 140),
-                        spacing: interItemSpacing
-                    ), count: columns),
-                    spacing: lineSpacing
-                ) {
-                    ForEach(tabs) { tab in
-                        let isHovering = hoveringOverTabId == tab.id
-                        ChromeTabCardView(
-                            tab: tab,
-                            viewModel: viewModel,
-                            onSelect: { onSelectTab(tab.id) },
-                            onClose: { onCloseTab(tab.id) }
-                        )
-                        .aspectRatio(cardAspectRatio, contentMode: .fit)
-                        .asMatchedTransitionSource(id: tab.id, in: animation)
-                        .opacity(isHovering ? 0.5 : 1.0)
-                        .draggable(tab.id.uuidString) {
-                            ChromeTabDragPreviewView(tab: tab)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    // 顶部间距：适应自定义导航栏
+                    Color.clear.frame(height: 15)
+
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(
+                            .flexible(minimum: 140),
+                            spacing: interItemSpacing
+                        ), count: columns),
+                        spacing: lineSpacing
+                    ) {
+                        ForEach(tabs) { tab in
+                            let isHovering = hoveringOverTabId == tab.id
+                            ChromeTabCardView(
+                                tab: tab,
+                                viewModel: viewModel,
+                                onSelect: { onSelectTab(tab.id) },
+                                onClose: { onCloseTab(tab.id) }
+                            )
+                            .aspectRatio(cardAspectRatio, contentMode: .fit)
+                            .asMatchedTransitionSource(id: tab.id, in: animation)
+                            .opacity(isHovering ? 0.5 : 1.0)
+                            .draggable(tab.id.uuidString) {
+                                ChromeTabDragPreviewView(tab: tab)
+                            }
+                            .dropDestination(for: String.self) { items, _ in
+                                guard let sourceIdStr = items.first,
+                                      let sourceId = UUID(uuidString: sourceIdStr),
+                                      sourceId != tab.id else { return false }
+                                withAnimation(.spring(response: 0.35, dampingFraction: 1.0)) {
+                                    viewModel.swapSlotPositions(tabId1: sourceId, tabId2: tab.id)
+                                    hoveringOverTabId = nil
+                                    let tabIds = viewModel.tabsSortedBySlotPosition().map { $0.tab.id.uuidString }
+                                    NotificationCenter.default.post(
+                                        name: .tabsReorderedFromNative,
+                                        object: nil,
+                                        userInfo: ["tabIds": tabIds]
+                                    )
+                                }
+                                return true
+                            } isTargeted: { targeted in
+                                if targeted {
+                                    hoveringOverTabId = tab.id
+                                } else if hoveringOverTabId == tab.id {
+                                    hoveringOverTabId = nil
+                                }
+                            }
                         }
-                        .dropDestination(for: String.self) { items, _ in
-                            guard let sourceIdStr = items.first,
-                                  let sourceId = UUID(uuidString: sourceIdStr),
-                                  sourceId != tab.id else { return false }
-                            withAnimation(.spring(response: 0.35, dampingFraction: 1.0)) {
-                                viewModel.swapSlotPositions(tabId1: sourceId, tabId2: tab.id)
-                                hoveringOverTabId = nil
-                                let tabIds = viewModel.tabsSortedBySlotPosition().map { $0.tab.id.uuidString }
-                                NotificationCenter.default.post(
-                                    name: .tabsReorderedFromNative,
-                                    object: nil,
-                                    userInfo: ["tabIds": tabIds]
-                                )
+
+                        // New Tab Card
+                        ChromeNewTabCardView()
+                            .aspectRatio(cardAspectRatio, contentMode: .fit)
+                            .id("newTabCard")
+                            .onTapGesture {
+                                onNewTab()
                             }
-                            return true
-                        } isTargeted: { targeted in
-                            if targeted {
-                                hoveringOverTabId = tab.id
-                            } else if hoveringOverTabId == tab.id {
-                                hoveringOverTabId = nil
-                            }
+                    }
+                    .padding(.horizontal, sideInset)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+                }
+                .onChange(of: viewModel.tabs.count) { oldCount, newCount in
+                    if newCount > oldCount {
+                        withAnimation {
+                            proxy.scrollTo("newTabCard", anchor: .bottom)
                         }
                     }
-
-                    // New Tab Card
-                    ChromeNewTabCardView()
-                        .aspectRatio(cardAspectRatio, contentMode: .fit)
-                        .onTapGesture {
-                            onNewTab()
-                        }
+                    previousTabCount = newCount
                 }
-                .padding(.horizontal, sideInset)
-                .padding(.top, 8)
-                .padding(.bottom, 16)
             }
         }
     }
