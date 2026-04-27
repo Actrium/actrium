@@ -9,6 +9,7 @@ import {
 import { KeyboardStickyView, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { AppText, HostIconButton, SafeBottomView } from '../../../components';
+import { exitFullscreen } from '../../../native-bridge';
 import { LoadAppCameraPanel } from './LoadAppCameraPanel';
 import { useLoadApp } from './useLoadApp';
 import { HOST_SHADOWS } from '../../styles/shadows';
@@ -27,12 +28,10 @@ const LoadAppPhone = () => {
     setCameraActive,
     setInputExpanded,
     inputRef,
-    inputValue,
     dismissKeyboard,
     ensureNetworkPermission,
     handleScannedUrl,
     showLoading,
-    submitInputUrl,
     tabCtx,
     renderInput,
     renderLoadingView,
@@ -41,6 +40,13 @@ const LoadAppPhone = () => {
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
+  const handleExitTab = React.useCallback(async () => {
+    try {
+      await exitFullscreen();
+    } catch (error) {
+      console.error('[LoadAppPhone] Failed to exit fullscreen', error);
+    }
+  }, []);
 
   const phoneScanSectionAnimatedStyle = useAnimatedStyle(() => {
     if (Platform.OS !== 'ios') {
@@ -131,15 +137,14 @@ const LoadAppPhone = () => {
                   {renderInput(styles.phoneInput, styles.phoneInputContainer)}
                 </View>
                 <HostIconButton
-                  iconType='send'
+                  iconType='tab_preview'
                   size={inputArea.sideButtonSize}
                   iconSize={inputArea.sideButtonIconSize}
-                  iconColor={inputValue.trim() ? colors.textPrimary : colors.textIconSecondary}
+                  iconColor={colors.textIconStrong}
                   onPress={() => {
                     inputRef.current?.blur();
-                    submitInputUrl(inputValue);
+                    void handleExitTab();
                   }}
-                  disabled={!inputValue.trim() || showLoading}
                   style={styles.phoneSendButton}
                 />
               </View>
