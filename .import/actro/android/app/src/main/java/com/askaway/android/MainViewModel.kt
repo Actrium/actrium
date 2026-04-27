@@ -6,6 +6,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import chat.askaway.android.core.asr.TextPostProcessor
 import chat.askaway.android.data.repository.ActiveRepository
 import chat.askaway.android.utils.TabBundleUtils
 import com.askaway.android.event.NativeModuleEvent
@@ -52,6 +53,8 @@ class MainViewModel(
 
         // 从数据库加载数据
         loadActiveListFromDatabase()
+        var result = TextPostProcessor.process("今天周六了天气怎么样")
+        Log.e("TextPostProcessor", "TextPostProcessor:${result}")
     }
 
     private fun loadActiveListFromDatabase() {

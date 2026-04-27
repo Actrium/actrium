@@ -35,6 +35,7 @@ object AsrManager {
      * 接收 PCM 音频片段，流式识别并返回当前结果。
      * acceptWaveForm 返回 true 表示检测到断句，取 getResult；
      * 返回 false 表示仍在说话中，取 getPartialResult。
+     * 仅对 final result（断句检测结果）做后处理（分词断句加标点），partial result 不处理。
      */
     fun feedAudio(data: ByteArray): AsrResult {
         val rec = recognizer ?: throw IllegalStateException("AsrManager not initialized, call initialize() first")
@@ -43,7 +44,9 @@ object AsrManager {
         val isEndpoint = rec.acceptWaveForm(data, data.size)
 
         return if (isEndpoint) {
-            AsrResult(parseResultText(rec.result), true)
+            val rawText = parseResultText(rec.result)
+            val processedText = postProcessIfNeeded(rawText)
+            AsrResult(processedText, true)
         } else {
             AsrResult(parsePartialText(rec.partialResult), false)
         }
@@ -57,15 +60,17 @@ object AsrManager {
         val rec = recognizer ?: throw IllegalStateException("AsrManager not initialized, call initialize() first")
 
         val fullAudio = audioBuffer.toByteArray()
-        if (fullAudio.isNotEmpty()) {
+        val rawText = if (fullAudio.isNotEmpty()) {
             val newRec = Recognizer(model!!, SAMPLE_RATE)
             newRec.acceptWaveForm(fullAudio, fullAudio.size)
             val finalResult = newRec.finalResult
             recognizer = newRec
-            return parseResultText(finalResult)
+            parseResultText(finalResult)
+        } else {
+            parseResultText(rec.finalResult)
         }
 
-        return parseResultText(rec.finalResult)
+        return postProcessIfNeeded(rawText)
     }
 
     /**
@@ -90,6 +95,15 @@ object AsrManager {
 
     private fun mapLanguageToDir(language: String): String {
         return if (language in ZH_LANG_CODES) "zh" else "en"
+    }
+
+    /**
+     * 仅对中文语种的最终结果做后处理（分词断句加标点），英文或其他语种跳过。
+     */
+    private fun postProcessIfNeeded(text: String): String {
+        if (text.isBlank()) return text
+        val langDir = currentLangDir ?: return text
+        return if (langDir == "zh") TextPostProcessor.process(text) else text
     }
 
     /**
