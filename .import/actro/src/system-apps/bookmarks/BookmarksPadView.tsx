@@ -6,7 +6,6 @@ import {
   Image,
   ActivityIndicator,
   TouchableOpacity,
-  Pressable,
   useWindowDimensions,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -149,16 +148,6 @@ export default function BookmarksPadView({
                     <AppText style={styles.cardTitle} numberOfLines={1}>
                       {item.instance_name}
                     </AppText>
-                    <Pressable
-                      hitSlop={8}
-                      style={styles.removeButton}
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        setPendingDeleteItem(item);
-                      }}
-                    >
-                      <Icon type="close" size={16} style={styles.removeButtonIcon} />
-                    </Pressable>
                   </View>
                 }
                 triggerType='longPress'
@@ -230,7 +219,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.md,
     paddingHorizontal: 13,
-    paddingRight: 38,
   },
   cardLogo: {
     width: 32,
@@ -244,18 +232,6 @@ const styles = StyleSheet.create({
     color: '#F2F2F7',
     ...getTypographyStyle('title3'),
     fontWeight: '500',
-  },
-  removeButton: {
-    position: 'absolute',
-    top: 18,
-    right: 13,
-    width: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  removeButtonIcon: {
-    tintColor: '#F2F2F7',
   },
   centerContainer: {
     flex: 1,
