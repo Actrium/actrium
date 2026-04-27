@@ -13,7 +13,6 @@ import type { ColorTokens } from '../../../theme/colors';
 
 interface ChatHeaderProps {
   onLeftPress: () => void;
-  onRightPress: () => void;
   leftDisabled?: boolean;
   leftActive?: boolean;
   showLeftButton?: boolean;
@@ -25,7 +24,6 @@ interface ChatHeaderProps {
 export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
   ({
     onLeftPress,
-    onRightPress,
     leftDisabled = false,
     leftActive = false,
     showLeftButton = true,
@@ -38,22 +36,12 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     const topInset = includeSafeTopInset ? topInsetRaw : 0;
     const hasAppId = Boolean(appId);
     const { showOfflineHint } = useNetworkStatus();
-    const [showCloseButton, setShowCloseButton] = React.useState(false);
 
     const colors = useColors();
     const colorScheme = useColorScheme();
     const styles = React.useMemo(() => makeStyles(colors), [colors]);
     const headerButtonBackgroundColor =
       colorScheme === 'dark' ? undefined : '#fff';
-
-    React.useEffect(() => {
-      if (hasAppId) {
-        setShowCloseButton(false);
-        return;
-      }
-      const timer = setTimeout(() => setShowCloseButton(true), 500);
-      return () => clearTimeout(timer);
-    }, [hasAppId]);
 
     return (
       <View
@@ -106,15 +94,6 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             style={styles.headerButton}
             backgroundColor={headerButtonBackgroundColor}
             iconColor={colors.iconChatHeader}
-          />
-        ) : showCloseButton ? (
-          <HostIconButton
-            iconType='close'
-            iconSize={16}
-            iconColor={colors.iconChatHeader}
-            onPress={onRightPress}
-            style={styles.headerButton}
-            backgroundColor={headerButtonBackgroundColor}
           />
         ) : (
           <View style={styles.headerButtonPlaceholder} />
