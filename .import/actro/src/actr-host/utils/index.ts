@@ -201,3 +201,15 @@ export const actrLoader = new ActrLoader({
  */
 export { AudioStreamManager, createAudioStream } from './AudioStreamManager';
 export type { AudioStreamOptions } from './AudioStreamManager';
+
+/**
+ * SpeechRecognitionService - 语音识别工具
+ */
+export { SpeechRecognitionService, speechRecognitionService } from './SpeechRecognitionService';
+export type {
+  SpeechRecognitionCallbacks,
+  SpeechRecognitionErrorEvent,
+  SpeechRecognitionState,
+  SpeechRecognitionTranscriptEvent,
+  StartSpeechRecognitionOptions,
+} from './SpeechRecognitionService/index.types';

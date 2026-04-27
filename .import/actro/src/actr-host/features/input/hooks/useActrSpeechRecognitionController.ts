@@ -1,0 +1,174 @@
+import React, { useCallback, useRef, useState } from 'react';
+import {
+  speechRecognitionService,
+  type SpeechRecognitionErrorEvent,
+  type SpeechRecognitionTranscriptEvent,
+} from '../../../utils';
+
+interface UseActrSpeechRecognitionControllerParams {
+  processMessageSend: (content: string) => Promise<unknown>;
+}
+
+interface UseActrSpeechRecognitionControllerResult {
+  isVoiceRecording: boolean;
+  isCancellingVoice: boolean;
+  metering: number;
+  handleVoiceStart: () => Promise<void>;
+  handleVoiceEnd: (isCancelled: boolean) => Promise<void>;
+  handleVoiceChangeState: (isCancelling: boolean) => void;
+}
+
+export function useActrSpeechRecognitionController(
+  params: UseActrSpeechRecognitionControllerParams,
+): UseActrSpeechRecognitionControllerResult {
+  const { processMessageSend } = params;
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [isCancellingVoice, setIsCancellingVoice] = useState(false);
+  const isVoiceRecordingRef = useRef(false);
+  const isCancellingVoiceRef = useRef(false);
+  const sessionIdRef = useRef(0);
+  const activeSessionIdRef = useRef<number | null>(null);
+  const lastTranscriptRef = useRef('');
+  const fallbackTranscriptRef = useRef('');
+  const shouldSubmitOnEndRef = useRef(false);
+
+  const setVoiceRecording = useCallback((next: boolean) => {
+    isVoiceRecordingRef.current = next;
+    setIsVoiceRecording(next);
+  }, []);
+
+  const resetRecognitionState = useCallback(() => {
+    setVoiceRecording(false);
+    isCancellingVoiceRef.current = false;
+    setIsCancellingVoice(false);
+    activeSessionIdRef.current = null;
+    lastTranscriptRef.current = '';
+    fallbackTranscriptRef.current = '';
+    shouldSubmitOnEndRef.current = false;
+  }, [setVoiceRecording]);
+
+  const updateTranscript = useCallback(
+    (event: SpeechRecognitionTranscriptEvent) => {
+      if (activeSessionIdRef.current == null || isCancellingVoiceRef.current) {
+        return;
+      }
+      lastTranscriptRef.current = event.text;
+    },
+    [],
+  );
+
+  React.useEffect(() => {
+    const unsubscribe = speechRecognitionService.subscribe({
+      onPartialResult: updateTranscript,
+      onFinalResult: updateTranscript,
+      onEnd: () => {
+        const shouldSubmit = shouldSubmitOnEndRef.current;
+        const transcript =
+          lastTranscriptRef.current.trim() || fallbackTranscriptRef.current.trim();
+        resetRecognitionState();
+        if (!shouldSubmit || !transcript) {
+          return;
+        }
+        void processMessageSend(transcript);
+      },
+      onError: (error: SpeechRecognitionErrorEvent) => {
+        console.error(
+          '[useActrSpeechRecognitionController] speech recognition error:',
+          error.error,
+          error.message,
+        );
+        resetRecognitionState();
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [processMessageSend, resetRecognitionState, updateTranscript]);
+
+  const handleVoiceStart = useCallback(async () => {
+    sessionIdRef.current += 1;
+    activeSessionIdRef.current = sessionIdRef.current;
+    lastTranscriptRef.current = '';
+    fallbackTranscriptRef.current = '';
+    shouldSubmitOnEndRef.current = false;
+    isCancellingVoiceRef.current = false;
+    setIsCancellingVoice(false);
+    setVoiceRecording(true);
+
+    // 简体中文：zh-CN
+    // 繁体中文：zh-TW
+    // 英文：en-US
+    // 日语：ja-JP
+    // 韩语：ko-KR
+    // 西班牙语：es-ES
+    // 俄语：ru-RU
+    // 法语：fr-FR
+    const started = await speechRecognitionService.start({
+      lang: 'zh-CN',
+      continuous: true,
+      interimResults: true,
+      addsPunctuation: true,
+    });
+
+    if (!started) {
+      resetRecognitionState();
+      console.warn(
+        '[useActrSpeechRecognitionController] speech recognition permission denied or unavailable',
+      );
+    }
+  }, [resetRecognitionState, setVoiceRecording]);
+
+  const handleVoiceEnd = useCallback(
+    async (isCancelled: boolean) => {
+      if (!isVoiceRecordingRef.current) {
+        return;
+      }
+
+      isCancellingVoiceRef.current = isCancelled;
+      setIsCancellingVoice(isCancelled);
+      setVoiceRecording(false);
+
+      if (isCancelled) {
+        activeSessionIdRef.current = null;
+        lastTranscriptRef.current = '';
+        fallbackTranscriptRef.current = '';
+        shouldSubmitOnEndRef.current = false;
+        speechRecognitionService.abort();
+        setIsCancellingVoice(false);
+        return;
+      }
+
+      // 中文注释：停止识别前先缓存一份当前转写，避免部分机型 stop 后未补发 final 结果时丢字。
+      const { finalText, partialText } = speechRecognitionService.getCurrentTranscript();
+      fallbackTranscriptRef.current =
+        finalText || partialText || lastTranscriptRef.current;
+      shouldSubmitOnEndRef.current = true;
+      speechRecognitionService.stop();
+      setIsCancellingVoice(false);
+    },
+    [setVoiceRecording],
+  );
+
+  const handleVoiceChangeState = useCallback((isCancelling: boolean) => {
+    isCancellingVoiceRef.current = isCancelling;
+    setIsCancellingVoice(isCancelling);
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      if (activeSessionIdRef.current != null) {
+        speechRecognitionService.abort();
+      }
+    };
+  }, []);
+
+  return {
+    isVoiceRecording,
+    isCancellingVoice,
+    metering: 0,
+    handleVoiceStart,
+    handleVoiceEnd,
+    handleVoiceChangeState,
+  };
+}
