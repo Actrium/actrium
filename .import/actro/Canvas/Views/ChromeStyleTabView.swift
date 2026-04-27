@@ -284,7 +284,7 @@ struct ChromeTabDragPreviewView: View {
 
                 Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Color(hex: "#404040"))
+                    .foregroundColor(Color(hex: "#ECECED"))
                     .lineLimit(1)
 
                 Spacer()
@@ -394,7 +394,7 @@ struct ChromeTabCardView: View {
                 // Title
                 Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Color(hex: "#404040"))
+                    .foregroundColor(Color(hex: "#ECECED"))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
@@ -424,7 +424,7 @@ struct ChromeTabCardView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 56)
             .padding(.horizontal, 14)
-            .background(Color(hex: theme.isDarkMode ? "#000000" : "#E5E5EA"))
+            .background(Color(hex: theme.isDarkMode ? "#2C2C2C" : "#E5E5EA"))
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .background(Color.black)

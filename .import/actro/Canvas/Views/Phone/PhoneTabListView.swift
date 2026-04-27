@@ -163,7 +163,7 @@ struct PhoneTabCardView: View {
                 // 标题
                 Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Color(hex: "#404040"))
+                    .foregroundColor(theme.isDarkMode ? Color(hex: "#ECECED") : Color(hex: "#404040"))
                     .lineLimit(1)
                 
                 Spacer()
@@ -191,7 +191,7 @@ struct PhoneTabCardView: View {
             }
             .frame(height: 56)
             .padding(.horizontal, 14)
-            .background(Color(hex: theme.isDarkMode ? "#000000" : "#E5E5EA"))
+            .background(Color(hex: theme.isDarkMode ? "#2C2C2C" : "#E5E5EA"))
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(1 / 0.54, contentMode: .fit)
