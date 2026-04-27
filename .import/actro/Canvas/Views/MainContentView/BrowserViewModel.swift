@@ -984,6 +984,13 @@ class BrowserViewModel: ObservableObject {
         saveTabs()
     }
 
+    func closeOtherTabs(keepTabId: UUID) {
+        let tabsToClose = tabs.filter { $0.id != keepTabId }
+        for tab in tabsToClose {
+            closeTab(id: tab.id)
+        }
+    }
+
     func closeCurrentTab() {
         guard let id = currentTabId else { return }
         closeTab(id: id)
