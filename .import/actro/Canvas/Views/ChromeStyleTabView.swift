@@ -53,9 +53,7 @@ struct ChromeStyleTabView: View {
                 focusedTab = newTab
             },
             onCloseTab: { tabId in
-                withAnimation {
-                    viewModel.closeTab(id: tabId)
-                }
+                viewModel.closeTab(id: tabId)
             }
         )
         .background(Color.black)
@@ -307,10 +305,32 @@ struct ChromeTabCardView: View {
     @ObservedObject var viewModel: BrowserViewModel
     let onSelect: () -> Void
     let onClose: () -> Void
-    
+
     @EnvironmentObject private var theme: ThemeManager
 
     private let iconWidth: CGFloat = 32.0
+
+    private func toggleBookmark() {
+        let newBookmarkStatus = !tab.isBookmarked
+        if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+            viewModel.tabs[index].isBookmarked = newBookmarkStatus
+            viewModel.saveTabs()
+        }
+        NotificationCenter.default.post(
+            name: .tabBookmarkChangedFromNative,
+            object: nil,
+            userInfo: [
+                "tabId": tab.id.uuidString,
+                "isBookmarked": newBookmarkStatus
+            ]
+        )
+    }
+
+    private func closeOtherTabs() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            viewModel.closeOtherTabs(keepTabId: tab.id)
+        }
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -384,14 +404,7 @@ struct ChromeTabCardView: View {
                 // Bookmark button
                 if tab.title != TM.active.blackTab() {
                     Button(action: {
-                        NotificationCenter.default.post(
-                            name: .tabBookmarkChangedFromNative,
-                            object: nil,
-                            userInfo: [
-                                "tabId": tab.id.uuidString,
-                                "isBookmarked": !tab.isBookmarked
-                            ]
-                        )
+                        toggleBookmark()
                     }) {
                         Image(systemName: "star.circle.fill")
                             .font(.system(size: 20))
@@ -415,6 +428,31 @@ struct ChromeTabCardView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .background(Color.black)
+        .contextMenu {
+            if tab.title != TM.active.blackTab() {
+                Button {
+                    toggleBookmark()
+                } label: {
+                    Label(tab.isBookmarked ? "取消收藏" : "收藏",
+                          systemImage: tab.isBookmarked ? "star.slash" : "star")
+                }
+            }
+
+            Button(role: .destructive) {
+                onClose()
+            } label: {
+                Label("关闭页签", systemImage: "xmark")
+            }
+
+            if viewModel.tabs.count > 1 {
+                Divider()
+                Button(role: .destructive) {
+                    closeOtherTabs()
+                } label: {
+                    Label("关闭其他页签", systemImage: "xmark")
+                }
+            }
+        }
     }
 }
 
