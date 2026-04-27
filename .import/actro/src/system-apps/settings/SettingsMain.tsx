@@ -165,6 +165,7 @@ const styles = StyleSheet.create({
   accountInfo: {
     flex: 1,
     marginLeft: spacing.lg,
+    marginRight: spacing.xl
   },
   accountName: {
     ...getTypographyStyle('title2'),
