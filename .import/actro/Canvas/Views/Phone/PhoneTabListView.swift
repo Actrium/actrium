@@ -78,8 +78,30 @@ struct PhoneTabCardView: View {
     let onClose: () -> Void
     
     @EnvironmentObject private var theme: ThemeManager
-    
+
     private let iconWidth = 32.0
+
+    private func toggleBookmark() {
+        let newBookmarkStatus = !tab.isBookmarked
+        if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+            viewModel.tabs[index].isBookmarked = newBookmarkStatus
+            viewModel.saveTabs()
+        }
+        NotificationCenter.default.post(
+            name: .tabBookmarkChangedFromNative,
+            object: nil,
+            userInfo: [
+                "tabId": tab.id.uuidString,
+                "isBookmarked": newBookmarkStatus
+            ]
+        )
+    }
+
+    private func closeOtherTabs() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            viewModel.closeOtherTabs(keepTabId: tab.id)
+        }
+    }
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -149,24 +171,7 @@ struct PhoneTabCardView: View {
                 // 收藏星（标题为空时隐藏）
                 if tab.title != TM.active.blackTab() {
                     Button(action: {
-                        // 切换收藏状态并发送通知给 RN
-                        let newBookmarkStatus = !tab.isBookmarked
-
-                        // 立即更新本地状态（UI 响应）
-                        if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
-                            viewModel.tabs[index].isBookmarked = newBookmarkStatus
-                            viewModel.saveTabs() // 持久化变更
-                        }
-
-                        // 发送通知给 RN 侧处理实际的收藏逻辑
-                        NotificationCenter.default.post(
-                            name: .tabBookmarkChangedFromNative,
-                            object: nil,
-                            userInfo: [
-                                "tabId": tab.id.uuidString,
-                                "isBookmarked": newBookmarkStatus
-                            ]
-                        )
+                        toggleBookmark()
                     }) {
                         Image(systemName: "star.circle.fill")
                             .font(.system(size: 20))
@@ -193,6 +198,31 @@ struct PhoneTabCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         .asMatchedTransitionSource(id: tab.id, in: animation)
+        .contextMenu {
+            if tab.title != TM.active.blackTab() {
+                Button {
+                    toggleBookmark()
+                } label: {
+                    Label(tab.isBookmarked ? "取消收藏" : "收藏",
+                          systemImage: tab.isBookmarked ? "star.slash" : "star")
+                }
+            }
+
+            Button(role: .destructive) {
+                onClose()
+            } label: {
+                Label("关闭页签", systemImage: "xmark")
+            }
+
+            if viewModel.tabs.count > 1 {
+                Divider()
+                Button(role: .destructive) {
+                    closeOtherTabs()
+                } label: {
+                    Label("关闭其他页签", systemImage: "xmark")
+                }
+            }
+        }
     }
 }
 
