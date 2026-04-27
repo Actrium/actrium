@@ -678,7 +678,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                       style={styles.mobileMicButton}
                       onPress={onSwitchToVoiceHoldMode}
                     >
-                      <Icon type='audio' size={inputArea.largeIconSize} color={colors.textIconSecondary} />
+                      <Icon type='audio' size={inputArea.smallIconSize} color={colors.textIconStrong} />
                     </TouchableOpacity>
                   ) : (
                     <View style={styles.mobileMicButton} />
@@ -719,8 +719,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
                   >
                     <Icon
                       type='keyboard'
-                      size={inputArea.largeIconSize}
-                      color={colors.textIconSecondary}
+                      size={inputArea.smallIconSize}
+                      color={colors.textIconStrong}
                     />
                   </TouchableOpacity>
                 </View>
