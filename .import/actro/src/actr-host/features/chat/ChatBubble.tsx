@@ -28,11 +28,7 @@ import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 
 import { LongPressMenu } from '../shared/LongPressMenu';
-import { WaveForm } from '../shared/WaveForm';
-import {
-  useVoicePlaybackStore,
-  type VoicePlaybackMode,
-} from '../../store/useVoicePlaybackStore';
+import { useVoicePlaybackStore } from '../../store/useVoicePlaybackStore';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -42,7 +38,6 @@ import { useMessageStore } from '../../store/useMessageStore';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { triggerHaptic } from '../../utils/haptics';
 
-import { Animated, Easing } from 'react-native';
 import { FeedbackFormModal } from './FeedbackFormModal';
 import { IAttachmentItem } from '../../types/attachment';
 import { Supramark } from '@supramark/rn';
@@ -57,6 +52,12 @@ import {
   playVoiceMessageFile,
   stopVoiceMessagePlayback,
 } from '../../utils/VoiceMessageStorage';
+import {
+  ReadAloudActionButton,
+  useReadAloudAction,
+} from './ReadAloudActionButton';
+
+const SHOW_AI_READ_ALOUD_ENTRY = false;
 
 interface ChatBubbleProps {
   content?: string;
@@ -126,7 +127,7 @@ export default function ChatBubble({
     ? styles.questionBubbleFrame
     : styles.answerBubbleFrame;
 
-  const { activePlayback, setActivePlayback, updatePlaybackStatus, clearPlayback } =
+  const { activePlayback, setActivePlayback, clearPlayback } =
     useVoicePlaybackStore();
   const selectionMode = useMessageStore((s) => s.selectionMode);
   const enterSelectionMode = useMessageStore((s) => s.enterSelectionMode);
@@ -139,7 +140,6 @@ export default function ChatBubble({
     width: number;
   } | null>(null);
 
-  const spinValue = React.useRef(new Animated.Value(0)).current;
   const bubblePart = type;
   const isCurrentPlaybackTarget =
     activePlayback.messageId === msgId &&
@@ -147,13 +147,8 @@ export default function ChatBubble({
     activePlayback.appId === (appId ?? null);
   const isVoiceBubblePlaying =
     isCurrentPlaybackTarget && activePlayback.mode === 'voice_message';
-  const readAloudStatus: 'idle' | 'loading' | 'playing' =
-    isCurrentPlaybackTarget && activePlayback.mode === 'read_aloud'
-      ? activePlayback.status
-      : 'idle';
-
   const beginPlayback = React.useCallback(
-    (mode: VoicePlaybackMode, status: 'loading' | 'playing' = 'playing') => {
+    (status: 'loading' | 'playing' = 'playing') => {
       if (!msgId) return;
       // 中文注释：切换全局播放目标前先停掉本地语音文件播放，保证新的播放态和实际音频输出一致。
       stopVoiceMessagePlayback();
@@ -161,7 +156,7 @@ export default function ChatBubble({
         appId: appId ?? null,
         messageId: msgId,
         part: bubblePart,
-        mode,
+        mode: 'voice_message',
         status,
       });
     },
@@ -180,87 +175,17 @@ export default function ChatBubble({
   }, [appId, bubblePart, clearPlayback, msgId]);
 
   React.useEffect(() => {
-    if (readAloudStatus === 'loading') {
-      Animated.loop(
-        Animated.timing(spinValue, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-      ).start();
-    } else {
-      spinValue.setValue(0);
-    }
-  }, [readAloudStatus]);
-
-  React.useEffect(() => {
     if (isCopied) {
       const timer = setTimeout(() => setIsCopied(false), 1000);
       return () => clearTimeout(timer);
     }
   }, [isCopied]);
 
-  const spin = spinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
-  const startPlayback = React.useCallback(() => {
-    if (!msgId) return;
-    console.log('[ChatBubble] startPlayback:', content);
-    beginPlayback('read_aloud', 'loading');
-
-    // 模拟加载 1s -> 播放 3s
-    const loadTimer = setTimeout(() => {
-      const playback = useVoicePlaybackStore.getState().activePlayback;
-      const isSamePlayback =
-        playback.messageId === msgId &&
-        playback.part === bubblePart &&
-        playback.appId === (appId ?? null) &&
-        playback.mode === 'read_aloud';
-      if (!isSamePlayback) return;
-
-      updatePlaybackStatus('playing');
-      const playTimer = setTimeout(() => {
-        clearPlaybackIfCurrent();
-      }, 3000);
-      timersRef.current.push(playTimer);
-    }, 1000);
-    timersRef.current.push(loadTimer);
-  }, [
+  const readAloudAction = useReadAloudAction({
     appId,
-    beginPlayback,
-    bubblePart,
-    clearPlaybackIfCurrent,
-    content,
     msgId,
-    updatePlaybackStatus,
-  ]);
-
-  const stopPlayback = React.useCallback(() => {
-    console.log('[ChatBubble] stopPlayback');
-    clearPlaybackIfCurrent();
-  }, [clearPlaybackIfCurrent]);
-
-  const timersRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
-
-  const clearLocalTimers = () => {
-    timersRef.current.forEach(clearTimeout);
-    timersRef.current = [];
-  };
-
-  const handleReadAloud = React.useCallback(() => {
-    if (!msgId) return;
-
-    // 如果当前正在播放/加载此消息，则停止
-    if (readAloudStatus !== 'idle') {
-      stopPlayback();
-      return;
-    }
-
-    startPlayback();
-  }, [msgId, readAloudStatus, startPlayback, stopPlayback]);
+    part: bubblePart,
+  });
 
   const handleVoiceBubblePress = React.useCallback(async () => {
     if (!msgId || !parsedVoicePayload) return;
@@ -272,7 +197,7 @@ export default function ChatBubble({
     }
 
     try {
-      beginPlayback('voice_message');
+      beginPlayback();
       await playVoiceMessageFile(voicePayload);
     } catch (error) {
       Alert.alert(
@@ -291,21 +216,6 @@ export default function ChatBubble({
     t,
     voicePayload,
   ]);
-
-  // 中文注释：任意其它气泡接管全局播放后，当前气泡的本地计时器必须立刻清理，避免 UI 残留。
-  React.useEffect(() => {
-    if (!isCurrentPlaybackTarget && readAloudStatus !== 'idle') {
-      console.log(
-        '[ChatBubble] Global playback changed, stopping current msg:',
-        msgId,
-      );
-      clearLocalTimers();
-    }
-  }, [isCurrentPlaybackTarget, msgId, readAloudStatus]);
-
-  React.useEffect(() => {
-    return () => clearLocalTimers();
-  }, []);
 
   const menuOptions = React.useMemo(() => {
     const options = [];
@@ -330,10 +240,11 @@ export default function ChatBubble({
         icon: <Icon type='share' size={16} />,
       });
     }
-    if (!isSmall && !isQuestion) {
+    // 中文注释：AI 朗读能力保留在独立组件/动作里，当前仅关闭入口显示，不影响后续单独恢复。
+    if (SHOW_AI_READ_ALOUD_ENTRY && !isSmall && !isQuestion) {
       options.push({
         label: t('actr.chat.readAloud'),
-        onPress: handleReadAloud,
+        onPress: readAloudAction.handlePress,
         icon: <Icon type='voice' size={16} />,
       });
     }
@@ -379,9 +290,8 @@ export default function ChatBubble({
     onEdit,
     onCopy,
     onShare,
-    isLatest,
     isSmall,
-    handleReadAloud,
+    readAloudAction.handlePress,
     msgId,
     tabId,
     enterSelectionMode,
@@ -660,30 +570,14 @@ export default function ChatBubble({
               size={chatBubbleToolbar.iconSize}
             />
           </Pressable>
-          <Pressable
-            style={[
-              styles.toolbarButton,
-              readAloudStatus === 'playing' && styles.toolbarButtonPlaying,
-              selectionMode && styles.toolbarButtonDisabled,
-            ]}
-            onPress={handleReadAloud}
-            disabled={readAloudStatus !== 'idle' || selectionMode}
-            hitSlop={8}
-          >
-            {readAloudStatus === 'loading' && (
-              <Animated.View
-                style={[
-                  styles.loadingBorder,
-                  { transform: [{ rotate: spin }] },
-                ]}
-              />
-            )}
-            {readAloudStatus === 'playing' ? (
-              <WaveForm />
-            ) : (
-              <Icon type='voice' size={chatBubbleToolbar.iconSize} />
-            )}
-          </Pressable>
+          {SHOW_AI_READ_ALOUD_ENTRY ? (
+            <ReadAloudActionButton
+              appId={appId}
+              msgId={msgId}
+              part={bubblePart}
+              selectionMode={selectionMode}
+            />
+          ) : null}
           <DropdownMenu
             width={longPressMenu.width}
             estimatedWidth={longPressMenu.width}
@@ -849,19 +743,6 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     backgroundColor: colors.bgToolbarButton,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  toolbarButtonPlaying: {
-    backgroundColor: colors.bgToolbarButtonPlaying,
-  },
-  loadingBorder: {
-    position: 'absolute',
-    width: chatBubbleToolbar.buttonSize,
-    height: chatBubbleToolbar.buttonSize,
-    borderRadius: chatBubbleToolbar.buttonSize / 2,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    borderTopColor: colors.accentBlue,
-    borderRightColor: colors.accentBlue,
   },
   questionWrapper: {
     alignItems: 'flex-end',
