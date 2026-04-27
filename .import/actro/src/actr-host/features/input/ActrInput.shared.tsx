@@ -10,7 +10,7 @@ import { getHostLayoutTokens } from '../../../utils/layout';
 import ActrInputMobileView from './ActrInputMobileView';
 import ActrInputPadView from './ActrInputPadView';
 import { StableTextInput } from './StableTextInput';
-import { useActrVoiceController } from './hooks/useActrVoiceController';
+import { useActrSpeechRecognitionController } from './hooks/useActrSpeechRecognitionController';
 import { useActrMessageFlow } from './hooks/useActrMessageFlow';
 import { LoginModal, AuthorizeModal } from '../../../system-apps/auth';
 import { getTypographyStyle } from '../../../theme/tokens';
@@ -88,10 +88,6 @@ export default function ActrInput({
     handleLoginSuccess,
     handleAuthorizeClose,
     handleAuthorizeSuccess,
-    sendVoiceChunk,
-    startVoice,
-    endVoice,
-    voiceMessageCallbacks,
   } = useActrMessageFlow({
     appId,
     tabId: tab.id,
@@ -120,13 +116,8 @@ export default function ActrInput({
     handleVoiceStart,
     handleVoiceEnd,
     handleVoiceChangeState,
-  } = useActrVoiceController({
-    processVoiceMessageSend: processMessageSend,
-    sendVoiceChunk,
-    startVoice,
-    endVoice,
-    onVoiceMessageReady: voiceMessageCallbacks.onVoiceMessageReady,
-    onVoiceMessageCanceled: voiceMessageCallbacks.onVoiceMessageCanceled,
+  } = useActrSpeechRecognitionController({
+    processMessageSend,
   });
 
   return (

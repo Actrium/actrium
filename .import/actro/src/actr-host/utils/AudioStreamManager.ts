@@ -24,6 +24,7 @@ export interface AudioStreamOptions {
 export class AudioStreamManager {
   private isRecording = false;
   private options: AudioStreamOptions;
+  private hasAttachedDataListener = false;
 
   constructor(options: AudioStreamOptions) {
     this.options = options;
@@ -51,15 +52,18 @@ export class AudioStreamManager {
         wavFile: this.options.wavFile || 'audio.wav',  // 提供默认值
       });
 
-      // 监听音频数据
-      LiveAudioStream.on('data', (data: string) => {
-        // data 是 base64 编码的音频数据
-        console.log(`[AudioStream] 收到音频切片: ${data.length} bytes`);
-        const binaryData = new Uint8Array(Buffer.from(data, 'base64'));
-        this.options.onAudioChunk(binaryData);
-        // TODO 暂时用 base64
-        // this.options.onAudioChunk(data as any);
-      });
+      if (!this.hasAttachedDataListener) {
+        this.hasAttachedDataListener = true;
+        // 中文注释：底层库没有暴露 removeListener，多次 start 时这里必须只注册一次 data 监听，避免重复喂音频。
+        LiveAudioStream.on('data', (data: string) => {
+          // data 是 base64 编码的音频数据
+          console.log(`[AudioStream] 收到音频切片: ${data.length} bytes`);
+          const binaryData = new Uint8Array(Buffer.from(data, 'base64'));
+          this.options.onAudioChunk(binaryData);
+          // TODO 暂时用 base64
+          // this.options.onAudioChunk(data as any);
+        });
+      }
 
       // 开始录音
       LiveAudioStream.start();
