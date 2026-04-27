@@ -53,8 +53,6 @@ class MainViewModel(
 
         // 从数据库加载数据
         loadActiveListFromDatabase()
-        var result = TextPostProcessor.process("今天周六了天气怎么样")
-        Log.e("TextPostProcessor", "TextPostProcessor:${result}")
     }
 
     private fun loadActiveListFromDatabase() {
