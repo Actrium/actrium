@@ -6,6 +6,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { KeyboardStickyView, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { AppText, HostIconButton, SafeBottomView } from '../../../components';
@@ -19,8 +20,8 @@ import type { ColorTokens } from '../../../theme/colors';
 
 const scanAreaSize = 252;
 const scanFrameOffset = 4;
-const openCameraBtnHeight = 66;
-const openCameraBtnFontSize = 18;
+const openCameraBtnHeight = 60;
+const openCameraBtnIconSize = 34;
 
 const LoadAppPhone = () => {
   const {
@@ -38,6 +39,7 @@ const LoadAppPhone = () => {
   } = useLoadApp();
 
   const colors = useColors();
+  const { t } = useTranslation();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
   const handleExitTab = React.useCallback(async () => {
@@ -101,7 +103,7 @@ const LoadAppPhone = () => {
                       }}
                       onScanUrl={handleScannedUrl}
                       openCameraBtnHeight={openCameraBtnHeight}
-                      openCameraBtnFontSize={openCameraBtnFontSize}
+                      openCameraBtnIconSize={openCameraBtnIconSize}
                     />
                   </View>
                   {/* scan.png 叠加在扫码区外层，类似外边框 */}
@@ -116,10 +118,7 @@ const LoadAppPhone = () => {
 
                 <View style={styles.scanHintBlock}>
                   <AppText style={styles.scanHintTitle}>
-                    请扫码 AskAway 二维码
-                  </AppText>
-                  <AppText style={styles.scanHintSubtitle}>
-                    进入应用
+                    {t('actr.app.scanHint')}
                   </AppText>
                 </View>
               </View>
@@ -219,13 +218,6 @@ const makeStyles = (colors: ColorTokens) =>
     scanHintTitle: {
       fontSize: 17,
       lineHeight: 22,
-      color: colors.textPrimary,
-      textAlign: 'center',
-    },
-    scanHintSubtitle: {
-      marginTop: 4,
-      fontSize: 20,
-      lineHeight: 26,
       color: colors.textPrimary,
       textAlign: 'center',
     },

@@ -174,7 +174,8 @@
       "realtime": "實時動態",
       "parentChild": "親子遊玩",
       "culture": "文化探索",
-      "officialService": "AskAway 官方客服"
+      "officialService": "AskAway 官方客服",
+      "scanHint": "掃描應用二維碼"
     },
     "auth": {
       "authDetailTip": "用戶標識、暱稱、頭像、郵箱。若所選登錄方式支持郵箱（如 Apple、Google），也將獲取郵箱地址。",

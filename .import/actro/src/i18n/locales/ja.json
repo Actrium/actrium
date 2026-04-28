@@ -174,7 +174,8 @@
       "realtime": "リアルタイム状況",
       "parentChild": "親子レジャー",
       "culture": "文化探索",
-      "officialService": "AskAway 公式カスタマーサポート"
+      "officialService": "AskAway 公式カスタマーサポート",
+      "scanHint": "アプリQRコードをスキャン"
     },
     "auth": {
       "authDetailTip": "ユーザー識別子、ニックネーム、アバター、メールアドレス。選択したログイン方法がメール（Apple、Googleなど）をサポートしている場合、メールアドレスも取得されます。",
