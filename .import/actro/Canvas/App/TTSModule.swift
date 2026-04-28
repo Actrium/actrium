@@ -40,6 +40,17 @@ class TTSModule: RCTEventEmitter {
         logger.notice("[TTSModule] speak called with text: \(text), options: \(options)")
 
         DispatchQueue.main.async {
+            // Switch audio session to playback mode for TTS
+            // This ensures TTS plays at normal volume even after voice recording
+            // which may have switched the session to .playAndRecord mode
+            let audioSession = AVAudioSession.sharedInstance()
+            do {
+                try audioSession.setCategory(.playback, mode: .default, options: .duckOthers)
+                try audioSession.setActive(true)
+            } catch {
+                logger.error("[TTSModule] Failed to set audio session category: \(error.localizedDescription)")
+            }
+
             // Stop any current speech
             if self.synthesizer.isSpeaking {
                 self.synthesizer.stopSpeaking(at: .immediate)
