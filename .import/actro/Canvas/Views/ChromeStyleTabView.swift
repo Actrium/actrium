@@ -127,7 +127,6 @@ struct ChromeTabOverviewView: View {
 
     @State private var hoveringOverTabId: UUID?
     @State private var showSettings: Bool = false
-    @State private var previousTabCount: Int = 0
 
     private let cardAspectRatio: CGFloat = 3.0 / 4.0
     private let interItemSpacing: CGFloat = 16
@@ -260,7 +259,6 @@ struct ChromeTabOverviewView: View {
                             proxy.scrollTo("newTabCard", anchor: .bottom)
                         }
                     }
-                    previousTabCount = newCount
                 }
             }
         }
