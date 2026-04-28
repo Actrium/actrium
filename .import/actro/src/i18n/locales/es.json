@@ -174,7 +174,8 @@
       "realtime": "En tiempo real",
       "parentChild": "Ocio familiar",
       "culture": "Exploración cultural",
-      "officialService": "Servicio al cliente oficial de AskAway"
+      "officialService": "Servicio al cliente oficial de AskAway",
+      "scanHint": "Escanear código QR de la app"
     },
     "auth": {
       "authDetailTip": "Identificador de usuario, apodo, avatar y correo electrónico. Si el método de inicio de sesión seleccionado admite correo electrónico (por ejemplo, Apple, Google), también se obtendrá la dirección de correo electrónico.",

@@ -174,7 +174,8 @@
       "realtime": "Real-time Dynamics",
       "parentChild": "Family Fun",
       "culture": "Culture Exploration",
-      "officialService": "AskAway Official Service"
+      "officialService": "AskAway Official Service",
+      "scanHint": "Scan app QR code"
     },
     "auth": {
       "authDetailTip": "User identifier, nickname, avatar, and email. If the selected login method supports email (e.g., Apple, Google), the email address will also be obtained.",
