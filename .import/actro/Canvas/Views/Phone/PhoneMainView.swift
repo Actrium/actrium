@@ -189,6 +189,36 @@ struct PhoneMainView: View {
                 ]
             )
         }
+        .onOpenURL { url in
+            handleUniversalLink(url)
+        }
+    }
+
+    // MARK: - Universal Link 处理
+
+    /// AskAway 通用链接的 host 列表
+    private static let askawayHosts: Set<String> = [
+        "go.askaway.chat",
+        "go-askaway.develenv.com"
+    ]
+
+    /// 处理通用链接：匹配 AskAway 域名时创建新页签并全屏打开
+    private func handleUniversalLink(_ url: URL) {
+        guard let host = url.host, Self.askawayHosts.contains(host) else {
+            return
+        }
+
+        // 创建新页签，将完整 URL 作为 appUrl 传入 RN 侧
+        let newTab = Tab(
+            title: "",
+            url: url,
+            unifiedScript: "/* welcome page shell */"
+        )
+        viewModel.tabs.append(newTab)
+        viewModel.tabSlotPositions[newTab.id] = viewModel.tabs.count - 1
+        viewModel.currentTabId = newTab.id
+        selectedTab = .tabs
+        fullscreenTab = newTab
     }
 
     /// 截取当前全屏 tab 的快照
