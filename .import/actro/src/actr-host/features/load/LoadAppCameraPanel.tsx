@@ -16,7 +16,7 @@ import {
   useCodeScanner,
 } from 'react-native-vision-camera';
 import { TabEvents } from '../../../native-bridge/tab/TabEvents';
-import { AppText, GlobalAlert } from '../../../components';
+import { AppText, GlobalAlert, Icon } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
@@ -32,8 +32,8 @@ type LoadAppCameraPanelProps = {
   onScanUrl: (url: string) => void;
   /** 打开相机扫码按钮高度，默认 Android 44 / iOS 48 */
   openCameraBtnHeight?: number;
-  /** 打开相机扫码按钮文本大小，默认跟随 scanActionLabel 排版 */
-  openCameraBtnFontSize?: number;
+  /** 打开相机扫码按钮图标大小，默认 24 */
+  openCameraBtnIconSize?: number;
 };
 
 export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
@@ -45,7 +45,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   onAfterCameraPermissionGranted,
   onScanUrl,
   openCameraBtnHeight,
-  openCameraBtnFontSize,
+  openCameraBtnIconSize,
 }) => {
   const { t } = useTranslation();
   const colors = useColors();
@@ -235,15 +235,12 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
               onPress={handleOpenCamera}
               activeOpacity={0.7}
             >
-              <AppText
-                variant='scanActionLabel'
-                style={[
-                  styles.openCameraBtnText,
-                  openCameraBtnFontSize != null ? { fontSize: openCameraBtnFontSize } : null,
-                ]}
-              >
-                {t('actr.app.openCameraScan')}
-              </AppText>
+              {/* 中文注释：这里改为相机图标入口，视觉上和扫码框保持一致，不再显示按钮文案。 */}
+              <Icon
+                type='camera'
+                size={openCameraBtnIconSize ?? 24}
+                color={colors.textOpenCameraBtn}
+              />
             </TouchableOpacity>
           )}
         </View>
@@ -321,17 +318,12 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     textAlign: 'center',
   },
   openCameraBtn: {
-    height: Platform.OS === 'android' ? 44 : 48,
-    paddingHorizontal: Platform.OS === 'android' ? 28 : 32,
+    paddingHorizontal: 30,
     backgroundColor: colors.bgLoadDark,
     borderRadius: Platform.OS === 'android' ? 30 : 34,
     alignItems: 'center',
     justifyContent: 'center',
     ...HOST_SHADOWS.headerButton,
-  },
-  openCameraBtnText: {
-    ...getTypographyStyle('scanActionLabel'),
-    color: colors.textOpenCameraBtn,
   },
   cameraContainer: {
     flex: 1,
