@@ -34,6 +34,9 @@ struct ContentView: View {
                         viewModel.currentSystemTabType = nil
                     }
                 }
+                .onOpenURL { url in
+                    handleUniversalLink(url)
+                }
                 // 顶层兜底：拖入 .actr 或目录时创建新标签
                 .dropDestination(for: URL.self) { urls, location in
                     guard let url = urls.first else {
@@ -70,6 +73,42 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Universal Link 处理
+
+    /// AskAway 通用链接的 host 列表
+    private static let askawayHosts: Set<String> = [
+        "go.askaway.chat",
+        "go-askaway.develenv.com"
+    ]
+
+    /// 处理通用链接：匹配 AskAway 域名时创建新页签并进入 Focus 模式
+    private func handleUniversalLink(_ url: URL) {
+        guard let host = url.host, Self.askawayHosts.contains(host) else {
+            return
+        }
+
+        // 从 URL query 参数中解析 appId
+        // 格式：https://go.askaway.chat/appstore/index.html?appid=xxx&env=production
+        let appId = URLComponents(url: url, resolvingAgainstBaseURL: true)?.queryItems?
+            .first(where: { $0.name == "appid" })?.value
+
+        // appId 为空时不打开新页签
+        guard let appId = appId, !appId.isEmpty else {
+            return
+        }
+
+        // 创建新页签，将 appId 传入 RN 侧
+        let newTab = Tab(
+            title: TM.active.blackTab(),
+            appId: appId,
+            unifiedScript: "/* welcome page shell */"
+        )
+        viewModel.tabs.append(newTab)
+        viewModel.tabSlotPositions[newTab.id] = viewModel.tabs.count - 1
+        viewModel.currentSystemTabType = nil
+        viewModel.switchToTab(id: newTab.id)
     }
 }
 
