@@ -210,6 +210,9 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             if let url = tab.url {
                 tabDict["appUrl"] = url.absoluteString
             }
+            if let appId = tab.appId {
+                tabDict["appId"] = appId
+            }
             if let htmlContent = tab.htmlContent {
                 tabDict["htmlContent"] = htmlContent
             }

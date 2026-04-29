@@ -181,6 +181,7 @@ class BrowserViewModel: ObservableObject {
                     title: persistedTab.title,
                     icon: persistedTab.icon,
                     url: persistedTab.appUrl,
+                    appId: persistedTab.appId,
                     hasUnreadMessage: persistedTab.hasUnreadMessage,
                     isBookmarked: persistedTab.isBookmarked
                 )
