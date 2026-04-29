@@ -185,12 +185,6 @@ struct CanvasApp: App {
     // The focused window's viewModel
     @FocusedValue(\.browserViewModel) private var focusedViewModel
 
-    /// AskAway 通用链接的 host 列表
-    static let askawayHosts: Set<String> = [
-        "go.actrium.example",
-        "go.actrium-dev.example"
-    ]
-
     init() {
         // Suppress common system warnings in development
         UserDefaults.standard.set(false, forKey: "NSConstraintBasedLayoutLogUnsatisfiable")
@@ -211,8 +205,9 @@ struct CanvasApp: App {
                 }
                 .onOpenURL { url in
                     // SwiftUI App lifecycle may deliver URL callbacks here instead of AppDelegate.
-                    // AskAway 通用链接由各端视图自行处理（PhoneMainView / iPad 端），此处只处理微信回调
-                    if !Self.askawayHosts.contains(url.host ?? "") {
+                    // 微信回调路径包含 weChatAppId，需优先交给微信处理；
+                    // AskAway 通用链接（路径不含 weChatAppId）由各端视图 onOpenURL 处理。
+                    if url.path.contains(AppConstants.weChatAppId) {
                         _ = WeChatManager.shared.handleOpenURL(url)
                     }
                 }
