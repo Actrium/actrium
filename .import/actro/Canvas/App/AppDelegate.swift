@@ -10,7 +10,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
     
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
-        appLogger.debug("接收到 Universal Link：\(url)")
+        appLogger.debug("接收到 URL：\(url)")
+        // AskAway 通用链接由 SwiftUI onOpenURL 处理，此处只处理微信回调
+        let askawayHosts: Set<String> = ["go.actrium.example", "go.actrium-dev.example"]
+        if let host = url.host, askawayHosts.contains(host) {
+            return false
+        }
         return WeChatManager.shared.handleOpenURL(url)
     }
 }

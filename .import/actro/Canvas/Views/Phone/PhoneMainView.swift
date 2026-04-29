@@ -189,6 +189,45 @@ struct PhoneMainView: View {
                 ]
             )
         }
+        .onOpenURL { url in
+            handleUniversalLink(url)
+        }
+    }
+
+    // MARK: - Universal Link 处理
+
+    /// AskAway 通用链接的 host 列表
+    private static let askawayHosts: Set<String> = [
+        "go.actrium.example",
+        "go.actrium-dev.example"
+    ]
+
+    /// 处理通用链接：匹配 AskAway 域名时创建新页签并全屏打开
+    private func handleUniversalLink(_ url: URL) {
+        guard let host = url.host, Self.askawayHosts.contains(host) else {
+            return
+        }
+
+        // 从 URL query 参数中解析 appId
+        // 格式：https://go.actrium.example/appstore/index.html?appid=xxx&env=production
+        let appId = URLComponents(url: url, resolvingAgainstBaseURL: true)?.queryItems?
+            .first(where: { $0.name == "appid" })?.value
+
+        // appId 为空时不打开新页签
+        guard let appId = appId, !appId.isEmpty else {
+            return
+        }
+
+        // 创建新页签，将 appId 传入 RN 侧
+        let newTab = Tab(
+            title: TM.active.blackTab(),
+            appId: appId,
+        )
+        viewModel.tabs.append(newTab)
+        viewModel.tabSlotPositions[newTab.id] = viewModel.tabs.count - 1
+        viewModel.currentTabId = newTab.id
+        selectedTab = .tabs
+        fullscreenTab = newTab
     }
 
     /// 截取当前全屏 tab 的快照
