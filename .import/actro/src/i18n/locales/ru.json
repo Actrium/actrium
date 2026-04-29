@@ -80,6 +80,8 @@
       "selectCategoryTip": "Выберите хотя бы одну категорию жалобы",
       "copySuccess": "Скопировано",
       "copyFailed": "Ошибка копирования, попробуйте еще раз",
+      "sendMessageFailedTitle": "Не удалось отправить сообщение",
+      "sendMessageFailedMessage": "Ошибка сервиса, попробуйте позже",
       "snapshotFailed": "Не удалось создать снимок карты",
       "deleteConfirmTitle": "Удалить выбранное?",
       "deleteConfirmMsg": "Удаленное невозможно будет восстановить.",

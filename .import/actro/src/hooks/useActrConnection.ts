@@ -14,6 +14,7 @@ import { Utils } from '../utils/utils';
 import { useMessageStore } from '../actr-host/store/useMessageStore';
 import { Progress } from '../repository/MessageRepository';
 import { GlobalAlert } from '../components';
+import i18n from '../i18n';
 
 /**
  * useActrConnection Hook
@@ -177,7 +178,11 @@ export function useActrConnection({
         },
         true,
       );
-      GlobalAlert.alert('Failed to send message', e.message || e);
+      // GlobalAlert.alert('Failed to send message', e.message || e);
+      GlobalAlert.alert(
+        i18n.t('actr.chat.sendMessageFailedTitle'),
+        i18n.t('actr.chat.sendMessageFailedMessage'),
+      );
       return null;
     }
   };
