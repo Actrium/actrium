@@ -59,6 +59,7 @@ export type TabConfig = {
   bookmarks?: BookmarkData[];
   // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
   appUrl?: string;
+  appId?: string;
 };
 
 export type ActrProps = {
@@ -83,6 +84,7 @@ export type TabRouterProps = ActrProps & {
   // FIXME 这些应该放到 tab 里面？
   // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
   appUrl?: string;
+  appId?: string;
   // Native-transparent payload for system app deep-links/actions
   systemAppPayload?: Record<string, unknown>;
 };
