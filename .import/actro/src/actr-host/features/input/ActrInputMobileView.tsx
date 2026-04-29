@@ -32,6 +32,7 @@ import {
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import { triggerHaptic } from '../../utils/haptics';
+import { useKeyboardInset } from '../../../hooks/useKeyboardInset';
 
 type ActrInputMobileSharedStyles = Pick<ActrInputStyles, 'input' | 'mobileInputText'>;
 
@@ -75,6 +76,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const totalUnread = useUnreadStore((state) => state.totalUnread);
+  const { isKeyboardVisible } = useKeyboardInset();
   const {
     sharedStyles,
     appId,
@@ -785,6 +787,15 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
           )}
         </View>
       </View>
+
+      {/* 中文注释：键盘弹起时隐藏附加文案，避免与输入态内容同时堆叠。 */}
+      {!isKeyboardVisible && (
+        <View pointerEvents='none' style={styles.mobileFloatingText}>
+          <AppText style={styles.mobileFloatingTextLabel}>
+            {t('actr.input.aiGeneratedLabel')}
+          </AppText>
+        </View>
+      )}
     </SafeBottomView>
   );
 }
@@ -798,6 +809,17 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   mobileSafeArea: {
     width: '100%',
     backgroundColor: colors.bgInputMobile,
+  },
+  mobileFloatingText: {
+    position: 'absolute',
+    left: 26,
+    right: 26,
+    bottom: 0,
+    alignItems: 'center',
+  },
+  mobileFloatingTextLabel: {
+    color: '#A0A0A0',
+    fontSize: 10,
   },
   mobileInputRow: {
     flexDirection: 'row',
