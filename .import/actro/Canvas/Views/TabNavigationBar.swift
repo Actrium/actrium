@@ -109,6 +109,9 @@ struct FocusModeNavigationBar: View {
     let availableWidth: CGFloat
     let onBackToOverview: () -> Void
 
+    /// 导航栏背景色
+    private let barColor: Color = Color(hex: "#EFEFEF")
+
     // 计算是否需要滚动
     private var needsScrolling: Bool {
         let tabAreaWidth = availableWidth - 44 - 44 - tabHeight // 减去左侧按钮、右侧按钮、新建按钮
@@ -117,12 +120,32 @@ struct FocusModeNavigationBar: View {
         return totalTabsWidth > tabAreaWidth
     }
 
+    /// 选中 tab 在 tabs 列表中的索引
+    private var selectedTabIndex: Int? {
+        guard let currentId = viewModel.currentTabId else { return nil }
+        return viewModel.tabs.firstIndex(where: { $0.id == currentId })
+    }
+
+    /// 选中 tab 左边缘相对于导航栏起始位置的 x 坐标
+    private var selectedTabLeftX: CGFloat? {
+        guard let index = selectedTabIndex else { return nil }
+        let tabWidth = calculateTabWidth()
+        // index * (tabWidth + 2) + 1(padding)
+        return CGFloat(index) * (tabWidth + 2) + 1
+    }
+
     var body: some View {
         ZStack(alignment: .trailing) {
             tabListArea
             trailingButtonsArea
         }
         .frame(height: tabHeight)
+    }
+
+    /// 安全获取 tabWidth
+    private var calculateTabWidthSafe: CGFloat? {
+        let width = calculateTabWidth()
+        return width > 0 ? width : nil
     }
 
     // 左侧按钮 + 中间标签页列表
@@ -137,7 +160,7 @@ struct FocusModeNavigationBar: View {
                 staticTabsWithAddButton
             }
         }
-        .background(Color(hex: "#D1D1D6"))
+        .background(barColor)
     }
 
     private var overviewButton: some View {
@@ -148,18 +171,34 @@ struct FocusModeNavigationBar: View {
                 .frame(width: 44, height: tabHeight)
         }
         .buttonStyle(.plain)
-        .background(Color(hex: "#D1D1D6"))
+        .background(barColor)
     }
 
     private var scrollingTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                tabsContent
-                Color.clear.frame(width: 100)
+            ZStack(alignment: .topLeading) {
+                HStack(spacing: 0) {
+                    tabsContent
+                    Color.clear.frame(width: 100)
+                }
+                // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
+                if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe {
+                    let cornerSize: CGFloat = 19
+                    let cornerColor: Color = Color(hex: "#F2F2F6")
+                    // 左下反圆角：右边缘对齐选中 tab 左边缘，底部对齐导航栏底部
+                    BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
+                        .frame(width: cornerSize, height: cornerSize)
+                        .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
+
+                    // 右下反圆角：左边缘对齐选中 tab 右边缘，底部对齐导航栏底部
+                    BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
+                        .frame(width: cornerSize, height: cornerSize)
+                        .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+                }
             }
         }
         .frame(maxWidth: .infinity)
-        .background(Color(hex: "#D1D1D6"))
+        .background(barColor)
     }
 
     private var staticTabsWithAddButton: some View {
@@ -182,7 +221,7 @@ struct FocusModeNavigationBar: View {
                 .frame(width: tabHeight, height: tabHeight)
         }
         .buttonStyle(.plain)
-        .background(Color(hex: "#D1D1D6"))
+        .background(barColor)
     }
 
     private var trailingButtonsArea: some View {
@@ -199,7 +238,7 @@ struct FocusModeNavigationBar: View {
         LinearGradient(
             gradient: Gradient(colors: [
                 Color.clear,
-                Color(hex: "#D1D1D6")
+                barColor
             ]),
             startPoint: .leading,
             endPoint: .trailing
@@ -219,7 +258,7 @@ struct FocusModeNavigationBar: View {
                 .frame(width: tabHeight, height: tabHeight)
         }
         .buttonStyle(.plain)
-        .background(Color(hex: "#D1D1D6"))
+        .background(barColor)
     }
 
     private var leftPanelToggleButton: some View {
@@ -232,7 +271,7 @@ struct FocusModeNavigationBar: View {
                 .frame(width: 44, height: tabHeight)
         }
         .buttonStyle(.plain)
-        .background(Color(hex: "#D1D1D6"))
+        .background(barColor)
     }
 
     // 标签页内容
@@ -273,8 +312,16 @@ struct TabItemView: View {
     var body: some View {
         tabContent
             .padding(.horizontal, 12)
-            .frame(width: width, height: tabHeight)
-            .background(tabBackground)
+            .frame(width: width, height: tabHeight + (isActive ? 2 : 0))
+            .background(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 14,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 14
+                )
+                .fill(isActive ? Color(hex: "#F2F2F6") : Color(hex: "#EAEAEA"))
+            )
             .contentShape(Rectangle())
             .onTapGesture {
                 onSelect()
@@ -300,14 +347,54 @@ struct TabItemView: View {
             .buttonStyle(.plain)
         }
     }
+}
 
-    private var tabBackground: some View {
-        UnevenRoundedRectangle(
-            topLeadingRadius: 14,
-            bottomLeadingRadius: 0,
-            bottomTrailingRadius: 0,
-            topTrailingRadius: 14
-        )
-        .fill(isActive ? Color.white : Color(hex: "#E6E6E6"))
+/// 左下反圆角遮罩：填充导航栏背景色，遮住选中 tab 左下角
+/// 路径对应 SVG: M0 19 C9.46 16.85 16.85 9.46 19 0 V19 H0
+struct BottomLeftInverseCorner: View {
+    let radius: CGFloat
+    let color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width
+            let h = size.height
+            let path = Path { p in
+                p.move(to: CGPoint(x: 0, y: h))
+                p.addCurve(
+                    to: CGPoint(x: w, y: 0),
+                    control1: CGPoint(x: w * 0.498, y: h * 0.887),
+                    control2: CGPoint(x: w * 0.887, y: h * 0.498)
+                )
+                p.addLine(to: CGPoint(x: w, y: h))
+                p.closeSubpath()
+            }
+            context.fill(path, with: .color(color))
+        }
+    }
+}
+
+/// 右下反圆角遮罩：填充导航栏背景色，遮住选中 tab 右下角
+/// 路径对应 SVG: M19 19 C9.54 16.85 2.15 9.46 0 0 V19 H19
+struct BottomRightInverseCorner: View {
+    let radius: CGFloat
+    let color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width
+            let h = size.height
+            let path = Path { p in
+                p.move(to: CGPoint(x: w, y: h))
+                p.addCurve(
+                    to: CGPoint(x: 0, y: 0),
+                    control1: CGPoint(x: w * 0.502, y: h * 0.887),
+                    control2: CGPoint(x: w * 0.113, y: h * 0.498)
+                )
+                p.addLine(to: CGPoint(x: 0, y: h))
+                p.closeSubpath()
+            }
+            context.fill(path, with: .color(color))
+        }
     }
 }
