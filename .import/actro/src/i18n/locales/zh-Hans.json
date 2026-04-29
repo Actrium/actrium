@@ -46,6 +46,7 @@
       "deleteWithCount": "删除 ({{count}})",
       "pleaseInput": "请添加文字后发送",
       "emptyTextAlert": "请添加文字后发送",
+      "aiGeneratedLabel": "内容由 AI 生成",
       "voiceMessage": "语音消息",
       "sendVoicePlaceholder": "😌 发送一条语音消息"
     },
