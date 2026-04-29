@@ -46,6 +46,7 @@
       "deleteWithCount": "Eliminar ({{count}})",
       "pleaseInput": "Agrega texto antes de enviar",
       "emptyTextAlert": "Agrega texto antes de enviar",
+      "aiGeneratedLabel": "Contenido generado por IA",
       "voiceMessage": "Mensaje de voz",
       "sendVoicePlaceholder": "😌 Enviar un mensaje de voz"
     },

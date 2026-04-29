@@ -46,6 +46,7 @@
       "deleteWithCount": "Удалить ({{count}})",
       "pleaseInput": "Пожалуйста, введите текст перед отправкой",
       "emptyTextAlert": "Пожалуйста, введите текст перед отправкой",
+      "aiGeneratedLabel": "Контент создан ИИ",
       "voiceMessage": "Голосовое сообщение",
       "sendVoicePlaceholder": "😌 Отправить голосовое сообщение"
     },
