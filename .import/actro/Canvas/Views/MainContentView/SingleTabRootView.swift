@@ -210,9 +210,6 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             if let url = tab.url {
                 tabDict["appUrl"] = url.absoluteString
             }
-            if let appId = tab.appId {
-                tabDict["appId"] = appId
-            }
             if let htmlContent = tab.htmlContent {
                 tabDict["htmlContent"] = htmlContent
             }
@@ -256,7 +253,8 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             // 显式传递容器尺寸，确保 RN 能感知窗口缩小（onLayout 可能不触发）
             "containerWidth": containerSize.width,
             "containerHeight": containerSize.height,
-            "appUrl": tab.url?.absoluteString ?? ""
+            "appUrl": tab.url?.absoluteString ?? "",
+            "appId": tab.appId ?? ""
         ]
         
         // 合并额外参数（从 openTab 传入的参数）
