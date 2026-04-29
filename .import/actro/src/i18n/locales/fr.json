@@ -80,6 +80,8 @@
       "selectCategoryTip": "Veuillez sélectionner au moins une catégorie de signalement",
       "copySuccess": "Copié",
       "copyFailed": "Échec de la copie, veuillez réessayer",
+      "sendMessageFailedTitle": "Échec de l'envoi du message",
+      "sendMessageFailedMessage": "Erreur du service, veuillez réessayer plus tard",
       "snapshotFailed": "Impossible de générer l'instantané de la carte",
       "deleteConfirmTitle": "Supprimer les éléments sélectionnés ?",
       "deleteConfirmMsg": "Une fois supprimé, il est impossible de le récupérer.",

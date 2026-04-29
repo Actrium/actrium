@@ -80,6 +80,8 @@
       "selectCategoryTip": "하나 이상의 신고 카테고리를 선택해 주세요",
       "copySuccess": "복사되었습니다",
       "copyFailed": "복사 실패, 다시 시도해 주세요",
+      "sendMessageFailedTitle": "메시지 전송에 실패했습니다",
+      "sendMessageFailedMessage": "서비스 오류입니다. 잠시 후 다시 시도해 주세요",
       "snapshotFailed": "지도 스냅샷을 생성할 수 없습니다",
       "deleteConfirmTitle": "선택한 항목을 삭제하시겠습니까?",
       "deleteConfirmMsg": "삭제 후에는 복구할 수 없습니다.",
