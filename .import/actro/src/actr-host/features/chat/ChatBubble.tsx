@@ -12,7 +12,6 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   Alert,
-
 } from 'react-native';
 import { Icon } from '../../../components';
 import { useTranslation } from 'react-i18next';
@@ -65,7 +64,6 @@ interface ChatBubbleProps {
   type: 'question' | 'answer';
   isLoading?: boolean;
   progress?: number;
-  size?: 'small' | 'normal';
   numberOfLines?: number;
   containerStyle?: ViewStyle;
   attachments?: string;
@@ -88,7 +86,6 @@ export default function ChatBubble({
   type,
   isLoading = false,
   progress,
-  size = 'normal',
   numberOfLines,
   containerStyle,
   attachments,
@@ -108,14 +105,10 @@ export default function ChatBubble({
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const isQuestion = type === 'question';
-  const isSmall = size === 'small';
-  const shouldShowLoadingBubble = !isQuestion && isLoading && !content && !voicePayload;
+  const shouldShowLoadingBubble =
+    !isQuestion && isLoading && !content && !voicePayload;
   const shouldShowLatestAnswerToolbar =
-    !isQuestion &&
-    isLatest &&
-    !isSmall &&
-    !shouldShowLoadingBubble &&
-    (progress === 2 || progress === 3);
+    !isQuestion && isLatest && !shouldShowLoadingBubble && progress === 2;
   const parsedVoicePayload = React.useMemo(
     () => parseVoicePayload(voicePayload),
     [voicePayload],
@@ -223,29 +216,29 @@ export default function ChatBubble({
       options.push({
         label: t('common.edit'),
         onPress: onEdit,
-        icon: <Icon type='edit' size={16} />,
+        icon: <Icon type="edit" size={16} />,
       });
     }
     if (onCopy) {
       options.push({
         label: t('common.copy'),
         onPress: onCopy,
-        icon: <Icon type='copy' size={16} />,
+        icon: <Icon type="copy" size={16} />,
       });
     }
     if (onShare) {
       options.push({
         label: t('actr.chat.share'),
         onPress: onShare,
-        icon: <Icon type='share' size={16} />,
+        icon: <Icon type="share" size={16} />,
       });
     }
     // 中文注释：AI 朗读能力保留在独立组件/动作里，当前仅关闭入口显示，不影响后续单独恢复。
-    if (SHOW_AI_READ_ALOUD_ENTRY && !isSmall && !isQuestion) {
+    if (SHOW_AI_READ_ALOUD_ENTRY && !isQuestion) {
       options.push({
         label: t('actr.chat.readAloud'),
         onPress: readAloudAction.handlePress,
-        icon: <Icon type='voice' size={16} />,
+        icon: <Icon type="voice" size={16} />,
       });
     }
     if (!isQuestion) {
@@ -254,11 +247,11 @@ export default function ChatBubble({
         onPress: (position: any) => {
           setMoreMenuPosition(position);
           setTimeout(() => {
-            triggerHaptic('impactHeavy')
+            triggerHaptic('impactHeavy');
             setShowMoreMenu(true);
           }, 300);
         },
-        icon: <Icon type='more' size={16} />,
+        icon: <Icon type="more" size={16} />,
       });
     }
 
@@ -279,7 +272,7 @@ export default function ChatBubble({
             enterSelectionMode(msgId, tabId, defaultPart);
           }
         },
-        icon: <Icon type='delete' size={16} color={colors.danger} />,
+        icon: <Icon type="delete" size={16} color={colors.danger} />,
         textColor: colors.danger,
       });
     }
@@ -290,7 +283,6 @@ export default function ChatBubble({
     onEdit,
     onCopy,
     onShare,
-    isSmall,
     readAloudAction.handlePress,
     msgId,
     tabId,
@@ -311,16 +303,18 @@ export default function ChatBubble({
   }, [attachments]);
   const isAttachmentOnly = parsedAttachments.length > 0 && !content;
   const hasAttachments = parsedAttachments.length > 0;
-  const messageTypography = isSmall
-    ? typography.messageBodySmall
-    : typography.messageBody;
+  const messageTypography = typography.messageBody;
   const markdownTextStyle = React.useMemo(
     () => ({
       color: colors.textHeading,
       fontSize: messageTypography.fontSize,
       lineHeight: messageTypography.lineHeight,
     }),
-    [colors.textHeading, messageTypography.fontSize, messageTypography.lineHeight],
+    [
+      colors.textHeading,
+      messageTypography.fontSize,
+      messageTypography.lineHeight,
+    ],
   );
   const markdownParagraphStyle = React.useMemo(
     () => ({
@@ -331,12 +325,40 @@ export default function ChatBubble({
   );
   const markdownHeadingStyles = React.useMemo(
     () => ({
-      h1: { ...getTypographyStyle('title2'), color: colors.textHeading, marginBottom: 12 },
-      h2: { ...getTypographyStyle('title3'), color: colors.textHeading, marginBottom: 10 },
-      h3: { ...getTypographyStyle('bodyInput'), color: colors.textHeading, fontWeight: '600', marginBottom: 8 },
-      h4: { ...getTypographyStyle('bodyInput'), color: colors.textHeading, fontWeight: '600', marginBottom: 6 },
-      h5: { ...getTypographyStyle('subhead'), color: colors.textHeading, fontWeight: '600', marginBottom: 4 },
-      h6: { ...getTypographyStyle('footnote'), color: colors.textHeading, fontWeight: '600', marginBottom: 4 },
+      h1: {
+        ...getTypographyStyle('title2'),
+        color: colors.textHeading,
+        marginBottom: 12,
+      },
+      h2: {
+        ...getTypographyStyle('title3'),
+        color: colors.textHeading,
+        marginBottom: 10,
+      },
+      h3: {
+        ...getTypographyStyle('bodyInput'),
+        color: colors.textHeading,
+        fontWeight: '600',
+        marginBottom: 8,
+      },
+      h4: {
+        ...getTypographyStyle('bodyInput'),
+        color: colors.textHeading,
+        fontWeight: '600',
+        marginBottom: 6,
+      },
+      h5: {
+        ...getTypographyStyle('subhead'),
+        color: colors.textHeading,
+        fontWeight: '600',
+        marginBottom: 4,
+      },
+      h6: {
+        ...getTypographyStyle('footnote'),
+        color: colors.textHeading,
+        fontWeight: '600',
+        marginBottom: 4,
+      },
     }),
     [colors.textHeading],
   );
@@ -352,18 +374,21 @@ export default function ChatBubble({
     [markdownHeadingStyles, markdownParagraphStyle, markdownTextStyle],
   );
 
-  const getDisplayFileName = React.useCallback((item: IAttachmentItem): string => {
-    const legacyName = (item as any).name as string | undefined;
-    const fileName = item.file_name || legacyName;
-    if (fileName) return fileName;
+  const getDisplayFileName = React.useCallback(
+    (item: IAttachmentItem): string => {
+      const legacyName = (item as any).name as string | undefined;
+      const fileName = item.file_name || legacyName;
+      if (fileName) return fileName;
 
-    const rawName = item.local_url.split('/').pop() || '';
-    try {
-      return decodeURIComponent(rawName);
-    } catch {
-      return rawName;
-    }
-  }, []);
+      const rawName = item.local_url.split('/').pop() || '';
+      try {
+        return decodeURIComponent(rawName);
+      } catch {
+        return rawName;
+      }
+    },
+    [],
+  );
 
   const getDisplayFileType = React.useCallback(
     (item: IAttachmentItem): string => {
@@ -391,16 +416,13 @@ export default function ChatBubble({
           : isQuestion
             ? styles.questionBubble
             : styles.answerBubble,
-        !isAttachmentOnly &&
-          isSmall &&
-          (isQuestion ? styles.smallQuestionBubble : styles.smallAnswerBubble),
       ]}
     >
       {/* Render Attachments */}
       {parsedAttachments.length > 0 && (
         <View
           style={[styles.attachmentsContainer, !content && { marginBottom: 0 }]}
-          pointerEvents='box-none'
+          pointerEvents="box-none"
         >
           <ScrollView
             horizontal
@@ -427,7 +449,7 @@ export default function ChatBubble({
                     cdnUrl={item.cdn_url}
                     localUrl={item.local_url}
                     style={[styles.attachmentImage, itemStyle]}
-                    resizeMode='cover'
+                    resizeMode="cover"
                   />
                 );
               } else if (item.attachment_type === 'file') {
@@ -443,12 +465,12 @@ export default function ChatBubble({
                       <Text
                         style={styles.attachmentFileName}
                         numberOfLines={2}
-                        ellipsizeMode='tail'
+                        ellipsizeMode="tail"
                       >
                         {getDisplayFileName(item)}
                       </Text>
                       <View style={styles.attachmentFileMetaRow}>
-                        <Icon type='file' size={12} color='#34A8FB' />
+                        <Icon type="file" size={12} color="#34A8FB" />
                         <AppText style={styles.attachmentFileType}>
                           {getDisplayFileType(item)}
                         </AppText>
@@ -474,16 +496,17 @@ export default function ChatBubble({
                             styles.attachmentImage,
                             item.aspect_ratio
                               ? { aspectRatio: item.aspect_ratio }
-                            : null,
+                              : null,
                           ]}
-                          resizeMode='cover'
+                          resizeMode="cover"
                         />
                       </>
                     ) : (
                       <View style={styles.locationPlaceholder}>
-                        <Icon type='geolocation' size={20} color='#34A8FB' />
+                        <Icon type="geolocation" size={20} color="#34A8FB" />
                         <Text style={styles.locationPlaceholderText}>
-                          {item.latitude?.toFixed(4)}, {item.longitude?.toFixed(4)}
+                          {item.latitude?.toFixed(4)},{' '}
+                          {item.longitude?.toFixed(4)}
                         </Text>
                       </View>
                     )}
@@ -498,8 +521,10 @@ export default function ChatBubble({
       {shouldShowLoadingBubble ? (
         // 中文注释：等待回答中的占位态也走 answer 气泡本体，保证 icon 和文案始终落在同一气泡结构里。
         <View style={styles.loadingBubbleContent}>
-          <ActivityIndicator size='small' color={colors.textHeading} />
-          <AppText style={styles.loadingText}>{t('actr.chat.thinking')}</AppText>
+          <ActivityIndicator size="small" color={colors.textHeading} />
+          <AppText style={styles.loadingText}>
+            {t('actr.chat.thinking')}
+          </AppText>
         </View>
       ) : isVoiceBubble && parsedVoicePayload ? (
         <View
@@ -509,27 +534,20 @@ export default function ChatBubble({
           ]}
         >
           <View style={styles.voiceBubbleMain}>
-            <Icon type='voice' size={18} color={colors.textMenuLabel} />
-            <Text
-              style={styles.voiceDurationText}
-            >
+            <Icon type="voice" size={18} color={colors.textMenuLabel} />
+            <Text style={styles.voiceDurationText}>
               {formatVoiceDuration(parsedVoicePayload.duration_ms)}
             </Text>
           </View>
-          <AppText
-            style={styles.voiceHintText}
-          >
+          <AppText style={styles.voiceHintText}>
             {isVoiceBubblePlaying ? '播放中' : '点击播放语音'}
           </AppText>
         </View>
       ) : content ? (
         numberOfLines ? (
           <AppText
-            variant={isSmall ? 'messageBodySmall' : 'messageBody'}
-            style={[
-              isQuestion ? styles.questionText : styles.answerText,
-              isSmall && styles.smallText,
-            ]}
+            variant="messageBody"
+            style={[isQuestion ? styles.questionText : styles.answerText]}
             numberOfLines={numberOfLines}
           >
             {content}
@@ -581,10 +599,10 @@ export default function ChatBubble({
           <DropdownMenu
             width={longPressMenu.width}
             estimatedWidth={longPressMenu.width}
-            anchorMode='end'
+            anchorMode="end"
             trigger={
               <View style={styles.toolbarButton}>
-                <Icon type='more' size={chatBubbleToolbar.iconSize} />
+                <Icon type="more" size={chatBubbleToolbar.iconSize} />
               </View>
             }
             disabled={selectionMode}
@@ -599,7 +617,7 @@ export default function ChatBubble({
                       });
                     }}
                   >
-                    <Icon type='share' size={16} />
+                    <Icon type="share" size={16} />
                     <DropdownMenuText>{t('actr.chat.share')}</DropdownMenuText>
                   </DropdownMenuItem>
                 ) : null}
@@ -610,7 +628,7 @@ export default function ChatBubble({
                     });
                   }}
                 >
-                  <Icon type='suggest' size={16} />
+                  <Icon type="suggest" size={16} />
                   <DropdownMenuText>{t('actr.chat.feedback')}</DropdownMenuText>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -621,15 +639,17 @@ export default function ChatBubble({
                     close();
                   }}
                 >
-                  <Icon type='delete' size={16} color={colors.danger} />
-                  <DropdownMenuText color={colors.danger}>{t('common.delete')}</DropdownMenuText>
+                  <Icon type="delete" size={16} color={colors.danger} />
+                  <DropdownMenuText color={colors.danger}>
+                    {t('common.delete')}
+                  </DropdownMenuText>
                 </DropdownMenuItem>
               </>
             )}
           </DropdownMenu>
         </View>
       )}
-      <Modal visible={showMoreMenu} transparent animationType='fade'>
+      <Modal visible={showMoreMenu} transparent animationType="fade">
         <TouchableWithoutFeedback
           onPress={() => {
             setShowMoreMenu(false);
@@ -659,8 +679,10 @@ export default function ChatBubble({
                   setTimeout(() => onFeedback?.(), 100);
                 }}
               >
-                <Icon type='suggest' size={16} />
-                <AppText style={styles.moreMenuText}>{t('actr.chat.feedback')}</AppText>
+                <Icon type="suggest" size={16} />
+                <AppText style={styles.moreMenuText}>
+                  {t('actr.chat.feedback')}
+                </AppText>
               </Pressable>
             </View>
           </View>
@@ -692,9 +714,7 @@ export default function ChatBubble({
       <View style={bubbleFrameStyle}>
         {hasAttachments ? (
           // 中文注释：附件气泡不再包外层 Pressable，避免与内部横向 ScrollView 竞争 responder。
-          <View>
-            {bubbleContent}
-          </View>
+          <View>{bubbleContent}</View>
         ) : (
           <Pressable
             onPress={handleBubblePress}
@@ -704,9 +724,7 @@ export default function ChatBubble({
           >
             {(() => {
               const shouldShowMenu =
-                !selectionMode &&
-                menuOptions.length > 0 &&
-                !hasAttachments;
+                !selectionMode && menuOptions.length > 0 && !hasAttachments;
               if (shouldShowMenu) {
                 return (
                   <LongPressMenu
@@ -726,223 +744,209 @@ export default function ChatBubble({
   );
 }
 
-const makeStyles = (colors: ColorTokens) => StyleSheet.create({
-  toolbarContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderToolbarTop,
-    gap: 10,
-  },
-  toolbarButton: {
-    width: chatBubbleToolbar.buttonSize,
-    height: chatBubbleToolbar.buttonSize,
-    borderRadius: chatBubbleToolbar.buttonSize / 2,
-    backgroundColor: colors.bgToolbarButton,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  questionWrapper: {
-    alignItems: 'flex-end',
-    marginBottom: 12,
-    width: '100%',
-  },
-  answerWrapper: {
-    alignItems: 'flex-start',
-    width: '100%',
-  },
-  questionBubbleFrame: {
-    maxWidth: 316,
-    alignSelf: 'flex-end',
-  },
-  answerBubbleFrame: {
-    maxWidth: '100%',
-    alignSelf: 'flex-start',
-  },
-  questionBubble: {
-    backgroundColor: colors.bgBubbleQuestion,
-    paddingHorizontal: 15,
-    paddingVertical: 14,
-    borderRadius: 20,
-    minWidth: 44,
-  },
-  answerBubble: {
-    backgroundColor: colors.bgBubbleAnswer,
-    paddingHorizontal: 15,
-    paddingVertical: 14,
-    borderRadius: 20,
-    minWidth: 44,
-  },
-  loadingBubbleContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 20,
-  },
-  loadingText: {
-    marginLeft: 8,
-    color: colors.textHeading,
-    ...getTypographyStyle('messageBody'),
-  },
-  voiceBubbleCard: {
-    minWidth: 120,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    gap: 4,
-  },
-  voiceBubbleCardPlaying: {
-    opacity: 0.85,
-  },
-  voiceBubbleMain: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  voiceDurationText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textHeading,
-  },
-  voiceHintText: {
-    ...getTypographyStyle('footnote'),
-    color: colors.textSecondary,
-  },
-  questionText: {
-    color: colors.textHeading,
-    ...getTypographyStyle('messageBody'),
-  },
-  answerText: {
-    color: colors.textHeading,
-    ...getTypographyStyle('messageBody'),
-  },
-  smallQuestionBubble: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    maxWidth: '90%',
-  },
-  smallAnswerBubble: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    maxWidth: '85%',
-  },
-  attachmentBareBubble: {
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    backgroundColor: 'transparent',
-    minWidth: 0,
-  },
-  smallText: {
-    ...getTypographyStyle('messageBodySmall'),
-  },
-  markdownContainer: {
-    flexShrink: 1,
-    width: '100%',
-  },
-  attachmentsContainer: {
-    marginBottom: 8,
-    flexDirection: 'row',
-    width: '100%',
-  },
-  attachmentsScrollView: {
-    width: '100%',
-  },
-  attachmentsScrollContent: {
-    flexGrow: 1,
-    paddingRight: 0,
-    justifyContent: 'flex-end',
-  },
-  attachmentImage: {
-    height: 82,
-    maxHeight: 82,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.borderFileBlock,
-    backgroundColor: colors.bgFileBlock,
-  },
-  attachmentFileBlock: {
-    width: 156,
-    maxHeight: 82,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.borderFileBlock,
-    backgroundColor: colors.bgFileBlock,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  attachmentFileInfo: {
-    flexShrink: 1,
-  },
-  attachmentFileName: {
-    fontSize: 15,
-    color: colors.textPrimary,
-    fontWeight: 'bold',
-    textAlign: 'left',
-  },
-  attachmentFileMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    gap: 6,
-  },
-  attachmentFileType: {
-    ...getTypographyStyle('footnote'),
-    color: colors.textTertiary,
-    textAlign: 'left',
-  },
-  locationPlaceholder: {
-    width: 100,
-    height: 80,
-    backgroundColor: colors.bgFileBlock,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.borderFileBlock,
-    paddingHorizontal: 6,
-  },
-  locationPlaceholderText: {
-    fontSize: 9,
-    color: colors.accentBlue,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  bubblePressed: {
-    opacity: 0.7,
-  },
-  toolbarButtonDisabled: {
-    opacity: 0.3,
-  },
-  moreMenuBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.1)',
-  },
-  moreMenuContainer: {
-    backgroundColor: colors.bgSurface,
-    borderRadius: 34,
-    padding: 10,
-    width: 228,
-    gap: 8,
-    ...HOST_SHADOWS.menuSurface,
-  },
-  moreMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 34,
-    gap: 12,
-  },
-  moreMenuItemPressed: {
-    backgroundColor: colors.bgMenuItemPressed,
-  },
-  moreMenuText: {
-    ...getTypographyStyle('title3'),
-    color: colors.textMenuLabel,
-    fontWeight: '500',
-  },
-});
+const makeStyles = (colors: ColorTokens) =>
+  StyleSheet.create({
+    toolbarContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 12,
+      paddingTop: 8,
+      borderTopWidth: 1,
+      borderTopColor: colors.borderToolbarTop,
+      gap: 10,
+    },
+    toolbarButton: {
+      width: chatBubbleToolbar.buttonSize,
+      height: chatBubbleToolbar.buttonSize,
+      borderRadius: chatBubbleToolbar.buttonSize / 2,
+      backgroundColor: colors.bgToolbarButton,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    questionWrapper: {
+      alignItems: 'flex-end',
+      marginBottom: 12,
+      width: '100%',
+    },
+    answerWrapper: {
+      alignItems: 'flex-start',
+      width: '100%',
+    },
+    questionBubbleFrame: {
+      maxWidth: 316,
+      alignSelf: 'flex-end',
+    },
+    answerBubbleFrame: {
+      maxWidth: '100%',
+      alignSelf: 'flex-start',
+    },
+    questionBubble: {
+      backgroundColor: colors.bgBubbleQuestion,
+      paddingHorizontal: 15,
+      paddingVertical: 14,
+      borderRadius: 20,
+      minWidth: 44,
+    },
+    answerBubble: {
+      backgroundColor: colors.bgBubbleAnswer,
+      paddingHorizontal: 15,
+      paddingVertical: 14,
+      borderRadius: 20,
+      minWidth: 44,
+    },
+    loadingBubbleContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 20,
+    },
+    loadingText: {
+      marginLeft: 8,
+      color: colors.textHeading,
+      ...getTypographyStyle('messageBody'),
+    },
+    voiceBubbleCard: {
+      minWidth: 120,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      gap: 4,
+    },
+    voiceBubbleCardPlaying: {
+      opacity: 0.85,
+    },
+    voiceBubbleMain: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    voiceDurationText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textHeading,
+    },
+    voiceHintText: {
+      ...getTypographyStyle('footnote'),
+      color: colors.textSecondary,
+    },
+    questionText: {
+      color: colors.textHeading,
+      ...getTypographyStyle('messageBody'),
+    },
+    answerText: {
+      color: colors.textHeading,
+      ...getTypographyStyle('messageBody'),
+    },
+    attachmentBareBubble: {
+      paddingHorizontal: 0,
+      paddingVertical: 0,
+      backgroundColor: 'transparent',
+      minWidth: 0,
+    },
+    markdownContainer: {
+      flexShrink: 1,
+      width: '100%',
+    },
+    attachmentsContainer: {
+      marginBottom: 8,
+      flexDirection: 'row',
+      width: '100%',
+    },
+    attachmentsScrollView: {
+      width: '100%',
+    },
+    attachmentsScrollContent: {
+      flexGrow: 1,
+      paddingRight: 0,
+      justifyContent: 'flex-end',
+    },
+    attachmentImage: {
+      height: 82,
+      maxHeight: 82,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.borderFileBlock,
+      backgroundColor: colors.bgFileBlock,
+    },
+    attachmentFileBlock: {
+      width: 156,
+      maxHeight: 82,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.borderFileBlock,
+      backgroundColor: colors.bgFileBlock,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    attachmentFileInfo: {
+      flexShrink: 1,
+    },
+    attachmentFileName: {
+      fontSize: 15,
+      color: colors.textPrimary,
+      fontWeight: 'bold',
+      textAlign: 'left',
+    },
+    attachmentFileMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 16,
+      gap: 6,
+    },
+    attachmentFileType: {
+      ...getTypographyStyle('footnote'),
+      color: colors.textTertiary,
+      textAlign: 'left',
+    },
+    locationPlaceholder: {
+      width: 100,
+      height: 80,
+      backgroundColor: colors.bgFileBlock,
+      borderRadius: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.borderFileBlock,
+      paddingHorizontal: 6,
+    },
+    locationPlaceholderText: {
+      fontSize: 9,
+      color: colors.accentBlue,
+      marginTop: 4,
+      textAlign: 'center',
+    },
+    bubblePressed: {
+      opacity: 0.7,
+    },
+    toolbarButtonDisabled: {
+      opacity: 0.3,
+    },
+    moreMenuBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.1)',
+    },
+    moreMenuContainer: {
+      backgroundColor: colors.bgSurface,
+      borderRadius: 34,
+      padding: 10,
+      width: 228,
+      gap: 8,
+      ...HOST_SHADOWS.menuSurface,
+    },
+    moreMenuItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 34,
+      gap: 12,
+    },
+    moreMenuItemPressed: {
+      backgroundColor: colors.bgMenuItemPressed,
+    },
+    moreMenuText: {
+      ...getTypographyStyle('title3'),
+      color: colors.textMenuLabel,
+      fontWeight: '500',
+    },
+  });

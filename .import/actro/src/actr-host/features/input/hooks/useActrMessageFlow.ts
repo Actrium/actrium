@@ -76,8 +76,7 @@ export function useActrMessageFlow(
     editingMessageId,
     attachments,
     showTopToast,
-  } =
-    params;
+  } = params;
   const { t } = useTranslation();
   const appInfo = useAppStore((state) => state.apps[appId]);
   const { checkAuth } = useAuth(appId);
@@ -152,6 +151,7 @@ export function useActrMessageFlow(
 
       const isFinished = data.isEnd || data.status === 2;
       const newContent = (currentMsg.answer_content || '') + data.message;
+      const isFailed = data.status === 3;
 
       updateMessage(
         tabId,
@@ -160,7 +160,7 @@ export function useActrMessageFlow(
           answer_type: 'text',
           answer_time: Date.now(),
           answer_content: newContent,
-          progress: isFinished ? 2 : 1,
+          progress: isFailed ? 3 : isFinished ? 2 : 1,
         },
         isFinished,
       );
@@ -436,21 +436,24 @@ export function useActrMessageFlow(
         return;
       }
 
-      if (connection?.reason) {
-        GlobalAlert.alert(t('actr.auth.serviceInitFailed'), connection.reason);
-        return;
-      }
+      // if (connection?.reason) {
+      //   GlobalAlert.alert(t('actr.auth.serviceInitFailed'), connection.reason);
+      //   return;
+      // }
 
       const trimmedContent = content.trim();
       if (!trimmedContent && !isVoice) {
-        GlobalAlert.alert(t('common.hint'), t('actr.input.emptyTextAlert'));
+        // GlobalAlert.alert(t('common.hint'), t('actr.input.emptyTextAlert'));
         return;
       }
 
       // 实时读取最新的附件和编辑状态，避免闭包陷阱
       const currentInputState = useInputStore.getState().inputs[tabId];
-      const attachmentsSnapshot = currentInputState?.attachments ? [...currentInputState.attachments] : [];
-      const editingMessageIdSnapshot = currentInputState?.editingMessageId || null;
+      const attachmentsSnapshot = currentInputState?.attachments
+        ? [...currentInputState.attachments]
+        : [];
+      const editingMessageIdSnapshot =
+        currentInputState?.editingMessageId || null;
 
       if (editingMessageIdSnapshot) {
         const messageIdToDelete = editingMessageIdSnapshot;
@@ -466,7 +469,10 @@ export function useActrMessageFlow(
       }
 
       let location: TLocation | undefined;
-      if (attachmentsSnapshot.length && attachmentsSnapshot[0].attachment_type === 'location') {
+      if (
+        attachmentsSnapshot.length &&
+        attachmentsSnapshot[0].attachment_type === 'location'
+      ) {
         const local = attachmentsSnapshot[0];
         location = {
           latitude: local.latitude!,
@@ -488,7 +494,9 @@ export function useActrMessageFlow(
         answer_time: 0,
         answer_content: '',
         attachments:
-          attachmentsSnapshot.length > 0 ? JSON.stringify(attachmentsSnapshot) : undefined,
+          attachmentsSnapshot.length > 0
+            ? JSON.stringify(attachmentsSnapshot)
+            : undefined,
         is_edited: editingMessageIdSnapshot ? 1 : 0,
         progress: 0,
       };
