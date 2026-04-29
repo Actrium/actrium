@@ -1,5 +1,5 @@
 {
-  "originHash" : "ad51b39562e4ce11205b1f49c6243631a0d88939cf7a5ecadafeec1c003e42f9",
+  "originHash" : "0474d0648b5e68b7742d5b61171fe699b49b0d9e3c8db4ad8ba631ee109f2a45",
   "pins" : [
     {
       "identity" : "a1-sdk-swift",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "git@github.com:actor-rtc/actr-swift.git",
       "state" : {
-        "revision" : "76a5e5703f5e33b3b4c73ed1b8aeaf2c0581c3c8",
-        "version" : "0.1.31"
+        "revision" : "2d82fe61a69bd24296951b475c7951a01b88d165",
+        "version" : "0.1.32"
       }
     },
     {
