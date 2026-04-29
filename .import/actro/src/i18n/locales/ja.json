@@ -46,6 +46,7 @@
       "deleteWithCount": "削除 ({{count}})",
       "pleaseInput": "テキストを入力してから送信してください",
       "emptyTextAlert": "テキストを入力してから送信してください",
+      "aiGeneratedLabel": "内容は AI により生成されています",
       "voiceMessage": "ボイスメッセージ",
       "sendVoicePlaceholder": "😌 ボイスメッセージを送信"
     },

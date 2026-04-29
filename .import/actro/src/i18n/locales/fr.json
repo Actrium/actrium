@@ -46,6 +46,7 @@
       "deleteWithCount": "Supprimer ({{count}})",
       "pleaseInput": "Veuillez ajouter du texte avant d'envoyer",
       "emptyTextAlert": "Veuillez ajouter du texte avant d'envoyer",
+      "aiGeneratedLabel": "Contenu généré par l'IA",
       "voiceMessage": "Message vocal",
       "sendVoicePlaceholder": "😌 Envoyer un message vocal"
     },
