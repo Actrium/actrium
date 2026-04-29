@@ -80,6 +80,8 @@
       "selectCategoryTip": "请至少选择一个举报分类",
       "copySuccess": "已复制",
       "copyFailed": "复制失败，请重试",
+      "sendMessageFailedTitle": "发送消息失败",
+      "sendMessageFailedMessage": "服务异常，请稍后再试",
       "snapshotFailed": "无法生成地图快照",
       "deleteConfirmTitle": "是否删除已选？",
       "deleteConfirmMsg": "删除后，无法恢复。",

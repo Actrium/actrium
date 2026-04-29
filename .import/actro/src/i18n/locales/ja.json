@@ -80,6 +80,8 @@
       "selectCategoryTip": "通報カテゴリを少なくとも1つ選択してください",
       "copySuccess": "コピーしました",
       "copyFailed": "コピーに失敗しました。再試行してください。",
+      "sendMessageFailedTitle": "メッセージの送信に失敗しました",
+      "sendMessageFailedMessage": "サービスエラーです。しばらくしてからもう一度お試しください",
       "snapshotFailed": "地図のスナップショットを生成できません",
       "deleteConfirmTitle": "選択した項目を削除しますか？",
       "deleteConfirmMsg": "削除すると復元できません。",

@@ -80,6 +80,8 @@
       "selectCategoryTip": "Selecciona al menos una categoría de reporte",
       "copySuccess": "Copiado",
       "copyFailed": "Error al copiar, intenta de nuevo",
+      "sendMessageFailedTitle": "No se pudo enviar el mensaje",
+      "sendMessageFailedMessage": "Error del servicio. Inténtalo de nuevo más tarde",
       "snapshotFailed": "No se pudo generar la captura del mapa",
       "deleteConfirmTitle": "¿Eliminar seleccionados?",
       "deleteConfirmMsg": "Una vez eliminado, no se podrá recuperar.",
