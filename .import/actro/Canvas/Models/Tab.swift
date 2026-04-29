@@ -75,6 +75,9 @@ struct Tab: Identifiable {
     /// Background color for this tab (Hex format: "#rrggbb")
     var backgroundColor: String
 
+    /// App ID parsed from URL (e.g. "xxx" from https://go.askaway.chat/app/xxx)
+    var appId: String?
+
     /// Additional properties from RN (excluding tabId)
     var additionalProps: [String: Any]?
 
@@ -89,6 +92,7 @@ struct Tab: Identifiable {
         title: String,
         icon: String? = nil,
         url: URL? = nil,
+        appId: String? = nil,
         htmlContent: String? = nil,
         systemTabType: SystemTabType? = nil,
         groupId: UUID? = nil,
@@ -111,6 +115,7 @@ struct Tab: Identifiable {
         self.title = title
         self.icon = icon
         self.url = url
+        self.appId = appId
         self.htmlContent = htmlContent
         self.systemTabType = systemTabType
         self.groupId = groupId
@@ -184,14 +189,16 @@ struct PersistedTab: Identifiable, Codable {
     var title: String
     var icon: String?
     var appUrl: URL?
+    var appId: String?
     var hasUnreadMessage: Bool
     var isBookmarked: Bool
 
-    init(id: UUID, title: String, icon: String?, appUrl: URL?, hasUnreadMessage: Bool = false, isBookmarked: Bool = false) {
+    init(id: UUID, title: String, icon: String?, appUrl: URL?, appId: String? = nil, hasUnreadMessage: Bool = false, isBookmarked: Bool = false) {
         self.id = id
         self.title = title
         self.icon = icon
         self.appUrl = appUrl
+        self.appId = appId
         self.hasUnreadMessage = hasUnreadMessage
         self.isBookmarked = isBookmarked
     }
@@ -201,6 +208,7 @@ struct PersistedTab: Identifiable, Codable {
         self.title = tab.title
         self.icon = tab.icon
         self.appUrl = tab.url
+        self.appId = tab.appId
         self.hasUnreadMessage = tab.hasUnreadMessage
         self.isBookmarked = tab.isBookmarked
     }
