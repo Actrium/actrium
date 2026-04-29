@@ -11,11 +11,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
         appLogger.debug("接收到 URL：\(url)")
-        // AskAway 通用链接由 SwiftUI onOpenURL 处理，此处只处理微信回调
-        let askawayHosts: Set<String> = ["go.askaway.chat", "go-askaway.develenv.com"]
-        if let host = url.host, askawayHosts.contains(host) {
-            return false
+        // 微信回调路径包含 weChatAppId，需优先交给微信处理；
+        // AskAway 通用链接（路径不含 weChatAppId）返回 false，由 SwiftUI onOpenURL 处理。
+        if url.path.contains(AppConstants.weChatAppId) {
+            return WeChatManager.shared.handleOpenURL(url)
         }
-        return WeChatManager.shared.handleOpenURL(url)
+        return false
     }
 }
