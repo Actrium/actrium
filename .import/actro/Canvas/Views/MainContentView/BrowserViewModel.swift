@@ -76,7 +76,7 @@ class BrowserViewModel: ObservableObject {
         }
 
         let defaultTab = Tab(
-            title: "",
+            title: TM.active.blackTab(),
             htmlContent: """
                 <!DOCTYPE html>
                 <html>
