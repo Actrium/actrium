@@ -80,6 +80,8 @@
       "selectCategoryTip": "Please select at least one report category",
       "copySuccess": "Copied",
       "copyFailed": "Copy failed, please try again",
+      "sendMessageFailedTitle": "Failed to send message",
+      "sendMessageFailedMessage": "Service error, please try again later",
       "snapshotFailed": "Unable to generate map snapshot",
       "deleteConfirmTitle": "Delete selected items?",
       "deleteConfirmMsg": "Once deleted, it cannot be recovered.",

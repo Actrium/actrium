@@ -80,6 +80,8 @@
       "selectCategoryTip": "請至少選擇一個檢舉分類",
       "copySuccess": "已複製",
       "copyFailed": "複製失敗，請重試",
+      "sendMessageFailedTitle": "發送消息失敗",
+      "sendMessageFailedMessage": "服務異常，請稍後再試",
       "snapshotFailed": "無法生成地圖快照",
       "deleteConfirmTitle": "是否刪除已選？",
       "deleteConfirmMsg": "刪除後，無法恢復。",
