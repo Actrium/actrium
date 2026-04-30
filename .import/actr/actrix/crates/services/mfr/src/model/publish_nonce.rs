@@ -85,22 +85,22 @@ impl PublishNonce {
         let entry = match entry {
             Some(e) => e,
             None => {
-                tracing::warn!("publish nonce not found");
+                platform::recording::warn!("publish nonce not found");
                 return Err(MfrError::Unauthorized);
             }
         };
 
         if entry.status != "pending" {
-            tracing::warn!(
-                nonce_id = entry.id,
-                status = %entry.status,
-                "publish nonce already consumed"
+            platform::recording::warn!(
+                "publish nonce already consumed: nonce_id={}, status={}",
+                entry.id,
+                entry.status
             );
             return Err(MfrError::Unauthorized);
         }
 
         if now > entry.expires_at {
-            tracing::warn!(nonce_id = entry.id, "publish nonce expired");
+            platform::recording::warn!("publish nonce expired: nonce_id={}", entry.id);
             return Err(MfrError::Unauthorized);
         }
 
@@ -121,7 +121,7 @@ impl PublishNonce {
         .await?;
 
         if result.rows_affected() != 1 {
-            tracing::warn!(nonce_id, "publish nonce consume race: already used");
+            platform::recording::warn!("publish nonce consume race: nonce_id={}", nonce_id);
             return Err(MfrError::Unauthorized);
         }
 

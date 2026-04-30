@@ -115,7 +115,11 @@ impl MfrKeyHistory {
         // Reject revoked keys: treat as if they don't exist
         match entry {
             Some(ref e) if e.status == KeyHistoryStatus::Revoked => {
-                tracing::warn!(key_id, mfr_id, "rejected lookup for revoked historical key");
+                platform::recording::warn!(
+                    "rejected lookup for revoked historical key: key_id={}, mfr_id={}",
+                    key_id,
+                    mfr_id
+                );
                 Err(MfrError::KeyRevoked(key_id.to_string()))
             }
             other => Ok(other),
