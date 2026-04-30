@@ -84,13 +84,15 @@ layout(&mut g, Some(opts));
 
 | Metric | Value |
 |--------|-------|
-| Source code | 8,500 lines |
-| Test code | 7,900 lines |
+| Source code | ~8,600 lines |
+| Test code | ~8,800 lines |
 | Test functions | 528 |
 | Test pass rate | 100% (0 ignored, 0 failures) |
 | Cross-validation | 20/20 match with dagre.js |
-| Clippy warnings | 0 |
+| Clippy warnings | 0 (enforced by CI via `clippy --all-targets -- -D warnings`) |
 | Runtime dependencies | 0 |
+
+CI runs `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test --all-features` on every push and pull request — see `.github/workflows/ci.yml`.
 
 ## License
 
