@@ -82,6 +82,46 @@ export class ActrStreamRouter {
     this.streamRegistry.delete(responseStreamId);
   }
 
+  // 本地消息返回 - 一般是有报错，模拟消息返回
+  emitLocalTextMessage(
+    responseStreamId: string,
+    payload: {
+      message: string;
+      status?: number;
+      isEnd?: boolean;
+    },
+  ): boolean {
+    const reg = this.streamRegistry.get(responseStreamId);
+    if (!reg || reg.type !== 'text') {
+      console.warn(
+        `[ActrStreamRouter] emitLocalTextMessage failed, stream not found: ${responseStreamId}`,
+      );
+      return false;
+    }
+
+    const {
+      streamMap: { messageId },
+    } = reg;
+    const status = payload.status ?? 3;
+    const isEnd = payload.isEnd ?? true;
+
+    reg.chatListeners.forEach((listener) =>
+      listener({
+        message_id: messageId,
+        message: payload.message,
+        status,
+        isEnd,
+      }),
+    );
+
+    if (isEnd) {
+      // 发送失败时没有远端流可关闭，这里只清理本地注册，避免残留脏映射。
+      this.clearStreamMap(reg.streamMap);
+    }
+
+    return true;
+  }
+
   clearConnectionStreams(connection: ActrConnection) {
     for (const [streamId, reg] of this.streamRegistry) {
       if (reg.connectionId === connection.getAppId()) {
@@ -118,7 +158,7 @@ export class ActrStreamRouter {
 
       if (isEnd) {
         this.sendCloseStream(data.streamID, actorType, tabId);
-        this.unregisterStream(data.streamID);
+        this.clearStreamMap(streamMap);
       }
 
       switch (reg.type) {
@@ -174,5 +214,10 @@ export class ActrStreamRouter {
     } catch (error) {
       console.error(`[ActrStreamRouter] sendCloseStreamMessage error:`, error);
     }
+  }
+
+  private clearStreamMap(streamMap: TActrStreamMap) {
+    this.streamRegistry.delete(streamMap.textResponseStreamId);
+    this.streamRegistry.delete(streamMap.voiceResponseStreamId);
   }
 }
