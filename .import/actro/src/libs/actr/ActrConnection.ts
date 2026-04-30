@@ -7,6 +7,7 @@ import {
 import { ActrNativeBridge } from '../../native-bridge/actr/ActrNativeBridge';
 import { Utils } from '../../utils/utils';
 import { ActrStreamRouter, TActrStreamMap } from './ActrStreamRouter';
+import { errorNote } from './LocalTestMessage';
 
 /**
  * Actr 连接管理类
@@ -144,10 +145,6 @@ export class ActrConnection {
   }
 
   async sendMessage(content: TActrMessageRequest): Promise<void> {
-    if (!this.isInitialized) {
-      throw new Error(`[ActrConnection:${this.appId}] Not initialized.`);
-    }
-
     const router = ActrStreamRouter.getInstance();
     let streamIdMap: TActrStreamMap | null = null;
 
@@ -155,6 +152,16 @@ export class ActrConnection {
       console.log(`[ActrConnection:${this.appId}] Start send message`);
 
       streamIdMap = router.bindStream(content.messageId, this);
+
+      if (!this.isInitialized) {
+        // 发送阶段失败时，将错误转换为一条本地终态文本消息，复用既有消息分发链路。
+        const router = ActrStreamRouter.getInstance();
+        router.emitLocalTextMessage(streamIdMap.textResponseStreamId, {
+          message: errorNote('连接未初始化'),
+        });
+        console.error(`[ActrConnection:${this.appId}] Not initialized.`);
+        return;
+      }
 
       const req = {
         messageId: content.messageId,
@@ -176,14 +183,19 @@ export class ActrConnection {
       return await ActrNativeBridge.sendTextMessage(req);
     } catch (error: any) {
       if (streamIdMap) {
-        router.unregisterStream(streamIdMap.textResponseStreamId);
-        router.unregisterStream(streamIdMap.voiceResponseStreamId);
+        const errorMessage = error?.message || String(error);
+
+        // 发送阶段失败时，将错误转换为一条本地终态文本消息，复用既有消息分发链路。
+        router.emitLocalTextMessage(streamIdMap.textResponseStreamId, {
+          message: errorNote(errorMessage),
+        });
       }
+
       console.error(
         `[ActrConnection:${this.appId}] Send message failed:`,
         error.message || error,
       );
-      throw error;
+      // throw error;
     }
   }
 
@@ -307,24 +319,34 @@ export class ActrConnection {
     },
   ): Promise<string> {
     if (!this.isInitialized) {
-      throw new Error(`[ActrConnection:${this.appId}] Not initialized.`);
+      console.error(`[ActrConnection:${this.appId}] Not initialized. Cannot upload attachment.`);
+      return '';
     }
     console.log('发送附件', data.fieldData.length);
-    const res = await ActrNativeBridge.uploadAttachment({
-      streamId,
-      type: 2,
-      fileData: Utils.uint8ArrayToBase64(data.fieldData),
-      actorType: this.actorType,
-      tabId: this.tabId,
-    });
 
-    if (res.statusCode !== 0) {
+    try {
+      const res = await ActrNativeBridge.uploadAttachment({
+        streamId,
+        type: 2,
+        fileData: Utils.uint8ArrayToBase64(data.fieldData),
+        actorType: this.actorType,
+        tabId: this.tabId,
+      });
+
+      if (res.statusCode !== 0) {
+        console.error(
+          `[ActrConnection:${this.appId}] Upload attachment failed: ${res.statusCode}, ${JSON.stringify(res)}`,
+        );
+      }
+
+      return res.id;
+    } catch (e: any) {
       console.error(
-        `[ActrConnection:${this.appId}] Upload attachment failed: ${res.statusCode}, ${JSON.stringify(res)}`,
+        `[ActrConnection:${this.appId}] Upload attachment failed:`,
+        e.message || e,
       );
+      return '';
     }
-
-    return res.id;
   }
 
   async uploadAttachmentSlice(

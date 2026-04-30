@@ -178,11 +178,7 @@ export function useActrConnection({
         },
         true,
       );
-      // GlobalAlert.alert('Failed to send message', e.message || e);
-      GlobalAlert.alert(
-        i18n.t('actr.chat.sendMessageFailedTitle'),
-        i18n.t('actr.chat.sendMessageFailedMessage'),
-      );
+      GlobalAlert.alert(i18n.t('actr.chat.sendMessageFailedTitle'), e.message);
       return null;
     }
   };
@@ -248,6 +244,6 @@ export function useActrConnection({
     sendVoiceChunk,
     endVoice,
     session_id: connection?.session_id || '',
-    connection
+    connection,
   };
 }
