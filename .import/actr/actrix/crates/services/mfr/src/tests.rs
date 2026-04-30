@@ -127,6 +127,7 @@ async fn setup_test_pool() -> SqlitePool {
 ///
 /// Creates a real nonce in the DB, then signs the challenge payload with the given key.
 /// Returns (nonce_b64, nonce_sig_b64) ready to use in PublishRequest.
+#[allow(clippy::too_many_arguments)]
 async fn make_publish_nonce(
     pool: &SqlitePool,
     mfr_id: i64,

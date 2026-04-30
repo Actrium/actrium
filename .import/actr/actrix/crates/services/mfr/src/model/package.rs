@@ -67,6 +67,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for ActrPackage {
 }
 
 impl ActrPackage {
+    #[allow(clippy::too_many_arguments)]
     pub async fn publish(
         pool: &SqlitePool,
         mfr_id: i64,

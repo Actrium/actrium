@@ -273,7 +273,11 @@ impl Database {
                         .bind(id)
                         .execute(&self.pool)
                         .await;
-                    tracing::info!(id, key_id, "backfilled key_id from public_key fingerprint");
+                    crate::recording::info!(
+                        "backfilled key_id from public_key fingerprint: id={}, key_id={}",
+                        id,
+                        key_id
+                    );
                 }
             }
         }
