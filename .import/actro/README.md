@@ -18,7 +18,13 @@ A complete Rust port of [dagre.js](https://github.com/dagrejs/dagre) -- hierarch
 
 ## Compatibility
 
+This crate tracks **[@dagrejs/dagre](https://github.com/dagrejs/dagre) v3.0.1-pre** (commit [`4713b59`](https://github.com/dagrejs/dagre/commit/4713b59bfa05af56cf58aa01e2027adf5d2dcf88)). The reference data in `cross-validate/reference_data.json` is generated against this exact commit; see `cross-validate/SETUP.md` for how to reproduce.
+
 Cross-validated against dagre.js on 20 reference graphs covering single nodes, chains, diamonds, cycles, fan-outs, disconnected components, edge labels, self-loops, compound subgraphs, all four rank directions, custom separators, margins, parallel edges, and varying node sizes. All produce identical coordinates, ranks, orders, and graph dimensions.
+
+### Downstream using dagre-d3-es or dagre.js v0.8.5 (mermaid, Go d2)
+
+`@dagrejs/dagre` changed its NetworkSimplex tie-breaking behavior between v0.8.5 and the current 3.x line: when two crossing-reduction sweeps tie on crossing count, the new behavior keeps the *last* tied layering, while v0.8.5 (still used by [dagre-d3-es](https://github.com/tbo47/dagre-d3-es) and [Go d2](https://github.com/terrastruct/d2)) keeps the *first*. Set `LayoutOptions { tie_keep_first: true, .. }` to opt into the v0.8.5 behavior — required for byte-identical layouts when interoperating with those downstreams.
 
 ## Usage
 
