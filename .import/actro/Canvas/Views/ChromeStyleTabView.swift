@@ -66,8 +66,16 @@ struct ChromeStyleTabView: View {
             historyVM: historyVM,
             animation: animation,
             onBackToOverview: {
-                viewModel.canvasMode = .overview
-                focusedTab = nil
+                // 退出前先截取当前 tab 内容区域的快照
+                if let currentTab = viewModel.tabs.first(where: { $0.id == viewModel.currentTabId }), !currentTab.title.isEmpty {
+                    takeSnapshot(for: currentTab) {
+                        viewModel.canvasMode = .overview
+                        focusedTab = nil
+                    }
+                } else {
+                    viewModel.canvasMode = .overview
+                    focusedTab = nil
+                }
             }
         )
         .ignoresSafeArea(.all, edges: .bottom)
@@ -110,6 +118,42 @@ struct ChromeStyleTabView: View {
         if viewModel.tabs.isEmpty {
             viewModel.canvasMode = .overview
             focusedTab = nil
+        }
+    }
+
+    /// 截取当前 tab 内容区域的快照（仅内容区域，不含导航栏）
+    private func takeSnapshot(for tab: Tab, completion: @escaping () -> Void) {
+        DispatchQueue.main.async {
+            defer { completion() }
+
+            let window = UIApplication.shared.connectedScenes
+                .filter { $0.activationState == .foregroundActive }
+                .compactMap { $0 as? UIWindowScene }
+                .first?.windows
+                .filter { $0.isKeyWindow }.first
+
+            guard let window = window else { return }
+
+            let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+            let fullImage = renderer.image { context in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+            }
+
+            // 仅截取内容区域：跳过顶部导航栏（44pt）
+            let screenHeight = window.bounds.height
+            let navBarHeight: CGFloat = 44
+            let contentRect = CGRect(
+                x: 0,
+                y: navBarHeight,
+                width: window.bounds.width,
+                height: screenHeight - navBarHeight
+            )
+
+            if let croppedImage = fullImage.cropped(to: contentRect) {
+                viewModel.setTabSnapshot(croppedImage, for: tab.id)
+            } else {
+                viewModel.setTabSnapshot(fullImage, for: tab.id)
+            }
         }
     }
 }
