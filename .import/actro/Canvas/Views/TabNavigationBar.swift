@@ -110,7 +110,7 @@ struct FocusModeNavigationBar: View {
     let onBackToOverview: () -> Void
 
     /// 导航栏背景色
-    private let barColor: Color = Color(hex: "#EFEFEF")
+    private let barColor: Color = Color(hex: "#E0E0E0")
 
     // 计算是否需要滚动
     private var needsScrolling: Bool {
