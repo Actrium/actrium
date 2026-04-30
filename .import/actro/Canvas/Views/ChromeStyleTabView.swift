@@ -172,7 +172,6 @@ struct ChromeTabOverviewView: View {
     @State private var hoveringOverTabId: UUID?
     @State private var showSettings: Bool = false
 
-    private let cardAspectRatio: CGFloat = 3.0 / 4.0
     private let interItemSpacing: CGFloat = 16
     private let lineSpacing: CGFloat = 20
     private let sideInset: CGFloat = 16
@@ -234,6 +233,9 @@ struct ChromeTabOverviewView: View {
         GeometryReader { geometry in
             let availableWidth = geometry.size.width - sideInset * 2
             let columns = calculateNumberOfColumns(availableWidth: availableWidth)
+            // 卡片宽高比与设备屏幕一致，横竖屏切换时自动更新
+            let screenBounds = UIScreen.main.bounds
+            let cardAspectRatio = screenBounds.width / screenBounds.height
 
             ScrollViewReader { proxy in
                 ScrollView {
