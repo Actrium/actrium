@@ -16,20 +16,20 @@ on top of the complete dagre.js port at
 
 ## Status
 
-**Active porting phase.** The foundations, reference-SVG pipeline, and
-Wave 1/2 geometry diagrams are already live. `cargo test` is green; the
-current work is concentrated on the Stratum 3 dagre family (`er`,
-`requirement`, `state`, `flowchart`, `block`, `class`), where working
-renderers exist but byte-exact parity is still being closed.
+**Convergence phase.** All 25 diagram types now parse, layout, and
+render through `convert_with_id`; 11 waves of byte-exact work have
+landed. `cargo test` is green (664 lib tests). As of 2026-05-02
+sweep_all reports **1184 / 1328 byte-exact ≈ 89.2%**.
 
 | | |
 |---|---|
 | Upstream version | `mermaid@11.14.0` (`2b9d054d`, tagged 2026-04-01) |
-| Implemented in `convert_with_id` | 19 diagram kinds (`gantt` is still renderer-stubbed) |
+| Wired in `convert_with_id` | **25 / 25** diagrams |
+| Byte-exact (≥99%) | 22 / 25 (pie, packet, radar, ishikawa, journey, timeline, quadrant, xychart, wardley, sankey, treemap, kanban, c4, er, block, requirement, class, state, gitGraph, gantt, venn, flowchart) |
+| Remaining frontier | sequence (40/150), mindmap multi-node (7/25), KaTeX ×6, icon shapes ×3, handDrawn venn ×3 |
 | Layout backend | [`dagre-rs`](https://github.com/kookyleo/dagre-rs) |
-| Reference tests | Wave 1/2 byte-exact sweeps are green; Stratum 3 is tracked by progress sweeps |
-| Active frontier | Stratum 3 parity, `gantt` renderer, then `mindmap` / `sequence` / `c4` / `gitGraph` |
-| Tracking docs | [PROGRESS.zh.md](PROGRESS.zh.md), [docs/stratum3_execution_guide.zh.md](docs/stratum3_execution_guide.zh.md) |
+| Reference tests | `cargo run --bin sweep_all` runs the full sweep; `known_ignored.txt` is now empty so every gap is surfaced |
+| Tracking doc | [PROGRESS.zh.md](PROGRESS.zh.md) (Chinese only, by project rule) |
 
 ## Non-Goals
 
