@@ -10,19 +10,16 @@ mermaid-little 读取 `.mmd` 源文本，输出 `.svg` —— 与 Mermaid 功能
 
 ## 当前状态
 
-**主动推进阶段。** foundations、reference-SVG 管线和 Wave 1/2
-几何类 diagram 已经落地，`cargo test` 全绿；当前主战场集中在
-Stratum 3 的 dagre 家族（`er`、`requirement`、`state`、
-`flowchart`、`block`、`class`），这些 diagram 已有可工作的
-renderer，但还在继续收敛 byte-exact parity。
+**收敛阶段。** 25 种 diagram 全部已 parser/layout/render 接通，11 路 wave 累计推进；`cargo test` 全绿（664 lib tests）。截至 2026-05-02，sweep_all **1184 / 1328 byte-exact ≈ 89.2%**。
 
 | | |
 |---|---|
 | 上游版本 | `mermaid@11.14.0`（`2b9d054d`，2026-04-01 发布） |
-| `convert_with_id` 已接线 | 19 种 diagram（`gantt` 仍是 renderer stub） |
+| `convert_with_id` 已接线 | **25 / 25** diagram |
+| 已 byte-exact (≥99%) | 22 / 25（pie / packet / radar / ishikawa / journey / timeline / quadrant / xychart / wardley / sankey / treemap / kanban / c4 / er / block / requirement / class / state / gitGraph / gantt / venn / flowchart） |
+| 主要剩余阻塞 | sequence (40/150)、mindmap multi-node (7/25)、KaTeX × 6、icon shapes × 3、handDrawn venn × 3 |
 | Layout 后端 | [`dagre-rs`](https://github.com/kookyleo/dagre-rs) |
-| Reference 测试 | Wave 1/2 byte-exact sweep 已稳定；Stratum 3 通过进度 sweep 跟踪 |
-| 当前推进面 | Stratum 3 parity、`gantt` renderer，随后是 `mindmap` / `sequence` / `c4` / `gitGraph` |
+| Reference 测试 | `cargo run --bin sweep_all` 单文件全量 sweep；known_ignored 列表已清空，所有失败均暴露 |
 | 跟踪文档 | [PROGRESS.zh.md](PROGRESS.zh.md)、[docs/stratum3_execution_guide.zh.md](docs/stratum3_execution_guide.zh.md) |
 
 ## 不在范围内
