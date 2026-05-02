@@ -10,14 +10,14 @@ mermaid-little 读取 `.mmd` 源文本，输出 `.svg` —— 与 Mermaid 功能
 
 ## 当前状态
 
-**收敛阶段。** 25 种 diagram 全部已 parser/layout/render 接通，11 路 wave 累计推进；`cargo test` 全绿（664 lib tests）。截至 2026-05-02，sweep_all **1184 / 1328 byte-exact ≈ 89.2%**。
+**收敛阶段。** 25 种 diagram 全部已 parser/layout/render 接通，12 路 wave 累计推进；`cargo test` 全绿（666 lib tests）。截至 2026-05-03，sweep_all **1200 / 1328 byte-exact ≈ 90.4%**。
 
 | | |
 |---|---|
 | 上游版本 | `mermaid@11.14.0`（`2b9d054d`，2026-04-01 发布） |
 | `convert_with_id` 已接线 | **25 / 25** diagram |
 | 已 byte-exact (≥99%) | 22 / 25（pie / packet / radar / ishikawa / journey / timeline / quadrant / xychart / wardley / sankey / treemap / kanban / c4 / er / block / requirement / class / state / gitGraph / gantt / venn / flowchart） |
-| 主要剩余阻塞 | sequence (40/150)、mindmap multi-node (7/25)、KaTeX × 6、icon shapes × 3、handDrawn venn × 3 |
+| 主要剩余阻塞 | sequence (51/150)、mindmap multi-node (7/25)、KaTeX × 6、icon shapes × 1、handDrawn venn × 3 |
 | Layout 后端 | [`dagre-rs`](https://github.com/kookyleo/dagre-rs) |
 | Reference 测试 | `cargo run --bin sweep_all` 单文件全量 sweep；known_ignored 列表已清空，所有失败均暴露 |
 | 跟踪文档 | [PROGRESS.zh.md](PROGRESS.zh.md)、[docs/stratum3_execution_guide.zh.md](docs/stratum3_execution_guide.zh.md) |

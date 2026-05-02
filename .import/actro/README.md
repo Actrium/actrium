@@ -17,17 +17,16 @@ on top of the complete dagre.js port at
 ## Status
 
 **Convergence phase.** All 25 diagram types now parse, layout, and
-render through `convert_with_id`; 11 waves of byte-exact work have
-landed. `cargo test` is green (664 lib tests). As of 2026-05-02
-sweep_all reports **1184 / 1328 byte-exact ≈ 89.2%**.
+render through `convert_with_id`; 12 waves of byte-exact work have
+landed. `cargo test` is green (666 lib tests). As of 2026-05-03
+sweep_all reports **1200 / 1328 byte-exact ≈ 90.4%**.
 
 | | |
 |---|---|
 | Upstream version | `mermaid@11.14.0` (`2b9d054d`, tagged 2026-04-01) |
 | Wired in `convert_with_id` | **25 / 25** diagrams |
 | Byte-exact (≥99%) | 22 / 25 (pie, packet, radar, ishikawa, journey, timeline, quadrant, xychart, wardley, sankey, treemap, kanban, c4, er, block, requirement, class, state, gitGraph, gantt, venn, flowchart) |
-| Remaining frontier | sequence (40/150), mindmap multi-node (7/25), KaTeX ×6, icon shapes ×3, handDrawn venn ×3 |
-| Layout backend | [`dagre-rs`](https://github.com/kookyleo/dagre-rs) |
+| Remaining frontier | sequence (51/150), mindmap multi-node (7/25), KaTeX ×6, icon shapes ×1, handDrawn venn ×3 |
 | Reference tests | `cargo run --bin sweep_all` runs the full sweep; `known_ignored.txt` is now empty so every gap is surfaced |
 | Tracking doc | [PROGRESS.zh.md](PROGRESS.zh.md) (Chinese only, by project rule) |
 
