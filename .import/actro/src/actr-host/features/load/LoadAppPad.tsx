@@ -100,6 +100,7 @@ const LoadAppPad = () => {
             >
               <LoadAppCameraPanel
                 tabId={tabCtx.tab.id}
+                openCameraBtnHeight={50}
                 cameraActive={cameraActive}
                 onCameraActiveChange={setCameraActive}
                 onBeforeOpenCamera={() => {
