@@ -50,3 +50,8 @@ log = "0.4"
 [dev-dependencies]
 # tests/flate_round_trip.rs validates our deflate against miniz_oxide.
 flate2 = "1"
+# Default LaTeX backend used by the test harness — the production crate has
+# no JS-engine dependency.  Web/RN/CLI embedders inject their own renderer
+# via `latex::set_engine()`, calling into the host's available JS engine
+# (browser V8, Hermes, JSC, etc.).
+rquickjs = "0.11.0"
