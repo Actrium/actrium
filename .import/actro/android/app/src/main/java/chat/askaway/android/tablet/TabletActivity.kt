@@ -2,6 +2,10 @@ package chat.askaway.android.tablet
 
 import android.content.Intent
 import android.os.Bundle
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.util.Base64
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -16,7 +20,7 @@ import androidx.core.view.postDelayed
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import chat.askaway.android.utils.GridViewColumnCalculator
+import android.content.res.Configuration
 import com.askaway.android.BuildConfig
 import com.askaway.android.MainApplication
 import com.askaway.android.R
@@ -39,14 +43,19 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     private lateinit var binding: ActivityTabletBinding
     private lateinit var adapter: ActiveAdapter
-    private lateinit var contentAdapter: TabletContentAdapter
+    private lateinit var tabContentAdapter: TabContentAdapter
+    private lateinit var gridAdapter: GridContentAdapter
     private var permissionListener: PermissionListener? = null
     private lateinit var viewModel: TabletViewModel
-    private var gridWidth = 0
-    private var gridHeight = 0
-    private var pagerLayoutManager: TabPagerLayoutManager? = null
-    private var gridLayoutManager: TabGridLayoutManager? = null
+    private val pagerLayoutManager = TabPagerLayoutManager(this)
+    private val gridLayoutManager: TabGridLayoutManager by lazy {
+        TabGridLayoutManager(this, 16f / 9f)
+    }
     private var gridItemDecoration: GridItemDecoration? = null
+    private val gridSpacingPx: Int
+        get() = (16 * resources.displayMetrics.density).toInt()
+    private val gridSpanCount: Int
+        get() = if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 4 else 3
     private val reactViewMap = mutableMapOf<String, ReactRootView>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,8 +69,18 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.rvApp.adapter = adapter
 
         // 初始化内容区域 adapter
-        contentAdapter = TabletContentAdapter(reactViewMap)
-        binding.rvContent.adapter = contentAdapter
+        tabContentAdapter = TabContentAdapter(reactViewMap)
+        gridAdapter = GridContentAdapter()
+
+        binding.rvTabContent.layoutManager = pagerLayoutManager
+        binding.rvTabContent.adapter = tabContentAdapter
+
+        binding.rvGridContent.layoutManager = gridLayoutManager
+        binding.rvGridContent.adapter = gridAdapter
+
+        val optionHeightPx = (32 * resources.displayMetrics.density).toInt()
+        gridItemDecoration = GridItemDecoration(gridSpanCount, gridSpacingPx, 16f / 9f, optionHeightPx)
+        binding.rvGridContent.addItemDecoration(gridItemDecoration!!)
 
         binding.flContent.addOnLayoutChangeListener { v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
             val newWidth = right - left
@@ -74,50 +93,62 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             // 更新容器尺寸
             if (newWidth > 0 && newHeight > 0) {
                 Log.e("TabletActivity", "newWidth:${newWidth}, newHeight:${newHeight}")
-                contentAdapter.containerWidth = newWidth
-                contentAdapter.containerHeight = newHeight
+
+                val marginHorizontalPx = (viewModel.containerWidth * resources.displayMetrics.density * 0.1).toInt()
+
+                gridAdapter.containerWidth = newWidth
+                gridAdapter.containerHeight = newHeight
+                gridAdapter.spanCount = gridSpanCount
+                gridAdapter.spacingPx = gridSpacingPx
+                gridAdapter.marginHorizontalPx = marginHorizontalPx
+
                 viewModel.containerWidth = newWidth.pxToDp().toInt()
                 viewModel.containerHeight = newHeight.pxToDp().toInt()
 
-                // 如果当前是 Grid 模式，更新 aspectRatio
-                if (contentAdapter.isGridMode) {
-                    val newAspectRatio = newWidth.toFloat() / newHeight.toFloat()
+                // 更新 GridLayoutManager 的 aspectRatio
+                val newAspectRatio = newWidth.toFloat() / newHeight.toFloat()
+                gridLayoutManager.updateAspectRatio(newAspectRatio)
 
-                    // 更新 GridLayoutManager
-                    gridLayoutManager?.updateAspectRatio(newAspectRatio)
-
-                    // 重新创建 GridItemDecoration
-                    gridItemDecoration?.let {
-                        binding.rvContent.removeItemDecoration(it)
-                    }
-                    gridItemDecoration = GridItemDecoration(newAspectRatio)
-                    binding.rvContent.addItemDecoration(gridItemDecoration!!)
-
-                    // 刷新布局，这会触发 adapter 的 bind 方法重新计算 scale
-                    contentAdapter.notifyDataSetChanged()
+                // 更新 GridItemDecoration 的宽高比和 optionHeight
+                gridItemDecoration?.let {
+                    binding.rvGridContent.removeItemDecoration(it)
                 }
-                // 新增：同步设置 rvContent 的 marginBottom
-                val params = binding.rvContent.layoutParams as? ViewGroup.MarginLayoutParams
-                if (params != null) {
-                    val marginBottom = if (contentAdapter.isGridMode) {
-                        (16 * resources.displayMetrics.density).toInt()
-                    } else {
-                        0
-                    }
-                    params.bottomMargin = marginBottom
-                    binding.rvContent.layoutParams = params
+                val optionHeightPxUpdate = (32 * resources.displayMetrics.density).toInt()
+                gridItemDecoration = GridItemDecoration(gridSpanCount, gridSpacingPx, newAspectRatio, optionHeightPxUpdate)
+                binding.rvGridContent.addItemDecoration(gridItemDecoration!!)
+
+                // 刷新 grid adapter 布局
+                gridAdapter.notifyDataSetChanged()
+
+                // 更新 rvGridContent 的 margin
+                val gridParams = binding.rvGridContent.layoutParams as? ViewGroup.MarginLayoutParams
+                if (gridParams != null) {
+                    val marginTop = (16 * resources.displayMetrics.density).toInt()
+                    gridParams.topMargin = marginTop
+                    gridParams.leftMargin = marginHorizontalPx
+                    gridParams.rightMargin = marginHorizontalPx
+                    gridParams.bottomMargin = marginTop
+                    binding.rvGridContent.layoutParams = gridParams
                 }
             }
         }
 
         // 获取容器尺寸
-        binding.rvContent.post {
-            contentAdapter.containerWidth = binding.rvContent.width
-            contentAdapter.containerHeight = binding.rvContent.height
-            viewModel.containerWidth = binding.rvContent.width.pxToDp().toInt()
-            viewModel.containerHeight = binding.rvContent.height.pxToDp().toInt()
+        binding.rvTabContent.post {
+            val w = binding.rvTabContent.width
+            val h = binding.rvTabContent.height
+            val marginHorizontalPx = (viewModel.containerWidth * resources.displayMetrics.density * 0.1).toInt()
+
+            gridAdapter.containerWidth = w
+            gridAdapter.containerHeight = h
+            gridAdapter.spanCount = gridSpanCount
+            gridAdapter.spacingPx = gridSpacingPx
+            gridAdapter.marginHorizontalPx = marginHorizontalPx
+
+            viewModel.containerWidth = w.pxToDp().toInt()
+            viewModel.containerHeight = h.pxToDp().toInt()
         }
-        binding.rvContent.adjustKeyboard()
+        binding.rvTabContent.adjustKeyboard()
 
         // 设置初始模式为 TAB
         changeMode(PageMode.TAB)
@@ -143,25 +174,24 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             }
         }
 
-        // 内容区域的点击事件
-        contentAdapter.onItemClick = { position ->
-            if (contentAdapter.isGridMode) {
-                // 在网格模式下点击，切换到 TAB 模式并滚动到对应位置
-                viewModel.changeDisplayMode(PageMode.TAB)
-                binding.rvContent.scrollToPosition(position)
-                // 更新当前选中的 app
-                val appList = viewModel.tabletUseCase.value?.appList
-                if (appList != null && position < appList.size) {
-                    viewModel.changeActiveModel(appList[position].id)
-                }
+        // Grid adapter 的点击事件
+        gridAdapter.onItemClick = { position ->
+            // 在网格模式下点击，切换到 TAB 模式并滚动到对应位置
+            viewModel.changeDisplayMode(PageMode.TAB)
+            binding.rvTabContent.scrollToPosition(position)
+            // 更新当前选中的 app
+            val appList = viewModel.tabletUseCase.value?.appList
+            if (appList != null && position < appList.size) {
+                viewModel.changeActiveModel(appList[position].id)
             }
         }
 
-        contentAdapter.onAddClick = {
+        gridAdapter.onAddClick = {
+            viewModel.changeDisplayMode(PageMode.TAB)
             viewModel.addApp()
         }
 
-        contentAdapter.onDeleteClick = { tabId ->
+        gridAdapter.onDeleteClick = { tabId ->
             // 从 reactViewMap 中移除并卸载
             val reactRootView = reactViewMap.remove(tabId)
             reactRootView?.let { rootView ->
@@ -173,7 +203,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             }
             viewModel.removeActiveModel(tabId)
         }
-        contentAdapter.onMarkClick = { activeModel ->
+        gridAdapter.onMarkClick = { activeModel ->
             viewModel.toggleMarkStatus(activeModel)
         }
 
@@ -239,7 +269,8 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     }
 
                     // 更新内容区域
-                    contentAdapter.updateItems(useCase.appList)
+                    tabContentAdapter.updateItems(useCase.appList)
+                    gridAdapter.updateItems(useCase.appList)
 
                     // 更新当前选中的 app
                     useCase.currentApp?.let {
@@ -252,7 +283,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                             val currentIndex = useCase.appList.indexOfFirst { model -> model.id == currentTabId }
                             Log.e("TabletActivity", "currentIndex:${currentIndex}")
                             if (currentIndex >= 0) {
-                                binding.rvContent.scrollToPosition(currentIndex)
+                                binding.rvTabContent.scrollToPosition(currentIndex)
                             }
                         }
                     }
@@ -273,7 +304,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         val currentIndex = useCase.appList.indexOfFirst { model -> model.id == adapter.currentId }
                         Log.e("TabletActivity", "currentIndex:${currentIndex}")
                         if (currentIndex >= 0) {
-                            binding.rvContent.scrollToPosition(currentIndex)
+                            binding.rvTabContent.scrollToPosition(currentIndex)
                         }
                     }
 
@@ -373,81 +404,30 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     }
 
     private fun changeMode(mode: PageMode) {
-        // 设置 flTitle 的底部 margin
-        val params = binding.rvContent.layoutParams as? ViewGroup.MarginLayoutParams
-        if (params != null) {
-            val marginTop = if (mode == PageMode.GRID) {
-                (16 * resources.displayMetrics.density).toInt()
-            } else {
-                0
-            }
-//            val marginHorizontal = viewModel.containerWidth.dpToPx()*0.1
-            val marginHorizontal =
-                if (mode == PageMode.GRID) viewModel.containerWidth * resources.displayMetrics.density * 0.1 else 0
-            params.topMargin = marginTop
-            params.leftMargin = marginHorizontal.toInt()
-            params.rightMargin = marginHorizontal.toInt()
-            binding.rvContent.layoutParams = params
+        // 切换到 Grid 模式前，对所有 item 的 ReactRootView 截图并存储到 screenshot 字段
+        if (mode == PageMode.GRID) {
+            captureScreenshots()
         }
 
         if (mode == PageMode.TAB) {
             viewModel.enterFullScreen()
             // TAB 模式
             binding.llTitleTab.isVisible = true
-            binding.rvContent.isVisible = true
+            binding.rvTabContent.isVisible = true
             binding.rlTitleGrid.isVisible = false
             binding.llSearch.isVisible = false
-
-            // 移除 Grid 的 ItemDecoration
-            gridItemDecoration?.let {
-                binding.rvContent.removeItemDecoration(it)
-                gridItemDecoration = null
-            }
-
-            // 创建或复用 TabPagerLayoutManager
-            if (pagerLayoutManager == null) {
-                pagerLayoutManager = TabPagerLayoutManager(this)
-            }
-            binding.rvContent.layoutManager = pagerLayoutManager
-            contentAdapter.isGridMode = false
-
-            // 强制刷新以重置 item 高度
-            contentAdapter.notifyDataSetChanged()
+            binding.rvGridContent.isVisible = false
         } else {
             viewModel.exitFullScreen()
             // GRID 模式
             binding.rlTitleGrid.isVisible = true
             binding.llSearch.isVisible = true
             binding.llTitleTab.isVisible = false
-            binding.rvContent.isVisible = true
+            binding.rvTabContent.isVisible = false
+            binding.rvGridContent.isVisible = true
 
-            // 创建或复用 TabGridLayoutManager
-            if (gridLayoutManager == null) {
-                val aspectRatio = if (contentAdapter.containerWidth > 0 && contentAdapter.containerHeight > 0) {
-                    contentAdapter.containerWidth.toFloat() / contentAdapter.containerHeight.toFloat()
-                } else {
-                    16f / 9f
-                }
-                gridLayoutManager = TabGridLayoutManager(this, aspectRatio)
-            }
-            binding.rvContent.layoutManager = gridLayoutManager
-
-            // 每次切换到 Grid 模式时重新创建 ItemDecoration
-            gridItemDecoration?.let {
-                binding.rvContent.removeItemDecoration(it)
-            }
-            val aspectRatio = if (contentAdapter.containerWidth > 0 && contentAdapter.containerHeight > 0) {
-                contentAdapter.containerWidth.toFloat() / contentAdapter.containerHeight.toFloat()
-            } else {
-                16f / 9f
-            }
-            gridItemDecoration = GridItemDecoration(aspectRatio)
-            binding.rvContent.addItemDecoration(gridItemDecoration!!)
-
-            contentAdapter.isGridMode = true
-
-            // 强制刷新以应用 Grid 布局
-            contentAdapter.notifyDataSetChanged()
+            // 刷新 grid adapter 以应用截图
+            gridAdapter.notifyDataSetChanged()
         }
     }
 
@@ -462,6 +442,32 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             }
             // 启动 React 应用
             startReactApplication(reactInstanceManager, componentName, launchOptions)
+        }
+    }
+
+    /**
+     * 对所有 ReactRootView 截图，并将 Base64 编码存储到对应 ActiveModel 的 screenshot 字段。
+     */
+    private fun captureScreenshots() {
+        val appList = viewModel.tabletUseCase.value?.appList ?: return
+        for (item in appList) {
+            val reactRootView = reactViewMap[item.id]
+            if (reactRootView != null && reactRootView.width > 0 && reactRootView.height > 0) {
+                try {
+                    val bitmap = Bitmap.createBitmap(
+                        reactRootView.width, reactRootView.height, Bitmap.Config.ARGB_8888
+                    )
+                    val canvas = Canvas(bitmap)
+                    reactRootView.draw(canvas)
+                    val outputStream = java.io.ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 80, outputStream)
+                    val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.DEFAULT)
+                    item.screenshot = base64
+                    bitmap.recycle()
+                } catch (e: Exception) {
+                    Log.e("TabletActivity", "Failed to capture screenshot for ${item.id}", e)
+                }
+            }
         }
     }
 
