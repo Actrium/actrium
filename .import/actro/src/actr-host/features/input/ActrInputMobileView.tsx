@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Animated,
   PanResponder,
+  Platform,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -814,12 +815,12 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     position: 'absolute',
     left: 26,
     right: 26,
-    bottom: 0,
+    bottom: Platform.OS === 'ios' ? 0 : -10,
     alignItems: 'center',
   },
   mobileFloatingTextLabel: {
     color: '#A0A0A0',
-    fontSize: 10,
+    fontSize: Platform.OS === 'ios' ? 10 : 8,
   },
   mobileInputRow: {
     flexDirection: 'row',
