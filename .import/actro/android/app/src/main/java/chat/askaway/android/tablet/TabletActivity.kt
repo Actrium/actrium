@@ -2,10 +2,6 @@ package chat.askaway.android.tablet
 
 import android.content.Intent
 import android.os.Bundle
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.util.Base64
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -36,6 +32,7 @@ import com.facebook.react.uimanager.PixelUtil.dpToPx
 import com.askaway.android.core.ReactNativeBundle
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
+import com.askaway.android.utils.screenshot
 import com.askaway.android.utils.adjustKeyboard
 import chat.askaway.android.utils.TabBundleUtils
 
@@ -446,7 +443,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     }
 
     /**
-     * 对所有 ReactRootView 截图，并将 Base64 编码存储到对应 ActiveModel 的 screenshot 字段。
+     * 对所有 ReactRootView 截图，并将本地存储路径存储到对应 ActiveModel 的 screenshot 字段。
      */
     private fun captureScreenshots() {
         val appList = viewModel.tabletUseCase.value?.appList ?: return
@@ -454,16 +451,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             val reactRootView = reactViewMap[item.id]
             if (reactRootView != null && reactRootView.width > 0 && reactRootView.height > 0) {
                 try {
-                    val bitmap = Bitmap.createBitmap(
-                        reactRootView.width, reactRootView.height, Bitmap.Config.ARGB_8888
-                    )
-                    val canvas = Canvas(bitmap)
-                    reactRootView.draw(canvas)
-                    val outputStream = java.io.ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 80, outputStream)
-                    val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.DEFAULT)
-                    item.screenshot = base64
-                    bitmap.recycle()
+                    val screenshotPath = reactRootView.screenshot("${item.id}.jpg")
+                    if (screenshotPath != null) {
+                        item.screenshot = screenshotPath
+                    }
                 } catch (e: Exception) {
                     Log.e("TabletActivity", "Failed to capture screenshot for ${item.id}", e)
                 }
