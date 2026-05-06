@@ -10,7 +10,7 @@
         android:id="@+id/llOption"
         android:layout_width="match_parent"
         android:layout_height="32dp"
-        android:layout_marginHorizontal="8dp"
+        android:paddingHorizontal="8dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
@@ -87,10 +87,14 @@
 
         </chat.askaway.android.tablet.ScalableContainer>
 
-        <FrameLayout
-            android:id="@+id/flOver"
+        <!-- Grid 模式下显示的截图 ImageView，覆盖在 ReactRootView 之上 -->
+        <ImageView
+            android:id="@+id/ivScreenshot"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-    </androidx.cardview.widget.CardView>
+            android:layout_height="match_parent"
+            android:scaleType="fitStart"
+            android:visibility="gone" />
+
+        </androidx.cardview.widget.CardView>
 
 </LinearLayout>

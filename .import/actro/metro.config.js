@@ -64,14 +64,26 @@ const config = {
         return { type: 'sourceFile', filePath: path.resolve(loomShimsDir, 'tslib.js') };
       }
 
-      // ---- @supramark/core 必须使用 RN 专用入口 ----
-      // 默认 main 是 index.ts（含 remark/unified 等 Node.js 依赖，RN 不兼容），
-      // RN 端需要指向 index.rn.ts（额外导出 LRUCache/createCacheKey/simpleHash 等工具）
-      if (moduleName === '@supramark/core') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(supermarkRoot, 'packages/core/src/index.rn.ts'),
-        };
+      // ---- @supramark/* 包统一从源码目录解析 ----
+      // yarn file: 依赖是物理拷贝，源码更新后 node_modules 副本不会同步。
+      // 让 Metro 直接从 supermarkRoot 解析，确保始终使用最新源码（含图片等资源）。
+      if (moduleName.startsWith('@supramark/')) {
+        const fullName = moduleName.slice('@supramark/'.length);
+        if (!fullName.includes('/')) {
+          // 顶层包导入（不含子路径如 /web）
+          let sourceDir;
+          if (fullName === 'core') {
+            sourceDir = path.resolve(supermarkRoot, 'packages', 'core');
+          } else if (fullName.startsWith('feature-')) {
+            sourceDir = path.resolve(supermarkRoot, 'packages', 'features', fullName);
+          } else {
+            sourceDir = path.resolve(supermarkRoot, 'packages', 'renderers', fullName);
+          }
+          // core 使用 RN 专用入口 index.rn.ts，其余使用 src/index.ts
+          const entryFile = fullName === 'core' ? 'src/index.rn.ts' : 'src/index.ts';
+          return { type: 'sourceFile', filePath: path.resolve(sourceDir, entryFile) };
+        }
+        // 子路径导入（如 @supramark/feature-admonition/web）暂走默认解析
       }
 
       // ---- supramark peer dependency: pako ----
