@@ -16,7 +16,10 @@ import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
 import com.askaway.android.utils.addMap
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
@@ -34,16 +37,13 @@ class MainViewModel(
     val currentReactNativeStatus: SharedFlow<Bundle> = _currentReactNativeStatus
 
     // ActiveModel 集合
-    private val _activeList = MutableSharedFlow<List<ActiveModel>>(replay = 1, extraBufferCapacity = 1)
-    val activeList: SharedFlow<List<ActiveModel>> = _activeList
+    private val _activeList = MutableStateFlow<List<ActiveModel>>(emptyList())
+    val activeList: StateFlow<List<ActiveModel>> = _activeList
 
     private val _showPageType = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val showPageType: SharedFlow<String> = _showPageType
 
     val pageBundle = Bundle()
-
-
-    private val _activeModelList = mutableListOf<ActiveModel>()
 
     init {
         // 注册 EventBus
@@ -61,8 +61,7 @@ class MainViewModel(
                 try {
                     val savedList = repository.loadActiveList()
                     if (savedList.isNotEmpty()) {
-                        _activeModelList.addAll(savedList)
-                        _activeList.tryEmit(_activeModelList.toList())
+                        _activeList.update { it + savedList }
                         Log.d("MainViewModel", "Loaded ${savedList.size} items from database")
                     }
                 } catch (e: Exception) {
@@ -76,8 +75,8 @@ class MainViewModel(
         activeRepository?.let { repository ->
             viewModelScope.launch {
                 try {
-                    repository.saveActiveList(_activeModelList.toList())
-                    Log.d("MainViewModel", "Saved ${_activeModelList.size} items to database")
+                    repository.saveActiveList(_activeList.value)
+                    Log.d("MainViewModel", "Saved ${_activeList.value.size} items to database")
                 } catch (e: Exception) {
                     Log.e("MainViewModel", "Error saving active list to database", e)
                 }
@@ -109,13 +108,13 @@ class MainViewModel(
                 if (systemAppType == null) { // 打开应用
                     val tabId = event.params["tabId"] as? String
                     Log.e("MainViewModel", "Received EVENT_OPEN_TAB for tabId: $tabId")
-                    val hasActive = tabId != null && _activeModelList.any { it.id == tabId }
+                    val hasActive = tabId != null && _activeList.value.any { it.id == tabId }
                     if (hasActive) {
-                        val appModel = _activeModelList.find { it.id == tabId }
+                        val appModel = _activeList.value.find { it.id == tabId }
                         Log.e("MainViewModel", "Received EVENT_OPEN_TAB appModel: $appModel")
                         appModel?.let {
                             _currentReactNativeStatus.tryEmit(
-                                TabBundleUtils.genBundle(it, _activeModelList.toList(),containerHeight, containerWidth )
+                                TabBundleUtils.genBundle(it, _activeList.value, containerHeight, containerWidth)
                             )
                         }
                     } else {
@@ -150,15 +149,18 @@ class MainViewModel(
                 val icon = event.params["icon"] as? String
                 val url = event.params["appUrl"] as? String
                 if (tabId != null) {
-                    val index = _activeModelList.indexOfFirst { it.id == tabId }
+                    val index = _activeList.value.indexOfFirst { it.id == tabId }
                     if (index != -1) {
-                        val oldItem = _activeModelList[index]
-                        _activeModelList[index] = oldItem.copy(
-                            name = title ?: oldItem.name,
-                            icon = icon ?: oldItem.icon,
-                            url = url ?: oldItem.url
-                        )
-                        _activeList.tryEmit(_activeModelList.toList())
+                        val oldItem = _activeList.value[index]
+                        _activeList.update { list ->
+                            list.mapIndexed { i, item ->
+                                if (i == index) oldItem.copy(
+                                    name = title ?: oldItem.name,
+                                    icon = icon ?: oldItem.icon,
+                                    url = url ?: oldItem.url
+                                ) else item
+                            }
+                        }
                     }
                 }
             }
@@ -167,17 +169,19 @@ class MainViewModel(
                 val tabId = event.params["tabId"] as? String
                 val marked = event.params["marked"] as? Boolean
                 if (tabId != null && marked != null) {
-                    val index = _activeModelList.indexOfFirst { it.id == tabId }
+                    val index = _activeList.value.indexOfFirst { it.id == tabId }
                     if (index != -1) {
-                        val oldItem = _activeModelList[index]
-                        _activeModelList[index] = oldItem.copy(isMarked = marked)
-                        _activeList.tryEmit(_activeModelList.toList())
+                        _activeList.update { list ->
+                            list.mapIndexed { i, item ->
+                                if (i == index) item.copy(isMarked = marked) else item
+                            }
+                        }
                     }
                 }
             }
             ReactModuleEvent.EVENT_GET_ALL_TABS -> {
                 val tabs = com.facebook.react.bridge.Arguments.createArray()
-                _activeModelList.forEach { model ->
+                _activeList.value.forEach { model ->
                     val map = com.facebook.react.bridge.Arguments.createMap()
                     map.putString("tabId", model.id)
                     map.putString("title", model.name)
@@ -210,7 +214,7 @@ class MainViewModel(
     }
 
     fun genBundle(model: ActiveModel): Bundle{
-        return TabBundleUtils.genBundle(model, _activeModelList.toList(),containerHeight, containerWidth )
+        return TabBundleUtils.genBundle(model, _activeList.value, containerHeight, containerWidth)
     }
 
 
@@ -222,46 +226,43 @@ class MainViewModel(
      * 添加 ActiveModel 到列表
      */
     fun addActiveModel(activeModel: ActiveModel) {
-        _activeModelList.add(activeModel)
-        _activeList.tryEmit(_activeModelList.toList())
+        _activeList.update { it + activeModel }
     }
 
     /**
      * 批量添加 ActiveModel 到列表
      */
     fun addActiveModels(models: List<ActiveModel>) {
-        _activeModelList.addAll(models)
-        _activeList.tryEmit(_activeModelList.toList())
+        _activeList.update { it + models }
     }
 
     /**
      * 清除所有 ActiveModel
      */
     fun clearActiveModels() {
-        _activeModelList.clear()
-        _activeList.tryEmit(_activeModelList.toList())
+        _activeList.update { emptyList() }
     }
 
     /**
      * 移除指定 ActiveModel
      */
     fun removeActiveModel(id: String) {
-        _activeModelList.removeAll { it.id == id }
-        _activeList.tryEmit(_activeModelList.toList())
+        _activeList.update { it.filterNot { model -> model.id == id } }
         Params.appList.removeAll { it.id == id }
     }
 
 
     private fun updateUnread(tabId: String?, unread: Boolean?) {
         if (tabId != null && unread != null) {
-            val index = _activeModelList.indexOfFirst { it.id == tabId }
+            val index = _activeList.value.indexOfFirst { it.id == tabId }
             if (index != -1) {
-                val oldItem = _activeModelList[index]
+                val oldItem = _activeList.value[index]
                 if (oldItem.hasUnread != unread) {
-                    _activeModelList[index] = oldItem.copy(
-                        hasUnread = unread
-                    )
-                    _activeList.tryEmit(_activeModelList.toList())
+                    _activeList.update { list ->
+                        list.mapIndexed { i, item ->
+                            if (i == index) item.copy(hasUnread = unread) else item
+                        }
+                    }
                 }
             }
         }
@@ -277,15 +278,17 @@ class MainViewModel(
     }
 
     fun canCaptureScreenshot(tabId: String): Boolean {
-        return _activeModelList.find { it.id == tabId }?.name?.isNotEmpty() == true
+        return _activeList.value.find { it.id == tabId }?.name?.isNotEmpty() == true
     }
 
     fun updateScreenshot(tabId: String, screenshotPath: String) {
-        val index = _activeModelList.indexOfFirst { it.id == tabId }
+        val index = _activeList.value.indexOfFirst { it.id == tabId }
         if (index != -1) {
-            val oldItem = _activeModelList[index]
-            _activeModelList[index] = oldItem.copy(screenshot = screenshotPath)
-            _activeList.tryEmit(_activeModelList.toList())
+            _activeList.update { list ->
+                list.mapIndexed { i, item ->
+                    if (i == index) item.copy(screenshot = screenshotPath) else item
+                }
+            }
         }
     }
 
@@ -309,7 +312,7 @@ class MainViewModel(
         )
     }
 
-    fun isActiveListEmpty(): Boolean = _activeModelList.isEmpty()
+    fun isActiveListEmpty(): Boolean = _activeList.value.isEmpty()
 
     fun changeInputText(text:String){
         EventBus.getDefault().post(
