@@ -47,10 +47,8 @@ import { useUnreadStore } from '../../store/useUnreadStore';
 import { GlobalAlert } from '../../../components';
 import TemporarySupramarkMockChat from './ChatMock';
 import { CHAT_HEADER_HEIGHT } from '../../constants';
-import { BookmarkRepository } from '../../../repository/BookmarkRepository';
 import { AppRepository } from '../../../repository/AppRepository';
 import {
-  setTabBookmarkStatus,
   updateTabInfo,
 } from '../../../native-bridge/tab/TabModule';
 import {
@@ -65,6 +63,7 @@ import {
   scrollToBottomButton,
   spacing,
 } from '../../../theme/tokens';
+import { useBookmarkStore } from '../../store/useBookmarkStore';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import ChatSharePreviewModal from './share/ChatSharePreviewModal';
@@ -415,10 +414,12 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     if (!appId) return;
 
     try {
-      // 首次进入聊天页时，按 appId 回查收藏表并同步当前 tab 的原生收藏态。
-      const bookmarkItem = await BookmarkRepository.getBookmarkByAppId(appId);
-      
-      await setTabBookmarkStatus(tab.id, !!bookmarkItem);
+      // 中文注释：聊天页只消费书签 store 的内存态；
+      // 若当前进程内尚未加载过书签，则先由 store 统一回源 SQLite。
+      await useBookmarkStore.getState().loadBookmarks();
+      await useBookmarkStore.getState().syncNativeBookmarkStatusByAppId({
+        appId,
+      });
     } catch (error) {
       console.error('[Chat] Failed to sync initial bookmark status:', error);
     }
