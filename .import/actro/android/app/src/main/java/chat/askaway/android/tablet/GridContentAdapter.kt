@@ -24,7 +24,7 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     }
 
     private val items = mutableListOf<ActiveModel>()
-    var onItemClick: ((Int) -> Unit)? = null
+    var onItemClick: ((Int, View) -> Unit)? = null
     var onAddClick: (() -> Unit)? = null
     var onDeleteClick: ((String) -> Unit)? = null
     var onMarkClick: ((ActiveModel) -> Unit)? = null
@@ -80,7 +80,7 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
                 // 设置点击事件
                 holder.ivScreenshot.setOnClickListener {
-                    onItemClick?.invoke(position)
+                    onItemClick?.invoke(position, holder.ivScreenshot)
                 }
 
                 holder.ivMark.setOnClickListener {
