@@ -19,13 +19,12 @@ import { useTab } from '../../contexts/TabContext';
 import { extractAppIdFromUrl } from '../../utils';
 import { AppSessionService } from '../../../services/AppSessionService';
 import { useKeyboardInset } from '../../../hooks/useKeyboardInset';
-import { setTabBookmarkStatus } from '../../../native-bridge/tab/TabModule';
 import { Icon, GlobalAlert, AppText } from '../../../components';
 import { isTablet } from '../../../utils/device';
 import { useNetworkPermission } from '../../hooks/useNetworkPermission';
-import { BookmarkRepository } from '../../../repository/BookmarkRepository';
 import { MessageRepository } from '../../../repository/MessageRepository';
 import { useMessageStore } from '../../store/useMessageStore';
+import { useBookmarkStore } from '../../store/useBookmarkStore';
 import { getTypographyStyle, loadApp, spacing } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
@@ -256,10 +255,10 @@ export const useLoadApp = () => {
           if (!appId) return;
 
           try {
-            const bookmark = await BookmarkRepository.getBookmarkByAppId(appId);
-            if (bookmark) {
-              await setTabBookmarkStatus(tabCtx.tab.id, true);
-            }
+            await useBookmarkStore.getState().loadBookmarks();
+            await useBookmarkStore.getState().syncNativeBookmarkStatusByAppId({
+              appId,
+            });
           } catch (error) {
             console.error('[LoadApp] Failed to check bookmark status:', error);
           }

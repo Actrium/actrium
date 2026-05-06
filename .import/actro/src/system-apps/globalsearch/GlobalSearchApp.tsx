@@ -17,12 +17,10 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../components';
+import { useBookmarkStore } from '../../actr-host/store/useBookmarkStore';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { getTypographyStyle, globalSearch } from '../../theme/tokens';
-import {
-  BookmarkRepository,
-  TBookmarkItem,
-} from '../../repository/BookmarkRepository';
+import { TBookmarkItem } from '../../repository/BookmarkRepository';
 import {
   openTab,
   getAllTabs,
@@ -196,12 +194,17 @@ export default function GlobalSearchApp() {
   const { t, i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const [allTabs, setAllTabs] = useState<TabSummary[]>([]);
-  const [bookmarks, setBookmarks] = useState<TBookmarkItem[]>([]);
   const { width: screenWidth } = useWindowDimensions();
   const userInfo = useUserStore((s) => s.userInfo);
+  const bookmarkGroups = useBookmarkStore((state) => state.groups);
+  const loadBookmarks = useBookmarkStore((state) => state.loadBookmarks);
   const isLoggedIn = !!userInfo;
   const searchLocale = resolveSearchLocale(i18n.resolvedLanguage || i18n.language);
   const localizedSearchCopy = LOCALIZED_SETTING_SEARCH_COPY[searchLocale];
+  const bookmarks = useMemo<TBookmarkItem[]>(
+    () => bookmarkGroups.flatMap((group) => group.items),
+    [bookmarkGroups],
+  );
 
   const isPhone = screenWidth < 600;
   const resultsAreaSize = isPhone ? 'auto' : 500;
@@ -209,11 +212,8 @@ export default function GlobalSearchApp() {
   const resultsCardRadius = 26;
 
   useEffect(() => {
-    BookmarkRepository.getBookmarksHierarchy().then((groups) => {
-      const allItems = groups.flatMap((g) => g.items);
-      setBookmarks(allItems);
-    });
-  }, []);
+    void loadBookmarks();
+  }, [loadBookmarks]);
 
   useEffect(() => {
     // 中文注释：活跃应用搜索改为基于页面打开时的 tab 快照做本地过滤，

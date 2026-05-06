@@ -1,6 +1,6 @@
 import { db } from './Sqlite';
 
-const LATEST_DB_VERSION = 2;
+const LATEST_DB_VERSION = 3;
 
 type UserVersionRow = {
   user_version: number;
@@ -60,6 +60,11 @@ const createBaseSchema = async () => {
       FOREIGN KEY (category_id) REFERENCES bookmark_categories (id) ON DELETE CASCADE,
       FOREIGN KEY (app_id) REFERENCES apps (app_id) ON DELETE CASCADE
     );
+  `, [], true);
+
+  await db.executeSql(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmark_items_app_id_unique
+    ON bookmark_items (app_id);
   `, [], true);
 
   // 4. 创建聊天历史表
@@ -188,6 +193,33 @@ const runMigrations = async (fromVersion: number) => {
       await db.executeSql('ALTER TABLE apps ADD COLUMN instance_name TEXT;', [], true);
     }
     currentVersion = 2;
+    await setUserVersion(currentVersion);
+  }
+
+  if (currentVersion < 3) {
+    // 中文注释：旧库可能已经存在同一 app_id 的重复书签，
+    // 先保留最早一条记录并删除其余重复项，再补唯一索引，避免升级时建索引失败。
+    await db.executeSql(
+      `
+        DELETE FROM bookmark_items
+        WHERE id NOT IN (
+          SELECT MIN(id)
+          FROM bookmark_items
+          GROUP BY app_id
+        );
+      `,
+      [],
+      true,
+    );
+    await db.executeSql(
+      `
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmark_items_app_id_unique
+        ON bookmark_items (app_id);
+      `,
+      [],
+      true,
+    );
+    currentVersion = 3;
     await setUserVersion(currentVersion);
   }
 

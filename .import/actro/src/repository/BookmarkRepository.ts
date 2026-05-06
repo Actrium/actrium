@@ -133,7 +133,7 @@ export class BookmarkRepository {
     sort_order?: number;
   }) {
     return await db.executeSql(
-      'INSERT INTO bookmark_items (category_id, app_id, sort_order) VALUES (?, ?, ?)',
+      'INSERT OR IGNORE INTO bookmark_items (category_id, app_id, sort_order) VALUES (?, ?, ?)',
       [category_id ?? null, app_id, sort_order]
     );
   }
