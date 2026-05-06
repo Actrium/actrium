@@ -1,9 +1,8 @@
 import React from 'react';
 import { TabEvents } from '../../native-bridge/tab/TabEvents';
-import { setTabBookmarkStatus } from '../../native-bridge/tab/TabModule';
+import { useBookmarkStore } from '../store/useBookmarkStore';
 import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { useUnreadStore } from '../store/useUnreadStore';
-import { BookmarkRepository } from '../../repository/BookmarkRepository';
 import { useAuth } from '../../hooks/auth';
 
 /**
@@ -51,24 +50,25 @@ export function useTabNativeEvents(tabId: string) {
       const currentAppId = useTabIdMapStore.getState().tabIdMap[tabId];
       if (!currentAppId) return;
 
+      // 中文注释：原生回流同 appId 其他 tab 的同步事件时，
+      // store 往往已经处于目标状态；这里直接按当前状态做幂等判断，避免重复写库。
+      if (
+        useBookmarkStore.getState().isBookmarked(currentAppId) ===
+        event.isBookmarked
+      ) {
+        return;
+      }
+
       console.log('收藏状态变化', event.isBookmarked);
 
       if (event.isBookmarked) {
-        // 收藏，更新数据库
-        await BookmarkRepository.addBookmark({
-          app_id: currentAppId,
-          sort_order: 0,
+        await useBookmarkStore.getState().addBookmark({
+          appId: currentAppId,
+          sortOrder: 0,
         });
       } else {
-        // 取消收藏，按 app_id 删除
-        await BookmarkRepository.removeBookmarkByAppId(currentAppId);
+        await useBookmarkStore.getState().removeBookmarkByAppId(currentAppId);
       }
-
-      // 通知所有同 appId 的 tab 更新收藏状态
-      const allTabIds = useTabIdMapStore.getState().getTabIdsByAppId(currentAppId);
-      await Promise.all(
-        allTabIds.map((id) => setTabBookmarkStatus(id, event.isBookmarked)),
-      );
     });
 
     return () => {
