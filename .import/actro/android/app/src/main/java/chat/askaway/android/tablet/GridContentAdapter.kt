@@ -98,18 +98,12 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     inner class GridItemViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val cardView: CardView = itemView.findViewById(R.id.cardView)
-        private val tvTitle: TextView = itemView.findViewById(R.id.tvTitle)
-        private val tvUrl: TextView = itemView.findViewById(R.id.tvUrl)
         val ivDelete: ImageView = itemView.findViewById(R.id.ivDelete)
         val ivMark: ImageView = itemView.findViewById(R.id.ivMark)
         val tvName: TextView = itemView.findViewById(R.id.tvName)
-        private val llInfo: LinearLayout = itemView.findViewById(R.id.llInfo)
         val ivScreenshot: ImageView = itemView.findViewById(R.id.ivScreenshot)
 
         fun bind(item: ActiveModel) {
-            tvTitle.text = item.name.ifEmpty { "New Tab" }
-            tvUrl.text = item.url.ifEmpty { "about:blank" }
-
             val density = itemView.context.resources.displayMetrics.density
 
             val cardLayoutParams = cardView.layoutParams as LinearLayout.LayoutParams
@@ -127,7 +121,6 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             }
 
             cardView.radius = 12f * density
-            llInfo.visibility = View.VISIBLE
 
             if (item.name.isEmpty()) {
                 tvName.setText(R.string.blank_tab)
@@ -157,10 +150,9 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             cardView.layoutParams = cardLayoutParams
         }
 
-        private fun decodeScreenshot(data: String): Bitmap? {
+        private fun decodeScreenshot(path: String): Bitmap? {
             return try {
-                val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                android.graphics.BitmapFactory.decodeFile(path)
             } catch (e: Exception) {
                 Log.e("GridContentAdapter", "Failed to decode screenshot", e)
                 null
