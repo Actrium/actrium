@@ -42,33 +42,9 @@ const RESOLVE_DEDUP_MS = 3000;
 // 扫码命中后给相机关闭一个很短的提交窗口，
 // 再弹错误提示，避免相机收起和弹框挂载抢同一帧导致观感卡顿。
 const INVALID_SCAN_ALERT_DELAY_MS = 150;
-
-const extractAlertMessage = (message?: string) => {
-  if (!message) return '';
-
-  try {
-    const parsed = JSON.parse(message);
-    // 接口或底层转发把整包响应序列化进 message 时，只提取真正给用户看的 message 文案。
-    if (parsed && typeof parsed === 'object') {
-      if (typeof parsed.message === 'string' && parsed.message.trim()) {
-        return parsed.message;
-      }
-
-      if (
-        parsed.data &&
-        typeof parsed.data === 'object' &&
-        typeof parsed.data.message === 'string' &&
-        parsed.data.message.trim()
-      ) {
-        return parsed.data.message;
-      }
-    }
-  } catch {
-    // 非 JSON 字符串说明本身就是可展示文案，直接透传。
-  }
-
-  return message;
-};
+// Phone 端先完成扫码区淡出，再触发输入框 focus 和键盘吸附，
+// 避免两段动画叠在一起把居中的扫码内容重新推位。
+const PHONE_INPUT_FOCUS_DELAY_MS = 0;
 
 // Phone 和 Pad 共用的样式
 const makeSharedStyles = (colors: ColorTokens) =>
@@ -107,6 +83,7 @@ export const useLoadApp = () => {
   const tabCtx = useTab();
   const [cameraActive, setCameraActive] = useState(false);
   const [inputExpanded, setInputExpanded] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isResolving, setIsResolving] = useState(false);
   const [loadRequest, setLoadRequest] = useState<LoadRequest | null>(null);
@@ -130,13 +107,12 @@ export const useLoadApp = () => {
   const showLoading = loadRequest != null || isResolving;
 
   useEffect(() => {
-    // 中文注释：输入框改成常驻后，不再在页面初始挂载时抢焦点，
-    // 只在用户明确回到 URL 输入态时再主动聚焦。
+    // 中文注释：仅当 Phone 端切到输入框展开态时再主动聚焦，
+    // 并且等扫码区淡出完成后再触发键盘，避免淡出阶段发生布局重算。
     if (!inputExpanded || isTablet) return;
     const timer = setTimeout(() => {
       inputRef.current?.focus();
-      setInputExpanded(false);
-    }, 0);
+    }, PHONE_INPUT_FOCUS_DELAY_MS);
     return () => {
       clearTimeout(timer);
     };
@@ -144,12 +120,43 @@ export const useLoadApp = () => {
 
   const renderLoadingView = () => (
     <View style={sharedStyles.loadingContainer}>
-      <ActivityIndicator size='large' color={colors.brandPrimary} />
-      <AppText variant='statusBody' style={sharedStyles.loadingText}>
+      <ActivityIndicator size="large" color={colors.brandPrimary} />
+      <AppText variant="statusBody" style={sharedStyles.loadingText}>
         {t('actr.app.loading')}
       </AppText>
     </View>
   );
+
+  const extractAlertMessage = (message?: string) => {
+    if (!message) return '';
+
+    try {
+      const parsed = JSON.parse(message);
+      // 接口或底层转发把整包响应序列化进 message 时，只提取真正给用户看的 message 文案。
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.message === 'string' && parsed.message.trim()) {
+          return parsed.message;
+        }
+
+        if (typeof parsed.data === 'object' && parsed.data?.code === 10010) {
+          return t('actr.app.notExist');
+        }
+
+        if (
+          parsed.data &&
+          typeof parsed.data === 'object' &&
+          typeof parsed.data.message === 'string' &&
+          parsed.data.message.trim()
+        ) {
+          return parsed.data.message;
+        }
+      }
+    } catch {
+      // 非 JSON 字符串说明本身就是可展示文案，直接透传。
+    }
+
+    return message;
+  };
 
   const handleResolveUrl = useCallback(
     async (url: string, source: LoadRequestSource) => {
@@ -172,10 +179,11 @@ export const useLoadApp = () => {
           // 只有宿主透传的 preset appUrl 才允许走"历史会话兜回 Chat"；
           // 手输和扫码仍保持现有语义，避免把真实无效地址误恢复成旧会话。
           if (source === 'preset' && initResult.reason === 'APP_NOT_FOUND') {
-            const hasHistory = await MessageRepository.hasMessagesByTabIdAndAppId(
-              tabCtx.tab.id,
-              appId,
-            );
+            const hasHistory =
+              await MessageRepository.hasMessagesByTabIdAndAppId(
+                tabCtx.tab.id,
+                appId,
+              );
 
             if (hasHistory) {
               GlobalAlert.alert(t('actr.app.notExist'));
@@ -334,15 +342,19 @@ export const useLoadApp = () => {
   const renderInput = (
     inputStyle: StyleProp<TextStyle>,
     containerStyle: StyleProp<ViewStyle>,
+    options?: { showPrefixIcon?: boolean },
   ) => {
+    const showPrefixIcon = options?.showPrefixIcon ?? true;
     return (
       <View style={containerStyle}>
-        <Icon
-          type='keyboard'
-          size={loadApp.inputPrefixIconSize}
-          color={colors.textIconStrong}
-          style={sharedStyles.inputPrefix}
-        />
+        {showPrefixIcon ? (
+          <Icon
+            type="keyboard"
+            size={loadApp.inputPrefixIconSize}
+            color={colors.textIconStrong}
+            style={sharedStyles.inputPrefix}
+          />
+        ) : null}
         <TouchableWithoutFeedback>
           <TextInput
             ref={inputRef}
@@ -352,15 +364,19 @@ export const useLoadApp = () => {
             placeholderTextColor={colors.textTertiary}
             onChangeText={setInputValue}
             onSubmitEditing={handleLoadWithUrl}
-            enterKeyHint='done'
-            returnKeyType='done'
-            returnKeyLabel='确认'
+            enterKeyHint="done"
+            returnKeyType="done"
+            returnKeyLabel="确认"
             blurOnSubmit={true}
             editable={!showLoading}
             onFocus={() => {
+              setInputFocused(true);
               if (cameraActive) {
                 setCameraActive(false);
               }
+            }}
+            onBlur={() => {
+              setInputFocused(false);
             }}
           />
         </TouchableWithoutFeedback>
@@ -374,7 +390,7 @@ export const useLoadApp = () => {
             }}
           >
             <Icon
-              type='input_clear'
+              type="input_clear"
               size={loadApp.inputPrefixIconSize}
               color={colors.textIconSecondary}
             />
@@ -387,8 +403,10 @@ export const useLoadApp = () => {
   return {
     cameraActive,
     setCameraActive,
+    inputExpanded,
     setInputExpanded,
     inputRef,
+    inputFocused,
     inputValue,
     showLoading,
     keyboardInset,
