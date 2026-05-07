@@ -752,6 +752,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
             ]}
             ListHeaderComponent={ListHeaderComponent}
             ListHeaderComponentStyle={styles.listHeader}
+            ListFooterComponent={<View style={styles.listFooterSpacer} />}
             showsHorizontalScrollIndicator={false}
             horizontal={false}
             // 让列表空白区域点击时由滚动容器负责收起键盘，同时不再用外层 Touchable 截断拖拽手势。
@@ -866,6 +867,8 @@ const makeStyles = (colors: ColorTokens) => ({
     },
     inputInner: {
       width: '100%',
+      // backgroundColor: 'red',
+      marginTop: -24
     },
     scrollToBottomContainer: {
       position: 'absolute',
@@ -889,6 +892,9 @@ const makeStyles = (colors: ColorTokens) => ({
     },
     listHeader: {
       paddingBottom: spacing.xl,
+    },
+    listFooterSpacer: {
+      height: 24,
     },
     loadMoreText: {
       textAlign: 'center',

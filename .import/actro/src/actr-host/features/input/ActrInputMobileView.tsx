@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useTranslation } from 'react-i18next';
 import { AppText } from '../../../components';
 import { AttachmentPreviewBar } from './AttachmentPreviewBar';
@@ -70,6 +71,37 @@ interface ActrInputMobileViewProps {
   /** 输入框聚焦前的授权预检，未授权返回 false */
   checkInputAuth?: () => Promise<boolean>;
 }
+
+const withOpacity = (color: string, opacity: number) => {
+  const normalized = color.trim();
+  const clampedOpacity = Math.max(0, Math.min(1, opacity));
+
+  if (normalized.startsWith('#')) {
+    let hex = normalized.slice(1);
+    if (hex.length === 3) {
+      hex = hex
+        .split('')
+        .map((char) => char + char)
+        .join('');
+    }
+    if (hex.length === 6) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${clampedOpacity})`;
+    }
+  }
+
+  const rgbMatch = normalized.match(
+    /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*[\d.]+\s*)?\)$/,
+  );
+  if (rgbMatch) {
+    const [, r, g, b] = rgbMatch;
+    return `rgba(${r}, ${g}, ${b}, ${clampedOpacity})`;
+  }
+
+  return color;
+};
 
 export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const { t } = useTranslation();
@@ -436,6 +468,18 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
   return (
     <SafeBottomView style={styles.mobileSafeArea} minBottom={10}>
+      {/* 中文注释：安全区顶部 24 高度单独做透明到半透明的过渡，24 以下区域保持聊天页实色背景。 */}
+      <LinearGradient
+        pointerEvents='none'
+        colors={[
+          withOpacity(colors.bgChatPage, 0),
+          withOpacity(colors.bgChatPage, 0.9),
+        ]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.mobileSafeAreaTopGradient}
+      />
+      <View pointerEvents='none' style={styles.mobileSafeAreaSolidBackground} />
       <View style={[styles.mobileContainer, { paddingHorizontal: 26 }]}>
         <View style={styles.mobileInputRow}>
           {/* 中文注释：Phone 端除独立退出 Tab 按钮外，其余输入操作区统一由授权门禁覆盖。 */}
@@ -804,12 +848,25 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 const makeStyles = (colors: ColorTokens) => StyleSheet.create({
   mobileContainer: {
     width: '100%',
-    paddingTop: spacing.xs,
-    backgroundColor: colors.bgInputMobile,
   },
   mobileSafeArea: {
     width: '100%',
-    backgroundColor: colors.bgInputMobile,
+    position: 'relative',
+  },
+  mobileSafeAreaTopGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 24,
+  },
+  mobileSafeAreaSolidBackground: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 24,
+    bottom: 0,
+    backgroundColor: colors.bgChatPage,
   },
   mobileFloatingText: {
     position: 'absolute',
