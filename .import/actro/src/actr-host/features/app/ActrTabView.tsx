@@ -49,6 +49,7 @@ import { useExtensionPanelGesture } from '../../hooks/useExtensionPanelGesture';
 import { isTablet, isAndroid, isPhone } from '../../../utils/device';
 import { useExtensionPanelVisibility } from '../../hooks/useExtensionPanelVisibility';
 import { AppText } from '../../../components';
+import { exitFullscreen } from '../../../native-bridge';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
@@ -113,6 +114,13 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     tabId: tab.id,
     isLeftPanelVisible,
   });
+  const handleExitTab = React.useCallback(async () => {
+    try {
+      await exitFullscreen();
+    } catch (error) {
+      console.error('[ActrTabView] Failed to exit fullscreen', error);
+    }
+  }, []);
 
   const engineRef = useRef<Engine | null>(null);
   const adapterRef = useRef<{ dispose: () => void } | null>(null);
@@ -464,6 +472,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         {!isTablet && (
           <ChatHeader
             onLeftPress={togglePhonePanelVisible}
+            onRightPress={handleExitTab}
             appId={appId}
             leftDisabled={!appId}
             leftActive={panelVisible}
