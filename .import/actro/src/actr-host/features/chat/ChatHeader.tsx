@@ -13,6 +13,7 @@ import type { ColorTokens } from '../../../theme/colors';
 
 interface ChatHeaderProps {
   onLeftPress: () => void;
+  onRightPress?: () => void;
   leftDisabled?: boolean;
   leftActive?: boolean;
   showLeftButton?: boolean;
@@ -24,6 +25,7 @@ interface ChatHeaderProps {
 export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
   ({
     onLeftPress,
+    onRightPress,
     leftDisabled = false,
     leftActive = false,
     showLeftButton = true,
@@ -91,6 +93,15 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             iconType='history'
             iconSize={22}
             onPress={() => {}}
+            style={styles.headerButton}
+            backgroundColor={headerButtonBackgroundColor}
+            iconColor={colors.iconChatHeader}
+          />
+        ) : onRightPress ? (
+          <HostIconButton
+            iconType='close'
+            iconSize={16}
+            onPress={onRightPress}
             style={styles.headerButton}
             backgroundColor={headerButtonBackgroundColor}
             iconColor={colors.iconChatHeader}

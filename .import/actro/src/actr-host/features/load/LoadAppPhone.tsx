@@ -1,20 +1,20 @@
 import React from 'react';
 import {
+  Animated,
   Image,
   Platform,
   StyleSheet,
+  TextStyle,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { KeyboardStickyView, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
-import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { AppText, HostIconButton, SafeBottomView } from '../../../components';
-import { exitFullscreen } from '../../../native-bridge';
 import { LoadAppCameraPanel } from './LoadAppCameraPanel';
 import { useLoadApp } from './useLoadApp';
 import { HOST_SHADOWS } from '../../styles/shadows';
-import { getTypographyStyle, inputArea, loadApp } from '../../../theme/tokens';
+import { getTypographyStyle, loadApp } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 
@@ -22,11 +22,14 @@ const scanAreaSize = 252;
 const scanFrameOffset = 4;
 const openCameraBtnHeight = 60;
 const openCameraBtnIconSize = 34;
+const androidInputTextStyle: TextStyle =
+  Platform.OS === 'android' ? { textAlignVertical: 'center', includeFontPadding: false } : {};
 
 const LoadAppPhone = () => {
   const {
     cameraActive,
     setCameraActive,
+    inputExpanded,
     setInputExpanded,
     inputRef,
     dismissKeyboard,
@@ -41,28 +44,19 @@ const LoadAppPhone = () => {
   const colors = useColors();
   const { t } = useTranslation();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
-  const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
-  const handleExitTab = React.useCallback(async () => {
-    try {
-      await exitFullscreen();
-    } catch (error) {
-      console.error('[LoadAppPhone] Failed to exit fullscreen', error);
-    }
-  }, []);
+  const scanSectionOpacity = React.useRef(
+    new Animated.Value(inputExpanded ? 0 : 1),
+  ).current;
 
-  const phoneScanSectionAnimatedStyle = useAnimatedStyle(() => {
-    if (Platform.OS !== 'ios') {
-      return {
-        paddingBottom: 0,
-      };
-    }
-
-    return {
-      // 中文注释：输入 Dock 由 StickyView 单独吸附后，内容区也要同步让出键盘高度，
-      // 否则扫码区仍按原高度布局，看起来就像“内容没有变化，只是输入框飘起来了”。
-      paddingBottom: Math.max(-keyboardHeight.value, 0),
-    };
-  }, []);
+  React.useEffect(() => {
+    // 中文注释：扫码区域保持挂载，仅通过透明度做显隐切换，
+    // 避免直接卸载导致内容闪断，同时让布局占位始终稳定。
+    Animated.timing(scanSectionOpacity, {
+      toValue: inputExpanded ? 0 : 1,
+      duration: 40,
+      useNativeDriver: true,
+    }).start();
+  }, [inputExpanded, scanSectionOpacity]);
 
   if (showLoading) {
     return <View style={styles.phoneContainer}>{renderLoadingView()}</View>;
@@ -73,57 +67,62 @@ const LoadAppPhone = () => {
       <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
         <View style={styles.phoneContent}>
           {/* 非输入框区域：带背景图，底部圆角 */}
-          <Reanimated.View
-            style={[styles.phoneScanSection, phoneScanSectionAnimatedStyle]}
-          >
-            <Image
-              source={require('../../../assets/load/load_bg.png')}
-              style={styles.bgImage}
-              resizeMode='stretch'
-            />
-            <View style={styles.phoneScanArea}>
-              <View style={styles.scanContent}>
-                <View style={styles.scanFrameWrapper}>
-                  <View style={styles.scanBox}>
-                    <LoadAppCameraPanel
-                      tabId={tabCtx.tab.id}
-                      cameraActive={cameraActive}
-                      onCameraActiveChange={setCameraActive}
-                      onBeforeOpenCamera={() => {
-                        setInputExpanded(false);
-                        inputRef.current?.blur();
-                        dismissKeyboard();
-                      }}
-                      onAfterOpenCameraPermissionDenied={() => {
-                        setCameraActive(false);
-                        setInputExpanded(true);
-                      }}
-                      onAfterCameraPermissionGranted={() => {
-                        void ensureNetworkPermission();
-                      }}
-                      onScanUrl={handleScannedUrl}
-                      openCameraBtnHeight={openCameraBtnHeight}
-                      openCameraBtnIconSize={openCameraBtnIconSize}
-                    />
-                  </View>
-                  {/* scan.png 叠加在扫码区外层，类似外边框 */}
-                  <View style={styles.scanOverlay} pointerEvents='none'>
-                    <Image
-                      source={require('../../../assets/load/scan.png')}
-                      style={styles.scanOverlayImage}
-                      resizeMode='contain'
-                    />
-                  </View>
-                </View>
+          <View style={styles.phoneScanSection}>
+            <Animated.View
+              style={[styles.phoneScanFadeLayer, { opacity: scanSectionOpacity }]}
+              pointerEvents={inputExpanded ? 'none' : 'auto'}
+            >
+              <>
+                <Image
+                  source={require('../../../assets/load/load_bg.png')}
+                  style={styles.bgImage}
+                  resizeMode='stretch'
+                />
+                <View style={styles.phoneScanArea}>
+                  <View style={styles.scanContent}>
+                    <View style={styles.scanFrameWrapper}>
+                      <View style={styles.scanBox}>
+                        <LoadAppCameraPanel
+                          tabId={tabCtx.tab.id}
+                          cameraActive={cameraActive}
+                          onCameraActiveChange={setCameraActive}
+                          onBeforeOpenCamera={() => {
+                            setInputExpanded(false);
+                            inputRef.current?.blur();
+                            dismissKeyboard();
+                          }}
+                          onAfterOpenCameraPermissionDenied={() => {
+                            setCameraActive(false);
+                            setInputExpanded(true);
+                          }}
+                          onAfterCameraPermissionGranted={() => {
+                            void ensureNetworkPermission();
+                          }}
+                          onScanUrl={handleScannedUrl}
+                          openCameraBtnHeight={openCameraBtnHeight}
+                          openCameraBtnIconSize={openCameraBtnIconSize}
+                        />
+                      </View>
+                      {/* scan.png 叠加在扫码区外层，类似外边框 */}
+                      <View style={styles.scanOverlay} pointerEvents='none'>
+                        <Image
+                          source={require('../../../assets/load/scan.png')}
+                          style={styles.scanOverlayImage}
+                          resizeMode='contain'
+                        />
+                      </View>
+                    </View>
 
-                <View style={styles.scanHintBlock}>
-                  <AppText style={styles.scanHintTitle}>
-                    {t('actr.app.scanHint')}
-                  </AppText>
+                    <View style={styles.scanHintBlock}>
+                      <AppText style={styles.scanHintTitle}>
+                        {t('actr.app.scanHint')}
+                      </AppText>
+                    </View>
+                  </View>
                 </View>
-              </View>
-            </View>
-          </Reanimated.View>
+              </>
+            </Animated.View>
+          </View>
 
           {/* 中文注释：Phone 端输入区需要直接跟随键盘吸附，避免仅靠根容器 padding 时被上方 flex 布局“吃掉”位移。 */}
           <KeyboardStickyView
@@ -131,21 +130,45 @@ const LoadAppPhone = () => {
             style={styles.phoneInputDock}
           >
             <SafeBottomView style={styles.phoneInputSafeArea} minBottom={12}>
-              <View style={styles.phoneInputRow}>
-                <View style={styles.phoneInputSection}>
-                  {renderInput(styles.phoneInput, styles.phoneInputContainer)}
-                </View>
-                <HostIconButton
-                  iconType='tab_preview'
-                  size={inputArea.sideButtonSize}
-                  iconSize={inputArea.sideButtonIconSize}
-                  iconColor={colors.textIconStrong}
-                  onPress={() => {
-                    inputRef.current?.blur();
-                    void handleExitTab();
-                  }}
-                  style={styles.phoneSendButton}
-                />
+              <View
+                style={[
+                  styles.phoneInputRow,
+                  inputExpanded ? styles.phoneInputRowExpanded : styles.phoneInputRowCollapsed,
+                ]}
+              >
+                {inputExpanded ? (
+                  <>
+                    <View style={styles.phoneInputSection}>
+                      {renderInput(styles.phoneInput, styles.phoneInputContainer, {
+                        showPrefixIcon: false,
+                      })}
+                    </View>
+                    <HostIconButton
+                      iconType='close'
+                      size={loadApp.inputHeight}
+                      iconSize={16}
+                      iconColor={colors.textIconStrong}
+                      onPress={() => {
+                        // 中文注释：收起时要同时撤销焦点和展开态，
+                        // 保证 Phone 端回到默认按钮态，并恢复上方扫码区内容。
+                        inputRef.current?.blur();
+                        setInputExpanded(false);
+                      }}
+                      style={styles.phoneActionButton}
+                    />
+                  </>
+                ) : (
+                  <HostIconButton
+                    iconType='keyboard'
+                    size={loadApp.inputHeight}
+                    iconSize={22}
+                    iconColor={colors.textIconStrong}
+                    onPress={() => {
+                      setInputExpanded(true);
+                    }}
+                    style={styles.phoneActionButton}
+                  />
+                )}
               </View>
             </SafeBottomView>
           </KeyboardStickyView>
@@ -172,6 +195,10 @@ const makeStyles = (colors: ColorTokens) =>
       flex: 1,
       width: '100%',
       overflow: 'hidden',
+    },
+    phoneScanFadeLayer: {
+      flex: 1,
+      width: '100%',
     },
     bgImage: {
       ...StyleSheet.absoluteFillObject,
@@ -232,19 +259,26 @@ const makeStyles = (colors: ColorTokens) =>
     },
     phoneInputRow: {
       width: '100%',
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      gap: 10,
+      minHeight: loadApp.inputHeight + 16,
       paddingHorizontal: 26,
       paddingTop: 6,
       paddingBottom: 10,
+    },
+    phoneInputRowExpanded: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 10,
+    },
+    phoneInputRowCollapsed: {
+      alignItems: 'center',
+      justifyContent: 'flex-end',
     },
     phoneInputSection: {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'flex-end',
     },
-    phoneSendButton: {
+    phoneActionButton: {
       borderWidth: 1,
       borderColor: colors.borderReservedButton,
       backgroundColor: colors.bgInputPill,
@@ -262,10 +296,12 @@ const makeStyles = (colors: ColorTokens) =>
       width: '100%',
       height: loadApp.inputHeight,
       borderRadius: 24,
-      paddingLeft: 39,
+      paddingLeft: 16,
       paddingRight: 60,
       paddingVertical: 0,
-      color: colors.textSecondary,
+      color: '#000000',
+      textAlignVertical: 'center',
+      ...androidInputTextStyle,
       ...getTypographyStyle(loadApp.inputTypographyVariant),
     },
   });
