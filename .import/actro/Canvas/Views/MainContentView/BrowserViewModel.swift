@@ -59,6 +59,9 @@ class BrowserViewModel: ObservableObject {
 
     /// Toolbar 实际高度（从视图测量得到）
     @Published var toolbarHeight: CGFloat = 52 // 默认值，会在视图中更新
+
+    // MARK: - Multiple Window mode (iPadOS)
+    @Published var multipleWindowMode: Bool = false
     
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }

@@ -43,6 +43,7 @@ struct OverviewNavigationBar: View {
                 }
                 .buttonStyle(.plain)
             }
+            .padding(.leading, viewModel.multipleWindowMode ? 0 : 65)
 
             // 中间：活跃 / 书签 切换（SwitchButton 风格）
             GeometryReader { geo in
@@ -160,6 +161,7 @@ struct FocusModeNavigationBar: View {
                 staticTabsWithAddButton
             }
         }
+        .padding(.leading, viewModel.multipleWindowMode ? 0 : 65)
         .background(barColor)
     }
 
