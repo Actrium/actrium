@@ -6,7 +6,6 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import chat.askaway.android.core.asr.TextPostProcessor
 import chat.askaway.android.data.repository.ActiveRepository
 import chat.askaway.android.utils.TabBundleUtils
 import com.askaway.android.event.NativeModuleEvent
@@ -179,6 +178,7 @@ class MainViewModel(
                     }
                 }
             }
+
             ReactModuleEvent.EVENT_GET_ALL_TABS -> {
                 val tabs = com.facebook.react.bridge.Arguments.createArray()
                 _activeList.value.forEach { model ->
@@ -198,7 +198,7 @@ class MainViewModel(
         _tabIndex.value = index
     }
 
-    fun addApp(params: Map<String, Any?>? = null) {
+    fun addApp(params: Map<String, Any?>? = null, appId: String? = null) {
         val tabModel = AppModel(id = UUID.randomUUID().toString())
         Params.appList.add(tabModel)
         val activeModel = ActiveModel(
@@ -210,10 +210,13 @@ class MainViewModel(
         addActiveModel(activeModel)
         val bundle = tabModel.genReactNativeBundle(Params.appList, containerHeight, containerWidth)
         bundle.addMap(params)
+        if (appId != null) {
+            bundle.putString("appId", appId)
+        }
         _currentReactNativeStatus.tryEmit(bundle)
     }
 
-    fun genBundle(model: ActiveModel): Bundle{
+    fun genBundle(model: ActiveModel): Bundle {
         return TabBundleUtils.genBundle(model, _activeList.value, containerHeight, containerWidth)
     }
 
@@ -314,7 +317,7 @@ class MainViewModel(
 
     fun isActiveListEmpty(): Boolean = _activeList.value.isEmpty()
 
-    fun changeInputText(text:String){
+    fun changeInputText(text: String) {
         EventBus.getDefault().post(
             NativeModuleEvent(
                 NativeModuleEvent.EVENT_SEARCH_INPUT_CHANGED,

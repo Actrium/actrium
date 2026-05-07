@@ -51,6 +51,7 @@ import com.askaway.android.utils.screenshot
 import com.askaway.android.utils.ViewAnimationHelper
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
+import com.facebook.react.modules.core.DeviceEventManagerModule
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
     private lateinit var binding: ActivityMainBinding
@@ -308,6 +309,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 }
             }
         }
+
+        // 处理首次启动时携带的 deeplink
+        handleDeepLink(intent)
     }
 
     /**
@@ -747,6 +751,25 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         super.onResume()
         val application = application as MainApplication
         application.reactNativeHost.reactInstanceManager.onHostResume(this, this)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    /**
+     * 解析 deeplink 并将数据发送给 React Native
+     * 链接格式示例:
+     *   askaway://chat/123?token=abc
+     *   https://app.askaway.chat/chat/123?token=abc
+     */
+    private fun handleDeepLink(intent: Intent?) {
+        val uri = intent?.data ?: return
+        Log.d("MainActivity", "DeepLink received: $uri")
+        val appId = uri.getQueryParameter("appid")
+        viewModel.addApp(appId = appId)
     }
 
     override fun onDestroy() {

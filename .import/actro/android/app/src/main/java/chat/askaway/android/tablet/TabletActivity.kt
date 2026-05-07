@@ -1,38 +1,37 @@
 package chat.askaway.android.tablet
 
+import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
-import androidx.core.view.postDelayed
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import android.content.res.Configuration
+import chat.askaway.android.utils.TabBundleUtils
 import com.askaway.android.BuildConfig
 import com.askaway.android.MainApplication
 import com.askaway.android.R
+import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.databinding.ActivityTabletBinding
+import com.askaway.android.utils.ViewAnimationHelper
+import com.askaway.android.utils.adjustKeyboard
+import com.askaway.android.utils.screenshot
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.facebook.react.uimanager.PixelUtil.pxToDp
-import com.askaway.android.core.ReactNativeBundle
-import android.content.Context
-import android.view.inputmethod.InputMethodManager
-import com.askaway.android.utils.screenshot
-import com.askaway.android.utils.adjustKeyboard
-import com.askaway.android.utils.ViewAnimationHelper
-import chat.askaway.android.utils.TabBundleUtils
 
 class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
 
@@ -53,6 +52,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     // 记录 tab 列表的顺序（id 列表），用于通过 index 找到对应子 View
     private val tabIdList = mutableListOf<String>()
+
     // Grid → Tab 动画时传入的 sourceView
     private var pendingGridSourceView: View? = null
 
@@ -230,19 +230,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         lifecycleScope.launchWhenStarted {
             viewModel.tabletUseCase.collect { useCase ->
                 if (useCase != null) {
-                    for (item in useCase.appList) {
-                        if (reactViewMap[item.id] == null) {
-                            // 创建新的 ReactRootView
-                            val bundle = TabBundleUtils.genBundle(
-                                item,
-                                useCase.appList,
-                                viewModel.containerHeight,
-                                viewModel.containerWidth
-                            )
-                            val targetView = createReactRootView("canvas-kotlin", bundle)
-                            reactViewMap[item.id] = targetView
-                        }
-                    }
                     // 为当前 app 创建 ReactRootView（如果还没有）
                     useCase.currentApp?.let { bundle ->
                         Log.e("TabletActivity", "bundle:${bundle}")
@@ -254,6 +241,20 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                                 reactViewMap[currentTabId] = targetView
                                 Log.d("TabletActivity", "Created new ReactRootView for $currentTabId ${bundle}")
                             }
+                        }
+                    }
+
+                    for (item in useCase.appList) {
+                        if (reactViewMap[item.id] == null) {
+                            // 创建新的 ReactRootView
+                            val bundle = TabBundleUtils.genBundle(
+                                item,
+                                useCase.appList,
+                                viewModel.containerHeight,
+                                viewModel.containerWidth
+                            )
+                            val targetView = createReactRootView("canvas-kotlin", bundle)
+                            reactViewMap[item.id] = targetView
                         }
                     }
 
@@ -345,6 +346,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             }
         }
 //        binding.flRNContent.adjustKeyboard()
+
+        // 处理首次启动时携带的 deeplink
+        handleDeepLink(intent)
     }
 
     override fun onPause() {
@@ -358,6 +362,25 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         super.onResume()
         val application = application as MainApplication
         application.reactNativeHost.reactInstanceManager.onHostResume(this, this)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    /**
+     * 解析 deeplink 并将数据发送给 React Native
+     * 链接格式示例:
+     *   askaway://chat/123?token=abc
+     *   https://app.askaway.chat/chat/123?token=abc
+     */
+    private fun handleDeepLink(intent: Intent?) {
+        val uri = intent?.data ?: return
+        Log.d("TabletActivity", "DeepLink received: $uri")
+        val appId = uri.getQueryParameter("appid")
+        viewModel.addApp(appId = appId)
     }
 
     private fun updateAddButtonPosition() {
@@ -508,6 +531,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
                 setIsFabric(true)
             }
+            Log.e("TabletActivity", "createReactRootView:${launchOptions}")
             // 启动 React 应用
             startReactApplication(reactInstanceManager, componentName, launchOptions)
         }
@@ -599,10 +623,12 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 (reactRootView.parent as? ViewGroup)?.removeView(reactRootView)
                 reactRootView.tag = item.id
                 reactRootView.visibility = View.GONE
-                flTabContent.addView(reactRootView, index, FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                ))
+                flTabContent.addView(
+                    reactRootView, index, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                )
             } else {
                 // 确保 View 在正确的位置
                 val currentIndex = flTabContent.indexOfChild(existingView)
