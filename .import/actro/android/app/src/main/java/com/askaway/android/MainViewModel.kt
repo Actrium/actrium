@@ -60,7 +60,11 @@ class MainViewModel(
                 try {
                     val savedList = repository.loadActiveList()
                     if (savedList.isNotEmpty()) {
-                        _activeList.update { it + savedList }
+                        _activeList.update { current ->
+                             savedList.filter { saved ->
+                                current.none { it.id == saved.id }
+                            } + current
+                        }
                         Log.d("MainViewModel", "Loaded ${savedList.size} items from database")
                     }
                 } catch (e: Exception) {

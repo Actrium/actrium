@@ -68,6 +68,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private var permissionListener: PermissionListener? = null
     private lateinit var activeRecyclerAdapter: com.askaway.android.adapter.ActiveRecyclerAdapter
     private var isSearchMode = false
+    private var isFromDeepLink = false
     private var originalSearchWidth = 0
     private var originalNavWidth = 0
 
@@ -229,7 +230,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         }
 
         binding.ivAdd.postDelayed({
-            if (viewModel.isActiveListEmpty()) {
+            if (isFromDeepLink) {
+                // deeplink 进入时不自动创建或打开，由 handleDeepLink 处理
+                isFromDeepLink = false
+            } else if (viewModel.isActiveListEmpty()) {
                 binding.ivAdd.performClick()
             } else {
                 // 列表不为空时自动点击第一个 item
@@ -769,6 +773,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         val uri = intent?.data ?: return
         Log.d("MainActivity", "DeepLink received: $uri")
         val appId = uri.getQueryParameter("appid")
+        isFromDeepLink = true
         viewModel.addApp(appId = appId)
     }
 

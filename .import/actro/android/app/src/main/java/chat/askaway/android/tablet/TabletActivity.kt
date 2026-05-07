@@ -378,9 +378,13 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
      */
     private fun handleDeepLink(intent: Intent?) {
         val uri = intent?.data ?: return
-        Log.d("TabletActivity", "DeepLink received: $uri")
         val appId = uri.getQueryParameter("appid")
-        viewModel.addApp(appId = appId)
+        Log.d("TabletActivity", "DeepLink received: $uri, appid=$appId")
+
+        if (appId != null) {
+            viewModel.isFromDeepLink = true
+            viewModel.addApp(appId = appId)
+        }
     }
 
     private fun updateAddButtonPosition() {
