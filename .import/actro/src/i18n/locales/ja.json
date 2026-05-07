@@ -161,7 +161,7 @@
       "openCameraScan": "カメラを開いてスキャン",
       "initCamera": "カメラを初期化中...",
       "loading": "読み込み中...",
-      "inputUrl": "AskAwayアプリのアクセスURLを入力してください",
+      "inputUrl": "URLを入力してください",
       "blockedTitle": "実行がブロックされました",
       "blockedReason": "ホストのコントラクト/権限ポリシーを満たしていません",
       "initEngine": "Single Engineを初期化中 (usePanels モード)...",

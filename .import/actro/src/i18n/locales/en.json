@@ -161,7 +161,7 @@
       "openCameraScan": "Open camera to scan",
       "initCamera": "Initializing camera...",
       "loading": "Loading...",
-      "inputUrl": "Please enter the AskAway app access URL",
+      "inputUrl": "Please enter URL",
       "blockedTitle": "Execution Blocked",
       "blockedReason": "Host contract/permission policy not met",
       "initEngine": "Initializing Single Engine (usePanels mode)...",
