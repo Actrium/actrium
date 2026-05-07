@@ -17,21 +17,44 @@ struct ChromeStyleTabView: View {
     
     @State private var focusedTab: Tab?
     @Namespace private var animation
+    
+    @State private var windowSize: CGSize = .zero
 
     var body: some View {
-        overviewView
-            .preferredColorScheme(.dark)
-            .fullScreenCover(item: $focusedTab) { tab in
-                focusSheetContent(tab: tab)
-                    .preferredColorScheme(.light)
-            }
-            .onAppear { syncFocusedTabWithCanvasMode() }
-            .onChange(of: viewModel.canvasMode) { oldValue, newValue in
-                handleCanvasModeChange(newValue)
-            }
-            .onChange(of: viewModel.tabs.count) { oldValue, newValue in
-                handleTabsCountChange()
-            }
+        GeometryReader { geometry in
+            overviewView
+                .fullScreenCover(item: $focusedTab) { tab in
+                    focusSheetContent(tab: tab)
+                }
+                .onAppear {
+                    syncFocusedTabWithCanvasMode()
+                    updateWindowState(size: geometry.size)
+                }
+                .onChange(of: viewModel.canvasMode) { oldValue, newValue in
+                    handleCanvasModeChange(newValue)
+                }
+                .onChange(of: viewModel.tabs.count) { oldValue, newValue in
+                    handleTabsCountChange()
+                }
+                .background(
+                    WindowAccessor { window in
+                        let screenBounds = window.screen.bounds
+                        let windowBounds = window.bounds
+                        
+                        viewModel.multipleWindowMode =
+                        abs(screenBounds.width - windowBounds.width) < 1 &&
+                        abs(screenBounds.height - windowBounds.height) < 1
+                        
+                    }
+                )
+                .onChange(of: geometry.size) { _, newSize in
+                    updateWindowState(size: newSize)
+                }
+        }
+    }
+    
+    private func updateWindowState(size: CGSize) {
+        windowSize = size
     }
 
     private var overviewView: some View {
@@ -209,6 +232,7 @@ struct ChromeTabOverviewView: View {
             // 卡片网格
             cardGridView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .environment(\.colorScheme, .dark)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(systemType: .settings, viewModel: viewModel)
