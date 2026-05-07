@@ -1,10 +1,10 @@
 {
-  "originHash" : "6056622b0189ed2feac053a503d42527b01aab7ff3686f835cdd33a9463663ed",
+  "originHash" : "ad51b39562e4ce11205b1f49c6243631a0d88939cf7a5ecadafeec1c003e42f9",
   "pins" : [
     {
       "identity" : "a1-sdk-swift",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:authick/a1-sdk-swift.git",
+      "location" : "https://github.com/authick/a1-sdk-swift.git",
       "state" : {
         "branch" : "dev",
         "revision" : "265aa9edceaab137e5b3f27cd9288aaf7c0eacc7"
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "git@github.com:actor-rtc/actr-swift.git",
       "state" : {
-        "revision" : "06749b2822fcb04605e9daf8419a1cd7cc4bf0ef",
-        "version" : "0.1.29"
+        "revision" : "2d82fe61a69bd24296951b475c7951a01b88d165",
+        "version" : "0.1.32"
       }
     },
     {
