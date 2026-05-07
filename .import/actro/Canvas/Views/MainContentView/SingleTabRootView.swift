@@ -62,7 +62,6 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIView, context: Context) {
         #if canImport(React)
-        logger.notice("[SingleTabRootView] Getting RootView for Tab: \(tab.title) (\(tab.id.uuidString.prefix(8)))")
         guard let rootView = uiView as? RCTRootView else { return }
         guard containerSize.width > 0 && containerSize.height > 0 else { return }
 
@@ -71,10 +70,16 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
 
         // 检查 isLeftPanelVisible 是否变化（立即更新，不等待 debounce）
         let currentIsLeftPanelVisible = viewModel.isLeftPanelVisible(for: tab.id)
-        let isResizing = coordinator.lastUpdatedSize != containerSize
+        let sizeChanged = coordinator.lastUpdatedSize != containerSize
         let reloadKeyChanged = coordinator.lastReloadKey != tab.reloadNonce
+        let leftPanelChanged = coordinator.lastLeftPanelVisible != currentIsLeftPanelVisible
 
-        if coordinator.lastLeftPanelVisible != currentIsLeftPanelVisible || reloadKeyChanged {
+        // 🛑 守卫：如果没有任何关键属性变化，直接跳过 — 防止 SwiftUI ↔ RN 反馈循环
+        if !leftPanelChanged && !reloadKeyChanged && !sizeChanged && coordinator.lastPropsSize == containerSize {
+            return
+        }
+
+        if leftPanelChanged || reloadKeyChanged {
             coordinator.lastLeftPanelVisible = currentIsLeftPanelVisible
             coordinator.lastReloadKey = tab.reloadNonce
             rootView.appProperties = self.makeProperties()
@@ -86,35 +91,32 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             setupRootViewOnce(rootView, frame: newFrame)
         }
 
-        // Native frame 始终立即更新（轻量操作）
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        rootView.frame = newFrame
-        rootView.bounds = newFrame
-        CATransaction.commit()
+        // Native frame 仅在尺寸变化时更新
+        if sizeChanged {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            rootView.frame = newFrame
+            rootView.bounds = newFrame
+            CATransaction.commit()
+        }
 
         // 拖动中：只更新 Yoga 布局（60fps 节流），不触发 React re-render
         coordinator.throttledYogaUpdate(newSize: containerSize) { [weak rootView] throttledSize in
             guard let rootView = rootView else { return }
 
-            // 通知 Yoga 新尺寸（关键：解决缩小时不更新的问题）
-            // 虽然 bridge 在定义上可能非可选，但在 Release 模式下运行时可能为 nil，
-            // 我们通过可选类型转换来安全访问 uiManager。
             if let uiManager = (rootView.bridge as RCTBridge?)?.uiManager {
                 uiManager.setSize(throttledSize, for: rootView)
             }
 
-            // 强制布局更新
             rootView.setNeedsLayout()
             rootView.layoutIfNeeded()
         }
 
-        // 拖动结束：尺寸变化超过阈值且停止拖动后，延迟同步到 React props
-        if isResizing {
+        // 拖动结束：尺寸变化后延迟同步到 React props
+        if sizeChanged {
             coordinator.scheduleDragEndUpdate { [weak rootView, weak coordinator] in
                 guard let rootView = rootView, let coordinator = coordinator else { return }
-                
-                // 检查尺寸是否真的变了（相对于上次同步给 props 的尺寸）
+
                 if coordinator.lastPropsSize != containerSize {
                     coordinator.lastPropsSize = containerSize
                     rootView.appProperties = self.makeProperties()
@@ -270,7 +272,7 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
     @MainActor
     class Coordinator: NSObject {
         let tab: Tab
-        @ObservedObject var viewModel: BrowserViewModel
+        var viewModel: BrowserViewModel
         #if canImport(React)
         var rootView: RCTRootView?
         #endif
