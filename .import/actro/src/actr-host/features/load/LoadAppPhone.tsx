@@ -13,7 +13,7 @@ import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { AppText, HostIconButton, SafeBottomView } from '../../../components';
 import { LoadAppCameraPanel } from './LoadAppCameraPanel';
 import { useLoadApp } from './useLoadApp';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { getTypographyStyle, loadApp } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
@@ -180,8 +180,10 @@ const LoadAppPhone = () => {
 
 export default LoadAppPhone;
 
-const makeStyles = (colors: ColorTokens) =>
-  StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
     phoneContainer: {
       flex: 1,
       width: '100%',
@@ -282,7 +284,7 @@ const makeStyles = (colors: ColorTokens) =>
       borderWidth: 1,
       borderColor: colors.borderReservedButton,
       backgroundColor: colors.bgInputPill,
-      ...HOST_SHADOWS.inputPill,
+      ...hostShadows.inputPill,
     },
     phoneInputContainer: {
       position: 'relative',
@@ -290,7 +292,7 @@ const makeStyles = (colors: ColorTokens) =>
       height: loadApp.inputHeight,
       backgroundColor: colors.bgLoadDark,
       borderRadius: 24,
-      ...HOST_SHADOWS.inputPill,
+      ...hostShadows.inputPill,
     },
     phoneInput: {
       width: '100%',
@@ -305,3 +307,4 @@ const makeStyles = (colors: ColorTokens) =>
       ...getTypographyStyle(loadApp.inputTypographyVariant),
     },
   });
+};

@@ -38,7 +38,7 @@ export const ShareConfirmButton: React.FC<ShareConfirmButtonProps> = ({
   return (
     <View style={styles.footer}>
       <LinearGradient
-        colors={['rgba(255,255,255,.1)', colors.bgSurface]}
+        colors={[colors.bgDeleteGradientStart, colors.bgDeleteGradientEnd]}
         style={styles.footerGradient}
       />
       <View style={styles.footerRow}>

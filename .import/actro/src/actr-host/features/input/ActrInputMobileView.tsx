@@ -18,7 +18,7 @@ import type { ActrInputStyles } from './ActrInput.shared';
 import type { PanResponderInstance } from 'react-native';
 import { StableTextInput } from './StableTextInput';
 import { AuthGateOverlay } from './AuthGateOverlay';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { useUnreadStore } from '../../store/useUnreadStore';
 import { useTab } from '../../contexts/TabContext';
 import { exitFullscreen } from '../../../native-bridge';
@@ -648,8 +648,10 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   );
 }
 
-const makeStyles = (colors: ColorTokens) =>
-  StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
     mobileContainer: {
       width: '100%',
     },
@@ -702,7 +704,7 @@ const makeStyles = (colors: ColorTokens) =>
       minHeight: inputArea.minHeight,
       borderRadius: inputArea.borderRadius,
       backgroundColor: colors.bgInputPill,
-      ...HOST_SHADOWS.inputPill,
+      ...hostShadows.inputPill,
     },
     mobileInputPillWithAttachment: {
       borderRadius: 20,
@@ -719,7 +721,7 @@ const makeStyles = (colors: ColorTokens) =>
       borderRadius: 24,
       backgroundColor: colors.bgInputPill,
       position: 'relative',
-      ...HOST_SHADOWS.inputPill,
+      ...hostShadows.inputPill,
     },
     mobileVoiceSurfaceWithAttachment: {
       borderRadius: 20,
@@ -772,7 +774,7 @@ const makeStyles = (colors: ColorTokens) =>
       borderWidth: 1,
       borderColor: colors.borderReservedButton,
       backgroundColor: colors.bgInputPill,
-      ...HOST_SHADOWS.inputPill,
+      ...hostShadows.inputPill,
     },
     mobileVoiceModeSpacer: {
       width: inputArea.smallButtonSize,
@@ -816,3 +818,4 @@ const makeStyles = (colors: ColorTokens) =>
       fontWeight: '600',
     },
   });
+};

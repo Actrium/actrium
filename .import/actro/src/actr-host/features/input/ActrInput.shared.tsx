@@ -14,7 +14,7 @@ import { useActrSpeechRecognitionController } from './hooks/useActrSpeechRecogni
 import { useActrMessageFlow } from './hooks/useActrMessageFlow';
 import { LoginModal, AuthorizeModal } from '../../../system-apps/auth';
 import { getTypographyStyle } from '../../../theme/tokens';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import type { PhoneAttachmentPanelController } from '../chat/hooks/usePhoneAttachmentPanelController';
@@ -239,7 +239,10 @@ export default function ActrInput({
   );
 }
 
-const makeStyles = (colors: ColorTokens) => StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
   rootContainer: {
     width: '100%',
   },
@@ -257,7 +260,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     paddingHorizontal: 13,
     paddingTop: 18,
     paddingBottom: 9,
-    ...HOST_SHADOWS.inputPill,
+    ...hostShadows.inputPill,
   },
   input: {
     ...getTypographyStyle('editorInput'),
@@ -284,7 +287,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
-    ...HOST_SHADOWS.compactFloatingButton,
+    ...hostShadows.compactFloatingButton,
   },
   mobileInputText: {
     ...getTypographyStyle('editorInputCompact'),
@@ -293,5 +296,6 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     textAlignVertical: 'top',
   },
 });
+};
 
 export type ActrInputStyles = ReturnType<typeof makeStyles>;

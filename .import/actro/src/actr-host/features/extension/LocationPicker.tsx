@@ -17,7 +17,7 @@ import type Geolocation from '@react-native-community/geolocation';
 import { GlobalAlert } from '../../../components';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 
@@ -307,7 +307,10 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   );
 };
 
-const makeStyles = (colors: ColorTokens) => StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: colors.bgOverlay,
@@ -320,7 +323,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     backgroundColor: colors.bgSurface,
     borderRadius: 34,
     overflow: 'hidden',
-    ...HOST_SHADOWS.mapSurface,
+    ...hostShadows.mapSurface,
   },
   mapContainer: {
     flex: 1,
@@ -352,7 +355,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     borderRadius: 34,
     justifyContent: 'center',
     alignItems: 'center',
-    ...HOST_SHADOWS.mapActionButton,
+    ...hostShadows.mapActionButton,
   },
   confirmButtonText: {
     color: colors.textInverse,
@@ -360,5 +363,6 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     fontWeight: 'bold',
   },
 });
+};
 
 export default LocationPicker;
