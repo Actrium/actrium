@@ -1,8 +1,10 @@
 package chat.askaway.android.tablet
 
+import android.os.Build
 import android.graphics.Bitmap
 import android.util.Log
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -28,6 +30,7 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     var onAddClick: (() -> Unit)? = null
     var onDeleteClick: ((String) -> Unit)? = null
     var onMarkClick: ((ActiveModel) -> Unit)? = null
+    var onItemLongClick: ((ActiveModel, Int, Int) -> Unit)? = null
     var containerWidth = 0
     var containerHeight = 0
     var spanCount = 3
@@ -78,9 +81,28 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 val item = items[position]
                 holder.bind(item)
 
-                // 设置点击事件
+                // 设置点击事件和长按事件
+                var touchX = 0
+                var touchY = 0
+                holder.ivScreenshot.setOnTouchListener { _, event ->
+                    touchX = event.rawX.toInt()
+                    touchY = event.rawY.toInt()
+                    false
+                }
                 holder.ivScreenshot.setOnClickListener {
                     onItemClick?.invoke(position, holder.ivScreenshot)
+                }
+                holder.ivScreenshot.setOnLongClickListener {
+                    // 长按震动反馈
+                    val vibrator = holder.ivScreenshot.context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator.vibrate(android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vibrator.vibrate(30)
+                    }
+                    onItemLongClick?.invoke(item, touchX, touchY)
+                    true
                 }
 
                 holder.ivMark.setOnClickListener {
