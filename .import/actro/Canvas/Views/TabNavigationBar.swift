@@ -46,55 +46,16 @@ struct OverviewNavigationBar: View {
             .padding(.leading, viewModel.multipleWindowMode ? 0 : 65)
 
             // 中间：活跃 / 书签 切换（SwitchButton 风格）
-            GeometryReader { geo in
-                let totalWidth = min(geo.size.width, 164)
-                let segmentHeight: CGFloat = height
-                let segmentCount: CGFloat = 2
-                let segmentWidth = totalWidth / segmentCount
-                ZStack(alignment: .center) {
-                    // 背景大胶囊
-                    Capsule()
-                        .fill(Color(hex: "#3C3C4399"))
-                        .frame(width: totalWidth, height: segmentHeight)
-
-                    // 可移动的选中高亮胶囊
-                    Capsule()
-                        .fill(Color(hex: "#121216"))
-                        .frame(width: segmentWidth - 8, height: segmentHeight - 8)
-                        .offset(x: selectedTab == .active ? -segmentWidth/2 : segmentWidth/2)
-                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: selectedTab)
-
-                    // 按钮堆栈
-                    HStack(spacing: 0) {
-                        Button(action: {
-                            selectedTab = .active
-                            viewModel.currentSystemTabType = nil
-                        }) {
-                            Text(TM.active.activity())
-                                .font(.system(size: 16, weight: .medium))
-                                .frame(width: segmentWidth, height: segmentHeight)
-                                .foregroundColor(selectedTab == .active ? Color.accentColor : Color.gray)
-                        }
-                        .buttonStyle(.plain)
-
-                        Button(action: {
-                            selectedTab = .bookmarks
-                            // 切换到书签页（系统 Tab）
-                            viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
-                            viewModel.currentSystemTabType = .bookmarks
-                        }) {
-                            Text(TM.active.bookmarks())
-                                .font(.system(size: 16, weight: .medium))
-                                .frame(width: segmentWidth, height: segmentHeight)
-                                .foregroundColor(selectedTab == .bookmarks ? Color.accentColor : Color.gray)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .frame(width: totalWidth, height: height)
-                }
-                .frame(width: totalWidth, height: height)
-            }
-            .frame(width: 164, height: height)
+            SegmentedToggle(selectedTab: $selectedTab,
+                           option1: TM.active.activity(),
+                           option2: TM.active.bookmarks(),
+                           onOption1: {
+                               viewModel.currentSystemTabType = nil
+                           },
+                           onOption2: {
+                               viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
+                               viewModel.currentSystemTabType = .bookmarks
+                           })
         }
         .frame(height: height)
         .background(Color.black)
@@ -444,6 +405,108 @@ struct BottomRightInverseCorner: View {
                 p.closeSubpath()
             }
             context.fill(path, with: .color(color))
+        }
+    }
+}
+
+// MARK: - 自适应宽度的分段切换控件
+
+/// 用于收集子视图宽度的 PreferenceKey
+private struct SegmentWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: [CGFloat] = []
+    static func reduce(value: inout [CGFloat], nextValue: () -> [CGFloat]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+/// 自适应文字宽度的两段式切换控件
+/// 文字宽度自适应，不会折行，整体居中显示
+struct SegmentedToggle: View {
+    @Binding var selectedTab: OverviewNavigationBar.OverviewTab
+    let option1: String
+    let option2: String
+    let onOption1: () -> Void
+    let onOption2: () -> Void
+
+    @State private var segmentWidths: [CGFloat] = [0, 0]
+    private let height: CGFloat = 44
+    private let horizontalPadding: CGFloat = 20
+
+    private var segmentWidth: CGFloat {
+        max(segmentWidths[0], segmentWidths[1])
+    }
+
+    private var totalWidth: CGFloat {
+        segmentWidth * 2
+    }
+
+    var body: some View {
+        ZStack(alignment: .center) {
+            // 背景大胶囊
+            Capsule()
+                .fill(Color(hex: "#3C3C4399"))
+                .frame(width: totalWidth, height: height)
+
+            // 可移动的选中高亮胶囊
+            Capsule()
+                .fill(Color(hex: "#121216"))
+                .frame(width: segmentWidth - 8, height: height - 8)
+                .offset(x: selectedTab == .active ? -segmentWidth/2 : segmentWidth/2)
+                .animation(.spring(response: 0.28, dampingFraction: 0.9), value: selectedTab)
+
+            // 按钮堆栈
+            HStack(spacing: 0) {
+                Button(action: {
+                    selectedTab = .active
+                    onOption1()
+                }) {
+                    Text(option1)
+                        .font(.system(size: 16, weight: .medium))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, horizontalPadding)
+                        .frame(height: height)
+                        .foregroundColor(selectedTab == .active ? Color.accentColor : Color.gray)
+                }
+                .buttonStyle(.plain)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: SegmentWidthPreferenceKey.self,
+                            value: [geo.size.width]
+                        )
+                    }
+                )
+
+                Button(action: {
+                    selectedTab = .bookmarks
+                    onOption2()
+                }) {
+                    Text(option2)
+                        .font(.system(size: 16, weight: .medium))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, horizontalPadding)
+                        .frame(height: height)
+                        .foregroundColor(selectedTab == .bookmarks ? Color.accentColor : Color.gray)
+                }
+                .buttonStyle(.plain)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: SegmentWidthPreferenceKey.self,
+                            value: [geo.size.width]
+                        )
+                    }
+                )
+            }
+            .frame(width: totalWidth, height: height)
+        }
+        .frame(width: totalWidth, height: height)
+        .onPreferenceChange(SegmentWidthPreferenceKey.self) { widths in
+            if widths.count >= 2 {
+                segmentWidths = [widths[0], widths[1]]
+            }
         }
     }
 }
