@@ -513,7 +513,7 @@ struct ChromeTabCardView: View {
                 Button {
                     toggleBookmark()
                 } label: {
-                    Label(tab.isBookmarked ? "取消收藏" : "收藏",
+                    Label(tab.isBookmarked ? TM.tabContextMenu.unbookmark() : TM.tabContextMenu.bookmark(),
                           systemImage: tab.isBookmarked ? "star.slash" : "star")
                 }
             }
@@ -521,7 +521,7 @@ struct ChromeTabCardView: View {
             Button(role: .destructive) {
                 onClose()
             } label: {
-                Label("关闭页签", systemImage: "xmark")
+                Label(TM.tabContextMenu.closeTab(), systemImage: "xmark")
             }
 
             if viewModel.tabs.count > 1 {
@@ -529,7 +529,7 @@ struct ChromeTabCardView: View {
                 Button(role: .destructive) {
                     closeOtherTabs()
                 } label: {
-                    Label("关闭其他页签", systemImage: "xmark")
+                    Label(TM.tabContextMenu.closeOtherTabs(), systemImage: "xmark")
                 }
             }
         }

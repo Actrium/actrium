@@ -21,3 +21,9 @@ If you do not agree, you will not be able to use the features of this applicatio
 "search" = "Search";
 "goback" = "Back";
 "blackTab" = "New Tab";
+
+/* Long Press Menu */
+"bookmark" = "Bookmark";
+"unbookmark" = "Remove Bookmark";
+"closeTab" = "Close Tab";
+"closeOtherTabs" = "Close Other Tabs";

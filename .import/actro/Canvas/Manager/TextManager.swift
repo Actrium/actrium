@@ -32,6 +32,10 @@ class TextManager: ObservableObject {
     var active: StartActive {
         return StartActive()
     }
+
+    var tabContextMenu: TabContextMenu {
+        return TabContextMenu()
+    }
 }
 
 /// MARK: - 文案键枚举
@@ -50,6 +54,12 @@ enum TextKey: String {
     case search
     case goback
     case blackTab
+
+    // 长按菜单
+    case bookmark
+    case unbookmark
+    case closeTab
+    case closeOtherTabs
 }
 
 // MARK: - 场景文案结构体
@@ -69,6 +79,14 @@ struct StartActive {
     func search() -> String { return TextManager.shared.text(.search) }
     func goback() -> String { return TextManager.shared.text(.goback) }
     func blackTab() -> String { return TextManager.shared.text(.blackTab) }
+}
+
+/// 长按菜单相关文案
+struct TabContextMenu {
+    func bookmark() -> String { return TextManager.shared.text(.bookmark) }
+    func unbookmark() -> String { return TextManager.shared.text(.unbookmark) }
+    func closeTab() -> String { return TextManager.shared.text(.closeTab) }
+    func closeOtherTabs() -> String { return TextManager.shared.text(.closeOtherTabs) }
 }
 
 // MARK: - SwiftUI文本扩展
