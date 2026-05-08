@@ -5,5 +5,9 @@
     <string name="search">検索...</string>
     <string name="goback">戻る</string>
     <string name="blank_tab">新規タブ</string>
+    <string name="menu_bookmark">ブックマーク</string>
+    <string name="menu_close_tab">タブを閉じる</string>
+    <string name="menu_close_other_tabs">その他のタブを閉じる</string>
+    <string name="menu_cancel_bookmark">ブックマーク解除</string>
 </resources>
 

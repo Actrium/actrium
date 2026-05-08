@@ -7,4 +7,8 @@
     <string name="search">搜索...</string>
     <string name="goback">返回</string>
     <string name="blank_tab">新页签</string>
+    <string name="menu_bookmark">收藏</string>
+    <string name="menu_close_tab">关闭页签</string>
+    <string name="menu_close_other_tabs">关闭其他页签</string>
+    <string name="menu_cancel_bookmark">取消收藏</string>
 </resources>
