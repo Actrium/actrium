@@ -33,7 +33,7 @@ import {
   DropdownMenuItem,
   DropdownMenuText,
 } from '../shared/DropdownMenu';
-import { useMessageStore } from '../../store/useMessageStore';
+import { useMessageStore, type SelectionMode } from '../../store/useMessageStore';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { triggerHaptic } from '../../utils/haptics';
 
@@ -70,7 +70,6 @@ interface ChatBubbleProps {
   onEdit?: () => void;
   onCopy?: () => void;
   onFeedback?: () => void;
-  onShare?: () => void;
   isLatest?: boolean;
   msgId?: string;
   tabId?: string;
@@ -92,7 +91,6 @@ export default function ChatBubble({
   onEdit,
   onCopy,
   onFeedback,
-  onShare,
   isLatest = false,
   msgId,
   tabId,
@@ -122,7 +120,7 @@ export default function ChatBubble({
 
   const { activePlayback, setActivePlayback, clearPlayback } =
     useVoicePlaybackStore();
-  const selectionMode = useMessageStore((s) => s.selectionMode);
+  const selectionMode: SelectionMode = useMessageStore((s) => s.selectionMode);
   const enterSelectionMode = useMessageStore((s) => s.enterSelectionMode);
 
   const [isCopied, setIsCopied] = React.useState(false);
@@ -226,10 +224,13 @@ export default function ChatBubble({
         icon: <Icon type="copy" size={16} />,
       });
     }
-    if (onShare) {
+    // 中文注释：分享入口进入分享选择模式，用户多选后点击确认才生成分享图。
+    if (msgId && tabId) {
       options.push({
         label: t('actr.chat.share'),
-        onPress: onShare,
+        onPress: () => {
+          enterSelectionMode(msgId, tabId, undefined, 'share');
+        },
         icon: <Icon type="share" size={16} />,
       });
     }
@@ -255,22 +256,14 @@ export default function ChatBubble({
       });
     }
 
-    // 添加删除选项
-    if (msgId && appId) {
+    // 中文注释：删除入口进入删除选择模式，显式传入 'delete'。
+    if (msgId && tabId) {
+      const defaultPart =
+        attachments && !content ? 'attachments' : undefined;
       options.push({
         label: t('common.delete'),
         onPress: () => {
-          console.log(
-            'Delete clicked from long press menu:',
-            msgId,
-            'appId:',
-            appId,
-          );
-          if (msgId && tabId) {
-            const defaultPart =
-              attachments && !content ? 'attachments' : undefined;
-            enterSelectionMode(msgId, tabId, defaultPart);
-          }
+          enterSelectionMode(msgId, tabId, defaultPart, 'delete');
         },
         icon: <Icon type="delete" size={16} color={colors.danger} />,
         textColor: colors.danger,
@@ -282,7 +275,6 @@ export default function ChatBubble({
     isQuestion,
     onEdit,
     onCopy,
-    onShare,
     readAloudAction.handlePress,
     msgId,
     tabId,
@@ -571,16 +563,16 @@ export default function ChatBubble({
           <Pressable
             style={[
               styles.toolbarButton,
-              selectionMode && styles.toolbarButtonDisabled,
+              selectionMode !== 'none' && styles.toolbarButtonDisabled,
             ]}
             onPress={() => {
-              if (selectionMode) return;
+              if (selectionMode !== 'none') return;
               setTimeout(() => {
                 onCopy?.();
                 setIsCopied(true);
               }, 0);
             }}
-            disabled={selectionMode}
+            disabled={selectionMode !== 'none'}
             hitSlop={8}
           >
             <Icon
@@ -605,15 +597,18 @@ export default function ChatBubble({
                 <Icon type="more" size={chatBubbleToolbar.iconSize} />
               </View>
             }
-            disabled={selectionMode}
+            disabled={selectionMode !== 'none'}
           >
             {(close) => (
               <>
-                {onShare ? (
+                {/* 中文注释：工具栏下拉菜单中的分享入口，进入分享选择模式。
+                    使用 close(callback) 将 enterSelectionMode 推迟到菜单关闭动画完成后执行，
+                    避免与 DropdownMenu 内部 Reanimated 动画产生 useInsertionEffect 冲突。 */}
+                {msgId && tabId ? (
                   <DropdownMenuItem
                     onPress={() => {
                       close(() => {
-                        onShare();
+                        enterSelectionMode(msgId, tabId, undefined, 'share');
                       });
                     }}
                   >
@@ -631,12 +626,14 @@ export default function ChatBubble({
                   <Icon type="suggest" size={16} />
                   <DropdownMenuText>{t('actr.chat.feedback')}</DropdownMenuText>
                 </DropdownMenuItem>
+                {/* 中文注释：工具栏下拉菜单中的删除入口，同样使用 close(callback) 避免时序冲突。 */}
                 <DropdownMenuItem
                   onPress={() => {
-                    if (msgId && appId) {
-                      enterSelectionMode(msgId, tabId);
+                    if (msgId && tabId) {
+                      close(() => {
+                        enterSelectionMode(msgId, tabId, undefined, 'delete');
+                      });
                     }
-                    close();
                   }}
                 >
                   <Icon type="delete" size={16} color={colors.danger} />
@@ -693,7 +690,7 @@ export default function ChatBubble({
 
   const handleBubblePress = () => {
     Keyboard.dismiss();
-    if (selectionMode && onToggleSelection) {
+    if (selectionMode !== 'none' && onToggleSelection) {
       onToggleSelection();
       return;
     }
@@ -719,12 +716,12 @@ export default function ChatBubble({
           <Pressable
             onPress={handleBubblePress}
             style={({ pressed }) => [
-              selectionMode && pressed && styles.bubblePressed,
+              selectionMode !== 'none' && pressed && styles.bubblePressed,
             ]}
           >
             {(() => {
               const shouldShowMenu =
-                !selectionMode && menuOptions.length > 0 && !hasAttachments;
+                selectionMode === 'none' && menuOptions.length > 0 && !hasAttachments;
               if (shouldShowMenu) {
                 return (
                   <LongPressMenu

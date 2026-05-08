@@ -5,6 +5,9 @@ import { cleanupVoiceMessageFile } from '../utils/VoiceMessageStorage';
 
 type MessagePart = 'attachments' | 'question' | 'answer';
 
+// 中文注释：选择模式类型，'none' 未进入选择模式，'delete' 为删除多选，'share' 为分享多选。
+export type SelectionMode = 'none' | 'delete' | 'share';
+
 interface MessageState {
   // Key is tabId
   messageIds: Record<string, string[]>;
@@ -23,13 +26,14 @@ interface MessageState {
   ) => void;
   deleteMessage: (tabId: string, messageId: string) => void;
   cleanMessage: (tabId: string) => void;
-  // 选择模式相关 删除时使用
-  selectionMode: boolean;
+  // 中文注释：选择模式，支持删除和分享两种用途。
+  selectionMode: SelectionMode;
   selectedItems: Record<string, Set<MessagePart>>;
   enterSelectionMode: (
     messageId: string,
     tabId?: string,
     defaultPart?: MessagePart,
+    mode?: 'delete' | 'share',
   ) => void;
   toggleSelection: (messageId: string, part: MessagePart) => void;
   exitSelectionMode: () => void;
@@ -75,7 +79,7 @@ const cleanupMessageVoiceFiles = async (
 export const useMessageStore = create<MessageState>((set, get) => ({
   messageIds: {},
   messageById: {},
-  selectionMode: false,
+  selectionMode: 'none',
   selectedItems: {},
   getMessage: (tabId, messageId) => get().messageById[tabId]?.[messageId],
   setMessages: (tabId, msgs) => {
@@ -215,6 +219,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     messageId: string,
     tabId?: string,
     defaultPart?: MessagePart,
+    mode: 'delete' | 'share' = 'delete',
   ) => {
     const state = get();
 
@@ -254,7 +259,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
 
     set({
-      selectionMode: true,
+      selectionMode: mode,
       selectedItems: {
         [messageId]: selectedParts,
       },
@@ -281,7 +286,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
   exitSelectionMode: () => {
     set({
-      selectionMode: false,
+      selectionMode: 'none',
       selectedItems: {},
     });
   },
@@ -357,7 +362,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           ...innerState.messageById,
           [tabId]: nextById,
         },
-        selectionMode: false,
+        selectionMode: 'none',
         selectedItems: {},
       };
     });

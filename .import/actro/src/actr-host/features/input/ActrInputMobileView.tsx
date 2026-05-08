@@ -27,6 +27,7 @@ import {
   spacing,
   inputArea,
   iconSize,
+  selectionActionBar,
 } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
@@ -392,7 +393,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const extraBottomPadding = isKeyboardVisible
     ? Math.max(insets.bottom / 2, 10)
     : isAndroid
-      ? Math.max(insets.bottom, 22)
+      ? Math.max(insets.bottom, selectionActionBar.phoneMinBottomPadding)
       : insets.bottom;
 
   return (
@@ -631,10 +632,10 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
           style={[
             styles.mobileFloatingText,
             {
-              // ios 底部安全区高度不固定 24 是输入框高度的一半，10是字体高度，安卓没有安全区
+              // ios 底部安全区高度不固定, 24 是输入框高度的一半，10是字体高度，安卓没有安全区
               bottom: isIOS
                 ? (extraBottomPadding - 24 + 10) / 2
-                : (extraBottomPadding - 22) / 2,
+                : (extraBottomPadding - selectionActionBar.phoneMinBottomPadding) / 2,
             },
           ]}
         >
