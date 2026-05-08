@@ -811,10 +811,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         // 根据收藏状态切换图标和文字
         if (activeModel.isMarked) {
             ivFav.setImageResource(R.drawable.menu_cancel_fav)
-            tvFav.text = "取消收藏"
+            tvFav.text = getString(R.string.menu_cancel_bookmark)
         } else {
             ivFav.setImageResource(R.drawable.menu_fav)
-            tvFav.text = "收藏"
+            tvFav.text = getString(R.string.menu_bookmark)
         }
 
         val popup = PopupWindow(

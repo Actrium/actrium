@@ -26,7 +26,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="收藏" />
+            android:text="@string/menu_bookmark" />
     </LinearLayout>
 
     <LinearLayout
@@ -48,7 +48,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="关闭" />
+            android:text="@string/menu_close_tab" />
     </LinearLayout>
 
     <View
@@ -75,6 +75,6 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="关闭其他页签" />
+            android:text="@string/menu_close_other_tabs" />
     </LinearLayout>
 </LinearLayout>
