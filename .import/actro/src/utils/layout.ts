@@ -7,7 +7,6 @@ export interface HostLayoutTokens {
   messageHorizontalPadding: number;
   chatListBottomPadding: number;
   inputHorizontalPadding: number;
-  inputBottomPadding: number;
   inputVerticalPadding: number;
   deleteButtonBottom: number;
   chatEmptyTitleSize: number;
@@ -25,7 +24,6 @@ export function getHostLayoutTokens(width: number): HostLayoutTokens {
     messageHorizontalPadding: isTablet ? 20 : 12,
     chatListBottomPadding: isTablet ? 40 : 24,
     inputHorizontalPadding: isTablet ? 16 : 12,
-    inputBottomPadding: isTablet ? (isIOS ? 26 : 20) : isIOS ? 12 : 10,
     inputVerticalPadding: isTablet ? 20 : 14,
     deleteButtonBottom: isTablet ? 126 : isIOS ? 88 : 74,
     chatEmptyTitleSize: isTablet ? 60 : 36,
