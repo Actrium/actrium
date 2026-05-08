@@ -21,3 +21,9 @@ If you do not agree, you will not be able to use the features of this applicatio
 "search" = "Rechercher";
 "goback" = "Retour";
 "blackTab" = "Nouvel onglet";
+
+/* Menu appui long */
+"bookmark" = "Signet";
+"unbookmark" = "Supprimer le signet";
+"closeTab" = "Fermer l'onglet";
+"closeOtherTabs" = "Fermer les autres onglets";
