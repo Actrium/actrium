@@ -33,7 +33,11 @@ import {
   IMessage,
   Progress,
 } from '../../../repository/MessageRepository';
-import { useMessageStore, type SelectionMode } from '../../store/useMessageStore';
+import {
+  useMessageStore,
+  type MessagePart,
+  type SelectionMode,
+} from '../../store/useMessageStore';
 import { useAppStore } from '../../store/useAppStore';
 import ChatBubble from './ChatBubble';
 import { FeedbackFormModal } from './FeedbackFormModal';
@@ -91,12 +95,10 @@ interface MessageRowProps {
   appId: string;
   messageId: string;
   layoutTokens: ReturnType<typeof getHostLayoutTokens>;
-  selectionMode: SelectionMode;
-  selectedParts: Set<'attachments' | 'question' | 'answer'>;
   isLatest: boolean;
   toggleSelection: (
     messageId: string,
-    part: 'attachments' | 'question' | 'answer',
+    part: MessagePart,
   ) => void;
   handleEdit: (msg: IMessage) => void;
   handleCopy: (text: string) => void;
@@ -104,16 +106,13 @@ interface MessageRowProps {
   styles: ReturnType<typeof makeStyles>;
 }
 
-const CHECKBOX_OFFSET = 30;
-const SELECTION_ANIMATION_DURATION = 200;
+const SELECTION_CHECKBOX_SLOT_WIDTH = 30;
 
 const MessageRow = React.memo(function MessageRow({
   tabId,
   appId,
   messageId,
   layoutTokens,
-  selectionMode,
-  selectedParts,
   isLatest,
   toggleSelection,
   handleEdit,
@@ -121,39 +120,20 @@ const MessageRow = React.memo(function MessageRow({
   handleFeedback,
   styles,
 }: MessageRowProps) {
-  const { t } = useTranslation();
   const item = useMessageStore(
     useCallback(
       (state) => state.messageById[tabId]?.[messageId],
       [tabId, messageId],
     ),
   );
-
-  // 中文注释：选择模式的过渡动画，paddingLeft 控制气泡宽度缩减，translateX + opacity 控制多选框滑入。
-  // 使用 RN Animated 替代 reanimated，避免 React.memo 内 useSharedValue 触发 useInsertionEffect 报错。
-  const selectionProgress = React.useRef(new Animated.Value(0)).current;
-
-  React.useEffect(() => {
-    const animation = Animated.timing(selectionProgress, {
-      toValue: selectionMode !== 'none' ? 1 : 0,
-      duration: SELECTION_ANIMATION_DURATION,
-      useNativeDriver: false,
-    });
-    animation.start();
-    return () => {
-      animation.stop();
-    };
-  }, [selectionMode]);
-
-  const paddingLeftAnimated = selectionProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, CHECKBOX_OFFSET],
-  });
-
-  const translateXAnimated = selectionProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-CHECKBOX_OFFSET, 0],
-  });
+  const selectionMode = useMessageStore((state) => state.selectionMode);
+  const selectedParts = useMessageStore(
+    useCallback(
+      (state) => state.selectedItems[messageId] || EMPTY_SELECTED_PARTS,
+      [messageId],
+    ),
+  );
+  const isSelectionMode = selectionMode !== 'none';
 
   if (!item) return null;
 
@@ -167,19 +147,19 @@ const MessageRow = React.memo(function MessageRow({
         },
       ]}
     >
-      <Animated.View
-        style={[styles.messageGroup, { paddingLeft: paddingLeftAnimated }]}
-      >
+      <View style={styles.messageGroup}>
         {item.attachments && (
           <View style={styles.bubbleWithCheckbox}>
-            <Animated.View style={[styles.checkboxContainer, { transform: [{ translateX: translateXAnimated }], opacity: selectionProgress }]}>
-              <Checkbox
-                checked={selectedParts.has('attachments')}
-                onPress={() =>
-                  toggleSelection(item.message_id, 'attachments')
-                }
-              />
-            </Animated.View>
+            {isSelectionMode ? (
+              <View style={styles.checkboxContainer}>
+                <Checkbox
+                  checked={selectedParts.has('attachments')}
+                  onPress={() =>
+                    toggleSelection(item.message_id, 'attachments')
+                  }
+                />
+              </View>
+            ) : null}
             <View style={styles.questionBubbleWrapper}>
               <ChatBubble
                 type='question'
@@ -195,6 +175,7 @@ const MessageRow = React.memo(function MessageRow({
                 msgId={item.message_id}
                 tabId={tabId}
                 appId={appId}
+                selectionMode={selectionMode}
                 selectionKey={`${item.message_id}:attachments`}
                 isSelected={selectedParts.has('attachments')}
                 onToggleSelection={() =>
@@ -206,12 +187,14 @@ const MessageRow = React.memo(function MessageRow({
         )}
         {item.question_content || item.question_type === 'voice' ? (
           <View style={styles.bubbleWithCheckbox}>
-            <Animated.View style={[styles.checkboxContainer, { transform: [{ translateX: translateXAnimated }], opacity: selectionProgress }]}>
-              <Checkbox
-                checked={selectedParts.has('question')}
-                onPress={() => toggleSelection(item.message_id, 'question')}
-              />
-            </Animated.View>
+            {isSelectionMode ? (
+              <View style={styles.checkboxContainer}>
+                <Checkbox
+                  checked={selectedParts.has('question')}
+                  onPress={() => toggleSelection(item.message_id, 'question')}
+                />
+              </View>
+            ) : null}
             <View style={styles.questionBubbleWrapper}>
               <ChatBubble
                 type='question'
@@ -220,6 +203,7 @@ const MessageRow = React.memo(function MessageRow({
                 appId={appId}
                 content={item.question_content}
                 voicePayload={item.question_voice_payload}
+                selectionMode={selectionMode}
                 onEdit={
                   isLatest && selectionMode === 'none' && item.question_type !== 'voice' && !item.is_edited
                     ? () => handleEdit(item)
@@ -246,12 +230,14 @@ const MessageRow = React.memo(function MessageRow({
           (item.progress === Progress.pending ||
             item.progress === Progress.processing)) ? (
           <View style={styles.bubbleWithCheckbox}>
-            <Animated.View style={[styles.checkboxContainer, { transform: [{ translateX: translateXAnimated }], opacity: selectionProgress }]}>
-              <Checkbox
-                checked={selectedParts.has('answer')}
-                onPress={() => toggleSelection(item.message_id, 'answer')}
-              />
-            </Animated.View>
+            {isSelectionMode ? (
+              <View style={styles.checkboxContainer}>
+                <Checkbox
+                  checked={selectedParts.has('answer')}
+                  onPress={() => toggleSelection(item.message_id, 'answer')}
+                />
+              </View>
+            ) : null}
             <ChatBubble
               type='answer'
               msgId={item.message_id}
@@ -259,6 +245,7 @@ const MessageRow = React.memo(function MessageRow({
               appId={appId}
               content={item.answer_content}
               voicePayload={item.answer_voice_payload}
+              selectionMode={selectionMode}
               isLoading={
                 isLatest &&
                 (item.progress === Progress.pending ||
@@ -280,7 +267,7 @@ const MessageRow = React.memo(function MessageRow({
             />
           </View>
         ) : null}
-      </Animated.View>
+      </View>
     </View>
   );
 });
@@ -368,6 +355,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   }, []);
 
   const handleContentSizeChange = useCallback(() => {
+    if (selectionMode !== 'none') return;
+
     // 异步内容（如 Supramark 卡片）撑高时，若用户仍在底部附近，则保持贴底。
     const shouldKeepBottom =
       isNearBottomRef.current ||
@@ -377,7 +366,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated: false });
     });
-  }, []);
+  }, [selectionMode]);
 
   const handleCopy = useCallback((text: string) => {
     if (!text) return;
@@ -697,8 +686,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           appId={appId}
           messageId={messageId}
           layoutTokens={layoutTokens}
-          selectionMode={selectionMode}
-          selectedParts={selectedItems[messageId] || EMPTY_SELECTED_PARTS}
           isLatest={index === messageIds.length - 1}
           toggleSelection={toggleSelection}
           handleEdit={handleEdit}
@@ -712,8 +699,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       tab.id,
       appId,
       layoutTokens,
-      selectionMode,
-      selectedItems,
       messageIds.length,
       toggleSelection,
       handleEdit,
@@ -1210,7 +1195,6 @@ const makeStyles = (colors: ColorTokens) => ({
     bubbleWithCheckbox: {
       flexDirection: 'row',
       alignItems: 'flex-start',
-      position: 'relative',
       marginBottom: spacing.xxs,
       width: '100%',
     },
@@ -1220,10 +1204,9 @@ const makeStyles = (colors: ColorTokens) => ({
       minWidth: 0,
     },
     checkboxContainer: {
-      position: 'absolute',
-      left: -30,
-      top: 14,
-      zIndex: 10,
+      width: SELECTION_CHECKBOX_SLOT_WIDTH,
+      paddingTop: 14,
+      alignItems: 'flex-start',
     },
     deleteButtonContainer: {
       position: 'absolute',

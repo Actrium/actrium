@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { LoadAppCameraPanel } from './LoadAppCameraPanel';
 import { useLoadApp } from './useLoadApp';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { getTypographyStyle, loadApp } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
@@ -148,8 +148,10 @@ const LoadAppPad = () => {
 
 export default LoadAppPad;
 
-const makeStyles = (colors: ColorTokens) =>
-  StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
     scrollContent: {
       flexGrow: 1,
     },
@@ -170,7 +172,7 @@ const makeStyles = (colors: ColorTokens) =>
     scanArea: {
       overflow: 'hidden',
       backgroundColor: colors.bgScanArea,
-      ...HOST_SHADOWS.softSurface,
+      ...hostShadows.softSurface,
     },
     padInput: {
       paddingLeft: 39,
@@ -189,6 +191,7 @@ const makeStyles = (colors: ColorTokens) =>
     padInputContainer: {
       height: loadApp.inputHeight,
       backgroundColor: colors.bgLoadDark,
-      ...HOST_SHADOWS.inputPill,
+      ...hostShadows.inputPill,
     },
   });
+};

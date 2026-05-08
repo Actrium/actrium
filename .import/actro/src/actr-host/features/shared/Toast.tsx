@@ -7,7 +7,7 @@ import React, {
 import { View, StyleSheet, Animated } from 'react-native';
 import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 
@@ -53,7 +53,10 @@ export const Toast = forwardRef<ToastRef, {}>((_, ref) => {
   );
 });
 
-const makeStyles = (colors: ColorTokens) => StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
   container: {
     position: 'absolute',
     left: 0,
@@ -68,7 +71,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingVertical: spacing.md,
     borderRadius: 24,
-    ...HOST_SHADOWS.floatingButton,
+    ...hostShadows.floatingButton,
   },
   text: {
     color: colors.textIconPrimary,
@@ -76,3 +79,4 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     fontWeight: '600',
   },
 });
+};
