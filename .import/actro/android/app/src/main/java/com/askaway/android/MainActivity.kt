@@ -50,7 +50,10 @@ import com.askaway.android.utils.getStatusBarHeight
 import com.askaway.android.utils.screenshot
 import com.askaway.android.utils.ViewAnimationHelper
 import android.content.Context
+import android.view.LayoutInflater
 import android.view.inputmethod.InputMethodManager
+import android.widget.ImageView
+import android.widget.PopupWindow
 import com.facebook.react.modules.core.DeviceEventManagerModule
 
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
@@ -179,6 +182,9 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
         activeRecyclerAdapter.onMarkClick = { activeModel ->
             viewModel.toggleMarkStatus(activeModel)
+        }
+        activeRecyclerAdapter.onItemLongClick = { activeModel, rawX, rawY ->
+            showLongPressPopup(activeModel, rawX, rawY)
         }
         // 设置 item 点击事件
         activeRecyclerAdapter.onItemClick = { activeModel, view ->
@@ -775,6 +781,111 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         val appId = uri.getQueryParameter("appid")
         isFromDeepLink = true
         viewModel.addApp(appId = appId)
+    }
+
+    private var longPressPopup: PopupWindow? = null
+
+    /**
+     * 长按 item 弹出操作菜单
+     * 以触点为中心定位，与屏幕边界保持 20px 间距
+     */
+    private fun showLongPressPopup(activeModel: ActiveModel, rawX: Int, rawY: Int) {
+        longPressPopup?.dismiss()
+
+        val popupView = LayoutInflater.from(this).inflate(R.layout.popup_long_press, null)
+        val llFav = popupView.findViewById<View>(R.id.llFav)
+        val ivFav = popupView.findViewById<ImageView>(R.id.ivFav)
+        val tvFav = popupView.findViewById<android.widget.TextView>(R.id.tvFav)
+        val llCloseOther = popupView.findViewById<View>(R.id.llCloseOther)
+        val vDivider = popupView.findViewById<View>(R.id.vDivider)
+
+        // name 为空时不显示收藏行（与 item 中 ivMark 的显隐逻辑一致）
+        val showFav = activeModel.name.isNotEmpty()
+        llFav.visibility = if (showFav) View.VISIBLE else View.GONE
+
+        // 只有当前 item 时不显示"关闭其他页签"
+        val hasOtherItems = viewModel.activeList.value.size > 1
+        llCloseOther.visibility = if (hasOtherItems) View.VISIBLE else View.GONE
+        vDivider.visibility = if (hasOtherItems) View.VISIBLE else View.GONE
+
+        // 根据收藏状态切换图标和文字
+        if (activeModel.isMarked) {
+            ivFav.setImageResource(R.drawable.menu_cancel_fav)
+            tvFav.text = "取消收藏"
+        } else {
+            ivFav.setImageResource(R.drawable.menu_fav)
+            tvFav.text = "收藏"
+        }
+
+        val popup = PopupWindow(
+            popupView,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        )
+        popup.isOutsideTouchable = true
+        longPressPopup = popup
+
+        llFav.setOnClickListener {
+            popup.dismiss()
+            // 与 item 上的收藏操作一致
+            activeRecyclerAdapter.onMarkClick?.invoke(activeModel)
+        }
+        popupView.findViewById<View>(R.id.llClose).setOnClickListener {
+            popup.dismiss()
+            // 与 item 上的删除操作一致
+            activeRecyclerAdapter.onDeleteClick?.invoke(activeModel)
+        }
+        llCloseOther.setOnClickListener {
+            closeOtherTabs(activeModel.id)
+            popup.dismiss()
+        }
+
+        // 测量弹窗尺寸
+        popupView.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        val popupWidth = popupView.measuredWidth
+        val popupHeight = popupView.measuredHeight
+
+        val margin = 20
+        val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
+
+        // 以触点为中心计算位置，再约束到边界内
+        val x = (rawX - popupWidth / 2)
+            .coerceAtLeast(margin)
+            .coerceAtMost(screenWidth - popupWidth - margin)
+
+        val y = (rawY - popupHeight / 2)
+            .coerceAtLeast(margin)
+            .coerceAtMost(screenHeight - popupHeight - margin)
+
+        popup.showAtLocation(window.decorView, android.view.Gravity.NO_GRAVITY, x, y)
+    }
+
+    /**
+     * 关闭除指定 tab 以外的所有 tab
+     */
+    private fun closeOtherTabs(keepId: String) {
+        val allItems = viewModel.activeList.value
+        val others = allItems.filter { it.id != keepId }
+        for (model in others) {
+            // 移除 flRNContent 中对应的 child
+            for (i in binding.flRNContent.childCount - 1 downTo 0) {
+                val child = binding.flRNContent.getChildAt(i)
+                if (child.tag == model.id) {
+                    binding.flRNContent.removeViewAt(i)
+                    if (child is ReactRootView) {
+                        try {
+                            child.unmountReactApplication()
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error unmounting React application", e)
+                        }
+                    }
+                    break
+                }
+            }
+            viewModel.removeActiveModel(model.id)
+        }
     }
 
     override fun onDestroy() {
