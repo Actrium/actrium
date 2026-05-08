@@ -209,11 +209,12 @@ struct PhoneTabCardView: View {
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         .asMatchedTransitionSource(id: tab.id, in: animation)
         .contextMenu {
+            let _ = UIImpactFeedbackGenerator(style: .light).impactOccurred()
             if tab.title != TM.active.blackTab() {
                 Button {
                     toggleBookmark()
                 } label: {
-                    Label(tab.isBookmarked ? "取消收藏" : "收藏",
+                    Label(tab.isBookmarked ? TM.tabContextMenu.unbookmark() : TM.tabContextMenu.bookmark(),
                           systemImage: tab.isBookmarked ? "star.slash" : "star")
                 }
             }
@@ -221,7 +222,7 @@ struct PhoneTabCardView: View {
             Button(role: .destructive) {
                 onClose()
             } label: {
-                Label("关闭页签", systemImage: "xmark")
+                Label(TM.tabContextMenu.closeTab(), systemImage: "xmark")
             }
 
             if viewModel.tabs.count > 1 {
@@ -229,7 +230,7 @@ struct PhoneTabCardView: View {
                 Button(role: .destructive) {
                     closeOtherTabs()
                 } label: {
-                    Label("关闭其他页签", systemImage: "xmark")
+                    Label(TM.tabContextMenu.closeOtherTabs(), systemImage: "xmark")
                 }
             }
         }
