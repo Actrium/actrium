@@ -21,3 +21,9 @@ If you do not agree, you will not be able to use the features of this applicatio
 "search" = "Поиск";
 "goback" = "Назад";
 "blackTab" = "Новая вкладка";
+
+/* Меню долгого нажатия */
+"bookmark" = "В закладки";
+"unbookmark" = "Убрать из закладок";
+"closeTab" = "Закрыть вкладку";
+"closeOtherTabs" = "Закрыть другие вкладки";
