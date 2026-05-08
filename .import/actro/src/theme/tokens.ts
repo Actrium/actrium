@@ -197,25 +197,6 @@ export const loadApp = {
 } as const;
 
 /**
- * Mobile 输入区附件菜单专用尺寸 token。
- * 左侧添加附件入口的下拉菜单结构更复杂，单独收口宽度和内边距，避免和其它菜单样式耦合。
- */
-export const attachmentActionMenu = {
-  // 添加附件菜单宽度
-  width: selectTokenValue({ ios: 228, android: 208 }),
-  // 菜单内容区左右内边距
-  contentPaddingHorizontal: spacing.sm,
-  // 菜单内容区顶部内边距
-  contentPaddingTop: spacing.sm,
-  // 菜单内容区底部内边距
-  contentPaddingBottom: spacing.xs,
-  // 菜单项左右内边距
-  itemPaddingHorizontal: selectTokenValue({ ios: 10, android: 8 }),
-  // 菜单项上下内边距
-  itemPaddingVertical: selectTokenValue({ ios: 10, android: 8 }),
-} as const;
-
-/**
  * 扩展面板专用尺寸 token。
  * Phone 侧滑面板需要按平台单独校准展开比例，避免手势路径和渲染宽度各自写死。
  */

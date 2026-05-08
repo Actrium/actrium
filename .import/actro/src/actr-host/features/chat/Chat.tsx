@@ -17,11 +17,17 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   Platform,
+  GestureResponderEvent,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText } from '../../../components';
 import ActrInput from '../input/ActrInput';
+import MobileAttachmentPanel, {
+  getMobileAttachmentPanelHeight,
+} from '../input/MobileAttachmentPanel';
+import LocationPicker from '../extension/LocationPicker';
 import {
   MessageRepository,
   IMessage,
@@ -67,10 +73,17 @@ import { useBookmarkStore } from '../../store/useBookmarkStore';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import ChatSharePreviewModal from './share/ChatSharePreviewModal';
+import { usePhoneAttachmentPanelController } from './hooks/usePhoneAttachmentPanelController';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
 const EMPTY_SELECTED_PARTS = new Set<'attachments' | 'question' | 'answer'>();
+const ATTACHMENT_PANEL_OPEN_DURATION = 220;
+const ATTACHMENT_PANEL_CLOSE_DURATION = 180;
+// 中文注释：内容区短按关闭附件区时，允许识别为点击的最长按压时长。
+const CONTENT_TAP_MAX_DURATION = 220;
+// 中文注释：内容区短按关闭附件区时，允许识别为点击的最大位移。
+const CONTENT_TAP_MAX_MOVE = 8;
 
 interface MessageRowProps {
   tabId: string;
@@ -291,10 +304,19 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const { t } = useTranslation();
   const { tab } = useTab();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
+  const attachmentPanelHeight = useMemo(
+    () => getMobileAttachmentPanelHeight(insets.bottom),
+    [insets.bottom],
+  );
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const phoneAttachmentPanelController = usePhoneAttachmentPanelController(
+    appId,
+    tab.id,
+  );
 
   const messageIds = useMessageStore(
     useCallback(
@@ -609,12 +631,50 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   }, [tab.id, setEditingMessageId, clearInput]);
 
   const input = useMemo(() => {
-    return <ActrInput appId={appId} showTopToast={showTopToast} />;
-  }, [appId, showTopToast]);
+    return (
+      <ActrInput
+        appId={appId}
+        showTopToast={showTopToast}
+        mobileAttachmentController={
+          layoutTokens.isTablet ? undefined : phoneAttachmentPanelController
+        }
+      />
+    );
+  }, [
+    appId,
+    layoutTokens.isTablet,
+    phoneAttachmentPanelController,
+    showTopToast,
+  ]);
 
   // 中文注释：Android 宿主已经在 Native 层处理键盘抬升，
   // Chat 页只保留 iOS 的联动，避免 Android Pad 再叠加一层 keyboardInset。
   const shouldApplyKeyboardInset = Platform.OS === 'ios' && layoutTokens.isTablet;
+  const attachmentPanelTranslateY = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (layoutTokens.isTablet) {
+      attachmentPanelTranslateY.setValue(0);
+      return;
+    }
+
+    Animated.timing(attachmentPanelTranslateY, {
+      // 中文注释：Phone 端附件区常驻在输入框下方，展开时通过整块内容上移来露出附件区，
+      // 不再压缩 FlatList 高度。
+      toValue: phoneAttachmentPanelController.isAttachmentPanelOpen
+        ? -attachmentPanelHeight
+        : 0,
+      duration: phoneAttachmentPanelController.isAttachmentPanelOpen
+        ? ATTACHMENT_PANEL_OPEN_DURATION
+        : ATTACHMENT_PANEL_CLOSE_DURATION,
+      useNativeDriver: true,
+    }).start();
+  }, [
+    attachmentPanelTranslateY,
+    attachmentPanelHeight,
+    layoutTokens.isTablet,
+    phoneAttachmentPanelController.isAttachmentPanelOpen,
+  ]);
 
   const contentAreaAnimatedStyle = useAnimatedStyle(() => {
     if (Platform.OS !== 'ios' || layoutTokens.isTablet) {
@@ -722,46 +782,216 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     );
   }, [tab.id, deleteSelectedMessages, exitSelectionMode, t]);
 
+  const handleContentScrollBeginDrag = useCallback(() => {
+    dismissKeyboard();
+
+    // 中文注释：Phone 端附件区展开时，内容区一旦开始滚动就立即收起，避免列表滚动和底部扩展态并存。
+    if (
+      !layoutTokens.isTablet &&
+      phoneAttachmentPanelController.isAttachmentPanelOpen
+    ) {
+      phoneAttachmentPanelController.closeAttachmentPanel();
+    }
+  }, [
+    dismissKeyboard,
+    layoutTokens.isTablet,
+    phoneAttachmentPanelController,
+  ]);
+
+  const contentTouchStartRef = useRef<{
+    time: number;
+    x: number;
+    y: number;
+    moved: boolean;
+  } | null>(null);
+
+  // 中文注释：记录内容区触摸起点，用于区分短按、长按和拖动。
+  const handleContentTouchStart = useCallback(
+    (event: GestureResponderEvent) => {
+      const { pageX, pageY } = event.nativeEvent;
+      contentTouchStartRef.current = {
+        time: Date.now(),
+        x: pageX,
+        y: pageY,
+        moved: false,
+      };
+    },
+    [],
+  );
+
+  // 中文注释：在手指移动时更新触摸状态，避免把拖动误判成短按点击。
+  const handleContentTouchMove = useCallback(
+    (event: GestureResponderEvent) => {
+      const touchState = contentTouchStartRef.current;
+      if (!touchState || touchState.moved) {
+        return;
+      }
+
+      const { pageX, pageY } = event.nativeEvent;
+      const movedX = Math.abs(pageX - touchState.x);
+      const movedY = Math.abs(pageY - touchState.y);
+
+      if (movedX > CONTENT_TAP_MAX_MOVE || movedY > CONTENT_TAP_MAX_MOVE) {
+        touchState.moved = true;
+      }
+    },
+    [],
+  );
+
+  // 中文注释：内容区触摸结束时，只对短按动作收起附件区，保留长按和拖动交互。
+  const handleContentTouchEnd = useCallback(() => {
+    const touchState = contentTouchStartRef.current;
+    contentTouchStartRef.current = null;
+
+    if (!touchState) {
+      return;
+    }
+
+    const duration = Date.now() - touchState.time;
+
+    // 中文注释：只有短按内容区才收起附件区，长按和拖动都不触发，避免误伤消息长按能力。
+    if (
+      !layoutTokens.isTablet &&
+      phoneAttachmentPanelController.isAttachmentPanelOpen &&
+      !touchState.moved &&
+      duration <= CONTENT_TAP_MAX_DURATION
+    ) {
+      phoneAttachmentPanelController.closeAttachmentPanel();
+    }
+  }, [layoutTokens.isTablet, phoneAttachmentPanelController]);
+
+  const contentNode = (
+    <Reanimated.View
+      style={[styles.contentArea, contentAreaAnimatedStyle]}
+      onTouchStart={handleContentTouchStart}
+      onTouchMove={handleContentTouchMove}
+      onTouchEnd={handleContentTouchEnd}
+    >
+      {hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore ? (
+        <View style={{ flex: 1 }}>
+          <ChatEmpty />
+        </View>
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={messageIds}
+          renderItem={renderItem}
+          keyExtractor={(item) => item}
+          onScroll={handleScroll}
+          onContentSizeChange={handleContentSizeChange}
+          onScrollBeginDrag={handleContentScrollBeginDrag}
+          scrollEventThrottle={16}
+          style={styles.chatScrollView}
+          contentContainerStyle={[
+            styles.chatContent,
+            {
+              // Pad 模式不展示 ChatHeader，顶部只保留内容呼吸位。
+              paddingTop: layoutTokens.isTablet
+                ? 12
+                : CHAT_HEADER_HEIGHT + 12,
+              paddingBottom: layoutTokens.chatListBottomPadding,
+            },
+          ]}
+          ListHeaderComponent={ListHeaderComponent}
+          ListHeaderComponentStyle={styles.listHeader}
+          ListFooterComponent={<View style={styles.listFooterSpacer} />}
+          showsHorizontalScrollIndicator={false}
+          horizontal={false}
+          // 让列表空白区域点击时由滚动容器负责收起键盘，同时不再用外层 Touchable 截断拖拽手势。
+          keyboardShouldPersistTaps='never'
+          keyboardDismissMode='on-drag'
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        />
+      )}
+    </Reanimated.View>
+  );
+
   return (
     <View style={styles.mainContainer}>
-      <Reanimated.View style={[styles.contentArea, contentAreaAnimatedStyle]}>
-        {hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore ? (
-          <View style={{ flex: 1 }}>
-            <ChatEmpty />
-          </View>
-        ) : (
-          <FlatList
-            ref={flatListRef}
-            data={messageIds}
-            renderItem={renderItem}
-            keyExtractor={(item) => item}
-            onScroll={handleScroll}
-            onContentSizeChange={handleContentSizeChange}
-            onScrollBeginDrag={dismissKeyboard}
-            scrollEventThrottle={16}
-            style={styles.chatScrollView}
-            contentContainerStyle={[
-              styles.chatContent,
+      {!layoutTokens.isTablet ? (
+        <View style={styles.phoneMain}>
+          <Animated.View
+            style={[
+              styles.phoneContentMotion,
               {
-                // Pad 模式不展示 ChatHeader，顶部只保留内容呼吸位。
-                paddingTop: layoutTokens.isTablet
-                  ? 12
-                  : CHAT_HEADER_HEIGHT + 12,
-                paddingBottom: layoutTokens.chatListBottomPadding,
+                transform: [{ translateY: attachmentPanelTranslateY }],
               },
             ]}
-            ListHeaderComponent={ListHeaderComponent}
-            ListHeaderComponentStyle={styles.listHeader}
-            ListFooterComponent={<View style={styles.listFooterSpacer} />}
-            showsHorizontalScrollIndicator={false}
-            horizontal={false}
-            // 让列表空白区域点击时由滚动容器负责收起键盘，同时不再用外层 Touchable 截断拖拽手势。
-            keyboardShouldPersistTaps='never'
-            keyboardDismissMode='on-drag'
-            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-          />
-        )}
-      </Reanimated.View>
+          >
+            {contentNode}
+          </Animated.View>
+
+          <Animated.View
+            style={[
+              styles.phoneInputMotion,
+              {
+                transform: [{ translateY: attachmentPanelTranslateY }],
+              },
+            ]}
+          >
+            <KeyboardStickyView
+              enabled={Platform.OS === 'ios' && !layoutTokens.isTablet}
+              style={[
+                styles.inputContainer,
+                {
+                  // backgroundColor: layoutTokens.isTablet ? colors.bgChatTablet : colors.bgChatPage,
+                  marginTop: layoutTokens.isTablet ? 8 : 0,
+                  marginBottom: shouldApplyKeyboardInset ? keyboardInset : 0,
+                },
+              ]}
+            >
+              <View style={styles.bottomDock}>
+                <View style={styles.inputInner}>{input}</View>
+              </View>
+            </KeyboardStickyView>
+          </Animated.View>
+
+          <Animated.View
+            pointerEvents={
+              phoneAttachmentPanelController.isAttachmentPanelOpen ? 'auto' : 'none'
+            }
+            style={[
+              styles.attachmentPanelOverlay,
+              {
+                bottom: -attachmentPanelHeight,
+                transform: [{ translateY: attachmentPanelTranslateY }],
+              },
+            ]}
+          >
+            <MobileAttachmentPanel
+              expanded={phoneAttachmentPanelController.isAttachmentPanelOpen}
+              showSearchEntry={phoneAttachmentPanelController.showSearchEntry}
+              showNewlineEntry={phoneAttachmentPanelController.showNewlineEntry}
+              isWebSearchActive={phoneAttachmentPanelController.isWebSearchActive}
+              isEnterForNewLine={phoneAttachmentPanelController.isEnterForNewLine}
+              onPickCamera={phoneAttachmentPanelController.takePhoto}
+              onPickImage={phoneAttachmentPanelController.pickImage}
+              onPickFile={phoneAttachmentPanelController.pickDocument}
+              onPickLocation={phoneAttachmentPanelController.pickLocation}
+              onToggleWebSearch={phoneAttachmentPanelController.toggleWebSearch}
+              onToggleEnterForNewLine={phoneAttachmentPanelController.toggleEnterForNewLine}
+            />
+          </Animated.View>
+        </View>
+      ) : (
+        <>
+          {contentNode}
+          <KeyboardStickyView
+            enabled={Platform.OS === 'ios' && !layoutTokens.isTablet}
+            style={[
+              styles.inputContainer,
+              {
+                marginTop: layoutTokens.isTablet ? 8 : 0,
+                marginBottom: shouldApplyKeyboardInset ? keyboardInset : 0,
+              },
+            ]}
+          >
+            <View style={styles.bottomDock}>
+              <View style={styles.inputInner}>{input}</View>
+            </View>
+          </KeyboardStickyView>
+        </>
+      )}
 
       {/* 编辑模式蒙版 - 点击退出编辑状态 */}
       {!!editingMessageId && (
@@ -773,34 +1003,22 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
 
       {/* 回到底部按钮 */}
       {!selectionMode && (
-        <View
+        <Animated.View
           style={[
             styles.scrollToBottomContainer,
             // Pad 端按钮额外上移 40，避免与更高的输入区视觉距离过近。
             layoutTokens.isTablet && styles.scrollToBottomContainerPad,
+            !layoutTokens.isTablet && {
+              transform: [{ translateY: attachmentPanelTranslateY }],
+            },
           ]}
         >
           <ScrollToBottomButton
             visible={showScrollToBottom}
             onPress={scrollToBottom}
           />
-        </View>
+        </Animated.View>
       )}
-
-      {/* 输入框 */}
-      <KeyboardStickyView
-        enabled={Platform.OS === 'ios' && !layoutTokens.isTablet}
-        style={[
-          styles.inputContainer,
-          {
-            // backgroundColor: layoutTokens.isTablet ? colors.bgChatTablet : colors.bgChatPage,
-            marginTop: layoutTokens.isTablet ? 8 : 0,
-            marginBottom: shouldApplyKeyboardInset ? keyboardInset : 0,
-          },
-        ]}
-      >
-        <View style={styles.inputInner}>{input}</View>
-      </KeyboardStickyView>
 
       {/* 删除按钮 - 底部 footer 布局，参考 ChatSharePreviewModal */}
       {selectionMode && (
@@ -837,6 +1055,17 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         }}
       />
 
+      {!layoutTokens.isTablet && (
+        <LocationPicker
+          visible={phoneAttachmentPanelController.showMapModal}
+          onClose={() => phoneAttachmentPanelController.setShowMapModal(false)}
+          onSelect={(data) => {
+            phoneAttachmentPanelController.handleConfirmLocation(data);
+            phoneAttachmentPanelController.setShowMapModal(false);
+          }}
+        />
+      )}
+
       <Toast ref={toastRef} />
     </View>
   );
@@ -865,9 +1094,27 @@ const makeStyles = (colors: ColorTokens) => ({
       width: '100%',
       zIndex: 100,
     },
+    phoneMain: {
+      flex: 1,
+    },
+    phoneContentMotion: {
+      flex: 1,
+    },
+    phoneInputMotion: {
+      width: '100%',
+    },
+    attachmentPanelOverlay: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      zIndex: 90,
+    },
+    bottomDock: {
+      width: '100%',
+    },
     inputInner: {
       width: '100%',
-      // backgroundColor: 'red',
+      // 必须保留，透明度渐变需要
       marginTop: -24
     },
     scrollToBottomContainer: {
