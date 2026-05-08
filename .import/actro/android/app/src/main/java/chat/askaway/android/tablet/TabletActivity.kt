@@ -12,6 +12,8 @@ import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.PopupWindow
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
@@ -19,6 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import chat.askaway.android.utils.TabBundleUtils
+import com.askaway.android.model.ActiveModel
 import com.askaway.android.BuildConfig
 import com.askaway.android.MainApplication
 import com.askaway.android.R
@@ -151,21 +154,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             viewModel.changeActiveModel(it.id)
         }
         adapter.onDeleteClick = {
-            // 从 reactViewMap 中移除并卸载
-            val reactRootView = reactViewMap.remove(it.id)
-            reactRootView?.let { rootView ->
-                try {
-                    rootView.unmountReactApplication()
-                } catch (e: Exception) {
-                    Log.e("TabletActivity", "Error unmounting React application", e)
-                }
-            }
-            // 移除当前 item
-            viewModel.removeActiveModel(it.id)
-            // 如果 reactViewMap 为空，则切换为 Grid 模式
-            if (reactViewMap.isEmpty()) {
-                viewModel.changeDisplayMode(PageMode.GRID)
-            }
+            deleteTab(it.id)
+        }
+        adapter.onItemLongClick = { activeModel, rawX, rawY ->
+            showLongPressPopup(activeModel, rawX, rawY)
         }
 
         // Grid adapter 的点击事件
@@ -187,19 +179,13 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         }
 
         gridAdapter.onDeleteClick = { tabId ->
-            // 从 reactViewMap 中移除并卸载
-            val reactRootView = reactViewMap.remove(tabId)
-            reactRootView?.let { rootView ->
-                try {
-                    rootView.unmountReactApplication()
-                } catch (e: Exception) {
-                    Log.e("TabletActivity", "Error unmounting React application", e)
-                }
-            }
-            viewModel.removeActiveModel(tabId)
+            deleteTab(tabId)
         }
         gridAdapter.onMarkClick = { activeModel ->
             viewModel.toggleMarkStatus(activeModel)
+        }
+        gridAdapter.onItemLongClick = { activeModel, rawX, rawY ->
+            showLongPressPopup(activeModel, rawX, rawY)
         }
 
         // 监听 RecyclerView 的布局变化，更新 ivAdd 位置
@@ -384,6 +370,113 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         if (appId != null) {
             viewModel.isFromDeepLink = true
             viewModel.addApp(appId = appId)
+        }
+    }
+
+    private var longPressPopup: PopupWindow? = null
+
+    /**
+     * 长按 item 弹出操作菜单
+     * 以触点为中心定位，与屏幕边界保持 20px 间距
+     */
+    private fun showLongPressPopup(activeModel: ActiveModel, rawX: Int, rawY: Int) {
+        longPressPopup?.dismiss()
+
+        val popupView = LayoutInflater.from(this).inflate(R.layout.popup_long_press, null)
+        val llFav = popupView.findViewById<View>(R.id.llFav)
+        val ivFav = popupView.findViewById<ImageView>(R.id.ivFav)
+        val tvFav = popupView.findViewById<android.widget.TextView>(R.id.tvFav)
+        val llCloseOther = popupView.findViewById<View>(R.id.llCloseOther)
+        val vDivider = popupView.findViewById<View>(R.id.vDivider)
+
+        // name 为空时不显示收藏行
+        val showFav = activeModel.name.isNotEmpty()
+        llFav.visibility = if (showFav) View.VISIBLE else View.GONE
+
+        // 只有当前 item 时不显示"关闭其他页签"
+        val appList = viewModel.tabletUseCase.value?.appList ?: emptyList()
+        val hasOtherItems = appList.size > 1
+        llCloseOther.visibility = if (hasOtherItems) View.VISIBLE else View.GONE
+        vDivider.visibility = if (hasOtherItems) View.VISIBLE else View.GONE
+
+        // 根据收藏状态切换图标和文字
+        if (activeModel.isMarked) {
+            ivFav.setImageResource(R.drawable.menu_cancel_fav)
+            tvFav.text = getString(R.string.menu_cancel_bookmark)
+        } else {
+            ivFav.setImageResource(R.drawable.menu_fav)
+            tvFav.text = getString(R.string.menu_bookmark)
+        }
+
+        val popup = PopupWindow(
+            popupView,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        )
+        popup.isOutsideTouchable = true
+        longPressPopup = popup
+
+        llFav.setOnClickListener {
+            popup.dismiss()
+            viewModel.toggleMarkStatus(activeModel)
+        }
+        popupView.findViewById<View>(R.id.llClose).setOnClickListener {
+            popup.dismiss()
+            deleteTab(activeModel.id)
+        }
+        llCloseOther.setOnClickListener {
+            popup.dismiss()
+            closeOtherTabs(activeModel.id)
+        }
+
+        // 测量弹窗尺寸
+        popupView.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        val popupWidth = popupView.measuredWidth
+        val popupHeight = popupView.measuredHeight
+
+        val margin = 20
+        val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
+
+        // 以触点为中心计算位置，再约束到边界内
+        val x = (rawX - popupWidth / 2)
+            .coerceAtLeast(margin)
+            .coerceAtMost(screenWidth - popupWidth - margin)
+
+        val y = (rawY - popupHeight / 2)
+            .coerceAtLeast(margin)
+            .coerceAtMost(screenHeight - popupHeight - margin)
+
+        popup.showAtLocation(window.decorView, android.view.Gravity.NO_GRAVITY, x, y)
+    }
+
+    /**
+     * 删除指定 tab（卸载 ReactRootView + 移除 ViewModel 数据 + 空列表切换 Grid）
+     */
+    private fun deleteTab(tabId: String) {
+        val reactRootView = reactViewMap.remove(tabId)
+        reactRootView?.let { rootView ->
+            try {
+                rootView.unmountReactApplication()
+            } catch (e: Exception) {
+                Log.e("TabletActivity", "Error unmounting React application", e)
+            }
+        }
+        viewModel.removeActiveModel(tabId)
+        if (reactViewMap.isEmpty()) {
+            viewModel.changeDisplayMode(PageMode.GRID)
+        }
+    }
+
+    /**
+     * 关闭除指定 tab 以外的所有 tab
+     */
+    private fun closeOtherTabs(keepId: String) {
+        val appList = viewModel.tabletUseCase.value?.appList ?: emptyList()
+        val others = appList.filter { it.id != keepId }
+        for (model in others) {
+            deleteTab(model.id)
         }
     }
 
