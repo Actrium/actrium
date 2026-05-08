@@ -21,3 +21,9 @@
 "search" = "搜尋";
 "goback" = "返回";
 "blackTab" = "新分頁";
+
+/* 長按選單 */
+"bookmark" = "收藏";
+"unbookmark" = "取消收藏";
+"closeTab" = "關閉分頁";
+"closeOtherTabs" = "關閉其他分頁";

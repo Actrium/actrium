@@ -286,11 +286,30 @@ struct FocusModeNavigationBar: View {
                 isHovered: tab.id == hoveredTabId,
                 width: calculateTabWidth(),
                 tabHeight: tabHeight,
+                tabsCount: viewModel.tabs.count,
                 onSelect: {
                     viewModel.switchToTab(id: tab.id)
                 },
                 onClose: {
                     viewModel.closeTab(id: tab.id)
+                },
+                onToggleBookmark: {
+                    let newBookmarkStatus = !tab.isBookmarked
+                    if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
+                        viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                        viewModel.saveTabs()
+                    }
+                    NotificationCenter.default.post(
+                        name: .tabBookmarkChangedFromNative,
+                        object: nil,
+                        userInfo: [
+                            "tabId": tab.id.uuidString,
+                            "isBookmarked": newBookmarkStatus
+                        ]
+                    )
+                },
+                onCloseOtherTabs: {
+                    viewModel.closeOtherTabs(keepTabId: tab.id)
                 }
             )
             .onHover { hovering in
@@ -308,8 +327,11 @@ struct TabItemView: View {
     let isHovered: Bool
     let width: CGFloat
     let tabHeight: CGFloat
+    let tabsCount: Int
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onToggleBookmark: () -> Void
+    let onCloseOtherTabs: () -> Void
 
     var body: some View {
         tabContent
@@ -327,6 +349,32 @@ struct TabItemView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 onSelect()
+            }
+            .contextMenu {
+                let _ = UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                if tab.title != TM.active.blackTab() {
+                    Button {
+                        onToggleBookmark()
+                    } label: {
+                        Label(tab.isBookmarked ? TM.tabContextMenu.unbookmark() : TM.tabContextMenu.bookmark(),
+                              systemImage: tab.isBookmarked ? "star.slash" : "star")
+                    }
+                }
+
+                Button(role: .destructive) {
+                    onClose()
+                } label: {
+                    Label(TM.tabContextMenu.closeTab(), systemImage: "xmark")
+                }
+
+                if tabsCount > 1 {
+                    Divider()
+                    Button(role: .destructive) {
+                        onCloseOtherTabs()
+                    } label: {
+                        Label(TM.tabContextMenu.closeOtherTabs(), systemImage: "xmark")
+                    }
+                }
             }
             .padding(.horizontal, 1)
             .padding(.bottom, 0)

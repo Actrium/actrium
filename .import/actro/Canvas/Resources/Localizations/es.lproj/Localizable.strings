@@ -21,3 +21,9 @@ If you do not agree, you will not be able to use the features of this applicatio
 "search" = "Buscar";
 "goback" = "Volver";
 "blackTab" = "Nueva pestaña";
+
+/* Menú de pulsación larga */
+"bookmark" = "Favorito";
+"unbookmark" = "Quitar de favoritos";
+"closeTab" = "Cerrar pestaña";
+"closeOtherTabs" = "Cerrar otras pestañas";
