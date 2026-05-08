@@ -14,7 +14,7 @@ import {
   longPressMenu,
   spacing,
 } from '../../../theme/tokens';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -215,7 +215,10 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   );
 };
 
-const makeStyles = (colors: ColorTokens) => StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.1)',
@@ -226,7 +229,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     borderRadius: 34,
     padding: longPressMenu.padding,
     gap: spacing.xxs,
-    ...HOST_SHADOWS.menuSurface,
+    ...hostShadows.menuSurface,
   },
   menuItem: {
     flexDirection: 'row',
@@ -245,3 +248,4 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     fontWeight: '500',
   },
 });
+};

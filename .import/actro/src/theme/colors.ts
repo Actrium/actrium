@@ -25,12 +25,20 @@ export interface ColorTokens {
   textIconSecondary: string;
   textIconDark: string;
   textIconStrong: string;
+  textMobileAttachmentPrimary: string;
+  textMobileAttachmentSecondary: string;
+  textMobileAttachmentSubtitle: string;
+  textMobileAttachmentActive: string;
+  textMobileAttachmentActiveSubtitle: string;
   iconDefault: string;
   iconChatHeader: string;
+  iconMobileAttachment: string;
+  iconMobileAttachmentActive: string;
 
   // HostIconButton
   iconHostIconButton: string;
   iconHostIconButtonActive: string;
+  shadowColor: string;
 
   // 背景
   bgPage: string;
@@ -66,6 +74,8 @@ export interface ColorTokens {
   bgActionButtonActive: string;
   bgAttachment: string;
   bgAttachmentItem: string;
+  bgMobileAttachmentItem: string;
+  bgMobileAttachmentItemActive: string;
   bgFileBlock: string;
   bgLocationPlaceholder: string;
   bgRemoveButton: string;
@@ -173,10 +183,18 @@ export const lightColors: ColorTokens = {
   textIconSecondary: '#666666',
   textIconDark: '#2C2C2C',
   textIconStrong: '#404040',
+  textMobileAttachmentPrimary: '#252525',
+  textMobileAttachmentSecondary: '#292929',
+  textMobileAttachmentSubtitle: '#8F8F8F',
+  textMobileAttachmentActive: '#597EF7',
+  textMobileAttachmentActiveSubtitle: 'rgba(89, 126, 247, 0.5)',
   iconDefault: '#0a0a0a',
   iconChatHeader: '#333333',
+  iconMobileAttachment: '#252525',
+  iconMobileAttachmentActive: '#597EF7',
   iconHostIconButton: '#0a0a0a',
   iconHostIconButtonActive: '#FFFFFF',
+  shadowColor: '#CCCCCC',
   textPlaceholader: '#d9d9d9',
   targetBgColor: '#00C323',
 
@@ -213,6 +231,8 @@ export const lightColors: ColorTokens = {
   bgActionButtonActive: '#D1D1D6',
   bgAttachment: '#E5E5EA',
   bgAttachmentItem: '#f5f5f5',
+  bgMobileAttachmentItem: '#EAEAEA',
+  bgMobileAttachmentItemActive: '#E9F0FC',
   bgFileBlock: '#F7F7F7',
   bgLocationPlaceholder: '#F0F8FF',
   bgRemoveButton: 'rgba(0,0,0,0.5)',
@@ -316,11 +336,19 @@ export const darkColors: ColorTokens = {
   textIconSecondary: '#fff',
   textIconDark: '#fff',
   textIconStrong: '#fff',
+  textMobileAttachmentPrimary: '#fff',
+  textMobileAttachmentSecondary: '#fff',
+  textMobileAttachmentSubtitle: '#fff',
+  textMobileAttachmentActive: '#597EF7',
+  textMobileAttachmentActiveSubtitle: 'rgba(89, 126, 247, 0.5)',
   iconDefault: '#fff',
   iconChatHeader: '#fff',
+  iconMobileAttachment: '#fff',
+  iconMobileAttachmentActive: '#597EF7',
 
   iconHostIconButton: '#78788052',
   iconHostIconButtonActive: '#78788052',
+  shadowColor: '#3A3A3C',
 
   bgPage: '#F7F7F7',
   bgOverlay: 'rgba(0, 0, 0, 0.4)',
@@ -340,9 +368,9 @@ export const darkColors: ColorTokens = {
   // modal
   bgToast: '#4A4A4A',
   bgSurface: '#383838',
-  bgDeleteGradientStart: 'rgba(44, 44, 46, 0)',
-  bgDeleteGradientMid: 'rgba(44, 44, 46, 0.7)',
-  bgDeleteGradientEnd: 'rgba(44, 44, 46, 1)',
+  bgDeleteGradientStart: 'rgba(0, 0, 0, 0)',
+  bgDeleteGradientMid: 'rgba(0, 0, 0, 0.7)',
+  bgDeleteGradientEnd: 'rgba(0, 0, 0, 1)',
   textModalTitle: '#FFF',
   textModalTitlePhone: '#FFF',
   bgCancelButtonPhone: '#4A4A4A',
@@ -373,6 +401,8 @@ export const darkColors: ColorTokens = {
   bgActionButtonActive: '#4E4E52',
   bgAttachment: '#E5E5EA',
   bgAttachmentItem: '#f5f5f5',
+  bgMobileAttachmentItem: '#565656',
+  bgMobileAttachmentItemActive: '#E9F0FC',
   bgFileBlock: '#2C2C2E',
   bgLocationPlaceholder: '#F0F8FF',
   bgRemoveButton: 'rgba(0,0,0,0.5)',

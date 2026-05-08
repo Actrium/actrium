@@ -18,7 +18,7 @@ import {
 import { TabEvents } from '../../../native-bridge/tab/TabEvents';
 import { AppText, GlobalAlert, Icon } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 
@@ -302,7 +302,10 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   );
 };
 
-const makeStyles = (colors: ColorTokens) => StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
   rootContainer: {
     flex: 1,
   },
@@ -323,7 +326,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     borderRadius: Platform.OS === 'android' ? 30 : 34,
     alignItems: 'center',
     justifyContent: 'center',
-    ...HOST_SHADOWS.headerButton,
+    ...hostShadows.headerButton,
   },
   cameraContainer: {
     flex: 1,
@@ -340,5 +343,6 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     elevation: 10,
   },
 });
+};
 
 export default LoadAppCameraPanel;

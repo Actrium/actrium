@@ -18,7 +18,6 @@ import {
 } from '../../actr-host/features/shared/DropdownMenu';
 import { Toast, type ToastRef } from '../../actr-host/features/shared/Toast';
 import { getTypographyStyle, spacing, radius, longPressMenu } from '../../theme/tokens';
-import { useColors } from '../../theme/useColors';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
 
@@ -37,7 +36,6 @@ export default function BookmarksPadView({
   openBookmark,
   removeBookmark,
 }: UseBookmarksPageResult) {
-  const colors = useColors();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
   const toastRef = React.useRef<ToastRef>(null);
@@ -176,8 +174,8 @@ export default function BookmarksPadView({
                         close(() => setPendingDeleteItem(item));
                       }}
                     >
-                      <Icon type='delete' size={16} color={colors.danger} />
-                      <DropdownMenuText color={colors.danger}>{t('actr.bookmark.remove')}</DropdownMenuText>
+                      <Icon type='delete' size={16} color='#FF3B30' />
+                      <DropdownMenuText color='#FF3B30'>{t('actr.bookmark.remove')}</DropdownMenuText>
                     </DropdownMenuItem>
                   </>
                 )}
