@@ -509,7 +509,6 @@ struct ChromeTabCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .background(Color.black)
         .contextMenu {
-            let _ = UIImpactFeedbackGenerator(style: .light).impactOccurred()
             if tab.title != TM.active.blackTab() {
                 Button {
                     toggleBookmark()

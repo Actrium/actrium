@@ -209,7 +209,6 @@ struct PhoneTabCardView: View {
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         .asMatchedTransitionSource(id: tab.id, in: animation)
         .contextMenu {
-            let _ = UIImpactFeedbackGenerator(style: .light).impactOccurred()
             if tab.title != TM.active.blackTab() {
                 Button {
                     toggleBookmark()

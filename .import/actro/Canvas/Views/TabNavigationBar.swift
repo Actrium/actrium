@@ -351,7 +351,6 @@ struct TabItemView: View {
                 onSelect()
             }
             .contextMenu {
-                let _ = UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 if tab.title != TM.active.blackTab() {
                     Button {
                         onToggleBookmark()
