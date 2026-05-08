@@ -1,11 +1,18 @@
 import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import LinearGradient from 'react-native-linear-gradient';
 import { AppText, HostIconButton } from '../../../components';
-import { getTypographyStyle, inputArea, spacing } from '../../../theme/tokens';
+import {
+  getTypographyStyle,
+  inputArea,
+  selectionActionBar,
+  spacing,
+} from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import { isTablet } from '../../../utils/device';
 
 interface DeleteButtonProps {
   selectedCount: number;
@@ -19,8 +26,15 @@ export const DeleteButton: React.FC<DeleteButtonProps> = ({
   onCancel,
 }) => {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const colors = useColors();
-  const styles = React.useMemo(() => makeStyles(colors), [colors]);
+  const bottomPadding = isTablet
+    ? 0
+    : Math.max(insets.bottom, selectionActionBar.phoneMinBottomPadding);
+  const styles = React.useMemo(
+    () => makeStyles(colors, bottomPadding),
+    [bottomPadding, colors],
+  );
 
   return (
     <View style={styles.footer}>
@@ -57,14 +71,20 @@ export const DeleteButton: React.FC<DeleteButtonProps> = ({
   );
 };
 
-const makeStyles = (colors: ColorTokens) =>
+const FOOTER_HEIGHT = selectionActionBar.height;
+const FOOTER_TOP_SPACE = (FOOTER_HEIGHT - inputArea.minHeight) / 2;
+
+const makeStyles = (colors: ColorTokens, bottomPadding: number) =>
   StyleSheet.create({
     footer: {
-      height: 118,
-      justifyContent: 'center',
+      height: isTablet
+        ? FOOTER_HEIGHT
+        : FOOTER_TOP_SPACE + inputArea.minHeight + bottomPadding,
+      justifyContent: isTablet ? 'center' : 'flex-end',
       width: '100%',
       paddingLeft: spacing.xl,
       paddingRight: spacing.xl,
+      paddingBottom: bottomPadding,
     },
     footerGradient: {
       ...StyleSheet.absoluteFillObject,

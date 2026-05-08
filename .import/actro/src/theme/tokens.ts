@@ -138,6 +138,15 @@ export const inputArea = {
 } as const;
 
 /**
+ * 多选模式底部操作栏尺寸 token。
+ * Phone 端会在运行时取 max(safeAreaInsets.bottom, phoneMinBottomPadding)。
+ */
+export const selectionActionBar = {
+  height: 118,
+  phoneMinBottomPadding: 22,
+} as const;
+
+/**
  * 附件预览条专用尺寸 token。
  * 这类尺寸只服务于附件缩略图场景，避免把局部交互尺寸继续写死在组件里。
  */
